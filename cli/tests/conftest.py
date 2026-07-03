@@ -201,10 +201,11 @@ def stub_session_resolvers(monkeypatch: pytest.MonkeyPatch) -> None:
     ``sessions.manager``.
 
     Several tests construct a ``SimpleNamespace`` config that omits the
-    ``vm_templates`` / ``agent_templates`` / ``secret_config_data``
-    attributes the real resolvers read. Patching the resolvers themselves
-    keeps those tests scope-correct (they exercise rollback / transport
-    plumbing, not env composition) without expanding the fake config.
+    ``vm_templates`` / ``agent_templates`` attributes (and can't publish
+    the registry rows) the real resolvers read. Patching the resolvers
+    themselves keeps those tests scope-correct (they exercise rollback /
+    transport plumbing, not env composition) without expanding the fake
+    config.
 
     Also stubs the Phase 6 eager-prompting orchestration: ``create_session``
     and ``restart_session`` call ``_session_secret_target`` +
@@ -323,21 +324,18 @@ def stub_build_registry(monkeypatch: pytest.MonkeyPatch) -> None:
         "agentworks.bootstrap.build_registry", _StubRegistry
     )
 
-    # resolver_for is registry-derived (Phase 3); namespace configs lack
-    # secret_config_data, so serve a per-config no-op resolver with the
-    # same memo semantics (one instance per config). Patched at every
-    # binding site: the providers module, the agentworks.secrets
-    # re-export (function-local importers), and the module-level
-    # importers (orchestration, env.show).
+    # resolver_for is registry-pure (it reads the secret-config row);
+    # _StubRegistry carries no such row, so serve a per-registry no-op
+    # resolver with the same memo semantics (one instance per registry).
     from agentworks.secrets.resolver import SecretResolver
 
     stub_resolvers: dict[int, SecretResolver] = {}
 
-    def _stub_resolver_for(config: object, registry: object = None) -> SecretResolver:
-        resolver = stub_resolvers.get(id(config))
+    def _stub_resolver_for(registry: object) -> SecretResolver:
+        resolver = stub_resolvers.get(id(registry))
         if resolver is None:
             resolver = SecretResolver([], {})
-            stub_resolvers[id(config)] = resolver
+            stub_resolvers[id(registry)] = resolver
         return resolver
 
     # Every production consumer imports resolver_for function-locally

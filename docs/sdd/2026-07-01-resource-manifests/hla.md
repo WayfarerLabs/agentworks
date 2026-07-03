@@ -72,12 +72,18 @@ and is not required by this design.
 
 - Keeps: `[operator]`, `[paths]`, `[defaults]`, `[azure]`, `[proxmox]`, `[session.config]`,
   `[secret_config]`. Parsing, validation, and types for these are untouched.
-- Loses: all resource sections, the resource-composition step, the TOML section-line regex scanner
-  (the YAML loader captures locations natively), and `Config.publish_to`.
+- Loses: all resource sections, the resource-composition step, and the TOML section-line regex
+  scanner (the YAML loader captures locations natively). `Config.publish_to` shrinks to exactly one
+  row -- the `secret-config` singleton -- rather than disappearing: pure config that names resources
+  keeps publishing its edges.
 - Post-cutover, `load_config()` raises `ConfigError` if any resource section is present, listing the
   sections and pointing at `agw config migrate`.
-- `[secret_config].backends` chain names are validated against the finalized registry (a lookup, not
-  a published reference; the chain is policy, not a resource).
+- `[secret_config]` stays TOML-parsed here, but because its `backends` chain names resources,
+  `Config.publish_to` publishes it as the singleton `secret-config:default` row (revised at the
+  maintainer's design revisit; originally "a lookup, not a published reference"). The chain becomes
+  `secret-backend` reference edges the framework validates at finalize; the kind is not
+  manifest-declarable, so TOML remains its only home. Publishing is not moving: the section is still
+  pure config, it just declares its edges to the graph.
 
 ### `agentworks.manifests` (new): the operator publisher
 
@@ -194,10 +200,12 @@ PROVIDER_REGISTRY: dict[str, SecretProvider]     # code-side; built-ins env-var,
 registry rows:
   secret-provider:<name>       # descriptor, built-in, error miss policy, not declarable
   secret-backend:<name>        # resource; spec.provider references secret-provider
+  secret-config:default        # singleton, published by Config; backends chain as edges
 
-resolver construction (orchestration):
-  for name in secret_config.backends:            # chain, config-side
-      backend = registry.lookup("secret-backend", name)     # miss -> ConfigError
+resolver construction (a projection; all validation already ran at finalize):
+  chain = registry.lookup("secret-config", "default").backends
+  for name in chain:
+      backend = registry.lookup("secret-backend", name)     # existence guaranteed by edges
       provider = PROVIDER_REGISTRY[backend.provider]        # ref already validated
       sources.append(provider.instantiate(name, backend.config))
 ```
@@ -254,15 +262,14 @@ config.toml --tomlkit parse--> section split per FRD R1 table
 
 ## Validation responsibilities (updated)
 
-| Layer                      | Owns                                                                                          |
-| -------------------------- | --------------------------------------------------------------------------------------------- |
-| Config (TOML)              | config-section parse, field types, `secret_config` chain shape                                |
-| Manifest loader (envelope) | YAML parse, apiVersion, kind known + declarable, metadata shape, operator duplicate detection |
-| Manifest loader (spec)     | kind-specific field types / required fields / value validation (unchanged semantics)          |
-| Provider capability        | provider-specific backend config (schema + defaults)                                          |
-| Registry publish           | built-in override policy per kind                                                             |
-| Registry finalize          | references, miss policies, reserved names, cycles, description polish (all unchanged)         |
-| Post-finalize lookups      | `secret_config.backends` chain names                                                          |
+| Layer                      | Owns                                                                                                                                                                                                               |
+| -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Config (TOML)              | config-section parse, field types, `secret_config` chain shape                                                                                                                                                     |
+| Manifest loader (envelope) | YAML parse, apiVersion, kind known + declarable, metadata shape, operator duplicate detection                                                                                                                      |
+| Manifest loader (spec)     | kind-specific field types / required fields / value validation (unchanged semantics)                                                                                                                               |
+| Provider capability        | provider-specific backend config (schema + defaults)                                                                                                                                                               |
+| Registry publish           | built-in override policy per kind                                                                                                                                                                                  |
+| Registry finalize          | references, miss policies, reserved names, cycles, description polish; kind `validate` hooks (chain names via the `secret-config` row's edges; secret reachability and provider instantiation via the kind's hook) |
 
 All raise `ConfigError`; the layer determines the framing, as today.
 

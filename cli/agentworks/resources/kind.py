@@ -145,6 +145,16 @@ class ResourceKind(Protocol):
     # would add a sibling ``provisioned_instances(...)`` hook returning
     # the same ``InstanceRef`` shape from manifests; today's
     # ``instances`` is the config-projected dimension.
+    #
+    # The optional ``validate(registry) -> None`` method is gated the
+    # same way. ``Registry.finalize`` calls it (when present) after the
+    # reference graph is complete and cycle-checked, immediately before
+    # freeze. It is the home for cross-resource SEMANTIC validation that
+    # referential integrity cannot express -- e.g. the ``secret-config``
+    # kind checks that every operator-declared secret is reachable via
+    # the active backend chain. Contract: read the registry and raise
+    # ``ConfigError``; never mutate. Kinds without cross-resource
+    # semantics simply omit the method.
 
 
 class NoUnreferencedDefaultError(Exception):

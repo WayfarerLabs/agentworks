@@ -157,6 +157,42 @@ Definition of done: chain-driven resolution runs entirely through provider-insta
 built-in backends ship as bundled manifests; git credential `provider` field aligned; CI green;
 reviewer-approved.
 
+## Phase 3.5: Registry-purity revisit (maintainer-directed)
+
+Design revisit against the resource-registry invariant (config publishes, registry validates,
+runtime reads the registry): YAML manifests must be "just another publisher", and anything more
+complex is a leaky abstraction. The audit found the resolver assembly doing graph validation the
+registry should own, rooted in `[secret_config]` not being published.
+
+- [x] Framework: optional `validate(registry)` hook on `ResourceKind` (getattr-gated, like
+      `instances`); `Registry.finalize` runs each kind's hook over the complete acyclic graph
+      immediately before freeze. Home for cross-resource SEMANTIC validation that referential
+      integrity can't express.
+- [x] `secret-config` kind (singleton, `auto-declare` reserved name `default`, NOT
+      manifest-declarable): `SecretConfig.referenced_resources()` emits one `secret-backend` edge
+      per chain entry; `Config.publish_to` publishes `secret-config:default` (TOML stays its only
+      home -- publishing is not moving). Chain-name validation collapses into the framework's error
+      miss policy; the bare-registry sentinel (empty chain, always-materialize origin, hooks skip
+      it) keeps hand-built test registries finalize-clean.
+- [x] Reachability + provider instantiation move from resolver assembly to the kind's
+      `validate(registry)` hook (delegating to `providers.validate_chain`); operator-declared-only
+      filter preserved.
+- [x] `resolver_for(registry)` is registry-pure: a plain projection of the published chain onto
+      instantiated sources, memoized per Registry; the `config` parameter is gone. Deep call paths
+      (`secrets/orchestration.py` -- whose entry points now take a registry --, `env/show.py`, the
+      manager `compose_env(resolver=...)` sites, `_collect_git_tokens` / `_collect_secrets` /
+      `_collect_agent_credentials`) receive the registry from their command entries.
+- [x] **Tests**: chain-unknown and unreachable errors pinned at `build_registry` finalize; the
+      secret-config kind (published row, default-chain edges as usage on built-in backend rows,
+      bare-registry sentinel); manual-publisher-equivalence updated to the full publisher set;
+      orchestration/describe/collect tests repointed to registry-first signatures.
+- [x] **Docs** (this phase's HEAD): FRD R1 note, HLA layer-changes + pseudocode + validation table,
+      provider-config LLD swap section rewritten as built.
+
+Definition of done: the runtime never reads resource-graph data from Config after the registry
+exists (`secret_config_data` has no readers outside `config.py`); all secret-system validation fires
+at `Registry.finalize`; CI green; reviewer-approved.
+
 ## Phase 4: Migration tool
 
 - [ ] Add tomlkit dependency (latest stable at implementation time; used only by the migrate path).
@@ -182,12 +218,15 @@ after); CI green; reviewer-approved.
 ## Phase 5: Cutover, samples, and doc promotions
 
 - [ ] `load_config()` rejects resource sections with a `ConfigError` listing the sections found and
-      pointing at `agw config migrate`; config publisher removed from bootstrap; TOML resource
+      pointing at `agw config migrate`; `Config.publish_to` shrinks to exactly the `secret-config`
+      singleton row (pure config that names resources keeps publishing its edges); TOML resource
       parsing survives only inside the migration tool. The `type` alias and the legacy TOML backend
       construction path are deleted with it.
-- [ ] Flip `secret-backend`'s `builtin_override` to `reserved` (the "allow" setting existed only for
-      the TOML dual-source window; with the TOML surface gone, `Registry.add` becomes the final
-      backstop behind the manifest publisher's reserved-name check).
+- [ ] Flip `secret-backend`'s `builtin_override` to `reserved` AND delete the reserved-name shim in
+      `ManifestSet.publish_to` in the same commit. The shim exists only because origin variants
+      cannot distinguish TOML rows from manifest rows during the dual-source window; with the TOML
+      surface gone, `Registry.add`'s collision policy is the sole enforcement -- publishers know
+      nothing about kinds (registry-purity revisit).
 - [ ] Rewrite `cli/agentworks/sample-config.toml` to config-only, with a pointer to the sample
       manifests; update `cli/tests/test_sample_config.py` conventions accordingly.
 - [ ] Ship sample manifests (envelope examples for the commonly-used kinds) and wire
@@ -219,6 +258,26 @@ Definition of done: fresh install and migrated install both work end to end with
 sections rejected; samples, docs, completions, release notes shipped in the same release; CI green;
 reviewer-approved.
 
+## Phase 6: Loader-ownership inversion (post-cutover follow-through)
+
+The dual-source window forced manifests to decode through `config.py`'s TOML loaders (the zero-drift
+shim). With the TOML resource surface gone that dependency points the wrong way; this phase inverts
+ownership so `config.py` is pure config (registry-purity revisit, leak 4).
+
+- [ ] Manifest decoders (or the kinds) own resource field validation natively; the `_load_*`
+      resource loaders and the decode-through-TOML shim are deleted from `config.py`.
+- [ ] The migration tool validates by routing raw TOML tables through the manifest decode path
+      rather than `config.py`'s resource loaders.
+- [ ] `config.py` retains pure-config parsing plus `Config.publish_to` publishing exactly the
+      `secret-config` singleton; nothing else resource-shaped remains.
+- [ ] Loader messages speak manifest vocabulary natively (subsumes Phase 5's re-vocabulary item if
+      that landed as a shim over shared loaders).
+- [ ] **Tests**: the decode-parity suite retires with the shim; kind-level validation coverage moves
+      to the decoders' own tests.
+
+Definition of done: `config.py` contains no resource-section knowledge; the migration tool is the
+only TOML-resource reader in the tree; CI green; reviewer-approved.
+
 ## Sequencing notes
 
 (Recorded as they happen, per SDD convention. Deviations from FRD/HLA get an entry here and an
@@ -240,6 +299,18 @@ artifact update.)
   relocates to the first `resolver_for` call, the same sanctioned pattern as the Phase 1
   cycle-detection move. `GitCredentialConfig.type` keeps its field name this phase; only the TOML
   alias ships (the operator-surface vocabulary is what R9 requires).
+- **2026-07-03: registry-purity revisit (maintainer-directed; Phase 3.5).** The maintainer
+  re-examined the whole design against the registry invariant ("these new yaml resource files really
+  should just be another way of publishing resources to the registry -- anything more complex
+  suggests a leaky abstraction"). Four leaks identified: (1) resolver assembly doing graph
+  validation because `[secret_config]` wasn't published -- fixed now (Phase 3.5: `secret-config`
+  kind, finalize `validate` hook, registry-pure `resolver_for(registry)`); (2) the reserved-name
+  shim in `ManifestSet.publish_to` -- window-forced, its deletion is now coupled to the Phase 5
+  `builtin_override` flip; (3) deep runtime paths conjuring the registry from Config -- fixed now
+  (registry threaded from command entries; the per-config singleton remains as the command-entry
+  seam only); (4) manifests decoding through `config.py`'s TOML loaders -- window-forced, inverted
+  in the new Phase 6. This supersedes the "relocates to the first `resolver_for` call" wording in
+  the note above: validation now fires at `build_registry` finalize.
 - **2026-07-03: name-validation parity, not the FRD's uniform rule.** FRD R3 originally implied the
   resource-name rule applies to every manifest `metadata.name`; the implementation pins TOML parity
   instead (`validate_name` for `secret` only, pass-through elsewhere) so the Phase 4

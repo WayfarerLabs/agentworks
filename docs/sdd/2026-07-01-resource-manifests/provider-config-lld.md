@@ -76,11 +76,15 @@ Today `load_config` builds `Config.secret_resolver` from `[secret_config].backen
 zero-arg source factories, and hard-errors at PARSE time on unknown chain names. That cannot survive
 manifest-declared backends (unknowable at `load_config`). The swap:
 
-- `providers.resolver_for(config, registry) -> SecretResolver`: walks the chain; for each name,
-  looks up the `secret-backend` row; `SecretBackendDecl` rows instantiate via
-  `PROVIDER_REGISTRY[row.provider]`; legacy `SecretBackendConfig` rows instantiate via the provider
-  matching `row.kind` (their kind IS the provider name). Unknown chain names raise `ConfigError`
-  here.
+- `providers.resolver_for(registry) -> SecretResolver` (as built, after the maintainer's
+  registry-purity revisit): a plain projection. The chain comes from the published
+  `secret-config:default` row -- Config is never consulted after the registry exists.
+  `SecretBackendDecl` rows instantiate via `PROVIDER_REGISTRY[row.provider]`; legacy
+  `SecretBackendConfig` rows instantiate via the provider matching `row.kind` (their kind IS the
+  provider name). Unknown chain names cannot reach the resolver: the row's `referenced_resources()`
+  makes them finalize-time miss-policy errors, and reachability plus provider instantiation run in
+  the `secret-config` kind's `validate(registry)` hook (a small framework extension: finalize runs
+  each kind's optional hook over the complete acyclic graph).
 - **Prompt-once identity**: the resolver instance carries the per-command resolved-value cache
   (eager-resolve fills it; later renders hit it without re-prompting). Today that identity comes
   from Config carrying ONE resolver. As-built (refined at the maintainer's suggestion): the
@@ -90,15 +94,17 @@ manifest-declared backends (unknowable at `load_config`). The swap:
   across builds" assumption, redundant registry rebuilds disappear, and an explicitly built registry
   (tests, custom orchestration) gets its own resolver matching its own rows.
 - `Config.secret_resolver` is removed along with `_build_secret_resolver` and the parse-time
-  chain-kind validation in `_load_secret_config` (the relocation is the same sanctioned pattern as
-  the Phase 1 cycle-detection move: config-only commands no longer validate the chain; every
-  resource-touching command does, at first `resolver_for`). Tests pinning the parse-time error
-  relocate accordingly.
-- Consumer repoint (~15 sites, as built): doctor and `secrets/inspect.py` pass their in-scope
-  registry to `resolver_for(config, registry)`; the deep call paths (`secrets/orchestration.py`,
-  `env/show.py`, the manager `compose_env(resolver=...)` sites) call `resolver_for(config)` bare and
-  get the standard per-config registry singleton. Every consumer imports `resolver_for`
-  function-locally from `agentworks.secrets.providers`, giving the test stub a single seam.
+  chain-kind validation in `_load_secret_config`. As built the checks land at `build_registry`
+  finalize (not lazily at first `resolver_for`): every resource-touching command validates the chain
+  and reachability when it builds the registry, which is closer to the original parse-time semantics
+  than the interim assembly-time relocation. Tests pinning the parse-time error relocate
+  accordingly.
+- Consumer repoint (~15 sites, as built): every consumer passes a registry --
+  `resolver_for(registry)` has no config parameter. Command entries build the registry once (the
+  per-config singleton makes repeats free) and thread it through the deep paths;
+  `compute_needed_secrets` / `resolve_for_command` take the registry instead of the config. Every
+  consumer imports `resolver_for` function-locally from `agentworks.secrets.providers`, giving the
+  test stub a single seam.
 
 ## Git credential provider alias (TOML side)
 
@@ -121,9 +127,11 @@ surface is what R9 requires now).
 Provider registry lookup and instantiation; test-only-provider config validation (good config, bad
 field, missing required, defaults) and resolution end to end; custom backend (provider env-var)
 declared via manifest and placed in the chain; reserved-name rejection for `env-var`/`prompt`
-operator manifests; multiple backends sharing a provider; chain naming an unknown backend (error
-relocated from parse time); legacy TOML `[secret_backends.*]` rows still resolving through the
-existing path; prompt-once identity (two `resolver_for` calls, one config, same instance); bundle
-publishes the two built-in backends with per-file built-in origins; git-credential TOML `provider`
-alias (alias works, both-present precedence, `type` still works); describe/doctor rendering;
-regression: the shipped sample config and a maximal today-valid TOML config load unchanged.
+operator manifests; multiple backends sharing a provider; chain naming an unknown backend (errors at
+`build_registry` finalize via the secret-config row's edges); legacy TOML `[secret_backends.*]` rows
+still resolving through the existing path; prompt-once identity (one registry, one resolver
+instance); the secret-config kind (published row, default chain edges, bare-registry sentinel);
+bundle publishes the two built-in backends with per-file built-in origins; git-credential TOML
+`provider` alias (alias works, both-present precedence, `type` still works); describe/doctor
+rendering; regression: the shipped sample config and a maximal today-valid TOML config load
+unchanged.

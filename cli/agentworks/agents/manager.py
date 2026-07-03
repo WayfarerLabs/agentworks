@@ -253,7 +253,7 @@ def create_agent(
     # the env-block system). Operator env secrets are NOT prompted at
     # agent create -- provisioning is hermetic. They get prompted at
     # the use site (agent shell, session create, etc.).
-    git_tokens = _collect_agent_credentials(config, registry, agent_tmpl)
+    git_tokens = _collect_agent_credentials(registry, agent_tmpl)
 
     from agentworks.ssh import SSHLogger
     ssh_logger = SSHLogger(vm.name, "agent-create")
@@ -465,7 +465,7 @@ def reinit_agent(
     vm = _require_vm(db, agent.vm_name)
 
     # Collect credentials up front before any SSH work.
-    git_tokens = _collect_agent_credentials(config, registry, agent_tmpl)
+    git_tokens = _collect_agent_credentials(registry, agent_tmpl)
 
     # Provisioning is hermetic: no operator-env secrets are prompted at
     # agent reinit. They get prompted at the use site (agent shell,
@@ -667,12 +667,13 @@ def shell_agent(
     # the interactive SSH session. The same scope dicts feed both the
     # SecretTarget (for resolve_for_command) and compose_env below so
     # the two consumers can't drift.
-    from agentworks.bootstrap import build_registry as _build_registry
+    from agentworks.bootstrap import build_registry
 
-    scopes = _resolve_agent_direct_env_scopes(_build_registry(config), vm, agent, ws=ws)
+    registry = build_registry(config)
+    scopes = _resolve_agent_direct_env_scopes(registry, vm, agent, ws=ws)
     resolve_for_command(
         [_agent_direct_secret_target(scopes, label=f"agent-shell={agent.name}")],
-        config,
+        registry,
     )
 
     ctx = ResourceContext(
@@ -685,7 +686,7 @@ def shell_agent(
         agent_name=agent.name,
     )
     env = compose_env(
-        resolver=resolver_for(config),
+        resolver=resolver_for(registry),
         ctx=ctx,
         vm=scopes.vm,
         workspace=scopes.workspace,
@@ -765,12 +766,13 @@ def exec_agent(
     # secret referenced by the agent exec env chain BEFORE running the
     # remote command. The same scope dicts feed both the SecretTarget
     # and compose_env below so the two consumers can't drift.
-    from agentworks.bootstrap import build_registry as _build_registry
+    from agentworks.bootstrap import build_registry
 
-    scopes = _resolve_agent_direct_env_scopes(_build_registry(config), vm, agent, ws=ws)
+    registry = build_registry(config)
+    scopes = _resolve_agent_direct_env_scopes(registry, vm, agent, ws=ws)
     resolve_for_command(
         [_agent_direct_secret_target(scopes, label=f"agent-exec={agent.name}")],
-        config,
+        registry,
     )
 
     ctx = ResourceContext(
@@ -783,7 +785,7 @@ def exec_agent(
         agent_name=agent.name,
     )
     env = compose_env(
-        resolver=resolver_for(config),
+        resolver=resolver_for(registry),
         ctx=ctx,
         vm=scopes.vm,
         workspace=scopes.workspace,
@@ -966,7 +968,6 @@ def _remove_from_workspace_group(
 
 
 def _collect_agent_credentials(
-    config: Config,
     registry: Registry,
     agent_tmpl: ResolvedAgentTemplate,
 ) -> dict[str, str]:
@@ -985,7 +986,7 @@ def _collect_agent_credentials(
 
     from agentworks.vms.manager import _collect_git_tokens
 
-    return _collect_git_tokens(config, registry, agent_cfg.git_credentials)
+    return _collect_git_tokens(registry, agent_cfg.git_credentials)
 
 
 def _create_agent_on_vm(

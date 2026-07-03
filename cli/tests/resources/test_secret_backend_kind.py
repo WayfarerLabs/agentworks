@@ -2,10 +2,9 @@
 
 The kind makes per-backend config a framework citizen and lets
 operator-declared ``[secret_backends.<kind>]`` blocks land as overrides
-on top of the built-in known-backend rows. Partial migration: the
-``[secret_config].backends`` active-chain validation is a bespoke check
-at resolver assembly (``agentworks.secrets.providers.resolver_for``)
-because ``SecretConfig`` isn't a framework Resource today (deferred).
+on top of the built-in known-backend rows. The ``[secret_config]``
+chain itself is a framework citizen too (the ``secret-config`` kind):
+its entries are reference edges validated at finalize.
 """
 
 from __future__ import annotations

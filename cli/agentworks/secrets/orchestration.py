@@ -18,7 +18,7 @@ Usage at a manager entry point:
             session=session_template.env,
         ),
     ]
-    resolve_for_command(targets, config)  # raises on non-interactive miss
+    resolve_for_command(targets, registry)  # raises on non-interactive miss
     # ... proceed with command execution; compose_env() hits the resolver cache.
 
 The orchestrator is generic: it doesn't know about VMs, workspaces, or
@@ -55,8 +55,8 @@ from agentworks.env.merge import effective_env
 if TYPE_CHECKING:
     from collections.abc import Iterable, Sequence
 
-    from agentworks.config import Config
     from agentworks.env.entry import EnvEntry
+    from agentworks.resources.registry import Registry
     from agentworks.secrets.base import SecretDecl
 
 
@@ -93,7 +93,7 @@ class SecretTarget:
 
 def compute_needed_secrets(
     targets: Sequence[SecretTarget],
-    config: Config,
+    registry: Registry,
     *,
     extra_decls: Iterable[SecretDecl] = (),
 ) -> list[SecretDecl]:
@@ -112,7 +112,7 @@ def compute_needed_secrets(
     """
     from agentworks.secrets.providers import resolver_for
 
-    resolver = resolver_for(config)
+    resolver = resolver_for(registry)
     seen: set[str] = set()
     out: list[SecretDecl] = []
     for target in targets:
@@ -136,7 +136,7 @@ def compute_needed_secrets(
 
 def resolve_for_command(
     targets: Sequence[SecretTarget],
-    config: Config,
+    registry: Registry,
     *,
     extra_decls: Iterable[SecretDecl] = (),
 ) -> dict[str, str]:
@@ -168,9 +168,9 @@ def resolve_for_command(
     call it -- they inherit the env captured at shell-create time and
     consume no secrets per FRD R4 / R5.
     """
-    decls = compute_needed_secrets(targets, config, extra_decls=extra_decls)
+    decls = compute_needed_secrets(targets, registry, extra_decls=extra_decls)
     if not decls:
         return {}
     from agentworks.secrets.providers import resolver_for
 
-    return resolver_for(config).resolve_all(decls)
+    return resolver_for(registry).resolve_all(decls)

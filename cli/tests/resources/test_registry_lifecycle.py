@@ -115,14 +115,25 @@ def test_iter_kind_empty_when_kind_absent() -> None:
 
 
 def test_build_registry_equivalent_to_manual_steps(example_config: Path) -> None:
-    """``build_registry(config)`` matches a manual ``empty + publish_to +     finalize``."""
+    """``build_registry(config)`` matches the manual publisher sequence.
+
+    The manual side needs the bundled built-in manifests (backend rows)
+    and the provider descriptors alongside ``Config.publish_to``: the
+    published ``secret-config`` row's chain references the built-in
+    backends, so finalize errors without them -- exactly the graph
+    completeness the framework is supposed to enforce.
+    """
+    from agentworks import secrets
     from agentworks.bootstrap import build_registry
+    from agentworks.manifests import builtin as builtin_manifests
 
     cfg = load_config(example_config, warn_issues=False)
 
     auto = build_registry(cfg)
 
     manual = Registry.empty()
+    builtin_manifests.publish_to(manual)
+    secrets.publish_to(manual)
     cfg.publish_to(manual)
     manual.finalize()
 

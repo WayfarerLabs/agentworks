@@ -381,7 +381,7 @@ def _check_secrets(config: Config, registry: Registry) -> HealthGroup:
     known_backend_kinds = set(kind_dict(registry, "secret-backend").keys())
     from agentworks.secrets.providers import resolver_for
 
-    resolver = resolver_for(config, registry)
+    resolver = resolver_for(registry)
 
     for name, decl in sorted(secrets.items()):
         invalid_kinds = sorted(

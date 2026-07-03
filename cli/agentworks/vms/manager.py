@@ -285,7 +285,7 @@ def create_vm(
     # shells, and the resolver caches them when the shell-opening code
     # invokes resolve_for_command later.
     tailscale_auth_key, git_tokens = _collect_secrets(
-        config, registry, providers, vm_name, vm_tmpl
+        registry, providers, vm_name, vm_tmpl
     )
 
     # Create DB record with as-provisioned resource values
@@ -667,9 +667,10 @@ def shell_vm(
     # a non-default-template VM.
     from agentworks.bootstrap import build_registry
 
-    scopes = _resolve_vm_admin_env_scopes(build_registry(config), vm, ws=ws)
+    registry = build_registry(config)
+    scopes = _resolve_vm_admin_env_scopes(registry, vm, ws=ws)
     resolve_for_command(
-        [_vm_secret_target(scopes, label=f"vm-shell={vm.name}")], config,
+        [_vm_secret_target(scopes, label=f"vm-shell={vm.name}")], registry,
     )
 
     ctx = ResourceContext(
@@ -681,7 +682,7 @@ def shell_vm(
         workspace_dir=ws.workspace_path if ws else None,
     )
     env = compose_env(
-        resolver=resolver_for(config),
+        resolver=resolver_for(registry),
         ctx=ctx,
         vm=scopes.vm,
         workspace=scopes.workspace,
@@ -756,9 +757,10 @@ def exec_vm(
     # comes from vm.template (DB row), not the config-default template.
     from agentworks.bootstrap import build_registry
 
-    scopes = _resolve_vm_admin_env_scopes(build_registry(config), vm, ws=ws)
+    registry = build_registry(config)
+    scopes = _resolve_vm_admin_env_scopes(registry, vm, ws=ws)
     resolve_for_command(
-        [_vm_secret_target(scopes, label=f"vm-exec={vm.name}")], config,
+        [_vm_secret_target(scopes, label=f"vm-exec={vm.name}")], registry,
     )
 
     ctx = ResourceContext(
@@ -770,7 +772,7 @@ def exec_vm(
         workspace_dir=ws.workspace_path if ws else None,
     )
     env = compose_env(
-        resolver=resolver_for(config),
+        resolver=resolver_for(registry),
         ctx=ctx,
         vm=scopes.vm,
         workspace=scopes.workspace,
@@ -821,7 +823,7 @@ def add_git_credential(db: Database, config: Config, name: str, credential_name:
     # Phase 1d: resolve the token via the framework (the resolver chain
     # handles env-var lookup + prompt fallback uniformly across every
     # site that needs a token).
-    tokens = _collect_git_tokens(config, registry, [credential_name])
+    tokens = _collect_git_tokens(registry, [credential_name])
     token = tokens[credential_name]
     new_lines = provider.credential_lines(token)
 
@@ -944,7 +946,7 @@ def rekey_vm(
     )
 
     with _mask_env_var_backend_for(ts_decl, masked=ignore_env):
-        resolved = resolve_for_command([], config, extra_decls=[ts_decl])
+        resolved = resolve_for_command([], registry, extra_decls=[ts_decl])
     ts_auth_key = resolved[rekey_vm_tmpl.tailscale_auth_key]
 
     output.info(f"Rekeying '{name}'...")
@@ -1156,7 +1158,7 @@ def reinit_vm(
     verify_git_credential_auth(providers)
 
     # Collect git tokens via the framework (Phase 1d).
-    git_tokens = _collect_git_tokens(config, registry, providers.keys())
+    git_tokens = _collect_git_tokens(registry, providers.keys())
 
     # Provisioning is hermetic: no operator-env secrets are prompted at
     # reinit. They get prompted at the use site (vm shell, session
@@ -1333,7 +1335,6 @@ def _mask_env_var_backend_for(
 
 
 def _collect_git_tokens(
-    config: Config,
     registry: Registry,
     credential_names: Iterable[str],
 ) -> dict[str, str]:
@@ -1380,7 +1381,7 @@ def _collect_git_tokens(
         token_name_for[cred_name] = cred.token
         decls.append(_lookup_or_synthesize_secret(registry, cred.token))
 
-    resolved = resolve_for_command([], config, extra_decls=decls)
+    resolved = resolve_for_command([], registry, extra_decls=decls)
     return {
         cred_name: resolved[token_name]
         for cred_name, token_name in token_name_for.items()
@@ -1415,7 +1416,6 @@ def _lookup_or_synthesize_secret(registry: Registry, name: str) -> SecretDecl:
 
 
 def _collect_secrets(
-    config: Config,
     registry: Registry,
     providers: dict[str, GitCredentialProvider],
     vm_name: str,
@@ -1458,12 +1458,12 @@ def _collect_secrets(
     ts_decl = _lookup_or_synthesize_secret(
         registry, vm_tmpl.tailscale_auth_key
     )
-    resolved = resolve_for_command([], config, extra_decls=[ts_decl])
+    resolved = resolve_for_command([], registry, extra_decls=[ts_decl])
     ts_auth_key = resolved[vm_tmpl.tailscale_auth_key]
 
     # Git credentials via the framework (Phase 1d). Pulls token values
     # for every credential the admin or agent templates reference.
-    git_tokens = _collect_git_tokens(config, registry, providers.keys())
+    git_tokens = _collect_git_tokens(registry, providers.keys())
 
     return ts_auth_key, git_tokens
 
@@ -1723,7 +1723,7 @@ def _ensure_tailscale(
     ts_decl = _lookup_or_synthesize_secret(
         registry, rejoin_vm_tmpl.tailscale_auth_key
     )
-    resolved = resolve_for_command([], config, extra_decls=[ts_decl])
+    resolved = resolve_for_command([], registry, extra_decls=[ts_decl])
     auth_key = resolved[rejoin_vm_tmpl.tailscale_auth_key]
 
     # provisioner_transport() composes Azure's attach/detach via

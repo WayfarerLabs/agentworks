@@ -194,6 +194,13 @@ class Registry:
         3. **Cycle detection** in the now-complete reference graph via
            iterative DFS three-coloring; raises ``ConfigError`` on the
            first cycle with the offending path.
+        3.5. **Kind-level semantic validation**: each kind's optional
+           ``validate(registry)`` hook (getattr-gated, like
+           ``instances``) runs over the complete acyclic graph. This is
+           where cross-resource semantics that referential integrity
+           can't express live (e.g. secret reachability against the
+           active backend chain). Hooks read and raise; they never
+           mutate.
         4. **Freeze**.
 
         First-encountered reference order (for the
@@ -250,6 +257,17 @@ class Registry:
 
         # 3: cycle detection across the now-complete graph.
         _detect_cycles(self._resources)
+
+        # 3.5: kind-level semantic validation over the complete, acyclic
+        # graph. The optional ``validate(registry)`` hook is
+        # getattr-gated exactly like ``instances`` -- kinds without
+        # cross-resource semantics simply don't define it. Runs before
+        # freeze so the registry a hook sees is complete but hooks
+        # themselves never mutate (contract: read + raise only).
+        for kind_handler in KIND_REGISTRY.values():
+            hook = getattr(kind_handler, "validate", None)
+            if hook is not None:
+                hook(self)
 
         # 4: freeze.
         self._frozen = True

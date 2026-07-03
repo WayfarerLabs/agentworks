@@ -99,8 +99,9 @@ def show_env(
     # template inheritance is already merged into the resolved templates).
     from agentworks.bootstrap import build_registry
 
+    registry = build_registry(config)
     vm_env, workspace_env, admin_env, agent_env, session_env = _resolve_scope_envs(
-        build_registry(config), ctx
+        registry, ctx
     )
 
     # Build the resource context for identity vars.
@@ -142,7 +143,7 @@ def show_env(
             continue
         entry = user_env_merged[key]
         scope = user_provenance[key]
-        rendered, is_secret = _render_value(entry, resolver_for(config), reveal_secrets)
+        rendered, is_secret = _render_value(entry, resolver_for(registry), reveal_secrets)
         rows.append(
             ResolvedEnvRow(
                 key=key,

@@ -624,7 +624,6 @@ def _session_secret_target(
 
 
 def _resolve_session_env(
-    config: Config,
     registry: Registry,
     *,
     db: Database,
@@ -641,8 +640,8 @@ def _resolve_session_env(
     Resolves the per-VM / per-workspace / per-agent templates, builds the
     ResourceContext, applies template-variable substitution to the session
     template's env values, and runs the merged dict through
-    ``compose_env`` (which renders secrets via the config resolver and
-    overlays per-context identity vars).
+    ``compose_env`` (which renders secrets via the registry-derived
+    resolver and overlays per-context identity vars).
     """
     from agentworks.env import ResourceContext, compose_env
     from agentworks.secrets.providers import resolver_for
@@ -671,7 +670,7 @@ def _resolve_session_env(
     )
 
     return compose_env(
-        resolver=resolver_for(config),
+        resolver=resolver_for(registry),
         ctx=ctx,
         vm=scopes.vm,
         workspace=scopes.workspace,
@@ -1437,7 +1436,7 @@ def create_session(
                 is_admin_mode=(agent_name is None),
             ),
         ],
-        config,
+        registry,
     )
     # If we reach here, every secret prompt is done and the resolver cache
     # is warm. The downstream create_workspace / create_agent / inner
@@ -1659,7 +1658,6 @@ def create_session(
                     template, session_name=name, workspace_name=workspace_name
                 )
                 session_env = _resolve_session_env(
-                    config,
                     registry,
                     db=db,
                     vm=vm_check,
@@ -2037,7 +2035,7 @@ def restart_session(
                     agent_name=session.agent_name,
                 ),
             ],
-            config,
+            registry,
         )
 
         output.info(f"Restarting session '{name}'...")
@@ -2094,7 +2092,6 @@ def restart_session(
         )
         linux_user = _resolve_session_linux_user(db, session, vm)
         session_env = _resolve_session_env(
-            config,
             registry,
             db=db,
             vm=vm,

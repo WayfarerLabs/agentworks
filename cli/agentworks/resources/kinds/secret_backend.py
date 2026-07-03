@@ -8,9 +8,9 @@ secret-backends.yaml``) as ``SecretBackendDecl`` rows; operator-declared
 backends arrive as manifests too, while legacy TOML
 ``[secret_backends.<kind>]`` blocks (``SecretBackendConfig`` rows)
 override the bundled rows until the cutover deletes that path. The
-``[secret_config].backends`` chain is validated at resolver assembly
-(``agentworks.secrets.providers.resolver_for``); promoting
-``SecretConfig`` itself to a framework kind remains a follow-up.
+``[secret_config].backends`` chain is reference edges on the published
+``secret-config:default`` row, so unknown chain names hit this kind's
+error miss policy at finalize.
 """
 
 from __future__ import annotations

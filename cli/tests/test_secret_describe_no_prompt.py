@@ -71,11 +71,11 @@ def test_describe_secret_does_not_invoke_resolve_all(
             "report state without resolving values per FRD R10"
         )
 
+    registry = build_registry(config)
     monkeypatch.setattr(
-        resolver_for(config), "resolve_all", _fail_resolve_all
+        resolver_for(registry), "resolve_all", _fail_resolve_all
     )
 
-    registry = build_registry(config)
     # Should complete without invoking resolve_all.
     describe_secret(registry, config, "api-key")
 
@@ -107,9 +107,9 @@ def test_describe_secret_does_not_invoke_render(
             "resolve env-table values"
         )
 
-    monkeypatch.setattr(resolver_for(config), "render", _fail_render)
-
     registry = build_registry(config)
+    monkeypatch.setattr(resolver_for(registry), "render", _fail_render)
+
     describe_secret(registry, config, "api-key")
 
 
@@ -135,8 +135,9 @@ def test_describe_secret_does_not_invoke_prompt_backend(
     config = load_config(cfg, warn_issues=False)
 
     # Find the prompt source in the active chain.
+    registry = build_registry(config)
     prompt_source = None
-    for source in resolver_for(config).sources:
+    for source in resolver_for(registry).sources:
         if source.kind == "prompt":
             prompt_source = source
             break

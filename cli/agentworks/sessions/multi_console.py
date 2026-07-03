@@ -408,7 +408,7 @@ def add_sessions(
                 # redundant.
                 new_shell_targets.append(pane)
         if new_shell_targets:
-            resolve_for_command(new_shell_targets, config)
+            resolve_for_command(new_shell_targets, registry)
 
     with db.transaction():
         for spec in specs:
@@ -641,7 +641,7 @@ def add_shell(
         if pane_target is not None:
             from agentworks.secrets import resolve_for_command
 
-            resolve_for_command([pane_target], config)
+            resolve_for_command([pane_target], registry)
 
     new_shell: ShellEntry = {"cwd": cwd, "admin": admin}
     new_shells = [*cs.shells, new_shell]
@@ -777,7 +777,7 @@ def restore_session(
                     _restore_session_secret_targets(
                         db, registry, vm=vm, member=member, indices=all_indices,
                     ),
-                    config,
+                    registry,
                 )
             _add_session_window(
                 target,
@@ -911,7 +911,7 @@ def restore_session(
             _restore_session_secret_targets(
                 db, registry, vm=vm, member=member, indices=missing,
             ),
-            config,
+            registry,
         )
 
         output.info(
@@ -1345,7 +1345,6 @@ def _restore_session_secret_targets(
 
 
 def _resolve_pane_env(
-    config: Config,
     db: Database,
     registry: Registry,
     *,
@@ -1404,7 +1403,7 @@ def _resolve_pane_env(
 
     if is_admin_pane:
         return compose_env(
-            resolver=resolver_for(config),
+            resolver=resolver_for(registry),
             ctx=ctx,
             vm=vm_tmpl.env,
             workspace=ws_tmpl.env,
@@ -1424,7 +1423,7 @@ def _resolve_pane_env(
         return {}
     agent_tmpl = _resolve_agent_template(registry, agent.template)
     return compose_env(
-        resolver=resolver_for(config),
+        resolver=resolver_for(registry),
         ctx=ctx,
         vm=vm_tmpl.env,
         workspace=ws_tmpl.env,
@@ -1491,7 +1490,6 @@ def _split_shell_pane(
     use_admin = shell["admin"] or session_user == admin_user
 
     pane_env = _resolve_pane_env(
-        config,
         db,
         registry,
         vm=vm,
@@ -1856,7 +1854,7 @@ def attach_console(
 
             resolve_for_command(
                 _console_build_secret_targets(db, registry, console=console, vm=vm),
-                config,
+                registry,
             )
 
         if recreate and exists:

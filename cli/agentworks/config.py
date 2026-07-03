@@ -632,10 +632,14 @@ class Config:
         when the operator's TOML omits all sections; Config.publish_to
         always publishes it.
 
-        ``secret_config`` is the secret-system policy envelope consumed
-        directly by ``agentworks.secrets``; it is NOT published as a
-        Registry kind. Its individual ``secret_backends`` entries are
-        published under the ``"secret-backend"`` kind.
+        ``secret_config`` is pure config (TOML is its only home; the
+        kind is not manifest-declarable) but its ``backends`` chain
+        names resources, so it publishes as the singleton
+        ``secret-config:default`` row -- the chain becomes reference
+        edges the framework validates at finalize, and the runtime
+        (resolver assembly) reads the chain from the registry rather
+        than from Config. Individual ``secret_backends`` entries publish
+        under the ``"secret-backend"`` kind.
 
         Imports ``Registry`` and ``Origin`` from ``agentworks.resources``
         -- the explicit layer handoff. Config's data structures (parsed
@@ -684,6 +688,12 @@ class Config:
             "default",
             self.named_console,
             op_origin(self.named_console.declared_at),
+        )
+        registry.add(
+            "secret-config",
+            "default",
+            self.secret_config_data,
+            op_origin(self.secret_config_data.declared_at),
         )
 
 

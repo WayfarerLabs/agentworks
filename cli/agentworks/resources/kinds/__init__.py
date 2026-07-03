@@ -16,6 +16,7 @@ from agentworks.resources.kinds import (  # noqa: F401
     named_console_template,
     secret,
     secret_backend,
+    secret_config,
     secret_provider,
     session_template,
     vm_template,

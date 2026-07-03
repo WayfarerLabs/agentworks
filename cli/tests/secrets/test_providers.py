@@ -195,7 +195,7 @@ def test_config_defaults_and_instantiation(
     assert isinstance(row, SecretBackendDecl)
     assert row.config == {"endpoint": "https://example.test", "timeout": 30}
 
-    resolver = resolver_for(config, registry)
+    resolver = resolver_for(registry)
     source = resolver.sources[0]
     assert isinstance(source, _FakeSource)
     assert source.backend_name == "fake-store"
@@ -223,7 +223,7 @@ def test_custom_backend_with_builtin_provider_in_chain(tmp_path: Path) -> None:
         """,
     )
     registry = build_registry(config)
-    resolver = resolver_for(config, registry)
+    resolver = resolver_for(registry)
     assert [s.kind for s in resolver.sources] == ["env-var", "prompt"]
 
 
@@ -257,7 +257,7 @@ def test_multiple_backends_share_a_provider(
         backends = ["store-a", "store-b"]
         """,
     )
-    resolver = resolver_for(config, build_registry(config))
+    resolver = resolver_for(build_registry(config))
     endpoints = [s.config["endpoint"] for s in resolver.sources]  # type: ignore[attr-defined]
     assert endpoints == ["https://a.test", "https://b.test"]
 
@@ -279,7 +279,10 @@ def test_unknown_provider_fails_via_framework_miss_policy(tmp_path: Path) -> Non
         build_registry(config)
 
 
-def test_chain_naming_unknown_backend_errors_at_resolver(tmp_path: Path) -> None:
+def test_chain_naming_unknown_backend_errors_at_finalize(tmp_path: Path) -> None:
+    """The chain is reference edges on the secret-config row, so an
+    unknown name hits the secret-backend kind's error miss policy at
+    build_registry -- the runtime never sees the invalid graph."""
     config = _config(
         tmp_path,
         """
@@ -287,9 +290,10 @@ def test_chain_naming_unknown_backend_errors_at_resolver(tmp_path: Path) -> None
         backends = ["no-such-backend"]
         """,
     )
-    registry = build_registry(config)
-    with pytest.raises(ConfigError, match="unknown backend 'no-such-backend'"):
-        resolver_for(config, registry)
+    with pytest.raises(
+        ConfigError, match="unknown secret-backend 'no-such-backend'"
+    ):
+        build_registry(config)
 
 
 def test_legacy_toml_backend_rows_still_resolve(tmp_path: Path) -> None:
@@ -305,7 +309,7 @@ def test_legacy_toml_backend_rows_still_resolve(tmp_path: Path) -> None:
     registry = build_registry(config)
     row = registry.lookup("secret-backend", "env-var")
     assert row.origin.variant == "operator-declared"
-    resolver = resolver_for(config, registry)
+    resolver = resolver_for(registry)
     assert [s.kind for s in resolver.sources] == ["env-var"]
 
 
@@ -323,12 +327,14 @@ def test_standard_registry_is_per_config_singleton(tmp_path: Path) -> None:
 
 
 def test_prompt_once_identity(tmp_path: Path) -> None:
+    """Resolver identity follows registry identity: the standard
+    registry is a per-config singleton, so every default-path caller
+    shares one resolver (the prompt-once cache)."""
     config = _config(tmp_path)
     registry = build_registry(config)
-    first = resolver_for(config, registry)
-    second = resolver_for(config)
-    third = resolver_for(config, build_registry(config))
-    assert first is second is third
+    first = resolver_for(registry)
+    second = resolver_for(build_registry(config))
+    assert first is second
 
 
 def test_backend_references_provider_in_registry(tmp_path: Path) -> None:

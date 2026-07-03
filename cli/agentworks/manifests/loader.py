@@ -101,7 +101,11 @@ class ManifestSet:
         only: the bundled manifests flow through the same loader but
         publish via ``manifests.builtin``, and the Registry-level
         ``builtin_override`` flag stays "allow" for the TOML dual-source
-        window (flipped at the cutover).
+        window. This check is a WINDOW-FORCED SHIM -- origin variants
+        can't distinguish TOML rows from manifest rows -- and is deleted
+        at the cutover in the same commit that flips the flag, leaving
+        ``Registry.add``'s collision policy as the sole enforcement (a
+        publisher should know nothing about kinds).
         """
         from agentworks.errors import ConfigError
         from agentworks.resources import Origin

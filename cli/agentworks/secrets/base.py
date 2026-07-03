@@ -137,6 +137,24 @@ class SecretConfig:
     origin: Origin | None = None
     references: tuple[ReferenceEntry, ...] = ()
 
+    def referenced_resources(self) -> list[ResourceReference]:
+        """The active chain as graph edges: one ``secret-backend``
+        reference per entry, in precedence order. The secret-backend
+        kind's error miss policy turns an unknown chain name into a
+        uniform finalize-time ``ConfigError`` -- no bespoke check.
+        """
+        from agentworks.resources.reference import ResourceReference
+
+        return [
+            ResourceReference(
+                name=backend,
+                kind="secret-backend",
+                usage="active backend chain",
+                source=("secret-config", "default"),
+            )
+            for backend in self.backends
+        ]
+
 
 class SecretSource(Protocol):
     """Structural type contract for backends that produce secret values.

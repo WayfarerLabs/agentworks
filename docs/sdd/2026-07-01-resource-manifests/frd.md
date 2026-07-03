@@ -75,33 +75,35 @@ config itself to YAML.
 
 Every section of today's `config.toml` gets exactly one destination:
 
-| Current TOML section                      | Destination                                         | Notes                                                   |
-| ----------------------------------------- | --------------------------------------------------- | ------------------------------------------------------- |
-| `[operator]`                              | config (TOML)                                       | SSH keys, host prefixes                                 |
-| `[paths]`                                 | config (TOML)                                       |                                                         |
-| `[defaults]`                              | config (TOML)                                       | CLI flag defaults                                       |
-| `[azure]`, `[proxmox]`                    | config (TOML)                                       | provisioner capability settings; plugin SDD may revisit |
-| `[session.config]`                        | config (TOML)                                       | non-template session settings                           |
-| `[secret_config]`                         | config (TOML)                                       | active backend chain; references backends by name       |
-| `[secrets.<name>]`                        | manifest (`secret`)                                 |                                                         |
-| `[secret_backends.<kind>]`                | manifest (`secret-backend`)                         | reshaped per R8                                         |
-| `[git_credentials.<name>]`                | manifest (`git-credential`)                         | `type` renamed to `provider` per R9                     |
-| `[vm_templates.<name>]` (+ `.env`)        | manifest (`vm-template`)                            |                                                         |
-| `[agent_templates.<name>]` (+ `.env`)     | manifest (`agent-template`)                         |                                                         |
-| `[workspace_templates.<name>]` (+ `.env`) | manifest (`workspace-template`)                     |                                                         |
-| `[session_templates.<name>]` (+ `.env`)   | manifest (`session-template`)                       |                                                         |
-| `[admin.config]`, `[admin.env]`, ...      | manifest (`admin-template`, name `default`)         | flattened into one document                             |
-| `[named_console]`                         | manifest (`named-console-template`, name `default`) |                                                         |
-| `[apt_sources.<name>]`                    | manifest (`apt-source`)                             | operator catalog extension                              |
-| `[apt_packages.<name>]`                   | manifest (`apt-package`)                            | operator catalog extension                              |
-| `[system_install_commands.<name>]`        | manifest (`system-install-command`)                 | operator catalog extension                              |
-| `[user_install_commands.<name>]`          | manifest (`user-install-command`)                   | operator catalog extension                              |
+| Current TOML section                      | Destination                                         | Notes                                                                                                         |
+| ----------------------------------------- | --------------------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
+| `[operator]`                              | config (TOML)                                       | SSH keys, host prefixes                                                                                       |
+| `[paths]`                                 | config (TOML)                                       |                                                                                                               |
+| `[defaults]`                              | config (TOML)                                       | CLI flag defaults                                                                                             |
+| `[azure]`, `[proxmox]`                    | config (TOML)                                       | provisioner capability settings; plugin SDD may revisit                                                       |
+| `[session.config]`                        | config (TOML)                                       | non-template session settings                                                                                 |
+| `[secret_config]`                         | config (TOML)                                       | active backend chain; publishes as the `secret-config` registry row so its backend references are graph edges |
+| `[secrets.<name>]`                        | manifest (`secret`)                                 |                                                                                                               |
+| `[secret_backends.<kind>]`                | manifest (`secret-backend`)                         | reshaped per R8                                                                                               |
+| `[git_credentials.<name>]`                | manifest (`git-credential`)                         | `type` renamed to `provider` per R9                                                                           |
+| `[vm_templates.<name>]` (+ `.env`)        | manifest (`vm-template`)                            |                                                                                                               |
+| `[agent_templates.<name>]` (+ `.env`)     | manifest (`agent-template`)                         |                                                                                                               |
+| `[workspace_templates.<name>]` (+ `.env`) | manifest (`workspace-template`)                     |                                                                                                               |
+| `[session_templates.<name>]` (+ `.env`)   | manifest (`session-template`)                       |                                                                                                               |
+| `[admin.config]`, `[admin.env]`, ...      | manifest (`admin-template`, name `default`)         | flattened into one document                                                                                   |
+| `[named_console]`                         | manifest (`named-console-template`, name `default`) |                                                                                                               |
+| `[apt_sources.<name>]`                    | manifest (`apt-source`)                             | operator catalog extension                                                                                    |
+| `[apt_packages.<name>]`                   | manifest (`apt-package`)                            | operator catalog extension                                                                                    |
+| `[system_install_commands.<name>]`        | manifest (`system-install-command`)                 | operator catalog extension                                                                                    |
+| `[user_install_commands.<name>]`          | manifest (`user-install-command`)                   | operator catalog extension                                                                                    |
 
 After the cutover, a resource section in `config.toml` is a config-load error naming the section and
 pointing at `agw config migrate` (R11).
 
 Config sections that reference resources by name (`[secret_config].backends` referencing backend
-names) keep doing so; the names are validated against the finalized registry.
+names) keep doing so; the section publishes into the registry (as the `secret-config` singleton row)
+so the names are reference edges validated by the framework at finalize, like every other
+cross-resource reference.
 
 ### R2: Manifest directory and auto-loading
 
