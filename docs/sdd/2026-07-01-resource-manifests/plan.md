@@ -188,6 +188,11 @@ registry should own, rooted in `[secret_config]` not being published.
       orchestration/describe/collect tests repointed to registry-first signatures.
 - [x] **Docs** (this phase's HEAD): FRD R1 note, HLA layer-changes + pseudocode + validation table,
       provider-config LLD swap section rewritten as built.
+- [x] Framework (reviewer round): optional `miss_hint(name, references)` hook on `ResourceKind`
+      (same getattr gating); the error-miss-policy `ConfigError` includes the reference's usage in
+      its message and the kind-supplied hint. `secret-backend` implements it, restoring the
+      `[secret_config].backends` operator vocabulary and remediation that the relocation into the
+      generic miss policy had lost. Both hooks pinned by framework-level probe-kind tests.
 
 Definition of done: the runtime never reads resource-graph data from Config after the registry
 exists (`secret_config_data` has no readers outside `config.py`); all secret-system validation fires

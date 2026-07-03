@@ -292,8 +292,12 @@ def test_chain_naming_unknown_backend_errors_at_finalize(tmp_path: Path) -> None
     )
     with pytest.raises(
         ConfigError, match="unknown secret-backend 'no-such-backend'"
-    ):
+    ) as exc:
         build_registry(config)
+    # The kind's miss_hint restores the operator vocabulary the generic
+    # framework message lacks.
+    assert exc.value.hint is not None
+    assert "[secret_config].backends" in exc.value.hint
 
 
 def test_legacy_toml_backend_rows_still_resolve(tmp_path: Path) -> None:

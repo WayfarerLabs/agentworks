@@ -7,6 +7,7 @@ publisher yet; Phase 2b will extend ``build_registry`` and update this test).
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from pathlib import Path
 from textwrap import dedent
 
@@ -74,6 +75,9 @@ class _HookProbeKind:
         if self.raise_error is not None:
             raise self.raise_error
 
+    def miss_hint(self, name: str, references: object) -> str:
+        return f"probe hint for {name!r}"
+
 
 def test_finalize_runs_kind_validate_hooks(
     monkeypatch: pytest.MonkeyPatch,
@@ -107,6 +111,52 @@ def test_finalize_propagates_validate_hook_errors(
     with pytest.raises(ConfigError, match="hook-probe rejects"):
         r.finalize()
     assert not r.is_finalized
+
+
+@dataclass(frozen=True)
+class _RefEmitter:
+    """Resource double whose only job is emitting one dangling reference."""
+
+    name: str
+    origin: object = None
+    references: tuple = ()  # type: ignore[type-arg]
+
+    def referenced_resources(self) -> list[object]:
+        from agentworks.resources.reference import ResourceReference
+
+        return [
+            ResourceReference(
+                name="missing",
+                kind="hook-probe",
+                usage="the probe dependency",
+                source=("hook-probe", self.name),
+            )
+        ]
+
+
+def test_error_miss_policy_includes_usage_and_kind_miss_hint(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
+    """Framework contract for the optional ``miss_hint`` hook: the
+    error-miss ConfigError carries the reference's usage in the message
+    and the kind-supplied operator-vocabulary hint."""
+    from agentworks.resources.kind import KIND_REGISTRY
+
+    probe = _HookProbeKind()
+    monkeypatch.setitem(KIND_REGISTRY, "hook-probe", probe)
+
+    r = Registry.empty()
+    r.add(
+        "hook-probe",
+        "seed",
+        _RefEmitter(name="seed"),
+        Origin.operator_declared(file=tmp_path / "c.toml", line=1),
+    )
+    with pytest.raises(ConfigError) as exc:
+        r.finalize()
+    assert "references unknown hook-probe 'missing'" in str(exc.value)
+    assert "(the probe dependency)" in str(exc.value)
+    assert exc.value.hint == "probe hint for 'missing'"
 
 
 def test_add_then_finalize_makes_queryable(tmp_path: Path) -> None:
