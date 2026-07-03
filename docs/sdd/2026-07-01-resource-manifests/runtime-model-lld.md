@@ -6,33 +6,39 @@ layer (which predates this SDD) and supersedes the interim resolver plumbing bui
 
 ## Part 1: the general pattern (all capability-backed domains)
 
-| Layer        | What it is                                                                        | Where it lives                                                            | Identity vocabulary  |
-| ------------ | --------------------------------------------------------------------------------- | ------------------------------------------------------------------------- | -------------------- |
-| Config       | Settings: ssh keys, prefs, the active backend chain, (future) active plugins      | TOML, `Config`                                                            | section/field names  |
-| Resources    | Declared things: secrets, backends, templates, credentials                        | the resource Registry, fed by publishers                                  | `kind` + `name`      |
-| Capabilities | Code implementations: secret providers, VM provisioners, git credential providers | per-domain provider registries (static today, plugin-registered tomorrow) | bare capability name |
+| Layer            | What it is                                                                        | Where it lives                                                            | Identity vocabulary  |
+| ---------------- | --------------------------------------------------------------------------------- | ------------------------------------------------------------------------- | -------------------- |
+| Config           | Settings: ssh keys, prefs, the active backend chain, (future) active plugins      | TOML, `Config`                                                            | section/field names  |
+| Resources        | Declared things: secrets, backends, templates, credentials                        | the resource Registry, fed by publishers                                  | `kind` + `name`      |
+| Raw capabilities | Code implementations: secret providers, VM provisioners, git credential providers | per-domain provider registries (static today, plugin-registered tomorrow) | bare capability name |
 
 **The vocabulary law: `kind` is a resource-registry concept, full stop.** Providers are not
-resources and have no kind. The resource that instantiates a capability has its own kind (for
-secrets: `secret-backend`), and `provider` is a field on that resource naming the capability.
-Nothing outside the resource registry may use the word "kind" for its identity.
+resources and have no kind. The resource that exposes a capability has its own kind (for secrets:
+`secret-backend`), and `provider` is a field on that resource naming the capability. Nothing outside
+the resource registry may use the word "kind" for its identity.
 
 The general pattern, stated once:
 
-- **Capability**: raw code, registered in a provider registry. A plugin brings the code and
-  registers it.
-- **Instantiation resource**: a declared resource that exposes the capability as a usable thing,
-  optionally with config. A plugin (or operator) declares these like any other resource; the
-  resource's kind delegates its provider-specific spec tail to the named capability's
-  `validate_config` at decode. One capability may back many instantiation resources.
+- **Raw capability**: code, registered in a per-domain provider registry. A plugin brings the code
+  and registers it.
+- **Exposed resource**: a declared resource that exposes the capability as a usable thing,
+  optionally with config. "Exposed" means it exposes the capability -- the resource is the
+  capability's public face -- not merely "visible in the registry" (every resource is visible). A
+  plugin (or operator) declares these like any other resource; the resource's kind delegates its
+  provider-specific spec tail to the named capability's `validate_config` at decode. One raw
+  capability may back many exposed resources.
+- **Exposed resources are the door**: ALL runtime access to a capability goes through one of its
+  exposed resources. The capability's invocation API is domain-owned and visible only to its exposed
+  resources; nothing else calls a provider. (Part 2's title is this principle's secrets
+  instantiation.)
 - **Domain terminology varies**: secrets say provider -> backend; VMs will likely say provider ->
   platform; git credentials will get their own words when their turn comes. "Provider" is likely the
-  stable half; the instantiation noun belongs to the domain.
+  stable half; the exposed-resource noun belongs to the domain.
 - **Registries are per-domain**: secret providers, VM provisioners, and git credential providers
   each have their own registry today. The registration _shape_ should stay common so plugin wiring
-  is uniform, but what the capabilities DO is wildly different, so their invocation APIs are
-  domain-owned and exposed only to their instantiation resources. Whether a universal provider
-  registry ever earns its keep is deliberately undecided and out of scope here.
+  is uniform, but what the capabilities DO is wildly different, so each domain owns its invocation
+  API. Whether a universal provider registry ever earns its keep is deliberately undecided and out
+  of scope here.
 
 Everything past this line is **secrets only**. The pattern above is the template; the rest of this
 document is its secrets instantiation, and nothing below should be read as prescribing VM or git
