@@ -13,6 +13,7 @@ dependencies = [
     "azure-identity>=1.25.1",
     "azure-mgmt-compute>=37.0.1",
     "azure-mgmt-network>=29.0.0",
+    "pyyaml>=6.0.3",
 ]
 
 [project.urls]
@@ -98,4 +99,5 @@ dev = [
     "ruff>=0.15.5",
     "mypy>=1.19.1",
     "pytest>=9.0.0",
+    "types-pyyaml>=6.0.12.20260518",
 ]

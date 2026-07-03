@@ -57,6 +57,8 @@ class _AptSourceKind:
     kind: str = "apt-source"
     miss_policy: Literal["auto-declare", "error"] = "error"
     auto_declare_names: frozenset[str] | None = None
+    manifest_declarable: bool = True
+    builtin_override: Literal["allow", "reserved"] = "allow"
 
     def synthesize(self, references: Sequence[ResourceReference]) -> Any:
         return _synthesize_no_default(self.kind, references)
@@ -69,6 +71,8 @@ class _AptPackageKind:
     kind: str = "apt-package"
     miss_policy: Literal["auto-declare", "error"] = "error"
     auto_declare_names: frozenset[str] | None = None
+    manifest_declarable: bool = True
+    builtin_override: Literal["allow", "reserved"] = "allow"
 
     def synthesize(self, references: Sequence[ResourceReference]) -> Any:
         return _synthesize_no_default(self.kind, references)
@@ -81,6 +85,8 @@ class _SystemInstallCommandKind:
     kind: str = "system-install-command"
     miss_policy: Literal["auto-declare", "error"] = "error"
     auto_declare_names: frozenset[str] | None = None
+    manifest_declarable: bool = True
+    builtin_override: Literal["allow", "reserved"] = "allow"
 
     def synthesize(self, references: Sequence[ResourceReference]) -> Any:
         return _synthesize_no_default(self.kind, references)
@@ -93,6 +99,8 @@ class _UserInstallCommandKind:
     kind: str = "user-install-command"
     miss_policy: Literal["auto-declare", "error"] = "error"
     auto_declare_names: frozenset[str] | None = None
+    manifest_declarable: bool = True
+    builtin_override: Literal["allow", "reserved"] = "allow"
 
     def synthesize(self, references: Sequence[ResourceReference]) -> Any:
         return _synthesize_no_default(self.kind, references)

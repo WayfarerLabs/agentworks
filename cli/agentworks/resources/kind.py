@@ -66,6 +66,14 @@ class ResourceKind(Protocol):
       name" (secrets). A non-empty set means "only these reserved names"
       (templates accept ``{"default"}``); requests for other missing names
       error.
+    - ``manifest_declarable``: whether operators may declare this kind
+      in YAML manifests (resource-manifests SDD, Phase 2). ``False``
+      for descriptor kinds provided by the app (and for
+      ``secret-backend`` until its Phase 3 provider/backend reshape).
+    - ``builtin_override``: what happens when an operator manifest
+      collides with an app-published built-in row. ``"allow"`` keeps
+      today's catalog behavior (operator row replaces the built-in);
+      ``"reserved"`` makes the collision a ``ConfigError``.
     - ``synthesize(references)``: called when an auto-declare-allowed
       missing name is being synthesized. Receives all matching references
       known so far (in config-load walk order). Returns the synthesized
@@ -107,6 +115,12 @@ class ResourceKind(Protocol):
 
     @property
     def auto_declare_names(self) -> frozenset[str] | None: ...
+
+    @property
+    def manifest_declarable(self) -> bool: ...
+
+    @property
+    def builtin_override(self) -> Literal["allow", "reserved"]: ...
 
     def synthesize(self, references: Sequence[ResourceReference]) -> Any: ...
 

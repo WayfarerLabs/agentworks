@@ -69,32 +69,39 @@ reviewer-approved.
       strictness as currently implemented (pinned from a full loader survey), error message catalog
       with `file:line` framing, and the YAML library decision (PyYAML 6.0.3, latest stable verified
       via the uv resolver; compose_all mark plumbing).
-- [ ] Add the YAML dependency to `cli/pyproject.toml` (latest stable at implementation time);
+- [x] Add the YAML dependency to `cli/pyproject.toml` (latest stable at implementation time);
       promote the library's name from this SDD's local cspell dictionary to the root `.cspell.json`
       once it appears in permanent code (skill promotion rule).
-- [ ] `agentworks/manifests/loader.py`: directory walk (sorted relative paths, dotfile skip,
+- [x] `agentworks/manifests/loader.py`: directory walk (sorted relative paths, dotfile skip,
       `.yaml`/`.yml`), YAML stream parse with document start-line capture, empty-document skip.
-- [ ] `agentworks/manifests/envelope.py`: apiVersion / kind / metadata / spec validation;
+- [x] `agentworks/manifests/envelope.py`: apiVersion / kind / metadata / spec validation;
       `manifest_declarable` kind flag; singleton kinds restricted to `name: default`.
-- [ ] `agentworks/manifests/decode.py`: spec-to-Resource construction for every operator kind,
-      reusing existing per-kind validation; `declared_at` attachment.
-- [ ] Cross-document duplicate detection with both locations in the error.
-- [ ] `ManifestSet.publish_to(registry)`; bootstrap gains the manifests publisher alongside the
-      still-active config publisher (dual-source until Phase 5).
-- [ ] `Registry.add` duplicate semantics: replace today's silent last-writer-wins with explicit
+- [x] `agentworks/manifests/decode.py`: spec-to-Resource construction for every operator kind,
+      reusing existing per-kind validation; `declared_at` attachment. (Decoders call the TOML
+      loaders through a fixed-location shim, so validation is shared verbatim; `secret-backend`
+      deferred to Phase 3 per the sequencing note.)
+- [x] Cross-document duplicate detection with both locations in the error.
+- [x] `ManifestSet.publish_to(registry)`; bootstrap gains the manifests publisher alongside the
+      still-active config publisher (dual-source until Phase 5). `Config` gained a `source_path`
+      field so the resources directory resolves relative to the loaded config file (test isolation
+      from the developer's real manifests).
+- [x] `Registry.add` duplicate semantics: replace today's silent last-writer-wins with explicit
       collision handling (operator-vs-operator collisions error citing both origins;
       operator-vs-built-in consults the kind's `builtin_override` flag). This is what makes a
-      resource declared in both TOML and a manifest an error during the dual-source window.
-- [ ] `agentworks/manifests/builtin.py`: app-bundled manifest discovery via importlib.resources;
+      resource declared in both TOML and a manifest an error during the dual-source window. (Line-0
+      sentinel rows -- omitted-singleton defaults and the legacy catalog publisher -- are
+      replaceable by a real operator declaration; the looseness dies with the TOML publisher.)
+- [x] `agentworks/manifests/builtin.py`: app-bundled manifest discovery via importlib.resources;
       published with `built-in` origin. Ship an empty-but-wired bundle (first content arrives in
       Phase 3).
-- [ ] `ResourceKind` gains `manifest_declarable` and `builtin_override` flags; `Registry.add`
-      enforces the built-in override policy (allow for catalog kinds, reserved otherwise).
-- [ ] **Tests**: loader walk order and dotfile skip; envelope acceptance/rejection per rule;
+- [x] `ResourceKind` gains `manifest_declarable` and `builtin_override` flags; `Registry.add`
+      enforces the built-in override policy (allow for catalog kinds, reserved otherwise;
+      `secret-backend` temporarily "allow" for the TOML dual-source window, flipped in Phase 5).
+- [x] **Tests**: loader walk order and dotfile skip; envelope acceptance/rejection per rule;
       per-kind decode round-trips against TOML-parser equivalents (same Resource out of both
       sources); duplicate detection (same file, cross-file, cross-source); built-in override allow
       and reserved paths; singleton name restriction; `file:line` accuracy on multi-doc files.
-- [ ] **Docs**: none yet (operator surface unchanged until cutover).
+- [x] **Docs**: none yet (operator surface unchanged until cutover).
 
 Definition of done: a resources directory fully declares any operator kind with feature parity to
 TOML; both sources coexist correctly; CI green; reviewer-approved.
@@ -172,6 +179,9 @@ after); CI green; reviewer-approved.
       pointing at `agw config migrate`; config publisher removed from bootstrap; TOML resource
       parsing survives only inside the migration tool. The `type` alias and the legacy TOML backend
       construction path are deleted with it.
+- [ ] Flip `secret-backend`'s `builtin_override` to `reserved` (the "allow" setting existed only for
+      the TOML dual-source window; with the TOML surface gone, `Registry.add` becomes the final
+      backstop behind the manifest publisher's reserved-name check).
 - [ ] Rewrite `cli/agentworks/sample-config.toml` to config-only, with a pointer to the sample
       manifests; update `cli/tests/test_sample_config.py` conventions accordingly.
 - [ ] Ship sample manifests (envelope examples for the commonly-used kinds) and wire

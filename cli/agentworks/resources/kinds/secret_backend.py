@@ -37,6 +37,16 @@ class _SecretBackendKind:
     kind: str = "secret-backend"
     miss_policy: Literal["auto-declare", "error"] = "error"
     auto_declare_names: frozenset[str] | None = None
+    # Not declarable until the Phase 3 provider/backend reshape lands;
+    # shipping the bare Phase 2 shape would be broken inside this PR.
+    manifest_declarable: bool = False
+    # "allow" preserves today's TOML behavior ([secret_backends.env-var]
+    # replaces the built-in row) through the dual-source window. Phase 3
+    # enforces reserved names for manifest-declared backends at the
+    # manifest publisher (origin variants can't distinguish TOML from
+    # manifest rows); this flag flips to "reserved" at the Phase 5
+    # cutover when the TOML surface is deleted.
+    builtin_override: Literal["allow", "reserved"] = "allow"
 
     def synthesize(self, references: Sequence[ResourceReference]) -> Any:
         raise NoUnreferencedDefaultError(

@@ -77,14 +77,74 @@ class Registry:
         and stores the result keyed by ``(kind, name)``.
 
         Raises ``RuntimeError`` if the Registry has been finalized.
-        Adding the same ``(kind, name)`` twice replaces the prior entry
-        (publishers are expected not to publish duplicates; the test
-        suite covers this; production publishers don't do it).
+
+        Collisions (same ``(kind, name)`` added twice) are handled
+        explicitly (resource-manifests SDD, Phase 2):
+
+        - operator row over operator row: ``ConfigError`` citing both
+          declaration locations. The manifest loader catches duplicates
+          within its own set; this is the backstop that also catches a
+          resource declared in both TOML and a manifest during the
+          in-branch dual-source window.
+        - operator row over built-in row: consults the kind's
+          ``builtin_override`` flag. ``"allow"`` keeps the catalog
+          behavior (operator row replaces the built-in); ``"reserved"``
+          raises ``ConfigError`` naming the reserved built-in.
+        - built-in row over built-in row: replaces (idempotent
+          republish).
+        - anything else (built-in over operator) is a publisher
+          ordering bug and raises ``AssertionError``.
         """
         if self._frozen:
             raise RuntimeError("registry is frozen; add must precede finalize")
+        existing = self._resources.get(kind, {}).get(name)
+        if existing is not None:
+            self._check_collision(kind, name, existing, origin)
         stamped = dataclasses.replace(resource, origin=origin)
         self._resources.setdefault(kind, {})[name] = stamped
+
+    @staticmethod
+    def _check_collision(
+        kind: str, name: str, existing: Any, incoming: Origin
+    ) -> None:
+        """Raise unless the incoming publish may replace ``existing``."""
+        from agentworks.errors import ConfigError
+        from agentworks.resources.render import format_origin_line
+
+        existing_origin: Origin | None = getattr(existing, "origin", None)
+        existing_variant = getattr(existing_origin, "variant", None)
+        if existing_variant == "built-in" and incoming.variant == "built-in":
+            return
+        if existing_variant == "built-in" and incoming.variant == "operator-declared":
+            handler = KIND_REGISTRY.get(kind)
+            if handler is not None and handler.builtin_override == "allow":
+                return
+            raise ConfigError(
+                f'{kind} "{name}" is a built-in resource with a reserved '
+                f"name; declare a differently-named {kind} instead",
+            )
+        if (
+            existing_variant == "operator-declared"
+            and incoming.variant == "operator-declared"
+        ):
+            # line == 0 is the SourceLocation sentinel for rows the TOML
+            # publisher synthesized rather than the operator declaring
+            # them (omitted-singleton defaults for admin-template /
+            # named-console-template, and the legacy line-unknown catalog
+            # publisher). Those are replaceable by a real operator
+            # declaration; the looseness disappears with the TOML
+            # publisher at the cutover.
+            if getattr(existing_origin, "line", None) == 0:
+                return
+            raise ConfigError(
+                f'duplicate {kind} "{name}": declared at '
+                f"{format_origin_line(existing_origin)} and "
+                f"{format_origin_line(incoming)}",
+            )
+        raise AssertionError(
+            f"publisher ordering bug: {incoming.variant} row published over "
+            f"{existing_variant} row for {kind}:{name}"
+        )
 
     # -- Finalize phase ------------------------------------------------
 

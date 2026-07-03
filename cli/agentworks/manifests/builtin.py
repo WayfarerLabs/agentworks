@@ -1,0 +1,36 @@
+"""App-bundled built-in resource manifests.
+
+Resources the app ships as data (rather than as code publishers) live in
+``agentworks/manifests/builtin/`` and go through the exact same loader
+as operator manifests, landing with ``Origin.built_in``. The bundle is
+wired but empty until the provider/backend split ships the built-in
+secret backends; future plugins reuse this mechanism with their own
+origin variants.
+"""
+
+from __future__ import annotations
+
+from importlib import resources as importlib_resources
+from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from agentworks.resources.registry import Registry
+
+_BUILTIN_SOURCE = "agentworks.manifests.builtin"
+
+
+def publish_to(registry: Registry) -> None:
+    """Publish every bundled manifest with a ``built-in`` origin."""
+    from agentworks.manifests.loader import load_manifests
+    from agentworks.resources import Origin
+
+    bundle = importlib_resources.files("agentworks.manifests") / "builtin"
+    # The traversable is a real directory both in the repo and in wheels
+    # (hatchling ships package data); resolve to a Path for the loader.
+    with importlib_resources.as_file(bundle) as bundle_dir:
+        manifests = load_manifests(Path(bundle_dir))
+
+    origin = Origin.built_in(source=_BUILTIN_SOURCE)
+    for entry in manifests.entries:
+        registry.add(entry.kind, entry.name, entry.resource, origin)

@@ -593,6 +593,10 @@ class Config:
     defaults: DefaultsConfig
     named_console: NamedConsoleConfig
     vm_templates: dict[str, VMTemplate]
+    # The file this Config was loaded from. The resources directory
+    # (YAML manifests) is resolved relative to it, so tests loading
+    # from tmp paths never pick up the developer's real manifests.
+    source_path: Path
     admin: AdminConfig
     agent_templates: dict[str, AgentTemplate]
     session: SessionConfig
@@ -1751,6 +1755,7 @@ def load_config(path: Path | None = None, *, warn_issues: bool = True) -> Config
         defaults=_load_defaults(data, issues),
         named_console=_load_named_console(data, issues, decls),
         vm_templates=loaded_vm_templates,
+        source_path=config_path,
         admin=admin,
         agent_templates=loaded_agent_templates,
         session=session_config,

@@ -46,6 +46,8 @@ class _SecretKind:
     kind: str = SECRET_KIND_NAME
     miss_policy: Literal["auto-declare", "error"] = "auto-declare"
     auto_declare_names: frozenset[str] | None = None  # None = any name accepted
+    manifest_declarable: bool = True
+    builtin_override: Literal["allow", "reserved"] = "reserved"
 
     def synthesize(self, references: Sequence[ResourceReference]) -> SecretDecl:
         """Build a ``SecretDecl`` for an auto-declared secret. ``references``

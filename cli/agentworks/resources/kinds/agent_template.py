@@ -38,6 +38,8 @@ class _AgentTemplateKind:
     kind: str = "agent-template"
     miss_policy: Literal["auto-declare", "error"] = "auto-declare"
     auto_declare_names: frozenset[str] | None = frozenset({"default"})
+    manifest_declarable: bool = True
+    builtin_override: Literal["allow", "reserved"] = "reserved"
 
     def synthesize(self, references: Sequence[ResourceReference]) -> AgentTemplate:
         """Build the code-defined default ``AgentTemplate``. See

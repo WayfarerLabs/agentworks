@@ -42,6 +42,8 @@ class _NamedConsoleTemplateKind:
     kind: str = "named-console-template"
     miss_policy: Literal["auto-declare", "error"] = "auto-declare"
     auto_declare_names: frozenset[str] | None = frozenset({"default"})
+    manifest_declarable: bool = True
+    builtin_override: Literal["allow", "reserved"] = "reserved"
 
     def synthesize(
         self,
