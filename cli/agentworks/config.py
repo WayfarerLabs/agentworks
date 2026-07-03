@@ -25,7 +25,6 @@ from agentworks.secrets import (
 from agentworks.source_location import SourceLocation, scan_section_lines, synthesized
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
 
     from agentworks.resources.origin import Origin
     from agentworks.resources.reference import (
@@ -34,7 +33,6 @@ if TYPE_CHECKING:
         SecretReference,
     )
     from agentworks.resources.registry import Registry
-    from agentworks.secrets import SecretResolver, SecretSource
 
 CONFIG_DIR = Path.home() / ".config" / "agentworks"
 CONFIG_PATH = CONFIG_DIR / "config.toml"
@@ -616,15 +614,6 @@ class Config:
     secret_backends: dict[str, SecretBackendConfig] = field(default_factory=dict)
     # Top-level [secret_config] table; carries the enabled-backends precedence list.
     secret_config_data: SecretConfig = field(default_factory=SecretConfig)
-    # Resolver assembled from secret_config_data.backends in precedence order.
-    # An empty SecretResolver (no sources, no secrets) is constructed when the
-    # operator hasn't opted into secrets - callers always get a usable resolver,
-    # so call sites can `.render(env)` unconditionally instead of branching on
-    # None. Plaintext env entries resolve trivially; secret-ref env entries fall
-    # through to an empty backend chain and surface `SecretUnavailableError` at
-    # command time. Phase 1b of the Resource Registry SDD made that the intended
-    # runtime failure mode (no longer a `ConfigError` at config load).
-    secret_resolver: SecretResolver = field(default_factory=lambda: _empty_resolver())
     config_issues: tuple[str, ...] = ()
 
     def publish_to(self, registry: Registry) -> None:
@@ -1278,7 +1267,16 @@ def _load_git_credentials(
         # ``_GitCredentialProviderKind``'s error miss policy fires at
         # build_registry time with the framework's consistent error
         # shape if the type isn't a known provider.
-        cred_type = str(_require(cdata, "type", f"git_credentials.{name}"))
+        # ``provider`` is the vocabulary going forward (matching
+        # secret-backend manifests); ``type`` remains accepted until the
+        # TOML resource surface is deleted at the cutover. ``provider``
+        # wins when both are present.
+        if "provider" in cdata:
+            cred_type = str(cdata["provider"])
+        elif "type" in cdata:
+            cred_type = str(cdata["type"])
+        else:
+            raise ConfigError(f"git_credentials.{name}.provider is required")
         if cred_type == "azdo" and "org" not in cdata:
             raise ConfigError(f"git_credentials.{name}.org is required for azdo type")
 
@@ -1495,7 +1493,9 @@ def _load_secret_backends(
     if not isinstance(raw, dict):
         raise ConfigError("[secret_backends] must be a table")
 
-    known_kinds = set(_v1_source_factories().keys())
+    from agentworks.secrets.providers import PROVIDER_REGISTRY
+
+    known_kinds = set(PROVIDER_REGISTRY)
     backends: dict[str, SecretBackendConfig] = {}
     for kind, bdata in raw.items():
         kind_str = str(kind)
@@ -1548,94 +1548,10 @@ def _load_secret_config(
     return SecretConfig(backends=tuple(backends_raw), declared_at=declared_at)
 
 
-def _empty_resolver() -> SecretResolver:
-    """A no-op SecretResolver used as the default when no secrets are configured.
-
-    Lets call sites depend on `Config.secret_resolver` always being a valid
-    SecretResolver instead of branching on None. Plaintext env entries
-    resolve trivially through `render`; secret-ref env entries fall through
-    to the (empty) backend chain and raise `SecretUnavailableError` at
-    command time -- the intended runtime failure mode per Phase 1b of the
-    Resource Registry SDD.
-    """
-    from agentworks.secrets import SecretResolver
-
-    return SecretResolver([], {})
-
-
-# Backend kinds whose source class is built in to v1. Source factories
-# accept no constructor args today; later backends accepting a
-# ``SecretBackendConfig`` will widen this signature when they ship.
-def _v1_source_factories() -> dict[str, Callable[[], SecretSource]]:
-    from agentworks.secrets import EnvVarSource, PromptSource
-
-    return {
-        "env-var": EnvVarSource,
-        "prompt": PromptSource,
-    }
-
-
-def _build_secret_resolver(
-    secret_config_data: SecretConfig,
-    secret_backends: dict[str, SecretBackendConfig],  # noqa: ARG001 - reserved for future per-backend ctor wiring
-    secrets: dict[str, SecretDecl],
-) -> SecretResolver:
-    """Assemble a SecretResolver from the configured backend chain.
-
-    Returns a no-op resolver when no backends are configured (and no secrets
-    are declared). When backends ARE configured, validates:
-
-    - every kind in ``[secret_config].backends`` has a known source factory;
-    - no declared secret is unreachable through the configured chain.
-    """
-    from agentworks.secrets import SecretResolver
-
-    if not secret_config_data.backends and not secrets:
-        return _empty_resolver()
-
-    factories = _v1_source_factories()
-    sources: list[SecretSource] = []
-    for kind in secret_config_data.backends:
-        factory = factories.get(kind)
-        if factory is None:
-            raise ConfigError(
-                f"[secret_config].backends: unknown backend kind {kind!r}; "
-                f"v1 supports {sorted(factories.keys())}"
-            )
-        sources.append(factory())
-
-    resolver = SecretResolver(sources, secrets)
-
-    unreachable = resolver.unreachable_secrets()
-    if unreachable:
-        names = ", ".join(sorted(d.name for d in unreachable))
-        chain_str = ", ".join(secret_config_data.backends) or "(empty)"
-        # The unreachable-secret case is tight by construction: with the
-        # default chain (``env-var``, ``prompt``), prompt's would_attempt
-        # returns True for every secret, so nothing is unreachable.
-        # Reaching this error means the operator has either:
-        # (a) explicitly stripped prompt from [secret_config].backends, AND
-        # (b) the remaining backends opt out via backend_mappings (env-var
-        #     respects `false`; backends without default conventions like
-        #     1password require an explicit mapping), OR
-        # (c) explicitly set backends = [] (resolution disabled).
-        # The hint enumerates the three remediations in the order they're
-        # most often the right fix.
-        raise ConfigError(
-            f"unreachable secret(s): {names}",
-            hint=(
-                f"active backend chain: [{chain_str}]. Each declared secret "
-                "needs at least one backend in the chain that would attempt "
-                "it. To fix: add 'prompt' (or another always-attempting backend) "
-                "to [secret_config].backends; drop a "
-                "`backend_mappings.<kind> = false` opt-out on the affected "
-                "secret(s); add `backend_mappings.<kind>` for a backend that "
-                "has no default convention (e.g. 1password); or remove the "
-                "unused secret declaration."
-            ),
-        )
-
-    return resolver
+# Resolver construction moved to ``agentworks.secrets.providers.resolver_for``
+# (resource-manifests SDD, Phase 3): the chain can name manifest-declared
+# backends, which are unknowable at config-load time. The chain-name and
+# unreachable-secret checks relocated with it.
 
 
 EXPECTED_TOP_LEVEL_KEYS = {
@@ -1737,17 +1653,9 @@ def load_config(path: Path | None = None, *, warn_issues: bool = True) -> Config
     secret_backends = _load_secret_backends(data, issues, decls)
     secret_config_data = _load_secret_config(data, issues, decls)
     # Phase 1b: env-block secret references no longer error at config load
-    # when they don't match a [secrets.<name>] block. The Resource Registry's
-    # finalize pass auto-declares missing secrets (per the framework's
-    # miss policy for the "secret" kind, in `agentworks/resources/kinds/
-    # secret.py`); operators see them in `agw secret list` with origin =
-    # auto-declared. Render-time resolution falls through the backend chain
-    # naturally; an unresolved secret raises `SecretUnavailableError`
-    # ("no active backend resolved ...") at command time rather than
-    # `ConfigError` at config load.
-    secret_resolver = _build_secret_resolver(
-        secret_config_data, secret_backends, secrets
-    )
+    # when they don't match a [secrets.<name>] block; the framework
+    # auto-declares them at finalize. The resolver itself is assembled
+    # registry-aware in ``agentworks.secrets.providers.resolver_for``.
 
     config = Config(
         operator=_load_operator(data, issues),
@@ -1771,7 +1679,7 @@ def load_config(path: Path | None = None, *, warn_issues: bool = True) -> Config
         secrets=secrets,
         secret_backends=secret_backends,
         secret_config_data=secret_config_data,
-        secret_resolver=secret_resolver,
+
         config_issues=tuple(issues),
     )
 

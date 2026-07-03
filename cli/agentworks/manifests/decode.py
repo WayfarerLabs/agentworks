@@ -36,6 +36,7 @@ KIND_SECTIONS: dict[str, str] = {
     "git-credential": "git_credentials",
     "admin-template": "admin",
     "named-console-template": "named_console",
+    "secret-backend": "secret_backends",
     "apt-source": "apt_sources",
     "apt-package": "apt_packages",
     "system-install-command": "system_install_commands",
@@ -47,6 +48,7 @@ KIND_SECTIONS: dict[str, str] = {
 # so the shared loaders validate and attach it exactly as for TOML.
 _DESCRIPTION_KINDS = {
     "secret",
+    "secret-backend",
     "session-template",
     "git-credential",
     "apt-source",
@@ -202,6 +204,31 @@ def _decode_named_console_template(
     )
 
 
+def _decode_secret_backend(doc: Document, spec: dict[str, object], issues: list[str]) -> Any:
+    from agentworks.secrets.base import SecretBackendDecl
+    from agentworks.secrets.providers import PROVIDER_REGISTRY
+
+    description = str(spec.pop("description", ""))
+    provider = spec.pop("provider", None)
+    if not isinstance(provider, str) or not provider:
+        raise ConfigError("secret-backend requires spec.provider")
+    # Remaining spec keys are the provider-specific config. When the
+    # provider is registered, validate now (the error carries this
+    # document's location); when it isn't, defer so the framework's
+    # reference miss policy reports the unknown provider uniformly.
+    known = PROVIDER_REGISTRY.get(provider)
+    config = dict(spec)
+    if known is not None:
+        config = dict(known.validate_config(doc.name, config))
+    return SecretBackendDecl(
+        name=doc.name,
+        provider=provider,
+        description=description,
+        config=config,
+        declared_at=doc.location,
+    )
+
+
 def _decode_apt_source(doc: Document, spec: dict[str, object], issues: list[str]) -> Any:
     from agentworks.catalog import _load_apt_sources
 
@@ -237,6 +264,7 @@ _DECODERS: dict[str, Callable[[Document, dict[str, object], list[str]], Any]] = 
     "workspace-template": _decode_workspace_template,
     "session-template": _decode_session_template,
     "git-credential": _decode_git_credential,
+    "secret-backend": _decode_secret_backend,
     "admin-template": _decode_admin_template,
     "named-console-template": _decode_named_console_template,
     "apt-source": _decode_apt_source,

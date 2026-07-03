@@ -21,7 +21,7 @@ if TYPE_CHECKING:
     # `from __future__ import annotations` keeps the field types as strings,
     # so the runtime imports are unnecessary.
     from agentworks.resources.origin import Origin
-    from agentworks.resources.reference import ReferenceEntry
+    from agentworks.resources.reference import ReferenceEntry, ResourceReference
 
 
 @dataclass(frozen=True)
@@ -53,6 +53,40 @@ class SecretDecl:
     # direct-construction call sites (tests, framework synthesize paths).
     origin: Origin | None = None
     references: tuple[ReferenceEntry, ...] = ()
+
+
+@dataclass(frozen=True)
+class SecretBackendDecl:
+    """A named, configured instantiation of a secret provider (Phase 3 of
+    the resource-manifests SDD). Declared via ``secret-backend``
+    manifests; the built-in ``env-var`` / ``prompt`` backends ship as
+    bundled manifests in this shape.
+
+    ``provider`` names the code capability
+    (``agentworks.secrets.providers.PROVIDER_REGISTRY``); ``config``
+    carries the provider-specific fields, validated by the provider at
+    manifest decode. Multiple backends may share one provider.
+    """
+
+    name: str
+    provider: str
+    description: str = ""
+    config: dict[str, object] = field(default_factory=dict)
+    declared_at: SourceLocation = field(default_factory=synthesized)
+    origin: Origin | None = None
+    references: tuple[ReferenceEntry, ...] = ()
+
+    def referenced_resources(self) -> list[ResourceReference]:
+        from agentworks.resources.reference import ResourceReference
+
+        return [
+            ResourceReference(
+                name=self.provider,
+                kind="secret-provider",
+                usage="the secret provider",
+                source=("secret-backend", self.name),
+            )
+        ]
 
 
 @dataclass(frozen=True)

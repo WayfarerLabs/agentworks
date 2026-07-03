@@ -19,6 +19,7 @@ from agentworks import output
 from agentworks.env.identity import ResourceContext, per_context_identity_env
 from agentworks.env.merge import effective_env
 from agentworks.errors import ValidationError
+from agentworks.secrets.providers import resolver_for
 
 if TYPE_CHECKING:
     from agentworks.agents.templates import ResolvedAgentTemplate
@@ -140,7 +141,7 @@ def show_env(
             continue
         entry = user_env_merged[key]
         scope = user_provenance[key]
-        rendered, is_secret = _render_value(entry, config.secret_resolver, reveal_secrets)
+        rendered, is_secret = _render_value(entry, resolver_for(config), reveal_secrets)
         rows.append(
             ResolvedEnvRow(
                 key=key,

@@ -89,7 +89,9 @@ def build_secret_table(config: Config, registry: Registry) -> SecretTable:
     Pure config + registry derived; never probes the backend or
     resolves a value.
     """
-    resolver = config.secret_resolver
+    from agentworks.secrets.providers import resolver_for
+
+    resolver = resolver_for(config, registry)
     sources = resolver.sources
     backend_kinds = tuple(s.kind for s in sources)
 
@@ -311,8 +313,10 @@ def describe_secret(
 
     # Backend mappings: walk the active source chain and ask each
     # source how it would handle this secret.
+    from agentworks.secrets.providers import resolver_for
+
     mappings: list[BackendMapping] = []
-    for source in config.secret_resolver.sources:
+    for source in resolver_for(config).sources:
         mappings.append(
             BackendMapping(
                 backend_kind=source.kind,
@@ -327,7 +331,7 @@ def describe_secret(
     # not just whether the backend is configured. The local
     # ``backend_mappings`` list above already covers configuration shape;
     # this layer is the live probe.
-    preview_kind = config.secret_resolver.preview_resolution(decl)
+    preview_kind = resolver_for(config).preview_resolution(decl)
     resolved_by = preview_kind
     available = preview_kind is not None
 

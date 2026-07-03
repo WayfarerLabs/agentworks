@@ -152,7 +152,7 @@ def test_unknown_kind_gets_kebab_hint(tmp_path: Path) -> None:
     assert "vm-template" in exc.value.hint
 
 
-def test_secret_backend_not_declarable_yet(tmp_path: Path) -> None:
+def test_secret_backend_requires_provider(tmp_path: Path) -> None:
     root = tmp_path / "resources"
     _write(
         root,
@@ -165,7 +165,7 @@ def test_secret_backend_not_declarable_yet(tmp_path: Path) -> None:
         spec: {}
         """,
     )
-    with pytest.raises(ConfigError, match="not manifest-declarable yet"):
+    with pytest.raises(ConfigError, match="requires spec.provider"):
         load_manifests(root)
 
 

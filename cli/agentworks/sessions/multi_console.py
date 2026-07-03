@@ -1378,6 +1378,7 @@ def _resolve_pane_env(
     """
     from agentworks.agents.templates import resolve_template as _resolve_agent_template
     from agentworks.env import ResourceContext, compose_env
+    from agentworks.secrets import resolver_for
     from agentworks.vms.templates import resolve_template as _resolve_vm_template
     from agentworks.workspaces.templates import resolve_template as _resolve_ws_template
 
@@ -1403,7 +1404,7 @@ def _resolve_pane_env(
 
     if is_admin_pane:
         return compose_env(
-            resolver=config.secret_resolver,
+            resolver=resolver_for(config),
             ctx=ctx,
             vm=vm_tmpl.env,
             workspace=ws_tmpl.env,
@@ -1423,7 +1424,7 @@ def _resolve_pane_env(
         return {}
     agent_tmpl = _resolve_agent_template(registry, agent.template)
     return compose_env(
-        resolver=config.secret_resolver,
+        resolver=resolver_for(config),
         ctx=ctx,
         vm=vm_tmpl.env,
         workspace=ws_tmpl.env,

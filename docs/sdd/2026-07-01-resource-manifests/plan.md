@@ -114,37 +114,41 @@ TOML; both sources coexist correctly; CI green; reviewer-approved.
       resolver construction swap (registry-derived `resolver_for` with `id(config)`-keyed
       prompt-once identity; parse-time chain validation relocates to first `resolver_for`,
       Config.secret_resolver retired).
-- [ ] `agentworks/secrets/providers.py`: code-side `PROVIDER_REGISTRY` (env-var, prompt) and the
+- [x] `agentworks/secrets/providers.py`: code-side `PROVIDER_REGISTRY` (env-var, prompt) and the
       `secret-provider` descriptor kind + publisher (built-in origin, error miss policy, not
       manifest-declarable).
-- [ ] `SecretBackendDecl` resource (name, description, provider, provider config mapping);
+- [x] `SecretBackendDecl` resource (name, description, provider, provider config mapping);
       `referenced_resources()` emits the `secret-provider` reference; `secret-backend` kind becomes
       manifest-declarable with `builtin_override = "reserved"` (enforced for manifest-declared rows
-      only; legacy TOML `[secret_backends.*]` rows keep today's override-allowed publish until Phase
-      5).
-- [ ] Built-in `secret-backends.yaml` bundled manifest (env-var and prompt backends, no
-      configuration).
-- [ ] Built-in providers accept no configuration (non-empty backend config is a schema validation
+      only, at `ManifestSet.publish_to`; legacy TOML `[secret_backends.*]` rows keep today's
+      override-allowed publish until Phase 5).
+- [x] Built-in `secret-backends.yaml` bundled manifest (env-var and prompt backends, no
+      configuration); `secrets.publish_to` became the provider-descriptor publisher.
+- [x] Built-in providers accept no configuration (non-empty backend config is a schema validation
       error for both); the provider-config plumbing (schema validation, defaults, `file:line` error
       framing, config reaching `instantiate`) is exercised end to end by a test-only provider
       registered only in the test suite, never shipped in the app.
-- [ ] Resolver construction from the chain: `secret_config.backends` names looked up in the
+- [x] Resolver construction from the chain: `secret_config.backends` names looked up in the
       registry; `SecretBackendDecl` rows instantiate via their provider, legacy TOML rows continue
-      through the existing construction path (retired in Phase 5 with the TOML resource surface).
-- [ ] `git_credentials.<name>` entries gain `provider`: TOML parse accepts it as an alias for `type`
+      to resolve (their kind IS the provider name; the kind-keyed path retires in Phase 5 with the
+      TOML resource surface). Shipped as `providers.resolver_for(config, registry=None)` per the
+      LLD, replacing `Config.secret_resolver`, with the chain-name and unreachable-secret checks
+      relocated from load time (unreachable restricted to operator-declared rows for parity).
+- [x] `git_credentials.<name>` entries gain `provider`: TOML parse accepts it as an alias for `type`
       (`provider` wins when both are present), so every today-valid config still loads at this
       phase; manifests accept only `provider`; `type` is removed with the TOML resource surface in
       Phase 5.
-- [ ] Inspection follow-through: `agw secret describe` backend mappings / resolution preview and
-      doctor rows compute conventions via instantiated sources; `agw resource list` shows
-      `secret-provider` and `secret-backend` rows with references.
-- [ ] **Tests**: provider registry lookup and instantiation; test-only-provider config validation
+- [x] Inspection follow-through: `agw secret describe` backend mappings / resolution preview and
+      doctor rows compute conventions via instantiated sources (through `resolver_for`);
+      `agw resource list` shows `secret-provider` and `secret-backend` rows with references.
+- [x] **Tests**: provider registry lookup and instantiation; test-only-provider config validation
       and resolution end to end; custom backend in chain; reserved-name rejection for
       `env-var`/`prompt` operator manifests; multiple backends sharing a provider; chain naming an
       unknown backend; describe/doctor rendering; regression: the shipped sample config and a
       maximal today-valid TOML config (including `type =` and `[secret_backends.*]` sections) load
-      unchanged at this phase's HEAD.
-- [ ] **Docs** (lockstep with what becomes true at this phase's HEAD): `cli/README.md` configuration
+      unchanged at this phase's HEAD. (tests/secrets/test_providers.py plus updated legacy pins;
+      prompt-once identity pinned directly.)
+- [x] **Docs** (lockstep with what becomes true at this phase's HEAD): `cli/README.md` configuration
       schema and command reference for the new `secret-provider` / `secret-backend` rows,
       describe/doctor rendering, and the `provider` alias on `[git_credentials.*]`;
       `sample-config.toml` comments where they mention `type`.

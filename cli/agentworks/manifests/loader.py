@@ -96,10 +96,31 @@ class ManifestSet:
         """Publish every entry as an operator-declared Resource. Mirrors
         ``Config.publish_to``; the Registry's collision handling is the
         cross-source duplicate backstop.
+
+        Built-in backend names are reserved on this (operator) path
+        only: the bundled manifests flow through the same loader but
+        publish via ``manifests.builtin``, and the Registry-level
+        ``builtin_override`` flag stays "allow" for the TOML dual-source
+        window (flipped at the cutover).
         """
+        from agentworks.errors import ConfigError
         from agentworks.resources import Origin
+        from agentworks.secrets import KNOWN_BACKEND_KINDS
 
         for entry in self.entries:
+            if (
+                entry.kind == "secret-backend"
+                and entry.name in KNOWN_BACKEND_KINDS
+            ):
+                raise ConfigError(
+                    f"{entry.location.file}:{entry.location.line}: "
+                    f'secret-backend "{entry.name}" is a built-in backend '
+                    "with a reserved name",
+                    hint=(
+                        "declare a differently-named backend with the same "
+                        "provider and put it in [secret_config].backends"
+                    ),
+                )
             registry.add(
                 entry.kind,
                 entry.name,

@@ -94,13 +94,13 @@ ssh_private_key = "~/.ssh/id_ed25519"        # required: used for SSH connection
 # `~/.git-credentials` via git's credential-store helper.
 
 #[git_credentials.github]
-#type = "github"
+#provider = "github"                              # `type` is accepted as a legacy alias
 #description = "GitHub full access"               # optional, shown in prompts and logs
 #token = "git-token-github"                       # optional; default is `git-token-<name>` (bare secret name; no { secret = "..." } polymorphism)
 # Resolved secret value is the PAT (create at https://github.com/settings/tokens, repo scope).
 
 #[git_credentials.azdo]
-#type = "azdo"
+#provider = "azdo"                                # `type` is accepted as a legacy alias
 #org = "my-org"
 #description = "Azure DevOps for my-org"          # optional, shown in prompts and logs
 #token = "git-token-azdo"                         # optional; default is `git-token-<name>`

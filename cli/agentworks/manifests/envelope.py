@@ -86,15 +86,6 @@ def validate_envelope(raw: object, location: SourceLocation) -> Document:
             hint=hint,
         )
     if not handler.manifest_declarable:
-        if kind == "secret-backend":
-            raise _err(
-                location,
-                "secret-backend is not manifest-declarable yet",
-                hint=(
-                    "backends become declarable with the provider/backend "
-                    "split; keep [secret_backends.*] in config.toml meanwhile"
-                ),
-            )
         raise _err(
             location,
             f"{kind} is provided by the app and cannot be declared in a manifest",

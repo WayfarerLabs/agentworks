@@ -626,7 +626,7 @@ def shell_vm(
     import sys
 
     from agentworks.env import ResourceContext, compose_env
-    from agentworks.secrets import resolve_for_command
+    from agentworks.secrets import resolve_for_command, resolver_for
     from agentworks.transports import provisioner_transport, transport
 
     vm = _require_vm(db, name)
@@ -680,7 +680,7 @@ def shell_vm(
         workspace_dir=ws.workspace_path if ws else None,
     )
     env = compose_env(
-        resolver=config.secret_resolver,
+        resolver=resolver_for(config),
         ctx=ctx,
         vm=scopes.vm,
         workspace=scopes.workspace,
@@ -722,7 +722,7 @@ def exec_vm(
 
     from agentworks.env import ResourceContext, compose_env
     from agentworks.exec_validation import reject_dash_prefixed_command
-    from agentworks.secrets import resolve_for_command
+    from agentworks.secrets import resolve_for_command, resolver_for
     from agentworks.transports import transport
 
     reject_dash_prefixed_command(command, kind="vm", name=name)
@@ -768,7 +768,7 @@ def exec_vm(
         workspace_dir=ws.workspace_path if ws else None,
     )
     env = compose_env(
-        resolver=config.secret_resolver,
+        resolver=resolver_for(config),
         ctx=ctx,
         vm=scopes.vm,
         workspace=scopes.workspace,

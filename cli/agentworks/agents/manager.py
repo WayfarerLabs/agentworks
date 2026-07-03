@@ -653,7 +653,7 @@ def shell_agent(
     import sys
 
     from agentworks.env import ResourceContext, compose_env
-    from agentworks.secrets import resolve_for_command
+    from agentworks.secrets import resolve_for_command, resolver_for
     from agentworks.transports import agent_transport
 
     # Resolve workspace upfront (needed for authz check, env scope, AND
@@ -684,7 +684,7 @@ def shell_agent(
         agent_name=agent.name,
     )
     env = compose_env(
-        resolver=config.secret_resolver,
+        resolver=resolver_for(config),
         ctx=ctx,
         vm=scopes.vm,
         workspace=scopes.workspace,
@@ -739,7 +739,7 @@ def exec_agent(
 
     from agentworks.env import ResourceContext, compose_env
     from agentworks.exec_validation import reject_dash_prefixed_command
-    from agentworks.secrets import resolve_for_command
+    from agentworks.secrets import resolve_for_command, resolver_for
     from agentworks.transports import agent_transport
 
     reject_dash_prefixed_command(command, kind="agent", name=name)
@@ -781,7 +781,7 @@ def exec_agent(
         agent_name=agent.name,
     )
     env = compose_env(
-        resolver=config.secret_resolver,
+        resolver=resolver_for(config),
         ctx=ctx,
         vm=scopes.vm,
         workspace=scopes.workspace,

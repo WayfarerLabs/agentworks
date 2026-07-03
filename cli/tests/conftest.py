@@ -322,3 +322,28 @@ def stub_build_registry(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         "agentworks.bootstrap.build_registry", _StubRegistry
     )
+
+    # resolver_for is registry-derived (Phase 3); namespace configs lack
+    # secret_config_data, so serve a per-config no-op resolver with the
+    # same memo semantics (one instance per config). Patched at every
+    # binding site: the providers module, the agentworks.secrets
+    # re-export (function-local importers), and the module-level
+    # importers (orchestration, env.show).
+    from agentworks.secrets.resolver import SecretResolver
+
+    stub_resolvers: dict[int, SecretResolver] = {}
+
+    def _stub_resolver_for(config: object, registry: object = None) -> SecretResolver:
+        resolver = stub_resolvers.get(id(config))
+        if resolver is None:
+            resolver = SecretResolver([], {})
+            stub_resolvers[id(config)] = resolver
+        return resolver
+
+    for site in (
+        "agentworks.secrets.providers.resolver_for",
+        "agentworks.secrets.resolver_for",
+        "agentworks.secrets.orchestration.resolver_for",
+        "agentworks.env.show.resolver_for",
+    ):
+        monkeypatch.setattr(site, _stub_resolver_for)

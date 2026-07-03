@@ -12,6 +12,7 @@ import pytest
 
 from agentworks.bootstrap import build_registry
 from agentworks.config import load_config
+from agentworks.secrets import resolver_for
 from agentworks.secrets.inspect import describe_secret
 
 
@@ -71,7 +72,7 @@ def test_describe_secret_does_not_invoke_resolve_all(
         )
 
     monkeypatch.setattr(
-        config.secret_resolver, "resolve_all", _fail_resolve_all
+        resolver_for(config), "resolve_all", _fail_resolve_all
     )
 
     registry = build_registry(config)
@@ -106,7 +107,7 @@ def test_describe_secret_does_not_invoke_render(
             "resolve env-table values"
         )
 
-    monkeypatch.setattr(config.secret_resolver, "render", _fail_render)
+    monkeypatch.setattr(resolver_for(config), "render", _fail_render)
 
     registry = build_registry(config)
     describe_secret(registry, config, "api-key")
@@ -135,7 +136,7 @@ def test_describe_secret_does_not_invoke_prompt_backend(
 
     # Find the prompt source in the active chain.
     prompt_source = None
-    for source in config.secret_resolver.sources:
+    for source in resolver_for(config).sources:
         if source.kind == "prompt":
             prompt_source = source
             break

@@ -512,11 +512,11 @@ order-preserving) across template inheritance.
 
 Cross-kind inspection of the Resource Registry. The registry is the framework that owns every
 operator-declared, auto-declared, and built-in resource the CLI knows about: secrets, VM templates,
-agent templates, workspace templates, catalog entries, git credential providers, secret backends,
-etc. The two commands below stop at the framework-uniform fields (`kind`, `name`, `origin`,
-`references`, `used_by`, `description`). For kind-specific detail -- secret backend mappings,
-template inheritance chains, resolution previews -- reach for the per-kind command (e.g.
-`agw secret describe`).
+agent templates, workspace templates, catalog entries, git credential providers, secret providers
+and their backends, etc. The two commands below stop at the framework-uniform fields (`kind`,
+`name`, `origin`, `references`, `used_by`, `description`). For kind-specific detail -- secret
+backend mappings, template inheritance chains, resolution previews -- reach for the per-kind command
+(e.g. `agw secret describe`).
 
 | Command                               | Description                                                          |
 | ------------------------------------- | -------------------------------------------------------------------- |
@@ -545,7 +545,8 @@ Key sections:
 - `[session_templates.*]` -- session templates with variable substitution
 - `[workspace_templates.*]` -- workspace templates with inheritance
 - `[named_console]` -- named-console layout (tmux preset names + `aw-session-vertical`)
-- `[git_credentials.*]` -- git credential providers (GitHub, Azure DevOps)
+- `[git_credentials.*]` -- git credentials; `provider` selects github or azdo (`type` is accepted as
+  a legacy alias)
 - `[<scope>.env]` -- env vars at vm / workspace / admin / agent / session scope
 - `[secrets.*]` -- secret declarations referenced by `{ secret = "name" }` env entries
 - `[secret_backends.*]` / `[secret_config]` -- active secret backend chain
@@ -672,6 +673,15 @@ Backend-applicability detail (per-backend soft-skip reasons, inactive mappings, 
 references) lives in `agw secret list` and `agw secret describe`. `AGENTWORKS_*` identity overrides
 surface in the Configuration group (they're a config-load warning). Broken `{ secret = "..." }`
 references are caught earlier as a hard config-load error before doctor runs.
+
+### Secret Providers and Backends
+
+Secret resolution is layered: a **provider** is a code capability (`env-var`, `prompt`; future
+providers can carry per-backend configuration), and a **backend** is a named instantiation of one.
+The built-in `env-var` and `prompt` backends ship with the app (their names are reserved);
+additional backends are declared as `secret-backend` resources and activated by listing them in
+`[secret_config].backends`. Run `agw resource list --kind secret-provider,secret-backend` to see
+both layers; `agw resource describe secret-provider env-var` lists the backends using a provider.
 
 ### Mise (Polyglot Tool Manager)
 

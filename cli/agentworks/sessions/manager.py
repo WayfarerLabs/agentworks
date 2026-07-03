@@ -645,6 +645,7 @@ def _resolve_session_env(
     overlays per-context identity vars).
     """
     from agentworks.env import ResourceContext, compose_env
+    from agentworks.secrets import resolver_for
 
     scopes = _resolve_session_env_scopes(
         registry,
@@ -670,7 +671,7 @@ def _resolve_session_env(
     )
 
     return compose_env(
-        resolver=config.secret_resolver,
+        resolver=resolver_for(config),
         ctx=ctx,
         vm=scopes.vm,
         workspace=scopes.workspace,

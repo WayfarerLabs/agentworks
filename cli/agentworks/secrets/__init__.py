@@ -25,6 +25,7 @@ from agentworks.secrets.orchestration import (
     resolve_for_command,
 )
 from agentworks.secrets.prompt import PromptSource
+from agentworks.secrets.providers import PROVIDER_REGISTRY, resolver_for
 from agentworks.secrets.resolver import SecretResolver
 
 # Known backend kind identifiers. The framework's secret-backend kind
@@ -35,28 +36,24 @@ KNOWN_BACKEND_KINDS: tuple[str, ...] = ("env-var", "prompt")
 
 
 def publish_to(registry: Registry) -> None:
-    """Publish the known secret backend kinds into the registry.
+    """Publish the ``secret-provider`` descriptor rows.
 
-    Each entry lands as a ``SecretBackendConfig`` row, built-in
-    with source ``"agentworks.secrets"``. Operator-declared
-    ``[secret_backends.<kind>]`` blocks land via ``Config.publish_to``
-    after this publisher runs and override the built-in rows
-    (same name -> registry.add replaces). Phase 2b.2.
+    Phase 3 of the resource-manifests SDD: the built-in BACKEND rows
+    moved to the bundled manifests (``manifests/builtin/
+    secret-backends.yaml``); this publisher now contributes the
+    provider descriptors that backend ``provider`` references resolve
+    against. Operator-declared ``[secret_backends.<kind>]`` TOML blocks
+    still land via ``Config.publish_to`` and override the bundled rows
+    until the cutover.
     """
-    from agentworks.resources import Origin
+    from agentworks.secrets.providers import publish_to as publish_providers
 
-    code_origin = Origin.built_in(source="agentworks.secrets")
-    for kind_name in KNOWN_BACKEND_KINDS:
-        registry.add(
-            "secret-backend",
-            kind_name,
-            SecretBackendConfig(kind=kind_name),
-            code_origin,
-        )
+    publish_providers(registry)
 
 
 __all__ = [
     "KNOWN_BACKEND_KINDS",
+    "PROVIDER_REGISTRY",
     "EnvVarSource",
     "PromptSource",
     "SecretBackendConfig",
@@ -70,4 +67,5 @@ __all__ = [
     "env_var_name_for",
     "publish_to",
     "resolve_for_command",
+    "resolver_for",
 ]

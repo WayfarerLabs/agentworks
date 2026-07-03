@@ -51,6 +51,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 from agentworks.env.merge import effective_env
+from agentworks.secrets.providers import resolver_for
 
 if TYPE_CHECKING:
     from collections.abc import Iterable, Sequence
@@ -110,7 +111,7 @@ def compute_needed_secrets(
     The result preserves first-encounter order across targets, then
     extras, for deterministic prompting order.
     """
-    resolver = config.secret_resolver
+    resolver = resolver_for(config)
     seen: set[str] = set()
     out: list[SecretDecl] = []
     for target in targets:
@@ -169,4 +170,4 @@ def resolve_for_command(
     decls = compute_needed_secrets(targets, config, extra_decls=extra_decls)
     if not decls:
         return {}
-    return config.secret_resolver.resolve_all(decls)
+    return resolver_for(config).resolve_all(decls)

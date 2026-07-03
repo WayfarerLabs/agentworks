@@ -25,6 +25,7 @@ from agentworks.secrets import (
     SecretTarget,
     compute_needed_secrets,
     resolve_for_command,
+    resolver_for,
 )
 
 # ---------------------------------------------------------------------------
@@ -339,7 +340,7 @@ backends = ["env-var"]
     # resolution would pick up "second"; the cache guarantees we
     # still see "first".
     monkeypatch.setenv("AW_SECRET_API_KEY", "second")
-    rendered = config.secret_resolver.render(
+    rendered = resolver_for(config).render(
         {"K": EnvEntry(key="K", secret="api-key")}
     )
     assert rendered == {"K": "first"}
@@ -360,7 +361,7 @@ def test_resolve_for_command_skips_resolver_when_no_secrets(
         called["count"] += 1
         return {}
 
-    monkeypatch.setattr(config.secret_resolver, "resolve_all", _spy)
+    monkeypatch.setattr(resolver_for(config), "resolve_all", _spy)
 
     resolve_for_command([], config)
     assert called["count"] == 0
@@ -389,13 +390,13 @@ backends = ["env-var"]
     config = load_config(cfg, warn_issues=False)
 
     calls: list[list[str]] = []
-    original = config.secret_resolver.resolve_all
+    original = resolver_for(config).resolve_all
 
     def _spy(decls: list[SecretDecl]) -> dict[str, str]:
         calls.append([d.name for d in decls])
         return original(decls)
 
-    monkeypatch.setattr(config.secret_resolver, "resolve_all", _spy)
+    monkeypatch.setattr(resolver_for(config), "resolve_all", _spy)
 
     resolve_for_command(
         [], config, extra_decls=[config.secrets["external"]]

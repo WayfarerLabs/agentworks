@@ -379,7 +379,9 @@ def _check_secrets(config: Config, registry: Registry) -> HealthGroup:
     # The registry always carries the built-in env-var / prompt backend
     # rows, so this set covers built-ins and operator declarations both.
     known_backend_kinds = set(kind_dict(registry, "secret-backend").keys())
-    resolver = config.secret_resolver
+    from agentworks.secrets.providers import resolver_for
+
+    resolver = resolver_for(config, registry)
 
     for name, decl in sorted(secrets.items()):
         invalid_kinds = sorted(

@@ -52,20 +52,33 @@ def test_synthesize_raises() -> None:
 
 
 def test_known_backends_published(tmp_path: Path) -> None:
-    """The secrets publisher seeds rows for every known backend
-    (``env-var``, ``prompt``). Operator config doesn't have to declare
-    ``[secret_backends.*]`` for them to exist in the registry.
+    """The bundled manifests seed ``SecretBackendDecl`` rows for every
+    built-in backend (``env-var``, ``prompt``); operator config doesn't
+    have to declare ``[secret_backends.*]`` for them to exist. Phase 3
+    of the resource-manifests SDD moved these rows from the code
+    publisher to ``manifests/builtin/secret-backends.yaml``.
     """
     cfg = load_config(_write_cfg(tmp_path / "config.toml"), warn_issues=False)
     registry = build_registry(cfg)
-    # SecretBackendConfig's identity is on the ``kind`` field (not
-    # ``name`` like other Resources); the Registry's per-kind dict uses
-    # that as the lookup name. Pin via lookup directly.
     for backend_name in KNOWN_BACKEND_KINDS:
         row = registry.lookup("secret-backend", backend_name)
-        assert row.kind == backend_name
+        assert row.name == backend_name
+        assert row.provider == backend_name
         assert row.origin.variant == "built-in"
-        assert row.origin.source == "agentworks.secrets"
+        assert row.origin.source == (
+            "agentworks.manifests.builtin/secret-backends.yaml"
+        )
+
+
+def test_secret_providers_published(tmp_path: Path) -> None:
+    """Every registered provider gets a read-only descriptor row that
+    backend ``provider`` references resolve against."""
+    cfg = load_config(_write_cfg(tmp_path / "config.toml"), warn_issues=False)
+    registry = build_registry(cfg)
+    for provider_name in KNOWN_BACKEND_KINDS:
+        row = registry.lookup("secret-provider", provider_name)
+        assert row.name == provider_name
+        assert row.origin.variant == "built-in"
 
 
 def test_operator_declared_backend_overrides_built_in(tmp_path: Path) -> None:

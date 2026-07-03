@@ -28,6 +28,7 @@ from textwrap import dedent
 import pytest
 
 from agentworks.config import ConfigError, load_config
+from agentworks.secrets import resolver_for
 
 
 def _write_base(config_path: Path, *, extras: str = "") -> None:
@@ -67,9 +68,9 @@ def test_no_secrets_section_loads_with_empty_resolver(tmp_path: Path) -> None:
     assert cfg.secret_backends == {}
     # Absence of [secret_config] defaults to the standard chain.
     assert cfg.secret_config_data.backends == ("env-var", "prompt")
-    assert cfg.secret_resolver is not None
+    assert resolver_for(cfg) is not None
     # No declared secrets => empty resolver, renders {} -> {} without raising.
-    assert cfg.secret_resolver.render({}) == {}
+    assert resolver_for(cfg).render({}) == {}
 
 
 def test_secret_config_absent_uses_default_chain(tmp_path: Path) -> None:
@@ -377,9 +378,9 @@ def test_secret_resolver_assembled_when_backends_configured(tmp_path: Path) -> N
         """,
     )
     cfg = load_config(cfg_file, warn_issues=False)
-    assert cfg.secret_resolver is not None
+    assert resolver_for(cfg) is not None
     # Smoke-check the chain by asking for the first attempting source.
-    first = cfg.secret_resolver.first_attempting_source(cfg.secrets["shared"])
+    first = resolver_for(cfg).first_attempting_source(cfg.secrets["shared"])
     assert first is not None
     assert first.kind == "env-var"
 
@@ -393,13 +394,18 @@ def test_unknown_backend_kind_raises(tmp_path: Path) -> None:
         backends = ["env-var", "totally-fake-backend"]
         """,
     )
+    # Phase 3 of the resource-manifests SDD relocated chain validation
+    # from load_config to the registry-aware resolver assembly (the
+    # chain may name manifest-declared backends).
+    cfg = load_config(cfg_file, warn_issues=False)
     with pytest.raises(ConfigError, match="totally-fake-backend"):
-        load_config(cfg_file, warn_issues=False)
+        resolver_for(cfg)
 
 
 def test_unreachable_secret_raises(tmp_path: Path) -> None:
-    """A secret with env-var = false and a backend chain with no other attempting
-    source is unreachable; the loader rejects this at load time."""
+    """A secret with env-var = false and a backend chain with no other
+    attempting source is unreachable; resolver assembly rejects it (the
+    check relocated from load_config with the Phase 3 resolver swap)."""
     cfg_file = tmp_path / "config.toml"
     _write_base(
         cfg_file,
@@ -412,8 +418,9 @@ def test_unreachable_secret_raises(tmp_path: Path) -> None:
         backends = ["env-var"]
         """,
     )
+    cfg = load_config(cfg_file, warn_issues=False)
     with pytest.raises(ConfigError, match="unreachable"):
-        load_config(cfg_file, warn_issues=False)
+        resolver_for(cfg)
 
 
 def test_unreachable_secret_error_message_and_hint(tmp_path: Path) -> None:
@@ -433,8 +440,9 @@ def test_unreachable_secret_error_message_and_hint(tmp_path: Path) -> None:
         backends = ["env-var"]
         """,
     )
+    cfg = load_config(cfg_file, warn_issues=False)
     with pytest.raises(ConfigError) as exc:
-        load_config(cfg_file, warn_issues=False)
+        resolver_for(cfg)
 
     # Message is short: just the affected secrets, no remediation noise.
     assert "stranded" in str(exc.value)
