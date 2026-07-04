@@ -222,6 +222,10 @@ class LimaProvisioner(VMProvisioner):
         )
         lima_cmd = f"limactl create --name {vm_name} --tty=false {remote_template} && limactl start {vm_name}"
         output.detail("Starting and provisioning VM via Lima (this may take several minutes)...")
+        # reuse_completed=False: creation is one-shot, so a leftover
+        # status file can only be stale garbage from an interrupted
+        # attempt -- consuming it would report a phantom result for a
+        # limactl run that never happened.
         result = run_detached(
             host_target,
             lima_cmd,
@@ -229,26 +233,29 @@ class LimaProvisioner(VMProvisioner):
             base_path=f"/tmp/agentworks-lima-{vm_name}",
             timeout=600,
             quiet=True,
+            reuse_completed=False,
         )
-        if result.exit_code != 0:
-            # Parse structured markers from provision script output if present
-            bootstrap = parse_bootstrap_output(result.output, result.exit_code)
-            for step in bootstrap.steps:
-                if step.error:
-                    ssh_logger.log_error(f"Provision step '{step.name}': {step.error}")
+        try:
+            if result.exit_code != 0:
+                # Parse structured markers from provision script output if present
+                bootstrap = parse_bootstrap_output(result.output, result.exit_code)
+                for step in bootstrap.steps:
+                    if step.error:
+                        ssh_logger.log_error(f"Provision step '{step.name}': {step.error}")
 
-            ssh_logger.log_error(f"limactl failed (exit {result.exit_code})")
-            ssh_logger.log_error(result.output)
+                ssh_logger.log_error(f"limactl failed (exit {result.exit_code})")
+                ssh_logger.log_error(result.output)
+                ssh_logger.close()
+                raise SSHError(
+                    f"limactl create/start failed (exit {result.exit_code})\n"
+                    f"SSH log: {ssh_logger.path}\n"
+                    f"Last output:\n{result.output[-1000:]}"
+                )
             ssh_logger.close()
-            raise SSHError(
-                f"limactl create/start failed (exit {result.exit_code})\n"
-                f"SSH log: {ssh_logger.path}\n"
-                f"Last output:\n{result.output[-1000:]}"
-            )
-        ssh_logger.close()
-
-        # Clean up remote temp file
-        ssh_run(target, f"rm -f {remote_template}", check=False)
+        finally:
+            # Clean up the remote temp file on success AND failure (these
+            # were accumulating in /tmp on the VM host after failures).
+            ssh_run(target, f"rm -f {remote_template}", check=False)
 
     def _log_provision_errors(self, vm_name: str) -> None:
         """Attempt to surface provision script errors from Lima logs."""
