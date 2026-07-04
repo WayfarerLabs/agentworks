@@ -9,12 +9,15 @@ is its legitimate home: it imports the publishers and orchestrates
 them. Registry stays publisher-agnostic; Config stays unaware of the
 others.
 
-``build_registry`` is a pure function: no memo, no cache. A command's
-composition root calls it exactly once and threads the registry down;
-anything that builds twice per command is a bug worth surfacing (its
-duplicate manifest warnings make it visible). Tests and multi-source
-orchestration can assemble Registry by hand with ``Registry.empty()`` +
-explicit ``publish_to`` calls + ``finalize``.
+``build_registry`` is a pure function: no memo, no cache. Each
+composition root calls it once and threads the registry down. Nested
+service entries are their own composition units -- ``session create
+--new-workspace/--new-agent`` invokes ``create_workspace`` /
+``create_agent``, each of which builds its own registry (and the
+manifest warnings repeat accordingly; config-load-scale work, no
+backend calls). Tests and multi-source orchestration can assemble
+Registry by hand with ``Registry.empty()`` + explicit ``publish_to``
+calls + ``finalize``.
 """
 
 from __future__ import annotations

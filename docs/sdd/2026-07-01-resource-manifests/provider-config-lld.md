@@ -1,5 +1,13 @@
 # Phase 3 LLD: secret providers, backends, and the resolver swap
 
+> Status: LARGELY SUPERSEDED (2026-07-03) by [runtime-model-lld.md](runtime-model-lld.md), which
+> replaced this document's runtime design (the `instantiate -> SecretSource` provider API, the
+> resolver and its memos, and the inspection routing through `resolver_for`) with the
+> backends-are-the-door model. Still current here: the provider/backend SPLIT itself, the
+> decode-time `validate_config` delegation, the bundled built-in manifests, the reserved names, and
+> the git-credential `provider` alias. The rest stands as the historical record of the interim
+> design.
+
 The capability/resource split for secrets: providers are code, backends are resources. This LLD pins
 the provider protocol, the registry surfaces, the manifest shape, the resolver construction swap
 (including the prompt-once identity semantics that constrain it), and the consumer repoint.

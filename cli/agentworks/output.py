@@ -303,7 +303,7 @@ def set_non_interactive(value: bool) -> None:
 def is_interactive() -> bool:
     """True iff stdin is a TTY and --non-interactive was not passed.
 
-    Service-layer helpers (e.g. ``agentworks.secrets.PromptSource``) consult
+    Service-layer helpers (e.g. the prompt secret provider) consult
     this rather than the cli/_app module to stay Typer-isolated.
     """
     if _non_interactive:

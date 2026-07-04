@@ -635,7 +635,7 @@ class Config:
         chain is a setting that names resources, consumed by the
         secrets subsystem directly (validated against the finalized
         registry by ``secrets.validate_chain`` in ``build_registry``,
-        read again at resolver assembly). Settings don't become
+        read again at resolve time). Settings don't become
         pseudo-resources just because they point at resources.
 
         Imports ``Registry`` and ``Origin`` from ``agentworks.resources``
@@ -804,7 +804,7 @@ def _parse_env_table(
             # ADR 0014: newlines in env values would corrupt the SSH
             # `-o SetEnv=KEY=VALUE` argument shape. Warn at load time so
             # operators catch accidental trailing newlines (a common
-            # copy-paste artifact). The runtime resolver applies the
+            # copy-paste artifact). The resolve loop applies the
             # same check defensively to secret-resolved values.
             if "\n" in val or "\r" in val:
                 issues.append(

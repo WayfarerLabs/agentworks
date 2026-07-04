@@ -115,18 +115,23 @@ and is not required by this design.
 
 ## Bootstrap
 
-`build_registry` gains the manifest publishers and loses the config publisher:
+`build_registry` gains the manifest publishers and keeps the config publisher (dual-path); it is a
+PURE FUNCTION -- no memo -- called once at a command's composition root and threaded down. After
+finalize it runs the config-consistency checks of subsystems whose settings name resources:
 
 ```python
-# agentworks/bootstrap.py
-def build_registry(config: Config, manifests: ManifestSet) -> Registry:
+# agentworks/bootstrap.py (as built)
+def build_registry(config: Config, manifests: ManifestSet | None = None) -> Registry:
+    # manifests=None auto-loads <config-dir>/resources/ and surfaces its warnings
     registry = Registry.empty()
-    catalog.publish_to(registry)            # built-in catalog entries (code publisher)
+    builtin_manifests.publish_to(registry)  # app-bundled resources (built-in backends)
+    catalog.publish_to(registry, config)    # built-in catalog + operator TOML catalog extensions
     git_credentials.publish_to(registry)    # git credential provider descriptors
-    secret_providers.publish_to(registry)   # NEW: secret provider descriptors
-    builtin_manifests.publish_to(registry)  # NEW: app-bundled resources (built-in backends)
-    manifests.publish_to(registry)          # operator documents (was: config.publish_to)
+    secrets.publish_to(registry)            # secret provider descriptors
+    config.publish_to(registry)             # operator TOML resource sections (dual-path)
+    manifests.publish_to(registry)          # operator YAML documents
     registry.finalize()
+    secrets.validate_chain(config, registry)  # config-vocabulary chain/reachability checks
     return registry
 ```
 
@@ -136,9 +141,8 @@ collision handling. A collision between an operator row and an existing built-in
 kind's override flag: allowed (catalog kinds; operator row replaces the built-in row, exactly
 today's behavior) or reserved (`secret-backend`; `ConfigError` naming the reserved built-in). A
 collision between two operator rows is always a `ConfigError` citing both origins. The manifest
-loader already catches operator duplicates within the manifest set, so in the released system the
-publish-time check is a backstop; during the development-window dual-source phases it is what
-catches a resource declared in both TOML and a manifest.
+loader already catches operator duplicates within the manifest set; the publish-time check is what
+catches a resource declared in both TOML and a manifest (a permanent dual-path condition).
 
 ## Dual source (permanent, revised 2026-07-03)
 
@@ -150,12 +154,10 @@ loads today keeps loading (with deprecation warnings on TOML resource sections).
   the collision handling above.
 - `git_credentials.<name>` TOML entries accept `provider` as an alias for `type` from Phase 3
   (`provider` wins when both are present); `type` keeps working until the TOML resource path is
-  removed at Phase 5. Manifests accept only `provider`.
-- TOML-published `[secret_backends.<kind>]` rows keep today's shape, today's override-allowed
-  publish (they may replace the built-in backend rows), and the legacy resolver construction path.
-  The reserved-name policy applies to manifest-declared backends only until Phase 5.
-
-The window exists only between merged phases; no release ships it.
+  removed in a future major (Phase 6). Manifests accept only `provider`.
+- `[secret_backends.<kind>]` TOML sections are warned deprecated no-ops as of Phase 3.6 (they were
+  semantically empty; the built-in backends ship as bundled manifests and their names are reserved
+  via `builtin_override = "reserved"` at `Registry.add`).
 
 ## Kind flags
 

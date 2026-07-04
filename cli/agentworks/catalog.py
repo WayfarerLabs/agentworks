@@ -359,10 +359,11 @@ def publish_to(registry: Registry, config: Config | None = None) -> None:
     ``[system_install_commands.<name>]``,
     ``[user_install_commands.<name>]`` in the operator's TOML) are
     published on top of the built-in entries with
-    ``Origin.operator_declared(...)``. Same last-writer-wins pattern
-    the other publishers use: catalog runs first, then Config, then
-    other publishers -- an operator's override lands on top of the
-    built-in base. Config-side publishing lives here (rather than
+    ``Origin.operator_declared(...)``. Publish order + the catalog
+    kinds' ``builtin_override = "allow"`` policy is what lets the
+    operator row replace the built-in at ``Registry.add``: catalog runs
+    first, then Config, then other publishers -- an operator's override
+    lands on top of the built-in base. Config-side publishing lives here (rather than
     in ``Config.publish_to``) because parsing operator catalog entries
     is catalog's expertise; Config just stashes the raw TOML dicts.
     """

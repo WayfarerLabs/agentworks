@@ -3,6 +3,10 @@
 How an existing agentworks install moves from TOML-declared resources to YAML manifests. The
 operator-facing summary lives in the FRD's "Migration notes"; this document covers the mechanics.
 
+Revised 2026-07-03 for the dual-path decision (FRD R11): migration is OPTIONAL and
+operator-scheduled. TOML resource sections stay fully supported with deprecation warnings; the
+migration tool is a convenience, not a gate.
+
 ## Current state (snapshot, 2026-07-01)
 
 One file, `~/.config/agentworks/config.toml`, holds both config and resources. The resource surface
@@ -21,11 +25,13 @@ composition step reassembles them. Resources and config interleave freely in one
 
 ## Target state
 
-- `config.toml`: config sections only.
+- `config.toml`: config sections only (the recommended, docs-leading layout; TOML resource sections
+  keep working with deprecation warnings for operators who haven't migrated).
 - `~/.config/agentworks/resources/**/*.yaml`: one document per resource, `apiVersion: agentworks/v1`
   envelope, auto-loaded.
-- Built-in `env-var` / `prompt` secret backends ship with the app; explicit empty
-  `[secret_backends.*]` declarations have no successor (they are simply covered).
+- Built-in `env-var` / `prompt` secret backends ship with the app; `[secret_backends.*]`
+  declarations have no successor (they were semantically empty and are warned no-ops today; the
+  migrator drops them with a note).
 
 ### Before / after example
 
@@ -89,28 +95,28 @@ spec:
 
 ## Transition mechanics
 
-**In the repo**: phases 0 and 1 are behavior-preserving refactors. Phases 2 through 4 build the
-manifest path alongside the still-working TOML path: a resource may come from either source,
-declaring the same one in both errors at publish (the `Registry.add` collision handling introduced
-in Phase 2), and TOML resource semantics stay exactly today's (the `provider` alias is additive;
-legacy backend rows keep their existing construction path), so any config that loads today loads at
-every intermediate phase. Phase 5 removes the TOML path. The dual-source condition exists between
-merged phases for development, but never in a release: the cutover and the migration tool ship
-together.
+**In the repo**: phases 0 and 1 are behavior-preserving refactors. Phase 2 onward, the manifest path
+runs alongside the fully supported TOML path -- permanently (dual-path, revised 2026-07-03): a
+resource may come from either source, declaring the same one in both errors at publish (the
+`Registry.add` collision handling introduced in Phase 2), and TOML resource semantics stay today's,
+so any config that loads today keeps loading. The exception is `[secret_backends.*]`, which Phase
+3.6 made a warned no-op (the sections were semantically empty; the built-in backends ship bundled).
+Phase 5 adds per-section deprecation warnings and repoints the docs to lead with YAML; the TOML
+resource path's removal waits for an unscheduled future major (Phase 6).
 
-**For an operator**, the upgrade is:
+**For an operator**, migration is optional and self-scheduled:
 
-1. Upgrade agentworks. Any resource section in `config.toml` now fails at load with an error naming
-   the sections and the command to run.
-2. Run `agw config migrate`. The tool previews, backs up `config.toml`, writes by-kind manifest
-   files, rewrites `config.toml` without the resource sections (comments on surviving sections
-   preserved), and applies the renames (`type` to `provider`; `[secret_backends.<kind>]` sections to
-   `secret-backend` documents; empty `env-var` / `prompt` backend sections dropped).
+1. Upgrade agentworks. Everything keeps working; TOML resource sections warn as deprecated
+   (per-section warnings arrive in Phase 5; today only `[secret_backends.*]` warns).
+2. When ready, run `agw config migrate` (Phase 4). The tool previews, backs up `config.toml`, writes
+   by-kind manifest files, rewrites `config.toml` without the resource sections (comments on
+   surviving sections preserved), applies the `type` to `provider` rename, and drops
+   `[secret_backends.<kind>]` sections with a note.
 3. Done. No behavior change: the finalized registry from the migrated layout is identical to the
-   pre-upgrade one (this equivalence is a Phase 4 test).
+   pre-migration one (this equivalence is a Phase 4 test).
 
-Fresh installs never see TOML resources: `agw config init` produces the config-only TOML and the
-sample manifests document the envelope.
+Fresh installs learn YAML first: `agw config init` produces the config-only TOML and the sample
+manifests document the envelope (Phase 5).
 
 ## Worked example: an operator with custom env var names
 
@@ -139,10 +145,8 @@ Operator-declared backends earn their keep when the first config-bearing provide
   exactly what is removed, and the backup keeps the original.
 - **Partially-applied migration** (tool interrupted): manifests are written before the TOML rewrite,
   and the TOML rewrite is atomic (write-new-then-rename). Worst case is manifests present plus the
-  original config; in the released (post-cutover) system that state fails at load with the
-  resource-sections-present error, which already points back at `agw config migrate`, and re-running
+  original config -- which, under dual-path, fails loudly and safely at the NEXT load as
+  cross-source duplicate errors citing both locations (never silent double-definition); re-running
   the tool (or deleting one side) resolves it. The backup makes every state recoverable.
-- **Operators on unreleased dual-source builds**: unsupported; the dual-source condition is a
-  development state only.
 - **Third-party tooling reading `config.toml` for resource sections**: none known; release notes
   call out the move regardless.

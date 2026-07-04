@@ -28,20 +28,22 @@ def active_backends(config: Config, registry: Registry) -> list[SecretBackendDec
     (``[secret_config].backends`` -- a setting), the rows from the
     resource Registry. An unknown chain name gets the operator's
     vocabulary -- the chain is config, so the error is a config error,
-    not a registry-graph error.
+    not a registry-graph error -- and the hint enumerates the DECLARED
+    backends (registry rows), never provider names.
     """
-    from agentworks.secrets.providers import PROVIDER_REGISTRY
-
     backends: list[SecretBackendDecl] = []
     for name in config.secret_config_data.backends:
         try:
             row: SecretBackendDecl = registry.lookup("secret-backend", name)
         except KeyError:
+            declared = sorted(
+                decl.name for decl in registry.iter_kind("secret-backend")
+            )
             raise ConfigError(
                 f"[secret_config].backends names unknown backend {name!r}",
                 hint=(
                     f"declare {name!r} as a secret-backend manifest, or "
-                    f"use a built-in backend: {sorted(PROVIDER_REGISTRY)}"
+                    f"use a declared backend: {declared}"
                 ),
             ) from None
         backends.append(row)

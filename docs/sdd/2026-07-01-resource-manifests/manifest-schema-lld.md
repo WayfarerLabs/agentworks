@@ -109,10 +109,11 @@ Spec fields per kind are exactly today's TOML fields (survey pinned; highlights 
 - **workspace-template**: `inherits`, `repo`, `tmuxinator`, `env`.
 - **session-template**: `inherits`, `command`, `restart_command`, `required_commands`, `env`.
   `description` moves to metadata.
-- **git-credential**: `provider` (required; decode maps it onto the existing `type` field until
-  Phase 3 renames the dataclass field), `org` (required when `provider: azdo`), `token` (optional
-  bare secret name, default `git-token-<name>`, empty rejected). `description` moves to metadata.
-  Manifests never accept `type`; the TOML alias game is Phase 3's concern.
+- **git-credential**: `provider` (required; decode maps it onto the existing `type` field -- the
+  dataclass keeps that name until the TOML resource path retires), `org` (required when
+  `provider: azdo`), `token` (optional bare secret name, default `git-token-<name>`, empty
+  rejected). `description` moves to metadata. Manifests never accept `type`; the TOML alias game is
+  Phase 3's concern.
 - **admin-template**: flat spec = the `[admin.config]` field set (`username`, `shell`,
   `git_credentials`, `user_install_commands`, dotfiles, mise, `git_force_safe_directory`, claude
   fields) plus `env` (was `[admin.env]`). Name restricted to `default`.
@@ -145,7 +146,7 @@ All loader errors are `ConfigError` with the document location prefix:
   name and precede subdirectories. Dot-prefixed files and directories are skipped (pruned without
   descent); documents load in file order. This order IS config-load order for the framework.
 - Duplicate `(kind, name)` across the manifest set errors citing both `file:line` locations.
-- Cross-source duplicates (manifest vs TOML during the in-branch dual-source window, manifest vs
+- Cross-source duplicates (manifest vs TOML under the permanent dual-path model, manifest vs
   built-in rows) are `Registry.add`'s job per the HLA collision rules, not the loader's.
 
 ## Built-in manifests

@@ -308,7 +308,7 @@ def test_secret_declared_with_all_mapping_forms(tmp_path: Path) -> None:
     """All three backend_mappings value shapes (string, inline table, false) parse
     onto SecretDecl. The chain uses prompt-only so even token-c (which opts out
     of env-var) and token-b (mapping for a future backend) stay reachable through
-    PromptSource."""
+    the prompt backend."""
     cfg_file = tmp_path / "config.toml"
     _write_base(
         cfg_file,

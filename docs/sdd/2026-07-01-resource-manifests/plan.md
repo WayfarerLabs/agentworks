@@ -3,8 +3,8 @@
 Delivery is a single branch and PR (`feat/resource-manifests-sdd`); phases are sequencing milestones
 within it (each ends at a green test suite and a coherent commit series), not separately-merged PRs.
 Phases 0 and 1 are pure refactors with unchanged behavior. TOML resource sections keep working
-through the Phase 4 commits and are cut over in Phase 5; the dual-source condition exists only
-inside the branch and never reaches main or a release.
+permanently (dual-path, revised 2026-07-03 from the original cutover plan): Phase 5 deprecates them
+with warnings and repoints the docs; removal waits for an unscheduled future major (Phase 6).
 
 See [frd.md](frd.md), [hla.md](hla.md), [migration-strategy.md](migration-strategy.md), and
 [prior-art-research.md](prior-art-research.md).
@@ -245,6 +245,12 @@ phase implements):
       inverted: `sibling-env` presents as `sibling-env`); compose drift error; purity pin for
       `build_registry`; deprecated-section warn + built-in-survives pins.
 
+- [ ] Follow-up (broad-review finding): pin the nested-create seam with a test --
+      `session create     --new-workspace/--new-agent` spans multiple composition units (each nested
+      create builds its own registry; `create_agent` runs its own git-token resolve). No test
+      currently counts resolves or registry builds across that path; add one so the "disjoint secret
+      sets in practice" comment is enforced rather than assumed.
+
 Definition of done: no resolver object, no cache, no memo anywhere in the secrets runtime; every
 operator surface speaks backend names; provider API unreachable outside the door; CI green;
 reviewer-approved.
@@ -293,8 +299,12 @@ both locations. TOML resource sections are deprecated, not removed.
         directory, the envelope, built-in resources and override rules, the provider/backend model,
         worked examples. Standalone; no SDD references.
   - [ ] ADR `docs/adrs/0016-yaml-resource-manifests.md` (number confirmed at write time): auto-load
-        YAML manifests with k8s envelope; config/resource/capability split; dual-path (deprecate,
-        don't break) rationale; backends-are-the-door runtime model.
+        YAML manifests with k8s envelope; config/resource/capability split (promote runtime-model
+        LLD Part 1, the vocabulary law -- it is load-bearing and must not live only in the SDD);
+        dual-path (deprecate, don't break) rationale; backends-are-the-door runtime model, with a
+        note that it supersedes the resolver/source MECHANISM described in ADRs 0013/0014 (their
+        decisions stand). Repoint the code docstrings citing "runtime-model LLD" (secrets/base.py,
+        resolve.py, providers.py, secrets/**init**.py, env/compose.py) at the ADR.
   - [ ] Sweep existing guides (`mise.md`, `source-refs.md`, `proxmox.md`, `idempotency.md`),
         `cli/README.md` (configuration schema and command reference; the largest doc blast radius),
         and the top-level README for TOML-section references to resource kinds; lead with manifest

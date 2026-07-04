@@ -136,10 +136,11 @@ def build_secret_table(config: Config, registry: Registry) -> SecretTable:
 def render_secret_table(table: SecretTable) -> None:
     """Emit the table as operator-friendly output.
 
-    Empty-state messages match the loader's defaults so an operator who
-    runs ``agw secret list`` on a fresh config sees one of:
+    Empty-state messages so an operator who runs ``agw secret list``
+    on a fresh config sees one of:
 
-    - ``No secrets declared in config.`` -- no `[secrets.<name>]` tables.
+    - ``No secrets in the resource registry.`` -- nothing declared or
+      auto-declared.
     - ``No active secret backends.`` -- ``[secret_config].backends = []``.
 
     Otherwise a header + table with one column per active backend in
@@ -414,7 +415,7 @@ def render_secret_description(desc: SecretDescription) -> None:
     else:
         for mapping in desc.backend_mappings:
             if not mapping.would_attempt:
-                status = "no mapping (skipped)"
+                status = "disabled"
             elif mapping.identifier is not None:
                 status = mapping.identifier
             else:

@@ -7,7 +7,7 @@ via the kind's ``synthesize`` for auto-declared ones); never mutated.
 Three variants today:
 
 - ``operator-declared``: from operator config (Config publisher today;
-  future YAML manifest publishers later). Carries ``file: Path`` + ``line:
+  the YAML manifest publisher). Carries ``file: Path`` + ``line:
   int`` for traceability. Built from the Config-layer ``SourceLocation``
   during ``Config.publish_to``.
 - ``built-in``: shipped with the app itself, inseparable from it (the
@@ -71,7 +71,7 @@ class Origin:
 
     @classmethod
     def operator_declared(cls, *, file: Path, line: int) -> Origin:
-        """Operator-typed Resource (Config or future operator-publishers)."""
+        """Operator-typed Resource (TOML Config or YAML manifests)."""
         return cls(variant="operator-declared", file=file, line=line)
 
     @classmethod

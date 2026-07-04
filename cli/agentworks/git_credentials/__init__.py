@@ -2,10 +2,11 @@
 
 Each provider implementation (``GitHubCredentialProvider``,
 ``AzDOCredentialProvider``) is the code-side handle for one
-``[git_credentials.<name>].type = "..."`` value. The framework's
-``git-credential-provider`` kind (Phase 2b.1) holds one row per known
-provider so a typo in the operator's ``type`` field surfaces as a
-clean miss-policy error at ``build_registry`` time.
+``[git_credentials.<name>].provider = "..."`` value (``type`` is the
+accepted legacy alias). The framework's ``git-credential-provider``
+kind (Phase 2b.1) holds one row per known provider so a typo in the
+operator's ``provider`` field surfaces as a clean miss-policy error at
+``build_registry`` time.
 """
 
 from __future__ import annotations
@@ -27,7 +28,7 @@ def publish_to(registry: Registry) -> None:
     Each entry lands as a ``GitCredentialProviderEntry`` row, built-in
     with source ``"agentworks.git_credentials"``. Phase 2b.1.
 
-    Unlike the catalog and secret_backend publishers, this kind has no
+    Unlike the catalog kinds, this kind has no
     operator-override path today: ``Config.publish_to`` publishes
     ``git_credentials`` entries (the per-credential config), not
     ``git-credential-provider`` rows. The kind is read-only from the

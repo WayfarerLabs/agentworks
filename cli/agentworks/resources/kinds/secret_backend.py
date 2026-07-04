@@ -39,7 +39,7 @@ class _SecretBackendKind:
 
     def synthesize(self, references: Sequence[ResourceReference]) -> Any:
         raise NoUnreferencedDefaultError(
-            "the secret_backend kind has miss_policy='error'; "
+            "the secret-backend kind has miss_policy='error'; "
             "synthesize should never be invoked (the framework raises "
             "ConfigError first)"
         )

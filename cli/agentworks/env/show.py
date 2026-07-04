@@ -377,15 +377,17 @@ def _reveal_values(
 ) -> tuple[dict[str, str], dict[str, str]]:
     """Resolve every secret referenced by ``merged`` when revealing.
 
-    Returns ``(values, errors)`` keyed by secret name. Each unique
-    secret resolves exactly once through the active backends (several
-    env keys may reference one secret); a failure lands in ``errors``
-    so the table renders it inline instead of aborting. That includes
-    the resolve loop's transport-safety guard: a backend value
-    containing newline / CR / NUL bytes raises ``ConfigError`` (the
-    same guard that protects SSH SetEnv from corruption) and the
-    operator sees it as ``<error: secret 'X': resolved value contains
-    a control character...>``.
+    Returns ``(values, errors)`` keyed by secret name. The happy path is
+    ONE batched resolve for every referenced secret (deduped by name;
+    several env keys may reference one secret) so interactive prompts
+    arrive up front in a single interaction. If the batch fails, each
+    secret is retried individually so one failure lands in ``errors``
+    and renders inline instead of aborting the table. That includes the
+    resolve loop's transport-safety guard: a backend value containing
+    newline / CR / NUL bytes raises ``ConfigError`` (the same guard that
+    protects SSH SetEnv from corruption) and the operator sees it as
+    ``<error: secret 'X': resolved value contains a control
+    character...>``.
     """
     if not reveal:
         return {}, {}
@@ -394,17 +396,29 @@ def _reveal_values(
 
     decls = secret_decls(registry)
     backends = active_backends(config, registry)
-    values: dict[str, str] = {}
-    errors: dict[str, str] = {}
+    needed: list[SecretDecl] = []
+    seen: set[str] = set()
     for entry in merged.values():
         name = entry.secret
-        if name is None or name in values or name in errors:
+        if name is None or name in seen:
             continue
-        decl = decls.get(name) or SecretDecl(name=name, description="")
+        seen.add(name)
+        needed.append(decls.get(name) or SecretDecl(name=name, description=""))
+    if not needed:
+        return {}, {}
+
+    try:
+        return dict(resolve_secrets(needed, backends)), {}
+    except Exception:  # noqa: BLE001, S110 - fall back to per-secret below
+        pass
+
+    values: dict[str, str] = {}
+    errors: dict[str, str] = {}
+    for decl in needed:
         try:
             values.update(resolve_secrets([decl], backends))
         except Exception as exc:  # noqa: BLE001 - render any failure inline
-            errors[name] = str(exc)
+            errors[decl.name] = str(exc)
     return values, errors
 
 

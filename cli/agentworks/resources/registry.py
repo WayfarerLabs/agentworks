@@ -84,8 +84,8 @@ class Registry:
         - operator row over operator row: ``ConfigError`` citing both
           declaration locations. The manifest loader catches duplicates
           within its own set; this is the backstop that also catches a
-          resource declared in both TOML and a manifest during the
-          in-branch dual-source window.
+          resource declared in both TOML and a manifest (a permanent
+          dual-path condition).
         - operator row over built-in row: consults the kind's
           ``builtin_override`` flag. ``"allow"`` keeps the catalog
           behavior (operator row replaces the built-in); ``"reserved"``
@@ -137,9 +137,8 @@ class Registry:
             # the operator omitted the sections. Only those synthesized
             # singletons are replaceable by a real operator declaration;
             # every other operator-vs-operator collision (including
-            # TOML-vs-manifest catalog extensions during the dual-source
-            # window) is a duplicate. The exemption dies with the TOML
-            # publisher at the cutover.
+            # TOML-vs-manifest) is a duplicate. The exemption lives as
+            # long as the TOML publisher does (future-major retirement).
             if (
                 kind in SYNTHESIZED_SINGLETON_KINDS
                 and getattr(existing_origin, "line", None) == 0
@@ -377,7 +376,7 @@ class Registry:
         need the framework's canonical name (the Registry's per-kind
         dict key) regardless of whether the Resource type carries it on
         a ``.name`` field (most do) or on a different field
-        (``SecretBackendConfig.kind``). Empty iterator if the kind has
+        (``SecretBackendDecl.name``). Empty iterator if the kind has
         no Resources.
         """
         return iter(self._resources.get(kind, {}).items())

@@ -1344,8 +1344,8 @@ def _collect_git_tokens(
     operator-overridable per ``[git_credentials.<name>]``) names a
     secret; the registry's finalize pass auto-declared each one via
     ``GitCredentialConfig.referenced_resources``. The backend chain
-    resolves them all in one batched call so the cache picks up every
-    token in one prompt (or one round-trip to a persistent store).
+    resolves them all in one batched call so the operator is prompted
+    once for the whole batch (or one round-trip to a persistent store).
 
     Missing-from-registry secrets get a synthesized ``SecretDecl``
     matching the auto-declare shape -- same fallback as

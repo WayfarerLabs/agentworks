@@ -320,7 +320,7 @@ def _check_git_credentials(registry: Registry) -> HealthGroup:
         g.warn("Git credentials", f"could not resolve providers: {e}")
         return g
 
-    # Phase 1d: tokens flow through the framework's resolver chain
+    # Phase 1d: tokens flow through the framework's backend chain
     # (env-var backend + prompt fallback by default; operator-typed
     # backends layered in via [secret_config].backends). Doctor stays
     # at the connectivity / authn-precondition layer; per-credential

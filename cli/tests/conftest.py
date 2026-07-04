@@ -255,7 +255,6 @@ class _StubRegistry:
         "workspace-template": "workspace_templates",
         "session-template": "session_templates",
         "git-credential": "git_credentials",
-        "secret-backend": "secret_backends",
         "apt-source": "apt_sources",
         "apt-package": "apt_packages",
         "system-install-command": "system_install_commands",

@@ -643,8 +643,8 @@ def _resolve_session_env(
     Resolves the per-VM / per-workspace / per-agent templates, builds the
     ResourceContext, applies template-variable substitution to the session
     template's env values, and runs the merged dict through
-    ``compose_env`` (which renders secrets via the registry-derived
-    resolver and overlays per-context identity vars).
+    ``compose_env`` (which renders secrets from the command's
+    pre-resolved ``values`` and overlays per-context identity vars).
     """
     from agentworks.env import ResourceContext, compose_env
 

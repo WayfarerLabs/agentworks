@@ -68,8 +68,7 @@ class ResourceKind(Protocol):
       error.
     - ``manifest_declarable``: whether operators may declare this kind
       in YAML manifests (resource-manifests SDD, Phase 2). ``False``
-      for descriptor kinds provided by the app (and for
-      ``secret-backend`` until its Phase 3 provider/backend reshape).
+      for descriptor kinds provided by the app.
     - ``builtin_override``: what happens when an operator manifest
       collides with an app-published built-in row. ``"allow"`` keeps
       today's catalog behavior (operator row replaces the built-in);

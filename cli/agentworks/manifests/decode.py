@@ -175,8 +175,9 @@ def _decode_git_credential(doc: Document, spec: dict[str, object], issues: list[
         raise ConfigError(
             "git-credential requires spec.provider (github or azdo)",
         )
-    # The Config-layer field is still named ``type`` until the Phase 3
-    # rename; manifests are born with the ``provider`` vocabulary.
+    # The Config-layer field keeps the ``type`` name until the TOML
+    # resource path retires (future major); manifests are born with the
+    # ``provider`` vocabulary.
     spec["type"] = provider
     result = _load_git_credentials(
         {"git_credentials": {doc.name: spec}}, issues, _decls(doc.location)
