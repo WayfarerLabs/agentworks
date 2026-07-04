@@ -246,7 +246,7 @@ phase implements):
       `build_registry`; deprecated-section warn + built-in-survives pins.
 
 - [ ] Follow-up (broad-review finding): pin the nested-create seam with a test --
-      `session create     --new-workspace/--new-agent` spans multiple composition units (each nested
+      `session create --new-workspace/--new-agent` spans multiple composition units (each nested
       create builds its own registry; `create_agent` runs its own git-token resolve). No test
       currently counts resolves or registry builds across that path; add one so the "disjoint secret
       sets in practice" comment is enforced rather than assumed.
@@ -303,8 +303,8 @@ both locations. TOML resource sections are deprecated, not removed.
         LLD Part 1, the vocabulary law -- it is load-bearing and must not live only in the SDD);
         dual-path (deprecate, don't break) rationale; backends-are-the-door runtime model, with a
         note that it supersedes the resolver/source MECHANISM described in ADRs 0013/0014 (their
-        decisions stand). Repoint the code docstrings citing "runtime-model LLD" (secrets/base.py,
-        resolve.py, providers.py, secrets/**init**.py, env/compose.py) at the ADR.
+        decisions stand). Repoint the code docstrings citing "runtime-model LLD" (`secrets/base.py`,
+        `resolve.py`, `providers.py`, `secrets/__init__.py`, `env/compose.py`) at the ADR.
   - [ ] Sweep existing guides (`mise.md`, `source-refs.md`, `proxmox.md`, `idempotency.md`),
         `cli/README.md` (configuration schema and command reference; the largest doc blast radius),
         and the top-level README for TOML-section references to resource kinds; lead with manifest
