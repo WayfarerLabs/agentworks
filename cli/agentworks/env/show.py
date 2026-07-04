@@ -377,17 +377,16 @@ def _reveal_values(
 ) -> tuple[dict[str, str], dict[str, str]]:
     """Resolve every secret referenced by ``merged`` when revealing.
 
-    Returns ``(values, errors)`` keyed by secret name. The happy path is
-    ONE batched resolve for every referenced secret (deduped by name;
-    several env keys may reference one secret) so interactive prompts
-    arrive up front in a single interaction. If the batch fails, each
-    secret is retried individually so one failure lands in ``errors``
-    and renders inline instead of aborting the table. That includes the
-    resolve loop's transport-safety guard: a backend value containing
-    newline / CR / NUL bytes raises ``ConfigError`` (the same guard that
-    protects SSH SetEnv from corruption) and the operator sees it as
-    ``<error: secret 'X': resolved value contains a control
-    character...>``.
+    Returns ``(values, errors)`` keyed by secret name: ONE batched
+    resolve for every referenced secret (deduped by name; several env
+    keys may reference one secret) so interactive prompts arrive up
+    front in a single interaction, run in the loop's collect mode --
+    per-secret failures land in ``errors`` and render inline instead of
+    aborting the table, while successfully-resolved values (including
+    already-answered prompts) are kept. That covers the resolve loop's
+    transport-safety guard too: a backend value containing newline / CR
+    / NUL bytes renders as ``<error: secret 'X': resolved value
+    contains a control character...>``.
     """
     if not reveal:
         return {}, {}
@@ -407,18 +406,8 @@ def _reveal_values(
     if not needed:
         return {}, {}
 
-    try:
-        return dict(resolve_secrets(needed, backends)), {}
-    except Exception:  # noqa: BLE001, S110 - fall back to per-secret below
-        pass
-
-    values: dict[str, str] = {}
     errors: dict[str, str] = {}
-    for decl in needed:
-        try:
-            values.update(resolve_secrets([decl], backends))
-        except Exception as exc:  # noqa: BLE001 - render any failure inline
-            errors[decl.name] = str(exc)
+    values = resolve_secrets(needed, backends, errors=errors)
     return values, errors
 
 

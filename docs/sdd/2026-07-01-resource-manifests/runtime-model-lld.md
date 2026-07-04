@@ -115,6 +115,12 @@ def resolve_secrets(secrets: list[SecretDecl], backends: list[SecretBackendDecl]
 `active_backends(config, registry) -> list[SecretBackendDecl]` maps the chain (config) onto backend
 rows (resources), in order. That, plus the loop above, is the entire runtime.
 
+The loop carries both failure policies via an optional `errors` out-param (same idiom as the config
+loaders' `issues`): `None` (commands) is the all-or-nothing raise shown above; a dict (inspection
+surfaces, e.g. `env show --reveal-secrets`) collects per-secret failures and returns partial values
+from the SAME single pass -- one loop, one code path, and already-answered prompts are never
+discarded and re-asked.
+
 **No caching.** There is no resolver object, no per-command value cache, no memo. A command resolves
 once at its entry point and passes the **values** down; "prompt-once" is true by construction
 because there is exactly one resolve call per command. Caching across CLI invocations (a

@@ -192,6 +192,66 @@ def test_unsatisfied_hint_per_secret_listing() -> None:
     assert "b: tried env-var, prompt" in hint
 
 
+# -- collect mode (errors out-param) -----------------------------------------
+
+
+def test_collect_mode_keeps_partial_values_and_records_failures() -> None:
+    """With an ``errors`` dict, the loop returns what resolved and
+    records per-secret failures instead of raising -- inspection
+    surfaces get partial success from ONE pass (already-answered
+    prompts are never discarded and re-asked)."""
+    b1 = _FakeBackend("env-var", values={"good": "value"})
+    good = _decl("good")
+    bad = _decl("bad", backend_mappings={"env-var": False})
+    errors: dict[str, str] = {}
+    values = resolve_secrets([good, bad], _chain(b1), errors=errors)
+    assert values == {"good": "value"}
+    assert set(errors) == {"bad"}
+    assert "no active backend could resolve" in errors["bad"]
+    assert "bad: tried" in errors["bad"]
+
+
+def test_collect_mode_records_control_character_values() -> None:
+    """The SetEnv transport guard lands in ``errors`` (value withheld)
+    instead of aborting the whole pass; clean values still return."""
+    b1 = _FakeBackend("vault", values={"clean": "ok", "dirty": "a\nb"})
+    errors: dict[str, str] = {}
+    values = resolve_secrets([_decl("clean"), _decl("dirty")], _chain(b1), errors=errors)
+    assert values == {"clean": "ok"}
+    assert set(errors) == {"dirty"}
+    assert "control character" in errors["dirty"]
+
+
+def test_collect_mode_records_backend_exception_without_fallthrough() -> None:
+    """A backend-level exception (hard miss / connectivity) is recorded
+    against every secret that backend was attempting -- batch-level
+    attribution -- and those secrets are NOT forwarded to later
+    backends, preserving the don't-mask-a-store-misconfiguration
+    semantics of the hard-miss halt."""
+
+    class _StrictMissBackend(_FakeBackend):
+        def resolve(self, secrets: list[SecretDecl]) -> dict[str, str]:
+            raise SecretMappingError("store has no item")
+
+    strict = _StrictMissBackend("strict")
+    later = _FakeBackend("prompt", values={"x": "would-prompt", "y": "would-prompt"})
+    errors: dict[str, str] = {}
+    values = resolve_secrets([_decl("x"), _decl("y")], _chain(strict, later), errors=errors)
+    assert values == {}
+    assert set(errors) == {"x", "y"}
+    assert "store has no item" in errors["x"]
+    # The prompt backend NEVER ran for the affected secrets.
+    assert later.resolve_calls == []
+
+
+def test_collect_mode_default_is_unchanged_raise_behavior() -> None:
+    """Without ``errors``, the loop keeps its all-or-nothing contract --
+    the out-param is additive, not a behavior change for commands."""
+    b1 = _FakeBackend("env-var")
+    with pytest.raises(SecretUnavailableError):
+        resolve_secrets([_decl("x")], _chain(b1))
+
+
 # -- preview_resolution ------------------------------------------------------
 
 

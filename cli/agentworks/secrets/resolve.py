@@ -111,7 +111,10 @@ def validate_chain(config: Config, registry: Registry) -> None:
 
 
 def resolve_secrets(
-    secrets: list[SecretDecl], backends: list[SecretBackendDecl]
+    secrets: list[SecretDecl],
+    backends: list[SecretBackendDecl],
+    *,
+    errors: dict[str, str] | None = None,
 ) -> dict[str, str]:
     """Resolve every secret through the active backends, in chain order.
 
@@ -119,9 +122,24 @@ def resolve_secrets(
     would-attempt subset; the next backend sees only what remains. Soft
     misses (a backend's provider has no value) fall through naturally;
     hard misses (``SecretMappingError`` from a persistent-store
-    provider) propagate, halting the chain. Anything still unresolved
-    after every backend raises ``SecretUnavailableError`` with a
-    per-secret list of the backends that attempted.
+    provider) halt the chain so a misconfigured store doesn't quietly
+    fall through to a prompt.
+
+    ``errors`` selects the failure policy (one loop, both policies --
+    same shape as the config loaders' ``issues`` out-param):
+
+    - ``None`` (commands): all-or-nothing. Hard misses and
+      control-character values raise immediately; anything still
+      unresolved after every backend raises ``SecretUnavailableError``
+      with a per-secret list of the backends that attempted.
+    - a dict (inspection surfaces, e.g. ``env show --reveal-secrets``):
+      partial success. Per-secret failures land in ``errors`` keyed by
+      secret name, successfully-resolved values are RETURNED rather
+      than discarded (prompt answers are never re-asked), and a
+      backend-level exception is recorded against every secret that
+      backend was attempting (batch-level attribution) without
+      forwarding them to later backends -- preserving the hard-miss
+      "don't mask a store misconfiguration with a prompt" semantics.
     """
     resolved: dict[str, str] = {}
     deduped: list[SecretDecl] = []
@@ -138,7 +156,19 @@ def resolve_secrets(
         attemptable = [s for s in missing if backend.would_attempt(s)]
         if not attemptable:
             continue
-        got = backend.resolve(attemptable)
+        try:
+            got = backend.resolve(attemptable)
+        except AgentworksError as exc:
+            if errors is None:
+                raise
+            # Batch-level attribution: the provider's exception doesn't
+            # say which mapping tripped it, so every secret this backend
+            # was attempting is marked failed and withheld from later
+            # backends (mirrors the hard-miss halt for these secrets).
+            for s in attemptable:
+                errors[s.name] = str(exc)
+            missing = [s for s in missing if s.name not in errors]
+            continue
         # Surface which backend + identifier won so operators can tell
         # env-var-from-shell apart from a fall-through to prompt. For
         # backends without a static identifier (prompt) the
@@ -158,31 +188,38 @@ def resolve_secrets(
             # for the same reason: OpenSSH's argv handling would
             # silently truncate the SetEnv arg at the first NUL.
             if "\n" in value or "\r" in value or "\0" in value:
-                raise ConfigError(
+                message = (
                     f"secret {name!r}: resolved value contains a "
                     f"control character (newline, carriage return, "
                     f"or NUL); cannot transport via SSH SetEnv. Fix "
                     f"the value at the source (e.g. strip trailing "
-                    f"newlines from the env var or vault entry).",
+                    f"newlines from the env var or vault entry)."
                 )
+                if errors is None:
+                    raise ConfigError(message)
+                errors[name] = message
+                continue
             resolved[name] = value
         missing = [s for s in missing if s.name not in got]
 
     if missing:
         sorted_missing = sorted(missing, key=lambda d: d.name)
-        names = [d.name for d in sorted_missing]
         # Per-secret backend list: only backends that actually attempted
         # (would_attempt == True) appear, so a secret with a backend
         # opted out via backend_mappings doesn't get told it was tried.
-        per_secret = []
+        per_secret: dict[str, str] = {}
         for d in sorted_missing:
             attempted = [b.name for b in backends if b.would_attempt(d)]
             tried = ", ".join(attempted) if attempted else "(none; secret unreachable)"
-            per_secret.append(f"{d.name}: tried {tried}")
-        raise SecretUnavailableError(
-            f"no active backend could resolve secret(s): {', '.join(names)}",
-            hint="; ".join(per_secret),
-        )
+            per_secret[d.name] = f"{d.name}: tried {tried}"
+        if errors is None:
+            names = [d.name for d in sorted_missing]
+            raise SecretUnavailableError(
+                f"no active backend could resolve secret(s): {', '.join(names)}",
+                hint="; ".join(per_secret.values()),
+            )
+        for name, line in per_secret.items():
+            errors[name] = f"no active backend could resolve the secret ({line})"
     return resolved
 
 
