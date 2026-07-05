@@ -478,7 +478,11 @@ class WorkspaceTemplate:
 @dataclass(frozen=True)
 class GitCredentialConfig:
     name: str
-    type: str
+    # The internal representation follows the YAML manifest shape (ADR
+    # 0016): field name ``provider``, matching ``spec.provider``. Only
+    # the TOML section still spells ``type`` (with ``provider`` as the
+    # preferred alias); the loader maps at its boundary.
+    provider: str
     # Provider-owned configuration (azdo's org), nested per the
     # provider_config pattern (ADR 0016). The flat TOML section is the
     # ONLY place org lives at the top level; this loader nests it at
@@ -520,12 +524,12 @@ class GitCredentialConfig:
                 usage="the auth token",
                 source=source,
             ),
-            # Phase 2b.1: the ``type`` field references a known provider
-            # kind; framework miss policy catches typos.
+            # Phase 2b.1: the ``provider`` field references a known
+            # provider kind; framework miss policy catches typos.
             _ResourceReq(
-                name=self.type,
+                name=self.provider,
                 kind="git-credential-provider",
-                usage="the provider type",
+                usage="the provider",
                 source=source,
             ),
         ]
@@ -1326,7 +1330,7 @@ def _load_git_credentials(
             provider_config["org"] = str(cdata["org"])
         creds[name] = GitCredentialConfig(
             name=name,
-            type=cred_type,
+            provider=cred_type,
             provider_config=provider_config,
             description=str(cdata["description"]) if "description" in cdata else None,
             token=token_raw,

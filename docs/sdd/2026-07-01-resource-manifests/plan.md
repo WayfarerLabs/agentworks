@@ -429,8 +429,13 @@ artifact update.)
   kind-owned `token`/`description` stay top-level. A follow-up clarification made the INTERNAL
   representation follow the nested shape as well (`GitCredentialConfig.org` became
   `provider_config`; the TOML loader nests at its boundary, so the flat section is the only flat
-  domain). ADR 0016 records the pattern. Also extended `--all` to `resource sample` and aggregated
-  the deprecation warnings behind `--no-deprecations` in this same pre-lock batch.
+  domain). A full audit then compared every kind's internal dataclass against its YAML spec
+  vocabulary (the maintainer's "best representations" rule: internal shapes match YAML shapes; TOML
+  is the lone divergent domain, mapped at its loader): twelve kinds were already 1:1; the one
+  offender was `GitCredentialConfig.type`, renamed `provider` to match `spec.provider` (the TOML
+  section still accepts `type`/`provider`, mapped at the boundary). ADR 0016 records the pattern.
+  Also extended `--all` to `resource sample` and aggregated the deprecation warnings behind
+  `--no-deprecations` in this same pre-lock batch.
 - **2026-07-05: kind/name display syntax unified on '/' (maintainer ruling, pre-lock).** The older
   inspection surfaces used `kind:name` (describe header, `--names-only`, auto-declared descriptions,
   references, used-by lines) while the migrate surfaces used `kind/name`. Everything now uses `/` --

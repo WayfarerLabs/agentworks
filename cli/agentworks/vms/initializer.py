@@ -1139,11 +1139,11 @@ def resolve_git_credential_providers(
                 entity_name=name,
             )
         desc = cred_config.description
-        if cred_config.type == "azdo":
+        if cred_config.provider == "azdo":
             org = cred_config.provider_config.get("org")
             assert isinstance(org, str)  # loader guarantees org for azdo
             providers[name] = AzDOCredentialProvider(config_name=name, org=org, description=desc)
-        elif cred_config.type == "github":
+        elif cred_config.provider == "github":
             providers[name] = GitHubCredentialProvider(config_name=name, description=desc)
     return providers
 

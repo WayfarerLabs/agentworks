@@ -72,7 +72,7 @@ def test_load_valid_config(config_dir: Path) -> None:
     assert "gruntweave" in cfg.workspace_templates
     assert cfg.workspace_templates["child"].inherits == ["gruntweave"]
     assert cfg.workspace_templates["child"].tmuxinator is False
-    assert cfg.git_credentials["github"].type == "github"
+    assert cfg.git_credentials["github"].provider == "github"
     assert cfg.git_credentials["azdo"].provider_config == {"org": "my-org"}
     assert cfg.admin.git_credentials == ["github"]
 
@@ -169,7 +169,7 @@ def test_git_credential_provider_key(tmp_path: Path) -> None:
         '[git_credentials.gh]\nprovider = "github"',
     )
     cfg = load_config(config_file)
-    assert cfg.git_credentials["gh"].type == "github"
+    assert cfg.git_credentials["gh"].provider == "github"
 
 
 def test_git_credential_type_still_accepted(tmp_path: Path) -> None:
@@ -179,7 +179,7 @@ def test_git_credential_type_still_accepted(tmp_path: Path) -> None:
         '[git_credentials.gh]\ntype = "github"',
     )
     cfg = load_config(config_file, warn_issues=False)
-    assert cfg.git_credentials["gh"].type == "github"
+    assert cfg.git_credentials["gh"].provider == "github"
     # Deprecation nudges travel on deprecation_issues, so this pin stays
     # sharp: the legacy key must not produce any real issue.
     assert not cfg.config_issues
@@ -193,7 +193,7 @@ def test_git_credential_provider_wins_over_type(tmp_path: Path) -> None:
         '[git_credentials.ado]\nprovider = "azdo"\ntype = "github"\norg = "my-org"',
     )
     cfg = load_config(config_file, warn_issues=False)
-    assert cfg.git_credentials["ado"].type == "azdo"
+    assert cfg.git_credentials["ado"].provider == "azdo"
     assert any(
         "git_credentials.ado" in issue and "provider wins" in issue
         for issue in cfg.config_issues
