@@ -37,7 +37,7 @@ agw resource migrate [SELECTOR]... [--all] [--layout per-kind|single|per-resourc
   "nothing to migrate" and exits 0, keeping scripted re-runs idempotent.
   `resource migrate secret-backend` is still an ERROR (nonzero exit, like any explicit selector that
   cannot match) but with a tailored message: those sections are warned no-ops with no manifest
-  successor; a bare run offers to drop them instead (below).
+  successor; an `--all` run drops them instead (below).
 - The migratable set is exactly the operator-declared rows whose origin is the TOML config file.
   Auto-declared and built-in rows never match a selector; YAML-declared rows are already migrated.
 
@@ -87,9 +87,9 @@ Mechanics, either mode:
   manifests included, so every partial state is recoverable from it.
 - The rewrite is atomic (write-new-then-rename).
 - `[secret_backends.*]` sections (warned no-ops) are dropped with a note in the summary on any run
-  that rewrites the TOML. A bare run whose only remaining deprecated TOML is these sections still
-  offers the drop -- otherwise the tool could never silence that residue ("nothing to migrate" would
-  short-circuit every invocation).
+  that rewrites the TOML. An `--all` run whose only remaining deprecated TOML is these sections
+  still offers the drop -- otherwise the tool could never silence that residue ("nothing to migrate"
+  would short-circuit every invocation).
 - Multi-section resources (`[x]` + `[x.env]` and similar) are treated as one unit -- all sections
   belonging to a selected resource are commented/deleted together -- including when the sections are
   non-contiguous in the file (each is edited where it sits).

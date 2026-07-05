@@ -247,7 +247,7 @@ def _resolve_selectors(
                 "secret-backend TOML sections are deprecated no-ops with no "
                 "manifest successor; there is nothing to migrate.",
                 hint=(
-                    "Run `agw resource migrate` without selectors to drop the "
+                    "Run `agw resource migrate --all` to drop the "
                     "[secret_backends.*] sections from config.toml."
                 ),
             )
