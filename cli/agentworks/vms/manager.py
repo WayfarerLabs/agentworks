@@ -20,11 +20,11 @@ from agentworks.errors import (
     ValidationError,
 )
 from agentworks.vms.initializer import (
+    announce_git_credentials,
     initialize_vm,
     rejoin_tailscale,
     resolve_git_credential_providers,
     run_initialization,
-    verify_git_credential_auth,
     verify_tailscale_available,
 )
 
@@ -277,7 +277,7 @@ def create_vm(
 
     verify_tailscale_available()
     providers = resolve_git_credential_providers(registry, admin.git_credentials)
-    verify_git_credential_auth(providers)
+    announce_git_credentials(providers)
 
     # Collect provisioning-time secrets upfront (tailscale auth, git creds).
     # Provisioning is hermetic: operator [admin.env] / [vm_templates.*.env]
@@ -1152,7 +1152,7 @@ def reinit_vm(
     verify_tailscale_available()
     admin = admin_template(registry)
     providers = resolve_git_credential_providers(registry, admin.git_credentials)
-    verify_git_credential_auth(providers)
+    announce_git_credentials(providers)
 
     # Collect git tokens via the framework (Phase 1d).
     git_tokens = _collect_git_tokens(config, registry, providers.keys())

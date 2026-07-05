@@ -107,10 +107,6 @@ def run_checks(*, completion_version: str | None = None) -> HealthReport:
     report.groups.append(config_group)
 
     if config is not None and registry is not None:
-        from agentworks.resources.access import kind_dict
-
-        if kind_dict(registry, "git-credential"):
-            report.groups.append(_check_git_credentials(registry))
         report.groups.append(_check_secrets(config, registry))
 
     report.groups.append(_check_database())
@@ -181,10 +177,16 @@ def _check_vm_platforms() -> HealthGroup:
 
 
 def _check_tailscale() -> HealthGroup:
+    """WORKSTATION Tailscale state only: is this machine connected to
+    the tailnet? Binary presence is Required tools' row; the auth key
+    is an ordinary secret and reports in the Secrets group like any
+    other (`agw secret describe tailscale-auth-key` for detail).
+    """
     g = HealthGroup("Tailscale")
-    ts = shutil.which("tailscale")
-    if not ts:
-        g.fail("tailscale", "not installed")
+    if not shutil.which("tailscale"):
+        # Required tools already fails the missing binary; nothing to
+        # add here without it.
+        g.info("Connectivity", "skipped (tailscale not installed)")
         return g
 
     try:
@@ -197,18 +199,7 @@ def _check_tailscale() -> HealthGroup:
             timeout=10,
         )
         if result.returncode == 0:
-            # Phase 1c of the Resource Registry SDD routed the Tailscale
-            # auth key through the framework; the legacy hard-coded
-            # `AW_TAILSCALE_AUTH_KEY` env var no longer has a special
-            # name. The auth key is now a `secret` Resource (default
-            # name `tailscale-auth-key`); its resolution path is the
-            # configured backend chain. `agw secret describe
-            # tailscale-auth-key` (Phase 1e) is the right diagnostic
-            # surface; this section just reports connectivity.
-            g.ok(
-                "Connected to tailnet",
-                "auth key resolved via the secret framework at VM-init time",
-            )
+            g.ok("Connected to tailnet")
         else:
             g.fail("Not connected", "run 'tailscale up'")
     except subprocess.TimeoutExpired:
@@ -299,61 +290,27 @@ def _check_ssh_key(g: HealthGroup, path: object, label: str) -> None:
             g.warn("SSH private key permissions", f"{oct(mode)}, recommend 600")
 
 
-def _check_git_credentials(registry: Registry) -> HealthGroup:
-    """Check git credential providers."""
-    from agentworks.resources.access import admin_template, kind_dict
-    from agentworks.vms.initializer import resolve_git_credential_providers
-
-    g = HealthGroup("Git credentials")
-
-    # Collect all credential names from admin and agent templates
-    all_cred_names: list[str] = list(admin_template(registry).git_credentials)
-    for tmpl in kind_dict(registry, "agent-template").values():
-        if tmpl.git_credentials is not None:
-            for name in tmpl.git_credentials:
-                if name not in all_cred_names:
-                    all_cred_names.append(name)
-
-    try:
-        providers = resolve_git_credential_providers(registry, all_cred_names)
-    except Exception as e:
-        g.warn("Git credentials", f"could not resolve providers: {e}")
-        return g
-
-    # Phase 1d: tokens flow through the framework's backend chain
-    # (env-var backend + prompt fallback by default; operator-typed
-    # backends layered in via [secret_config].backends). Doctor stays
-    # at the connectivity / authn-precondition layer; per-credential
-    # token diagnostic detail lives in `agw secret describe
-    # git-token-<name>` (Phase 1e).
-    for provider in providers.values():
-        label = provider.display_name
-        try:
-            if not provider.verify_auth():
-                g.warn(label, f"auth check failed ({provider.auth_hint()})")
-                continue
-            g.ok(label, "ready (token resolved via the secret framework at VM-init time)")
-        except Exception as e:
-            g.warn(label, f"auth check error: {e}")
-
-    return g
-
 
 def _check_secrets(config: Config, registry: Registry) -> HealthGroup:
-    """Check declared secrets per env-and-secrets SDD FRD R6.
+    """Check every registry secret per env-and-secrets SDD FRD R6.
 
-    Emits exactly one row per declared secret:
+    One row per secret -- operator-declared AND auto-declared alike
+    (the auto-declared ones, e.g. ``tailscale-auth-key`` and the
+    ``git-token-*`` family, are exactly the secrets most likely to
+    prompt or fail at command time, so a doctor that hides them cannot
+    predict the next command). Auto-declared rows carry an ``(auto)``
+    marker.
 
     - OK: at least one active backend in the chain would resolve the
-      secret at runtime.
+      secret at runtime (the message says which -- "would resolve via
+      prompt" is the heads-up that a prompt is coming).
     - WARN: no active backend would resolve it (config is valid but
       there's no path to a value -- e.g. env-var has no matching env
       var set and prompt is opted out).
     - FAIL: the secret's ``backend_mappings`` references an unknown
-      backend kind (no ``[secret_backends.<kind>]`` section and not a
-      built-in like env-var / prompt). Config error; nothing to resolve
-      against. FAIL takes precedence over OK / WARN so the operator
-      fixes the typo before we tell them about resolution.
+      backend name. Config error; nothing to resolve against. FAIL
+      takes precedence over OK / WARN so the operator fixes the typo
+      before we tell them about resolution.
 
     Backend-applicability detail (per-backend soft-skip reasons,
     inactive mappings) lives in ``agw secret list``; unused declarations
@@ -364,14 +321,7 @@ def _check_secrets(config: Config, registry: Registry) -> HealthGroup:
 
     g = HealthGroup("Secrets")
 
-    # Operator-declared rows only: doctor's Secrets group reports on
-    # what the operator wrote (matching the pre-registry behavior);
-    # auto-declared rows surface via `agw secret list` / `describe`.
-    secrets = {
-        name: decl
-        for name, decl in secret_decls(registry).items()
-        if getattr(decl.origin, "variant", None) == "operator-declared"
-    }
+    secrets = secret_decls(registry)
     if not secrets:
         g.info("Declared secrets", "none")
         return g
@@ -384,6 +334,8 @@ def _check_secrets(config: Config, registry: Registry) -> HealthGroup:
     backends = active_backends(config, registry)
 
     for name, decl in sorted(secrets.items()):
+        auto = getattr(decl.origin, "variant", None) == "auto-declared"
+        label = f"Secret {name!r} (auto)" if auto else f"Secret {name!r}"
         invalid = sorted(
             backend
             for backend in decl.backend_mappings
@@ -392,16 +344,16 @@ def _check_secrets(config: Config, registry: Registry) -> HealthGroup:
         if invalid:
             noun = "backend" if len(invalid) == 1 else "backends"
             g.fail(
-                f"Secret {name!r}",
+                label,
                 f"references unknown {noun}: {', '.join(invalid)}",
             )
             continue
 
         resolved_by = preview_resolution(decl, backends)
         if resolved_by is not None:
-            g.ok(f"Secret {name!r}", f"would resolve via {resolved_by}")
+            g.ok(label, f"would resolve via {resolved_by}")
         else:
-            g.warn(f"Secret {name!r}", "not available in any active backend")
+            g.warn(label, "not available in any active backend")
 
     return g
 

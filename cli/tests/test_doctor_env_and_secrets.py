@@ -40,16 +40,22 @@ shell = "zsh"
 # ---------------------------------------------------------------------------
 
 
-def test_no_secrets_shows_declared_secrets_none(tmp_path: Path) -> None:
-    """No secrets declared: a single info row stating 'none'. Doctor does
-    not surface the backend chain -- that's per-secret detail, and there
-    are no secrets to report against."""
+def test_auto_declared_secrets_are_reported(tmp_path: Path) -> None:
+    """Doctor reports EVERY registry secret, auto-declared included --
+    they are exactly the ones most likely to prompt at command time,
+    so hiding them made doctor unable to predict the next command.
+    A bare config still carries the framework-auto-declared
+    ``tailscale-auth-key`` (vm-template requirement); it shows with an
+    ``(auto)`` marker and an honest would-resolve-via-prompt heads-up.
+    """
     cfg = _write_config(tmp_path)
     config = load_config(cfg, warn_issues=False)
     g = _check_secrets(config, build_registry(config))
     assert g.name == "Secrets"
     statuses = [(c.name, c.status, c.message) for c in g.checks]
-    assert statuses == [("Declared secrets", Status.INFO, "none")], statuses
+    assert statuses == [
+        ("Secret 'tailscale-auth-key' (auto)", Status.OK, "would resolve via prompt")
+    ], statuses
 
 
 def test_secret_resolves_via_env_var_when_set(

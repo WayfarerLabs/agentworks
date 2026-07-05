@@ -24,7 +24,7 @@ from agentworks.env import (
     ResourceContext,
     vm_stable_identity_env,
 )
-from agentworks.errors import ConnectivityError, ExternalError, NotFoundError, StateError
+from agentworks.errors import ConnectivityError, NotFoundError, StateError
 from agentworks.ssh import SSHError, SSHLogger
 from agentworks.transports import (
     SSHTransport,
@@ -1147,16 +1147,14 @@ def resolve_git_credential_providers(
     return providers
 
 
-def verify_git_credential_auth(providers: dict[str, GitCredentialProvider]) -> None:
-    """Pre-flight: verify auth for all selected git credential providers."""
-    for name, provider in providers.items():
-        if not provider.verify_auth():
-            raise ExternalError(
-                f"Authentication check failed for '{name}'.",
-                entity_kind="git-credential",
-                entity_name=name,
-                hint=provider.auth_hint(),
-            )
+def announce_git_credentials(providers: dict[str, GitCredentialProvider]) -> None:
+    """Tell the operator which git credentials the operation will
+    configure. (The former per-provider auth pre-flight was vestigial:
+    every provider's check returned True unconditionally once token
+    resolution moved to the secret framework. Token health reports
+    through doctor's Secrets group and resolution failures surface as
+    ``SecretUnavailableError`` at collect time.)
+    """
     if providers:
         labels = [p.display_name for p in providers.values()]
         output.info(f"Git credentials configured: {', '.join(labels)}")

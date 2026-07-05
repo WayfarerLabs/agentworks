@@ -1,12 +1,11 @@
 """Base interface for git credential providers.
 
-Phase 1d of the Resource Registry SDD: providers now own only the
-type-specific formatting (``credential_lines``) and authn pre-flight
-(``verify_auth`` / ``auth_hint``). Token resolution moved to the
-framework -- each ``GitCredentialConfig`` emits a ``SecretReference``
-for its ``token`` field; the active backend chain (env-var / 1Password /
-prompt / ...) handles the lookup. The previous provider-side env-var
-helpers and prompt method are gone.
+Providers own only the type-specific formatting (``credential_lines``).
+Token resolution lives in the framework -- each ``GitCredentialConfig``
+emits a ``SecretReference`` for its ``token`` field; the active backend
+chain (env-var / 1Password / prompt / ...) handles the lookup, and the
+token secret's health reports through the doctor Secrets group and
+``agw secret describe git-token-<name>`` like any other secret.
 """
 
 from __future__ import annotations
@@ -18,10 +17,8 @@ class GitCredentialProvider(ABC):
     """Interface for configuring git credentials on VMs.
 
     Each provider knows how to format the credential line(s) for
-    ``~/.git-credentials`` and how to pre-flight authn (e.g., warn
-    the operator before provisioning if their CLI / browser state
-    isn't ready to mint a token). Tokens themselves come from the
-    framework's backend chain, not from this class.
+    ``~/.git-credentials``. Tokens themselves come from the framework's
+    backend chain, not from this class.
     """
 
     def __init__(self, config_name: str, description: str | None = None) -> None:
@@ -34,17 +31,6 @@ class GitCredentialProvider(ABC):
         if self._description:
             return f"{self._config_name} ({self._description})"
         return self._config_name
-
-    @abstractmethod
-    def verify_auth(self) -> bool:
-        """Check if authentication is possible (e.g. CLI tools present).
-
-        For prompt-based providers, this always returns True.
-        """
-
-    @abstractmethod
-    def auth_hint(self) -> str:
-        """Return a human-readable hint for how to authenticate."""
 
     @abstractmethod
     def credential_lines(self, token: str) -> list[str]:

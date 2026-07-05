@@ -660,21 +660,26 @@ agw secret describe tailscale-auth-key
 
 `describe` reports state -- it does not prompt and does not resolve the secret's value.
 
-`agw doctor`'s Secrets group emits exactly one row per declared secret:
+`agw doctor`'s Secrets group emits exactly one row per registry secret -- operator-declared and
+auto-declared alike (auto-declared rows, e.g. `tailscale-auth-key` and the `git-token-*` family,
+carry an `(auto)` marker; they are exactly the secrets most likely to prompt at command time):
 
 - **OK** when at least one active backend would resolve the secret at runtime
-  (`would resolve via env-var`, `would resolve via prompt`, ...).
+  (`would resolve via env-var`, `would resolve via prompt`, ...). `would resolve via prompt` is the
+  heads-up that the next command needing this secret will ask for it interactively.
 - **WARN** when nothing in the chain would resolve it (config-valid but no path to a value, e.g.
   env-var has no matching env var set and `prompt` is opted out via
   `backend_mappings.prompt = false`).
 - **FAIL** when `backend_mappings` references an unknown backend name (not a built-in like `env-var`
   / `prompt` and not a declared `secret-backend` manifest).
 
-When no secrets are declared, a single info row states `Declared secrets: none`.
 Backend-applicability detail (per-backend soft-skip reasons, inactive mappings, per-secret
 references) lives in `agw secret list` and `agw secret describe`. `AGENTWORKS_*` identity overrides
 surface in the Configuration group (they're a config-load warning). Broken `{ secret = "..." }`
-references are caught earlier as a hard config-load error before doctor runs.
+references are caught earlier as a hard config-load error before doctor runs. Git-credential token
+health reports here as ordinary `git-token-*` secrets (doctor has no separate git-credentials
+group), and the Tailscale group checks only workstation connectivity -- the auth key is the
+`tailscale-auth-key` secret row.
 
 ### Secret Providers and Backends
 
