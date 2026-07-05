@@ -56,7 +56,7 @@ cli/agentworks/secrets/
   providers.py        # NEW: code-side provider registry + descriptor publisher
   env_var.py          # unchanged behavior; instantiated via provider registry
   prompt.py           # unchanged behavior; instantiated via provider registry
-cli/agentworks/cli/commands/config.py   # gains `agw config migrate`
+cli/agentworks/cli/commands/resource.py  # gains `agw resource migrate` + `agw resource sample`
 cli/agentworks/migrate/                  # NEW: TOML -> manifests migration tool
 ```
 
@@ -74,9 +74,9 @@ and is not required by this design.
   `[secret_config]`. Parsing, validation, and types for these are untouched.
 - Keeps (dual-path, revised 2026-07-03): the TOML resource sections and their loaders, deprecated
   but fully supported. End state (Phase 5): each present section warns at load with a pointer at
-  `agw config migrate` (at HEAD only `[secret_backends.*]` warns, and the migrate command arrives in
-  Phase 4 -- the warning gains its pointer then). Removal (and the loader-ownership inversion that
-  follows it) waits for a future major release.
+  `agw resource migrate` (at HEAD only `[secret_backends.*]` warns, and the migrate command arrives
+  in Phase 4 -- the warning gains its pointer then). Removal (and the loader-ownership inversion
+  that follows it) waits for a future major release.
 - `[secret_config]` is pure config and is NEVER published (final ruling, reversing the interim
   secret-config-row experiment): settings that name resources -- the chain today, active plugins
   tomorrow -- are consumed by their owning subsystem in normal operation. The secrets subsystem
@@ -240,17 +240,26 @@ the same story, which is the point of R9.
 ## Migration tool
 
 ```text
-agw config migrate [--yes] [--force] [--dry-run]
+agw resource migrate [SELECTOR]... [--layout per-kind|single|per-resource]
+                     [--toml comment|delete] [--dry-run] [--yes]
 
-config.toml --tomlkit parse--> section split per FRD R1 table
-   config sections  --> config.toml rewritten in place (comments/format preserved,
-                        resource sections deleted; original backed up to paths.backups)
-   resource sections --> resources/<kind-kebab>.yaml (multi-document, declaration order)
-                        + renames: type->provider, [secret_backends.<kind>] -> secret-backend
-                          documents (empty env-var/prompt sections dropped)
+config.toml --tomlkit parse--> selected resource sections per FRD R1 table / decode.KIND_SECTIONS
+   selected sections --> resources/ YAML per --layout (multi-document, declaration order,
+                         APPEND-ONLY: existing YAML is never parsed or rewritten)
+                         + renames: type->provider; [secret_backends.<kind>] dropped with a note
+   config.toml       --> migrated sections commented out (default, with a migrated-to marker)
+                         or deleted; surviving sections' comments/format preserved; rewrite
+                         atomic (backup to paths.backups taken before ANY write, manifests
+                         included)
+   post-run          --> registry rebuilt and verified row-for-row equivalent (rollback on
+                         mismatch)
 ```
 
-- Lives in `cli/agentworks/migrate/` with a thin Typer command in `commands/config.py`.
+Recurring mover, not a one-time converter (revised 2026-07-05): selectors make it incremental,
+append-only output makes repeats safe, and the per-run registry-equivalence verification makes every
+run self-checking. Full semantics in `migration-tool-lld.md`.
+
+- Lives in `cli/agentworks/migrate/` with a thin Typer command in `commands/resource.py`.
 - Uses **tomlkit** for the comment-preserving rewrite (new dependency, migration path only; verify
   latest stable at implementation). The read side uses the same parse the legacy loader used, so
   field interpretation cannot drift from what the config actually meant.
@@ -261,6 +270,9 @@ config.toml --tomlkit parse--> section split per FRD R1 table
 - The live config loader keeps reading TOML resource sections (dual-path, with deprecation
   warnings); the migration tool's own tomlkit read side is what a future major's retirement phase
   keeps when the live loaders drop the sections.
+- Companion authoring command: `agw resource sample [KIND] [--write FILENAME]` prints bundled,
+  loader-verified sample manifests (all kinds or one), or saves them into the resources directory
+  (append-only, like the migrator). The samples are the YAML counterpart of `sample-config.toml`.
 
 ## Validation responsibilities (updated)
 
@@ -278,10 +290,14 @@ All raise `ConfigError`; the layer determines the framing, as today.
 
 ## CLI surfaces
 
-- `agw config migrate`: new (see above). Completions updated for the new subcommand.
-- `agw config sample`: emits the config-only TOML sample; gains a way to emit sample manifests
-  (exact flag shape at LLD; the sample-manifest content ships with the app like `sample-config.toml`
-  does).
+- `agw resource migrate`: new (see above). Completions updated; selector completion is a NEW
+  cross-product completer (kind identifiers plus `kind/name` pairs read from the operator's TOML)
+  built on the dynamic-completion plumbing -- the existing dynamic completers are flat per-parameter
+  name lists, so this is new capability, not reuse.
+- `agw resource sample`: new (see above); kind argument and `--write` complete statically.
+- `agw config init / edit / sample`: unchanged, and NOT deprecated -- config-is-config makes the
+  settings file permanent, so these commands are already in their final home. `config sample` stays
+  the TOML sample; the YAML teaching surface is `resource sample`.
 - `agw resource list/describe`, `agw secret list/describe`, `agw doctor`: display-only changes
   (origin strings, `--origin builtin`, `--kind git-credential`, backend rows showing provider and
   effective convention).
@@ -307,11 +323,13 @@ force a permanent mapping layer with no functional payoff. `metadata` carries ex
 framework-uniform fields (`name`, `description`), mirroring the framework-uniform vs kind-specific
 split the registry already draws.
 
-### By-kind migration output
+### Migration output layouts, per-kind default
 
-One file per kind, multi-document. Typical configs are small; per-resource files would produce a
-directory of five-line files. The loader is layout-agnostic, so operators can split further at will.
-The tool's grouping is a default, not a contract.
+The loader is layout-agnostic, so the tool's file mapping is ergonomics, not contract. `--layout`
+offers `per-kind` (default), `single`, and `per-resource` (revised 2026-07-05: the maintainer wants
+resource-to-file mapping to be the operator's call). Per-kind stays the default because typical
+configs are small and one multi-document file per kind reads best -- a directory of five-line files
+is the worst shape for the common case, which is why it is an option rather than the default.
 
 ### Dual-path (revised from "hard cutover", 2026-07-03)
 
@@ -350,7 +368,9 @@ silently depended on Config-layer quirks before the format changes underneath it
   repoint phase's LLD maps the exact call sites.
 - **Provider `config_schema` shape**: a small dataclass-based schema vs plain validate-callable.
   Whatever is chosen must produce field-level `ConfigError`s naming the manifest location.
-- **Sample manifest delivery**: flag shape on `agw config sample` and packaging of the sample files.
+- **Sample manifest delivery**: RESOLVED 2026-07-05, differently than posed -- a new
+  `agw resource sample [KIND] [--write FILENAME]` owns the YAML teaching surface (`config sample`
+  stays TOML, per config-is-config); see `migration-tool-lld.md`.
 - **Kind vocabulary sweep blast radius (Phase 0)**: enumerate the kind-string literals, completions
   entries, and naming-consistency test updates for the lower-kebab casing change plus the
   `git-credential` singularization.

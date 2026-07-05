@@ -5,7 +5,9 @@ operator-facing summary lives in the FRD's "Migration notes"; this document cove
 
 Revised 2026-07-03 for the dual-path decision (FRD R11): migration is OPTIONAL and
 operator-scheduled. TOML resource sections stay fully supported with deprecation warnings; the
-migration tool is a convenience, not a gate.
+migration tool is a convenience, not a gate. Revised again 2026-07-05: the tool is
+`agw resource migrate`, a recurring incremental mover (selectors, layouts, append-only YAML,
+comment-or-delete TOML, per-run registry-equivalence verification) -- see `migration-tool-lld.md`.
 
 ## Current state (snapshot, 2026-07-01)
 
@@ -108,15 +110,18 @@ resource path's removal waits for an unscheduled future major (Phase 6).
 
 1. Upgrade agentworks. Everything keeps working; TOML resource sections warn as deprecated
    (per-section warnings arrive in Phase 5; today only `[secret_backends.*]` warns).
-2. When ready, run `agw config migrate` (Phase 4). The tool previews, backs up `config.toml`, writes
-   by-kind manifest files, rewrites `config.toml` without the resource sections (comments on
-   surviving sections preserved), applies the `type` to `provider` rename, and drops
-   `[secret_backends.<kind>]` sections with a note.
-3. Done. No behavior change: the finalized registry from the migrated layout is identical to the
-   pre-migration one (this equivalence is a Phase 4 test).
+2. When ready, run `agw resource migrate` (Phase 4) -- all at once, or incrementally
+   (`agw resource migrate secret`, then templates next month; selectors scope each run). The tool
+   previews, backs up `config.toml` before writing anything, writes or appends manifest files per
+   the chosen `--layout`, comments out (default) or deletes the migrated TOML sections, applies the
+   `type` to `provider` rename, and drops `[secret_backends.<kind>]` sections with a note.
+3. Done -- and proven: every real run rebuilds the registry and verifies it row-for-row identical to
+   the pre-migration one (rolling back on mismatch), so "no behavior change" is checked on the
+   operator's actual config, not just in the repo's golden test.
 
-Fresh installs learn YAML first: `agw config init` produces the config-only TOML and the sample
-manifests document the envelope (Phase 5).
+Fresh installs learn YAML first: `agw config init` produces the config-only TOML and
+`agw resource sample` provides the envelope teaching surface (samples ship in Phase 4; docs lead
+with them in Phase 5).
 
 ## Worked example: an operator with custom env var names
 
@@ -139,14 +144,23 @@ Operator-declared backends earn their keep when the first config-bearing provide
   through the same kind/field mapping the manifest loader consumes, and Phase 4's definition of done
   compares finalized registries before and after on a maximal config. Any drift fails the golden
   test, not the operator.
-- **Comment loss in `config.toml`.** Comments inside migrated resource sections necessarily go with
-  the sections (their content now lives in YAML; the tool does not attempt comment transplantation).
-  Comments on surviving config sections are preserved via tomlkit round-trip. The preview shows
-  exactly what is removed, and the backup keeps the original.
-- **Partially-applied migration** (tool interrupted): manifests are written before the TOML rewrite,
-  and the TOML rewrite is atomic (write-new-then-rename). Worst case is manifests present plus the
-  original config -- which, under dual-path, fails loudly and safely at the NEXT load as
-  cross-source duplicate errors citing both locations (never silent double-definition); re-running
-  the tool (or deleting one side) resolves it. The backup makes every state recoverable.
+- **Comment loss in `config.toml`.** Mode-dependent: under the default `--toml comment`, operator
+  comments inside migrated sections survive in place (commented out with the section); under
+  `--toml delete` they go with the sections. In neither mode are comments transplanted into the
+  YAML. Comments on surviving config sections are preserved via tomlkit round-trip regardless. The
+  preview shows exactly what changes, and the backup keeps the original.
+- **Partially-applied migration** (tool interrupted): the backup is taken before anything is
+  written, manifests are written before the TOML rewrite, and the TOML rewrite is atomic
+  (write-new-then-rename). Worst case is manifests present plus the original config -- which, under
+  dual-path, fails loudly and safely at the NEXT load as cross-source duplicate errors citing both
+  locations (never silent double-definition). Recovery is manual and mechanical: restore
+  `config.toml` from the backup and delete the YAML documents the preview listed, or hand-finish the
+  TOML edit. The tool itself refuses to run on a broken config -- an auto-resume mode was considered
+  and rejected as YAGNI for a crash window this small -- so "re-run the tool" is NOT the recovery
+  path.
+- **Migrator drift on THIS operator's config**: beyond the repo's golden test, every real run
+  verifies registry equivalence on the config it just migrated and rolls back (backup restore,
+  created-file removal, append truncation) on mismatch. A migrator bug cannot leave an operator with
+  a silently-different registry.
 - **Third-party tooling reading `config.toml` for resource sections**: none known; release notes
   call out the move regardless.

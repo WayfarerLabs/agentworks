@@ -49,7 +49,8 @@ multi-doc files, and kustomize consumes both layouts interchangeably. Community 
 layout as user preference, not semantics.
 
 - **Adopted**: multi-doc support in the loader; layout carries no meaning; by-kind grouping as the
-  migration tool's default output. Decisions: FRD R2/R10, HLA "By-kind migration output".
+  migration tool's default output. Decisions: FRD R2/R10, HLA "Migration output layouts, per-kind
+  default".
 
 ### 4. Python tooling
 

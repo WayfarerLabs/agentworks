@@ -35,8 +35,9 @@ auto-loaded YAML manifest files using a Kubernetes-style envelope. The motivatio
 The move is dual-path (revised 2026-07-03 from the original hard cutover): YAML manifests and TOML
 resource sections are both fully supported publishers into the one registry, mixing included; TOML
 resource sections are deprecated with load-time warnings, and a migration tool
-(`agw config migrate`) converts an existing `config.toml` in place on the operator's schedule
-(resource sections become manifests, config sections stay).
+(`agw resource migrate`, R10) moves resources from TOML to YAML on the operator's schedule --
+wholesale or incrementally, a recurring mover rather than a one-time conversion (resource sections
+become manifests, config sections stay).
 
 ### Scope
 
@@ -102,7 +103,7 @@ Every section of today's `config.toml` gets exactly one destination:
 | `[user_install_commands.<name>]`          | manifest (`user-install-command`)                   | operator catalog extension                                                                                     |
 
 TOML resource sections keep loading, with a per-section deprecation warning pointing at
-`agw config migrate` (R11). They become load errors only in a future major release.
+`agw resource migrate` (R11). They become load errors only in a future major release.
 
 Config sections that reference resources by name (`[secret_config].backends` referencing backend
 names) keep doing so; the owning subsystem validates the names against the finalized registry at the
@@ -322,25 +323,42 @@ Git credentials already follow the capability/instance pattern; this SDD aligns 
   policy); its rows report origin `built-in` per R7. The provider classes keep owning behavior
   (credential line formatting, auth hints, provider-specific fields like `org`).
 
-### R10: Migration tool
+### R10: Migration tool (revised 2026-07-05 for the dual-path era)
 
-`agw config migrate` converts a pre-cutover `config.toml` in place:
+`agw resource migrate` moves resources from TOML to YAML -- a recurring, incremental mover, not a
+one-time converter (under R11 dual-path there is no cutover to gate). Renamed from `config migrate`:
+its object is resources; the TOML edit is a side effect on the source. Full design in
+`migration-tool-lld.md`; requirement-level behavior:
 
-- **Reads** the TOML, splits sections per the R1 table.
-- **Writes manifests** grouped one file per kind into the resources directory (`secrets.yaml`,
-  `vm-templates.yaml`, `git-credentials.yaml`, ...), multi-document within each file, preserving
-  declaration order. Only kinds present in the config produce files. Grouping is a tool default, not
-  a loader requirement; operators are free to reorganize afterwards.
-- **Rewrites `config.toml`** with the resource sections removed and everything else (including
-  comments and formatting of the surviving sections) preserved.
+- **Selectors** scope the move: none (everything TOML-declared), `KIND` (one kind), `KIND/NAME` (one
+  resource; the token splits at the first `/`). Overlapping selectors union. Only operator-declared
+  TOML rows are migratable. An EXPLICIT selector matching nothing errors before anything is written;
+  the bare no-selector form with nothing left reports "nothing to migrate" and exits 0, keeping
+  scripted re-runs idempotent.
+- **Writes manifests** per `--layout`: `per-kind` (default; `vm-templates.yaml` per the bundled
+  plural convention), `single` (one file), or `per-resource` (`<kind>/<name>.yaml`). Layout is
+  operator ergonomics only -- the loader does not care -- and declaration order is preserved.
+- **Append-only YAML**: existing files are never parsed or rewritten; new documents are appended
+  with `---`. This is what makes repeat and incremental runs safe, and removes any overwrite
+  `--force`.
+- **Edits the TOML -- mandatorily**: dual-path makes a both-sources declaration a hard load error,
+  so migrated sections cannot stay live. `--toml comment` (default) comments them out in place with
+  a `# migrated to resources/<file>` marker (reversible); `--toml delete` removes them. Either way:
+  tomlkit round-trip preserves surviving sections' comments/formatting, the original is backed up to
+  `paths.backups` before ANYTHING is written (manifests included), and the rewrite is atomic.
 - **Applies the renames**: `git_credentials.<name>.type` becomes `provider`.
-  `[secret_backends.<kind>]` sections are dropped entirely, with a note in the migration summary:
-  they were semantically empty (the kind was the only field), the built-in backends ship bundled,
-  and their names are reserved -- converting them to manifests would collide.
-- **Safety**: prints a preview and asks for confirmation (`--yes` to skip); `--dry-run` shows the
-  preview and writes nothing; refuses to overwrite existing manifest files without `--force`; backs
-  up the original `config.toml` to the configured backups directory (`paths.backups`) before
-  rewriting; idempotent on an already-migrated config (reports nothing to do).
+  `[secret_backends.<kind>]` sections are dropped with a note whenever the tool rewrites a file
+  containing them: they were semantically empty, the built-in backends ship bundled, and their names
+  are reserved -- converting them to manifests would collide.
+- **Verifies every real run**: rebuilds the registry from the result and confirms row-for-row
+  equivalence with the pre-migration registry (modulo declaration location/origin), printing
+  `verified: registry unchanged (N resources)`; on mismatch it rolls back (backup + created-file
+  removal + append truncation) and errors. The one-time golden test is thereby promoted to an
+  operator-facing guarantee on every run.
+- **Safety**: preview + confirmation (`--yes` to skip); `--dry-run` prints the would-be YAML and the
+  TOML diff and writes nothing. An interrupted run fails loudly at the next load (cross-source
+  duplicates citing both locations); recovery is from the pre-write backup or by hand-finishing the
+  TOML edit -- the tool itself refuses to run on a broken config.
 
 ### R11: Dual-path with deprecation (revised from "hard cutover", 2026-07-03)
 
@@ -348,11 +366,15 @@ Git credentials already follow the capability/instance pattern; this SDD aligns 
   different publishers, one registry. Mixing is supported; the same resource declared in both is a
   duplicate error citing both locations.
 - TOML resource sections emit a per-section deprecation warning at load, naming the section and
-  pointing at `agw config migrate`. Operators migrate on their own schedule; the TOML resource
+  pointing at `agw resource migrate`. Operators migrate on their own schedule; the TOML resource
   path's removal waits for a future major release.
 - Release notes carry the change and the one-command migration path.
-- `agw config sample` output leads with YAML: sample manifests demonstrating the envelope for each
-  commonly-used kind, plus a config-only `config.toml` sample.
+- The YAML teaching surface is `agw resource sample [KIND] [--write FILENAME]`: commented sample
+  manifests per manifest-declarable kind (all kinds without an argument), shipped bundled and
+  guaranteed to load through the real loader. `--write` saves into the resources directory instead
+  of stdout (appending with `---` if the file exists -- the same append-only rule as the migrator).
+  `agw config sample` is unchanged: it documents the settings file, which is permanent under
+  config-is-config.
 
 ### R12: Framework invariance
 
@@ -388,8 +410,8 @@ now mention manifest locations; the shapes stay the same.
 
 ## Migration notes
 
-Operators upgrading across this SDD run `agw config migrate` once. Observable changes beyond the
-file moves:
+Operators upgrading across this SDD migrate with `agw resource migrate` on their own schedule, in
+one run or many (selectors scope each run). Observable changes beyond the file moves:
 
 - `git_credentials.*.type` becomes `provider` (rewritten by the tool).
 - Explicit empty `[secret_backends.env-var]` / `[secret_backends.prompt]` sections disappear; the

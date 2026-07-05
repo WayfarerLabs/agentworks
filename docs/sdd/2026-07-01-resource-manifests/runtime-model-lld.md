@@ -151,7 +151,7 @@ values = resolve_for_command(targets, config, registry)   # ONE resolve; returns
   bug, not a fall-through.
 - Inspection surfaces (`agw secret list/describe`, doctor, `env show`) call `would_attempt` /
   `describe_lookup` directly on the active backends. They display **backend names**. No resolver, no
-  resolution, per FRD R10.
+  resolution, per FRD R8.
 
 ## What this deletes
 

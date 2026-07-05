@@ -255,29 +255,71 @@ Definition of done: no resolver object, no cache, no memo anywhere in the secret
 operator surface speaks backend names; provider API unreachable outside the door; CI green;
 reviewer-approved.
 
-## Phase 4: Migration tool
+## Phase 4: Resource migration and authoring commands
+
+Redesigned 2026-07-05 with the maintainer for the dual-path era (design: `migration-tool-lld.md`).
+The tool is `agw resource migrate` -- a recurring incremental mover, not a one-time converter -- and
+the phase also ships the YAML authoring surface `agw resource sample`. A CONVENIENCE, not a gate:
+TOML keeps working; operators migrate on their own schedule, one kind at a time if they like.
 
 - [ ] Add tomlkit dependency (latest stable at implementation time; used only by the migrate path).
-- [ ] `agentworks/migrate/`: TOML section split per the FRD R1 table; manifest emission (by-kind
-      files, multi-document, declaration order) through the shared field mapping from
-      `manifest-schema-lld.md`; renames (`type` to `provider`); `[secret_backends.<kind>]` sections
-      are DROPPED with a note (semantically empty; converting them to manifests would collide with
-      the reserved built-in rows).
-- [ ] Comment-preserving `config.toml` rewrite via tomlkit; timestamped backup of the original to
-      the configured backups directory (`paths.backups`).
-- [ ] `agw config migrate` command: preview + confirm, `--yes`, `--force`, `--dry-run`; idempotent
-      no-op on an already-migrated config. A CONVENIENCE, not a gate: the dual-path decision (below)
-      means TOML keeps working; operators migrate on their own schedule.
-- [ ] Completions updated for the new subcommand.
-- [ ] **Tests**: golden-file migration of a maximal config (every section type, comments in
-      surviving sections preserved); rename coverage; refusal without `--force` when manifests
-      exist; idempotency; backup creation; dry-run writes nothing.
-- [ ] **Docs**: `cli/README.md` command reference entry for `agw config migrate` rides this phase
-      (the command is real at this HEAD); the broader doc repoint waits for Phase 5.
+- [ ] `agentworks/migrate/`: selector resolution (none / `KIND` / `KIND/NAME` split at the first
+      `/`; overlaps union; operator-declared TOML rows only; an EXPLICIT selector matching nothing
+      errors before writes, while the bare form with nothing left is a "nothing to migrate" exit-0);
+      manifest emission through `decode.KIND_SECTIONS` (multi-document, declaration order); layouts
+      `per-kind` (default, plural-`s` filenames) / `single` / `per-resource` (`<kind>/<name>.yaml`;
+      REFUSES filename-unsafe names with a pointer at per-kind); APPEND-ONLY writes (existing YAML
+      never parsed or rewritten; `---`-separated appends, newline-guarded); renames (`type` to
+      `provider`); `[secret_backends.<kind>]` sections DROPPED with a note on any TOML rewrite --
+      and offered on a bare run with nothing else to migrate, so the tool can silence that residue,
+      while `resource migrate secret-backend` explains they are no-ops instead of erroring
+      generically; the `admin` and `named_console` singletons emit as `admin-template/default` and
+      `named-console-template/default`; supported declaration shapes are standard `[section.name]`
+      header tables (plus sub-sections, contiguous or not, one unit); dotted-key / inline-table
+      declarations under a parent header are refused with their location and a hand-migration hint.
+- [ ] TOML edit via tomlkit round-trip: `--toml comment` (default; in-place comment-out with
+      `# migrated to resources/<file>` markers, multi-section resources handled as one unit) and
+      `--toml delete`; timestamped backup to `paths.backups` taken before ANY write (manifests
+      included); atomic rewrite.
+- [ ] Per-run registry-equivalence verification: rebuild from the result and compare KEYED by
+      `(kind, name)` -- not iteration order, which legitimately changes when rows move between
+      publishers -- normalizing declaration locations and origin variants recursively, including the
+      attribution locations inside auto-declared rows (sharing the decode-parity normalization);
+      print `verified: registry unchanged (N resources)`; on mismatch roll back (restore backup,
+      remove created files and directories, truncate appends to recorded lengths) and error.
+- [ ] `agw resource migrate` command in `commands/resource.py`: preview + confirm, `--yes`,
+      `--dry-run` (prints would-be YAML and the TOML diff, writes nothing), "nothing to migrate"
+      exit-0 on the bare form when everything is already migrated (explicit selectors matching
+      nothing error instead). (No `--force`: append-only means nothing can be overwritten.)
+- [ ] Bundled sample manifests (one per manifest-declarable kind, FULLY commented out so written
+      samples are inert -- `--write` can never create a duplicate or a live resource; the loader
+      test mechanically un-comments them so "loads clean" is tested against real documents, not
+      vacuously) and `agw resource sample [KIND] [--write FILENAME]`: stdout by default; `--write`
+      saves under the resources directory (relative paths only, `.yaml`/`.yml` required, parents
+      created, appends with `---` if the file exists).
+- [ ] Completions: both new subcommands; a NEW cross-product selector completer (kind identifiers
+      plus `kind/name` pairs from the operator's TOML -- the existing dynamic completers are flat
+      per-parameter name lists, so this is new plumbing on the same machinery); `--layout` /
+      `--toml` enums; `resource sample` kind argument.
+- [ ] **Tests**: golden-file migration of a maximal config (every section type, surviving-section
+      comments preserved); selector filtering (kind, kind/name, unknown, overlap dedupe, explicit
+      selector matching nothing errors, bare nothing-to-migrate exits 0); all three layouts plus the
+      per-resource unsafe-name refusal; append to existing files including one lacking a trailing
+      newline; comment vs delete including markers, multi-section units, non-contiguous sections,
+      and the dotted-key / inline-table refusal; rename coverage; `[secret_backends.*]` drop note
+      including the bare-run-only case; backup creation and its before-any-write ordering; dry-run
+      writes nothing; verification success, PARTIAL-migration verification (one kind moved, rest
+      still TOML), and mismatch-rollback (files, created directories, append truncation);
+      `resource sample` stdout / kind filter / `--write` create + append + traversal and suffix
+      refusals; un-commented samples load clean through the real loader.
+- [ ] **Docs**: `cli/README.md` command reference entries for `agw resource migrate` and
+      `agw resource sample` ride this phase (the commands are real at this HEAD); the
+      `paths.backups` comment in `cli/agentworks/sample-config.toml` widens from "vm backup
+      directory" to cover config backups too; the broader doc repoint waits for Phase 5.
 
-Definition of done: a representative real config migrates to a loadable manifest set plus a
-config-only TOML with zero behavior change (verified by comparing finalized registries before and
-after); CI green; reviewer-approved.
+Definition of done: a representative real config migrates -- wholesale or incrementally -- to a
+loadable manifest set plus a config-only TOML with zero behavior change, and every real run proves
+it via the built-in registry-equivalence verification; CI green; reviewer-approved.
 
 ## Phase 5: Dual-path steady state -- deprecation and docs
 
@@ -287,13 +329,17 @@ architecture, not a transitional window). Mixing is supported; cross-source dupl
 both locations. TOML resource sections are deprecated, not removed.
 
 - [ ] `load_config()` emits a deprecation issue for each TOML resource section present, naming the
-      section and pointing at `agw config migrate` (same shape as the `[secret_backends.*]` warning
-      that already ships).
+      section and pointing at `agw resource migrate` (same shape as the `[secret_backends.*]`
+      warning that already ships).
 - [ ] Sample config leads with YAML: `cli/agentworks/sample-config.toml` keeps a minimal
       commented-out resource example with a deprecation pointer; sample manifests become the primary
       teaching surface. Update `cli/tests/test_sample_config.py` conventions accordingly.
-- [ ] Ship sample manifests (envelope examples for the commonly-used kinds) and wire
-      `agw config sample` to emit them (flag shape per LLD).
+
+  > Superseded (2026-07-05): sample manifests and their delivery command moved to Phase 4 as
+  > `agw resource sample` (`config sample` stays the TOML surface, per config-is-config).
+
+- [ ] Verify the Phase 5 doc sweep leads with `agw resource sample` output as the primary YAML
+      teaching surface.
 - [ ] **Docs (permanent-home promotions, per SDD-not-permanent rule)**:
   - [ ] New operator guide `docs/guides/resources.md`: the config/resource split, the resources
         directory, the envelope, built-in resources and override rules, the provider/backend model,
@@ -311,9 +357,10 @@ both locations. TOML resource sections are deprecated, not removed.
         examples (TOML noted as deprecated-but-supported).
 - [ ] Release notes: the dual-path model, the deprecation, the one-command migration, the rename
       list from FRD "Migration notes".
-- [ ] Completions: verify the full command tree still round-trips (kind values, new subcommand).
-- [ ] **Tests**: per-section deprecation issue content; sample manifests load clean through the real
-      loader; guide/sample examples lint.
+- [ ] Completions: verify the full command tree still round-trips (kind values and both Phase 4
+      subcommands included).
+- [ ] **Tests**: per-section deprecation issue content; guide/sample examples lint (the
+      samples-load-clean test ships with the samples in Phase 4).
 - [ ] Housekeeping: confirm the resource-registry SDD's locked docs need no drift note beyond
       "superseded source format; framework unchanged" (its lockfile anticipated this SDD; add a
       dated note there only if reviewers want one).
@@ -328,7 +375,7 @@ Deferred until a future major release, on operator telemetry/feedback -- not par
 delivery. Recorded so the end state is explicit:
 
 - [ ] `load_config()` rejects TOML resource sections with a `ConfigError` pointing at
-      `agw config migrate`; the `type` alias on `[git_credentials.*]` and the deprecated
+      `agw resource migrate`; the `type` alias on `[git_credentials.*]` and the deprecated
       `[secret_backends.*]` acceptance are deleted with it.
 - [ ] Loader-ownership inversion: manifest decoders (or the kinds) own resource field validation
       natively; the `_load_*` resource loaders and the decode-through-TOML shim are deleted from
@@ -343,6 +390,14 @@ only TOML-resource reader in the tree; CI green; reviewer-approved.
 (Recorded as they happen, per SDD convention. Deviations from FRD/HLA get an entry here and an
 artifact update.)
 
+- **2026-07-05: Phase 4 redesigned as a recurring mover (maintainer-directed).** The migration tool
+  is `agw resource migrate` (renamed from `config migrate`; its object is resources): positional
+  selectors for incremental runs, `--layout per-kind|single|per-resource`, append-only YAML output,
+  mandatory TOML edit as `--toml comment` (default) or `delete`, and per-run registry-equivalence
+  verification with rollback. Sample manifests moved from Phase 5 to Phase 4 behind a new
+  `agw resource sample [KIND] [--write FILENAME]`; `config init/edit/sample` stay TOML-owned per
+  config-is-config. FRD R10/R11, HLA, migration-strategy, and `migration-tool-lld.md` (new) carry
+  the design.
 - **2026-07-02: single-branch delivery.** At the maintainer's direction, all phases land on one
   branch and PR instead of PR-per-phase. Per-phase "reviewer-approved" in the definitions of done
   reads as "commit series complete and suite green"; review happens once on the full PR. Side
