@@ -83,7 +83,8 @@ class TestCompletionChecks:
 
         assert len(g.checks) == 1
         assert g.checks[0].status == Status.INFO
-        assert "not found on this machine" in g.checks[0].message
+        message = g.checks[0].message
+        assert message is not None and "not found on this machine" in message
 
     def test_stale_available_shell_still_warns(self, tmp_path, monkeypatch) -> None:
         from agentworks import doctor
@@ -95,7 +96,8 @@ class TestCompletionChecks:
         g = doctor._check_completions("v-new")
 
         assert g.checks[0].status == Status.WARN
-        assert "stale" in g.checks[0].message
+        message = g.checks[0].message
+        assert message is not None and "stale" in message
 
     def test_up_to_date_available_shell_is_ok(self, tmp_path, monkeypatch) -> None:
         from agentworks import doctor
@@ -110,12 +112,21 @@ class TestCompletionChecks:
 
     def test_shell_available_maps_powershell_to_pwsh(self, monkeypatch) -> None:
         """On systems where only `pwsh` exists (not `powershell`), the
-        powershell shell should still count as available."""
+        powershell shell should still count as available. Also pins the
+        symmetric case: `powershell` on PATH without `pwsh` should also
+        count (Windows-native Windows PowerShell)."""
+        import shutil
+
         from agentworks import doctor
 
-        monkeypatch.setattr(doctor.shutil, "which", lambda name: "/x/pwsh" if name == "pwsh" else None)
+        monkeypatch.setattr(shutil, "which", lambda name: "/x/pwsh" if name == "pwsh" else None)
         assert doctor._shell_available("powershell") is True
         assert doctor._shell_available("zsh") is False
+
+        monkeypatch.setattr(
+            shutil, "which", lambda name: "/x/powershell" if name == "powershell" else None
+        )
+        assert doctor._shell_available("powershell") is True
 
 
 @pytest.mark.integration

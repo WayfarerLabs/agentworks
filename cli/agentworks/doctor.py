@@ -470,6 +470,12 @@ def _shell_available(shell_name: str) -> bool:
     PowerShell ships as either `pwsh` (Core) or `powershell` (Windows
     PowerShell), so either binary counts as the `powershell` shell being
     present.
+
+    Kept in sync with ``_get_completion_paths``: today its PowerShell entry
+    only exists when ``_query_powershell_profile`` finds a binary on PATH,
+    so the powershell branch here can't fire in practice. If that
+    enumeration ever changes to include a static PowerShell path, this
+    branch becomes load-bearing.
     """
     candidates = {"powershell": ("pwsh", "powershell")}.get(shell_name, (shell_name,))
     return any(shutil.which(c) for c in candidates)

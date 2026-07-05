@@ -448,17 +448,87 @@ class TestUninstall:
         # Unrelated profile content is preserved.
         assert "Write-Host hi" in profile.read_text()
 
+    @pytest.mark.parametrize("shell", ["bash", "zsh", "powershell"])
     def test_uninstall_when_nothing_installed_is_clean(
-        self, monkeypatch, tmp_path
+        self, monkeypatch, tmp_path, shell
     ) -> None:
+        """Every shell's uninstall exits 0 with a "nothing found" message
+        when there's nothing to remove -- not just bash."""
         from typer.testing import CliRunner
 
+        from agentworks.completions import install
+
         monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path))
+        monkeypatch.delenv("ZSH_CUSTOM", raising=False)
+        # For powershell, provide a resolvable profile that just doesn't
+        # have the completions or the source line -- otherwise the "no
+        # binary on PATH" failure path fires instead.
+        if shell == "powershell":
+            profile = tmp_path / "profile.ps1"
+            monkeypatch.setattr(install, "_query_powershell_profile", lambda: profile)
+
         result = CliRunner().invoke(
-            app, ["completion", "uninstall", "--shell", "bash"]
+            app, ["completion", "uninstall", "--shell", shell]
         )
         assert result.exit_code == 0
-        assert "No bash completions found" in result.stdout
+        # Lowercase compare: the powershell message uses "PowerShell".
+        assert f"no {shell} completions found" in result.stdout.lower()
+
+    def test_powershell_uninstall_fails_when_no_binary(
+        self, monkeypatch
+    ) -> None:
+        """If neither `pwsh` nor `powershell` is on PATH, uninstall exits
+        non-zero with a clear error rather than silently succeeding."""
+        from typer.testing import CliRunner
+
+        from agentworks.completions import install
+
+        monkeypatch.setattr(install, "_query_powershell_profile", lambda: None)
+
+        result = CliRunner().invoke(
+            app, ["completion", "uninstall", "--shell", "powershell"]
+        )
+        assert result.exit_code != 0
+        assert "could not determine PowerShell $PROFILE path" in result.stderr
+
+    def test_powershell_uninstall_preserves_user_lines_mentioning_filename(
+        self, monkeypatch, tmp_path
+    ) -> None:
+        """The $PROFILE strip must match the installer's exact
+        dot-source-plus-quoted-path shape, not any line containing the
+        string 'agentworks.ps1'. Comments, conditionals, and unrelated
+        dot-sources that mention the name should survive uninstall."""
+        from typer.testing import CliRunner
+
+        from agentworks.completions import install
+
+        profile = tmp_path / "profile.ps1"
+        completions_dir = tmp_path / "Completions"
+        completions_dir.mkdir()
+        script = completions_dir / "agentworks.ps1"
+        script.write_text("x")
+
+        # Mix of the installer's real line and lines a user could plausibly
+        # write that mention the filename but aren't the installer's line.
+        installer_line = f'. "{script}"'
+        user_comment = "# uses agentworks.ps1 for completions"
+        user_conditional = 'if ($true) { Write-Host "agentworks.ps1 loaded" }'
+        user_alt_dotsource = '. "$HOME/custom/agentworks.ps1.bak"'  # different filename suffix
+        profile.write_text(
+            "\n".join([user_comment, installer_line, user_conditional, user_alt_dotsource]) + "\n"
+        )
+        monkeypatch.setattr(install, "_query_powershell_profile", lambda: profile)
+
+        result = CliRunner().invoke(
+            app, ["completion", "uninstall", "--shell", "powershell"]
+        )
+        assert result.exit_code == 0
+
+        remaining = profile.read_text()
+        assert installer_line not in remaining
+        assert user_comment in remaining
+        assert user_conditional in remaining
+        assert user_alt_dotsource in remaining
 
 
 class TestVariadicPositionalCompletion:

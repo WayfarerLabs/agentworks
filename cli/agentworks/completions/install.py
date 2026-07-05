@@ -3,11 +3,20 @@
 from __future__ import annotations
 
 import os
+import re
 import shutil
 import subprocess
 from pathlib import Path
 
 import typer
+
+
+# The exact shape the installer appends to $PROFILE: a leading dot-source
+# operator, a double-quoted absolute path, ending in ``agentworks.ps1``.
+# Matched at uninstall time to strip only what we wrote -- a substring
+# match on ``agentworks.ps1`` would clobber user-authored lines that
+# merely mention the filename (comments, conditionals, alternate paths).
+_PS_PROFILE_SOURCE_LINE = re.compile(r'^\s*\.\s+"[^"]*[/\\]agentworks\.ps1"\s*$')
 
 
 def _link_alias(alias_link: Path, target_name: str) -> None:
@@ -204,10 +213,14 @@ def _uninstall_powershell() -> None:
 
     removed = _remove_file(profile_path.parent / "Completions" / "agentworks.ps1")
 
-    # Strip the `. "...agentworks.ps1"` line the installer appended.
+    # Strip the `. "...agentworks.ps1"` line the installer appended. Match
+    # the installer's exact shape rather than doing a substring test on
+    # ``agentworks.ps1`` -- otherwise any user-authored line that mentions
+    # the filename (a comment, a wrapping conditional, a dot-source of a
+    # differently-pathed agentworks.ps1) gets silently dropped.
     if profile_path.exists():
         lines = profile_path.read_text().splitlines(keepends=True)
-        kept = [ln for ln in lines if "agentworks.ps1" not in ln]
+        kept = [ln for ln in lines if not _PS_PROFILE_SOURCE_LINE.match(ln.rstrip("\r\n"))]
         if len(kept) != len(lines):
             profile_path.write_text("".join(kept))
             typer.echo(f"Removed source line from $PROFILE: {profile_path}")
