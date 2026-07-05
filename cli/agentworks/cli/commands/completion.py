@@ -65,3 +65,16 @@ def completion_install(
 
     resolved = _resolve_shell(shell)
     install_completions(resolved, generate(resolved))
+
+
+@completion_app.command("uninstall")
+def completion_uninstall(
+    shell: Annotated[
+        str | None,
+        typer.Option("--shell", help="Shell type (autodetected if omitted)", click_type=_SHELL_CHOICES),
+    ] = None,
+) -> None:
+    """Remove installed completion files for the given shell."""
+    from agentworks.completions.install import uninstall_completions
+
+    uninstall_completions(_resolve_shell(shell))

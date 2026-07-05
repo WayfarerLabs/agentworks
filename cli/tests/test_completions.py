@@ -381,6 +381,86 @@ class TestInstall:
         assert alias.read_text() == primary.read_text()
 
 
+class TestUninstall:
+    """Filesystem-level checks for `agentworks completion uninstall`."""
+
+    def test_bash_uninstall_removes_script_and_alias(
+        self, monkeypatch, tmp_path
+    ) -> None:
+        from typer.testing import CliRunner
+
+        monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path))
+        completions_dir = (
+            tmp_path / ".local" / "share" / "bash-completion" / "completions"
+        )
+        completions_dir.mkdir(parents=True)
+        (completions_dir / "agentworks").write_text("x")
+        (completions_dir / "agw").write_text("x")
+
+        result = CliRunner().invoke(
+            app, ["completion", "uninstall", "--shell", "bash"]
+        )
+        assert result.exit_code == 0
+        assert not (completions_dir / "agentworks").exists()
+        assert not (completions_dir / "agw").exists()
+
+    def test_zsh_uninstall_removes_script_and_alias(
+        self, monkeypatch, tmp_path
+    ) -> None:
+        from typer.testing import CliRunner
+
+        monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path))
+        monkeypatch.delenv("ZSH_CUSTOM", raising=False)
+        zfunc = tmp_path / ".zfunc"
+        zfunc.mkdir()
+        (zfunc / "_agentworks").write_text("x")
+        (zfunc / "_agw").write_text("x")
+
+        result = CliRunner().invoke(
+            app, ["completion", "uninstall", "--shell", "zsh"]
+        )
+        assert result.exit_code == 0
+        assert not (zfunc / "_agentworks").exists()
+        assert not (zfunc / "_agw").exists()
+
+    def test_powershell_uninstall_removes_script_and_profile_line(
+        self, monkeypatch, tmp_path
+    ) -> None:
+        from typer.testing import CliRunner
+
+        from agentworks.completions import install
+
+        profile = tmp_path / "profile.ps1"
+        completions_dir = tmp_path / "Completions"
+        completions_dir.mkdir()
+        script = completions_dir / "agentworks.ps1"
+        script.write_text("x")
+        profile.write_text(f'Write-Host hi\n. "{script}"\n')
+
+        monkeypatch.setattr(install, "_query_powershell_profile", lambda: profile)
+
+        result = CliRunner().invoke(
+            app, ["completion", "uninstall", "--shell", "powershell"]
+        )
+        assert result.exit_code == 0
+        assert not script.exists()
+        assert "agentworks.ps1" not in profile.read_text()
+        # Unrelated profile content is preserved.
+        assert "Write-Host hi" in profile.read_text()
+
+    def test_uninstall_when_nothing_installed_is_clean(
+        self, monkeypatch, tmp_path
+    ) -> None:
+        from typer.testing import CliRunner
+
+        monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path))
+        result = CliRunner().invoke(
+            app, ["completion", "uninstall", "--shell", "bash"]
+        )
+        assert result.exit_code == 0
+        assert "No bash completions found" in result.stdout
+
+
 class TestVariadicPositionalCompletion:
     """Variadic Argument positionals (Click nargs=-1) must produce 'every
     subsequent position' completion in all three shells, not just position N."""
