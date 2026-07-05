@@ -10,7 +10,6 @@ from pathlib import Path
 
 import typer
 
-
 # The exact shape the installer appends to $PROFILE: a leading dot-source
 # operator, a double-quoted absolute path, ending in ``agentworks.ps1``.
 # Matched at uninstall time to strip only what we wrote -- a substring
