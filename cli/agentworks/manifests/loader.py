@@ -53,16 +53,25 @@ class _StrictLoader(yaml.SafeLoader):
                     key_node.start_mark,
                 )
             key = self.construct_object(key_node, deep=True)
-            if isinstance(key, dict | list):
-                continue  # unhashable; base class raises its own error
-            if key in seen:
+            try:
+                is_duplicate = key in seen
+                if not is_duplicate:
+                    seen.add(key)
+            except TypeError:
+                # Unhashable key (dict, list, !!set, ...): skip the
+                # duplicate check; the base class raises its own clean
+                # "unhashable key" ConstructorError below. (Both ops sit
+                # in the try: set membership silently coerces a set key
+                # to frozenset instead of raising, so add() is the one
+                # that actually trips for !!set keys.)
+                continue
+            if is_duplicate:
                 raise yaml.constructor.ConstructorError(
                     None,
                     None,
                     f"duplicate mapping key {key!r}",
                     key_node.start_mark,
                 )
-            seen.add(key)
         return super().construct_mapping(node, deep=deep)
 
 

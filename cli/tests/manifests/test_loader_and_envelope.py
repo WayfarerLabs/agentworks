@@ -258,6 +258,28 @@ def test_duplicate_mapping_key_rejected(tmp_path: Path) -> None:
         load_manifests(root)
 
 
+def test_unhashable_mapping_key_surfaces_clean_error(tmp_path: Path) -> None:
+    """An unhashable YAML key (e.g. a ``!!set``) must surface as a clean
+    ConfigError from the base loader's unhashable-key handling, not a
+    raw TypeError from the duplicate-key check (Copilot review find)."""
+    root = tmp_path / "resources"
+    _write(
+        root,
+        "a.yaml",
+        """
+        apiVersion: agentworks/v1
+        kind: secret
+        metadata:
+          name: s1
+          ? !!set {a: null}
+          : value
+        spec: {}
+        """,
+    )
+    with pytest.raises(ConfigError, match="unhashable"):
+        load_manifests(root)
+
+
 def test_walk_order_is_files_first_per_directory(tmp_path: Path) -> None:
     """Per directory: files by name, then subdirectories by name
     (recursively). Root files precede nested ones, and ``a/`` sorts
