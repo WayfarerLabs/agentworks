@@ -63,9 +63,11 @@ concept and for the `provider` field on exposed resources, whose owner scopes it
 Provider-owned configuration on an exposed resource nests under a single `spec.provider_config` key
 -- an opaque blob the named provider owns and validates -- so the rest of the spec stays
 provider-agnostic. Kind-owned fields stay top-level: a `git-credential`'s `token` belongs to every
-credential, while `azdo`'s `org` nests. The manifest shape may diverge from the flat TOML sections
-to carry this pattern -- decoders reshape before calling the shared loaders, so validation stays
-TOML-shared while the YAML surface stays uniform.
+credential, while `azdo`'s `org` nests. The INTERNAL resource representation follows the nested
+shape too (`SecretBackendDecl.provider_config`, `GitCredentialConfig.provider_config`): the flat
+TOML section is the ONLY domain where provider-owned fields sit at the top level, and the TOML
+loader nests them at its boundary. Decoders reshape before calling the shared loaders, so validation
+stays TOML-shared while the YAML surface and the internal model stay uniform.
 
 For secrets concretely: backends (`SecretBackendDecl`) own `would_attempt` / `describe_lookup` /
 `resolve`; providers are stateless code invoked only from those door methods; and resolution is a

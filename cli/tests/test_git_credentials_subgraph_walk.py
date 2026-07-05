@@ -98,7 +98,7 @@ def test_agent_template_to_git_credentials_to_secret_walk(
     registry = build_registry(config)
 
     cred = registry.lookup("git-credential", "azdo")
-    assert cred.org == "my-org"
+    assert cred.provider_config == {"org": "my-org"}
 
     decl = registry.lookup("secret", "git-token-azdo")
     assert decl.origin is not None

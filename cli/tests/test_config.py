@@ -73,7 +73,7 @@ def test_load_valid_config(config_dir: Path) -> None:
     assert cfg.workspace_templates["child"].inherits == ["gruntweave"]
     assert cfg.workspace_templates["child"].tmuxinator is False
     assert cfg.git_credentials["github"].type == "github"
-    assert cfg.git_credentials["azdo"].org == "my-org"
+    assert cfg.git_credentials["azdo"].provider_config == {"org": "my-org"}
     assert cfg.admin.git_credentials == ["github"]
 
 

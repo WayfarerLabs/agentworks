@@ -1140,8 +1140,9 @@ def resolve_git_credential_providers(
             )
         desc = cred_config.description
         if cred_config.type == "azdo":
-            assert cred_config.org is not None
-            providers[name] = AzDOCredentialProvider(config_name=name, org=cred_config.org, description=desc)
+            org = cred_config.provider_config.get("org")
+            assert isinstance(org, str)  # loader guarantees org for azdo
+            providers[name] = AzDOCredentialProvider(config_name=name, org=org, description=desc)
         elif cred_config.type == "github":
             providers[name] = GitHubCredentialProvider(config_name=name, description=desc)
     return providers

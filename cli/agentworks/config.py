@@ -479,7 +479,12 @@ class WorkspaceTemplate:
 class GitCredentialConfig:
     name: str
     type: str
-    org: str | None = None
+    # Provider-owned configuration (azdo's org), nested per the
+    # provider_config pattern (ADR 0016). The flat TOML section is the
+    # ONLY place org lives at the top level; this loader nests it at
+    # the boundary, so the internal representation matches the YAML
+    # manifest shape.
+    provider_config: dict[str, object] = field(default_factory=dict)
     description: str | None = None
     # Secret name for the auth token. Default ``"git-token-<name>"`` is
     # computed in ``__post_init__`` (the per-credential default depends
@@ -1293,6 +1298,8 @@ def _load_git_credentials(
             raise ConfigError(f"git_credentials.{name}.provider is required")
         if cred_type == "azdo" and "org" not in cdata:
             raise ConfigError(f"git_credentials.{name}.org is required for azdo type")
+        # (TOML keeps org at the section top level -- the only flat
+        # domain; it nests into provider_config below.)
 
         # ``token`` is a bare secret name; same rules as
         # ``tailscale_auth_key``. Omission triggers GitCredentialConfig's
@@ -1314,10 +1321,13 @@ def _load_git_credentials(
                 )
             token_raw = cdata["token"]
 
+        provider_config: dict[str, object] = {}
+        if "org" in cdata:
+            provider_config["org"] = str(cdata["org"])
         creds[name] = GitCredentialConfig(
             name=name,
             type=cred_type,
-            org=str(cdata["org"]) if "org" in cdata else None,
+            provider_config=provider_config,
             description=str(cdata["description"]) if "description" in cdata else None,
             token=token_raw,
             declared_at=decls.lookup("git_credentials", name),

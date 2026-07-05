@@ -426,9 +426,11 @@ artifact update.)
   maintainer's push ("YAML can have a different shape than TOML"): `org` nests in manifests too (the
   decoder flattens back into the shared TOML loader, so validation is unchanged, and the migrator
   emits the nested shape -- proven shape-only by its own registry-equivalence verification);
-  kind-owned `token`/`description` stay top-level. ADR 0016 records the pattern. Also extended
-  `--all` to `resource sample` and aggregated the deprecation warnings behind `--no-deprecations` in
-  this same pre-lock batch.
+  kind-owned `token`/`description` stay top-level. A follow-up clarification made the INTERNAL
+  representation follow the nested shape as well (`GitCredentialConfig.org` became
+  `provider_config`; the TOML loader nests at its boundary, so the flat section is the only flat
+  domain). ADR 0016 records the pattern. Also extended `--all` to `resource sample` and aggregated
+  the deprecation warnings behind `--no-deprecations` in this same pre-lock batch.
 - **2026-07-05: kind/name display syntax unified on '/' (maintainer ruling, pre-lock).** The older
   inspection surfaces used `kind:name` (describe header, `--names-only`, auto-declared descriptions,
   references, used-by lines) while the migrate surfaces used `kind/name`. Everything now uses `/` --
