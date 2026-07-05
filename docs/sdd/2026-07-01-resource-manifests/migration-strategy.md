@@ -101,10 +101,12 @@ spec:
 runs alongside the fully supported TOML path -- permanently (dual-path, revised 2026-07-03): a
 resource may come from either source, declaring the same one in both errors at publish (the
 `Registry.add` collision handling introduced in Phase 2), and TOML resource semantics stay today's,
-so any config that loads today keeps loading. The exception is `[secret_backends.*]`, which Phase
-3.6 made a warned no-op (the sections were semantically empty; the built-in backends ship bundled).
-Phase 5 adds per-section deprecation warnings and repoints the docs to lead with YAML; the TOML
-resource path's removal waits for an unscheduled future major (Phase 6).
+so any config that loads today keeps loading -- with one deliberate exception (FRD R13, 2026-07-05):
+resource names containing `/` are now rejected at publish, since `/` is reserved for selectors and
+per-resource filenames. The exception is `[secret_backends.*]`, which Phase 3.6 made a warned no-op
+(the sections were semantically empty; the built-in backends ship bundled). Phase 5 adds per-section
+deprecation warnings and repoints the docs to lead with YAML; the TOML resource path's removal waits
+for an unscheduled future major (Phase 6).
 
 **For an operator**, migration is optional and self-scheduled:
 

@@ -291,10 +291,13 @@ def test_per_resource_layout_kind_directories(tmp_path: Path) -> None:
 
 
 def test_per_resource_layout_refuses_unsafe_names(tmp_path: Path) -> None:
+    """'/' is rejected at load, but spaces (and other shell-hostile
+    characters) survive name pass-through and are refused by the
+    per-resource layout specifically."""
     cfg = _write_config(
         tmp_path,
         resources="""\
-[vm_templates."weird/name"]
+[vm_templates."weird name"]
 cpus = 2
 """,
     )
@@ -471,9 +474,10 @@ def test_singleton_assignment_shape_refused(tmp_path: Path) -> None:
         _plan(cfg, ["admin-template"])
 
 
-def test_slash_names_are_individually_addressable(tmp_path: Path) -> None:
-    """First-slash split leaves the full name as the remainder, so a
-    name containing `/` selects fine (per-kind layout carries it)."""
+def test_slash_names_are_rejected_at_load(tmp_path: Path) -> None:
+    """'/' is banned in resource names at Registry.add (maintainer
+    ruling, 2026-07-05), so a slash-named resource never reaches the
+    migrate tool -- the KIND/NAME selector grammar is unambiguous."""
     cfg = _write_config(
         tmp_path,
         resources="""\
@@ -481,11 +485,8 @@ def test_slash_names_are_individually_addressable(tmp_path: Path) -> None:
 cpus = 2
 """,
     )
-    config, plan = _plan(cfg, ["vm-template/we/ird"])
-    assert [(u.kind, u.name) for u in plan.units] == [("vm-template", "we/ird")]
-    execute_plan(plan, config)
-    (doc,) = _loaded_docs(tmp_path / "resources" / "vm-templates.yaml")
-    assert doc["metadata"]["name"] == "we/ird"
+    with pytest.raises(ConfigError, match="contains '/'"):
+        _plan(cfg, [])
 
 
 def test_per_resource_comment_markers_name_every_file(tmp_path: Path) -> None:

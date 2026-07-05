@@ -42,8 +42,9 @@ _MIGRATABLE_KINDS = {k: s for k, s in KIND_SECTIONS.items() if k != "secret-back
 
 _SECRET_BACKENDS_SECTION = "secret_backends"
 
-# Conservative filename-safe set for the per-resource layout. Names are
-# pass-through for non-secret kinds, so anything can appear here; unsafe
+# Conservative filename-safe set for the per-resource layout. '/' is
+# already banned at Registry.add, but non-secret names are otherwise
+# pass-through (spaces, backslashes, leading dots can appear); unsafe
 # names are refused (not sanitized) with a pointer at per-kind.
 _SAFE_FILENAME = re.compile(r"[A-Za-z0-9_][A-Za-z0-9._-]*")
 

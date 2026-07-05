@@ -9,7 +9,11 @@ therefore inert text the loader ignores: ``--write`` can never create a
 duplicate or a live resource, and running it twice just appends more
 comments. The loader guarantee stays real rather than vacuous -- the
 test suite mechanically strips one ``#`` per line and loads the result
-through the real loader.
+through the real loader, and the whole uncommented set builds a full
+registry. One deliberate exception: the secret-backend sample is
+prose-only (no document to uncomment) until a config-bearing provider
+ships -- there is nothing real to declare yet, and an uncommentable
+document would teach a lie.
 """
 
 from __future__ import annotations

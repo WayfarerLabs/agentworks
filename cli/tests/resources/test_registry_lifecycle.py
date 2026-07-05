@@ -46,6 +46,74 @@ def test_empty_registry_is_not_finalized() -> None:
     assert not r.is_finalized
 
 
+def test_add_rejects_names_containing_slash(tmp_path: Path) -> None:
+    """'/' is banned in resource names at the single publisher choke
+    point (maintainer ruling, 2026-07-05): it is reserved for kind/name
+    selectors and per-resource manifest filenames. Uniform across
+    sources -- TOML, YAML, and direct adds all hit the same check."""
+    r = Registry.empty()
+    decl = SecretDecl(name="we/ird", description="d")
+    with pytest.raises(ConfigError, match="contains '/'"):
+        r.add(
+            "secret",
+            "we/ird",
+            decl,
+            Origin.operator_declared(file=tmp_path / "c.toml", line=1),
+        )
+
+    # TOML source: a quoted section name with a slash loads as data but
+    # is refused at publish.
+    pub = tmp_path / "id.pub"
+    priv = tmp_path / "id"
+    pub.write_text("ssh-ed25519 X")
+    priv.write_text("-----BEGIN-----")
+    cfg = tmp_path / "c.toml"
+    cfg.write_text(
+        dedent(
+            f"""
+            [operator]
+            ssh_public_key = "{pub}"
+            ssh_private_key = "{priv}"
+
+            [vm_templates."we/ird"]
+            cpus = 2
+            """
+        )
+    )
+    from agentworks.bootstrap import build_registry
+
+    with pytest.raises(ConfigError, match="contains '/'"):
+        build_registry(load_config(cfg, warn_issues=False))
+
+    # Manifest source: same rule, error cites the manifest origin.
+    cfg2 = tmp_path / "c2.toml"
+    cfg2.write_text(
+        dedent(
+            f"""
+            [operator]
+            ssh_public_key = "{pub}"
+            ssh_private_key = "{priv}"
+            """
+        )
+    )
+    resources = tmp_path / "resources"
+    resources.mkdir()
+    (resources / "r.yaml").write_text(
+        dedent(
+            """
+            apiVersion: agentworks/v1
+            kind: vm-template
+            metadata:
+              name: we/ird
+            spec:
+              cpus: 2
+            """
+        )
+    )
+    with pytest.raises(ConfigError, match="contains '/'"):
+        build_registry(load_config(cfg2, warn_issues=False))
+
+
 class _MissProbeKind:
     """Minimal error-miss-policy kind for the message-shape test."""
 

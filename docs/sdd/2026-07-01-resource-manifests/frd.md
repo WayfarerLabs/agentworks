@@ -371,11 +371,13 @@ its object is resources; the TOML edit is a side effect on the source. Full desi
 - Release notes carry the change and the one-command migration path.
 - The YAML teaching surface is `agw resource sample [KIND] [--write FILENAME]`: commented sample
   manifests per manifest-declarable kind (all kinds without an argument), shipped bundled and
-  guaranteed to load through the real loader. `--write` saves into the resources directory instead
-  of stdout, appending if the file exists -- the same append-only rule as the migrator, minus the
-  `---` separator (the samples are fully commented, so appended text is inert and a separator would
-  create a null document the loader rejects). `agw config sample` is unchanged: it documents the
-  settings file, which is permanent under config-is-config.
+  guaranteed to load through the real loader -- and to build a full registry as a set (exception:
+  the secret-backend sample is prose-only until a config-bearing provider ships; there is nothing
+  real to declare yet). `--write` saves into the resources directory instead of stdout, appending if
+  the file exists -- the same append-only rule as the migrator, minus the `---` separator (the
+  samples are fully commented, so appended text is inert and a separator would create a null
+  document the loader rejects). `agw config sample` is unchanged: it documents the settings file,
+  which is permanent under config-is-config.
 
 ### R12: Framework invariance
 
@@ -408,6 +410,16 @@ now mention manifest locations; the shapes stay the same.
 - **Configuration on the built-in providers** (e.g. an env var prefix option): no known operator
   ask; per-secret `backend_mappings` covers identifier customization. Would be a purely additive
   provider schema field later.
+
+### R13: '/' is disallowed in resource names (added 2026-07-05)
+
+Resource names may not contain `/` -- it is reserved for `KIND/NAME` selectors
+(`agw resource migrate`) and per-resource manifest filenames. Enforced source-independently at
+`Registry.add`, so TOML, YAML, and future plugin publishers share one rule. This is a deliberate
+BREAKING tightening of the name rule for the (unlikely) configs carrying slash-bearing quoted
+section names (`[vm_templates."a/b"]` loaded before this SDD); it amends the earlier
+name-validation-parity position (which kept non-secret names pass-through) for this one character,
+and rides the Phase 5 release notes.
 
 ## Migration notes
 

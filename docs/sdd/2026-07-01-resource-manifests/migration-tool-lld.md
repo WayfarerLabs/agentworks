@@ -21,10 +21,9 @@ agw resource migrate [SELECTOR]... [--layout per-kind|single|per-resource]
 - No selectors: migrate every operator-declared resource currently sourced from TOML.
 - `KIND` (e.g. `vm-template`): every TOML-declared resource of that kind.
 - `KIND/NAME` (e.g. `vm-template/small`): that one resource. The token splits at the FIRST `/`, and
-  the remainder is the complete name -- so a name containing `/` (possible for non-secret kinds,
-  whose names are pass-through) IS individually addressable: `vm-template/we/ird` selects the
-  vm-template named `we/ird` (pinned by test; corrected from this doc's earlier cannot-be-addressed
-  claim at implementation).
+  the grammar is unambiguous because `/` is strictly disallowed in resource names (maintainer
+  ruling, 2026-07-05, enforced source-independently at `Registry.add` -- a breaking tightening for
+  configs carrying slash-bearing quoted names, called out in the Phase 5 release notes).
 - Overlapping selectors (`secret secret/foo`) union: each matched resource migrates exactly once.
 - Selectors use registry kind identifiers (lower-kebab), not TOML section names. The section-to-kind
   mapping is `decode.KIND_SECTIONS`, shared with the manifest decoder -- one source of truth.
@@ -49,10 +48,10 @@ agw resource migrate [SELECTOR]... [--layout per-kind|single|per-resource]
 
 - Per-kind filenames pluralize the kind with a plain `s` (matching the bundled
   `secret-backends.yaml` convention).
-- Per-resource layout REFUSES names that are not filename-safe (`/`, `\`, leading dots, anything
-  outside a conservative safe set -- non-secret names are pass-through and may contain such
-  characters), pointing at the per-kind layout. No sanitization: a mangled filename would break the
-  "filenames are convention" story from the other direction.
+- Per-resource layout REFUSES names that are not filename-safe (spaces, `\`, leading dots --
+  anything outside a conservative safe set; `/` is already banned at load, but non-secret names are
+  otherwise pass-through), pointing at the per-kind layout. No sanitization: a mangled filename
+  would break the "filenames are convention" story from the other direction.
 - Filenames are convention only -- the loader walks everything and does not care -- so `--layout` is
   operator ergonomics, not semantics. Operators are free to reorganize afterwards.
 - Documents are emitted in TOML declaration order.
@@ -154,9 +153,13 @@ agw resource sample [KIND] [--write FILENAME]
 - Samples ship bundled with the app (like `sample-config.toml`), one per kind, and are FULLY
   commented out: every line carries a leading `#`, so written samples are inert text the loader
   ignores -- `--write` can never create a duplicate or a live resource by accident, and running it
-  twice just appends more comments. The operator uncomments and edits to activate. The loader
-  guarantee stays real rather than vacuous: the test mechanically strips the `#` prefixes and loads
-  the result through the real loader.
+  twice just appends more comments. The operator uncomments and edits to activate. The guarantee
+  stays real rather than vacuous: the test mechanically strips one `#` per line, loads the result
+  through the real loader, and builds a full registry over the whole uncommented set. One deliberate
+  exception (maintainer ruling, 2026-07-05): the secret-backend sample is PROSE-ONLY -- no
+  config-bearing provider ships yet, so there is nothing real to declare, and an uncommentable
+  document would teach a lie; it gains a real document when such a provider lands (pinned by a test
+  that flips that day).
 - `--write FILENAME`: instead of stdout, write to `<resources-dir>/FILENAME`. Rules:
   - Relative paths only, resolved under the resources directory; escaping it is an error.
   - Must end `.yaml` / `.yml` (otherwise the loader would never pick it up; error with that hint).

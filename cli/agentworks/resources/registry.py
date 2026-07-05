@@ -98,6 +98,24 @@ class Registry:
         """
         if self._frozen:
             raise RuntimeError("registry is frozen; add must precede finalize")
+        if "/" in name:
+            # Uniform, source-independent rule (maintainer ruling,
+            # 2026-07-05): '/' is reserved -- kind/name selectors,
+            # per-resource manifest filenames -- so no publisher may
+            # register a name containing it. Enforced here rather than
+            # per-loader so TOML, YAML, and future plugin publishers
+            # cannot drift.
+            from agentworks.errors import ConfigError
+            from agentworks.resources.render import format_origin_line
+
+            raise ConfigError(
+                f"{kind} name {name!r} contains '/', which is not allowed "
+                f"in resource names ({format_origin_line(origin)})",
+                hint=(
+                    "Rename the resource: '/' is reserved for kind/name "
+                    "selectors and per-resource manifest filenames."
+                ),
+            )
         existing = self._resources.get(kind, {}).get(name)
         if existing is not None:
             self._check_collision(kind, name, existing, origin)

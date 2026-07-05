@@ -357,7 +357,8 @@ both locations. TOML resource sections are deprecated, not removed.
         and the top-level README for TOML-section references to resource kinds; lead with manifest
         examples (TOML noted as deprecated-but-supported).
 - [ ] Release notes: the dual-path model, the deprecation, the one-command migration, the rename
-      list from FRD "Migration notes".
+      list from FRD "Migration notes", and the FRD R13 breaking change ('/' now rejected in resource
+      names).
 - [ ] Completions: verify the full command tree still round-trips (kind values and both Phase 4
       subcommands included).
 - [ ] **Tests**: per-section deprecation issue content; guide/sample examples lint (the
@@ -391,13 +392,28 @@ only TOML-resource reader in the tree; CI green; reviewer-approved.
 (Recorded as they happen, per SDD convention. Deviations from FRD/HLA get an entry here and an
 artifact update.)
 
+- **2026-07-05: secret-backend sample is prose-only (maintainer ruling, via the implementation
+  review).** No config-bearing provider ships, so no operator-declarable backend can be real; an
+  uncommentable onepassword document would teach a lie. The sample's illustrative shape moved into
+  prose, the samples-load-clean and registry-build tests carve the kind out explicitly (the registry
+  test is thereby exclusion-free over the whole uncommented set), and a test pins the prose-only
+  state so it flips the day a real provider lands. Supersedes the checked Phase 4 sample checkbox's
+  "loads clean for every kind" description for this one kind.
+- **2026-07-05: '/' banned in resource names (maintainer ruling, via the implementation review).**
+  Supersedes the slash-addressability note below: rather than supporting slash-bearing names in
+  selectors, `/` is strictly disallowed in resource names, enforced source-independently at
+  `Registry.add` (FRD R13). Deliberately breaking for configs with slash-bearing quoted section
+  names; release-notes line rides Phase 5. The selector grammar and the `migrate_selectors`
+  completions are unambiguous as a result, and the per-resource layout's unsafe-name refusal narrows
+  to the remaining pass-through hazards (spaces, backslashes, leading dots).
 - **2026-07-05: Phase 4 implementation notes.** Two deviations from the LLD text, both reconciled
   there: selector completion sources operator-origin registry rows (which include already-migrated
   YAML rows) rather than a TOML-only list -- the already-migrated error is clear and a TOML-only
-  filter is not worth new CLI surface -- and names containing `/` ARE individually addressable
-  (first-slash split leaves the full name as the remainder; the LLD had claimed otherwise). Also
-  discovered: `resource sample --write` appends WITHOUT a `---` separator (commented content plus a
-  separator would create a null document the loader rejects); FRD/LLD updated.
+  filter is not worth new CLI surface -- and names containing `/` were briefly made individually
+  addressable (first-slash split leaves the full name as the remainder) before the ruling above
+  removed the case entirely. Also discovered: `resource sample --write` appends WITHOUT a `---`
+  separator (commented content plus a separator would create a null document the loader rejects);
+  FRD/LLD updated.
 - **2026-07-05: Phase 4 redesigned as a recurring mover (maintainer-directed).** The migration tool
   is `agw resource migrate` (renamed from `config migrate`; its object is resources): positional
   selectors for incremental runs, `--layout per-kind|single|per-resource`, append-only YAML output,
