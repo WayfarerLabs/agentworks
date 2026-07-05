@@ -340,10 +340,16 @@ def _declared_at(registry: Registry, unit: MigrationUnit) -> str | None:
 
 
 def _section_location(old_text: str, config_path: Path, section: str) -> str:
-    """Best-effort file:line of a section's first appearance."""
+    """Best-effort file:line of a section's first appearance.
+
+    Headers may be indented; assignment patterns are anchored to column
+    zero, since a top-level assignment cannot be indented -- otherwise a
+    same-named key inside an earlier table (``secrets = [...]`` under a
+    template) would match first.
+    """
     for number, line in enumerate(old_text.splitlines(), start=1):
         stripped = line.lstrip()
-        if stripped.startswith((f"[{section}]", f"[{section}.")) or stripped.startswith(
+        if stripped.startswith((f"[{section}]", f"[{section}.")) or line.startswith(
             (f"{section} =", f"{section}=")
         ):
             return f"{config_path}:{number}"
