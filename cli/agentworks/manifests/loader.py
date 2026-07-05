@@ -128,9 +128,10 @@ def _iter_manifest_files(resources_dir: Path) -> Iterator[Path]:
 
     A hand-rolled walk (rather than ``rglob``) so dot-directories are
     pruned without descending into them. Files-first-per-directory is
-    the deliberate ordering (root manifests precede anything nested;
-    ``a/`` sorts before ``a-b/`` component-wise); FRD R2 documents the
-    same rule.
+    the deliberate ordering contract: root manifests precede anything
+    nested, and ``a/`` sorts before ``a-b/`` component-wise. This order
+    IS config-load order for the framework (first-matching-reference
+    origin attribution), so it must stay stable.
     """
     if not resources_dir.is_dir():
         return

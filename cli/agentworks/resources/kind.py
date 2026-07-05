@@ -67,8 +67,8 @@ class ResourceKind(Protocol):
       (templates accept ``{"default"}``); requests for other missing names
       error.
     - ``manifest_declarable``: whether operators may declare this kind
-      in YAML manifests (resource-manifests SDD, Phase 2). ``False``
-      for descriptor kinds provided by the app.
+      in YAML manifests (ADR 0016). ``False`` for descriptor kinds
+      provided by the app.
     - ``builtin_override``: what happens when an operator manifest
       collides with an app-published built-in row. ``"allow"`` keeps
       today's catalog behavior (operator row replaces the built-in);

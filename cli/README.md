@@ -566,7 +566,7 @@ Configuration splits into two surfaces:
   platform connections, and the secret backend chain. Run `agw config init` to generate a sample;
   see [sample-config.toml](agentworks/sample-config.toml) for the full reference.
 - **Resources** -- secrets, templates, git credentials, catalog entries -- are declared as YAML
-  manifests under `~/.config/agentworks/resources/`, auto-loaded on every command.
+  manifests under `~/.config/agentworks/resources/`, auto-loaded whenever a command needs them.
   `agw resource sample` prints a commented starter for every kind. The classic TOML resource
   sections keep working (deprecated, with per-section load warnings); `agw resource migrate` moves
   them to YAML whenever you like. See [docs/guides/resources.md](../docs/guides/resources.md).
@@ -746,24 +746,29 @@ Agentworks installs [mise](https://mise.jdx.dev/) by default on all VMs for mana
 ### Claude Code Plugins
 
 Agentworks can register Claude Code marketplaces and install plugins automatically per user (admin
-and per-agent). Configure via `claude_marketplaces` and `claude_plugins` in `admin.config` or any
-`agent_templates.*`. Requires the `claude` CLI on PATH (typically installed via
+and per-agent). Configure via `claude_marketplaces` and `claude_plugins` on the admin template or
+any agent template. Requires the `claude` CLI on PATH (typically installed via
 `user_install_commands`). To install nerftools this way:
 
-```toml
-[admin.config]
-claude_marketplaces = ["https://github.com/WayfarerLabs/nerftools#4.1.0"]
-claude_plugins = ["nerftools-default@nerftools"]
+```yaml
+apiVersion: agentworks/v1
+kind: admin-template
+metadata:
+  name: default
+spec:
+  claude_marketplaces: ["https://github.com/WayfarerLabs/nerftools#4.1.0"]
+  claude_plugins: [nerftools-default@nerftools]
 ```
+
+(TOML equivalent: `[admin.config]` in `config.toml`, deprecated but supported.)
 
 ### Built-in Catalog
 
 Agentworks ships a built-in catalog of common tools (apt sources, apt packages, system install
 commands, and user install commands). Run
 `agw resource list --kind apt-package,system-install-command,user-install-command,apt-source` to see
-what is available (or filter to any single kind). Reference catalog entries by name in
-`vm_templates`, `admin.config`, and `agent_templates`. User-defined entries in your config override
-built-in entries with the same name.
+what is available (or filter to any single kind). Reference catalog entries by name from VM, admin,
+and agent templates. User-defined entries override built-in entries with the same name.
 
 ## VM Initialization
 

@@ -79,7 +79,7 @@ class Registry:
         Raises ``RuntimeError`` if the Registry has been finalized.
 
         Collisions (same ``(kind, name)`` added twice) are handled
-        explicitly (resource-manifests SDD, Phase 2):
+        explicitly (dual-path sources, ADR 0016):
 
         - operator row over operator row: ``ConfigError`` citing both
           declaration locations. The manifest loader catches duplicates

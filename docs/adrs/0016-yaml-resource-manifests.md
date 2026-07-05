@@ -67,7 +67,7 @@ Prompt-once is structural (one resolve per command, values threaded to env compo
 Operator resources are declared as YAML documents under `<config-dir>/resources/` (any file layout;
 the loader walks everything), using the familiar envelope -- `apiVersion: agentworks/v1`, `kind`
 (lower-kebab), `metadata` (framework-uniform: `name`, `description`), `spec` (kind-specific).
-Manifests are auto-loaded on every invocation, exactly like config: there is no `apply` step and no
+Manifests are auto-loaded whenever a command builds the registry: there is no `apply` step and no
 persisted registry state to reconcile. App-bundled built-in resources (the built-in secret backends)
 ship through the same loader with a `built-in` origin; future plugins reuse the mechanism.
 

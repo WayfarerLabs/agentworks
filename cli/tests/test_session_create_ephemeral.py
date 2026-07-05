@@ -624,12 +624,11 @@ def test_nested_creates_are_their_own_composition_units(
             vm_name="vm1",
         )
 
-    for seam, keys in seam_kwargs.items():
-        forbidden = keys & {"values", "registry", "secret_values", "secrets"}
-        assert not forbidden, (
-            f"{seam} received secret material through the seam: {forbidden}"
-        )
-    assert set(seam_kwargs) == {"create_workspace", "create_agent"}
+    # Allowlist, not denylist: the seam contract is CLI-shaped args and
+    # NOTHING else, so any smuggled kwarg (values, registry, resolved,
+    # parent_registry, ...) trips this regardless of its name.
+    assert seam_kwargs["create_workspace"] == {"name", "vm_name", "template_name"}
+    assert seam_kwargs["create_agent"] == {"name", "vm_name", "template"}
     db.close()
 
 

@@ -4,7 +4,9 @@ Date: 2026-06-06
 
 ## Status
 
-Accepted
+Accepted. The resolution mechanism ("env var, then prompt" as a hardcoded sourcing order) is
+superseded by ADR 0016's backend-chain model; the decision itself -- CLI-side injection, no VM-side
+secret storage -- stands.
 
 ## Context
 

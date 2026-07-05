@@ -28,9 +28,10 @@ the `tailscale-auth-key` secret or `git-token-<name>` secrets).
 ## Declaring resources: YAML manifests
 
 Declare resources as YAML files under `~/.config/agentworks/resources/` (next to `config.toml`).
-Every `*.yaml` / `*.yml` file in that directory tree is loaded automatically on every command --
-there is no `apply` step. File names and layout are entirely your choice: one file per resource, one
-per kind, or one for everything all work the same.
+Every `*.yaml` / `*.yml` file in that directory tree is loaded automatically whenever a command
+needs resources -- there is no `apply` step and no persisted state to reconcile. File names and
+layout are entirely your choice: one file per resource, one per kind, or one for everything all work
+the same.
 
 Each document uses a Kubernetes-style envelope:
 
@@ -48,7 +49,8 @@ spec:
 - `kind` is the lower-kebab resource kind (`secret`, `vm-template`, `session-template`,
   `git-credential`, `apt-package`, ...).
 - `metadata` carries the framework-uniform fields: `name` (required; `/` is not allowed in resource
-  names) and `description`.
+  names) and `description`. Two kinds are singletons: `admin-template` and `named-console-template`
+  accept only `name: default`.
 - `spec` carries the kind-specific fields -- the same fields, with the same validation, as the TOML
   sections (both sources decode through the same loaders, so they cannot drift).
 - Multiple documents per file are separated with `---`.
@@ -68,10 +70,10 @@ locations.
 Move resources over whenever you like:
 
 ```bash
-agw resource migrate secret                 # one kind
-agw resource migrate vm-template/dev       # one resource
-agw resource migrate --all                  # everything (explicit opt-in)
-agw resource migrate --all --dry-run        # see the plan first (--full for the diff)
+agw resource migrate secret            # one kind
+agw resource migrate vm-template/dev   # one resource
+agw resource migrate --all             # everything (explicit opt-in)
+agw resource migrate --all --dry-run   # see the plan first (--full for the diff)
 ```
 
 The migrator is incremental and repeat-safe: output is append-only (your existing YAML files are

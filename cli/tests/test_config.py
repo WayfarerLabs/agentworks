@@ -181,8 +181,12 @@ def test_git_credential_type_still_accepted(tmp_path: Path) -> None:
     cfg = load_config(config_file, warn_issues=False)
     assert cfg.git_credentials["gh"].type == "github"
     # The only issue is the Phase 5 deprecation nudge for the TOML
-    # resource section itself, not anything about the legacy key.
-    assert not [i for i in cfg.config_issues if "deprecated" not in i]
+    # resource section itself; the legacy key must not add anything
+    # (filtering on the section prefix keeps this pin sharp: a future
+    # "type is deprecated" issue would still trip it).
+    assert not [
+        i for i in cfg.config_issues if not i.startswith("[git_credentials.*]")
+    ]
 
 
 def test_git_credential_provider_wins_over_type(tmp_path: Path) -> None:
@@ -484,7 +488,9 @@ def test_claude_marketplaces_agent_template(tmp_path: Path) -> None:
     cfg = load_config(config_file, warn_issues=False)
     assert cfg.agent_templates["claude"].claude_marketplaces == ["https://github.com/example/tools#v1"]
     assert cfg.agent_templates["claude"].claude_plugins == ["my-plugin@my-marketplace"]
-    assert not [i for i in cfg.config_issues if "deprecated" not in i]
+    assert not [
+        i for i in cfg.config_issues if not i.startswith("[agent_templates.*]")
+    ]
 
 
 def test_claude_marketplaces_rejects_string(tmp_path: Path) -> None:

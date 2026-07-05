@@ -301,7 +301,8 @@ def load_catalog(config: Config) -> ResolvedCatalog:
     Cross-references (apt_sources in apt_packages) are validated.
     Production consumers read ``catalog_from_registry`` instead; this
     parse-level merge survives for the catalog parsing tests and is
-    slated for deletion in Phase 5 of the resource-manifests SDD along
+    deleted only when the TOML resource surface retires (a future
+    major release; ADR 0016's dual-path decision) along
     with the rest of the TOML resource surface.
     """
     builtin = load_builtin_catalog()

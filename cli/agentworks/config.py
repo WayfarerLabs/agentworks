@@ -1538,15 +1538,20 @@ def _warn_deprecated_resource_sections(
     for kind, section in KIND_SECTIONS.items():
         if section == "secret_backends" or section not in data:
             continue
-        # [named_console] is the one flat section; everything else nests
-        # ([secrets.<name>], [admin.config], ...).
-        display = f"[{section}]" if section == "named_console" else f"[{section}.*]"
+        # Display the header shape operators can actually grep for:
+        # [admin.config] and [named_console] are the two non-family
+        # sections; everything else nests names ([secrets.<name>]).
+        if section == "admin":
+            lead = "[admin.config] is a deprecated TOML resource section"
+        elif section == "named_console":
+            lead = "[named_console] is a deprecated TOML resource section"
+        else:
+            lead = f"[{section}.*] TOML resource sections are deprecated"
         issues.append(
-            f"{display} TOML resource sections are deprecated: declare "
-            f"resources as YAML manifests in the resources/ directory "
-            f"(see `agw resource sample {kind}`), or move existing ones "
-            f"with `agw resource migrate {kind}`. TOML keeps working "
-            f"until a future major release."
+            f"{lead}: declare resources as YAML manifests in the "
+            f"resources/ directory (see `agw resource sample {kind}`), or "
+            f"move existing ones with `agw resource migrate {kind}`. TOML "
+            f"keeps working until a future major release."
         )
 
 
@@ -1579,10 +1584,10 @@ def _load_secret_config(
     return SecretConfig(backends=tuple(backends_raw), declared_at=declared_at)
 
 
-# Secret resolution moved to ``agentworks.secrets.resolve``
-# (resource-manifests SDD, Phase 3): the chain can name manifest-declared
-# backends, which are unknowable at config-load time. The chain-name and
-# unreachable-secret checks relocated with it.
+# Secret resolution lives in ``agentworks.secrets.resolve`` (ADR 0016):
+# the chain can name manifest-declared backends, which are unknowable at
+# config-load time, so the chain-name and unreachable-secret checks run
+# at the composition boundary instead of here.
 
 
 EXPECTED_TOP_LEVEL_KEYS = {

@@ -4,7 +4,8 @@ Date: 2026-06-13
 
 ## Status
 
-Accepted
+Accepted. Where this document describes how the CLI sources secret values, that mechanism is
+superseded by ADR 0016's backend-chain model; the transport decision itself stands.
 
 ## Context
 

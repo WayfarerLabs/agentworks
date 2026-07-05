@@ -61,6 +61,21 @@ def test_each_present_resource_section_warns_once(tmp_path: Path) -> None:
     assert len([i for i in issues if i.startswith("[named_console]")]) == 1
 
 
+def test_admin_warning_names_the_greppable_header(tmp_path: Path) -> None:
+    """[admin.*] is not a header an operator can grep for; the warning
+    names [admin.config], the section shape configs actually contain."""
+    cfg = _config(
+        tmp_path,
+        """
+        [admin.config]
+        shell = "zsh"
+        """,
+    )
+    (issue,) = _deprecation_issues(cfg)
+    assert issue.startswith("[admin.config]")
+    assert "agw resource migrate admin-template" in issue
+
+
 def test_warning_names_the_commands(tmp_path: Path) -> None:
     cfg = _config(
         tmp_path,
