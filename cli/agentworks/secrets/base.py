@@ -71,15 +71,16 @@ class SecretBackendDecl:
     (``would_attempt``, ``describe_lookup``, ``resolve``) is a method
     here, and only these methods call the provider API. ``name`` is the
     only identity runtime surfaces use; ``provider`` names the raw
-    capability (a field, not an identity); ``config`` carries the
-    provider-specific fields, validated by the provider at manifest
-    decode. Multiple backends may share one provider.
+    capability (a field, not an identity); ``provider_config`` carries
+    the provider-owned blob (``spec.provider_config`` in the manifest),
+    validated by the provider at manifest decode -- the rest of the spec
+    is provider-agnostic. Multiple backends may share one provider.
     """
 
     name: str
     provider: str
     description: str = ""
-    config: dict[str, object] = field(default_factory=dict)
+    provider_config: dict[str, object] = field(default_factory=dict)
     declared_at: SourceLocation = field(default_factory=synthesized)
     origin: Origin | None = None
     references: tuple[ReferenceEntry, ...] = ()
@@ -135,7 +136,7 @@ class SecretBackendDecl:
         mapping = self.mapping_for(secret)
         if mapping is False:
             return False
-        return self._capability().would_attempt(self.config, secret, mapping)
+        return self._capability().would_attempt(self.provider_config, secret, mapping)
 
     def describe_lookup(self, secret: SecretDecl) -> str | None:
         """Human-readable identifier this backend would use (env var
@@ -144,7 +145,7 @@ class SecretBackendDecl:
         mapping = self.mapping_for(secret)
         if mapping is False:
             return None
-        return self._capability().describe_lookup(self.config, secret, mapping)
+        return self._capability().describe_lookup(self.provider_config, secret, mapping)
 
     def resolve(self, secrets: list[SecretDecl]) -> dict[str, str]:
         """Batch-resolve through the provider. Callers pre-filter by
@@ -162,14 +163,14 @@ class SecretBackendDecl:
         ]
         if not wants:
             return {}
-        return self._capability().batch_get(self.config, wants)
+        return self._capability().batch_get(self.provider_config, wants)
 
     def validate_config(self) -> None:
         """Re-run the provider's config schema over this backend's
         config (decode already ran it for manifest-declared backends;
         this covers hand-published rows and future non-manifest
         publishers). Raises ``ConfigError`` on schema violations."""
-        self._capability().validate_config(self.name, self.config)
+        self._capability().validate_config(self.name, self.provider_config)
 
 
 DEFAULT_BACKEND_CHAIN: tuple[str, ...] = ("env-var", "prompt")

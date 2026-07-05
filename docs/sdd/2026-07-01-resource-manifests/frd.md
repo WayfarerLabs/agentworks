@@ -262,8 +262,11 @@ anyway.
   as read-only `built-in` rows (error miss policy, not manifest-declarable) so references to them
   validate uniformly and they are visible in `agw resource list`.
 - **`secret-backend`** (resource, manifest-declarable): a named instantiation of a provider.
-  `spec.provider` (required) references a `secret-provider` by name; the rest of `spec` is
-  provider-specific configuration validated by the provider capability, not the framework.
+  `spec.provider` (required) references a `secret-provider` by name; provider-owned configuration
+  nests under `spec.provider_config`, an opaque blob validated by the provider capability, not the
+  framework (pattern established 2026-07-05: everything outside `provider_config` is
+  provider-agnostic and framework-validated -- unknown top-level spec fields error with a pointer at
+  the nesting rule).
 
 ```yaml
 apiVersion: agentworks/v1
@@ -273,7 +276,8 @@ metadata:
   description: Work 1Password vault
 spec:
   provider: onepassword
-  vault: Work
+  provider_config:
+    vault: Work
 ```
 
 (Illustrative: the `onepassword` provider is future work. Today's built-in providers accept no

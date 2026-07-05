@@ -115,12 +115,35 @@ def test_builtin_provider_rejects_config(tmp_path: Path) -> None:
           name: my-env
         spec:
           provider: env-var
-          prefix: NOPE_
+          provider_config:
+            prefix: NOPE_
         """,
     )
     with pytest.raises(ConfigError, match="accepts no configuration") as exc:
         load_manifests(tmp_path / "resources")
     assert "res.yaml:2" in str(exc.value)
+
+
+def test_provider_fields_must_nest_under_provider_config(tmp_path: Path) -> None:
+    """The spec outside provider_config is provider-agnostic: a stray
+    top-level field errors with a pointer at the nesting rule, before
+    any provider is consulted."""
+    _manifest(
+        tmp_path,
+        """
+        apiVersion: agentworks/v1
+        kind: secret-backend
+        metadata:
+          name: my-env
+        spec:
+          provider: env-var
+          prefix: NOPE_
+        """,
+    )
+    with pytest.raises(
+        ConfigError, match="goes under spec.provider_config"
+    ):
+        load_manifests(tmp_path / "resources")
 
 
 def test_reserved_builtin_backend_names(tmp_path: Path) -> None:
@@ -156,7 +179,8 @@ def test_config_validation_at_decode(
           name: broken
         spec:
           provider: test-only
-          bogus: 1
+          provider_config:
+            bogus: 1
         """,
     )
     with pytest.raises(ConfigError, match="unknown test-only provider field") as exc:
@@ -177,7 +201,8 @@ def test_config_defaults_and_instantiation(
           description: test-only backend
         spec:
           provider: test-only
-          endpoint: https://example.test
+          provider_config:
+            endpoint: https://example.test
         """,
     )
     config = _config(
@@ -190,7 +215,7 @@ def test_config_defaults_and_instantiation(
     registry = build_registry(config)
     row = registry.lookup("secret-backend", "fake-store")
     assert isinstance(row, SecretBackendDecl)
-    assert row.config == {"endpoint": "https://example.test", "timeout": 30}
+    assert row.provider_config == {"endpoint": "https://example.test", "timeout": 30}
 
     # End-to-end through the door: the backend threads its validated
     # config into the provider on resolve.
@@ -242,7 +267,8 @@ def test_multiple_backends_share_a_provider(
           name: store-a
         spec:
           provider: test-only
-          endpoint: https://a.test
+          provider_config:
+            endpoint: https://a.test
         ---
         apiVersion: agentworks/v1
         kind: secret-backend
@@ -250,7 +276,8 @@ def test_multiple_backends_share_a_provider(
           name: store-b
         spec:
           provider: test-only
-          endpoint: https://b.test
+          provider_config:
+            endpoint: https://b.test
         """,
     )
     config = _config(
@@ -263,7 +290,7 @@ def test_multiple_backends_share_a_provider(
     backends = active_backends(config, build_registry(config))
     assert [b.name for b in backends] == ["store-a", "store-b"]
     # Independent configs per backend, one shared provider.
-    assert [b.config["endpoint"] for b in backends] == [
+    assert [b.provider_config["endpoint"] for b in backends] == [
         "https://a.test",
         "https://b.test",
     ]

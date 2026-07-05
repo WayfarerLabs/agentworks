@@ -103,8 +103,10 @@ Three layers, one rule each:
   is the generic term for a raw capability across domains -- VM providers and git credential
   providers follow the same pattern -- so anything secret-specific spells it out.)
 - A **backend** is a resource of kind `secret-backend`: a named instance of a provider, optionally
-  with configuration (a future `onepassword` provider could back `op-work` and `op-personal`
-  backends pointed at different vaults). All secret operations go through backends.
+  with configuration nested under `spec.provider_config` -- an opaque blob the provider validates,
+  keeping the rest of the spec provider-agnostic (a future `onepassword` provider could back
+  `op-work` and `op-personal` backends pointed at different vaults). All secret operations go
+  through backends.
 - The **chain** is a setting: `[secret_config].backends` in `config.toml` lists the active backends
   in precedence order (default `["env-var", "prompt"]`). Declared backends absent from the chain are
   dormant.

@@ -210,7 +210,8 @@ resolution (a loop; validate_chain already ran at build_registry):
 ```
 
 - `SecretBackendDecl` (the `secret-backend` Resource) carries `name`, `description`, `provider`, and
-  the provider-specific config mapping. Its `referenced_resources()` emits one reference to
+  `provider_config` -- the provider-owned blob nested under `spec.provider_config` in the manifest,
+  so the rest of the spec is provider-agnostic. Its `referenced_resources()` emits one reference to
   `("secret-provider", provider)`.
 - **Neither built-in provider accepts configuration** (non-empty backend config is a validation
   error from each schema); `env_var_name_for` keeps its fixed `AW_SECRET_` convention. The

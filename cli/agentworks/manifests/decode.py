@@ -213,19 +213,30 @@ def _decode_secret_backend(doc: Document, spec: dict[str, object], issues: list[
     provider = spec.pop("provider", None)
     if not isinstance(provider, str) or not provider:
         raise ConfigError("secret-backend requires spec.provider")
-    # Remaining spec keys are the provider-specific config. When the
-    # provider is registered, validate now (the error carries this
+    # Provider-owned configuration nests under spec.provider_config -- an
+    # opaque blob the named provider validates -- so the rest of the spec
+    # stays provider-agnostic and framework-validated. When the provider
+    # is registered, validate the blob now (the error carries this
     # document's location); when it isn't, defer so the framework's
     # reference miss policy reports the unknown provider uniformly.
+    raw_config = spec.pop("provider_config", {})
+    if spec:
+        extras = ", ".join(sorted(spec))
+        raise ConfigError(
+            f"unknown secret-backend spec field(s): {extras}; "
+            "provider-specific configuration goes under spec.provider_config"
+        )
+    if not isinstance(raw_config, dict):
+        raise ConfigError("spec.provider_config must be a mapping")
     known = SECRET_PROVIDER_REGISTRY.get(provider)
-    config = dict(spec)
+    provider_config = dict(raw_config)
     if known is not None:
-        config = dict(known.validate_config(doc.name, config))
+        provider_config = dict(known.validate_config(doc.name, provider_config))
     return SecretBackendDecl(
         name=doc.name,
         provider=provider,
         description=description,
-        config=config,
+        provider_config=provider_config,
         declared_at=doc.location,
     )
 

@@ -417,6 +417,14 @@ only TOML-resource reader in the tree; CI green; reviewer-approved.
 (Recorded as they happen, per SDD convention. Deviations from FRD/HLA get an entry here and an
 artifact update.)
 
+- **2026-07-05: provider_config nesting (maintainer ruling, pre-lock).** Provider-owned
+  configuration on exposed resources nests under one `spec.provider_config` key (an opaque blob the
+  provider validates) instead of spreading across the spec tail; unknown top-level spec fields error
+  with a pointer at the rule. Cheap now because no config-bearing provider ships; the test-only
+  provider, the illustrative sample, and `SecretBackendDecl.config` (renamed `provider_config`)
+  carry it. Kind-owned fields (git-credential's `org`) deliberately stay top-level. ADR 0016 records
+  the pattern. Also extended `--all` to `resource sample` and aggregated the deprecation warnings
+  behind `--no-deprecations` in this same pre-lock batch.
 - **2026-07-05: kind/name display syntax unified on '/' (maintainer ruling, pre-lock).** The older
   inspection surfaces used `kind:name` (describe header, `--names-only`, auto-declared descriptions,
   references, used-by lines) while the migrate surfaces used `kind/name`. Everything now uses `/` --

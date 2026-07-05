@@ -29,7 +29,7 @@ The general pattern, stated once:
   optionally with config. "Exposed" means it exposes the capability -- the resource is the
   capability's public face -- not merely "visible in the registry" (every resource is visible). A
   plugin (or operator) declares these like any other resource; the resource's kind delegates its
-  provider-specific spec tail to the named capability's `validate_config` at decode. One raw
+  `spec.provider_config` blob to the named capability's `validate_config` at decode. One raw
   capability may back many exposed resources.
 - **Exposed resources are the door**: ALL runtime access to a capability goes through one of its
   exposed resources. The capability's invocation API is domain-owned and visible only to its exposed
@@ -96,7 +96,8 @@ documented as a naming choice, never relied on in code. Two onepassword backends
 `op-personal`) get independent mappings, opt-outs, and describe rows.
 
 Schema delegation follows Part 1's pattern: `secret-backend` decode pops `provider` and hands the
-spec tail to the named capability's `validate_config` (already implemented; unchanged here).
+`spec.provider_config` blob to the named capability's `validate_config` (pattern established
+2026-07-05: provider-owned config nests; the rest of the spec is provider-agnostic).
 
 ## Resolution is a loop, not an object
 
