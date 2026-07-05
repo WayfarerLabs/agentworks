@@ -17,7 +17,7 @@ registry, is identified by `kind` + `name`, and can be inspected uniformly:
 ```bash
 agw resource list                       # everything, all kinds and origins
 agw resource list --kind secret         # one kind
-agw resource describe vm-template dev   # one resource, with references and usage
+agw resource describe vm-template/dev   # one resource, with references and usage
 ```
 
 Resources come from three origins: **operator-declared** (you wrote them, in YAML or TOML),
@@ -118,7 +118,7 @@ backend would look up each secret; `agw secret describe <name>` shows one secret
 
 ```bash
 agw resource list --origin operator     # what you have declared, either source
-agw resource describe secret npm-token  # where it's referenced, what uses it
+agw resource describe secret/npm-token  # where it's referenced, what uses it
 agw doctor                              # health: would every secret resolve?
 ```
 

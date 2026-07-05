@@ -372,7 +372,7 @@ def render_resource_description(desc: ResourceDescription) -> None:
     Mirrors the shape of ``agw secret describe`` minus the
     secret-specific sections (backend mappings, resolution preview).
     """
-    output.info(f"Resource: {desc.kind}:{desc.name}")
+    output.info(f"Resource: {desc.kind}/{desc.name}")
     if desc.description:
         output.detail(f"Description: {desc.description}")
     else:
@@ -392,7 +392,7 @@ def render_resource_description(desc: ResourceDescription) -> None:
             if key in seen:
                 continue
             seen.add(key)
-            src = f"{entry.source[0]}:{entry.source[1]}"
+            src = f"{entry.source[0]}/{entry.source[1]}"
             output.detail(f"- {src} -- {entry.usage}")
 
     if desc.used_by is not None:
@@ -408,4 +408,4 @@ def render_resource_description(desc: ResourceDescription) -> None:
                 grouped.setdefault(ref.instance_kind, []).append(ref.instance_name)
             for instance_kind in grouped:
                 for instance_name in grouped[instance_kind]:
-                    output.detail(f"- {instance_kind}:{instance_name}")
+                    output.detail(f"- {instance_kind}/{instance_name}")

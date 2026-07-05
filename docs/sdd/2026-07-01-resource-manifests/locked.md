@@ -33,6 +33,9 @@ plan checkbox except Phase 6's is flipped.
 
 Two deliberate breaking changes, both `!`-flagged for release-please: resource names may not contain
 `/` (FRD R13, enforced at `Registry.add`), and `agw resource migrate` requires selectors or `--all`.
+Pre-lock additions: bare "provider" scoped to `SECRET_PROVIDER_REGISTRY`, and the `kind/name`
+display syntax unified on `/` everywhere (including `resource describe KIND/NAME`, a third breaking
+CLI change; ADR 0016 records the display-syntax rule).
 
 ### Permanent homes (the SDD-not-permanent promotions)
 

@@ -23,12 +23,12 @@ DYNAMIC_SNIPPETS: dict[str, str] = {
     ),
     "ws_templates": (
         "(agw resource list --kind workspace-template --names-only 2>$null"
-        " | ForEach-Object { ($_ -split ':', 2)[1] }"
+        " | ForEach-Object { ($_ -split '/', 2)[1] }"
         ' | Where-Object { $_ -like "$wordToComplete*" })'
     ),
     "git_credentials": (
         "(agw resource list --kind git-credential --names-only 2>$null"
-        " | ForEach-Object { ($_ -split ':', 2)[1] }"
+        " | ForEach-Object { ($_ -split '/', 2)[1] }"
         ' | Where-Object { $_ -like "$wordToComplete*" })'
     ),
     "sessions": (
@@ -45,17 +45,17 @@ DYNAMIC_SNIPPETS: dict[str, str] = {
     ),
     "session_templates": (
         "(agw resource list --kind session-template --names-only 2>$null"
-        " | ForEach-Object { ($_ -split ':', 2)[1] }"
+        " | ForEach-Object { ($_ -split '/', 2)[1] }"
         ' | Where-Object { $_ -like "$wordToComplete*" })'
     ),
     "vm_templates": (
         "(agw resource list --kind vm-template --names-only 2>$null"
-        " | ForEach-Object { ($_ -split ':', 2)[1] }"
+        " | ForEach-Object { ($_ -split '/', 2)[1] }"
         ' | Where-Object { $_ -like "$wordToComplete*" })'
     ),
     "agent_templates": (
         "(agw resource list --kind agent-template --names-only 2>$null"
-        " | ForEach-Object { ($_ -split ':', 2)[1] }"
+        " | ForEach-Object { ($_ -split '/', 2)[1] }"
         ' | Where-Object { $_ -like "$wordToComplete*" })'
     ),
     "secrets": (
@@ -64,19 +64,16 @@ DYNAMIC_SNIPPETS: dict[str, str] = {
     ),
     "resource_kinds": (
         "(agw resource list --names-only 2>$null |"
-        " ForEach-Object { ($_ -split ':', 2)[0] } | Sort-Object -Unique |"
+        " ForEach-Object { ($_ -split '/', 2)[0] } | Sort-Object -Unique |"
         ' Where-Object { $_ -like "$wordToComplete*" })'
     ),
-    "resource_names": (
-        "& { $k = $tokens[$tokenCount - 2];"
-        " if ($k) {"
-        " agw resource list --kind $k --names-only 2>$null"
-        " | ForEach-Object { ($_ -split ':', 2)[1] }"
-        ' | Where-Object { $_ -like "$wordToComplete*" } } }'
+    "resource_refs": (
+        "(agw resource list --names-only 2>$null |"
+        ' Where-Object { $_ -like "$wordToComplete*" })'
     ),
     "migrate_selectors": (
         "(agw resource list --origin operator --names-only 2>$null"
-        " | ForEach-Object { $p = $_ -split ':', 2; $p[0]; \"$($p[0])/$($p[1])\" }"
+        " | ForEach-Object { ($_ -split '/', 2)[0]; $_ }"
         " | Sort-Object -Unique |"
         ' Where-Object { $_ -like "$wordToComplete*" })'
     ),

@@ -168,10 +168,10 @@ def test_cli_describe_renders_header_and_usage_sections(
     monkeypatch.setattr("agentworks.config.CONFIG_PATH", cfg_file)
 
     result = CliRunner().invoke(
-        app, ["resource", "describe", "secret", "tailscale-auth-key"]
+        app, ["resource", "describe", "secret/tailscale-auth-key"]
     )
     assert result.exit_code == 0, result.stdout
-    assert "Resource: secret:tailscale-auth-key" in result.stdout
+    assert "Resource: secret/tailscale-auth-key" in result.stdout
     assert "Origin:" in result.stdout
     assert "Description:" in result.stdout
     assert "Referenced by:" in result.stdout
@@ -189,7 +189,7 @@ def test_cli_describe_unknown_name_exits_nonzero(
     monkeypatch.setattr("agentworks.config.CONFIG_PATH", cfg_file)
 
     result = CliRunner().invoke(
-        app, ["resource", "describe", "secret", "no-such-secret"]
+        app, ["resource", "describe", "secret/no-such-secret"]
     )
     assert result.exit_code != 0
 
@@ -206,6 +206,6 @@ def test_cli_describe_unknown_kind_exits_nonzero(
     monkeypatch.setattr("agentworks.config.CONFIG_PATH", cfg_file)
 
     result = CliRunner().invoke(
-        app, ["resource", "describe", "no_such_kind", "name"]
+        app, ["resource", "describe", "no_such_kind/name"]
     )
     assert result.exit_code != 0

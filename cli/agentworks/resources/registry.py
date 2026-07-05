@@ -169,7 +169,7 @@ class Registry:
             )
         raise ConfigError(
             f"publisher ordering conflict: {incoming.variant} row published "
-            f"over {existing_variant} row for {kind}:{name}"
+            f"over {existing_variant} row for {kind}/{name}"
         )
 
     # -- Finalize phase ------------------------------------------------
@@ -356,7 +356,7 @@ class Registry:
                 raise ConfigError(
                     f"{kind} kind only auto-declares the reserved name(s) "
                     f"{sorted(allowed)!r}; got {name!r} "
-                    f"(required by {first.source[0]}:{first.source[1]})"
+                    f"(required by {first.source[0]}/{first.source[1]})"
                 )
             synthesized = kind_handler.synthesize(refs)
             self._resources.setdefault(kind, {})[name] = synthesized
@@ -481,7 +481,7 @@ def _polish_auto_declared_description(resource: Any, kind: str) -> Any:
         distinct_other = {entry.source for entry in references} - {first.source}
         suffix = f" (and {len(distinct_other)} more)" if distinct_other else ""
         description = (
-            f"(auto) {first.usage} for {first.source[0]}:{first.source[1]}{suffix}"
+            f"(auto) {first.usage} for {first.source[0]}/{first.source[1]}{suffix}"
         )
     return dataclasses.replace(resource, description=description)
 
@@ -547,7 +547,7 @@ def _detect_cycles(resources: dict[str, dict[str, Any]]) -> None:
                 target_color = color.get(target, WHITE)
                 if target_color == GRAY:
                     cycle = path[path.index(target):] + [target]
-                    cycle_path = " -> ".join(f"{k}:{n}" for k, n in cycle)
+                    cycle_path = " -> ".join(f"{k}/{n}" for k, n in cycle)
                     raise ConfigError(
                         f"resource reference cycle detected: {cycle_path}"
                     )

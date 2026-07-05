@@ -34,7 +34,7 @@ def format_origin_line(origin: Origin | None) -> str:
     if origin.variant == "auto-declared":
         source = origin.source
         if isinstance(source, tuple) and len(source) == 2:
-            return f"auto-declared ({source[0]}:{source[1]})"
+            return f"auto-declared ({source[0]}/{source[1]})"
         return "auto-declared"
     if origin.variant == "built-in":
         source = origin.source

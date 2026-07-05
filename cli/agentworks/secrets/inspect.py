@@ -380,7 +380,7 @@ def render_secret_description(desc: SecretDescription) -> None:
             if key in seen:
                 continue
             seen.add(key)
-            src = f"{entry.source[0]}:{entry.source[1]}"
+            src = f"{entry.source[0]}/{entry.source[1]}"
             output.detail(f"- {src} -- {entry.usage}")
 
     # --- Used by (dynamic, per current config) ---
@@ -405,7 +405,7 @@ def render_secret_description(desc: SecretDescription) -> None:
                 grouped.setdefault(ref.instance_kind, []).append(ref.instance_name)
             for instance_kind in grouped:
                 for instance_name in grouped[instance_kind]:
-                    output.detail(f"- {instance_kind}:{instance_name}")
+                    output.detail(f"- {instance_kind}/{instance_name}")
 
     # --- Backend mappings ---
     output.info("")

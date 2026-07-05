@@ -109,7 +109,7 @@ def test_auto_declared_secret_shows_first_requirement_source(
     # requirement's usage text + source. Reads as "what this is for,
     # who's asking". No "(and N more)" suffix when there's only one
     # source.
-    assert desc.description == "(auto) the API_KEY env var for admin-template:default"
+    assert desc.description == "(auto) the API_KEY env var for admin-template/default"
 
 
 def test_auto_declared_description_suffix_counts_other_sources(
@@ -144,8 +144,8 @@ def test_auto_declared_description_suffix_counts_other_sources(
     registry = build_registry(config)
     desc = describe_secret(config, registry, "shared")
 
-    # Two distinct sources require this secret: admin-template:default
-    # and vm-template:azure-prod. Whichever the framework walks first
+    # Two distinct sources require this secret: admin-template/default
+    # and vm-template/azure-prod. Whichever the framework walks first
     # is named in the description (publish order, not asserted here);
     # the second contributes to "(and 1 more)". The two references
     # inside azure-prod's env block share a source and do not inflate
@@ -156,8 +156,8 @@ def test_auto_declared_description_suffix_counts_other_sources(
     assert desc.description.endswith("(and 1 more)")
     # First-named source is one of the two requiring templates.
     assert (
-        " for admin-template:default " in desc.description
-        or " for vm-template:azure-prod " in desc.description
+        " for admin-template/default " in desc.description
+        or " for vm-template/azure-prod " in desc.description
     )
 
 
@@ -490,7 +490,7 @@ def test_render_emits_header_usages_mappings_preview(
     assert out.index("Description:") < out.index("Origin:")
     # References (inbound)
     assert "Referenced by:" in out
-    assert "admin-template:default" in out
+    assert "admin-template/default" in out
     assert "the ADMIN_KEY env var" in out
     # Backend mappings
     assert "Backend mappings:" in out
@@ -606,7 +606,7 @@ def test_render_emits_used_by_section_when_populated(
     out = capsys.readouterr().out
 
     assert "Used by (per current config):" in out
-    assert "session:sess-1" in out
+    assert "session/sess-1" in out
     # Section ordering: Referenced by -> Used by -> Backend mappings.
     assert out.index("Referenced by:") < out.index("Used by (per current config):")
     assert out.index("Used by (per current config):") < out.index("Backend mappings:")

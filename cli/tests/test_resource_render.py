@@ -38,7 +38,7 @@ def test_format_origin_line_operator_declared_without_file_returns_bare_label() 
 
 def test_format_origin_line_auto_declared_with_source() -> None:
     origin = Origin.auto_declared(source=("vm-template", "default"))
-    assert format_origin_line(origin) == "auto-declared (vm-template:default)"
+    assert format_origin_line(origin) == "auto-declared (vm-template/default)"
 
 
 def test_format_origin_line_built_in_with_source() -> None:

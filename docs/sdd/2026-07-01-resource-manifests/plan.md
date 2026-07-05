@@ -417,6 +417,16 @@ only TOML-resource reader in the tree; CI green; reviewer-approved.
 (Recorded as they happen, per SDD convention. Deviations from FRD/HLA get an entry here and an
 artifact update.)
 
+- **2026-07-05: kind/name display syntax unified on '/' (maintainer ruling, pre-lock).** The older
+  inspection surfaces used `kind:name` (describe header, `--names-only`, auto-declared descriptions,
+  references, used-by lines) while the migrate surfaces used `kind/name`. Everything now uses `/` --
+  which the R13 ban makes the only parse-safe separator (`:` remains legal in pass-through names) --
+  including `resource describe`, which takes a single `KIND/NAME` token matching migrate's grammar
+  (breaking for the three-week-old two-token form). Live-instance lines in Used by: sections share
+  the display syntax; they are still not kinds (vocabulary law unchanged; `instance_kind` stays),
+  the section context carries the distinction. ADR 0016 records the rule; completions moved to `-F/`
+  splitters and `resource_names` was replaced by a `resource_refs` completer whose candidates are
+  the describe tokens verbatim.
 - **2026-07-05: whole-config migration requires --all; dry-run is summary-first (maintainer
   refinement).** A bare `agw resource migrate` errors with a hint instead of migrating everything --
   "migrate everything" is an explicit `--all` opt-in (mutually exclusive with selectors), and the

@@ -54,7 +54,7 @@ def resource_list(
         False,
         "--names-only",
         help=(
-            "Emit one kind:name per line (no header, no formatting). "
+            "Emit one kind/name per line (no header, no formatting). "
             "Used by shell completion."
         ),
     ),
@@ -103,22 +103,28 @@ def resource_list(
     # cli-conventions ``--names-only`` rule, render-only work is skipped:
     # ``list_resources`` does no I/O (pure dict + attribute access over
     # already-published Resources), so the cost up to here is negligible.
-    # The cross-kind divergence from the rule: we emit ``kind:name``
+    # The cross-kind divergence from the rule: we emit ``kind/name``
     # rather than bare ``name`` because two kinds can publish resources
-    # with the same name; completion snippets ``awk -F:`` the prefix.
-    # Empty result emits nothing (no friendly "No resources" message),
-    # matching the rule so completion candidate sets stay clean.
+    # with the same name; completion snippets ``awk -F/`` the prefix.
+    # ``/`` is the parse-safe separator: it cannot appear in names
+    # (enforced at Registry.add), while ``:`` can. Empty result emits
+    # nothing (no friendly "No resources" message), matching the rule so
+    # completion candidate sets stay clean.
     if names_only:
         for row in listing.rows:
-            output.info(f"{row.kind}:{row.name}")
+            output.info(f"{row.kind}/{row.name}")
         return
     render_resource_table(listing)
 
 
 @resource_app.command("describe")
 def resource_describe(
-    kind: str = typer.Argument(..., help="Resource kind (e.g. secret, vm-template)."),
-    name: str = typer.Argument(..., help="Resource name within the kind."),
+    ref: Annotated[
+        str,
+        typer.Argument(
+            help="Resource as KIND/NAME (e.g. secret/npm-token, vm-template/dev).",
+        ),
+    ],
 ) -> None:
     """Show the full per-resource detail view.
 
@@ -132,10 +138,21 @@ def resource_describe(
     """
     from agentworks.bootstrap import build_registry
     from agentworks.config import load_config
+    from agentworks.errors import ValidationError
     from agentworks.resources.inspect import (
         describe_resource,
         render_resource_description,
     )
+
+    # One KIND/NAME grammar across the resource group (same token shape
+    # as `resource migrate` selectors); '/' cannot appear in names, so
+    # the first-slash split is unambiguous.
+    kind, slash, name = ref.partition("/")
+    if not slash or not name:
+        raise ValidationError(
+            f"expected KIND/NAME, got {ref!r}",
+            hint="Example: agw resource describe secret/npm-token",
+        )
 
     config = load_config()
     registry = build_registry(config)

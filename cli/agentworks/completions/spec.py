@@ -94,14 +94,14 @@ class CommandSpec:
 #                        auto-declared names like tailscale-auth-key
 #                        complete the same as operator-declared ones)
 #   "resource_kinds"  -> agw resource list --names-only
-#                        (kind:name per line; the snippet awk-splits the
+#                        (kind/name per line; the snippet splits the
 #                        prefix and `sort -u`'s to get distinct kinds)
-#   "resource_names"  -> agw resource list --kind <prev> --names-only
-#                        (same kind:name stream, scoped by the typed kind;
-#                        the snippet awk-splits to get just the name)
+#   "resource_refs"   -> agw resource list --names-only
+#                        (kind/name per line, verbatim -- the candidate
+#                        IS the token for `resource describe KIND/NAME`)
 #   "migrate_selectors" -> agw resource list --origin operator --names-only
-#                        (a NEW cross-product completer for `resource
-#                        migrate`: each kind:name row emits BOTH the bare
+#                        (a cross-product completer for `resource
+#                        migrate`: each kind/name row emits BOTH the bare
 #                        kind and the kind/name selector form, sort -u'd.
 #                        Operator-origin includes YAML-declared rows that
 #                        are already migrated; selecting one produces the
@@ -123,13 +123,15 @@ class CommandSpec:
 # per kind. `resource_kinds` uses `sort -u` because it aggregates the
 # kind prefix across ALL rows in the full listing, where duplicates
 # are the norm (one row per resource, many resources per kind).
+# `/` is the parse-safe separator for the kind/name stream: it cannot
+# appear in resource names (enforced at Registry.add), while `:` can.
 #
 # The ``--names-only`` flag is the explicit completion contract:
 # every list command that backs a completer emits one name per line
 # when the flag is passed, in the same order as its table rows.
 # See ``.claude/rules/cli-conventions.md`` for the broader convention.
 # ``agw resource list`` is the deliberate cross-kind divergence: it
-# emits ``kind:name`` per line (the prefix is load-bearing -- two kinds
+# emits ``kind/name`` per line (the prefix is load-bearing -- two kinds
 # can publish resources with the same name), and the completers slice
 # the prefix off shell-side. The convention's "one name per line"
 # spirit is preserved (one line per resource, no header or formatting).
@@ -233,10 +235,10 @@ DYNAMIC_COMPLETIONS: dict[tuple[str, str], str] = {
 
     # Secret inspection
     ("secret.describe", "name"): "secrets",
-    # Resource inspection (Phase 2c)
+    # Resource inspection (Phase 2c; describe took the single KIND/NAME
+    # grammar in the display-syntax unification)
     ("resource.list", "kind"): "resource_kinds",
-    ("resource.describe", "kind"): "resource_kinds",
-    ("resource.describe", "name"): "resource_names",
+    ("resource.describe", "ref"): "resource_refs",
     # Resource migration + authoring (Phase 4). `resource sample`'s kind
     # argument is a static click.Choice (SAMPLE_KINDS), so it completes
     # via ParamSpec.choices rather than a dynamic completer.

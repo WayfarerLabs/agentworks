@@ -528,13 +528,15 @@ backend mappings, template inheritance chains, resolution previews -- reach for 
 | Command                                | Description                                                          |
 | -------------------------------------- | -------------------------------------------------------------------- |
 | `agw resource list`                    | List every resource in the registry across all kinds                 |
-| `agw resource describe <kind> <name>`  | Show the per-resource detail view (header + Referenced by + Used by) |
+| `agw resource describe KIND/NAME`      | Show the per-resource detail view (header + Referenced by + Used by) |
 | `agw resource migrate [SELECTOR]...`   | Move resources from config.toml to YAML manifests                    |
 | `agw resource sample [KIND] [--write]` | Print (or save) commented sample resource manifests                  |
 
 `resource list` accepts `--kind <csv>` (e.g. `--kind secret,vm-template`) and `--origin <variant>`
-where variant is `operator`, `auto`, or `builtin`. `--names-only` emits `kind:name` per line and
-backs shell completion.
+where variant is `operator`, `auto`, or `builtin`. `--names-only` emits `kind/name` per line and
+backs shell completion (`/` cannot appear in resource names, so the split is unambiguous). The
+`kind/name` token is the one grammar across the resource group: `resource describe secret/npm-token`
+and `resource migrate vm-template/dev` take the same shape.
 
 `resource migrate` is a recurring, incremental mover -- run it any time you want to move resources
 (or a subset) from TOML to YAML manifests. Selectors scope the run: `KIND` one kind, `KIND/NAME` one

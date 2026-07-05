@@ -75,7 +75,14 @@ persisted registry state to reconcile. App-bundled built-in resources (the built
 ship through the same loader with a `built-in` origin; future plugins reuse the mechanism.
 
 Resource names may not contain `/` (reserved for `KIND/NAME` selectors and per-resource manifest
-filenames), enforced source-independently at `Registry.add`.
+filenames), enforced source-independently at `Registry.add`. That ban makes `kind/name` the one
+parse-safe display syntax, and it is uniform everywhere a typed name appears: CLI tokens
+(`resource describe secret/npm-token`, `resource migrate vm-template/dev`), rendered output
+(headers, references, auto-declared descriptions, `--names-only`), and the live-instance lines in
+`Used by:` sections (`session/foo`). Lifecycle entities (VMs, workspaces, agents, sessions,
+consoles) are NOT registry kinds -- the vocabulary law is unchanged, and code keeps calling their
+type `instance_kind` -- but they share the display syntax: the section context, not the punctuation,
+tells the reader whether a pair is a config resource or a live instance.
 
 ### Dual-path: deprecate, don't break
 

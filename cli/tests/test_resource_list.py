@@ -272,7 +272,7 @@ def test_description_populated_for_operator_and_auto_resources(tmp_path: Path) -
 # -- CLI surface -----------------------------------------------------------
 
 
-def test_cli_names_only_emits_kind_colon_name_per_line(
+def test_cli_names_only_emits_kind_slash_name_per_line(
     tmp_path: Path, monkeypatch
 ) -> None:
     """``agw resource list --names-only`` is the source for shell
@@ -298,11 +298,11 @@ def test_cli_names_only_emits_kind_colon_name_per_line(
     lines = [line for line in result.stdout.splitlines() if line]
     assert lines, "expected at least one resource row"
     for line in lines:
-        assert ":" in line
-    # Spot-check known framework defaults appear (vm-template:default
+        assert "/" in line
+    # Spot-check known framework defaults appear (vm-template/default
     # operator-declared; tailscale-auth-key auto-declared).
-    assert "vm-template:default" in lines
-    assert "secret:tailscale-auth-key" in lines
+    assert "vm-template/default" in lines
+    assert "secret/tailscale-auth-key" in lines
 
 
 def test_cli_kind_csv_filter(tmp_path: Path, monkeypatch) -> None:
@@ -326,7 +326,7 @@ def test_cli_kind_csv_filter(tmp_path: Path, monkeypatch) -> None:
     )
     assert result.exit_code == 0, result.stdout
     lines = [line for line in result.stdout.splitlines() if line]
-    seen_kinds = {line.split(":", 1)[0] for line in lines}
+    seen_kinds = {line.split("/", 1)[0] for line in lines}
     assert seen_kinds == {"vm-template", "secret"}
 
 
@@ -357,7 +357,7 @@ def test_cli_kind_csv_filter_tolerates_whitespace(
     )
     assert result.exit_code == 0, result.stdout
     lines = [line for line in result.stdout.splitlines() if line]
-    seen_kinds = {line.split(":", 1)[0] for line in lines}
+    seen_kinds = {line.split("/", 1)[0] for line in lines}
     assert seen_kinds == {"vm-template", "secret"}
 
 

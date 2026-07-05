@@ -14,37 +14,37 @@ DYNAMIC_SNIPPETS: dict[str, str] = {
     "workspaces": ("$(agw workspace list --names-only 2>/dev/null)"),
     "ws_templates": (
         "$(agw resource list --kind workspace-template --names-only 2>/dev/null"
-        " | awk -F: '{print $2}')"
+        " | awk -F/ '{print $2}')"
     ),
     "git_credentials": (
         "$(agw resource list --kind git-credential --names-only 2>/dev/null"
-        " | awk -F: '{print $2}')"
+        " | awk -F/ '{print $2}')"
     ),
     "sessions": ("$(agw session list --names-only 2>/dev/null)"),
     "agents": ("$(agw agent list --names-only 2>/dev/null)"),
     "consoles": ("$(agw console list --names-only 2>/dev/null)"),
     "session_templates": (
         "$(agw resource list --kind session-template --names-only 2>/dev/null"
-        " | awk -F: '{print $2}')"
+        " | awk -F/ '{print $2}')"
     ),
     "vm_templates": (
         "$(agw resource list --kind vm-template --names-only 2>/dev/null"
-        " | awk -F: '{print $2}')"
+        " | awk -F/ '{print $2}')"
     ),
     "agent_templates": (
         "$(agw resource list --kind agent-template --names-only 2>/dev/null"
-        " | awk -F: '{print $2}')"
+        " | awk -F/ '{print $2}')"
     ),
     "secrets": ("$(agw secret list --names-only 2>/dev/null)"),
     "resource_kinds": (
-        "$(agw resource list --names-only 2>/dev/null | awk -F: '{print $1}' | sort -u)"
+        "$(agw resource list --names-only 2>/dev/null | awk -F/ '{print $1}' | sort -u)"
     ),
-    "resource_names": (
-        "$(agw resource list --kind \"$prev\" --names-only 2>/dev/null | awk -F: '{print $2}')"
+    "resource_refs": (
+        "$(agw resource list --names-only 2>/dev/null)"
     ),
     "migrate_selectors": (
         "$(agw resource list --origin operator --names-only 2>/dev/null"
-        " | awk -F: '{print $1; print $1\"/\"$2}' | sort -u)"
+        " | awk -F/ '{print $1; print $0}' | sort -u)"
     ),
 }
 

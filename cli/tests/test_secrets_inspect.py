@@ -54,7 +54,7 @@ def test_no_operator_secrets_still_shows_auto_declared(tmp_path: Path) -> None:
     # from the first requirement's usage + source: "what this secret
     # is for, and who's asking".
     ts = next(r for r in table.rows if r.name == "tailscale-auth-key")
-    assert ts.description == "(auto) the Tailscale auth key for vm-template:default"
+    assert ts.description == "(auto) the Tailscale auth key for vm-template/default"
     # Counts match the operator/auto split.
     assert table.operator_count == 0
     assert table.auto_count >= 1
