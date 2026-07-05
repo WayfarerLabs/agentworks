@@ -93,11 +93,12 @@ exits with the conventional SIGINT exit code (130).
 
 ### Top-level
 
-| Command                  | Description                            |
-| ------------------------ | -------------------------------------- |
-| `agw doctor`             | Check environment and config           |
-| `agw completion show`    | Print the completion script to stdout  |
-| `agw completion install` | Install the completion script in-place |
+| Command                    | Description                              |
+| -------------------------- | ---------------------------------------- |
+| `agw doctor`               | Check environment and config             |
+| `agw completion show`      | Print the completion script to stdout    |
+| `agw completion install`   | Install the completion script in-place   |
+| `agw completion uninstall` | Remove installed completions for a shell |
 
 ### VM Hosts
 
@@ -754,7 +755,10 @@ standard location for that shell. For PowerShell it also appends a dot-source li
 note telling you what to add.
 
 To print the script without installing, use `agw completion show` (handy for piping into your own
-config-management flow).
+config-management flow). To remove completions installed here, use
+`agw completion uninstall --shell {bash|zsh|powershell}`. For PowerShell, uninstall also strips the
+dot-source line the installer appended to `$PROFILE`; user-authored lines around it are left
+untouched.
 
 Completions include dynamic VM, workspace, VM host, session, and template name lookups.
 

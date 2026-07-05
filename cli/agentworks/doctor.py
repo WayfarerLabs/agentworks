@@ -417,10 +417,19 @@ def _check_completions(current_version: str) -> HealthGroup:
 
     any_found = False
     for shell_name, candidate_paths in shells:
-        for path in candidate_paths:
-            if not path.exists():
-                continue
-            any_found = True
+        existing = [p for p in candidate_paths if p.exists()]
+        if not existing:
+            continue
+        any_found = True
+        # Completions may linger under this home from a prior install or a
+        # synced home dir even when the shell itself isn't present here (e.g.
+        # bash/zsh files on a Windows box driven from PowerShell). Don't nag
+        # about staleness for a shell that can't run here; report it and move
+        # on so the results tally stays clean.
+        if not _shell_available(shell_name):
+            g.info(shell_name, f"completions installed, but {shell_name} not found on this machine")
+            continue
+        for path in existing:
             installed_version = _read_completion_version(path)
             if installed_version == current_version:
                 g.ok(shell_name, "up to date")
@@ -435,6 +444,23 @@ def _check_completions(current_version: str) -> HealthGroup:
         )
 
     return g
+
+
+def _shell_available(shell_name: str) -> bool:
+    """Whether the shell can actually run on this machine (found on PATH).
+
+    PowerShell ships as either `pwsh` (Core) or `powershell` (Windows
+    PowerShell), so either binary counts as the `powershell` shell being
+    present.
+
+    Kept in sync with ``_get_completion_paths``: today its PowerShell entry
+    only exists when ``_query_powershell_profile`` finds a binary on PATH,
+    so the powershell branch here can't fire in practice. If that
+    enumeration ever changes to include a static PowerShell path, this
+    branch becomes load-bearing.
+    """
+    candidates = {"powershell": ("pwsh", "powershell")}.get(shell_name, (shell_name,))
+    return any(shutil.which(c) for c in candidates)
 
 
 def _get_completion_paths() -> list[tuple[str, list[Path]]]:

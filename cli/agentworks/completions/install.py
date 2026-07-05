@@ -3,11 +3,19 @@
 from __future__ import annotations
 
 import os
+import re
 import shutil
 import subprocess
 from pathlib import Path
 
 import typer
+
+# The exact shape the installer appends to $PROFILE: a leading dot-source
+# operator, a double-quoted absolute path, ending in ``agentworks.ps1``.
+# Matched at uninstall time to strip only what we wrote -- a substring
+# match on ``agentworks.ps1`` would clobber user-authored lines that
+# merely mention the filename (comments, conditionals, alternate paths).
+_PS_PROFILE_SOURCE_LINE = re.compile(r'^\s*\.\s+"[^"]*[/\\]agentworks\.ps1"\s*$')
 
 
 def _link_alias(alias_link: Path, target_name: str) -> None:
@@ -132,6 +140,93 @@ def _install_powershell(script: str) -> None:
             f.write("\n")
         f.write(f"{source_line}\n")
     typer.echo(f"Added to $PROFILE: {profile_path}")
+
+
+def uninstall_completions(shell: str) -> None:
+    """Remove previously installed completion files for the given shell."""
+    if shell == "bash":
+        _uninstall_bash()
+    elif shell == "zsh":
+        _uninstall_zsh()
+    elif shell == "powershell":
+        _uninstall_powershell()
+    else:
+        typer.echo(f"Error: uninstall not supported for '{shell}'", err=True)
+        raise typer.Exit(1)
+
+
+def _remove_file(path: Path) -> bool:
+    """Delete a file if present. Returns True if something was removed."""
+    try:
+        path.unlink()
+    except FileNotFoundError:
+        return False
+    except OSError as e:
+        typer.echo(f"Warning: could not remove {path}: {e}", err=True)
+        return False
+    typer.echo(f"Removed {path}")
+    return True
+
+
+def _uninstall_bash() -> None:
+    """Remove bash completions (primary script and the `agw` alias)."""
+    target_dir = Path.home() / ".local" / "share" / "bash-completion" / "completions"
+    removed = False
+    for name in ("agentworks", "agw"):
+        removed |= _remove_file(target_dir / name)
+    if not removed:
+        typer.echo("No bash completions found to remove")
+
+
+def _uninstall_zsh() -> None:
+    """Remove zsh completions from every known install location.
+
+    Install writes to a single preferred directory, but which one depends on
+    the environment at install time (Oh My Zsh vs ~/.zfunc). Sweep all of them
+    so uninstall is thorough regardless of how they were originally placed.
+    """
+    home = Path.home()
+    target_dirs = [home / ".zfunc"]
+    zsh_custom = os.environ.get("ZSH_CUSTOM")
+    if zsh_custom:
+        target_dirs.append(Path(zsh_custom) / "completions")
+    omz = home / ".oh-my-zsh" / "custom" / "completions"
+    if omz not in target_dirs:
+        target_dirs.append(omz)
+
+    removed = False
+    for target_dir in target_dirs:
+        for name in ("_agentworks", "_agw"):
+            removed |= _remove_file(target_dir / name)
+    if not removed:
+        typer.echo("No zsh completions found to remove")
+
+
+def _uninstall_powershell() -> None:
+    """Remove PowerShell completions and drop the source line from $PROFILE."""
+    profile_path = _query_powershell_profile()
+    if profile_path is None:
+        typer.echo("Error: could not determine PowerShell $PROFILE path", err=True)
+        typer.echo("Is powershell or pwsh installed and on PATH?", err=True)
+        raise typer.Exit(1)
+
+    removed = _remove_file(profile_path.parent / "Completions" / "agentworks.ps1")
+
+    # Strip the `. "...agentworks.ps1"` line the installer appended. Match
+    # the installer's exact shape rather than doing a substring test on
+    # ``agentworks.ps1`` -- otherwise any user-authored line that mentions
+    # the filename (a comment, a wrapping conditional, a dot-source of a
+    # differently-pathed agentworks.ps1) gets silently dropped.
+    if profile_path.exists():
+        lines = profile_path.read_text().splitlines(keepends=True)
+        kept = [ln for ln in lines if not _PS_PROFILE_SOURCE_LINE.match(ln.rstrip("\r\n"))]
+        if len(kept) != len(lines):
+            profile_path.write_text("".join(kept))
+            typer.echo(f"Removed source line from $PROFILE: {profile_path}")
+            removed = True
+
+    if not removed:
+        typer.echo("No PowerShell completions found to remove")
 
 
 def _query_powershell_profile() -> Path | None:
