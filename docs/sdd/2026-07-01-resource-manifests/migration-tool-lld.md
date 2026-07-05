@@ -150,11 +150,12 @@ run self-checks; no run can leave a silently-different registry.
 ## `agw resource sample`
 
 ```text
-agw resource sample [KIND] [--write FILENAME]
+agw resource sample (KIND | --all) [--write FILENAME]
 ```
 
-- No arguments: print commented sample manifests for every manifest-declarable kind (multi-document)
-  to stdout. With `KIND`: just that kind's sample.
+- `KIND` prints that kind's sample; `--all` prints every manifest-declarable kind's (mutually
+  exclusive; a bare invocation is an error, mirroring `resource migrate` -- extended to this command
+  by maintainer ruling, 2026-07-05, so no surface dumps everything by accident).
 - Samples ship bundled with the app (like `sample-config.toml`), one per kind, and are FULLY
   commented out: every line carries a leading `#`, so written samples are inert text the loader
   ignores -- `--write` can never create a duplicate or a live resource by accident, and running it

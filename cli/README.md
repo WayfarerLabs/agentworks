@@ -526,12 +526,12 @@ and their backends, etc. The two commands below stop at the framework-uniform fi
 backend mappings, template inheritance chains, resolution previews -- reach for the per-kind command
 (e.g. `agw secret describe`).
 
-| Command                                | Description                                                          |
-| -------------------------------------- | -------------------------------------------------------------------- |
-| `agw resource list`                    | List every resource in the registry across all kinds                 |
-| `agw resource describe KIND/NAME`      | Show the per-resource detail view (header + Referenced by + Used by) |
-| `agw resource migrate [SELECTOR]...`   | Move resources from config.toml to YAML manifests                    |
-| `agw resource sample [KIND] [--write]` | Print (or save) commented sample resource manifests                  |
+| Command                              | Description                                                          |
+| ------------------------------------ | -------------------------------------------------------------------- |
+| `agw resource list`                  | List every resource in the registry across all kinds                 |
+| `agw resource describe KIND/NAME`    | Show the per-resource detail view (header + Referenced by + Used by) |
+| `agw resource migrate [SELECTOR]...` | Move resources from config.toml to YAML manifests                    |
+| `agw resource sample KIND [--write]` | Print (or save) a kind's commented sample manifest (--all for all)   |
 
 `resource list` accepts `--kind <csv>` (e.g. `--kind secret,vm-template`) and `--origin <variant>`
 where variant is `operator`, `auto`, or `builtin`. `--names-only` emits `kind/name` per line and
@@ -555,11 +555,11 @@ one -- on mismatch the run rolls back and reports. `--dry-run` prints a summary 
 migrate where and writes nothing; add `--full` for the complete YAML documents and the config.toml
 diff.
 
-`resource sample` prints fully-commented-out sample manifests (all kinds, or one) -- the YAML
-teaching surface, mirroring `agw config sample` for the settings file. `--write <file>` saves under
-the resources directory instead (relative `.yaml`/`.yml` path; appends if the file exists). Written
-samples are inert until you uncomment them (delete one leading `#` per line), so `--write` can never
-create a live resource or a duplicate.
+`resource sample` prints a kind's fully-commented-out sample manifest (`--all` for every kind) --
+the YAML teaching surface, mirroring `agw config sample` for the settings file. `--write <file>`
+saves under the resources directory instead (relative `.yaml`/`.yml` path; appends if the file
+exists). Written samples are inert until you uncomment them (delete one leading `#` per line), so
+`--write` can never create a live resource or a duplicate.
 
 ## Configuration
 
@@ -570,10 +570,10 @@ Configuration splits into two surfaces:
   see [sample-config.toml](agentworks/sample-config.toml) for the full reference.
 - **Resources** -- secrets, templates, git credentials, catalog entries -- are declared as YAML
   manifests under `~/.config/agentworks/resources/`, auto-loaded whenever a command needs them.
-  `agw resource sample` prints a commented starter for every kind. The classic TOML resource
-  sections keep working (deprecated, with one aggregated load warning naming the sections present;
-  silence it with the global `--no-deprecations` flag); `agw resource migrate` moves them to YAML
-  whenever you like. See [docs/guides/resources.md](../docs/guides/resources.md).
+  `agw resource sample <kind>` prints a commented starter (`--all` for every kind). The classic TOML
+  resource sections keep working (deprecated, with one aggregated load warning naming the sections
+  present; silence it with the global `--no-deprecations` flag); `agw resource migrate` moves them
+  to YAML whenever you like. See [docs/guides/resources.md](../docs/guides/resources.md).
 
 Settings sections (`config.toml`, permanent):
 

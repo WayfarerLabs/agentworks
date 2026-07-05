@@ -35,7 +35,7 @@ def test_every_kind_has_a_sample() -> None:
 
 
 def test_all_kinds_concatenation_and_unknown_kind() -> None:
-    everything = sample_text()
+    everything = sample_text(all_kinds=True)
     for kind in SAMPLE_KINDS:
         # Every sample opens with its prose header line -- checked
         # explicitly (not by document substring) because secret-backend
@@ -43,6 +43,15 @@ def test_all_kinds_concatenation_and_unknown_kind() -> None:
         assert f"## kind: {kind} --" in everything
     with pytest.raises(ValidationError, match="unknown kind"):
         sample_text("nope")
+
+
+def test_bare_sample_requires_kind_or_all() -> None:
+    """Mirrors `resource migrate`: dumping every kind is an explicit
+    opt-in, and mixing a kind with --all is an error."""
+    with pytest.raises(ValidationError, match="indicate a kind"):
+        sample_text()
+    with pytest.raises(ValidationError, match="not both"):
+        sample_text("secret", all_kinds=True)
 
 
 def test_samples_are_fully_commented() -> None:
@@ -113,7 +122,7 @@ def test_commented_samples_are_inert_through_the_loader(tmp_path: Path) -> None:
     """As shipped (commented), a written sample declares nothing."""
     resources = tmp_path / "resources"
     resources.mkdir()
-    (resources / "all.yaml").write_text(sample_text())
+    (resources / "all.yaml").write_text(sample_text(all_kinds=True))
     manifests = load_manifests(resources)
     assert not manifests.entries
     assert not manifests.issues

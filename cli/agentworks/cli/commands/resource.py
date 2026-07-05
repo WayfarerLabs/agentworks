@@ -299,10 +299,20 @@ def resource_sample(
             click_type=_SAMPLE_KIND_CHOICES,
             help=(
                 "Kind to print a sample manifest for (e.g. secret, "
-                "vm-template). Default: samples for every kind."
+                "vm-template). Required unless --all is passed."
             ),
         ),
     ] = None,
+    all_kinds: Annotated[
+        bool,
+        typer.Option(
+            "--all",
+            help=(
+                "Print every kind's sample. Required for the full set; a "
+                "bare invocation is an error, matching `resource migrate`."
+            ),
+        ),
+    ] = False,
     write: Annotated[
         str | None,
         typer.Option(
@@ -327,14 +337,14 @@ def resource_sample(
     from agentworks.manifests.samples import sample_text, write_sample
 
     if write is None:
-        output.info(sample_text(kind).rstrip("\n"))
+        output.info(sample_text(kind, all_kinds=all_kinds).rstrip("\n"))
         return
 
     from agentworks.config import load_config
 
     config = load_config()
     resources_dir = config.source_path.parent / RESOURCES_DIRNAME
-    path, appended = write_sample(resources_dir, write, kind)
+    path, appended = write_sample(resources_dir, write, kind, all_kinds=all_kinds)
     verb = "Appended sample to" if appended else "Wrote sample to"
     output.info(f"{verb} {path}")
     output.info("Uncomment the document lines (delete one leading '#') to activate.")

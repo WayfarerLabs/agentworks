@@ -55,9 +55,9 @@ spec:
   sections (both sources decode through the same loaders, so they cannot drift).
 - Multiple documents per file are separated with `---`.
 
-`agw resource sample` prints a commented starter for every kind (`agw resource sample vm-template`
-for one); `--write <file>` saves it under the resources directory instead. Samples are fully
-commented out -- delete one leading `#` per line to activate.
+`agw resource sample vm-template` prints a commented starter for one kind (`--all` for every kind);
+`--write <file>` saves it under the resources directory instead. Samples are fully commented out --
+delete one leading `#` per line to activate.
 
 ## TOML resource sections: deprecated but supported
 

@@ -371,15 +371,15 @@ its object is resources; the TOML edit is a side effect on the source. Full desi
   pointing at `agw resource migrate`. Operators migrate on their own schedule; the TOML resource
   path's removal waits for a future major release.
 - Release notes carry the change and the one-command migration path.
-- The YAML teaching surface is `agw resource sample [KIND] [--write FILENAME]`: commented sample
-  manifests per manifest-declarable kind (all kinds without an argument), shipped bundled and
-  guaranteed to load through the real loader -- and to build a full registry as a set (exception:
-  the secret-backend sample is prose-only until a config-bearing provider ships; there is nothing
-  real to declare yet). `--write` saves into the resources directory instead of stdout, appending if
-  the file exists -- the same append-only rule as the migrator, minus the `---` separator (the
-  samples are fully commented, so appended text is inert and a separator would create a null
-  document the loader rejects). `agw config sample` is unchanged: it documents the settings file,
-  which is permanent under config-is-config.
+- The YAML teaching surface is `agw resource sample (KIND | --all) [--write FILENAME]`: commented
+  sample manifests per manifest-declarable kind (`--all` for every kind; a bare invocation errors,
+  mirroring `resource migrate`), shipped bundled and guaranteed to load through the real loader --
+  and to build a full registry as a set (exception: the secret-backend sample is prose-only until a
+  config-bearing provider ships; there is nothing real to declare yet). `--write` saves into the
+  resources directory instead of stdout, appending if the file exists -- the same append-only rule
+  as the migrator, minus the `---` separator (the samples are fully commented, so appended text is
+  inert and a separator would create a null document the loader rejects). `agw config sample` is
+  unchanged: it documents the settings file, which is permanent under config-is-config.
 
 ### R12: Framework invariance
 

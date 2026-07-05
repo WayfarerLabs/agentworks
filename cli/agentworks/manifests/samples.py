@@ -38,14 +38,26 @@ SAMPLE_KINDS: tuple[str, ...] = tuple(KIND_SECTIONS)
 _SUFFIXES = {".yaml", ".yml"}
 
 
-def sample_text(kind: str | None = None) -> str:
-    """The bundled sample for ``kind``, or all kinds concatenated."""
-    kinds = _validated_kinds(kind)
+def sample_text(kind: str | None = None, *, all_kinds: bool = False) -> str:
+    """The bundled sample for ``kind``, or (with ``all_kinds``) every
+    kind concatenated.
+
+    Dumping every kind requires the explicit ``all_kinds`` opt-in
+    (``--all``), mirroring ``agw resource migrate``: a bare invocation
+    is an error, never a wall of thirteen samples by accident.
+    """
+    kinds = _validated_kinds(kind, all_kinds)
     parts = [_read_sample(k) for k in kinds]
     return "\n".join(part.rstrip("\n") for part in parts) + "\n"
 
 
-def write_sample(resources_dir: Path, filename: str, kind: str | None = None) -> tuple[Path, bool]:
+def write_sample(
+    resources_dir: Path,
+    filename: str,
+    kind: str | None = None,
+    *,
+    all_kinds: bool = False,
+) -> tuple[Path, bool]:
     """Write (or append) the sample under the resources directory.
 
     Returns ``(path, appended)``. The content is fully commented, so no
@@ -53,7 +65,7 @@ def write_sample(resources_dir: Path, filename: str, kind: str | None = None) ->
     manifest file cannot change what it declares.
     """
     target = _validated_target(resources_dir, filename)
-    text = sample_text(kind)
+    text = sample_text(kind, all_kinds=all_kinds)
     appended = target.exists()
     target.parent.mkdir(parents=True, exist_ok=True)
     if appended:
@@ -68,9 +80,20 @@ def write_sample(resources_dir: Path, filename: str, kind: str | None = None) ->
     return target, appended
 
 
-def _validated_kinds(kind: str | None) -> tuple[str, ...]:
-    if kind is None:
+def _validated_kinds(kind: str | None, all_kinds: bool) -> tuple[str, ...]:
+    if all_kinds and kind is not None:
+        raise ValidationError(
+            "pass a kind or --all, not both",
+            hint="A kind prints one sample; --all prints every kind's.",
+        )
+    if all_kinds:
         return SAMPLE_KINDS
+    if kind is None:
+        known = ", ".join(SAMPLE_KINDS)
+        raise ValidationError(
+            "indicate a kind to sample, or pass --all",
+            hint=f"Example: `agw resource sample secret`. Kinds: {known}.",
+        )
     if kind not in SAMPLE_KINDS:
         known = ", ".join(SAMPLE_KINDS)
         raise ValidationError(
