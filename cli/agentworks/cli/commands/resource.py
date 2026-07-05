@@ -150,12 +150,23 @@ def resource_migrate(
         list[str] | None,
         typer.Argument(
             help=(
-                "What to migrate: nothing (all TOML-declared resources), KIND "
-                "(one kind), or KIND/NAME (one resource). Repeatable; "
-                "overlaps union."
+                "What to migrate: KIND (one kind) or KIND/NAME (one "
+                "resource). Repeatable; overlaps union. Required unless "
+                "--all is passed."
             ),
         ),
     ] = None,
+    all_resources: Annotated[
+        bool,
+        typer.Option(
+            "--all",
+            help=(
+                "Migrate every TOML-declared resource. Required for a "
+                "whole-config run; a bare invocation is an error, never "
+                "an accidental full migration."
+            ),
+        ),
+    ] = False,
     layout: Annotated[
         str,
         typer.Option(
@@ -183,7 +194,21 @@ def resource_migrate(
         bool,
         typer.Option(
             "--dry-run",
-            help="Print the would-be YAML and the config.toml diff; write nothing.",
+            help=(
+                "Print what would migrate where; write nothing. Summary by "
+                "default; add --full for the YAML documents and the "
+                "config.toml diff."
+            ),
+        ),
+    ] = False,
+    full: Annotated[
+        bool,
+        typer.Option(
+            "--full",
+            help=(
+                "With --dry-run: include the full YAML documents and the "
+                "config.toml diff in the output."
+            ),
         ),
     ] = False,
     yes: Annotated[
@@ -201,9 +226,15 @@ def resource_migrate(
     from agentworks import output
     from agentworks.bootstrap import build_registry
     from agentworks.config import load_config
-    from agentworks.errors import UserAbort
+    from agentworks.errors import UserAbort, ValidationError
     from agentworks.migrate import execute_plan, plan_migration
     from agentworks.migrate.render import render_dry_run, render_preview
+
+    if full and not dry_run:
+        raise ValidationError(
+            "--full only applies to --dry-run",
+            hint="A real run prints the summary and asks for confirmation.",
+        )
 
     config = load_config()
     registry = build_registry(config)
@@ -211,6 +242,7 @@ def resource_migrate(
         config,
         registry,
         list(selectors or []),
+        all_resources=all_resources,
         layout=layout,
         toml_mode=toml,
     )
@@ -220,7 +252,7 @@ def resource_migrate(
         return
 
     if dry_run:
-        for line in render_dry_run(plan):
+        for line in render_dry_run(plan, full=full):
             output.info(line)
         output.info("")
         output.info("Dry run: nothing was written.")

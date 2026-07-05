@@ -32,9 +32,18 @@ def render_preview(plan: MigrationPlan) -> list[str]:
     return lines
 
 
-def render_dry_run(plan: MigrationPlan) -> list[str]:
-    """Full dry-run detail: the would-be YAML plus the TOML diff."""
+def render_dry_run(plan: MigrationPlan, *, full: bool = False) -> list[str]:
+    """Dry-run output: the summary, plus (with ``full``) the would-be
+    YAML documents and the TOML diff. Summary-only is the default --
+    the full content of a whole-config run is unusably long as a
+    first answer (maintainer ruling, 2026-07-05)."""
     lines = render_preview(plan)
+    if not full:
+        lines.append("")
+        lines.append(
+            "(Pass --full to include the YAML documents and the config.toml diff.)"
+        )
+        return lines
     for write in plan.writes:
         header = "appended to" if write.exists else "written to"
         lines.append("")

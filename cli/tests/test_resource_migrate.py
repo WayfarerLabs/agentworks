@@ -123,11 +123,11 @@ def _loaded_docs(path: Path) -> list[dict]:  # type: ignore[type-arg]
 
 
 def test_full_migration_golden(tmp_path: Path) -> None:
-    """The maximal config migrates wholesale: every kind lands in YAML,
-    the TOML keeps only config sections (comments preserved), the
-    secret_backends residue is dropped, and verification passes."""
+    """The maximal config migrates wholesale (--all): every kind lands
+    in YAML, the TOML keeps only config sections (comments preserved),
+    the secret_backends residue is dropped, and verification passes."""
     cfg = _write_config(tmp_path)
-    config, plan = _plan(cfg, [])
+    config, plan = _plan(cfg, [], all_resources=True)
 
     kinds = {(u.kind, u.name) for u in plan.units}
     assert kinds == {
@@ -248,19 +248,33 @@ def test_secret_backend_selector_gets_tailored_error(tmp_path: Path) -> None:
         _plan(cfg, ["secret-backend"])
 
 
-def test_bare_run_with_nothing_left_is_nothing_to_do(tmp_path: Path) -> None:
+def test_bare_invocation_is_an_error(tmp_path: Path) -> None:
+    """No selectors and no --all: error, never an accidental
+    whole-config migration (maintainer ruling, 2026-07-05)."""
     cfg = _write_config(tmp_path)
-    config, plan = _plan(cfg, [])
+    with pytest.raises(ValidationError, match="indicate resources to migrate"):
+        _plan(cfg, [])
+
+
+def test_selectors_and_all_are_mutually_exclusive(tmp_path: Path) -> None:
+    cfg = _write_config(tmp_path)
+    with pytest.raises(ValidationError, match="not both"):
+        _plan(cfg, ["secret"], all_resources=True)
+
+
+def test_all_run_with_nothing_left_is_nothing_to_do(tmp_path: Path) -> None:
+    cfg = _write_config(tmp_path)
+    config, plan = _plan(cfg, [], all_resources=True)
     execute_plan(plan, config)
-    _config2, plan2 = _plan(cfg, [])
+    _config2, plan2 = _plan(cfg, [], all_resources=True)
     assert plan2.nothing_to_do
 
 
-def test_bare_run_with_only_secret_backends_offers_drop(tmp_path: Path) -> None:
+def test_all_run_with_only_secret_backends_offers_drop(tmp_path: Path) -> None:
     """The [secret_backends.*] residue is droppable even when there are
     no resources left to migrate."""
     cfg = _write_config(tmp_path, resources="[secret_backends.env-var]\n")
-    config, plan = _plan(cfg, [])
+    config, plan = _plan(cfg, [], all_resources=True)
     assert not plan.units
     assert plan.drops_secret_backends
     assert not plan.nothing_to_do
@@ -275,7 +289,7 @@ def test_bare_run_with_only_secret_backends_offers_drop(tmp_path: Path) -> None:
 
 def test_single_layout_one_file(tmp_path: Path) -> None:
     cfg = _write_config(tmp_path)
-    config, plan = _plan(cfg, [], layout="single")
+    config, plan = _plan(cfg, [], all_resources=True, layout="single")
     execute_plan(plan, config)
     target = tmp_path / "resources" / "resources.yaml"
     assert target.exists()
@@ -302,15 +316,15 @@ cpus = 2
 """,
     )
     with pytest.raises(ConfigError, match="not filename-safe"):
-        _plan(cfg, [], layout="per-resource")
+        _plan(cfg, [], all_resources=True, layout="per-resource")
 
 
 def test_unknown_layout_and_toml_mode_error(tmp_path: Path) -> None:
     cfg = _write_config(tmp_path)
     with pytest.raises(ValidationError, match="unknown layout"):
-        _plan(cfg, [], layout="flat")
+        _plan(cfg, [], all_resources=True, layout="flat")
     with pytest.raises(ValidationError, match="unknown --toml mode"):
-        _plan(cfg, [], toml_mode="erase")
+        _plan(cfg, [], all_resources=True, toml_mode="erase")
 
 
 # ---------------------------------------------------------------------------
@@ -456,7 +470,7 @@ def test_top_level_assignment_shape_refused_on_bare_run(tmp_path: Path) -> None:
         prefix='secrets = { npm-token = { description = "assignment shape" } }\n',
     )
     with pytest.raises(ConfigError, match="standard TOML tables") as exc:
-        _plan(cfg, [])
+        _plan(cfg, [], all_resources=True)
     assert "config.toml:" in str(exc.value)
     # And the explicit selector reaches the same refusal, not a
     # misleading "no TOML-declared secret".
@@ -486,7 +500,7 @@ cpus = 2
 """,
     )
     with pytest.raises(ConfigError, match="contains '/'"):
-        _plan(cfg, [])
+        _plan(cfg, [], all_resources=True)
 
 
 def test_per_resource_comment_markers_name_every_file(tmp_path: Path) -> None:
@@ -517,7 +531,7 @@ cpus = 8
 def test_backup_holds_the_original(tmp_path: Path) -> None:
     cfg = _write_config(tmp_path)
     original = cfg.read_text()
-    config, plan = _plan(cfg, [])
+    config, plan = _plan(cfg, [], all_resources=True)
     result = execute_plan(plan, config)
     assert result.backup_path.parent == tmp_path / "backups"
     assert result.backup_path.read_text() == original
@@ -538,7 +552,7 @@ def test_backup_taken_before_any_write(
         raise OSError("simulated write failure")
 
     monkeypatch.setattr(execute_mod, "_ensure_parents", boom)
-    config, plan = _plan(cfg, [])
+    config, plan = _plan(cfg, [], all_resources=True)
     with pytest.raises(OSError, match="simulated"):
         execute_plan(plan, config)
     backups = sorted((tmp_path / "backups").glob("config-*.toml"))
@@ -562,22 +576,29 @@ def test_preview_lists_every_resource_and_the_drop_note(tmp_path: Path) -> None:
     from agentworks.migrate.render import render_preview
 
     cfg = _write_config(tmp_path)
-    _config, plan = _plan(cfg, [])
+    _config, plan = _plan(cfg, [], all_resources=True)
     text = "\n".join(render_preview(plan))
     for unit in plan.units:
         assert f"{unit.kind}/{unit.name} -> " in text
     assert "[secret_backends.*] sections will be dropped" in text
 
 
-def test_dry_run_is_plan_only(tmp_path: Path) -> None:
-    """Planning writes nothing; the dry-run path is plan + print."""
+def test_dry_run_is_plan_only_and_summary_by_default(tmp_path: Path) -> None:
+    """Planning writes nothing, and the dry-run default is the summary
+    (maintainer ruling, 2026-07-05: whole-config content dumps are
+    unusable as a first answer); --full opts into documents + diff."""
     from agentworks.migrate.render import render_dry_run
 
     cfg = _write_config(tmp_path)
     original = cfg.read_text()
-    _config, plan = _plan(cfg, [])
-    lines = render_dry_run(plan)
-    assert any("config.toml changes" in line for line in lines)
+    _config, plan = _plan(cfg, [], all_resources=True)
+    summary = render_dry_run(plan)
+    assert not any("config.toml changes" in line for line in summary)
+    assert any("Pass --full" in line for line in summary)
+    assert any("secret/npm-token -> " in line for line in summary)
+    detailed = render_dry_run(plan, full=True)
+    assert any("config.toml changes" in line for line in detailed)
+    assert any("apiVersion: agentworks/v1" in line for line in detailed)
     assert cfg.read_text() == original
     assert not (tmp_path / "resources").exists()
     assert not (tmp_path / "backups").exists()
@@ -606,11 +627,22 @@ def _cli(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, args: list[str]):
     return CliRunner().invoke(app, args)
 
 
-def test_cli_migrate_bare_nothing_to_do_exits_zero(
+def test_cli_migrate_bare_invocation_errors_with_hint(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _write_config(tmp_path)
+    result = _cli(tmp_path, monkeypatch, ["resource", "migrate", "--yes"])
+    assert result.exit_code != 0
+    # The error surfaces through the CLI entry's renderer; under
+    # CliRunner it is the raw exception.
+    assert "indicate resources to migrate" in str(result.exception)
+
+
+def test_cli_migrate_all_nothing_to_do_exits_zero(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     _write_config(tmp_path, resources="")
-    result = _cli(tmp_path, monkeypatch, ["resource", "migrate", "--yes"])
+    result = _cli(tmp_path, monkeypatch, ["resource", "migrate", "--all", "--yes"])
     assert result.exit_code == 0, result.stdout
     assert "Nothing to migrate" in result.stdout
 
@@ -620,18 +652,48 @@ def test_cli_migrate_dry_run_writes_nothing(
 ) -> None:
     cfg = _write_config(tmp_path)
     original = cfg.read_text()
-    result = _cli(tmp_path, monkeypatch, ["resource", "migrate", "--dry-run"])
+    result = _cli(
+        tmp_path, monkeypatch, ["resource", "migrate", "--all", "--dry-run"]
+    )
     assert result.exit_code == 0, result.stdout
     assert "Dry run: nothing was written." in result.stdout
+    assert "Pass --full" in result.stdout
+    assert "apiVersion" not in result.stdout  # summary by default
     assert cfg.read_text() == original
     assert not (tmp_path / "resources").exists()
+
+
+def test_cli_migrate_dry_run_full_includes_content(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _write_config(tmp_path)
+    result = _cli(
+        tmp_path,
+        monkeypatch,
+        ["resource", "migrate", "--all", "--dry-run", "--full"],
+    )
+    assert result.exit_code == 0, result.stdout
+    assert "apiVersion: agentworks/v1" in result.stdout
+    assert "config.toml changes" in result.stdout
+
+
+def test_cli_migrate_full_requires_dry_run(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _write_config(tmp_path)
+    result = _cli(
+        tmp_path, monkeypatch, ["resource", "migrate", "--all", "--full", "--yes"]
+    )
+    assert result.exit_code != 0
 
 
 def test_cli_migrate_yes_executes_and_verifies(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     _write_config(tmp_path)
-    result = _cli(tmp_path, monkeypatch, ["resource", "migrate", "--yes"])
+    result = _cli(
+        tmp_path, monkeypatch, ["resource", "migrate", "--all", "--yes"]
+    )
     assert result.exit_code == 0, result.stdout
     assert "verified: registry unchanged" in result.stdout
     assert (tmp_path / "resources" / "secrets.yaml").exists()
@@ -686,7 +748,7 @@ def test_verification_mismatch_rolls_back(
         execute_mod, "first_difference", lambda pre, post: "forced difference"
     )
 
-    config, plan = _plan(cfg, [], layout="per-resource")
+    config, plan = _plan(cfg, [], all_resources=True, layout="per-resource")
     # Also append into the existing per-kind file to exercise truncation:
     # switch one write target to the existing file by planning a second
     # per-kind run for the secret.

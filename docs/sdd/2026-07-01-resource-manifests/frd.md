@@ -330,11 +330,12 @@ one-time converter (under R11 dual-path there is no cutover to gate). Renamed fr
 its object is resources; the TOML edit is a side effect on the source. Full design in
 `migration-tool-lld.md`; requirement-level behavior:
 
-- **Selectors** scope the move: none (everything TOML-declared), `KIND` (one kind), `KIND/NAME` (one
-  resource; the token splits at the first `/`). Overlapping selectors union. Only operator-declared
-  TOML rows are migratable. An EXPLICIT selector matching nothing errors before anything is written;
-  the bare no-selector form with nothing left reports "nothing to migrate" and exits 0, keeping
-  scripted re-runs idempotent.
+- **Selectors** scope the move: `KIND` (one kind), `KIND/NAME` (one resource; the token splits at
+  the first `/`), or `--all` (everything TOML-declared -- an explicit opt-in; a bare invocation
+  errors rather than migrating the whole config by accident, and `--all` plus selectors is an error
+  too). Overlapping selectors union. Only operator-declared TOML rows are migratable. An EXPLICIT
+  selector matching nothing errors before anything is written; `--all` with nothing left reports
+  "nothing to migrate" and exits 0, keeping scripted re-runs idempotent.
 - **Writes manifests** per `--layout`: `per-kind` (default; `vm-templates.yaml` per the bundled
   plural convention), `single` (one file), or `per-resource` (`<kind>/<name>.yaml`). Layout is
   operator ergonomics only -- the loader does not care -- and declaration order is preserved.
@@ -355,10 +356,11 @@ its object is resources; the TOML edit is a side effect on the source. Full desi
   `verified: registry unchanged (N resources)`; on mismatch it rolls back (backup + created-file
   removal + append truncation) and errors. The one-time golden test is thereby promoted to an
   operator-facing guarantee on every run.
-- **Safety**: preview + confirmation (`--yes` to skip); `--dry-run` prints the would-be YAML and the
-  TOML diff and writes nothing. An interrupted run fails loudly at the next load (cross-source
-  duplicates citing both locations); recovery is from the pre-write backup or by hand-finishing the
-  TOML edit -- the tool itself refuses to run on a broken config.
+- **Safety**: preview + confirmation (`--yes` to skip); `--dry-run` prints the summary (which
+  resources go where) and writes nothing -- `--full` opts into the complete YAML documents and the
+  TOML diff. An interrupted run fails loudly at the next load (cross-source duplicates citing both
+  locations); recovery is from the pre-write backup or by hand-finishing the TOML edit -- the tool
+  itself refuses to run on a broken config.
 
 ### R11: Dual-path with deprecation (revised from "hard cutover", 2026-07-03)
 

@@ -318,6 +318,15 @@ TOML keeps working; operators migrate on their own schedule, one kind at a time 
       `paths.backups` comment in `cli/agentworks/sample-config.toml` widens from "vm backup
       directory" to cover config backups too; the broader doc repoint waits for Phase 5.
 
+Maintainer refinements after the review cycle (2026-07-05; see the sequencing note):
+
+- [x] `--all` required for whole-config runs: bare invocation errors with a hint, `--all` +
+      selectors errors, the nothing-to-migrate exit-0 moves to `--all`; service-level and CLI-level
+      tests updated and added.
+- [x] `--dry-run` prints the summary by default with a `--full` opt-in for the YAML documents and
+      TOML diff (`--full` without `--dry-run` errors); tests pin summary content, full content, and
+      the flag interaction.
+
 Definition of done: a representative real config migrates -- wholesale or incrementally -- to a
 loadable manifest set plus a config-only TOML with zero behavior change, and every real run proves
 it via the built-in registry-equivalence verification; CI green; reviewer-approved.
@@ -392,6 +401,13 @@ only TOML-resource reader in the tree; CI green; reviewer-approved.
 (Recorded as they happen, per SDD convention. Deviations from FRD/HLA get an entry here and an
 artifact update.)
 
+- **2026-07-05: whole-config migration requires --all; dry-run is summary-first (maintainer
+  refinement).** A bare `agw resource migrate` errors with a hint instead of migrating everything --
+  "migrate everything" is an explicit `--all` opt-in (mutually exclusive with selectors), and the
+  idempotent nothing-to-migrate exit-0 moves to the `--all` form. `--dry-run` prints the summary
+  (which resources go where) by default; `--full` opts into the YAML documents and the TOML diff,
+  which are unusably long as a first answer on whole-config runs. FRD R10 and the LLD amended; new
+  checkboxes below record the delivery.
 - **2026-07-05: secret-backend sample is prose-only (maintainer ruling, via the implementation
   review).** No config-bearing provider ships, so no operator-declarable backend can be real; an
   uncommentable onepassword document would teach a lie. The sample's illustrative shape moved into

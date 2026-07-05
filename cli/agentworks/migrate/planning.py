@@ -95,16 +95,36 @@ def plan_migration(
     registry: Registry,
     selectors: list[str],
     *,
+    all_resources: bool = False,
     layout: str = "per-kind",
     toml_mode: str = "comment",
 ) -> MigrationPlan:
     """Resolve selectors against the config's TOML and build the plan.
+
+    Migrating everything requires the explicit ``all_resources`` opt-in
+    (``--all``); an empty selection without it is an error, so a bare
+    ``agw resource migrate`` can never rewrite the whole config by
+    accident (maintainer ruling, 2026-07-05).
 
     Raises ``ValidationError`` for selector errors (unknown kind,
     explicit selector matching nothing) and ``ConfigError`` for TOML
     shapes the tool refuses (dotted-key / inline-table declarations,
     filename-unsafe names under the per-resource layout).
     """
+    if all_resources and selectors:
+        raise ValidationError(
+            "pass selectors or --all, not both",
+            hint="Selectors scope the run; --all migrates everything.",
+        )
+    if not all_resources and not selectors:
+        raise ValidationError(
+            "indicate resources to migrate, or pass --all",
+            hint=(
+                "Examples: `agw resource migrate secret`, "
+                "`agw resource migrate vm-template/dev`, "
+                "`agw resource migrate --all`."
+            ),
+        )
     if layout not in ("per-kind", "single", "per-resource"):
         raise ValidationError(
             f"unknown layout {layout!r}",

@@ -12,13 +12,16 @@ config-is-config; they are already in their final home.)
 ## `agw resource migrate`
 
 ```text
-agw resource migrate [SELECTOR]... [--layout per-kind|single|per-resource]
-                     [--toml comment|delete] [--dry-run] [--yes]
+agw resource migrate [SELECTOR]... [--all] [--layout per-kind|single|per-resource]
+                     [--toml comment|delete] [--dry-run [--full]] [--yes]
 ```
 
 ### Selectors
 
-- No selectors: migrate every operator-declared resource currently sourced from TOML.
+- Selectors are REQUIRED unless `--all` is passed; a bare invocation errors with a hint (maintainer
+  ruling, 2026-07-05: "migrate everything" must be an explicit opt-in, never the accident of typing
+  nothing). `--all` and selectors together is also an error.
+- `--all`: migrate every operator-declared resource currently sourced from TOML.
 - `KIND` (e.g. `vm-template`): every TOML-declared resource of that kind.
 - `KIND/NAME` (e.g. `vm-template/small`): that one resource. The token splits at the FIRST `/`, and
   the grammar is unambiguous because `/` is strictly disallowed in resource names (maintainer
@@ -30,7 +33,7 @@ agw resource migrate [SELECTOR]... [--layout per-kind|single|per-resource]
 - An EXPLICIT selector matching nothing in the TOML is a hard error before anything is written --
   the operator named something specific, so silence would mislead (the error for a known kind says
   "no TOML-declared resources of kind X"; the resource may already be YAML-declared or
-  auto-declared, neither of which is migratable). The BARE form with nothing left to migrate reports
+  auto-declared, neither of which is migratable). `--all` with nothing left to migrate reports
   "nothing to migrate" and exits 0, keeping scripted re-runs idempotent.
   `resource migrate secret-backend` is still an ERROR (nonzero exit, like any explicit selector that
   cannot match) but with a tailored message: those sections are warned no-ops with no manifest
@@ -122,13 +125,15 @@ run self-checks; no run can leave a silently-different registry.
    TOML edit). Deliberate: an auto-resume path was considered and rejected as YAGNI for a crash
    window this small; the mandatory backup plus the loud duplicate error make manual recovery
    mechanical, and the migration-strategy doc carries the operator-facing version of this guidance.
-2. Resolve selectors to a concrete resource list. Explicit selectors matching nothing error; the
-   bare form with nothing left reports "nothing to migrate" and exits 0 (after offering the
+2. Resolve selectors to a concrete resource list. Explicit selectors matching nothing error; `--all`
+   with nothing left reports "nothing to migrate" and exits 0 (after offering the
    `[secret_backends.*]` drop if those sections remain).
 3. Print the plan: documents to be written per target file (created vs appended), TOML sections to
    be commented/deleted, `[secret_backends.*]` drops if any.
-4. `--dry-run`: stop after the preview, plus print the full YAML documents and the TOML diff. Writes
-   nothing.
+4. `--dry-run`: stop after the preview -- the SUMMARY (which resources go where, files
+   created/appended, TOML mode) by default, since a whole-config content dump is unusable as a first
+   answer (maintainer ruling, 2026-07-05); `--full` adds the YAML documents and the TOML diff.
+   Writes nothing either way.
 5. Confirm (skipped by `--yes`), then: back up, write/append manifests, rewrite TOML, verify.
 
 ### Renames and special cases
