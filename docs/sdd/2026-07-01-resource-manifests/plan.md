@@ -245,11 +245,13 @@ phase implements):
       inverted: `sibling-env` presents as `sibling-env`); compose drift error; purity pin for
       `build_registry`; deprecated-section warn + built-in-survives pins.
 
-- [ ] Follow-up (broad-review finding): pin the nested-create seam with a test --
+- [x] Follow-up (broad-review finding): pin the nested-create seam with a test --
       `session create --new-workspace/--new-agent` spans multiple composition units (each nested
       create builds its own registry; `create_agent` runs its own git-token resolve). No test
       currently counts resolves or registry builds across that path; add one so the "disjoint secret
-      sets in practice" comment is enforced rather than assumed.
+      sets in practice" comment is enforced rather than assumed. (Delivered in Phase 5:
+      `test_nested_creates_are_their_own_composition_units` pins that the seam passes CLI-shaped
+      args only -- no values/registry -- so threading secret material through it trips the test.)
 
 Definition of done: no resolver object, no cache, no memo anywhere in the secrets runtime; every
 operator surface speaks backend names; provider API unreachable outside the door; CI green;
@@ -338,43 +340,57 @@ publish into the one registry indefinitely (different publishers, single registr
 architecture, not a transitional window). Mixing is supported; cross-source duplicates error with
 both locations. TOML resource sections are deprecated, not removed.
 
-- [ ] `load_config()` emits a deprecation issue for each TOML resource section present, naming the
+- [x] `load_config()` emits a deprecation issue for each TOML resource section present, naming the
       section and pointing at `agw resource migrate` (same shape as the `[secret_backends.*]`
-      warning that already ships).
-- [ ] Sample config leads with YAML: `cli/agentworks/sample-config.toml` keeps a minimal
+      warning that already ships -- which itself gained the `--all` pointer).
+- [x] Sample config leads with YAML: `cli/agentworks/sample-config.toml` keeps a minimal
       commented-out resource example with a deprecation pointer; sample manifests become the primary
-      teaching surface. Update `cli/tests/test_sample_config.py` conventions accordingly.
+      teaching surface. Update `cli/tests/test_sample_config.py` conventions accordingly. (As
+      shipped, the sample declares no live resource sections and loads warning-free; the header
+      prose carries the YAML-first pointer at `agw resource sample` / `agw resource migrate`.)
 
   > Superseded (2026-07-05): sample manifests and their delivery command moved to Phase 4 as
   > `agw resource sample` (`config sample` stays the TOML surface, per config-is-config).
 
-- [ ] Verify the Phase 5 doc sweep leads with `agw resource sample` output as the primary YAML
+- [x] Verify the Phase 5 doc sweep leads with `agw resource sample` output as the primary YAML
       teaching surface.
-- [ ] **Docs (permanent-home promotions, per SDD-not-permanent rule)**:
-  - [ ] New operator guide `docs/guides/resources.md`: the config/resource split, the resources
+- [x] **Docs (permanent-home promotions, per SDD-not-permanent rule)**:
+  - [x] New operator guide `docs/guides/resources.md`: the config/resource split, the resources
         directory, the envelope, built-in resources and override rules, the provider/backend model,
         worked examples. Standalone; no SDD references.
-  - [ ] ADR `docs/adrs/0016-yaml-resource-manifests.md` (number confirmed at write time): auto-load
+  - [x] ADR `docs/adrs/0016-yaml-resource-manifests.md` (number confirmed at write time): auto-load
         YAML manifests with k8s envelope; config/resource/capability split (promote runtime-model
         LLD Part 1, the vocabulary law -- it is load-bearing and must not live only in the SDD);
         dual-path (deprecate, don't break) rationale; backends-are-the-door runtime model, with a
         note that it supersedes the resolver/source MECHANISM described in ADRs 0013/0014 (their
         decisions stand). Repoint the code docstrings citing "runtime-model LLD" (`secrets/base.py`,
-        `resolve.py`, `providers.py`, `secrets/__init__.py`, `env/compose.py`) at the ADR.
-  - [ ] Sweep existing guides (`mise.md`, `source-refs.md`, `proxmox.md`, `idempotency.md`),
+        `resolve.py`, `providers.py`, `secrets/__init__.py`) at the ADR (`env/compose.py` turned out
+        to carry no LLD citation; `migrate/__init__.py` did and was repointed too).
+  - [x] Sweep existing guides (`mise.md`, `source-refs.md`, `proxmox.md`, `idempotency.md`),
         `cli/README.md` (configuration schema and command reference; the largest doc blast radius),
         and the top-level README for TOML-section references to resource kinds; lead with manifest
-        examples (TOML noted as deprecated-but-supported).
-- [ ] Release notes: the dual-path model, the deprecation, the one-command migration, the rename
-      list from FRD "Migration notes", and the FRD R13 breaking change ('/' now rejected in resource
-      names).
-- [ ] Completions: verify the full command tree still round-trips (kind values and both Phase 4
-      subcommands included).
-- [ ] **Tests**: per-section deprecation issue content; guide/sample examples lint (the
+        examples (TOML noted as deprecated-but-supported). (`proxmox.md`, `idempotency.md`, and the
+        top-level README had no resource-section references; `mise.md`, `source-refs.md`, and
+        `cli/README.md` were converted.)
+- [x] Release notes: release-please compiles them from the conventional commits (maintainer
+      direction, 2026-07-05) -- the branch's commit subjects/bodies carry the dual-path model, the
+      deprecation, the migration command, and the rename story, and both breaking changes are
+      flagged with `!` (FRD R13 '/' ban; `--all` required) -- so no hand-written notes document is
+      produced.
+- [x] Completions: verify the full command tree still round-trips (kind values and both Phase 4
+      subcommands included). (Enforced structurally by `tests/test_completions.py`: every
+      DYNAMIC_COMPLETIONS key must resolve to a real command/param, every completer id must have a
+      snippet in all three shells, and the generated scripts must contain every command in the tree
+      -- which now includes `resource migrate` / `resource sample`.)
+- [x] **Tests**: per-section deprecation issue content (`tests/test_config_deprecation_warnings.py`
+      -- one warning per section kind, command pointers, config-only TOML and the shipped sample
+      warn nothing, secret_backends keeps its dedicated message); guide/sample examples lint (the
       samples-load-clean test ships with the samples in Phase 4).
-- [ ] Housekeeping: confirm the resource-registry SDD's locked docs need no drift note beyond
+- [x] Housekeeping: confirm the resource-registry SDD's locked docs need no drift note beyond
       "superseded source format; framework unchanged" (its lockfile anticipated this SDD; add a
-      dated note there only if reviewers want one).
+      dated note there only if reviewers want one). (A dated vocabulary-translation note WAS added:
+      the lockfile names kinds in the retired snake_case spelling, which would mislead a present-day
+      reader without it.)
 
 Definition of done: fresh installs learn YAML first; existing TOML configs keep working with a
 deprecation nudge; samples, docs, completions, release notes shipped in the same release; CI green;

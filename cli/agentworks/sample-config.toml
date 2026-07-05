@@ -4,6 +4,15 @@
 # Required fields are uncommented. Everything else shows the default value
 # commented out -- uncomment and change only what you need.
 #
+# RESOURCES ARE YAML-FIRST: declare secrets, templates, git credentials, and
+# catalog entries as YAML manifests in the resources/ directory next to this
+# file (`agw resource sample` prints a commented starter for every kind).
+# The TOML resource sections below keep working, but they are deprecated --
+# each one loads with a warning, and `agw resource migrate` moves them to
+# YAML whenever you're ready. This file remains the permanent home for
+# SETTINGS: operator identity, paths, defaults, platform connections, and
+# the secret backend chain.
+#
 # Comment convention: examples are written as `#key = "value"` (no space
 # after `#`), so you can uncomment a line in place by deleting one `#`.
 # Prose comments use `# <text>` (with space). Pinned by tests in
@@ -69,7 +78,7 @@ ssh_private_key = "~/.ssh/id_ed25519"        # required: used for SSH connection
 # `agw console attach <name> --recreate` (or adding/restoring a shell on a
 # live console) is enough to switch layouts.
 
-[named_console]
+#[named_console]
 #tmux_layout = "aw-session-vertical"
 # Valid values:
 #   aw-session-vertical  - single column; session pane takes the top 50%
@@ -201,7 +210,7 @@ ssh_private_key = "~/.ssh/id_ed25519"        # required: used for SSH connection
 # unzip) during init, in addition to provisioning packages (openssh-server,
 # curl, sudo, ca-certificates, gnupg) installed at VM create time.
 
-[vm_templates.default]
+#[vm_templates.default]
 # -- Provisioning (set once at create time) --
 #cpus = 4                                   # number of CPUs (Lima)
 #memory = 8                                 # memory in GiB (Lima)

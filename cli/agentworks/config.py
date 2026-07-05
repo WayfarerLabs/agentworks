@@ -1515,7 +1515,38 @@ def _load_secret_backends(
         issues.append(
             f"[secret_backends.{kind_str}] is deprecated and has no effect: "
             f"the built-in backends ship with agentworks, and activation is "
-            f"[secret_config].backends. Remove the section."
+            f"[secret_config].backends. Remove the section, or run "
+            f"`agw resource migrate --all` to drop it."
+        )
+
+
+def _warn_deprecated_resource_sections(
+    data: dict[str, object],
+    issues: list[str],
+) -> None:
+    """One deprecation issue per TOML resource section present (Phase 5).
+
+    Dual-path is permanent policy short of a future major release: these
+    sections keep loading with exactly today's semantics. The warning is
+    the nudge toward the YAML manifest surface, naming the section and
+    the migration command. ``[secret_backends.*]`` is excluded -- it has
+    its own no-op warning above -- and ``[secret_config]`` is config,
+    not a resource section.
+    """
+    from agentworks.manifests.decode import KIND_SECTIONS
+
+    for kind, section in KIND_SECTIONS.items():
+        if section == "secret_backends" or section not in data:
+            continue
+        # [named_console] is the one flat section; everything else nests
+        # ([secrets.<name>], [admin.config], ...).
+        display = f"[{section}]" if section == "named_console" else f"[{section}.*]"
+        issues.append(
+            f"{display} TOML resource sections are deprecated: declare "
+            f"resources as YAML manifests in the resources/ directory "
+            f"(see `agw resource sample {kind}`), or move existing ones "
+            f"with `agw resource migrate {kind}`. TOML keeps working "
+            f"until a future major release."
         )
 
 
@@ -1651,6 +1682,7 @@ def load_config(path: Path | None = None, *, warn_issues: bool = True) -> Config
 
     secrets = _load_secrets(data, issues, decls)
     _load_secret_backends(data, issues)
+    _warn_deprecated_resource_sections(data, issues)
     secret_config_data = _load_secret_config(data, issues, decls)
     # Phase 1b: env-block secret references no longer error at config load
     # when they don't match a [secrets.<name>] block; the framework

@@ -564,6 +564,75 @@ def test_eager_resolve_fires_exactly_once_for_new_workspace_and_new_agent(
     db.close()
 
 
+def test_nested_creates_are_their_own_composition_units(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Pin the composition-unit seam (resource-manifests SDD, Phase 3.6
+    follow-up): ``create_session`` passes the nested ``create_workspace``
+    / ``create_agent`` calls CLI-shaped args ONLY -- no resolved values,
+    no registry. Each nested create is its own composition unit that
+    builds its own registry and resolves its own secrets; the parent's
+    single eager resolve covers the session's needs (union prompt), and
+    the secret sets are disjoint in practice. If someone threads
+    ``values=`` or ``registry=`` through this seam to "save" a resolve,
+    this test trips."""
+    from agentworks.sessions.manager import create_session
+
+    db = Database(tmp_path / "test.db")
+    db._conn.execute(
+        "INSERT INTO vms (name, platform, admin_username, tailscale_host) "
+        "VALUES ('vm1', 'lima', 'admin', '100.64.0.5')"
+    )
+    db._conn.commit()
+    _install_session_prep_stubs(monkeypatch)
+
+    seam_kwargs: dict[str, set[str]] = {}
+
+    def _ws_spy(db: object, config: object, **kwargs: object) -> None:
+        seam_kwargs["create_workspace"] = set(kwargs)
+        db._conn.execute(  # type: ignore[attr-defined]
+            "INSERT INTO workspaces (name, vm_name, workspace_path, linux_group) "
+            "VALUES (?, ?, ?, ?)",
+            (kwargs["name"], kwargs["vm_name"], "/tmp/ws", f"ws-{kwargs['name']}"),
+        )
+        db._conn.commit()  # type: ignore[attr-defined]
+
+    def _ag_spy(db: object, config: object, **kwargs: object) -> None:
+        seam_kwargs["create_agent"] = set(kwargs)
+        db.insert_agent(kwargs["name"], kwargs["vm_name"], f"aw-{kwargs['name']}")  # type: ignore[attr-defined]
+
+    monkeypatch.setattr("agentworks.secrets.resolve_for_command", lambda *a, **k: {})
+    monkeypatch.setattr("agentworks.workspaces.manager.create_workspace", _ws_spy)
+    monkeypatch.setattr("agentworks.agents.manager.create_agent", _ag_spy)
+
+    class _Stop(Exception):
+        pass
+
+    monkeypatch.setattr(
+        "agentworks.sessions.manager._prepare_vm",
+        lambda *a, **k: (_ for _ in ()).throw(_Stop()),
+    )
+
+    config = SimpleNamespace(session=SimpleNamespace(history_limit=50000))
+    with pytest.raises(_Stop):
+        create_session(
+            db,
+            config,  # type: ignore[arg-type]
+            name="s1",
+            new_workspace=True,
+            new_agent=True,
+            vm_name="vm1",
+        )
+
+    for seam, keys in seam_kwargs.items():
+        forbidden = keys & {"values", "registry", "secret_values", "secrets"}
+        assert not forbidden, (
+            f"{seam} received secret material through the seam: {forbidden}"
+        )
+    assert set(seam_kwargs) == {"create_workspace", "create_agent"}
+    db.close()
+
+
 def test_failure_after_ephemeral_create_rolls_back_ephemerals(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

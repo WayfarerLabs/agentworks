@@ -1,8 +1,7 @@
 """The secret-provider capability registry.
 
 Three distinct layers meet in the secret system, and keeping them
-distinct is the design (runtime-model LLD of the resource-manifests
-SDD):
+distinct is the design (ADR 0016):
 
 - CONFIG: ``[secret_config].backends``, the active chain. A setting,
   not a resource.

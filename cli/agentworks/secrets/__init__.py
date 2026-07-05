@@ -1,8 +1,7 @@
 """Secret declarations, backends, and the resolve loop.
 
-Backends are the door: see the runtime-model LLD of the
-resource-manifests SDD for the model (config chain -> backend resources
--> provider capabilities).
+Backends are the door: see ADR 0016 for the model (config chain ->
+backend resources -> provider capabilities).
 """
 
 from __future__ import annotations

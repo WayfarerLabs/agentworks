@@ -144,8 +144,19 @@ Carried forward (still deferred, non-blocking, picked up when the relevant code 
 
 ### Drift notes
 
-None. The FRD and HLA accurately describe the shipped surface as of this date. The sequencing-notes
-section in plan.md documents every per-phase pivot that touched the design.
+None as of 2026-06-30. The FRD and HLA accurately describe the shipped surface as of this date. The
+sequencing-notes section in plan.md documents every per-phase pivot that touched the design.
+
+**2026-07-05 (resource-manifests SDD):** the successor effort this lockfile anticipated shipped. The
+framework contract described here is unchanged; the drift is vocabulary and source format, so a
+reader of these artifacts should translate: kind identifiers are now lower-kebab (`vm-template`,
+`secret-backend`; `git_credentials` singularized to `git-credential`), origin `code-declared` reads
+`built-in`, operator resources may also arrive as auto-loaded YAML manifests (TOML sections remain
+supported, deprecated), `[secret_backends.*]` sections became warned no-ops (the built-in backends
+ship as bundled manifests; `secret-backend` resources carry a `provider` field per the
+provider/backend split), and the Phase 2b.2 scope cut recorded above resolved as "config is config"
+-- the chain stays a setting, validated against the finalized registry at the composition boundary.
+See ADR 0016 for the permanent record.
 
 See [plan.md](plan.md) for full per-phase detail and [frd.md](frd.md) / [hla.md](hla.md) for the
 locked design. These specs are now locked.

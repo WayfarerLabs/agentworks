@@ -4,8 +4,8 @@ A recurring, incremental mover -- not a one-time converter. Selectors
 scope each run, output is append-only YAML, the TOML edit is mandatory
 (dual-path makes a both-sources declaration a hard load error), and
 every real run verifies registry equivalence before it counts as done.
-Design: docs/sdd/2026-07-01-resource-manifests/migration-tool-lld.md
-(promoted to permanent docs in Phase 5).
+The dual-path model this serves is ADR 0016; the operator-facing story
+is docs/guides/resources.md.
 """
 
 from __future__ import annotations

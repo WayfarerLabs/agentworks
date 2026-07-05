@@ -1,7 +1,8 @@
 """Core types for the agentworks secret system.
 
-Backends are the door (runtime-model LLD of the resource-manifests SDD):
-every runtime secret operation is a method on ``SecretBackendDecl``,
+Backends are the door (ADR 0016, YAML resource manifests and the
+config/resource/capability split): every runtime secret operation is a
+method on ``SecretBackendDecl``,
 which invokes its provider (the raw capability) through the provider
 API. See ``docs/adrs/0013-cli-side-secret-injection.md`` for why values
 never persist on the VM.

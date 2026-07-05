@@ -478,15 +478,21 @@ via `--workspace <ws>`). Use these when you just need a terminal without the con
 
 Templates define the command a session runs. The built-in `default` template runs a login shell
 (`$SHELL --login`), respecting whatever shell the user (admin or agent) is configured with. Define
-custom templates in config:
+custom templates as `session-template` resources:
 
-```toml
-[session_templates.default]            # override the built-in default
-command = "claude --name {{session_name}}"
-restart_command = "claude --resume {{session_name}}"
-required_commands = ["claude"]
-description = "Claude Code interactive session"
+```yaml
+apiVersion: agentworks/v1
+kind: session-template
+metadata:
+  name: default # override the built-in default
+  description: Claude Code interactive session
+spec:
+  command: claude --name {{session_name}}
+  restart_command: claude --resume {{session_name}}
+  required_commands: [claude]
 ```
+
+(TOML equivalent: `[session_templates.default]` in `config.toml`, deprecated but supported.)
 
 Template commands support `{{session_name}}` and `{{workspace_name}}` variable substitution
 (double-brace syntax). The optional `restart_command` is used by `session restart` -- useful for
@@ -554,35 +560,47 @@ create a live resource or a duplicate.
 
 ## Configuration
 
-Config lives at `~/.config/agentworks/config.toml`. Run `agw config init` to generate a sample with
-all options documented. See [sample-config.toml](agentworks/sample-config.toml) for the full
-reference.
+Configuration splits into two surfaces:
 
-Key sections:
+- **Settings** live in `~/.config/agentworks/config.toml` -- your identity, paths, defaults,
+  platform connections, and the secret backend chain. Run `agw config init` to generate a sample;
+  see [sample-config.toml](agentworks/sample-config.toml) for the full reference.
+- **Resources** -- secrets, templates, git credentials, catalog entries -- are declared as YAML
+  manifests under `~/.config/agentworks/resources/`, auto-loaded on every command.
+  `agw resource sample` prints a commented starter for every kind. The classic TOML resource
+  sections keep working (deprecated, with per-section load warnings); `agw resource migrate` moves
+  them to YAML whenever you like. See [docs/guides/resources.md](../docs/guides/resources.md).
+
+Settings sections (`config.toml`, permanent):
 
 - `[operator]` -- SSH keys (required), additional authorized keys, SSH config management
-- `[paths]` -- VM workspace and VS Code workspace file directories
+- `[paths]` -- VM workspace, VS Code workspace file, and backup directories
 - `[defaults]` -- default platform, VM host
-- `[vm_templates.*]` -- VM resources, apt packages, system install commands, mise
-- `[admin.config]` -- admin user shell, dotfiles, git credentials, user install commands, mise
-- `[agent_templates.*]` -- agent user shell, dotfiles, git credentials, user install commands, mise
 - `[session.config]` -- session defaults (history limit)
-- `[session_templates.*]` -- session templates with variable substitution
-- `[workspace_templates.*]` -- workspace templates with inheritance
-- `[named_console]` -- named-console layout (tmux preset names + `aw-session-vertical`)
-- `[git_credentials.*]` -- git credentials; `provider` selects github or azdo (`type` is accepted as
-  a legacy alias)
-- `[<scope>.env]` -- env vars at vm / workspace / admin / agent / session scope
-- `[secrets.*]` -- secret declarations referenced by `{ secret = "name" }` env entries
 - `[secret_config]` -- active secret backend chain (`[secret_backends.*]` sections are deprecated
   no-ops; the built-in backends ship with agentworks, and new backends are declared as
   `secret-backend` YAML manifests)
-- `[apt_sources.*]` -- user-defined third-party apt repositories
-- `[apt_packages.*]` -- user-defined named apt package sets
-- `[system_install_commands.*]` -- user-defined system-level install commands
-- `[user_install_commands.*]` -- user-defined per-user install commands
 - `[azure]` -- Azure-specific settings
 - `[proxmox]` -- Proxmox VE API settings
+
+Resource kinds (YAML manifests; the deprecated TOML section is noted for each):
+
+- `vm-template` (`[vm_templates.*]`) -- VM resources, apt packages, system install commands, mise
+- `admin-template` (`[admin.config]`) -- admin user shell, dotfiles, git credentials, user install
+  commands, mise
+- `agent-template` (`[agent_templates.*]`) -- agent user shell, dotfiles, git credentials, user
+  install commands, mise
+- `session-template` (`[session_templates.*]`) -- session commands with variable substitution
+- `workspace-template` (`[workspace_templates.*]`) -- workspace templates with inheritance
+- `named-console-template` (`[named_console]`) -- named-console layout (tmux preset names +
+  `aw-session-vertical`)
+- `git-credential` (`[git_credentials.*]`) -- git credentials; `spec.provider` selects github or
+  azdo (TOML also accepts the legacy `type`)
+- `secret` (`[secrets.*]`) -- secret declarations referenced by `{secret: name}` env entries
+- `apt-source` / `apt-package` / `system-install-command` / `user-install-command`
+  (`[apt_sources.*]` etc.) -- catalog extensions
+- Env vars ride their owning resource: an `env` map in the template's `spec` (TOML: `[<scope>.env]`
+  subsections) at vm / workspace / admin / agent / session scope
 
 ### Environment Variables and Secrets
 
@@ -594,25 +612,29 @@ session > (agent | admin) > workspace > vm           (AGENTWORKS_* identity over
 ```
 
 Admin and agent scopes are mutually exclusive: a shell opened as the admin user (e.g.
-`agw vm shell`) sees admin scope; an agent-mode session sees agent scope. Each scope is a TOML table
-mapping env-var name to either a plaintext string or `{ secret = "<name>" }`:
+`agw vm shell`) sees admin scope; an agent-mode session sees agent scope. Each scope is an env map
+on the owning resource, mapping env-var name to either a plaintext string or a secret reference:
 
-```toml
-[vm_templates.default.env]
-HTTP_PROXY = "http://proxy:3128"
-NPM_TOKEN = { secret = "npm-token" }
-
-[admin.env]
-EDITOR = "nvim"
+```yaml
+apiVersion: agentworks/v1
+kind: vm-template
+metadata:
+  name: default
+spec:
+  env:
+    HTTP_PROXY: http://proxy:3128
+    NPM_TOKEN: { secret: npm-token }
 ```
 
-Every `{ secret = "<name>" }` reference must point to a `[secrets.<name>]` declaration. Active
-backends (and their precedence order) are listed in `[secret_config].backends`. Today the
-implemented backends are:
+(TOML equivalent: `[vm_templates.default.env]` with `NPM_TOKEN = { secret = "npm-token" }`.)
+
+Every secret reference points to a `secret` resource declaration (auto-declared with a
+framework-synthesized description if you skip it). Active backends (and their precedence order) are
+listed in `[secret_config].backends`. Today the implemented backends are:
 
 - `env-var` -- reads from the operator's process env. Default convention is
-  `AW_SECRET_<UPPER_SNAKE_CASE>`, overridable per secret via
-  `[secrets.<name>].backend_mappings.env-var = "CUSTOM_NAME"`.
+  `AW_SECRET_<UPPER_SNAKE_CASE>`, overridable per secret via the secret's `backend_mappings`
+  (`env-var: CUSTOM_NAME`).
 - `prompt` -- interactive prompt; batched at the start of the CLI run.
 
 **Eager prompting (FRD R4):** every command that opens new shells resolves all needed secrets up
@@ -797,7 +819,7 @@ Secret values are read from the operator's shell via the `env-var` backend, whic
 convention `AW_SECRET_<UPPER_SNAKE_CASE>` derived from the secret's name. The Tailscale auth key
 (secret `tailscale-auth-key`) reads from `AW_SECRET_TAILSCALE_AUTH_KEY`; a git credential's PAT
 (secret `git-token-<name>`) reads from `AW_SECRET_GIT_TOKEN_<NAME>`; and so on. Override the
-convention per secret via `[secrets.<name>].backend_mappings.env-var = "CUSTOM_NAME"`.
+convention per secret via the secret's `backend_mappings` (`env-var: CUSTOM_NAME`).
 
 Use `agw secret list` to see the exact env var name for each declared or auto-declared secret, and
 `agw secret describe <name>` for the full per-secret view (origin, usages, backend mappings,

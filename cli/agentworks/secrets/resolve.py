@@ -1,8 +1,8 @@
 """The secrets runtime: a loop over the active backends.
 
 Resolution is iterating the needed secrets over each active backend in
-chain order -- no resolver object, no cache, no memo (runtime-model LLD
-of the resource-manifests SDD). A command resolves ONCE at its
+chain order -- no resolver object, no cache, no memo (ADR 0016). A
+command resolves ONCE at its
 composition root and passes the values down; "prompt-once" is true by
 construction. Caching across CLI invocations would be a different
 feature with different security properties.
