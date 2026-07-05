@@ -175,12 +175,27 @@ def _decode_git_credential(doc: Document, spec: dict[str, object], issues: list[
         raise ConfigError(
             "git-credential requires spec.provider (github or azdo)",
         )
-    # The Config-layer field keeps the ``type`` name until the TOML
-    # resource path retires (future major); manifests are born with the
-    # ``provider`` vocabulary.
-    spec["type"] = provider
+    # Kind-owned fields stay top-level; provider-owned configuration
+    # (azdo's org) nests under spec.provider_config. The YAML shape
+    # deliberately diverges from the flat TOML sections here -- the
+    # decoder flattens back into the shared loader's shape, so
+    # validation stays verbatim-shared with TOML.
+    raw_config = spec.pop("provider_config", {})
+    if not isinstance(raw_config, dict):
+        raise ConfigError("spec.provider_config must be a mapping")
+    loader_spec: dict[str, object] = {"type": provider, **raw_config}
+    for kind_owned in ("token", "description"):
+        if kind_owned in spec:
+            loader_spec[kind_owned] = spec.pop(kind_owned)
+    if spec:
+        extras = ", ".join(sorted(spec))
+        raise ConfigError(
+            f"unknown git-credential spec field(s): {extras}; "
+            "provider-specific configuration (e.g. azdo's org) goes under "
+            "spec.provider_config"
+        )
     result = _load_git_credentials(
-        {"git_credentials": {doc.name: spec}}, issues, _decls(doc.location)
+        {"git_credentials": {doc.name: loader_spec}}, issues, _decls(doc.location)
     )
     return result[doc.name]
 

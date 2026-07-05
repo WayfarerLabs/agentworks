@@ -421,17 +421,31 @@ def _emit_document(doc: tomlkit.TOMLDocument, unit: MigrationUnit) -> str:
     spec = _spec_data(doc, unit)
     metadata: dict[str, Any] = {"name": unit.name}
 
-    if unit.kind == "git-credential":
-        # TOML accepts type (legacy) or provider (alias); the manifest
-        # surface only ever has spec.provider, listed first for
-        # readability. Pop BOTH before rebuilding so the precedence
-        # (provider wins, matching the TOML loader) is explicit rather
-        # than an artifact of dict-literal ordering.
-        legacy = spec.pop("type", None)
-        provider = spec.pop("provider", None) or legacy
-        spec = {"provider": provider, **spec}
+    # Description moves to metadata BEFORE any kind-specific rebuild --
+    # the git-credential branch below sweeps "everything left" into
+    # provider_config, and description is kind-owned, not provider-owned.
     if unit.kind in _DESCRIPTION_KINDS and "description" in spec:
         metadata["description"] = spec.pop("description")
+
+    if unit.kind == "git-credential":
+        # TOML accepts type (legacy) or provider (alias); the manifest
+        # surface only ever has spec.provider. Pop BOTH before
+        # rebuilding so the precedence (provider wins, matching the TOML
+        # loader) is explicit rather than an artifact of dict-literal
+        # ordering. Kind-owned token stays top-level; everything else
+        # (azdo's org) is provider-owned and nests under
+        # provider_config -- the YAML shape diverges from flat TOML by
+        # design, and the post-run registry-equivalence verification
+        # proves the divergence is shape-only.
+        legacy = spec.pop("type", None)
+        provider = spec.pop("provider", None) or legacy
+        token = spec.pop("token", None)
+        rebuilt: dict[str, Any] = {"provider": provider}
+        if token is not None:
+            rebuilt["token"] = token
+        if spec:
+            rebuilt["provider_config"] = dict(spec)
+        spec = rebuilt
 
     envelope: dict[str, Any] = {
         "apiVersion": "agentworks/v1",

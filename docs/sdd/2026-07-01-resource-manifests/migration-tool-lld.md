@@ -138,7 +138,10 @@ run self-checks; no run can leave a silently-different registry.
 
 ### Renames and special cases
 
-- `git_credentials.<name>.type` emits as `spec.provider` (the manifest surface never had `type`).
+- `git_credentials.<name>.type` emits as `spec.provider` (the manifest surface never had `type`),
+  and provider-owned fields (azdo's `org`) emit nested under `spec.provider_config` while kind-owned
+  `token` stays top-level -- the YAML shape diverges from flat TOML by design (provider_config
+  pattern, 2026-07-05).
 - `description` moves from the section body to `metadata.description`.
 - The `admin` singleton (`[admin.config]` / `[admin.env]` / sub-sections) emits as one
   `admin-template` document named `default`, and `[named_console]` as one

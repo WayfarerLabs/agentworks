@@ -185,6 +185,32 @@ def test_git_credential_type_becomes_provider(tmp_path: Path) -> None:
     assert doc["metadata"]["description"] == "gh access"
 
 
+def test_git_credential_org_nests_in_emission(tmp_path: Path) -> None:
+    """The migrator emits the YAML shape (provider-owned org nested
+    under provider_config, kind-owned token top-level); the run's own
+    registry-equivalence verification proves the divergence from the
+    flat TOML is shape-only."""
+    cfg = _write_config(
+        tmp_path,
+        resources="""\
+[git_credentials.ado]
+type = "azdo"
+org = "my-org"
+token = "git-token-ado"
+description = "AZDO access"
+""",
+    )
+    config, plan = _plan(cfg, ["git-credential/ado"])
+    execute_plan(plan, config)  # verification passes -> rows equivalent
+    (doc,) = _loaded_docs(tmp_path / "resources" / "git-credentials.yaml")
+    assert doc["spec"] == {
+        "provider": "azdo",
+        "token": "git-token-ado",
+        "provider_config": {"org": "my-org"},
+    }
+    assert doc["metadata"]["description"] == "AZDO access"
+
+
 def test_singletons_emit_default_documents(tmp_path: Path) -> None:
     cfg = _write_config(tmp_path)
     config, plan = _plan(cfg, ["admin-template", "named-console-template"])

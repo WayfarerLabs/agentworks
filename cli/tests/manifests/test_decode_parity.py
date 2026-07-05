@@ -161,6 +161,30 @@ def _strip(resource: Any) -> Any:
             """,
         ),
         (
+            # The deliberate shape divergence: flat TOML (org top-level)
+            # and nested YAML (org under provider_config) decode to the
+            # same row -- provider-owned config nests in manifests.
+            "git-credential",
+            "ado",
+            """
+            [git_credentials.ado]
+            type = "azdo"
+            org = "my-org"
+            token = "git-token-ado"
+            """,
+            """
+            apiVersion: agentworks/v1
+            kind: git-credential
+            metadata:
+              name: ado
+            spec:
+              provider: azdo
+              token: git-token-ado
+              provider_config:
+                org: my-org
+            """,
+        ),
+        (
             "apt-package",
             "my-tool",
             """
@@ -265,6 +289,25 @@ def test_git_credential_type_key_rejected(tmp_path: Path) -> None:
         """,
     )
     with pytest.raises(ConfigError, match='use "provider", not "type"'):
+        load_manifests(tmp_path / "resources")
+
+
+def test_git_credential_org_must_nest_under_provider_config(tmp_path: Path) -> None:
+    """Provider-owned fields do not ride the spec top level in YAML:
+    a stray `org` errors with a pointer at the nesting rule."""
+    _manifest(
+        tmp_path,
+        """
+        apiVersion: agentworks/v1
+        kind: git-credential
+        metadata:
+          name: ado
+        spec:
+          provider: azdo
+          org: my-org
+        """,
+    )
+    with pytest.raises(ConfigError, match="goes under\\s+spec.provider_config"):
         load_manifests(tmp_path / "resources")
 
 

@@ -60,6 +60,13 @@ capability across domains. Symbols and kinds that are domain-specific spell the 
 (`SECRET_PROVIDER_REGISTRY`, kind `secret-provider`); the bare word is reserved for the generic
 concept and for the `provider` field on exposed resources, whose owner scopes it.
 
+Provider-owned configuration on an exposed resource nests under a single `spec.provider_config` key
+-- an opaque blob the named provider owns and validates -- so the rest of the spec stays
+provider-agnostic. Kind-owned fields stay top-level: a `git-credential`'s `token` belongs to every
+credential, while `azdo`'s `org` nests. The manifest shape may diverge from the flat TOML sections
+to carry this pattern -- decoders reshape before calling the shared loaders, so validation stays
+TOML-shared while the YAML surface stays uniform.
+
 For secrets concretely: backends (`SecretBackendDecl`) own `would_attempt` / `describe_lookup` /
 `resolve`; providers are stateless code invoked only from those door methods; and resolution is a
 plain loop over the active backends in chain order -- no resolver object, no cache, no memos.
