@@ -12,7 +12,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Any
 
 import tomlkit
 import yaml
@@ -28,8 +28,6 @@ if TYPE_CHECKING:
     from agentworks.config import Config
     from agentworks.resources.registry import Registry
 
-Layout = Literal["per-kind", "single", "per-resource"]
-TomlMode = Literal["comment", "delete"]
 
 # Kinds that exist in TOML as one singleton section rather than a named
 # family; they emit as <kind>/default per the envelope restriction.
@@ -75,7 +73,7 @@ class MigrationPlan:
     resources_dir: Path
     units: list[MigrationUnit]
     writes: list[FileWrite]
-    toml_mode: str  # validated "comment" | "delete" (see TomlMode)
+    toml_mode: str  # validated: "comment" | "delete"
     old_toml_text: str
     new_toml_text: str
     drops_secret_backends: bool
