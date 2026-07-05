@@ -63,6 +63,72 @@ def test_health_check_message_optional() -> None:
     assert check_with_msg.message == "details"
 
 
+class TestCompletionChecks:
+    """Relevance-aware staleness reporting in `_check_completions`."""
+
+    def _stamped(self, path, version: str):
+        path.write_text(f"# agentworks-completion-version: {version}\n")
+        return path
+
+    def test_unavailable_shell_reports_info_not_warn(self, tmp_path, monkeypatch) -> None:
+        """A stale completion file for a shell that isn't on this machine
+        (e.g. zsh on Windows) should be an info note, not a warning."""
+        from agentworks import doctor
+
+        f = self._stamped(tmp_path / "_agentworks", "v-old")
+        monkeypatch.setattr(doctor, "_get_completion_paths", lambda: [("zsh", [f])])
+        monkeypatch.setattr(doctor, "_shell_available", lambda name: False)
+
+        g = doctor._check_completions("v-new")
+
+        assert len(g.checks) == 1
+        assert g.checks[0].status == Status.INFO
+        message = g.checks[0].message
+        assert message is not None and "not found on this machine" in message
+
+    def test_stale_available_shell_still_warns(self, tmp_path, monkeypatch) -> None:
+        from agentworks import doctor
+
+        f = self._stamped(tmp_path / "agentworks", "v-old")
+        monkeypatch.setattr(doctor, "_get_completion_paths", lambda: [("bash", [f])])
+        monkeypatch.setattr(doctor, "_shell_available", lambda name: True)
+
+        g = doctor._check_completions("v-new")
+
+        assert g.checks[0].status == Status.WARN
+        message = g.checks[0].message
+        assert message is not None and "stale" in message
+
+    def test_up_to_date_available_shell_is_ok(self, tmp_path, monkeypatch) -> None:
+        from agentworks import doctor
+
+        f = self._stamped(tmp_path / "agentworks", "v-cur")
+        monkeypatch.setattr(doctor, "_get_completion_paths", lambda: [("bash", [f])])
+        monkeypatch.setattr(doctor, "_shell_available", lambda name: True)
+
+        g = doctor._check_completions("v-cur")
+
+        assert g.checks[0].status == Status.OK
+
+    def test_shell_available_maps_powershell_to_pwsh(self, monkeypatch) -> None:
+        """On systems where only `pwsh` exists (not `powershell`), the
+        powershell shell should still count as available. Also pins the
+        symmetric case: `powershell` on PATH without `pwsh` should also
+        count (Windows-native Windows PowerShell)."""
+        import shutil
+
+        from agentworks import doctor
+
+        monkeypatch.setattr(shutil, "which", lambda name: "/x/pwsh" if name == "pwsh" else None)
+        assert doctor._shell_available("powershell") is True
+        assert doctor._shell_available("zsh") is False
+
+        monkeypatch.setattr(
+            shutil, "which", lambda name: "/x/powershell" if name == "powershell" else None
+        )
+        assert doctor._shell_available("powershell") is True
+
+
 @pytest.mark.integration
 def test_run_checks_returns_report() -> None:
     """Smoke test: run_checks returns a valid HealthReport with expected groups.
