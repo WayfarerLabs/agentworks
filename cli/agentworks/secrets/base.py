@@ -100,9 +100,9 @@ class SecretBackendDecl:
 
     def _capability(self) -> SecretProvider:
         from agentworks.errors import ConfigError
-        from agentworks.secrets.providers import PROVIDER_REGISTRY
+        from agentworks.secrets.providers import SECRET_PROVIDER_REGISTRY
 
-        capability = PROVIDER_REGISTRY.get(self.provider)
+        capability = SECRET_PROVIDER_REGISTRY.get(self.provider)
         if capability is None:
             # The registry graph validates provider references at
             # finalize; reaching here means a row exists without code

@@ -1500,9 +1500,9 @@ def _load_secret_backends(
     if not isinstance(raw, dict):
         raise ConfigError("[secret_backends] must be a table")
 
-    from agentworks.secrets.providers import PROVIDER_REGISTRY
+    from agentworks.secrets.providers import SECRET_PROVIDER_REGISTRY
 
-    known_kinds = set(PROVIDER_REGISTRY)
+    known_kinds = set(SECRET_PROVIDER_REGISTRY)
     for kind, bdata in raw.items():
         kind_str = str(kind)
         if not isinstance(bdata, dict):

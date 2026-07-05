@@ -18,7 +18,7 @@ from agentworks.bootstrap import build_registry
 from agentworks.config import load_config
 from agentworks.errors import ConfigError
 from agentworks.manifests import load_manifests
-from agentworks.secrets import PROVIDER_REGISTRY, active_backends, resolve_secrets
+from agentworks.secrets import SECRET_PROVIDER_REGISTRY, active_backends, resolve_secrets
 from agentworks.secrets.base import SecretBackendDecl, SecretDecl
 
 _BASE_TOML = """
@@ -97,12 +97,12 @@ class _TestOnlyProvider:
 @pytest.fixture
 def test_only_provider(monkeypatch: pytest.MonkeyPatch) -> Any:
     provider = _TestOnlyProvider()
-    monkeypatch.setitem(PROVIDER_REGISTRY, "test-only", provider)  # type: ignore[misc]
+    monkeypatch.setitem(SECRET_PROVIDER_REGISTRY, "test-only", provider)  # type: ignore[misc]
     return provider
 
 
 def test_builtin_providers_registered() -> None:
-    assert set(PROVIDER_REGISTRY) >= {"env-var", "prompt"}
+    assert set(SECRET_PROVIDER_REGISTRY) >= {"env-var", "prompt"}
 
 
 def test_builtin_provider_rejects_config(tmp_path: Path) -> None:

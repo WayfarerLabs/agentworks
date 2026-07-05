@@ -23,7 +23,7 @@ from agentworks.secrets.orchestration import (
     compute_needed_secrets,
     resolve_for_command,
 )
-from agentworks.secrets.providers import PROVIDER_REGISTRY
+from agentworks.secrets.providers import SECRET_PROVIDER_REGISTRY
 from agentworks.secrets.resolve import (
     active_backends,
     resolve_secrets,
@@ -38,7 +38,7 @@ def publish_to(registry: Registry) -> None:
     (``manifests/builtin/secret-backends.yaml``); this publisher
     contributes the provider descriptors that backend ``provider``
     references resolve against -- the resource-registry projection of
-    the capability registry (``PROVIDER_REGISTRY``), which remains the
+    the capability registry (``SECRET_PROVIDER_REGISTRY``), which remains the
     source of truth for the implementations themselves.
     """
     from agentworks.secrets.providers import publish_to as publish_providers
@@ -47,7 +47,7 @@ def publish_to(registry: Registry) -> None:
 
 
 __all__ = [
-    "PROVIDER_REGISTRY",
+    "SECRET_PROVIDER_REGISTRY",
     "SecretBackendDecl",
     "SecretConfig",
     "SecretDecl",

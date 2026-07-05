@@ -37,7 +37,7 @@ Everything the CLI works with belongs to exactly one of three layers:
 | ---------------- | ------------------------------------------------------------------------------- | ----------------------------------------- | -------------------- |
 | Config           | Settings: SSH keys, paths, defaults, the active backend chain, (future) plugins | TOML (`config.toml`), the `Config` object | section/field names  |
 | Resources        | Declared things: secrets, backends, templates, credentials, catalog entries     | the resource Registry, fed by publishers  | `kind` + `name`      |
-| Raw capabilities | Code implementations: secret providers, VM provisioners, git cred providers     | per-domain provider registries            | bare capability name |
+| Raw capabilities | Code implementations: secret providers, VM providers, git credential providers  | per-domain provider registries            | bare capability name |
 
 **The vocabulary law: `kind` is a resource-registry concept, full stop.** Providers (raw
 capabilities) are not resources and have no kind. The resource that exposes a capability has its own
@@ -54,8 +54,11 @@ A raw capability is registered code; an **exposed resource** is the declared res
 usable (optionally with configuration). ALL runtime access to a capability goes through one of its
 exposed resources; the capability's invocation API is domain-owned and visible only to them. One
 capability may back many exposed resources (two future `onepassword` backends pointed at different
-vaults). Domain terminology varies -- secrets say provider -> backend; VMs will likely say provider
--> platform -- but the pattern is uniform.
+vaults). Domain terminology varies on the exposed-resource side -- secrets say provider -> backend;
+VMs will likely say provider -> platform -- while "provider" is the stable generic term for the raw
+capability across domains. Symbols and kinds that are domain-specific spell the domain out
+(`SECRET_PROVIDER_REGISTRY`, kind `secret-provider`); the bare word is reserved for the generic
+concept and for the `provider` field on exposed resources, whose owner scopes it.
 
 For secrets concretely: backends (`SecretBackendDecl`) own `would_attempt` / `describe_lookup` /
 `resolve`; providers are stateless code invoked only from those door methods; and resolution is a

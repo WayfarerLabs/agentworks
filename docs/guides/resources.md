@@ -98,8 +98,10 @@ policy is per kind:
 
 Three layers, one rule each:
 
-- A **provider** is code -- the raw capability (`env-var`, `prompt`; later `onepassword`, ...).
-  Providers are not resources and cannot be declared; plugins will register them.
+- A **secret provider** is code -- the raw capability (`env-var`, `prompt`; later `onepassword`,
+  ...). Providers are not resources and cannot be declared; plugins will register them. ("Provider"
+  is the generic term for a raw capability across domains -- VM providers and git credential
+  providers follow the same pattern -- so anything secret-specific spells it out.)
 - A **backend** is a resource of kind `secret-backend`: a named instance of a provider, optionally
   with configuration (a future `onepassword` provider could back `op-work` and `op-personal`
   backends pointed at different vaults). All secret operations go through backends.

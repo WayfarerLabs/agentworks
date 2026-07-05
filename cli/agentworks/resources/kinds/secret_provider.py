@@ -27,7 +27,7 @@ class SecretProviderEntry:
     """A name-keyed marker for one secret provider implementation.
 
     The actual capability (validate_config / batch_get) lives in
-    ``agentworks.secrets.providers.PROVIDER_REGISTRY``; this row is what
+    ``agentworks.secrets.providers.SECRET_PROVIDER_REGISTRY``; this row is what
     a ``secret-backend``'s ``provider`` field resolves against in the
     framework.
     """

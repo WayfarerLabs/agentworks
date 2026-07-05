@@ -71,11 +71,11 @@ def test_describe_secret_never_resolves_through_interactive_backends(
             "backends must be previewed via would_attempt alone (FRD R10)"
         )
 
-    from agentworks.secrets import PROVIDER_REGISTRY
+    from agentworks.secrets import SECRET_PROVIDER_REGISTRY
 
     registry = build_registry(config)
     monkeypatch.setattr(
-        PROVIDER_REGISTRY["prompt"], "batch_get", _fail_batch_get
+        SECRET_PROVIDER_REGISTRY["prompt"], "batch_get", _fail_batch_get
     )
 
     # Should complete without invoking the prompt provider.

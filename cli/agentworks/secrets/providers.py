@@ -9,7 +9,7 @@ distinct is the design (ADR 0016):
   built-ins or operator manifests) -- the exposed resources, and THE
   DOOR: all runtime access to a capability goes through a backend's
   methods (``agentworks.secrets.base.SecretBackendDecl``).
-- RAW CAPABILITIES: this module. ``PROVIDER_REGISTRY`` holds the code
+- RAW CAPABILITIES: this module. ``SECRET_PROVIDER_REGISTRY`` holds the code
   implementations (``env-var``, ``prompt``; later ``onepassword``,
   plugin-registered providers). Providers are not resources and have no
   kind; the provider API below is consumed only by backend door methods
@@ -93,7 +93,7 @@ class SecretProvider(Protocol):
     ) -> dict[str, str]: ...
 
 
-PROVIDER_REGISTRY: dict[str, SecretProvider] = {
+SECRET_PROVIDER_REGISTRY: dict[str, SecretProvider] = {
     "env-var": EnvVarProvider(),
     "prompt": PromptProvider(),
 }
@@ -111,7 +111,7 @@ def publish_to(registry: Registry) -> None:
     from agentworks.resources.kinds.secret_provider import SecretProviderEntry
 
     origin = Origin.built_in(source="agentworks.secrets")
-    for name in PROVIDER_REGISTRY:
+    for name in SECRET_PROVIDER_REGISTRY:
         registry.add(
             "secret-provider", name, SecretProviderEntry(name=name), origin
         )

@@ -207,7 +207,7 @@ def _decode_named_console_template(
 
 def _decode_secret_backend(doc: Document, spec: dict[str, object], issues: list[str]) -> Any:
     from agentworks.secrets.base import SecretBackendDecl
-    from agentworks.secrets.providers import PROVIDER_REGISTRY
+    from agentworks.secrets.providers import SECRET_PROVIDER_REGISTRY
 
     description = str(spec.pop("description", ""))
     provider = spec.pop("provider", None)
@@ -217,7 +217,7 @@ def _decode_secret_backend(doc: Document, spec: dict[str, object], issues: list[
     # provider is registered, validate now (the error carries this
     # document's location); when it isn't, defer so the framework's
     # reference miss policy reports the unknown provider uniformly.
-    known = PROVIDER_REGISTRY.get(provider)
+    known = SECRET_PROVIDER_REGISTRY.get(provider)
     config = dict(spec)
     if known is not None:
         config = dict(known.validate_config(doc.name, config))
