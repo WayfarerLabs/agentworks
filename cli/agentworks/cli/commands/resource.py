@@ -15,6 +15,7 @@ import typer
 
 from agentworks.cli._app import app
 from agentworks.cli._helpers import get_db
+from agentworks.manifests.samples import SAMPLE_KINDS
 
 if TYPE_CHECKING:
     from agentworks.resources.inspect import OriginFilter
@@ -28,6 +29,7 @@ app.add_typer(resource_app)
 
 _LAYOUT_CHOICES = click.Choice(["per-kind", "single", "per-resource"])
 _TOML_CHOICES = click.Choice(["comment", "delete"])
+_SAMPLE_KIND_CHOICES = click.Choice(list(SAMPLE_KINDS))
 
 
 @resource_app.command("list")
@@ -245,6 +247,7 @@ def resource_sample(
     kind: Annotated[
         str | None,
         typer.Argument(
+            click_type=_SAMPLE_KIND_CHOICES,
             help=(
                 "Kind to print a sample manifest for (e.g. secret, "
                 "vm-template). Default: samples for every kind."

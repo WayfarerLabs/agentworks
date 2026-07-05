@@ -62,6 +62,38 @@ def test_uncommented_samples_load_through_the_real_loader(tmp_path: Path) -> Non
     assert not manifests.issues, manifests.issues
 
 
+def test_uncommented_samples_build_a_registry(tmp_path: Path) -> None:
+    """Beyond the loader: the sample set is internally consistent -- its
+    cross-references (admin-template -> git-credential github,
+    apt-package -> apt-source my-repo, secrets auto-declare) resolve
+    through a full registry build. secret-backend is excluded: its
+    sample deliberately shows a provider (onepassword) that does not
+    ship yet, flagged as illustrative in its prose."""
+    from agentworks.bootstrap import build_registry
+    from agentworks.config import load_config
+
+    pub = tmp_path / "id.pub"
+    priv = tmp_path / "id"
+    pub.write_text("ssh-ed25519 AAAA...")
+    priv.write_text("-----BEGIN OPENSSH PRIVATE KEY-----")
+    cfg = tmp_path / "config.toml"
+    cfg.write_text(
+        f"""\
+[operator]
+ssh_public_key = "{pub.as_posix()}"
+ssh_private_key = "{priv.as_posix()}"
+"""
+    )
+    resources = tmp_path / "resources"
+    resources.mkdir()
+    for kind in SAMPLE_KINDS:
+        if kind == "secret-backend":
+            continue
+        (resources / f"{kind}.yaml").write_text(_uncomment(sample_text(kind)))
+    config = load_config(cfg, warn_issues=False)
+    build_registry(config)
+
+
 def test_commented_samples_are_inert_through_the_loader(tmp_path: Path) -> None:
     """As shipped (commented), a written sample declares nothing."""
     resources = tmp_path / "resources"

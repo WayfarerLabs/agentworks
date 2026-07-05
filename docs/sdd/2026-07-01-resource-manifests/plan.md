@@ -391,6 +391,13 @@ only TOML-resource reader in the tree; CI green; reviewer-approved.
 (Recorded as they happen, per SDD convention. Deviations from FRD/HLA get an entry here and an
 artifact update.)
 
+- **2026-07-05: Phase 4 implementation notes.** Two deviations from the LLD text, both reconciled
+  there: selector completion sources operator-origin registry rows (which include already-migrated
+  YAML rows) rather than a TOML-only list -- the already-migrated error is clear and a TOML-only
+  filter is not worth new CLI surface -- and names containing `/` ARE individually addressable
+  (first-slash split leaves the full name as the remainder; the LLD had claimed otherwise). Also
+  discovered: `resource sample --write` appends WITHOUT a `---` separator (commented content plus a
+  separator would create a null document the loader rejects); FRD/LLD updated.
 - **2026-07-05: Phase 4 redesigned as a recurring mover (maintainer-directed).** The migration tool
   is `agw resource migrate` (renamed from `config migrate`; its object is resources): positional
   selectors for incremental runs, `--layout per-kind|single|per-resource`, append-only YAML output,

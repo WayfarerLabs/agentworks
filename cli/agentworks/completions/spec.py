@@ -237,9 +237,10 @@ DYNAMIC_COMPLETIONS: dict[tuple[str, str], str] = {
     ("resource.list", "kind"): "resource_kinds",
     ("resource.describe", "kind"): "resource_kinds",
     ("resource.describe", "name"): "resource_names",
-    # Resource migration + authoring (Phase 4)
+    # Resource migration + authoring (Phase 4). `resource sample`'s kind
+    # argument is a static click.Choice (SAMPLE_KINDS), so it completes
+    # via ParamSpec.choices rather than a dynamic completer.
     ("resource.migrate", "selectors"): "migrate_selectors",
-    ("resource.sample", "kind"): "resource_kinds",
 }
 
 

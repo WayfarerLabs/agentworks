@@ -80,7 +80,11 @@ test_exec = "my-user"
 """
 
 
-def _write_config(tmp_path: Path, resources: str = MAXIMAL_RESOURCES) -> Path:
+def _write_config(
+    tmp_path: Path, resources: str = MAXIMAL_RESOURCES, *, prefix: str = ""
+) -> Path:
+    """``prefix`` lands before the first table header -- the only place
+    a TOP-LEVEL assignment shape (``secrets = {...}``) can live."""
     pub = tmp_path / "id.pub"
     priv = tmp_path / "id"
     pub.write_text("ssh-ed25519 AAAA...")
@@ -88,7 +92,7 @@ def _write_config(tmp_path: Path, resources: str = MAXIMAL_RESOURCES) -> Path:
     cfg = tmp_path / "config.toml"
     cfg.write_text(
         f"""\
-# operator identity comment stays
+{prefix}# operator identity comment stays
 [operator]
 ssh_public_key = "{pub.as_posix()}"
 ssh_private_key = "{priv.as_posix()}"
@@ -425,7 +429,7 @@ def test_delete_mode_removes_sections(tmp_path: Path) -> None:
     assert "# migrated to" not in after
 
 
-def test_dotted_key_declaration_refused(tmp_path: Path) -> None:
+def test_dotted_key_declaration_refused_with_location(tmp_path: Path) -> None:
     cfg = _write_config(
         tmp_path,
         resources="""\
@@ -433,8 +437,75 @@ def test_dotted_key_declaration_refused(tmp_path: Path) -> None:
 npm-token = { description = "inline shape" }
 """,
     )
-    with pytest.raises(ConfigError, match="dotted key or\ninline table|dotted key or inline table"):
+    with pytest.raises(ConfigError, match="dotted key or inline table") as exc:
         _plan(cfg, ["secret/npm-token"])
+    assert "config.toml:" in str(exc.value)
+
+
+def test_top_level_assignment_shape_refused_on_bare_run(tmp_path: Path) -> None:
+    """A resource declared via a top-level assignment (`secrets = {...}`)
+    loads into the registry but has no faithful comment-out rendering.
+    It must be discovered and REFUSED -- silently skipping it would
+    report a complete migration that left rows behind."""
+    cfg = _write_config(
+        tmp_path,
+        resources="",
+        prefix='secrets = { npm-token = { description = "assignment shape" } }\n',
+    )
+    with pytest.raises(ConfigError, match="standard TOML tables") as exc:
+        _plan(cfg, [])
+    assert "config.toml:" in str(exc.value)
+    # And the explicit selector reaches the same refusal, not a
+    # misleading "no TOML-declared secret".
+    with pytest.raises(ConfigError, match="standard TOML tables"):
+        _plan(cfg, ["secret/npm-token"])
+
+
+def test_singleton_assignment_shape_refused(tmp_path: Path) -> None:
+    cfg = _write_config(
+        tmp_path,
+        resources="",
+        prefix='admin = { config = { shell = "zsh" } }\n',
+    )
+    with pytest.raises(ConfigError, match="standard TOML tables"):
+        _plan(cfg, ["admin-template"])
+
+
+def test_slash_names_are_individually_addressable(tmp_path: Path) -> None:
+    """First-slash split leaves the full name as the remainder, so a
+    name containing `/` selects fine (per-kind layout carries it)."""
+    cfg = _write_config(
+        tmp_path,
+        resources="""\
+[vm_templates."we/ird"]
+cpus = 2
+""",
+    )
+    config, plan = _plan(cfg, ["vm-template/we/ird"])
+    assert [(u.kind, u.name) for u in plan.units] == [("vm-template", "we/ird")]
+    execute_plan(plan, config)
+    (doc,) = _loaded_docs(tmp_path / "resources" / "vm-templates.yaml")
+    assert doc["metadata"]["name"] == "we/ird"
+
+
+def test_per_resource_comment_markers_name_every_file(tmp_path: Path) -> None:
+    """A whole contiguous run replaced under per-resource layout gets
+    one marker line per distinct target file, not just the first."""
+    cfg = _write_config(
+        tmp_path,
+        resources="""\
+[vm_templates.default]
+cpus = 4
+
+[vm_templates.dev]
+cpus = 8
+""",
+    )
+    config, plan = _plan(cfg, ["vm-template"], layout="per-resource")
+    execute_plan(plan, config)
+    after = cfg.read_text()
+    assert "# migrated to resources/vm-template/default.yaml" in after
+    assert "# migrated to resources/vm-template/dev.yaml" in after
 
 
 # ---------------------------------------------------------------------------
@@ -449,6 +520,52 @@ def test_backup_holds_the_original(tmp_path: Path) -> None:
     result = execute_plan(plan, config)
     assert result.backup_path.parent == tmp_path / "backups"
     assert result.backup_path.read_text() == original
+
+
+def test_backup_taken_before_any_write(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The backup must exist before the first manifest byte is written:
+    force the very first write step to fail and assert the backup is
+    already on disk with the original content."""
+    import agentworks.migrate.execute as execute_mod
+
+    cfg = _write_config(tmp_path)
+    original = cfg.read_text()
+
+    def boom(*args: object, **kwargs: object) -> list:  # type: ignore[type-arg]
+        raise OSError("simulated write failure")
+
+    monkeypatch.setattr(execute_mod, "_ensure_parents", boom)
+    config, plan = _plan(cfg, [])
+    with pytest.raises(OSError, match="simulated"):
+        execute_plan(plan, config)
+    backups = sorted((tmp_path / "backups").glob("config-*.toml"))
+    assert backups, "backup must be taken before any write"
+    assert backups[0].read_text() == original
+    assert cfg.read_text() == original
+
+
+def test_backup_stamps_do_not_collide(tmp_path: Path) -> None:
+    """Two runs inside one second keep both backups."""
+    cfg = _write_config(tmp_path)
+    config, plan = _plan(cfg, ["secret"])
+    execute_plan(plan, config)
+    config2, plan2 = _plan(cfg, ["vm-template"])
+    execute_plan(plan2, config2)
+    backups = list((tmp_path / "backups").glob("config-*.toml"))
+    assert len(backups) == 2
+
+
+def test_preview_lists_every_resource_and_the_drop_note(tmp_path: Path) -> None:
+    from agentworks.migrate.render import render_preview
+
+    cfg = _write_config(tmp_path)
+    _config, plan = _plan(cfg, [])
+    text = "\n".join(render_preview(plan))
+    for unit in plan.units:
+        assert f"{unit.kind}/{unit.name} -> " in text
+    assert "[secret_backends.*] sections will be dropped" in text
 
 
 def test_dry_run_is_plan_only(tmp_path: Path) -> None:
@@ -472,6 +589,76 @@ def test_partial_migration_verifies(tmp_path: Path) -> None:
     config, plan = _plan(cfg, ["secret"])
     result = execute_plan(plan, config)
     assert result.verified_rows > 0
+
+
+# ---------------------------------------------------------------------------
+# CLI surface
+# ---------------------------------------------------------------------------
+
+
+def _cli(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, args: list[str]):
+    from typer.testing import CliRunner
+
+    from agentworks.cli import app
+
+    monkeypatch.setattr("agentworks.config.CONFIG_PATH", tmp_path / "config.toml")
+    return CliRunner().invoke(app, args)
+
+
+def test_cli_migrate_bare_nothing_to_do_exits_zero(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _write_config(tmp_path, resources="")
+    result = _cli(tmp_path, monkeypatch, ["resource", "migrate", "--yes"])
+    assert result.exit_code == 0, result.stdout
+    assert "Nothing to migrate" in result.stdout
+
+
+def test_cli_migrate_dry_run_writes_nothing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    cfg = _write_config(tmp_path)
+    original = cfg.read_text()
+    result = _cli(tmp_path, monkeypatch, ["resource", "migrate", "--dry-run"])
+    assert result.exit_code == 0, result.stdout
+    assert "Dry run: nothing was written." in result.stdout
+    assert cfg.read_text() == original
+    assert not (tmp_path / "resources").exists()
+
+
+def test_cli_migrate_yes_executes_and_verifies(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _write_config(tmp_path)
+    result = _cli(tmp_path, monkeypatch, ["resource", "migrate", "--yes"])
+    assert result.exit_code == 0, result.stdout
+    assert "verified: registry unchanged" in result.stdout
+    assert (tmp_path / "resources" / "secrets.yaml").exists()
+
+
+def test_cli_migrate_explicit_selector_miss_exits_nonzero(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _write_config(tmp_path, resources="")
+    result = _cli(tmp_path, monkeypatch, ["resource", "migrate", "secret", "--yes"])
+    assert result.exit_code != 0
+
+
+def test_cli_sample_stdout_and_write(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _write_config(tmp_path, resources="")
+    result = _cli(tmp_path, monkeypatch, ["resource", "sample", "secret"])
+    assert result.exit_code == 0, result.stdout
+    assert "kind: secret" in result.stdout
+
+    result2 = _cli(
+        tmp_path,
+        monkeypatch,
+        ["resource", "sample", "secret", "--write", "secrets.yaml"],
+    )
+    assert result2.exit_code == 0, result2.stdout
+    assert (tmp_path / "resources" / "secrets.yaml").exists()
 
 
 def test_verification_mismatch_rolls_back(

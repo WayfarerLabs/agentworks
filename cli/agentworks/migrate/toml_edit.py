@@ -24,14 +24,9 @@ against tomlkit 0.15):
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
-
 import tomlkit
 from tomlkit import items as toml_items
 from tomlkit.items import Comment, Trivia, Whitespace
-
-if TYPE_CHECKING:
-    from collections.abc import Iterable
 
 BodyEntry = tuple["toml_items.Key | None", "toml_items.Item"]
 
@@ -78,8 +73,9 @@ def apply_toml_edits(
             continue
 
         if section in singleton_sections:
+            marker = markers.get((section, "default"))
             index = _replace_entry(
-                body, index, section, item, mode, markers.get((section, "default"), "")
+                body, index, section, item, mode, [marker] if marker else []
             )
             continue
 
@@ -95,10 +91,15 @@ def apply_toml_edits(
             continue
         if set(hit) == set(children):
             # Every child of this contiguous run migrates: replace the
-            # whole entry (avoids the stray empty [section] header).
-            index = _replace_entry(
-                body, index, section, item, mode, markers.get((section, hit[0]), "")
-            )
+            # whole entry (avoids the stray empty [section] header). One
+            # marker line per distinct target file -- under per-resource
+            # layout the run's children land in different files.
+            run_markers: list[str] = []
+            for name in hit:
+                marker = markers.get((section, name))
+                if marker and marker not in run_markers:
+                    run_markers.append(marker)
+            index = _replace_entry(body, index, section, item, mode, run_markers)
             continue
         if mode == "delete":
             _delete_children(item, selected)
@@ -119,7 +120,7 @@ def _replace_entry(
     section: str,
     item: toml_items.Table,
     mode: str,
-    marker: str,
+    markers: list[str],
 ) -> int:
     """Delete or comment out one whole top-level body entry.
 
@@ -129,7 +130,7 @@ def _replace_entry(
     if mode == "delete":
         return index
     rendered = _render_entry(section, item)
-    entries = _comment_block(rendered, marker)
+    entries = _comment_block(rendered, markers)
     for offset, entry in enumerate(entries):
         body.insert(index + offset, entry)
     return index + len(entries)
@@ -172,7 +173,8 @@ def _split_occurrence(
         if name is not None and name in selected and isinstance(child, toml_items.Table):
             flush()
             rendered = _render_child(section, name, child)
-            entries.extend(_comment_block(rendered, markers.get((section, name), "")))
+            marker = markers.get((section, name))
+            entries.extend(_comment_block(rendered, [marker] if marker else []))
             continue
         if k is None and current is None:
             # Loose trivia between runs (whitespace/comments) lands at
@@ -209,9 +211,9 @@ def _render_child(section: str, name: str, child: toml_items.Table) -> str:
     return tomlkit.dumps(scratch)
 
 
-def _comment_block(rendered: str, marker: str) -> list[BodyEntry]:
-    """The marker + ``# ``-prefixed section text, as body entries."""
-    lines = [f"# migrated to {marker}"] if marker else []
+def _comment_block(rendered: str, markers: list[str]) -> list[BodyEntry]:
+    """The marker line(s) + ``# ``-prefixed section text, as body entries."""
+    lines = [f"# migrated to {marker}" for marker in markers]
     for line in rendered.rstrip("\n").splitlines():
         lines.append(f"# {line}" if line.strip() else "#")
     entries: list[BodyEntry] = [
@@ -221,9 +223,3 @@ def _comment_block(rendered: str, marker: str) -> list[BodyEntry]:
     entries.append((None, Whitespace("\n")))
     return entries
 
-
-def iter_child_names(item: toml_items.Table) -> Iterable[str]:
-    """Clean names of an occurrence's keyed children (planning helper)."""
-    for k, _child in item.value.body:
-        if k is not None:
-            yield key_name(k)

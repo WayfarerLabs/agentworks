@@ -63,10 +63,14 @@ def execute_plan(plan: MigrationPlan, config: Config) -> ExecutionResult:
                 _append_documents(write.path, write.documents)
                 result.appended.append(write.path)
             else:
+                # Record BEFORE writing so a mid-write failure (disk
+                # full, ...) still gets the partial file removed by
+                # rollback; the append path records its length first for
+                # the same reason.
+                result.created.append(write.path)
                 write.path.write_text(
                     "---\n".join(write.documents), encoding="utf-8"
                 )
-                result.created.append(write.path)
 
         _atomic_write(plan.config_path, plan.new_toml_text)
 
@@ -82,6 +86,12 @@ def _take_backup(config_path: Path, config: Config) -> Path:
     backup_dir = config.paths.backups
     backup_dir.mkdir(parents=True, exist_ok=True)
     backup_path = backup_dir / f"config-{stamp}.toml"
+    counter = 1
+    while backup_path.exists():
+        # Second-granularity stamps collide under scripted back-to-back
+        # runs; overwriting would lose the earlier (truer) original.
+        backup_path = backup_dir / f"config-{stamp}-{counter}.toml"
+        counter += 1
     shutil.copy2(config_path, backup_path)
     return backup_path
 

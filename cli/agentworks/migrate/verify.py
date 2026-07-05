@@ -27,7 +27,7 @@ def normalized_rows(registry: Registry) -> dict[tuple[str, str], Any]:
     rows: dict[tuple[str, str], Any] = {}
     for kind in KIND_REGISTRY:
         for name, resource in kind_dict(registry, kind).items():
-            rows[(kind, name)] = _strip(resource)
+            rows[(kind, name)] = strip_source_fields(resource)
     return rows
 
 
@@ -50,9 +50,10 @@ def first_difference(
     return None
 
 
-def _strip(resource: Any) -> Any:
+def strip_source_fields(resource: Any) -> Any:
     """Drop the source-dependent fields so TOML- and manifest-sourced
-    rows compare equal (mirrors the decode-parity tests' ``_strip``)."""
+    rows compare equal. Shared with the decode-parity tests, which
+    import it from here so the two normalizations cannot drift."""
     if not dataclasses.is_dataclass(resource) or isinstance(resource, type):
         return resource
     kwargs: dict[str, Any] = {}

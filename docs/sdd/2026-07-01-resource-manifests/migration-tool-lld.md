@@ -20,9 +20,11 @@ agw resource migrate [SELECTOR]... [--layout per-kind|single|per-resource]
 
 - No selectors: migrate every operator-declared resource currently sourced from TOML.
 - `KIND` (e.g. `vm-template`): every TOML-declared resource of that kind.
-- `KIND/NAME` (e.g. `vm-template/small`): that one resource. The token splits at the FIRST `/`; a
-  name containing `/` (possible for non-secret kinds, whose names are pass-through) cannot be
-  addressed individually -- select its kind or use the bare form.
+- `KIND/NAME` (e.g. `vm-template/small`): that one resource. The token splits at the FIRST `/`, and
+  the remainder is the complete name -- so a name containing `/` (possible for non-secret kinds,
+  whose names are pass-through) IS individually addressable: `vm-template/we/ird` selects the
+  vm-template named `we/ird` (pinned by test; corrected from this doc's earlier cannot-be-addressed
+  claim at implementation).
 - Overlapping selectors (`secret secret/foo`) union: each matched resource migrates exactly once.
 - Selectors use registry kind identifiers (lower-kebab), not TOML section names. The section-to-kind
   mapping is `decode.KIND_SECTIONS`, shared with the manifest decoder -- one source of truth.
@@ -91,9 +93,11 @@ Mechanics, either mode:
   non-contiguous in the file (each is edited where it sits).
 - Supported declaration shapes: standard `[section.name]` header tables (and their sub-sections).
   Dotted-key or inline-table declarations under a parent header (`[secrets]` holding
-  `foo = { ... }`) are REFUSED with their file/line and a hand-migration hint: "commented out in
-  place" has no faithful rendering for a key buried in a shared table, and guessing would risk the
-  surviving config.
+  `foo = { ... }`) -- and top-level assignment shapes (`secrets = { foo = ... }`, which load fine
+  but have no header to comment) -- are REFUSED with their file/line and a hand-migration hint:
+  "commented out in place" has no faithful rendering for a key buried in a shared table, and
+  guessing would risk the surviving config. Refusal happens even on a bare run: silently skipping a
+  discoverable resource would report a complete migration that left rows behind.
 
 ### Verification (the trust feature)
 
@@ -166,12 +170,16 @@ agw resource sample [KIND] [--write FILENAME]
 
 ## Completions
 
-- `resource migrate` selectors complete via a NEW cross-product completer: the candidate list is
-  kind identifiers plus `kind/name` pairs read from the operator's TOML. The existing dynamic
-  completers are flat per-parameter name lists (workspaces, sessions), so this is new plumbing on
-  the same machinery, not reuse of it.
-- `--layout` / `--toml` enum values, `resource sample` kind argument, and both new subcommands enter
-  the static tree.
+- `resource migrate` selectors complete via a NEW cross-product completer: each operator-origin
+  registry row emits both its bare kind and its `kind/name` selector form (implementation choice:
+  the source is `agw resource list --origin operator --names-only`, which also includes
+  YAML-declared rows that are already migrated -- selecting one produces the clear already-migrated
+  error, and that beats growing CLI surface solely to filter completion candidates). The existing
+  dynamic completers are flat per-parameter name lists, so this is new plumbing on the same
+  machinery, not reuse of it.
+- `--layout` / `--toml` enum values and the `resource sample` kind argument complete statically
+  (click.Choice; the sample kinds are known at generation time), and both new subcommands enter the
+  static tree.
 - Deliberate CLI-shape divergence, for the record: `resource describe` keeps its two-positional
   `KIND NAME` grammar; `migrate` uses composite `KIND/NAME` tokens because selectors are variadic
   and mixed-granularity. Aligning `describe` is not this SDD's business.

@@ -78,6 +78,10 @@ class MigrationPlan:
     old_toml_text: str
     new_toml_text: str
     drops_secret_backends: bool
+    # (kind, name) -> target path relative to the config dir (e.g.
+    # "resources/vm-templates.yaml"); feeds the preview and the
+    # "migrated to" markers.
+    targets: dict[tuple[str, str], str] = field(default_factory=dict)
     # Normalized pre-migration registry rows, keyed by (kind, name);
     # ``execute_plan`` compares the post-migration rebuild against this.
     pre_rows: dict[tuple[str, str], Any] = field(repr=False, default_factory=dict)
@@ -118,16 +122,17 @@ def plan_migration(
 
     available = _discover_units(doc)
     selected = _resolve_selectors(selectors, available)
-    _check_declaration_shapes(doc, selected)
+    _check_declaration_shapes(doc, selected, registry, old_text, config_path)
 
     resources_dir = config_path.parent / RESOURCES_DIRNAME
+    targets = _targets(selected, layout)
     writes = _build_writes(doc, selected, layout, resources_dir)
 
     drops = any(
         key is not None and key_name(key) == _SECRET_BACKENDS_SECTION
         for key, _item in doc.body
     )
-    markers = _markers(selected, layout)
+    markers = {(u.section, u.name): targets[(u.kind, u.name)] for u in selected}
     if selected or drops:
         new_text = apply_toml_edits(
             old_text,
@@ -149,6 +154,7 @@ def plan_migration(
         old_toml_text=old_text,
         new_toml_text=new_text,
         drops_secret_backends=drops,
+        targets=targets,
         pre_rows=normalized_rows(registry),
     )
 
@@ -172,7 +178,16 @@ def _discover_units(doc: tomlkit.TOMLDocument) -> list[MigrationUnit]:
                 units.append(unit)
             continue
         if not isinstance(item, toml_items.Table):
-            continue  # non-table section shape; refused later if selected
+            # A top-level assignment shape (`secrets = { npm-token = ... }`).
+            # Its children are still discoverable, so a bare run reaches
+            # them and the shape check refuses loudly -- silently skipping
+            # would report a "complete" migration that left rows behind.
+            child_names = _mapping_child_names(item)
+            for name in child_names:
+                if (section, name) not in seen:
+                    seen.add((section, name))
+                    units.append(MigrationUnit(kind=kind, name=name, section=section))
+            continue
         for inner_key, _inner in item.value.body:
             if inner_key is None:
                 continue
@@ -181,6 +196,16 @@ def _discover_units(doc: tomlkit.TOMLDocument) -> list[MigrationUnit]:
                 seen.add((section, name))
                 units.append(MigrationUnit(kind=kind, name=name, section=section))
     return units
+
+
+def _mapping_child_names(item: toml_items.Item) -> list[str]:
+    try:
+        value = item.unwrap()
+    except AttributeError:
+        return []
+    if isinstance(value, dict):
+        return [str(k) for k in value]
+    return []
 
 
 def _resolve_selectors(
@@ -243,25 +268,44 @@ def _resolve_selectors(
 
 
 def _check_declaration_shapes(
-    doc: tomlkit.TOMLDocument, selected: list[MigrationUnit]
+    doc: tomlkit.TOMLDocument,
+    selected: list[MigrationUnit],
+    registry: Registry,
+    old_text: str,
+    config_path: Path,
 ) -> None:
     """Refuse dotted-key / inline-table declarations for selected units.
 
     "Commented out in place" has no faithful rendering for a key buried
-    in a shared table; the operator migrates those by hand.
+    in a shared table; the operator migrates those by hand. Errors carry
+    the declaration's file:line (from the registry row where one exists,
+    else a text scan for the section).
     """
     wanted: dict[str, set[str]] = {}
+    singleton_sections: dict[str, MigrationUnit] = {}
     for unit in selected:
-        if unit.kind not in _SINGLETON_KINDS:
+        if unit.kind in _SINGLETON_KINDS:
+            singleton_sections[unit.section] = unit
+        else:
             wanted.setdefault(unit.section, set()).add(unit.name)
     for key, item in doc.body:
-        if key is None or key_name(key) not in wanted:
+        if key is None:
             continue
         section = key_name(key)
-        if not isinstance(item, toml_items.Table):
+        if section in singleton_sections and not isinstance(item, toml_items.Table):
+            where = _section_location(old_text, config_path, section)
             raise ConfigError(
-                f"[{section}] is not declared as standard TOML tables; "
-                "the migrate tool cannot rewrite it",
+                f"{where}: [{section}] is not declared as standard TOML "
+                "tables; the migrate tool cannot rewrite it",
+                hint="Migrate this section by hand (dotted-key/inline shapes).",
+            )
+        if section not in wanted:
+            continue
+        if not isinstance(item, toml_items.Table):
+            where = _section_location(old_text, config_path, section)
+            raise ConfigError(
+                f"{where}: [{section}] is not declared as standard TOML "
+                "tables; the migrate tool cannot rewrite it",
                 hint="Migrate this section by hand (dotted-key/inline shapes).",
             )
         for inner_key, inner in item.value.body:
@@ -269,20 +313,49 @@ def _check_declaration_shapes(
                 continue
             if not isinstance(inner, toml_items.Table):
                 child = f"{section}.{key_name(inner_key)}"
+                unit = next(
+                    u for u in selected
+                    if u.section == section and u.name == key_name(inner_key)
+                )
+                where = _declared_at(registry, unit) or _section_location(
+                    old_text, config_path, section
+                )
                 raise ConfigError(
-                    f"[{child}] is declared as a dotted key or inline table; "
-                    f"the migrate tool only rewrites standard [{child}] "
-                    "header tables",
+                    f"{where}: [{child}] is declared as a dotted key or "
+                    f"inline table; the migrate tool only rewrites standard "
+                    f"[{child}] header tables",
                     hint="Migrate this resource by hand.",
                 )
 
 
-def _markers(
+def _declared_at(registry: Registry, unit: MigrationUnit) -> str | None:
+    try:
+        resource = registry.lookup(unit.kind, unit.name)
+    except Exception:  # noqa: BLE001 - location is best-effort decoration
+        return None
+    location = getattr(resource, "declared_at", None)
+    if location is None or not getattr(location, "line", 0):
+        return None
+    return f"{location.file}:{location.line}"
+
+
+def _section_location(old_text: str, config_path: Path, section: str) -> str:
+    """Best-effort file:line of a section's first appearance."""
+    for number, line in enumerate(old_text.splitlines(), start=1):
+        stripped = line.lstrip()
+        if stripped.startswith((f"[{section}]", f"[{section}.")) or stripped.startswith(
+            (f"{section} =", f"{section}=")
+        ):
+            return f"{config_path}:{number}"
+    return str(config_path)
+
+
+def _targets(
     selected: list[MigrationUnit], layout: str
 ) -> dict[tuple[str, str], str]:
-    """Per-unit ``migrated to <relative target>`` marker paths."""
+    """Per-unit target paths relative to the config dir."""
     return {
-        (u.section, u.name): f"{RESOURCES_DIRNAME}/{_relative_target(u, layout).as_posix()}"
+        (u.kind, u.name): f"{RESOURCES_DIRNAME}/{_relative_target(u, layout).as_posix()}"
         for u in selected
     }
 
@@ -326,8 +399,11 @@ def _emit_document(doc: tomlkit.TOMLDocument, unit: MigrationUnit) -> str:
     if unit.kind == "git-credential":
         # TOML accepts type (legacy) or provider (alias); the manifest
         # surface only ever has spec.provider, listed first for
-        # readability.
-        provider = spec.pop("type", None) or spec.pop("provider", None)
+        # readability. Pop BOTH before rebuilding so the precedence
+        # (provider wins, matching the TOML loader) is explicit rather
+        # than an artifact of dict-literal ordering.
+        legacy = spec.pop("type", None)
+        provider = spec.pop("provider", None) or legacy
         spec = {"provider": provider, **spec}
     if unit.kind in _DESCRIPTION_KINDS and "description" in spec:
         metadata["description"] = spec.pop("description")
@@ -338,7 +414,9 @@ def _emit_document(doc: tomlkit.TOMLDocument, unit: MigrationUnit) -> str:
         "metadata": metadata,
         "spec": spec,
     }
-    return yaml.safe_dump(envelope, sort_keys=False, default_flow_style=False)
+    return yaml.safe_dump(
+        envelope, sort_keys=False, default_flow_style=False, allow_unicode=True
+    )
 
 
 def _spec_data(doc: tomlkit.TOMLDocument, unit: MigrationUnit) -> dict[str, Any]:

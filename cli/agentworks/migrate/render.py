@@ -14,6 +14,9 @@ def render_preview(plan: MigrationPlan) -> list[str]:
     lines: list[str] = []
     if plan.units:
         lines.append(f"Migrating {len(plan.units)} resource(s) from config.toml:")
+        for unit in plan.units:
+            target = plan.targets.get((unit.kind, unit.name), "?")
+            lines.append(f"  {unit.kind}/{unit.name} -> {target}")
         for write in plan.writes:
             action = "append to" if write.exists else "create"
             lines.append(

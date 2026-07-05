@@ -9,7 +9,6 @@ flattening) end to end through ``build_registry``.
 
 from __future__ import annotations
 
-import dataclasses
 from pathlib import Path
 from textwrap import dedent
 from typing import Any
@@ -47,14 +46,11 @@ def _manifest(tmp_path: Path, text: str, rel: str = "res.yaml") -> None:
 
 def _strip(resource: Any) -> Any:
     """Drop the source-dependent fields so TOML- and manifest-decoded
-    Resources compare equal."""
-    kwargs: dict[str, Any] = {}
-    for field in ("origin", "declared_at"):
-        if hasattr(resource, field):
-            kwargs[field] = None
-    if hasattr(resource, "references"):
-        kwargs["references"] = ()
-    return dataclasses.replace(resource, **kwargs)
+    Resources compare equal. Shared with the migrate tool's per-run
+    registry-equivalence verification so the two cannot drift."""
+    from agentworks.migrate.verify import strip_source_fields
+
+    return strip_source_fields(resource)
 
 
 @pytest.mark.parametrize(
