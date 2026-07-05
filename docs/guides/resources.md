@@ -62,10 +62,10 @@ commented out -- delete one leading `#` per line to activate.
 ## TOML resource sections: deprecated but supported
 
 The classic TOML resource sections (`[secrets.*]`, `[vm_templates.*]`, `[git_credentials.*]`, ...)
-keep working with exactly their historical semantics. They load with a per-section deprecation
-warning, and their removal waits for a future major release. You may mix sources freely -- some
-resources in YAML, some in TOML -- but declaring the SAME resource in both is an error citing both
-locations.
+keep working with exactly their historical semantics. Their presence emits one aggregated
+deprecation warning naming the sections found (silence it with the global `--no-deprecations` flag),
+and their removal waits for a future major release. You may mix sources freely -- some resources in
+YAML, some in TOML -- but declaring the SAME resource in both is an error citing both locations.
 
 Move resources over whenever you like:
 

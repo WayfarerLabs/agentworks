@@ -329,7 +329,7 @@ def test_legacy_toml_backend_section_is_warned_noop(tmp_path: Path) -> None:
     )
     assert any(
         "[secret_backends.env-var] is deprecated" in issue
-        for issue in config.config_issues
+        for issue in config.deprecation_issues
     )
     registry = build_registry(config)
     row = registry.lookup("secret-backend", "env-var")

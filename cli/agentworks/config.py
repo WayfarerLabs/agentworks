@@ -614,6 +614,10 @@ class Config:
     # Top-level [secret_config] table; carries the enabled-backends precedence list.
     secret_config_data: SecretConfig = field(default_factory=SecretConfig)
     config_issues: tuple[str, ...] = ()
+    # Deprecation nudges (TOML resource sections, [secret_backends.*]
+    # no-ops): a separate channel so real issues stay sharp for tests
+    # and callers, and so --no-deprecations can silence only these.
+    deprecation_issues: tuple[str, ...] = ()
 
     def publish_to(self, registry: Registry) -> None:
         """Publish every operator-declared Resource into ``registry``.
@@ -1485,7 +1489,7 @@ def _load_secrets(
 
 def _load_secret_backends(
     data: dict[str, object],
-    issues: list[str],
+    deprecations: list[str],
 ) -> None:
     """Warn ``[secret_backends.*]`` sections as deprecated no-ops.
 
@@ -1512,7 +1516,7 @@ def _load_secret_backends(
                 f"[secret_backends.{kind_str}] declares an unknown backend kind; "
                 f"supported: {sorted(known_kinds)}"
             )
-        issues.append(
+        deprecations.append(
             f"[secret_backends.{kind_str}] is deprecated and has no effect: "
             f"the built-in backends ship with agentworks, and activation is "
             f"[secret_config].backends. Remove the section, or run "
@@ -1522,37 +1526,43 @@ def _load_secret_backends(
 
 def _warn_deprecated_resource_sections(
     data: dict[str, object],
-    issues: list[str],
+    deprecations: list[str],
 ) -> None:
-    """One deprecation issue per TOML resource section present (Phase 5).
+    """ONE aggregated deprecation issue for the TOML resource sections
+    present (Phase 5, aggregated at maintainer direction -- a warning
+    per section was obnoxious on real configs).
 
     Dual-path is permanent policy short of a future major release: these
     sections keep loading with exactly today's semantics. The warning is
-    the nudge toward the YAML manifest surface, naming the section and
-    the migration command. ``[secret_backends.*]`` is excluded -- it has
-    its own no-op warning above -- and ``[secret_config]`` is config,
-    not a resource section.
+    the nudge toward the YAML manifest surface. ``[secret_backends.*]``
+    is excluded -- it has its own no-op message above -- and
+    ``[secret_config]`` is config, not a resource section.
     """
     from agentworks.manifests.decode import KIND_SECTIONS
 
-    for kind, section in KIND_SECTIONS.items():
+    present: list[str] = []
+    for _kind, section in KIND_SECTIONS.items():
         if section == "secret_backends" or section not in data:
             continue
         # Display the header shape operators can actually grep for:
         # [admin.config] and [named_console] are the two non-family
         # sections; everything else nests names ([secrets.<name>]).
         if section == "admin":
-            lead = "[admin.config] is a deprecated TOML resource section"
+            present.append("[admin.config]")
         elif section == "named_console":
-            lead = "[named_console] is a deprecated TOML resource section"
+            present.append("[named_console]")
         else:
-            lead = f"[{section}.*] TOML resource sections are deprecated"
-        issues.append(
-            f"{lead}: declare resources as YAML manifests in the "
-            f"resources/ directory (see `agw resource sample {kind}`), or "
-            f"move existing ones with `agw resource migrate {kind}`. TOML "
-            f"keeps working until a future major release."
-        )
+            present.append(f"[{section}.*]")
+    if not present:
+        return
+    noun = "section" if len(present) == 1 else "sections"
+    deprecations.append(
+        f"deprecated TOML resource {noun}: {', '.join(present)}. Declare "
+        f"new resources as YAML manifests (`agw resource sample`), move "
+        f"these with `agw resource migrate` (per kind, or --all), or "
+        f"silence this warning with --no-deprecations. TOML keeps working "
+        f"until a future major release."
+    )
 
 
 def _load_secret_config(
@@ -1686,8 +1696,9 @@ def load_config(path: Path | None = None, *, warn_issues: bool = True) -> Config
     workspace_templates = _load_workspace_templates(data, issues, decls)
 
     secrets = _load_secrets(data, issues, decls)
-    _load_secret_backends(data, issues)
-    _warn_deprecated_resource_sections(data, issues)
+    deprecations: list[str] = []
+    _load_secret_backends(data, deprecations)
+    _warn_deprecated_resource_sections(data, deprecations)
     secret_config_data = _load_secret_config(data, issues, decls)
     # Phase 1b: env-block secret references no longer error at config load
     # when they don't match a [secrets.<name>] block; the framework
@@ -1716,6 +1727,7 @@ def load_config(path: Path | None = None, *, warn_issues: bool = True) -> Config
         secrets=secrets,
         secret_config_data=secret_config_data,
         config_issues=tuple(issues),
+        deprecation_issues=tuple(deprecations),
     )
 
     if warn_issues and config.config_issues:
@@ -1723,5 +1735,11 @@ def load_config(path: Path | None = None, *, warn_issues: bool = True) -> Config
 
         for issue in config.config_issues:
             warn(f"Config: {issue}")
+    if warn_issues and config.deprecation_issues:
+        from agentworks.output import deprecations_suppressed, warn
+
+        if not deprecations_suppressed():
+            for issue in config.deprecation_issues:
+                warn(f"Config: {issue}")
 
     return config

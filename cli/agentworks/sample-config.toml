@@ -8,7 +8,7 @@
 # catalog entries as YAML manifests in the resources/ directory next to this
 # file (`agw resource sample` prints a commented starter for every kind).
 # The TOML resource sections below keep working, but they are deprecated --
-# each one loads with a warning, and `agw resource migrate` moves them to
+# they load with a deprecation warning, and `agw resource migrate` moves them to
 # YAML whenever you're ready. This file remains the permanent home for
 # SETTINGS: operator identity, paths, defaults, platform connections, and
 # the secret backend chain.

@@ -68,6 +68,7 @@ agw console delete my-console              # Extra shells are lost but sessions 
 | ------------------- | ---------------------------------------------------------------------------- |
 | `--non-interactive` | Disable all interactive prompts                                              |
 | `--debug`           | Print the full Python traceback on unhandled errors (also via `AGW_DEBUG=1`) |
+| `--no-deprecations` | Suppress deprecation warnings (e.g. the TOML resource-section nudge)         |
 
 When `--non-interactive` is set (or stdin is not a TTY), commands that would normally prompt for
 missing values (VM selection, workspace selection, name generation) will fail with a clear error
@@ -570,8 +571,9 @@ Configuration splits into two surfaces:
 - **Resources** -- secrets, templates, git credentials, catalog entries -- are declared as YAML
   manifests under `~/.config/agentworks/resources/`, auto-loaded whenever a command needs them.
   `agw resource sample` prints a commented starter for every kind. The classic TOML resource
-  sections keep working (deprecated, with per-section load warnings); `agw resource migrate` moves
-  them to YAML whenever you like. See [docs/guides/resources.md](../docs/guides/resources.md).
+  sections keep working (deprecated, with one aggregated load warning naming the sections present;
+  silence it with the global `--no-deprecations` flag); `agw resource migrate` moves them to YAML
+  whenever you like. See [docs/guides/resources.md](../docs/guides/resources.md).
 
 Settings sections (`config.toml`, permanent):
 

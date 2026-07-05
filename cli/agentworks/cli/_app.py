@@ -66,6 +66,13 @@ def _global_options(
             help="Print full Python traceback on unhandled errors (also via AGW_DEBUG=1)",
         ),
     ] = False,
+    no_deprecations: Annotated[
+        bool,
+        typer.Option(
+            "--no-deprecations",
+            help="Suppress deprecation warnings (e.g. TOML resource sections)",
+        ),
+    ] = False,
 ) -> None:
     """Global options for all commands."""
     import os
@@ -74,6 +81,7 @@ def _global_options(
 
     global _debug  # noqa: PLW0603
     output.set_non_interactive(non_interactive)
+    output.set_suppress_deprecations(no_deprecations)
     _debug = debug or os.environ.get("AGW_DEBUG") == "1"
 
 
