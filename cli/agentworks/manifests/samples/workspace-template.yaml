@@ -1,0 +1,15 @@
+## kind: workspace-template -- selected at `agw workspace create` time
+## with --template; `default` applies when --template is omitted. Repo
+## URLs use HTTPS; git credentials configured on the admin template
+## provide authentication.
+##
+#apiVersion: agentworks/v1
+#kind: workspace-template
+#metadata:
+#  name: myproject
+#spec:
+#  inherits: [default]
+#  repo: https://github.com/org/myproject.git
+#  tmuxinator: true
+#  env:
+#    REPO_REGION: us-east-1

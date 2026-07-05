@@ -519,14 +519,36 @@ and their backends, etc. The two commands below stop at the framework-uniform fi
 backend mappings, template inheritance chains, resolution previews -- reach for the per-kind command
 (e.g. `agw secret describe`).
 
-| Command                               | Description                                                          |
-| ------------------------------------- | -------------------------------------------------------------------- |
-| `agw resource list`                   | List every resource in the registry across all kinds                 |
-| `agw resource describe <kind> <name>` | Show the per-resource detail view (header + Referenced by + Used by) |
+| Command                                | Description                                                          |
+| -------------------------------------- | -------------------------------------------------------------------- |
+| `agw resource list`                    | List every resource in the registry across all kinds                 |
+| `agw resource describe <kind> <name>`  | Show the per-resource detail view (header + Referenced by + Used by) |
+| `agw resource migrate [SELECTOR]...`   | Move resources from config.toml to YAML manifests                    |
+| `agw resource sample [KIND] [--write]` | Print (or save) commented sample resource manifests                  |
 
 `resource list` accepts `--kind <csv>` (e.g. `--kind secret,vm-template`) and `--origin <variant>`
 where variant is `operator`, `auto`, or `builtin`. `--names-only` emits `kind:name` per line and
 backs shell completion.
+
+`resource migrate` is a recurring, incremental mover -- run it any time you want to move resources
+(or a subset) from TOML to YAML manifests. Selectors scope the run: none migrates everything
+TOML-declared, `KIND` one kind, `KIND/NAME` one resource; overlaps union.
+`--layout per-kind|single|per-resource` picks the file mapping (default one multi-document file per
+kind, e.g. `resources/vm-templates.yaml`). Output is append-only: existing YAML files are never
+parsed or rewritten, new documents are appended after a `---` separator. Because a resource declared
+in both sources is a hard load error, the migrated TOML sections are commented out in place with a
+`# migrated to resources/<file>` marker (default) or removed with `--toml delete`; either way the
+original `config.toml` is backed up to `paths.backups` first and the rewrite is atomic. Deprecated
+`[secret_backends.*]` sections are dropped (with a note) by any run, including a bare run with
+nothing else to migrate. Every real run finishes by rebuilding the registry and verifying it is
+row-for-row identical to the pre-migration one -- on mismatch the run rolls back and reports.
+`--dry-run` prints the would-be YAML and the config.toml diff and writes nothing.
+
+`resource sample` prints fully-commented-out sample manifests (all kinds, or one) -- the YAML
+teaching surface, mirroring `agw config sample` for the settings file. `--write <file>` saves under
+the resources directory instead (relative `.yaml`/`.yml` path; appends if the file exists). Written
+samples are inert until you uncomment them (delete one leading `#` per line), so `--write` can never
+create a live resource or a duplicate.
 
 ## Configuration
 

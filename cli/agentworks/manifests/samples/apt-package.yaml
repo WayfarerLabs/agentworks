@@ -1,0 +1,12 @@
+## kind: apt-package -- a named package set, optionally depending on
+## apt-source entries. Referenced by name from vm-template
+## `apt_packages`. Same name as a built-in catalog entry overrides it.
+##
+#apiVersion: agentworks/v1
+#kind: apt-package
+#metadata:
+#  name: my-tool
+#  description: My internal tool
+#spec:
+#  apt_sources: [my-repo]
+#  apt: [my-tool]

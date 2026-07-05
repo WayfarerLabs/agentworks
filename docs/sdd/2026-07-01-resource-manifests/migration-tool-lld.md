@@ -157,8 +157,10 @@ agw resource sample [KIND] [--write FILENAME]
   - Relative paths only, resolved under the resources directory; escaping it is an error.
   - Must end `.yaml` / `.yml` (otherwise the loader would never pick it up; error with that hint).
   - Parent subdirectories are created.
-  - If the file exists, the sample is APPENDED as a new document with a `---` separator -- same
-    append-only rule as the migrator; the tool never rewrites existing YAML.
+  - If the file exists, the sample is APPENDED -- same append-only rule as the migrator; the tool
+    never rewrites existing YAML. No `---` separator is involved (discovered at implementation): the
+    samples are fully commented out, so a separator would create an empty null document that the
+    loader would reject; appending comment text to a manifest file cannot change what it declares.
 - `agw config sample` is unchanged and stays TOML: it documents the settings file. The YAML teaching
   surface is this command.
 

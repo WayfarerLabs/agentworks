@@ -8,8 +8,9 @@ inheritance chains, etc.) lives in the per-kind commands
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING, Annotated, cast
 
+import click
 import typer
 
 from agentworks.cli._app import app
@@ -24,6 +25,9 @@ resource_app = typer.Typer(
     no_args_is_help=True,
 )
 app.add_typer(resource_app)
+
+_LAYOUT_CHOICES = click.Choice(["per-kind", "single", "per-resource"])
+_TOML_CHOICES = click.Choice(["comment", "delete"])
 
 
 @resource_app.command("list")
@@ -136,3 +140,149 @@ def resource_describe(
     db = get_db()
     desc = describe_resource(registry, kind, name, db=db)
     render_resource_description(desc)
+
+
+@resource_app.command("migrate")
+def resource_migrate(
+    selectors: Annotated[
+        list[str] | None,
+        typer.Argument(
+            help=(
+                "What to migrate: nothing (all TOML-declared resources), KIND "
+                "(one kind), or KIND/NAME (one resource). Repeatable; "
+                "overlaps union."
+            ),
+        ),
+    ] = None,
+    layout: Annotated[
+        str,
+        typer.Option(
+            "--layout",
+            click_type=_LAYOUT_CHOICES,
+            help=(
+                "How resources map to files: per-kind (default; "
+                "vm-templates.yaml), single (resources.yaml), or per-resource "
+                "(vm-template/small.yaml)."
+            ),
+        ),
+    ] = "per-kind",
+    toml: Annotated[
+        str,
+        typer.Option(
+            "--toml",
+            click_type=_TOML_CHOICES,
+            help=(
+                "What happens to the migrated TOML sections: comment "
+                "(default; commented out in place with a marker) or delete."
+            ),
+        ),
+    ] = "comment",
+    dry_run: Annotated[
+        bool,
+        typer.Option(
+            "--dry-run",
+            help="Print the would-be YAML and the config.toml diff; write nothing.",
+        ),
+    ] = False,
+    yes: Annotated[
+        bool, typer.Option("--yes", help="Skip the confirmation prompt.")
+    ] = False,
+) -> None:
+    """Move resources from config.toml to YAML manifests.
+
+    A recurring, incremental mover: run it any time you want to move
+    resources (or a subset) from TOML to YAML. Output is append-only
+    (existing YAML files are never rewritten), the original config.toml
+    is backed up first, and every real run verifies the resulting
+    registry is identical before it counts as done.
+    """
+    from agentworks import output
+    from agentworks.bootstrap import build_registry
+    from agentworks.config import load_config
+    from agentworks.errors import UserAbort
+    from agentworks.migrate import execute_plan, plan_migration
+    from agentworks.migrate.render import render_dry_run, render_preview
+
+    config = load_config()
+    registry = build_registry(config)
+    plan = plan_migration(
+        config,
+        registry,
+        list(selectors or []),
+        layout=layout,
+        toml_mode=toml,
+    )
+
+    if plan.nothing_to_do:
+        output.info("Nothing to migrate: no TOML-declared resources remain.")
+        return
+
+    if dry_run:
+        for line in render_dry_run(plan):
+            output.info(line)
+        output.info("")
+        output.info("Dry run: nothing was written.")
+        return
+
+    for line in render_preview(plan):
+        output.info(line)
+    if not yes and not output.confirm("Proceed?", default=False):
+        raise UserAbort("migration cancelled")
+
+    result = execute_plan(plan, config)
+    for path in result.created:
+        output.info(f"Created {path}")
+    for path in result.appended:
+        output.info(f"Appended to {path}")
+    output.info(f"Rewrote {plan.config_path} (backup: {result.backup_path})")
+    if result.dropped_secret_backends:
+        output.info("Dropped deprecated [secret_backends.*] sections.")
+    output.info(f"verified: registry unchanged ({result.verified_rows} resources)")
+
+
+@resource_app.command("sample")
+def resource_sample(
+    kind: Annotated[
+        str | None,
+        typer.Argument(
+            help=(
+                "Kind to print a sample manifest for (e.g. secret, "
+                "vm-template). Default: samples for every kind."
+            ),
+        ),
+    ] = None,
+    write: Annotated[
+        str | None,
+        typer.Option(
+            "--write",
+            help=(
+                "Save to this filename under the resources directory instead "
+                "of stdout (relative .yaml/.yml path; appends if the file "
+                "exists)."
+            ),
+        ),
+    ] = None,
+) -> None:
+    """Print (or save) commented sample resource manifests.
+
+    Samples are fully commented out: saved files are inert until you
+    uncomment and edit them, so --write can never create a live
+    resource or a duplicate. The TOML settings-file counterpart is
+    `agw config sample`.
+    """
+    from agentworks import output
+    from agentworks.manifests.loader import RESOURCES_DIRNAME
+    from agentworks.manifests.samples import sample_text, write_sample
+
+    if write is None:
+        output.info(sample_text(kind).rstrip("\n"))
+        return
+
+    from agentworks.config import load_config
+
+    config = load_config()
+    resources_dir = config.source_path.parent / RESOURCES_DIRNAME
+    path, appended = write_sample(resources_dir, write, kind)
+    verb = "Appended sample to" if appended else "Wrote sample to"
+    output.info(f"{verb} {path}")
+    output.info("Uncomment the document lines (delete one leading '#') to activate.")

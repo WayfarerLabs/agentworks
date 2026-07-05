@@ -1,0 +1,11 @@
+## kind: named-console-template -- settings for named multi-session
+## consoles created via `agw console create`. There is exactly one; the
+## envelope accepts only the name `default`. See the tmux_layout value
+## list in the sample config (`agw config sample`).
+##
+#apiVersion: agentworks/v1
+#kind: named-console-template
+#metadata:
+#  name: default
+#spec:
+#  tmux_layout: aw-session-vertical

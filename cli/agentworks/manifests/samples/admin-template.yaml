@@ -1,0 +1,17 @@
+## kind: admin-template -- per-user settings for the admin (operator)
+## user on VMs, applied during init/reinit. There is exactly one; the
+## envelope accepts only the name `default`.
+##
+#apiVersion: agentworks/v1
+#kind: admin-template
+#metadata:
+#  name: default
+#spec:
+#  username: agentworks
+#  shell: zsh
+#  git_credentials: [github]
+#  user_install_commands: [bun]
+#  dotfiles_source: git::https://github.com/user/dotfiles
+#  mise_activate: true
+#  env:
+#    EDITOR: nvim

@@ -99,6 +99,14 @@ class CommandSpec:
 #   "resource_names"  -> agw resource list --kind <prev> --names-only
 #                        (same kind:name stream, scoped by the typed kind;
 #                        the snippet awk-splits to get just the name)
+#   "migrate_selectors" -> agw resource list --origin operator --names-only
+#                        (a NEW cross-product completer for `resource
+#                        migrate`: each kind:name row emits BOTH the bare
+#                        kind and the kind/name selector form, sort -u'd.
+#                        Operator-origin includes YAML-declared rows that
+#                        are already migrated; selecting one produces the
+#                        clear already-migrated error, which beats adding
+#                        CLI surface just to filter completion candidates.)
 #
 # The template + git_credentials completers source from the Resource
 # Registry (via `agw resource list --kind X --names-only`) rather than
@@ -229,6 +237,9 @@ DYNAMIC_COMPLETIONS: dict[tuple[str, str], str] = {
     ("resource.list", "kind"): "resource_kinds",
     ("resource.describe", "kind"): "resource_kinds",
     ("resource.describe", "name"): "resource_names",
+    # Resource migration + authoring (Phase 4)
+    ("resource.migrate", "selectors"): "migrate_selectors",
+    ("resource.sample", "kind"): "resource_kinds",
 }
 
 

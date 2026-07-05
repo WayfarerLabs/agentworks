@@ -74,6 +74,12 @@ DYNAMIC_SNIPPETS: dict[str, str] = {
         " | ForEach-Object { ($_ -split ':', 2)[1] }"
         ' | Where-Object { $_ -like "$wordToComplete*" } } }'
     ),
+    "migrate_selectors": (
+        "(agw resource list --origin operator --names-only 2>$null"
+        " | ForEach-Object { $p = $_ -split ':', 2; $p[0]; \"$($p[0])/$($p[1])\" }"
+        " | Sort-Object -Unique |"
+        ' Where-Object { $_ -like "$wordToComplete*" })'
+    ),
 }
 
 

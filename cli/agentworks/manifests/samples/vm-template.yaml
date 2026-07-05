@@ -1,0 +1,21 @@
+## kind: vm-template -- system-level VM configuration: hardware
+## resources, system packages, and system-wide tools. Selected at
+## `agw vm create` time with --template; the `default` template applies
+## when --template is omitted. Templates inherit via `inherits` (child
+## values win, depth-first left-to-right).
+##
+#apiVersion: agentworks/v1
+#kind: vm-template
+#metadata:
+#  name: dev
+#spec:
+#  inherits: [default]
+#  cpus: 8
+#  memory: 16
+#  disk: 100
+#  apt: [zsh, ripgrep]
+#  apt_packages: [gh]
+#  system_install_commands: [az-cli]
+#  env:
+#    HTTP_PROXY: http://proxy:3128
+#    NPM_TOKEN: {secret: npm-token}

@@ -372,9 +372,10 @@ its object is resources; the TOML edit is a side effect on the source. Full desi
 - The YAML teaching surface is `agw resource sample [KIND] [--write FILENAME]`: commented sample
   manifests per manifest-declarable kind (all kinds without an argument), shipped bundled and
   guaranteed to load through the real loader. `--write` saves into the resources directory instead
-  of stdout (appending with `---` if the file exists -- the same append-only rule as the migrator).
-  `agw config sample` is unchanged: it documents the settings file, which is permanent under
-  config-is-config.
+  of stdout, appending if the file exists -- the same append-only rule as the migrator, minus the
+  `---` separator (the samples are fully commented, so appended text is inert and a separator would
+  create a null document the loader rejects). `agw config sample` is unchanged: it documents the
+  settings file, which is permanent under config-is-config.
 
 ### R12: Framework invariance
 

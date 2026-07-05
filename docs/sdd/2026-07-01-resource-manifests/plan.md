@@ -262,8 +262,8 @@ The tool is `agw resource migrate` -- a recurring incremental mover, not a one-t
 the phase also ships the YAML authoring surface `agw resource sample`. A CONVENIENCE, not a gate:
 TOML keeps working; operators migrate on their own schedule, one kind at a time if they like.
 
-- [ ] Add tomlkit dependency (latest stable at implementation time; used only by the migrate path).
-- [ ] `agentworks/migrate/`: selector resolution (none / `KIND` / `KIND/NAME` split at the first
+- [x] Add tomlkit dependency (latest stable at implementation time; used only by the migrate path).
+- [x] `agentworks/migrate/`: selector resolution (none / `KIND` / `KIND/NAME` split at the first
       `/`; overlaps union; operator-declared TOML rows only; an EXPLICIT selector matching nothing
       errors before writes, while the bare form with nothing left is a "nothing to migrate" exit-0);
       manifest emission through `decode.KIND_SECTIONS` (multi-document, declaration order); layouts
@@ -277,31 +277,32 @@ TOML keeps working; operators migrate on their own schedule, one kind at a time 
       `named-console-template/default`; supported declaration shapes are standard `[section.name]`
       header tables (plus sub-sections, contiguous or not, one unit); dotted-key / inline-table
       declarations under a parent header are refused with their location and a hand-migration hint.
-- [ ] TOML edit via tomlkit round-trip: `--toml comment` (default; in-place comment-out with
+- [x] TOML edit via tomlkit round-trip: `--toml comment` (default; in-place comment-out with
       `# migrated to resources/<file>` markers, multi-section resources handled as one unit) and
       `--toml delete`; timestamped backup to `paths.backups` taken before ANY write (manifests
       included); atomic rewrite.
-- [ ] Per-run registry-equivalence verification: rebuild from the result and compare KEYED by
+- [x] Per-run registry-equivalence verification: rebuild from the result and compare KEYED by
       `(kind, name)` -- not iteration order, which legitimately changes when rows move between
       publishers -- normalizing declaration locations and origin variants recursively, including the
       attribution locations inside auto-declared rows (sharing the decode-parity normalization);
       print `verified: registry unchanged (N resources)`; on mismatch roll back (restore backup,
       remove created files and directories, truncate appends to recorded lengths) and error.
-- [ ] `agw resource migrate` command in `commands/resource.py`: preview + confirm, `--yes`,
+- [x] `agw resource migrate` command in `commands/resource.py`: preview + confirm, `--yes`,
       `--dry-run` (prints would-be YAML and the TOML diff, writes nothing), "nothing to migrate"
       exit-0 on the bare form when everything is already migrated (explicit selectors matching
       nothing error instead). (No `--force`: append-only means nothing can be overwritten.)
-- [ ] Bundled sample manifests (one per manifest-declarable kind, FULLY commented out so written
+- [x] Bundled sample manifests (one per manifest-declarable kind, FULLY commented out so written
       samples are inert -- `--write` can never create a duplicate or a live resource; the loader
       test mechanically un-comments them so "loads clean" is tested against real documents, not
       vacuously) and `agw resource sample [KIND] [--write FILENAME]`: stdout by default; `--write`
       saves under the resources directory (relative paths only, `.yaml`/`.yml` required, parents
-      created, appends with `---` if the file exists).
-- [ ] Completions: both new subcommands; a NEW cross-product selector completer (kind identifiers
+      created, appends if the file exists -- as comment text, no `---`: a separator would create a
+      null document the loader rejects).
+- [x] Completions: both new subcommands; a NEW cross-product selector completer (kind identifiers
       plus `kind/name` pairs from the operator's TOML -- the existing dynamic completers are flat
       per-parameter name lists, so this is new plumbing on the same machinery); `--layout` /
       `--toml` enums; `resource sample` kind argument.
-- [ ] **Tests**: golden-file migration of a maximal config (every section type, surviving-section
+- [x] **Tests**: golden-file migration of a maximal config (every section type, surviving-section
       comments preserved); selector filtering (kind, kind/name, unknown, overlap dedupe, explicit
       selector matching nothing errors, bare nothing-to-migrate exits 0); all three layouts plus the
       per-resource unsafe-name refusal; append to existing files including one lacking a trailing
@@ -312,7 +313,7 @@ TOML keeps working; operators migrate on their own schedule, one kind at a time 
       still TOML), and mismatch-rollback (files, created directories, append truncation);
       `resource sample` stdout / kind filter / `--write` create + append + traversal and suffix
       refusals; un-commented samples load clean through the real loader.
-- [ ] **Docs**: `cli/README.md` command reference entries for `agw resource migrate` and
+- [x] **Docs**: `cli/README.md` command reference entries for `agw resource migrate` and
       `agw resource sample` ride this phase (the commands are real at this HEAD); the
       `paths.backups` comment in `cli/agentworks/sample-config.toml` widens from "vm backup
       directory" to cover config backups too; the broader doc repoint waits for Phase 5.

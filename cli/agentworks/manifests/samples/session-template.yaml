@@ -1,0 +1,18 @@
+## kind: session-template -- defines a command sessions can run.
+## Commands support {{session_name}} and {{workspace_name}} variables.
+## `restart_command` (optional) is used by `agw session restart`;
+## `required_commands` are checked on the launch target before the
+## session is created. Env maps merge during inheritance (child wins).
+##
+#apiVersion: agentworks/v1
+#kind: session-template
+#metadata:
+#  name: claude
+#  description: Claude Code interactive session
+#spec:
+#  inherits: [default]
+#  command: claude --name {{session_name}}
+#  restart_command: claude --resume {{session_name}}
+#  required_commands: [claude]
+#  env:
+#    CLAUDE_LOG_LEVEL: info

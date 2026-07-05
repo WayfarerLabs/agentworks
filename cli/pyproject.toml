@@ -20,6 +20,7 @@ dependencies = [
     "azure-mgmt-compute>=37.0.1",
     "azure-mgmt-network>=29.0.0",
     "pyyaml>=6.0.3",
+    "tomlkit>=0.15.0",
 ]
 
 [project.urls]

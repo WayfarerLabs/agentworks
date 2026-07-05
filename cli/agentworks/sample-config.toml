@@ -47,7 +47,7 @@ ssh_private_key = "~/.ssh/id_ed25519"        # required: used for SSH connection
 [paths]
 #vm_workspaces = "/opt/agentworks/workspaces"  # workspace directory on VMs
 #vscode_workspaces = "~/aw-vscode-workspaces"   # .code-workspace file directory
-#backups = "~/.config/agentworks/backups"       # vm backup directory
+#backups = "~/.config/agentworks/backups"       # backup directory (vm backups, config.toml backups from `agw resource migrate`)
 
 # --- Default values for CLI flags ---
 
