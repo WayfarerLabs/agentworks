@@ -160,6 +160,14 @@ agw resource sample [KIND] [--write FILENAME]
   config-bearing provider ships yet, so there is nothing real to declare, and an uncommentable
   document would teach a lie; it gains a real document when such a provider lands (pinned by a test
   that flips that day).
+- Comment convention, pinned (2026-07-05): document lines are `#` + the YAML line
+  (`#apiVersion: ...`, `#  name: ...`), prose lines are `##`. This DELIBERATELY diverges from
+  `sample-config.toml`'s hash-space-is-prose convention, for two mechanical reasons the TOML surface
+  doesn't face: stripping one `#` must yield valid YAML (from `## prose` it leaves `# prose`, a YAML
+  comment; from `# prose` it would leave live content), and hash-space cannot distinguish prose from
+  indented document lines (`#  name: default` is a document line with YAML indentation). The
+  strip-one-`#` rule is what keeps the uncomment story and the loader-guarantee test trivially
+  mechanical.
 - `--write FILENAME`: instead of stdout, write to `<resources-dir>/FILENAME`. Rules:
   - Relative paths only, resolved under the resources directory; escaping it is an error.
   - Must end `.yaml` / `.yml` (otherwise the loader would never pick it up; error with that hint).
