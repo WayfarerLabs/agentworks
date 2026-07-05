@@ -1560,8 +1560,8 @@ def _warn_deprecated_resource_sections(
         f"deprecated TOML resource {noun}: {', '.join(present)}. Declare "
         f"new resources as YAML manifests (`agw resource sample`), move "
         f"these with `agw resource migrate` (per kind, or --all), or "
-        f"silence this warning with --no-deprecations. TOML keeps working "
-        f"until a future major release."
+        f"silence this warning with --no-deprecations. TOML resource "
+        f"support will likely be removed in a future major release."
     )
 
 
