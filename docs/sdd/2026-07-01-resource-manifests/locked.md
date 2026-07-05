@@ -2,6 +2,10 @@
 
 ## 2026-07-05
 
+The lock takes effect when PR #156 merges (maintainer ruling: a lockfile written on the branch is
+intent, not the lock). Until then, changes on the branch are "pre-lock" and the artifacts -- this
+file included -- remain mutable.
+
 The resource-manifests SDD shipped on one branch and PR (single-branch delivery per the 2026-07-02
 sequencing note): `feat/resource-manifests-sdd`, PR #156. Phases 0 through 5 are complete; every
 plan checkbox except Phase 6's is flipped.
@@ -64,4 +68,4 @@ Phase 4 artifacts and implementation (which also relayed four maintainer rulings
 and a Copilot pass (one valid loader-robustness fix). The maintainer manually tested the dual-path
 loading, doctor, and migration surfaces against a real config during development.
 
-The FRD, HLA, plan, and LLDs are accurate as-built as of this date and are now locked.
+The FRD, HLA, plan, and LLDs are accurate as-built as of this date; they lock at merge.
