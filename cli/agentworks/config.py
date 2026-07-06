@@ -1592,10 +1592,10 @@ def _warn_deprecated_resource_sections(
         return ()
     noun = "section" if len(present) == 1 else "sections"
     deprecations.append(
-        f"deprecated TOML resource {noun}: {', '.join(present)}. Declare "
+        f"deprecated TOML resource {noun}: {', '.join(present)}. Move "
+        f"these with `agw resource migrate` (per kind, or --all), declare "
         f"new resources as YAML manifests (`agw resource sample <kind>`), "
-        f"move these with `agw resource migrate` (per kind, or --all), or "
-        f"silence this warning with --no-deprecations. TOML resource "
+        f"or silence this warning with --no-deprecations. TOML resource "
         f"support will likely be removed in a future major release."
     )
     return tuple(present)
