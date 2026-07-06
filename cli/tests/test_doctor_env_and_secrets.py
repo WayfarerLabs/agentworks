@@ -233,9 +233,36 @@ def test_doctor_surfaces_deprecation_nudges(tmp_path: Path, monkeypatch) -> None
     """Deprecations moved off config_issues onto their own channel (so
     --no-deprecations can silence the ambient per-command warning);
     doctor is the explicit full-health surface and must still show them
-    -- the channel split silently dropped them from doctor once."""
+    -- the channel split silently dropped them from doctor once.
+
+    Doctor renders the FACT as a tidy one-liner (maintainer ruling,
+    2026-07-06): one next step (`agw resource migrate`), no section
+    list, no teaching text -- that stays on the ambient warning."""
     cfg = _write_config(tmp_path)  # has [vm_templates.default] + [admin.config]
     monkeypatch.setattr("agentworks.config.CONFIG_PATH", cfg)
     g, _, _ = _check_config()
     warns = [c.message or "" for c in g.checks if c.status == Status.WARN]
-    assert any("deprecated TOML resource" in m for m in warns), warns
+    (line,) = [m for m in warns if "deprecated TOML resource" in m]
+    assert "agw resource migrate" in line
+    # The tidy pin: none of the ambient teaching text leaks into doctor.
+    assert "--no-deprecations" not in line
+    assert "resource sample" not in line
+    assert "[vm_templates.*]" not in line
+
+
+def test_doctor_shows_noop_secret_backend_sections(
+    tmp_path: Path, monkeypatch
+) -> None:
+    cfg = _write_config(
+        tmp_path,
+        extras="""
+[secret_backends.env-var]
+""",
+    )
+    monkeypatch.setattr("agentworks.config.CONFIG_PATH", cfg)
+    g, _, _ = _check_config()
+    warns = [c.message or "" for c in g.checks if c.status == Status.WARN]
+    assert any(
+        m.startswith("[secret_backends.env-var]") and "no effect" in m
+        for m in warns
+    ), warns

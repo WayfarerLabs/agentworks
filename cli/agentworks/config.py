@@ -626,7 +626,13 @@ class Config:
     # Deprecation nudges (TOML resource sections, [secret_backends.*]
     # no-ops): a separate channel so real issues stay sharp for tests
     # and callers, and so --no-deprecations can silence only these.
+    # ``deprecation_issues`` holds the ambient teaching messages;
+    # ``deprecated_sections`` / ``noop_secret_backend_sections`` hold
+    # the bare facts (display shapes of the sections present) for
+    # surfaces that render their own tidy lines (doctor).
     deprecation_issues: tuple[str, ...] = ()
+    deprecated_sections: tuple[str, ...] = ()
+    noop_secret_backend_sections: tuple[str, ...] = ()
     # False when loaded with ``load_config(resources=False)`` (settings-only
     # callers); ``build_registry`` refuses such a Config so the TOML side
     # can never silently publish as empty.
@@ -1508,15 +1514,19 @@ def _load_secrets(
 def _load_secret_backends(
     data: dict[str, object],
     deprecations: list[str],
-) -> None:
+) -> tuple[str, ...]:
     """Warn ``[secret_backends.*]`` sections as deprecated no-ops.
 
-    The kind-keyed TOML sections never carried configuration (only the
-    kind itself), and the built-in backends now ship as bundled
-    manifests -- so a section here is semantically empty. Known kinds
-    warn as deprecated; unknown kinds (typo ``envvar`` for ``env-var``)
-    stay a hard ``ConfigError`` for typo protection. Nothing is stored
-    and nothing publishes.
+    The provider-keyed TOML sections never carried configuration (only
+    the provider name itself), and the built-in backends now ship as
+    bundled manifests -- so a section here is semantically empty. Known
+    providers warn as deprecated; unknown ones (typo ``envvar`` for
+    ``env-var``) stay a hard ``ConfigError`` for typo protection.
+    Nothing is stored and nothing publishes.
+
+    Returns the display shapes of the sections found (facts for
+    surfaces with their own rendering, mirroring
+    ``_warn_deprecated_resource_sections``).
     """
     raw = data.get("secret_backends", {})
     if not isinstance(raw, dict):
@@ -1525,6 +1535,7 @@ def _load_secret_backends(
     from agentworks.secrets.providers import SECRET_PROVIDER_REGISTRY
 
     known_providers = set(SECRET_PROVIDER_REGISTRY)
+    found: list[str] = []
     for key, bdata in raw.items():
         provider_str = str(key)
         if not isinstance(bdata, dict):
@@ -1534,18 +1545,20 @@ def _load_secret_backends(
                 f"[secret_backends.{provider_str}] names an unknown secret "
                 f"provider; supported: {sorted(known_providers)}"
             )
+        found.append(f"[secret_backends.{provider_str}]")
         deprecations.append(
             f"[secret_backends.{provider_str}] is deprecated and has no effect: "
             f"the built-in backends ship with agentworks, and activation is "
             f"[secret_config].backends. Remove the section, or run "
             f"`agw resource migrate --all` to drop it."
         )
+    return tuple(found)
 
 
 def _warn_deprecated_resource_sections(
     data: dict[str, object],
     deprecations: list[str],
-) -> None:
+) -> tuple[str, ...]:
     """ONE aggregated deprecation issue for the TOML resource sections
     present (Phase 5, aggregated at maintainer direction -- a warning
     per section was obnoxious on real configs).
@@ -1555,6 +1568,10 @@ def _warn_deprecated_resource_sections(
     the nudge toward the YAML manifest surface. ``[secret_backends.*]``
     is excluded -- it has its own no-op message above -- and
     ``[secret_config]`` is config, not a resource section.
+
+    Returns the display shapes of the sections found, so surfaces with
+    their own rendering (doctor's tidy one-line row) can compose from
+    the fact instead of reusing this ambient teaching text.
     """
     from agentworks.manifests.decode import KIND_SECTIONS
 
@@ -1572,7 +1589,7 @@ def _warn_deprecated_resource_sections(
         else:
             present.append(f"[{section}.*]")
     if not present:
-        return
+        return ()
     noun = "section" if len(present) == 1 else "sections"
     deprecations.append(
         f"deprecated TOML resource {noun}: {', '.join(present)}. Declare "
@@ -1581,6 +1598,7 @@ def _warn_deprecated_resource_sections(
         f"silence this warning with --no-deprecations. TOML resource "
         f"support will likely be removed in a future major release."
     )
+    return tuple(present)
 
 
 def _load_secret_config(
@@ -1738,8 +1756,10 @@ def load_config(
 
     secrets = _load_secrets(resource_data, issues, decls)
     deprecations: list[str] = []
-    _load_secret_backends(resource_data, deprecations)
-    _warn_deprecated_resource_sections(resource_data, deprecations)
+    noop_backend_sections = _load_secret_backends(resource_data, deprecations)
+    deprecated_sections = _warn_deprecated_resource_sections(
+        resource_data, deprecations
+    )
     secret_config_data = _load_secret_config(data, issues, decls)
     # Phase 1b: env-block secret references no longer error at config load
     # when they don't match a [secrets.<name>] block; the framework
@@ -1769,6 +1789,8 @@ def load_config(
         secret_config_data=secret_config_data,
         config_issues=tuple(issues),
         deprecation_issues=tuple(deprecations),
+        deprecated_sections=deprecated_sections,
+        noop_secret_backend_sections=noop_backend_sections,
         resources_loaded=resources,
     )
 

@@ -227,3 +227,29 @@ def test_settings_only_config_refuses_registry_build(tmp_path: Path) -> None:
     assert not config.secrets  # resource fields empty
     with pytest.raises(StateError, match="settings-only"):
         build_registry(config)
+
+
+def test_fact_fields_mirror_the_messages(tmp_path: Path) -> None:
+    """The structured facts (for doctor's tidy rendering) track the
+    ambient messages: deprecated_sections lists the display shapes the
+    aggregate names, and noop_secret_backend_sections the no-op ones."""
+    cfg = _config(
+        tmp_path,
+        """
+        [secrets.npm-token]
+        description = "npm token"
+
+        [vm_templates.default]
+
+        [secret_backends.env-var]
+        """,
+    )
+    config = load_config(cfg, warn_issues=False)
+    assert config.deprecated_sections == ("[secrets.*]", "[vm_templates.*]")
+    assert config.noop_secret_backend_sections == ("[secret_backends.env-var]",)
+    # And a clean config carries empty facts.
+    clean_dir = tmp_path / "clean"
+    clean_dir.mkdir()
+    clean = load_config(_config(clean_dir), warn_issues=False)
+    assert clean.deprecated_sections == ()
+    assert clean.noop_secret_backend_sections == ()

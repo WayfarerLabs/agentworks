@@ -237,9 +237,22 @@ def _check_config() -> tuple[HealthGroup, Config | None, Registry | None]:
         g.ok("Config is valid")
     # Deprecation nudges ride their own channel (so --no-deprecations
     # can silence the ambient per-command warning), but doctor is the
-    # explicit full-health surface: always show them here.
-    for issue in config.deprecation_issues:
-        g.warn("Config", issue)
+    # explicit full-health surface. Doctor rows are scannable one-liners
+    # (maintainer ruling, 2026-07-06): render the FACT with one next
+    # step; the full teaching text (sample pointer, silencer flag,
+    # removal forecast) stays on the ambient command warning.
+    if config.deprecated_sections:
+        g.warn(
+            "Config",
+            "deprecated TOML resource sections in use; move them with "
+            "`agw resource migrate`",
+        )
+    for section in config.noop_secret_backend_sections:
+        g.warn(
+            "Config",
+            f"{section} is deprecated and has no effect; remove it "
+            f"(or `agw resource migrate --all` drops it)",
+        )
 
     # SSH keys
     _check_ssh_key(g, config.operator.ssh_public_key, "public")
