@@ -241,10 +241,20 @@ def test_doctor_surfaces_deprecation_nudges(tmp_path: Path, monkeypatch) -> None
     cfg = _write_config(tmp_path)  # has [vm_templates.default] + [admin.config]
     monkeypatch.setattr("agentworks.config.CONFIG_PATH", cfg)
     g, _, _ = _check_config()
-    warns = [c.message or "" for c in g.checks if c.status == Status.WARN]
-    (line,) = [m for m in warns if "deprecated TOML resource" in m]
-    assert "agw resource migrate" in line
+    warns = [
+        (c.name, c.message or "")
+        for c in g.checks
+        if c.status == Status.WARN
+    ]
+    ((name, message),) = [
+        w for w in warns if "deprecated TOML resource" in w[0]
+    ]
+    # Maintainer-specified row shape: the check NAME carries the fact,
+    # the parenthetical carries the one next step.
+    assert name == "Config has deprecated TOML resource declarations"
+    assert message == "migrate to YAML with `agw resource migrate`"
     # The tidy pin: none of the ambient teaching text leaks into doctor.
+    line = f"{name} {message}"
     assert "--no-deprecations" not in line
     assert "resource sample" not in line
     assert "[vm_templates.*]" not in line
@@ -261,8 +271,12 @@ def test_doctor_shows_noop_secret_backend_sections(
     )
     monkeypatch.setattr("agentworks.config.CONFIG_PATH", cfg)
     g, _, _ = _check_config()
-    warns = [c.message or "" for c in g.checks if c.status == Status.WARN]
+    warns = [
+        (c.name, c.message or "")
+        for c in g.checks
+        if c.status == Status.WARN
+    ]
     assert any(
-        m.startswith("[secret_backends.env-var]") and "no effect" in m
-        for m in warns
+        "[secret_backends.env-var]" in name and "remove it" in message
+        for name, message in warns
     ), warns

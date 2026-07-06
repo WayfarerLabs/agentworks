@@ -243,15 +243,14 @@ def _check_config() -> tuple[HealthGroup, Config | None, Registry | None]:
     # removal forecast) stays on the ambient command warning.
     if config.deprecated_sections:
         g.warn(
-            "Config",
-            "deprecated TOML resource sections in use; move them with "
-            "`agw resource migrate`",
+            "Config has deprecated TOML resource declarations",
+            "migrate to YAML with `agw resource migrate`",
         )
     for section in config.noop_secret_backend_sections:
         g.warn(
-            "Config",
-            f"{section} is deprecated and has no effect; remove it "
-            f"(or `agw resource migrate --all` drops it)",
+            f"Config has a no-op {section} section",
+            "deprecated and ignored; remove it, or `agw resource migrate "
+            "--all` drops it",
         )
 
     # SSH keys
