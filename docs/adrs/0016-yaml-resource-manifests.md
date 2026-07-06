@@ -56,17 +56,31 @@ exposed resources; the capability's invocation API is domain-owned and visible o
 capability may back many exposed resources (two future `onepassword` backends pointed at different
 vaults). Domain terminology varies on the exposed-resource side -- secrets say provider -> backend;
 VMs will likely say provider -> platform -- while "provider" is the stable generic term for the raw
-capability across domains. Symbols and kinds that are domain-specific spell the domain out
-(`SECRET_PROVIDER_REGISTRY`, kind `secret-provider`); the bare word is reserved for the generic
-concept and for the `provider` field on exposed resources, whose owner scopes it.
+capability across domains. Symbols related to domain-specific capabilities spell the domain out
+(`SECRET_PROVIDER_REGISTRY`, for the `secret-provider` capability registry) in order to leave room
+for other capabilities. The bare word "provider" is reserved for the generic concept and the
+(future, not certain) possibility of a generic provider registry. An exposed resource's
+`spec.provider` field is simply a bare use of the word where the context (the owning resource) makes
+the domain clear; nothing special is reserved there.
 
-Provider-owned configuration on an exposed resource nests under a single `spec.provider_config` key
--- an opaque blob the named provider owns and validates -- so the rest of the spec stays
-provider-agnostic. Kind-owned fields stay top-level: a `git-credential`'s `token` belongs to every
-credential, while `azdo`'s `org` nests. The INTERNAL resource representation follows the nested
-shape too (`SecretBackendDecl.provider_config`, `GitCredentialConfig.provider_config`): the flat
-TOML section is the ONLY domain where provider-owned fields sit at the top level, and the TOML
-loader nests them at its boundary. Decoders reshape before calling the shared loaders, so validation
+Providers can optionally carry configuration. For example, a `onepassword` secret provider may need
+a vault name, an AZDO git credential provider requires an organization name, a (future) Azure VM
+provider may need a subscription ID, etc. The nature and shape of this configuration is entirely
+provider-specific. The configuration is managed as part of the exposed resource, thus allowing for
+multiple instances of the same provider with different configurations.
+
+To keep the data model clean, the provider-specific configuration is limited to the
+`spec.provider_config` key on an exposed resource. This is an opaque blob the named provider owns
+and validates so that the rest of the spec stays provider-agnostic. Fields specific to the exposed
+resource's kind are generic by definition and live at the top level of the resource spec. For
+example, a `git-credential`'s `token` belongs to every credential, while `azdo`'s `org` nests.
+
+The INTERNAL resource representation follows the nested shape too
+(`SecretBackendDecl.provider_config`, `GitCredentialConfig.provider_config`) as this represents the
+best representation available. For backwards compatibility, we continue to support the legacy TOML
+shapes which aren't as clean. However, the flat TOML section is the ONLY domain where provider-owned
+fields are allowed to sit outside the `provider_config` blob. The TOML loaders translate into the
+nested shape at their boundary. Decoders reshape before calling the shared loaders, so validation
 stays TOML-shared while the YAML surface and the internal model stay uniform.
 
 For secrets concretely: backends (`SecretBackendDecl`) own `would_attempt` / `describe_lookup` /
@@ -105,8 +119,9 @@ surface, while `agw config init/edit/sample` continue to own the permanent setti
 
 ## Consequences
 
-- Operators declare resources as small reviewable files, one document per resource, with the same
-  validation as TOML (the manifest decoders call the TOML loaders, so the two sources cannot drift).
+- Operators declare resources as small reviewable files, grouping resources into any number of YAML
+  manifests, with the same validation as TOML (the manifest decoders call the TOML loaders, so the
+  two sources cannot drift).
 - The registry is the single source of truth for the runtime; `Config` carries settings only.
   Consumer code reads resources through registry accessors, never `Config` attributes.
 - Plugins get a paved road: resources arrive as bundled manifests with their own origin variant;
