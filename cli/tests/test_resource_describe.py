@@ -1,5 +1,5 @@
 """Tests for ``agentworks.resources.inspect.describe_resource`` --
-the service layer behind ``agw resource describe <kind> <name>``
+the service layer behind ``agw resource describe KIND/NAME``
 (Phase 2c).
 
 Stops at framework-uniform fields: kind, name, origin, description,
@@ -148,7 +148,7 @@ def test_unknown_name_under_known_kind_raises_not_found_with_hint(
 def test_cli_describe_renders_header_and_usage_sections(
     tmp_path: Path, monkeypatch
 ) -> None:
-    """End-to-end ``agw resource describe <kind> <name>`` emits the
+    """End-to-end ``agw resource describe KIND/NAME`` emits the
     framework-uniform sections: header (kind/name/description/origin)
     then a Usages list. We don't pin exact whitespace; just confirm
     each section's anchor strings appear in the rendered output.
