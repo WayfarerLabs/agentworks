@@ -49,8 +49,16 @@ def build_registry(config: Config, manifests: ManifestSet | None = None) -> Regi
     ``ManifestSet`` (e.g. ``ManifestSet.empty()``) to skip the auto-load.
     """
     from agentworks import catalog, git_credentials, output, secrets
+    from agentworks.errors import StateError
     from agentworks.manifests import RESOURCES_DIRNAME, load_manifests
     from agentworks.manifests import builtin as builtin_manifests
+
+    if not config.resources_loaded:
+        raise StateError(
+            "build_registry requires a Config loaded with resources=True; "
+            "this one was loaded settings-only (load_config(resources=False)), "
+            "so publishing it would silently drop every TOML-declared resource"
+        )
 
     if manifests is None:
         resources_dir = config.source_path.parent / RESOURCES_DIRNAME

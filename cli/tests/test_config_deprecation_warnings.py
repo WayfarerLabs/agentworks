@@ -15,6 +15,8 @@ from __future__ import annotations
 from pathlib import Path
 from textwrap import dedent
 
+import pytest
+
 from agentworks.config import load_config
 
 
@@ -169,3 +171,59 @@ def test_cli_no_deprecations_flag_silences_the_warning(
     )
     assert silenced.exit_code == 0, silenced.output
     assert "deprecated" not in silenced.output
+
+
+def test_remediation_commands_do_not_nag(tmp_path: Path, monkeypatch) -> None:
+    """The commands the nudge points at are exempt from it: migrate
+    loads with warn_deprecations=False (it still needs the resource
+    sections for the equivalence-verification registry), and sample
+    --write loads settings-only (resources=False), which never collects
+    deprecations at all."""
+    from typer.testing import CliRunner
+
+    from agentworks.cli import app
+
+    cfg = _config(
+        tmp_path,
+        """
+        [secrets.npm-token]
+        description = "npm token"
+        """,
+    )
+    monkeypatch.setattr("agentworks.config.CONFIG_PATH", cfg)
+
+    dry = CliRunner().invoke(
+        app, ["resource", "migrate", "secret", "--dry-run"]
+    )
+    assert dry.exit_code == 0, dry.output
+    assert "deprecated TOML resource" not in dry.output
+    assert "secret/npm-token" in dry.output  # it still planned the move
+
+    written = CliRunner().invoke(
+        app, ["resource", "sample", "secret", "--write", "samples.yaml"]
+    )
+    assert written.exit_code == 0, written.output
+    assert "deprecated TOML resource" not in written.output
+    assert (tmp_path / "resources" / "samples.yaml").exists()
+
+
+def test_settings_only_config_refuses_registry_build(tmp_path: Path) -> None:
+    """load_config(resources=False) skips the resource sections, so
+    build_registry must refuse the resulting Config -- publishing it
+    would silently drop every TOML-declared resource."""
+    from agentworks.bootstrap import build_registry
+    from agentworks.errors import StateError
+
+    cfg = _config(
+        tmp_path,
+        """
+        [secrets.npm-token]
+        description = "npm token"
+        """,
+    )
+    config = load_config(cfg, warn_issues=False, resources=False)
+    assert config.resources_loaded is False
+    assert config.deprecation_issues == ()  # sections never loaded
+    assert not config.secrets  # resource fields empty
+    with pytest.raises(StateError, match="settings-only"):
+        build_registry(config)

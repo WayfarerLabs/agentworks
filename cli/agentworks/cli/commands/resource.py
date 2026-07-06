@@ -253,7 +253,10 @@ def resource_migrate(
             hint="A real run prints the summary and asks for confirmation.",
         )
 
-    config = load_config()
+    # This command IS the remediation the deprecation nudge points at;
+    # nagging it is noise. (It still needs the resource sections loaded:
+    # the post-run registry-equivalence verification builds a registry.)
+    config = load_config(warn_deprecations=False)
     registry = build_registry(config)
     plan = plan_migration(
         config,
@@ -342,7 +345,10 @@ def resource_sample(
 
     from agentworks.config import load_config
 
-    config = load_config()
+    # Settings-only load: --write needs nothing but source_path to locate
+    # the resources directory, so the resource sections (and their
+    # deprecation nudge -- this command is the remediation path) stay out.
+    config = load_config(resources=False)
     resources_dir = config.source_path.parent / RESOURCES_DIRNAME
     path, appended = write_sample(resources_dir, write, kind, all_kinds=all_kinds)
     verb = "Appended sample to" if appended else "Wrote sample to"

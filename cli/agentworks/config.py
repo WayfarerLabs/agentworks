@@ -627,6 +627,10 @@ class Config:
     # no-ops): a separate channel so real issues stay sharp for tests
     # and callers, and so --no-deprecations can silence only these.
     deprecation_issues: tuple[str, ...] = ()
+    # False when loaded with ``load_config(resources=False)`` (settings-only
+    # callers); ``build_registry`` refuses such a Config so the TOML side
+    # can never silently publish as empty.
+    resources_loaded: bool = True
 
     def publish_to(self, registry: Registry) -> None:
         """Publish every operator-declared Resource into ``registry``.
@@ -1650,13 +1654,30 @@ def _warn_unexpected_top_level_keys(data: dict[str, object], issues: list[str]) 
         issues.append(f"unexpected top-level keys in config: {keys}")
 
 
-def load_config(path: Path | None = None, *, warn_issues: bool = True) -> Config:
+def load_config(
+    path: Path | None = None,
+    *,
+    warn_issues: bool = True,
+    warn_deprecations: bool = True,
+    resources: bool = True,
+) -> Config:
     """Load and validate the agentworks configuration.
 
     Args:
         path: Override config file path (default: ~/.config/agentworks/config.toml).
         warn_issues: Emit config issues as warnings to stderr (default: True).
             Set to False when the caller handles issues itself (e.g. doctor).
+        warn_deprecations: Emit the TOML-resource deprecation nudge (default:
+            True; also silenceable per-invocation via --no-deprecations). Set
+            to False for commands that ARE the remediation the nudge points at
+            (e.g. ``agw resource migrate``) -- nagging them is noise.
+        resources: Load the TOML resource sections into Config (default:
+            True). Settings-only callers (e.g. ``agw resource sample --write``,
+            which only needs ``source_path``) pass False: resource sections are
+            neither validated nor deprecation-warned, and the resulting Config
+            carries ``resources_loaded=False`` -- ``build_registry`` refuses it,
+            so a settings-only Config can never silently publish an empty TOML
+            side into a registry.
 
     Returns:
         Validated Config object.
@@ -1696,23 +1717,29 @@ def load_config(path: Path | None = None, *, warn_issues: bool = True) -> Config
             "[admin.config] (dotfiles_source, dotfiles_destination, dotfiles_install_cmd)."
         )
 
-    git_credentials = _load_git_credentials(data, issues, decls)
-    apt_sources, apt_packages, system_cmds, user_cmds = _load_catalog_sections(data)
+    # Settings-only mode: resource loaders see an empty document, so they
+    # produce their framework defaults with zero issues or deprecations.
+    # Settings loaders (operator, paths, defaults, session, azure,
+    # proxmox, secret_config) always see the real data -- they are config.
+    resource_data = data if resources else {}
+
+    git_credentials = _load_git_credentials(resource_data, issues, decls)
+    apt_sources, apt_packages, system_cmds, user_cmds = _load_catalog_sections(resource_data)
 
     session_config = _load_session_config(data, issues)
-    session_templates = _load_session_templates(data, issues, decls)
+    session_templates = _load_session_templates(resource_data, issues, decls)
 
-    loaded_vm_templates = _load_vm_templates(data, issues, decls)
-    loaded_agent_templates = _load_agent_templates(data, issues, decls)
+    loaded_vm_templates = _load_vm_templates(resource_data, issues, decls)
+    loaded_agent_templates = _load_agent_templates(resource_data, issues, decls)
 
 
-    admin = _load_admin_config(data, issues, decls)
-    workspace_templates = _load_workspace_templates(data, issues, decls)
+    admin = _load_admin_config(resource_data, issues, decls)
+    workspace_templates = _load_workspace_templates(resource_data, issues, decls)
 
-    secrets = _load_secrets(data, issues, decls)
+    secrets = _load_secrets(resource_data, issues, decls)
     deprecations: list[str] = []
-    _load_secret_backends(data, deprecations)
-    _warn_deprecated_resource_sections(data, deprecations)
+    _load_secret_backends(resource_data, deprecations)
+    _warn_deprecated_resource_sections(resource_data, deprecations)
     secret_config_data = _load_secret_config(data, issues, decls)
     # Phase 1b: env-block secret references no longer error at config load
     # when they don't match a [secrets.<name>] block; the framework
@@ -1723,7 +1750,7 @@ def load_config(path: Path | None = None, *, warn_issues: bool = True) -> Config
         operator=_load_operator(data, issues),
         paths=_load_paths(data),
         defaults=_load_defaults(data, issues),
-        named_console=_load_named_console(data, issues, decls),
+        named_console=_load_named_console(resource_data, issues, decls),
         vm_templates=loaded_vm_templates,
         source_path=config_path,
         admin=admin,
@@ -1742,6 +1769,7 @@ def load_config(path: Path | None = None, *, warn_issues: bool = True) -> Config
         secret_config_data=secret_config_data,
         config_issues=tuple(issues),
         deprecation_issues=tuple(deprecations),
+        resources_loaded=resources,
     )
 
     if warn_issues and config.config_issues:
@@ -1749,7 +1777,7 @@ def load_config(path: Path | None = None, *, warn_issues: bool = True) -> Config
 
         for issue in config.config_issues:
             warn(f"Config: {issue}")
-    if warn_issues and config.deprecation_issues:
+    if warn_issues and warn_deprecations and config.deprecation_issues:
         from agentworks.output import deprecations_suppressed, warn
 
         if not deprecations_suppressed():
