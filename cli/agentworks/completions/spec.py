@@ -239,6 +239,7 @@ DYNAMIC_COMPLETIONS: dict[tuple[str, str], str] = {
     # grammar in the display-syntax unification)
     ("resource.list", "kind"): "resource_kinds",
     ("resource.describe", "ref"): "resource_refs",
+    ("resource.edit", "ref"): "resource_refs",
     # Resource migration + authoring (Phase 4). `resource sample`'s kind
     # argument is a static click.Choice (SAMPLE_KINDS), so it completes
     # via ParamSpec.choices rather than a dynamic completer.

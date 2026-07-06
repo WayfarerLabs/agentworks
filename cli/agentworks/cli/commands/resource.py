@@ -161,6 +161,55 @@ def resource_describe(
     render_resource_description(desc)
 
 
+@resource_app.command("edit")
+def resource_edit(
+    ref: Annotated[
+        str,
+        typer.Argument(
+            help="Resource as KIND/NAME (e.g. secret/npm-token, vm-template/dev).",
+        ),
+    ],
+) -> None:
+    """Open the YAML manifest declaring a resource in $EDITOR.
+
+    Only operator-declared YAML resources are editable here: TOML-declared
+    resources error with a pointer at `agw resource migrate` / `agw config
+    edit`, and built-in / auto-declared resources have no file to open.
+    """
+    import os
+    import subprocess
+
+    from agentworks import output
+    from agentworks.bootstrap import build_registry
+    from agentworks.config import load_config
+    from agentworks.errors import ValidationError
+    from agentworks.resources.inspect import edit_location
+
+    kind, slash, name = ref.partition("/")
+    if not slash or not name:
+        raise ValidationError(
+            f"expected KIND/NAME, got {ref!r}",
+            hint="Example: agw resource edit secret/npm-token",
+        )
+
+    # Same $EDITOR contract as `agw config edit`; checked before the
+    # (comparatively slow) registry build so the common misconfiguration
+    # fails fast.
+    editor = os.environ.get("EDITOR") or os.environ.get("VISUAL")
+    if not editor:
+        typer.echo("Error: $EDITOR is not set. Set it to your preferred editor.", err=True)
+        raise typer.Exit(1)
+
+    config = load_config()
+    registry = build_registry(config)
+    path, line = edit_location(registry, kind, name)
+    # Per-kind layout files hold many documents; the line tells the
+    # operator where to look. (No editor +line heuristics -- keep it
+    # simple, per the maintainer's scope ruling.)
+    output.info(f"Editing {kind}/{name} ({path}:{line})")
+    raise typer.Exit(subprocess.call([editor, str(path)]))
+
+
 @resource_app.command("migrate")
 def resource_migrate(
     selectors: Annotated[

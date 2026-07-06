@@ -15,7 +15,7 @@ Description is reliably populated across kinds thanks to Phase 2a's
 generalized polish: operator-declared resources carry the operator's
 text (when their Resource type has a ``description`` field), and
 auto-declared resources get a framework-synthesized
-``"(auto) <usage> for <kind>:<name>"`` / ``"(auto) auto-declared default
+``"(auto) <usage> for <kind>/<name>"`` / ``"(auto) auto-declared default
 <kind>"``. Kinds whose Resource type has no ``description`` field
 render an empty cell -- that's the cross-kind cost the SDD accepts.
 
@@ -33,9 +33,11 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Literal
 
 from agentworks import output
-from agentworks.resources.render import format_origin_line
+from agentworks.resources.render import format_file_path, format_origin_line
 
 if TYPE_CHECKING:
+    from pathlib import Path
+
     from agentworks.db import Database
     from agentworks.resources import Registry
     from agentworks.resources.kind import InstanceRef
@@ -301,6 +303,56 @@ def describe_resource(
         references=tuple(getattr(resource, "references", ())),
         used_by=used_by_for(db, registry, kind, resource),
     )
+
+
+def edit_location(registry: Registry, kind: str, name: str) -> tuple[Path, int]:
+    """Resolve ``agw resource edit KIND/NAME`` to the manifest to open.
+
+    Only operator-declared YAML manifests are editable through this
+    command. The other origins error with the right next step
+    (maintainer ruling, 2026-07-05, keep-it-simple scope):
+
+    - operator-declared in TOML: point at ``agw resource migrate`` or
+      ``agw config edit`` rather than opening config.toml here.
+    - built-in: not on disk in editable form.
+    - auto-declared: nothing on disk at all.
+
+    Reuses ``describe_resource``'s validated lookup so unknown kinds and
+    names error identically across the resource group.
+    """
+    from agentworks.errors import ValidationError
+
+    desc = describe_resource(registry, kind, name)
+    origin = desc.origin
+    if origin is None or origin.variant != "operator-declared":
+        variant = origin.variant if origin is not None else "unknown-origin"
+        if variant == "built-in":
+            raise ValidationError(
+                f"{kind}/{name} is built-in; there is no file to edit",
+                hint=(
+                    f"Declare an operator resource instead: "
+                    f"`agw resource sample {kind} --write {kind}s.yaml`."
+                ),
+            )
+        raise ValidationError(
+            f"{kind}/{name} is {variant}; there is no file to edit",
+            hint=(
+                f"Declare it explicitly first: "
+                f"`agw resource sample {kind} --write {kind}s.yaml`."
+            ),
+        )
+    assert origin.file is not None and origin.line is not None  # variant contract
+    if origin.file.suffix == ".toml":
+        raise ValidationError(
+            f"{kind}/{name} is declared in TOML "
+            f"({format_file_path(origin.file)}:{origin.line})",
+            hint=(
+                f"Move it to a YAML manifest with `agw resource migrate "
+                f"{kind}/{name}`, or edit the config directly with "
+                f"`agw config edit`."
+            ),
+        )
+    return origin.file, origin.line
 
 
 # ``_collect_used_by`` previously duplicated ``used_by_for``'s guard

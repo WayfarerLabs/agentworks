@@ -436,6 +436,14 @@ artifact update.)
   section still accepts `type`/`provider`, mapped at the boundary). ADR 0016 records the pattern.
   Also extended `--all` to `resource sample` and aggregated the deprecation warnings behind
   `--no-deprecations` in this same pre-lock batch.
+- **2026-07-05: `agw resource edit KIND/NAME` (maintainer request, pre-lock).** Opens the YAML
+  manifest declaring a resource in $EDITOR (same contract as `config edit`), printing `file:line`
+  first since per-kind layout files hold many documents. Deliberately minimal per the maintainer's
+  scope ruling: no editor line-jump heuristics, no scaffolding; TOML-declared resources error with a
+  pointer at `agw resource migrate KIND/NAME` or `agw config edit`, built-in and auto-declared
+  resources have no file to open. `edit_location` in resources/inspect.py is the service authority
+  (reusing describe's validated lookup); the `resource_refs` completer covers the new argument for
+  free.
 - **2026-07-05: kind/name display syntax unified on '/' (maintainer ruling, pre-lock).** The older
   inspection surfaces used `kind:name` (describe header, `--names-only`, auto-declared descriptions,
   references, used-by lines) while the migrate surfaces used `kind/name`. Everything now uses `/` --

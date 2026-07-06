@@ -530,6 +530,7 @@ backend mappings, template inheritance chains, resolution previews -- reach for 
 | ------------------------------------ | -------------------------------------------------------------------- |
 | `agw resource list`                  | List every resource in the registry across all kinds                 |
 | `agw resource describe KIND/NAME`    | Show the per-resource detail view (header + Referenced by + Used by) |
+| `agw resource edit KIND/NAME`        | Open the declaring YAML manifest in $EDITOR                          |
 | `agw resource migrate [SELECTOR]...` | Move resources from config.toml to YAML manifests                    |
 | `agw resource sample KIND [--write]` | Print (or save) a kind's commented sample manifest (--all for all)   |
 
