@@ -368,7 +368,7 @@ def test_legacy_toml_backend_section_is_warned_noop(tmp_path: Path) -> None:
 def test_legacy_toml_backend_unknown_kind_still_errors(tmp_path: Path) -> None:
     """Typo protection survives the deprecation: an unknown kind in a
     legacy section is a hard ConfigError, not a silent no-op."""
-    with pytest.raises(ConfigError, match="unknown backend kind"):
+    with pytest.raises(ConfigError, match="unknown secret provider"):
         _config(
             tmp_path,
             """

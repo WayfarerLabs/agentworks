@@ -191,7 +191,7 @@ Today's `SecretSource` protocol (`would_attempt` / `get` / `batch_get` / `descri
 already the capability contract. The split adds instantiation-by-name with config:
 
 ```text
-PROVIDER_REGISTRY: dict[str, SecretProvider]     # raw capabilities; built-ins env-var, prompt
+SECRET_PROVIDER_REGISTRY: dict[str, SecretProvider]  # raw capabilities; built-ins env-var, prompt
   SecretProvider (protocol, stateless; visible only to the backend door):
     name, interactive
     validate_config(backend_name, config)        # decode-time schema (spec minus `provider`)

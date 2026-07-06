@@ -94,6 +94,9 @@ class TestDynamicCompletionsMapping:
             )
 
     def test_completer_ids_are_known(self) -> None:
+        from agentworks.completions.bash import (
+            DYNAMIC_SNIPPETS as BASH_SNIPPETS,
+        )
         from agentworks.completions.powershell import DYNAMIC_SNIPPETS
         from agentworks.completions.zsh import COMPLETER_FUNC_NAMES
 
@@ -103,6 +106,12 @@ class TestDynamicCompletionsMapping:
             )
             assert completer_id in DYNAMIC_SNIPPETS, (
                 f"Completer '{completer_id}' from ({command_path}, {param_name}) has no PowerShell snippet mapping"
+            )
+            # The bash generator silently skips unknown completer ids, so
+            # a rename missed in bash alone would ship as silently-dead
+            # completion -- pin all three shell maps.
+            assert completer_id in BASH_SNIPPETS, (
+                f"Completer '{completer_id}' from ({command_path}, {param_name}) has no bash snippet mapping"
             )
 
 

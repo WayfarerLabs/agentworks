@@ -9,7 +9,7 @@ Per FRD R10, neither command prompts the operator nor resolves a secret
 value for display; they report state by asking the active backends
 (``would_attempt`` / ``describe_lookup`` -- the door methods) directly.
 Surfaces display BACKEND NAMES; the provider is a field visible via
-``agw resource describe secret-backend <name>``.
+``agw resource describe secret-backend/<name>``.
 """
 
 from __future__ import annotations

@@ -59,7 +59,7 @@ class SecretBackendDecl:
     name: str                      # the ONLY identity runtime surfaces use
     provider: str                  # capability name; a field, not an identity
     description: str = ""
-    config: dict[str, object] = ...
+    provider_config: dict[str, object] = ...  # spec.provider_config blob
     # declared_at / origin / references as today
 
     def mapping_for(self, secret: SecretDecl) -> Mapping:
@@ -172,7 +172,7 @@ values = resolve_for_command(targets, config, registry)   # ONE resolve; returns
 - Multiple backends per provider actually work end to end: independent mappings, opt-outs, describe
   rows, chain positions.
 - Operator surfaces speak backend names everywhere; providers appear only as a field
-  (`agw resource describe secret-backend op-work` shows `provider: onepassword`).
+  (`agw resource describe secret-backend/op-work` shows `provider: onepassword`).
 - The weakref/memo machinery and its failure modes are gone; prompt-once is structural.
 - The provider API is private to backends, so a future plugin provider has exactly one contract to
   satisfy and no way to be misused from the outside.

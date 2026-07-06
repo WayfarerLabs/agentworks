@@ -739,7 +739,7 @@ providers can carry per-backend configuration), and a **backend** is a named ins
 The built-in `env-var` and `prompt` backends ship with the app (their names are reserved);
 additional backends are declared as `secret-backend` resources and activated by listing them in
 `[secret_config].backends`. Run `agw resource list --kind secret-provider,secret-backend` to see
-both layers; `agw resource describe secret-provider env-var` lists the backends using a provider.
+both layers; `agw resource describe secret-provider/env-var` lists the backends using a provider.
 
 ### Mise (Polyglot Tool Manager)
 

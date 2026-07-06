@@ -292,6 +292,60 @@ def test_git_credential_type_key_rejected(tmp_path: Path) -> None:
         load_manifests(tmp_path / "resources")
 
 
+def test_git_credential_provider_config_rejects_kind_owned_fields(
+    tmp_path: Path,
+) -> None:
+    """The blob may not shadow the kind-owned surface: without this,
+    provider_config.token would silently override spec.token and
+    provider_config.type/provider would silently re-pick the provider
+    (the flatten-into-the-loader trick made that possible)."""
+    _manifest(
+        tmp_path,
+        """
+        apiVersion: agentworks/v1
+        kind: git-credential
+        metadata:
+          name: gh
+        spec:
+          provider: github
+          provider_config:
+            token: sneaky
+        """,
+    )
+    with pytest.raises(
+        ConfigError, match="may not contain kind-owned field"
+    ):
+        load_manifests(tmp_path / "resources")
+
+
+def test_provider_config_must_be_a_mapping(tmp_path: Path) -> None:
+    """Both capability-instance kinds reject a non-mapping blob."""
+    _manifest(
+        tmp_path,
+        """
+        apiVersion: agentworks/v1
+        kind: git-credential
+        metadata:
+          name: gh
+        spec:
+          provider: github
+          provider_config: nope
+        ---
+        apiVersion: agentworks/v1
+        kind: secret-backend
+        metadata:
+          name: my-env
+        spec:
+          provider: env-var
+          provider_config: nope
+        """,
+    )
+    with pytest.raises(
+        ConfigError, match="provider_config must be a mapping"
+    ):
+        load_manifests(tmp_path / "resources")
+
+
 def test_git_credential_org_must_nest_under_provider_config(tmp_path: Path) -> None:
     """Provider-owned fields do not ride the spec top level in YAML:
     a stray `org` errors with a pointer at the nesting rule."""

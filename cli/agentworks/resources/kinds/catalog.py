@@ -12,7 +12,7 @@ TOML, and references must resolve to a known name.
 ``apt-source`` was originally not a framework kind (only operator-facing
 config referenced by name got promoted in Phase 2b.0). It joined the
 framework later so the ``apt-package -> apt-source`` dependency graph
-becomes visible on ``agw resource describe apt-source <name>``'s
+becomes visible on ``agw resource describe apt-source/<name>``'s
 ``Referenced by:`` section, and so unknown-source errors flow through
 the same miss-policy pipeline as everything else instead of a
 catalog-specific validator.

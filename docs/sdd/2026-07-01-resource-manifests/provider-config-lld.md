@@ -26,7 +26,7 @@ class SecretProvider(Protocol):
     def instantiate(self, backend_name: str, config: Mapping[str, object]) -> SecretSource:
         """Build the SecretSource for one configured backend instance."""
 
-PROVIDER_REGISTRY: dict[str, SecretProvider]  # built-ins: env-var, prompt
+SECRET_PROVIDER_REGISTRY: dict[str, SecretProvider]  # built-ins: env-var, prompt
 ```
 
 - Built-in providers accept no configuration (`validate_config` rejects any key). The
@@ -57,13 +57,15 @@ metadata:
   description: Work 1Password vault
 spec:
   provider: onepassword
-  vault: Work # provider-specific; validated by the provider
+  provider_config:
+    vault: Work # provider-owned blob; validated by the provider
 ```
 
-Decode: `spec.provider` required; remaining spec keys form `config`. When the provider is
-registered, `validate_config` runs at decode (errors carry the document `file:line`); when it isn't,
-decode defers so the framework's reference miss policy reports the unknown provider uniformly at
-finalize.
+Decode (revised by the 2026-07-05 provider_config ruling): `spec.provider` required; provider-owned
+configuration nests under `spec.provider_config` (any other top-level spec key is an error naming
+the nesting rule). When the provider is registered, `validate_config` runs on the blob at decode
+(errors carry the document `file:line`); when it isn't, decode defers so the framework's reference
+miss policy reports the unknown provider uniformly at finalize.
 
 **Reserved names**: `ManifestSet.publish_to` rejects operator manifests redeclaring a built-in
 backend name (`env-var`, `prompt`) with a declare-a-sibling hint. The check lives at the OPERATOR
@@ -92,7 +94,7 @@ manifest-declared backends (unknowable at `load_config`). The swap:
 - `providers.resolver_for(registry) -> SecretResolver` (as built, after the maintainer's
   registry-purity revisit): a plain projection. The chain comes from the published
   `secret-config:default` row -- Config is never consulted after the registry exists.
-  `SecretBackendDecl` rows instantiate via `PROVIDER_REGISTRY[row.provider]`; legacy
+  `SecretBackendDecl` rows instantiate via `SECRET_PROVIDER_REGISTRY[row.provider]`; legacy
   `SecretBackendConfig` rows instantiate via the provider matching `row.kind` (their kind IS the
   provider name). Unknown chain names cannot reach the resolver: the row's `referenced_resources()`
   makes them finalize-time miss-policy errors, and reachability plus provider instantiation run in

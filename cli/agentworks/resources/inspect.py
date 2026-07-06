@@ -2,7 +2,7 @@
 
 ``list_resources`` / ``render_resource_table`` back ``agw resource list``;
 ``describe_resource`` / ``render_resource_description`` back
-``agw resource describe <kind> <name>`` (FRD R12 / Phase 2c).
+``agw resource describe KIND/NAME`` (FRD R12 / Phase 2c).
 
 The cross-kind shape **stops at framework-uniform fields**: kind, name,
 origin (variant + sub-fields), usage list, description. Kind-specific

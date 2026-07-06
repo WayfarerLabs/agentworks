@@ -478,7 +478,7 @@ def test_unknown_backend_kind_in_secret_backends_errors(
         # typo: kind is 'env-var' (kebab), not 'env_var' (snake)
         """,
     )
-    with pytest.raises(ConfigError, match="unknown backend kind"):
+    with pytest.raises(ConfigError, match="unknown secret provider"):
         load_config(cfg_file, warn_issues=False)
 
 

@@ -183,6 +183,17 @@ def _decode_git_credential(doc: Document, spec: dict[str, object], issues: list[
     raw_config = spec.pop("provider_config", {})
     if not isinstance(raw_config, dict):
         raise ConfigError("spec.provider_config must be a mapping")
+    # The flatten-into-the-loader trick must not let the blob shadow
+    # kind-owned surface: without this check, provider_config.token
+    # would silently override spec.token, and provider_config.type/
+    # provider would silently re-pick the provider.
+    reserved = {"type", "provider", "token", "description"} & set(raw_config)
+    if reserved:
+        names = ", ".join(sorted(reserved))
+        raise ConfigError(
+            f"spec.provider_config may not contain kind-owned field(s): "
+            f"{names}; they belong at the spec top level"
+        )
     loader_spec: dict[str, object] = {"type": provider, **raw_config}
     for kind_owned in ("token", "description"):
         if kind_owned in spec:
@@ -235,14 +246,14 @@ def _decode_secret_backend(doc: Document, spec: dict[str, object], issues: list[
     # document's location); when it isn't, defer so the framework's
     # reference miss policy reports the unknown provider uniformly.
     raw_config = spec.pop("provider_config", {})
+    if not isinstance(raw_config, dict):
+        raise ConfigError("spec.provider_config must be a mapping")
     if spec:
         extras = ", ".join(sorted(spec))
         raise ConfigError(
             f"unknown secret-backend spec field(s): {extras}; "
             "provider-specific configuration goes under spec.provider_config"
         )
-    if not isinstance(raw_config, dict):
-        raise ConfigError("spec.provider_config must be a mapping")
     known = SECRET_PROVIDER_REGISTRY.get(provider)
     provider_config = dict(raw_config)
     if known is not None:

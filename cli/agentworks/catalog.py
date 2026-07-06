@@ -72,7 +72,7 @@ class AptPackageEntry:
 
         The registry attaches the corresponding ``ReferenceEntry`` to
         each ``AptSourceEntry`` during finalize, so
-        ``agw resource describe apt-source github`` shows every apt-package
+        ``agw resource describe apt-source/github`` shows every apt-package
         that depends on it -- the dependency graph that was previously
         implicit is now visible.
         """

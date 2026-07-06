@@ -6,7 +6,7 @@
 #
 # RESOURCES ARE YAML-FIRST: declare secrets, templates, git credentials, and
 # catalog entries as YAML manifests in the resources/ directory next to this
-# file (`agw resource sample` prints a commented starter for every kind).
+# file (`agw resource sample <kind>` prints a commented starter; --all for every kind).
 # The TOML resource sections below keep working, but they are deprecated --
 # they load with a deprecation warning, and `agw resource migrate` moves them to
 # YAML whenever you're ready. This file remains the permanent home for
@@ -28,7 +28,7 @@
 # Naming conventions:
 #   - Framework keys (section names, field names) use snake_case:
 #     [vm_templates.foo], ssh_public_key, mise_activate, backend_mappings.
-#   - Operator-typed identifiers (entity names, backend kinds, secret names)
+#   - Operator-typed identifiers (entity names, backend names, secret names)
 #     use kebab-case: [vm_templates.dev-host], `secret = "github-token"`,
 #     `backends = ["env-var", "prompt"]`. The validator is permissive so
 #     legacy names continue to load, but new names should follow kebab.
@@ -130,9 +130,9 @@ ssh_private_key = "~/.ssh/id_ed25519"        # required: used for SSH connection
 # Secret declarations -- one per `{ secret = "<name>" }` reference used anywhere
 # in your config. `description` is required and shown in prompts and
 # `agw doctor`; `hint` (optional) is shown alongside the prompt.
-# `backend_mappings.<kind>` (optional) overrides that backend's default
-# identifier for this one secret, or sets `false` to opt out of that backend
-# entirely.
+# `backend_mappings.<backend>` (optional, keyed by BACKEND NAME) overrides that
+# backend's default identifier for this one secret, or sets `false` to opt out
+# of that backend entirely.
 
 #[secrets.npm-token]
 #description = "npm registry token"

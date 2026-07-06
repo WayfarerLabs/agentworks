@@ -235,6 +235,11 @@ def _check_config() -> tuple[HealthGroup, Config | None, Registry | None]:
         g.warn("Config", issue)
     if not config.config_issues:
         g.ok("Config is valid")
+    # Deprecation nudges ride their own channel (so --no-deprecations
+    # can silence the ambient per-command warning), but doctor is the
+    # explicit full-health surface: always show them here.
+    for issue in config.deprecation_issues:
+        g.warn("Config", issue)
 
     # SSH keys
     _check_ssh_key(g, config.operator.ssh_public_key, "public")

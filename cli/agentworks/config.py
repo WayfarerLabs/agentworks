@@ -1520,18 +1520,18 @@ def _load_secret_backends(
 
     from agentworks.secrets.providers import SECRET_PROVIDER_REGISTRY
 
-    known_kinds = set(SECRET_PROVIDER_REGISTRY)
-    for kind, bdata in raw.items():
-        kind_str = str(kind)
+    known_providers = set(SECRET_PROVIDER_REGISTRY)
+    for key, bdata in raw.items():
+        provider_str = str(key)
         if not isinstance(bdata, dict):
-            raise ConfigError(f"secret_backends.{kind_str} must be a table")
-        if kind_str not in known_kinds:
+            raise ConfigError(f"secret_backends.{provider_str} must be a table")
+        if provider_str not in known_providers:
             raise ConfigError(
-                f"[secret_backends.{kind_str}] declares an unknown backend kind; "
-                f"supported: {sorted(known_kinds)}"
+                f"[secret_backends.{provider_str}] names an unknown secret "
+                f"provider; supported: {sorted(known_providers)}"
             )
         deprecations.append(
-            f"[secret_backends.{kind_str}] is deprecated and has no effect: "
+            f"[secret_backends.{provider_str}] is deprecated and has no effect: "
             f"the built-in backends ship with agentworks, and activation is "
             f"[secret_config].backends. Remove the section, or run "
             f"`agw resource migrate --all` to drop it."
@@ -1572,8 +1572,8 @@ def _warn_deprecated_resource_sections(
     noun = "section" if len(present) == 1 else "sections"
     deprecations.append(
         f"deprecated TOML resource {noun}: {', '.join(present)}. Declare "
-        f"new resources as YAML manifests (`agw resource sample`), move "
-        f"these with `agw resource migrate` (per kind, or --all), or "
+        f"new resources as YAML manifests (`agw resource sample <kind>`), "
+        f"move these with `agw resource migrate` (per kind, or --all), or "
         f"silence this warning with --no-deprecations. TOML resource "
         f"support will likely be removed in a future major release."
     )

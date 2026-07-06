@@ -200,9 +200,10 @@ agw resource sample (KIND | --all) [--write FILENAME]
 - `--layout` / `--toml` enum values and the `resource sample` kind argument complete statically
   (click.Choice; the sample kinds are known at generation time), and both new subcommands enter the
   static tree.
-- Deliberate CLI-shape divergence, for the record: `resource describe` keeps its two-positional
-  `KIND NAME` grammar; `migrate` uses composite `KIND/NAME` tokens because selectors are variadic
-  and mixed-granularity. Aligning `describe` is not this SDD's business.
+- CLI-shape note, superseded pre-lock (2026-07-05 display-syntax ruling): `describe` originally kept
+  a two-positional `KIND NAME` grammar while `migrate` used composite `KIND/NAME` tokens. The
+  maintainer's `/`-unification aligned `describe` to the same single `KIND/NAME` token (recorded in
+  locked.md as the third breaking change); the resource group now has one grammar.
 
 ## Test surface (plan carries the checkboxes)
 

@@ -209,3 +209,23 @@ def test_cli_describe_unknown_kind_exits_nonzero(
         app, ["resource", "describe", "no_such_kind/name"]
     )
     assert result.exit_code != 0
+
+
+def test_cli_describe_rejects_token_without_slash(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """The single-token grammar is KIND/NAME: a bare kind (or a token
+    with an empty name half) errors with the example hint before any
+    registry work."""
+    from typer.testing import CliRunner
+
+    from agentworks.cli import app
+
+    cfg_file = tmp_path / "config.toml"
+    _write_base(cfg_file)
+    monkeypatch.setattr("agentworks.config.CONFIG_PATH", cfg_file)
+
+    for token in ("secret", "secret/"):
+        result = CliRunner().invoke(app, ["resource", "describe", token])
+        assert result.exit_code != 0
+        assert "expected KIND/NAME" in str(result.exception)
