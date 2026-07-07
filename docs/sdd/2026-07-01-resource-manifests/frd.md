@@ -63,9 +63,9 @@ config itself to YAML.
 - **Resource, reference, registry, origin, miss policy**: as defined by the resource-registry SDD.
   This SDD changes where operator-declared resources come from, not what they are.
 - **Capability**: a unit of code the app (or, later, a plugin) provides: a secret provider, a git
-  credential provider, a VM provisioner. Capabilities are not manifest-declarable. Where a
-  capability is referenced by name from resources, it is mirrored into the registry as a read-only
-  descriptor row so references validate uniformly.
+  credential provider, a VM provisioner, a secret backend. Capabilities are not manifest-declarable.
+  Where a capability is referenced by name from resources, it is mirrored into the registry as a
+  read-only descriptor row so references validate uniformly.
 - **Backend**: the secret-domain capability -- the code that produces secret values (`env-var`,
   `prompt`; later `onepassword`, ...). Named by `[secret_config].backends` (the chain) and by
   `backend_mappings` keys on secrets. Not a resource; mirrored as a `secret-backend` descriptor row.
@@ -277,8 +277,8 @@ sample was prose-only because nothing declarable could exist. The requirements a
   (`env-var`, then `prompt`) is unchanged. The v0.10.0 TOML vocabulary is unchanged and now
   literally correct.
 - **Per-secret addressing lives in the mapping**: `backend_mappings.<backend>` values remain string
-  / structured dict / `false` (R4's forms). The structured form is where instance-flavored
-  addressing belongs -- a future 1Password backend reads
+  / structured dict / `false` (the env-and-secrets SDD's value forms). The structured form is where
+  instance-flavored addressing belongs -- a future 1Password backend reads
   `backend_mappings.onepassword = { vault = "Work", item = "npm", field = "token" }` per secret.
 - **Backend-level configuration** (connection material: a service-account token, an account URL):
   none exists today. When the first config-bearing backend ships, its configuration is

@@ -111,7 +111,7 @@ and is not required by this design.
   TOML parser does today, reusing the existing per-kind construction and validation logic.
   Unknown-key strictness matches current TOML behavior per kind (LLD confirms the current behavior
   kind by kind and pins it).
-- **Registry layer**: unchanged (references, miss policies, reserved names, cycles).
+- **Registry layer**: unchanged (references, miss policies, reserved-default names, cycles).
 
 ## Bootstrap
 
@@ -285,7 +285,7 @@ run self-checking. Full semantics in `migration-tool-lld.md`.
 | Manifest loader (spec)     | kind-specific field types / required fields / value validation (unchanged semantics)                                 |
 | Capability (git-cred)      | `spec.provider_config` validation on git-credential resources                                                        |
 | Registry publish           | built-in override policy per kind                                                                                    |
-| Registry finalize          | references, miss policies, reserved names, cycles, description polish (unchanged)                                    |
+| Registry finalize          | references, miss policies, reserved-default names, cycles, description polish (unchanged)                            |
 | Composition boundary       | `build_registry` runs `secrets.validate_chain(config, registry)`: chain names, operator-declared secret reachability |
 
 All raise `ConfigError`; the layer determines the framing, as today.

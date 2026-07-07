@@ -81,21 +81,21 @@ schema table.
 Unknown-key modes (pinned from the loader survey; "warn" = allowlist diff appended to issues,
 "silent" = extra keys ignored):
 
-| Kind                     | TOML section                       | Unknown spec keys                    |
-| ------------------------ | ---------------------------------- | ------------------------------------ |
-| `secret`                 | `[secrets.<name>]`                 | warn                                 |
-| `vm-template`            | `[vm_templates.<name>]`            | warn                                 |
-| `agent-template`         | `[agent_templates.<name>]`         | warn                                 |
-| `workspace-template`     | `[workspace_templates.<name>]`     | silent (parity; TOML has no check)   |
-| `session-template`       | `[session_templates.<name>]`       | warn                                 |
-| `git-credential`         | `[git_credentials.<name>]`         | silent (parity)                      |
-| `admin-template`         | `[admin.config]` + `[admin.env]`   | warn                                 |
-| `named-console-template` | `[named_console]`                  | warn                                 |
-| `secret-backend`         | `[secret_backends.<kind>]`         | silent (parity; reshaped in Phase 3) |
-| `apt-source`             | `[apt_sources.<name>]`             | silent (parity)                      |
-| `apt-package`            | `[apt_packages.<name>]`            | silent (parity)                      |
-| `system-install-command` | `[system_install_commands.<name>]` | silent, but `test` errors (parity)   |
-| `user-install-command`   | `[user_install_commands.<name>]`   | silent, but `test` errors (parity)   |
+| Kind                     | TOML section                       | Unknown spec keys                  |
+| ------------------------ | ---------------------------------- | ---------------------------------- |
+| `secret`                 | `[secrets.<name>]`                 | warn                               |
+| `vm-template`            | `[vm_templates.<name>]`            | warn                               |
+| `agent-template`         | `[agent_templates.<name>]`         | warn                               |
+| `workspace-template`     | `[workspace_templates.<name>]`     | silent (parity; TOML has no check) |
+| `session-template`       | `[session_templates.<name>]`       | warn                               |
+| `git-credential`         | `[git_credentials.<name>]`         | silent (parity)                    |
+| `admin-template`         | `[admin.config]` + `[admin.env]`   | warn                               |
+| `named-console-template` | `[named_console]`                  | warn                               |
+| `secret-backend`         | `[secret_backends.<kind>]`         | silent (post-5.5: not declarable)  |
+| `apt-source`             | `[apt_sources.<name>]`             | silent (parity)                    |
+| `apt-package`            | `[apt_packages.<name>]`            | silent (parity)                    |
+| `system-install-command` | `[system_install_commands.<name>]` | silent, but `test` errors (parity) |
+| `user-install-command`   | `[user_install_commands.<name>]`   | silent, but `test` errors (parity) |
 
 Spec fields per kind are exactly today's TOML fields (survey pinned; highlights and deltas only):
 
@@ -120,10 +120,10 @@ Spec fields per kind are exactly today's TOML fields (survey pinned; highlights 
   fields) plus `env` (was `[admin.env]`). Name restricted to `default`.
 - **named-console-template**: `tmux_layout` (enum `VALID_TMUX_LAYOUTS`). Name restricted to
   `default`.
-- **secret-backend** (Phase 2 shape): the TOML section carries only the implicit kind key today; the
-  manifest form is deferred to Phase 3's reshape (`spec.provider` + provider config). In Phase 2 the
-  kind is NOT yet manifest-declarable; declaring it errors with a pointer to the Phase 3 surface.
-  This avoids shipping a manifest shape that Phase 3 immediately breaks inside the same PR.
+- **secret-backend**: not manifest-declarable. (History: Phase 2 deferred the manifest form to Phase
+  3's reshape, Phase 3 shipped a declarable `spec.provider` + provider-config shape, and the Phase
+  5.5 collapse, 2026-07-07, removed it -- the kind is now the capability descriptor, and declaring
+  it gets R3's permanent capability-kind error.)
 - **catalog kinds**: fields exactly per the survey (`key_url`/`key_path`/`source`/`source_file` (+
   `_SAFE_FILENAME_RE`) / `key_dearmor`; `apt` required list + `apt_sources`; `command` + `path` +
   at-most-one of `test_exec`/`test_file`/`test_dir`).
@@ -135,8 +135,8 @@ All loader errors are `ConfigError` with the document location prefix:
 - `resources/vm-templates.yaml:12: apiVersion must be "agentworks/v1"; got "v2"`
 - `resources/foo.yaml:1: unknown kind "vm_template"; valid kinds: agent-template, apt-package, ...`
   (misspelled-snake case gets the kebab suggestion when the kebab form exists)
-- `resources/foo.yaml:8: secret-backend is not manifest-declarable yet` (hint names the Phase 3
-  provider/backend shape)
+- `resources/foo.yaml:8: secret-backend is not manifest-declarable` (the permanent capability-kind
+  error: provided by the app, post-5.5)
 - `resources/a.yaml:3: duplicate secret "npm-token" (also declared at resources/b.yaml:9)`
 - Spec-level field errors reuse the existing validation messages with the location prefix
   substituted for the TOML path prefix.

@@ -417,11 +417,16 @@ model.
       bundled `secret-backends.yaml` manifest, the reserved-name enforcement for backend names, and
       the prose-only secret-backend sample (SAMPLE_KINDS shrinks; `agw resource sample` choices
       follow).
-- [ ] Door survives keyed by capability: the resolution loop, `would_attempt` / `describe_lookup` /
-      `resolve`, prompt-once, per-backend batching, and per-backend opt-outs move onto the
-      capability row (or a thin non-resource runtime wrapper) with mappings looked up by backend
-      name -- which now IS the capability name. `active_backends` / `validate_chain` validate
+- [ ] Runtime survives keyed by capability: the `SecretBackend` API is exactly `would_attempt` /
+      `describe_lookup` / `batch_get`; orchestration (mapping lookup, the generic `false` opt-out,
+      prompt-once batching) lives in the resolution loop, with mappings looked up by backend name --
+      which now IS the capability name. `active_backends` / `validate_chain` validate
       `[secret_config].backends` against the descriptor rows.
+- [ ] Retire the "door" metaphor in code prose and docs (maintainer ruling, 2026-07-07): it enforced
+      providers-only-via-backends, which the collapse makes vacuous; `SecretBackend` is a
+      well-defined API abstracting where secrets come from. Historical artifacts (Phase 3.6 heading,
+      runtime-model-lld title/banner, checked boxes, provider-config-lld's superseded banner and
+      body) keep the word as record.
 - [ ] TOML surface unchanged and now literally correct: `[secret_config].backends` lists backend
       (capability) names; `backend_mappings.<backend>` keys backends. No renames, no aliases. The
       `[secret_backends.*]` no-op deprecation and migrate's drop handling stay as-is.
