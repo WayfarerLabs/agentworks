@@ -43,7 +43,7 @@ class _SecretBackendKind:
     """Implementation of ``ResourceKind`` for ``"secret-backend"``."""
 
     kind: str = "secret-backend"
-    description: str = "Capability: code that produces secret values (the chain's entries)"
+    description: str = "Code that produces secret values (the chain's entries)"
     miss_policy: Literal["auto-declare", "error"] = "error"
     auto_declare_names: frozenset[str] | None = None
     category: Literal["declarable", "capability"] = "capability"

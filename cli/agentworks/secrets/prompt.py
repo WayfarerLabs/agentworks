@@ -1,5 +1,5 @@
-"""The ``prompt`` secret backend: interactive last-resort. A raw
-capability, consumed by the resolution loop through the
+"""The ``prompt`` secret backend: interactive last-resort. A capability
+implementation, consumed by the resolution loop through the
 ``SecretBackend`` API.
 
 Resolves nothing when stdin is not a TTY or the CLI was invoked with

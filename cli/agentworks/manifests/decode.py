@@ -36,7 +36,7 @@ KIND_SECTIONS: dict[str, str] = {
     "git-credential": "git_credentials",
     "admin-template": "admin",
     "named-console-template": "named_console",
-    # secret-backend: capability descriptor, not declarable (no decoder);
+    # secret-backend: capability kind, not declarable (no decoder);
     # listed for the migrator's [secret_backends.*] drop handling only.
     "secret-backend": "secret_backends",
     "apt-source": "apt_sources",

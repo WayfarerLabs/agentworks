@@ -564,3 +564,32 @@ class TestVariadicPositionalCompletion:
         # Same idea: -ge for the variadic.
         assert "tokenCount -ge" in output
         assert "tokenCount -eq" in output
+
+
+class TestKindsSourcedCompleter:
+    """The resource_kinds completer sources `agw resource kinds
+    --names-only` in all three shells -- the config-free static path --
+    not a scrape of the resource list."""
+
+    def test_all_shells_call_resource_kinds(self) -> None:
+        from agentworks.completions.bash import (
+            DYNAMIC_SNIPPETS as BASH_SNIPPETS,
+        )
+        from agentworks.completions.powershell import (
+            DYNAMIC_SNIPPETS as PS_SNIPPETS,
+        )
+        from agentworks.completions.zsh import DYNAMIC_FUNCTIONS
+
+        for shell, source in (
+            ("bash", BASH_SNIPPETS["resource_kinds"]),
+            ("zsh", DYNAMIC_FUNCTIONS["resource_kinds"]),
+            ("powershell", PS_SNIPPETS["resource_kinds"]),
+        ):
+            assert "resource kinds --names-only" in source, (
+                f"{shell} resource_kinds should call the config-free "
+                f"kinds command; got: {source!r}"
+            )
+            assert "resource list" not in source, (
+                f"{shell} resource_kinds still scrapes resource list: "
+                f"{source!r}"
+            )

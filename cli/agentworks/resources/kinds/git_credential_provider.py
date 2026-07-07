@@ -47,7 +47,7 @@ class _GitCredentialProviderKind:
     """Implementation of ``ResourceKind`` for ``"git-credential-provider"``."""
 
     kind: str = "git-credential-provider"
-    description: str = "Capability: code behind git credentials (github, azdo)"
+    description: str = "Code behind git credentials (github, azdo)"
     miss_policy: Literal["auto-declare", "error"] = "error"
     auto_declare_names: frozenset[str] | None = None
     category: Literal["declarable", "capability"] = "capability"

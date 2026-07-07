@@ -1,4 +1,4 @@
-# 16. YAML Resource Manifests and the Config/Resource/Capability Split
+# 16. YAML Resource Manifests and the Config/Resource Split
 
 Date: 2026-07-05 (amended 2026-07-07)
 
@@ -87,13 +87,14 @@ provider registry.
 Capabilities can optionally carry configuration, and its nature and shape is entirely
 capability-specific. For example, an AZDO git credential provider requires an organization name; a
 (future) Azure VM provider may need a subscription ID; a (future) 1Password secret backend may need
-an account URL. Where the reference site is a resource spec, that configuration is limited to the
-`spec.provider_config` key: an opaque blob the named capability owns and validates, so the rest of
-the spec stays provider-agnostic. Fields specific to the resource's kind are generic by definition
-and live at the top level of the resource spec (a `git-credential`'s `token` belongs to every
-credential, while `azdo`'s `org` nests). Where the reference site is per-secret
-(`backend_mappings`), the structured mapping value carries the per-secret addressing (a vault, item,
-and field) -- same principle, capability-owned content at the reference site.
+an account URL. Where the reference site is a resource spec, that configuration is limited to a
+single sibling key named after the reference field (`provider` -> `spec.provider_config`; a future
+inline selector like `harness` -> `harness_config`): an opaque blob the named capability owns and
+validates, so the rest of the spec stays provider-agnostic. Fields specific to the resource's kind
+are generic by definition and live at the top level of the resource spec (a `git-credential`'s
+`token` belongs to every credential, while `azdo`'s `org` nests). Where the reference site is
+per-secret (`backend_mappings`), the structured mapping value carries the per-secret addressing (a
+vault, item, and field) -- same principle, capability-owned content at the reference site.
 
 The INTERNAL resource representation follows the nested shape too
 (`GitCredentialConfig.provider_config`) as this represents the best representation available. For

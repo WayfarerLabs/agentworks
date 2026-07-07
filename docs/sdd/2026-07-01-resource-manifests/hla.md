@@ -158,7 +158,7 @@ loads today keeps loading (with deprecation warnings on TOML resource sections).
   (`provider` wins when both are present); `type` keeps working until the TOML resource path is
   removed in a future major (Phase 6). Manifests accept only `provider`.
 - `[secret_backends.<kind>]` TOML sections are warned deprecated no-ops as of Phase 3.6 (they were
-  semantically empty; post-5.5 the kind is a capability descriptor and not declarable at all).
+  semantically empty; the kind is a capability kind and not declarable at all).
 
 ## Kind flags
 

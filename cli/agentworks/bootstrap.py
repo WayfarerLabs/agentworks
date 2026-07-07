@@ -2,7 +2,7 @@
 standard set of publishers.
 
 The "standard set of publishers" -- the bundled built-in manifests, the
-catalog, the git-credential-provider and secret-backend descriptors, the TOML
+catalog, the git-credential-provider and secret-backend capability resources, the TOML
 ``Config``, and the operator's YAML ``ManifestSet`` -- is application
 knowledge, not Registry knowledge and not Config knowledge. This module
 is its legitimate home: it imports the publishers and orchestrates

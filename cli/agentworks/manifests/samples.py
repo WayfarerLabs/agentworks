@@ -34,7 +34,7 @@ _SAMPLES_DIR = "samples"
 # bundled sample; the samples-exist test pins this stays true as kinds
 # are added.
 # secret-backend stays in KIND_SECTIONS (the migrator's drop table) but
-# is a capability descriptor, not declarable -- no sample exists.
+# is a capability kind, not declarable -- no sample exists.
 SAMPLE_KINDS: tuple[str, ...] = tuple(
     k for k in KIND_SECTIONS if k != "secret-backend"
 )

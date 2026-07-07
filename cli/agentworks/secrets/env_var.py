@@ -1,5 +1,5 @@
 """The ``env-var`` secret backend: reads operator-side environment
-variables. A raw capability, consumed by the resolution loop through
+variables. A capability implementation, consumed by the resolution loop through
 the ``SecretBackend`` API.
 """
 

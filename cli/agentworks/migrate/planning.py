@@ -33,7 +33,7 @@ if TYPE_CHECKING:
 # family; they emit as <kind>/default per the envelope restriction.
 _SINGLETON_KINDS = {"admin-template", "named-console-template"}
 
-# secret-backend is a capability descriptor kind (not declarable); its
+# secret-backend is a capability kind (not declarable); its
 # TOML sections are warned no-ops with no manifest successor -- they are
 # dropped, never migrated.
 _MIGRATABLE_KINDS = {k: s for k, s in KIND_SECTIONS.items() if k != "secret-backend"}

@@ -79,8 +79,8 @@ def active_backends(config: Config, registry: Registry) -> list[ActiveBackend]:
 
     Each layer in its natural role: the chain comes from CONFIG
     (``[secret_config].backends`` -- a setting), validated against the
-    ``secret-backend`` descriptor rows in the resource Registry, and the
-    capabilities come from ``SECRET_BACKEND_REGISTRY``. An unknown chain
+    ``secret-backend`` capability resources in the Registry, and the
+    implementations come from ``SECRET_BACKEND_REGISTRY``. An unknown chain
     name gets the operator's vocabulary -- the chain is config, so the
     error is a config error, not a registry-graph error -- and the hint
     enumerates the registered backends.
@@ -101,9 +101,9 @@ def active_backends(config: Config, registry: Registry) -> list[ActiveBackend]:
             ) from None
         capability = SECRET_BACKEND_REGISTRY.get(name)
         if capability is None:
-            # The descriptor rows mirror the capability registry; a row
-            # without code means a publisher bug (or a hand-built
-            # registry that skipped the secrets publisher).
+            # The capability resources mirror the code registry; a row
+            # without an implementation means a publisher bug (or a
+            # hand-built registry that skipped the secrets publisher).
             raise ConfigError(
                 f"secret backend {name!r} has a registry row but no "
                 f"registered implementation"
@@ -115,7 +115,7 @@ def active_backends(config: Config, registry: Registry) -> list[ActiveBackend]:
 def validate_chain(config: Config, registry: Registry) -> None:
     """Secret-system config consistency, run by ``build_registry`` right
     after finalize: the chain's names must be ``secret-backend``
-    descriptor rows, and every operator-declared secret must be
+    capability resources, and every operator-declared secret must be
     reachable via the chain.
 
     The chain is pure config consumed here the way any subsystem

@@ -394,7 +394,7 @@ class Registry:
         need the framework's canonical name (the Registry's per-kind
         dict key) regardless of whether the Resource type carries it on
         a ``.name`` field (most do) or on a different field
-        (descriptor rows). Empty iterator if the kind has
+        (capability resources). Empty iterator if the kind has
         no Resources.
         """
         return iter(self._resources.get(kind, {}).items())

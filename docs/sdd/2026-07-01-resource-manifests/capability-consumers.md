@@ -4,8 +4,8 @@ Status: SUGGESTION (2026-07-07). A prototype of what consuming a capability shou
 every current and planned capability, written as feedback input for the plugin-system SDD (draft,
 `docs/sdd/2026-07-06-plugin-system/`) and future work. The first three rows describe shipped
 behavior; the rest are proposals and bind nothing. ADR 0016 carries the rules that ARE decided
-(resources reference capabilities many-to-one; `provider` + `provider_config` at the reference site;
-dedicated kinds only for real domain nouns).
+(resources reference capabilities many-to-one; `provider` + `provider_config` on dedicated
+capability-instance kinds; dedicated kinds only for real domain nouns).
 
 ## The observation this doc is built on
 
@@ -233,6 +233,6 @@ passport CA directory, not per-agent validity).
    `{}` for none. Templates get per-key inheritance merge for free.
 4. Many capabilities, ordered: a list of bare names; config never rides an ordered list.
 5. Adjust-an-ambient-selection consumers (today: only `backend_mappings`) add the `false` opt-out
-   shorthand to shape 3; pure opt-in consumers don't need it.
+   shorthand to the map shape (rule 3); pure opt-in consumers don't need it.
 6. Value shorthands are per-domain sugar (`env-var: NPM_TOKEN` as a mapping value), always
    equivalent to a spelled-out form.

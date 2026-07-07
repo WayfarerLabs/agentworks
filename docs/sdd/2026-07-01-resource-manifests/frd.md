@@ -41,8 +41,8 @@ become manifests, config sections stay).
 
 In scope: the manifest loader and envelope schema, the config/resource split of the current TOML
 surface, built-in resource manifests, the origin taxonomy cleanup, the secret-backend capability
-descriptor rows (R8, revised), the git-credential provider field alignment, the migration tool, and
-the deprecation of the TOML resource surface (its removal is deferred to a future major release).
+resources (R8), the git-credential provider field alignment, the migration tool, and the deprecation
+of the TOML resource surface (its removal is deferred to a future major release).
 
 Out of scope: the plugin system (system and external plugins), apply-style reconciliation against
 provisioned state, lifecycle resources (VMs, agents, sessions, consoles stay in the DB), and moving
@@ -88,7 +88,7 @@ Every section of today's `config.toml` gets exactly one destination:
 | `[session.config]`                        | config (TOML)                                       | non-template session settings                                                                                  |
 | `[secret_config]`                         | config (TOML)                                       | active backend chain; a setting, never published -- validated against the registry at the composition boundary |
 | `[secrets.<name>]`                        | manifest (`secret`)                                 |                                                                                                                |
-| `[secret_backends.<kind>]`                | dropped by the migrator (with a note)               | semantically empty; the kind is a capability descriptor, not declarable                                        |
+| `[secret_backends.<kind>]`                | dropped by the migrator (with a note)               | semantically empty; the kind is a capability kind, not declarable                                              |
 | `[git_credentials.<name>]`                | manifest (`git-credential`)                         | `type` renamed to `provider` per R9                                                                            |
 | `[vm_templates.<name>]` (+ `.env`)        | manifest (`vm-template`)                            |                                                                                                                |
 | `[agent_templates.<name>]` (+ `.env`)     | manifest (`agent-template`)                         |                                                                                                                |
@@ -164,8 +164,7 @@ spec:
 Not manifest-declarable, rejected with a specific error: kinds reserved to capabilities
 (`secret-backend`, `git-credential-provider`) and any future code-only kind. The error names the
 kind and explains that it is provided by the app (or a plugin). (A `kind: secret-backend` document
-gets exactly this error post-collapse -- the kind exists, as descriptor rows, and cannot be
-declared.)
+gets exactly this error -- the kind exists, holding capability resources, and cannot be declared.)
 
 Singleton-shaped kinds (`admin-template`, `named-console-template`) accept only
 `metadata.name: default`; other names are load errors. For `named-console-template` the Config-side
@@ -216,13 +215,13 @@ The app ships resources of its own through the same framework:
 - **Mechanism**: app-bundled manifests (same envelope, packaged with the app) and/or code
   publishers, both landing in the registry with origin `built-in`. Which mechanism each built-in
   uses is an implementation choice; the operator-visible contract is the `built-in` origin.
-- **Initial built-ins**: the `env-var` and `prompt` secret-backend descriptor rows (R8), published
-  by the secrets code publisher. The catalog (apt sources, apt packages, install commands) keeps its
-  existing code publisher and simply reports the `built-in` origin (R7); moving it to bundled
-  manifests or a system plugin is future work. The app-bundled-manifest mechanism itself stays wired
-  but currently empty (its original content, the bundled backend manifests, died in the 2026-07-07
-  collapse); the loader path remains exercised by tests, and plugins/future built-ins are its
-  consumers.
+- **Initial built-ins**: the `env-var` and `prompt` secret-backend capability resources (R8),
+  published by the secrets code publisher. The catalog (apt sources, apt packages, install commands)
+  keeps its existing code publisher and simply reports the `built-in` origin (R7); moving it to
+  bundled manifests or a system plugin is future work. The app-bundled-manifest mechanism itself
+  stays wired but currently empty (its original content, the bundled backend manifests, died in the
+  2026-07-07 collapse); the loader path remains exercised by tests, and plugins/future built-ins are
+  its consumers.
 - **Override policy is per kind**:
   - Catalog kinds keep today's documented behavior: an operator manifest with the same name as a
     built-in entry overrides it.
@@ -258,15 +257,15 @@ Surfaced everywhere origins appear today (`agw doctor`, `agw secret list/describ
 (As revised by the capability collapse; the original provider/backend split and the ruling chain
 that removed it are in the plan's sequencing notes.)
 
-- **`secret-backend`** (capability, registry descriptor): the code that produces secret values --
-  what the ecosystem calls a secrets backend. Built-ins: `env-var` (convention `AW_SECRET_<NAME>`),
-  `prompt`. Backends are registered code-side (`SECRET_BACKEND_REGISTRY`) and mirrored into the
-  registry as read-only `built-in` descriptor rows (error miss policy, not manifest-declarable) so
-  chain references validate uniformly and the capabilities are visible in `agw resource list`. There
-  is no declarable instantiation kind.
+- **`secret-backend`** (capability kind): the code that produces secret values -- what the ecosystem
+  calls a secrets backend. Built-ins: `env-var` (convention `AW_SECRET_<NAME>`), `prompt`. Backends
+  are registered code-side (`SECRET_BACKEND_REGISTRY`) and published as read-only `built-in`
+  capability resources (error miss policy, not manifest-declarable) so chain references validate
+  uniformly and the backends are visible in `agw resource list`. There is no declarable
+  instantiation kind.
 - **Chain**: `[secret_config].backends` lists backend (capability) names in precedence order;
-  unknown names are load errors validated against the descriptor rows. The zero-config default chain
-  (`env-var`, then `prompt`) is unchanged. The v0.10.0 TOML vocabulary is unchanged and now
+  unknown names are load errors validated against the capability resources. The zero-config default
+  chain (`env-var`, then `prompt`) is unchanged. The v0.10.0 TOML vocabulary is unchanged and now
   literally correct.
 - **Per-secret addressing lives in the mapping**: `backend_mappings.<backend>` values remain string
   / structured dict / `false` (the env-and-secrets SDD's value forms). The structured form is where
