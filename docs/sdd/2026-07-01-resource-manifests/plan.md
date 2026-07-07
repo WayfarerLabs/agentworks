@@ -445,6 +445,11 @@ model.
 - [x] **Tests**: rename sweeps; kind-collapse pins (one row per capability; declarable manifest for
       `kind: secret-backend` is now an envelope error); chain validation against descriptor rows;
       existing resolution/inspection suites pass with mappings keyed by capability name.
+- [x] **Companion (maintainer request)**: [capability-consumers.md](capability-consumers.md) --
+      consumers and schema shapes for every current and planned capability, organized by cardinality
+      (reference+blob for one; map keyed by capability name for many order-free; ordered name list
+      when order is the meaning). Explicitly a SUGGESTION doc: feedback input for the plugin SDD,
+      binding nothing.
 
 Definition of done: one `secret-backend` kind (the capability); no declarable instantiation layer;
 released TOML configs work verbatim; CI green; reviewer-approved.

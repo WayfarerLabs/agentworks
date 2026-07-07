@@ -39,7 +39,9 @@ flipped.
   `backend_mappings` already named backends). The "door" metaphor was retired -- `SecretBackend` is
   a well-defined API abstracting where secrets come from, consumed by a plain resolution loop. ADR
   0016 records the resources-reference-capabilities model and the domain-natural capability naming
-  rule.
+  rule. A companion doc (capability-consumers.md, marked SUGGESTION) prototypes consumer schema
+  shapes by cardinality for every current and planned capability, as feedback input for the plugin
+  SDD.
 
 Two deliberate breaking changes, both `!`-flagged for release-please: resource names may not contain
 `/` (FRD R13, enforced at `Registry.add`), and `agw resource migrate` requires selectors or `--all`.

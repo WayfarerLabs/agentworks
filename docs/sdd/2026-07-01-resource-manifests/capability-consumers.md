@@ -1,0 +1,226 @@
+# Companion: capability consumers and schema shapes, by cardinality
+
+Status: SUGGESTION (2026-07-07). A prototype of what consuming a capability should look like across
+every current and planned capability, written as feedback input for the plugin-system SDD (draft,
+`docs/sdd/2026-07-06-plugin-system/`) and future work. The first three rows describe shipped
+behavior; the rest are proposals and bind nothing. ADR 0016 carries the rules that ARE decided
+(resources reference capabilities many-to-one; `provider` + `provider_config` at the reference site;
+dedicated kinds only for real domain nouns).
+
+## The observation this doc is built on
+
+With the exposed-resource layer gone, every "consume a capability" site reduces to two questions:
+
+1. **Cardinality**: does this consumer name ONE capability or MANY?
+2. **What rides the selection**: nothing, a capability-owned config blob, or (for secrets) a
+   per-consumer adjustment against a selection made elsewhere?
+
+Three schema shapes cover every case:
+
+| Shape                 | When                                    | Grammar                                                |
+| --------------------- | --------------------------------------- | ------------------------------------------------------ |
+| **Reference + blob**  | exactly one capability                  | `provider: <name>` + optional `provider_config: {...}` |
+| **Map keyed by name** | many capabilities, order-free           | `<field>: { <capability>: <blob-or-shorthand>, ... }`  |
+| **Ordered name list** | many capabilities, order IS the meaning | `<field> = ["a", "b"]`; config lives elsewhere         |
+
+The map-vs-list split is the cardinality wrinkle: a keyed map gives uniqueness by construction,
+per-key config with no envelope ceremony, and -- decisive for templates -- **per-key merge under
+template inheritance** (a child overrides ONE feature's config without restating the set). A list
+earns its place only when order is the semantic payload (the chain), and then it carries names only:
+interleaving config into an ordered list couples two concerns and makes inheritance merges ambiguous
+(replace? append? splice?).
+
+A second observation, visible in the secrets rows: **selection and configuration can live in
+different places.** Features co-locate them (the template both enables and configures). Secrets
+split them: the chain (config) selects; per-secret maps only adjust. Both are legitimate -- the
+split form is what "ambient capability, per-consumer tuning" looks like.
+
+## The table
+
+| #   | Capability                          | Consuming resource / config         | Cardinality           | Shape                         |
+| --- | ----------------------------------- | ----------------------------------- | --------------------- | ----------------------------- |
+| 1   | `secret-backend`                    | `[secret_config].backends` (config) | many, ordered         | ordered name list             |
+| 2   | `secret-backend`                    | `secret.spec.backend_mappings`      | many, adjusts ambient | map keyed by name             |
+| 3   | `git-credential-provider`           | `git-credential.spec`               | one                   | reference + blob              |
+| 4   | `vm-provider` (planned)             | `vm-platform.spec` (dedicated kind) | one                   | reference + blob              |
+| 5   | `harness` (planned)                 | `session-template.spec.harness`     | one                   | reference + blob, inline      |
+| 6   | `feature` (planned, per level)      | `<level>-template.spec.features`    | many, order-free      | map keyed by name             |
+| 7   | plugin (trust unit, not capability) | `[plugins]` (config)                | many, order-free      | name list + namespaced tables |
+
+## Samples, row by row
+
+### 1. The chain: many, ordered -- names only
+
+```toml
+[secret_config]
+backends = ["env-var", "onepassword", "prompt"]
+```
+
+Order is the meaning (resolution precedence), so this is the one list. It carries names only:
+backend-level configuration (a future onepassword service-account token) is backend-scoped and lives
+with the capability, not interleaved into the chain (FRD R8's backend-scoped-config-then-graduate
+story).
+
+### 2. `backend_mappings`: many, adjusting an ambient selection
+
+```yaml
+apiVersion: agentworks/v1
+kind: secret
+metadata:
+  name: npm-token
+  description: npm registry token
+spec:
+  backend_mappings:
+    env-var: NPM_TOKEN # string shorthand: identifier override
+    onepassword: # capability-owned addressing, full form
+      vault: Work
+      item: npm
+      field: token
+    prompt: false # opt-out shorthand
+```
+
+Map keyed by capability name; the VALUE vocabulary is capability-owned (env-var reads a string,
+onepassword reads a structured address) plus two generic shorthands the loop owns: `false` (opt out)
+and key-absent (backend default convention / soft-skip). The `false` shorthand exists here and
+nowhere else because this is the one adjust-an-ambient-selection consumer: everything in the chain
+applies unless a secret opts out. Opt-IN consumers (features) don't need it -- absence is the
+opt-out.
+
+### 3. git-credential: one capability, dedicated kind
+
+```yaml
+apiVersion: agentworks/v1
+kind: git-credential
+metadata:
+  name: ado
+spec:
+  provider: azdo
+  token: git-token-ado # kind-owned: every credential has one
+  provider_config:
+    org: my-org # capability-owned
+```
+
+The canonical single-reference shape, hosted by a dedicated kind because a credential is a real
+domain noun (templates reference credentials by name; the token secret hangs off it).
+
+### 4. vm-platform: one capability, dedicated kind (planned)
+
+```yaml
+apiVersion: agentworks/v1
+kind: vm-platform
+metadata:
+  name: azure-prod
+  description: Production subscription, East US
+spec:
+  provider: azure
+  provider_config:
+    subscription: 1234-...
+    resource_group: agw-prod
+    region: eastus
+```
+
+Same shape as row 3. The dedicated kind is justified by the instance-identity test, not by the
+pattern: many consumers name the platform (`vm-template.spec.platform: azure-prod`,
+`agw vm create --platform azure-prod`, DB provenance), and "create a VM HERE" wants multiple named
+heres per provider without carrying connection config on the create command. Note the consumers
+reference the PLATFORM (a resource) by bare name -- resource-to-resource references don't use this
+doc's shapes at all.
+
+### 5. harness: one capability, inline in the template (planned)
+
+```yaml
+apiVersion: agentworks/v1
+kind: session-template
+metadata:
+  name: claude
+spec:
+  harness:
+    provider: claude-code
+    provider_config:
+      marketplaces:
+        - https://github.com/WayfarerLabs/nerftools#v4.0.0
+      plugins:
+        - nerftools-default@nerftools
+```
+
+Same reference+blob shape, hosted INLINE because the template is the only consumer (the
+capability-collapse ruling: no dedicated `harness` kind). With no config, a string shorthand keeps
+the common case flat:
+
+```yaml
+spec:
+  harness: shell # equivalent to {provider: shell}
+```
+
+Omitted entirely -> `shell`, preserving today's behavior. The `shell` harness's `provider_config` is
+where `command` / `restart_command` / `required_commands` land, which keeps those fields' owner
+honest (they were always harness-owned; the core just didn't have the word).
+
+### 6. features: many, order-free -- the map earns its keep (planned)
+
+```yaml
+apiVersion: agentworks/v1
+kind: agent-template
+metadata:
+  name: dd-agent
+spec:
+  inherits: [default]
+  features:
+    az-cli: {} # enabled, no config
+    passport-agent: # enabled, capability-owned config
+      ca: wayfarer-prod
+      validity_days: 7
+```
+
+Map keyed by capability name, value = the capability-owned blob directly (`{}` for none). No
+`provider:` key and no `provider_config:` envelope -- the map key IS the selection and the value IS
+the blob, so the single-reference envelope would be pure ceremony here. Three properties make the
+map the right multi-shape for templates:
+
+- **Uniqueness by construction**: a feature can't be enabled twice with conflicting configs; a list
+  needs a validation rule for that.
+- **Inheritance merges per key**: a child template can override just `passport-agent.validity_days`
+  or disable inheritance-supplied `az-cli` (see below) without restating the whole set. An
+  entry-list would force whole-list replacement semantics.
+- **Order-free is honest**: activation order is the framework's job (same-level dependency
+  topological sort, plugin SDD R8), so operator-supplied order would be dead information at best and
+  a false promise at worst.
+
+Open sub-question for the plugin SDD: whether inheritance needs a disable shorthand (`az-cli: false`
+-- borrowed from row 2's vocabulary -- to drop a parent-enabled feature). Opt-in-plus-inheritance
+quietly recreates the ambient-selection situation within a template lineage, so the mapping
+precedent likely transfers; flagging rather than deciding.
+
+Dependencies stay capability-name-to-capability-name and are declared BY the feature, not in this
+schema (the collapse ruling): `passport-agent requires passport-vm` is code-side metadata, validated
+against the lineage at create time. Instance pairing, when a real case lands, is a reference inside
+the blob (`broker: default` naming another feature's configured instance), not a schema shape.
+
+### 7. plugins: config-level selection of trust units (planned)
+
+```toml
+[plugins]
+enable = ["claude-code", "passport"]
+
+[plugins.passport]
+ca_dir = "~/.config/agentworks/passport"
+```
+
+Included for completeness because it LOOKS like row 6 and isn't: a plugin is a trust/distribution
+unit, not a capability, and enabling one activates nothing (activation is rows 5-6). The shape is
+config-idiomatic TOML -- a name list (order-free; a map of tables would also work and the plugin SDD
+should pick) plus one namespaced table per plugin for plugin-level settings. Capability-level config
+still lives at the reference sites above; the namespaced table is for plugin-wide concerns (the
+passport CA directory, not per-agent validity).
+
+## The rules, restated for the plugin SDD
+
+1. One capability: `provider` + `provider_config`, hosted by a dedicated kind only when the
+   instance-identity test passes (vm-platform yes; harness no).
+2. Many capabilities, order-free: a map keyed by capability name, value = capability-owned blob,
+   `{}` for none. Templates get per-key inheritance merge for free.
+3. Many capabilities, ordered: a list of bare names; config never rides an ordered list.
+4. Adjust-an-ambient-selection consumers (today: only `backend_mappings`) add the `false` opt-out
+   shorthand to shape 2; pure opt-in consumers don't need it.
+5. String shorthands are per-domain sugar (`harness: shell`, `env-var: NPM_TOKEN`), always
+   equivalent to a spelled-out form.
