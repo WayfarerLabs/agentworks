@@ -26,11 +26,9 @@ auto-loaded YAML manifest files using a Kubernetes-style envelope. The motivatio
    through the same mechanism (built-in secret backends, and eventually catalog entries), and future
    plugins can do the same. This SDD lays the origin taxonomy and the built-in-manifest mechanism;
    the plugin system itself is a future SDD.
-4. **Capabilities are code, not resources.** Secret backends, VM provisioners, and git credential
-   providers have associated code. They are not manifest-declarable; they are mirrored into the
-   registry as read-only descriptor rows, and resources reference them directly (R8; revised
-   2026-07-07 -- the original provider/backend split for secrets was collapsed, see the plan's
-   sequencing note).
+4. **Capabilities are code-backed resources.** Secret backends, VM provisioners, and git credential
+   providers are resources whose implementation is registered code: read-only rows of capability
+   kinds, not manifest-declarable, referenced directly by other resources (R8).
 
 The move is dual-path (revised 2026-07-03 from the original hard cutover): YAML manifests and TOML
 resource sections are both fully supported publishers into the one registry, mixing included; TOML
@@ -65,14 +63,10 @@ config itself to YAML.
 - **Capability**: a resource whose implementation is registered code (a git credential provider, a
   VM provisioner, a secret backend), provided by the app or, later, a plugin. Capability kinds are
   not manifest-declarable; the rows are read-only, and references to them validate uniformly through
-  the registry. (Definition expanded 2026-07-07: an earlier revision held capabilities apart as "not
-  resources, mirrored in as descriptor rows" -- prose-only ontology that confused every reader of
-  `agw resource list`.)
+  the registry.
 - **Backend**: the secret-domain capability -- the code that produces secret values (`env-var`,
   `prompt`; later `onepassword`, ...). A capability resource of kind `secret-backend`, named by
-  `[secret_config].backends` (the chain) and by `backend_mappings` keys on secrets. (Revised
-  2026-07-07: originally "backend" named a declarable instantiation of a "secret-provider"
-  capability; the collapse made the capability itself the backend.)
+  `[secret_config].backends` (the chain) and by `backend_mappings` keys on secrets.
 - **Provider**: the conventional name for a capability-reference field on a resource
   (`git-credential.spec.provider` naming `github`/`azdo`), and the generic cross-domain word for
   capabilities in pattern prose (ADR 0016's naming rule).
@@ -232,11 +226,10 @@ The app ships resources of its own through the same framework:
 - **Override policy is per kind**:
   - Catalog kinds keep today's documented behavior: an operator manifest with the same name as a
     built-in entry overrides it.
-  - `secret-backend` is not manifest-declarable at all (revised 2026-07-07): any
-    `kind: secret-backend` document is the R3 capability-kind envelope error. The reserved-names
-    override tier keeps its type but has no reachable member (retained for the plugin SDD's default
-    exposed resources); per-secret customization is `backend_mappings`, and chain composition is
-    `[secret_config].backends`.
+  - `secret-backend` is not manifest-declarable: any `kind: secret-backend` document is the R3
+    capability-kind envelope error. The reserved-names override tier keeps its type but has no
+    reachable member (retained for the plugin SDD's default exposed resources); per-secret
+    customization is `backend_mappings`, and chain composition is `[secret_config].backends`.
   - Template kinds are unaffected (their defaults remain framework-synthesized via
     always-materialize, not built-in rows; an operator declaring `default` replaces the synthesis
     exactly as today).
@@ -260,14 +253,10 @@ Surfaced everywhere origins appear today (`agw doctor`, `agw secret list/describ
 `agw resource list/describe`). The `agw resource list --origin` filter vocabulary becomes
 `operator | builtin | auto` (extended, not redefined, when plugin variants arrive).
 
-### R8: Secret backends (revised 2026-07-07: the capability collapse)
+### R8: Secret backends
 
-This SDD originally split secrets into a capability layer (`secret-provider`) and a declarable
-exposure layer (`secret-backend` resources instantiating providers). A maintainer-directed revision
-(2026-07-07, out of the plugin-system SDD design review; full ruling chain in the plan's sequencing
-notes) collapsed the split: the exposure layer was ceremony -- no config-bearing capability exists,
-the built-in "backends" were forced to share their providers' names, and the declarable kind's
-sample was prose-only because nothing declarable could exist. The requirements as they now stand:
+(As revised by the capability collapse; the original provider/backend split and the ruling chain
+that removed it are in the plan's sequencing notes.)
 
 - **`secret-backend`** (capability, registry descriptor): the code that produces secret values --
   what the ecosystem calls a secrets backend. Built-ins: `env-var` (convention `AW_SECRET_<NAME>`),
@@ -309,8 +298,8 @@ Two vocabulary alignments ride this SDD's release train:
   them). The rename lands in Phase 0 so every new surface (manifests, migration output) is born
   kebab.
 
-Git credentials already follow the resources-reference-capabilities pattern (they were never a
-split-model example -- see the 2026-07-07 sequencing note); this SDD aligns their vocabulary:
+Git credentials already follow the resources-reference-capabilities pattern; this SDD aligns their
+vocabulary:
 
 - The `type` field on git credential entries is renamed to **`provider`** (`github`, `azdo`),
   matching the capability-reference field convention (ADR 0016's naming rule). The migration tool

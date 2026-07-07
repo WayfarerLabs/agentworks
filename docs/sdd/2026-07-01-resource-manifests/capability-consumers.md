@@ -15,13 +15,21 @@ With the exposed-resource layer gone, every "consume a capability" site reduces 
 2. **What rides the selection**: nothing, a capability-owned config blob, or (for secrets) a
    per-consumer adjustment against a selection made elsewhere?
 
-Three schema shapes cover every case:
+Three schema shapes cover every case (the first has two hosting forms):
 
 | Shape                 | When                                    | Grammar                                                |
 | --------------------- | --------------------------------------- | ------------------------------------------------------ |
-| **Reference + blob**  | exactly one capability                  | `provider: <name>` + optional `provider_config: {...}` |
+| **Reference + blob**  | one capability, dedicated kind          | `provider: <name>` + optional `provider_config: {...}` |
+|                       | one capability, inline in a consumer    | `<domain>: <name>` + optional `<domain>_config: {...}` |
 | **Map keyed by name** | many capabilities, order-free           | `<field>: { <capability>: <blob-or-shorthand>, ... }`  |
 | **Ordered name list** | many capabilities, order IS the meaning | `<field> = ["a", "b"]`; config lives elsewhere         |
+
+The inline form drops the `provider` envelope: when a template field selects exactly one capability,
+the FIELD is the selector -- it's not a "harness provider", it's simply the template's harness -- so
+`harness: claude-code` plus a sibling `harness_config: {...}` (validated by the selected harness)
+says everything the nested form said with one less layer. The `provider` / `provider_config`
+spelling survives only where a dedicated kind's whole identity is "a configured capability instance"
+(git-credential, vm-platform), where the generic field name is the honest one.
 
 The map-vs-list split is the cardinality wrinkle: a keyed map gives uniqueness by construction,
 per-key config with no envelope ceremony, and -- decisive for templates -- **per-key merge under
@@ -134,27 +142,29 @@ kind: session-template
 metadata:
   name: claude
 spec:
-  harness:
-    provider: claude-code
-    provider_config:
-      marketplaces:
-        - https://github.com/WayfarerLabs/nerftools#v4.0.0
-      plugins:
-        - nerftools-default@nerftools
+  harness: claude-code
+  harness_config:
+    marketplaces:
+      - https://github.com/WayfarerLabs/nerftools#v4.0.0
+    plugins:
+      - nerftools-default@nerftools
 ```
 
-Same reference+blob shape, hosted INLINE because the template is the only consumer (the
-capability-collapse ruling: no dedicated `harness` kind). With no config, a string shorthand keeps
-the common case flat:
+The inline form of reference+blob: the template is the only consumer (no dedicated `harness` kind),
+so the field IS the selector and `harness_config` is the sibling blob the selected harness
+validates. No config needed? Just the selector:
 
 ```yaml
 spec:
-  harness: shell # equivalent to {provider: shell}
+  harness: shell
 ```
 
-Omitted entirely -> `shell`, preserving today's behavior. The `shell` harness's `provider_config` is
-where `command` / `restart_command` / `required_commands` land, which keeps those fields' owner
-honest (they were always harness-owned; the core just didn't have the word).
+Omitted entirely -> `shell`, preserving today's behavior; `harness_config` without `harness` is an
+error (a blob with no owner). The two inherit as a pair under template inheritance: a child that
+overrides `harness` gets a fresh (empty) `harness_config` rather than the parent's blob, which would
+be addressed to the wrong capability. The `shell` harness's `harness_config` is where `command` /
+`restart_command` / `required_commands` land, which keeps those fields' owner honest (they were
+always harness-owned; the core just didn't have the word).
 
 ### 6. features: many, order-free -- the map earns its keep (planned)
 
@@ -215,12 +225,14 @@ passport CA directory, not per-agent validity).
 
 ## The rules, restated for the plugin SDD
 
-1. One capability: `provider` + `provider_config`, hosted by a dedicated kind only when the
-   instance-identity test passes (vm-platform yes; harness no).
-2. Many capabilities, order-free: a map keyed by capability name, value = capability-owned blob,
+1. One capability, dedicated kind (instance-identity test passes: vm-platform, git-credential):
+   `provider` + `provider_config`.
+2. One capability, inline in a consumer (the test fails: harness): the field is the selector
+   (`harness: <name>`) with a sibling `<field>_config` blob; the pair inherits as a unit.
+3. Many capabilities, order-free: a map keyed by capability name, value = capability-owned blob,
    `{}` for none. Templates get per-key inheritance merge for free.
-3. Many capabilities, ordered: a list of bare names; config never rides an ordered list.
-4. Adjust-an-ambient-selection consumers (today: only `backend_mappings`) add the `false` opt-out
-   shorthand to shape 2; pure opt-in consumers don't need it.
-5. String shorthands are per-domain sugar (`harness: shell`, `env-var: NPM_TOKEN`), always
+4. Many capabilities, ordered: a list of bare names; config never rides an ordered list.
+5. Adjust-an-ambient-selection consumers (today: only `backend_mappings`) add the `false` opt-out
+   shorthand to shape 3; pure opt-in consumers don't need it.
+6. Value shorthands are per-domain sugar (`env-var: NPM_TOKEN` as a mapping value), always
    equivalent to a spelled-out form.

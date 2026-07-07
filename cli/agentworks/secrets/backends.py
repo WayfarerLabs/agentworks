@@ -18,8 +18,8 @@ distinct is the design (ADR 0016):
   resolution loop (``agentworks.secrets.resolve``).
 
 There is no instantiation layer between the chain and the capability
-(the 2026-07-07 capability collapse, ADR 0016): resources and config
-reference backends directly, many-to-one. Per-secret behavior lives in
+(ADR 0016): resources and config reference backends directly,
+many-to-one. Per-secret behavior lives in
 ``backend_mappings`` (keyed by backend name); if a backend someday
 genuinely needs multiple configured instances, a declarable instance
 kind for that backend is an additive graduation.

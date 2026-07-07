@@ -164,20 +164,15 @@ loads today keeps loading (with deprecation warnings on TOML resource sections).
 
 `ResourceKind` gains two declarative flags consumed by the envelope layer and `Registry.add`:
 
-- `category: Literal["declarable", "capability"]` (renamed from `manifest_declarable` by the
-  2026-07-07 per-kind-category revision; the bool was the classifier's mechanical shadow).
+- `category: Literal["declarable", "capability"]` (replaced the earlier `manifest_declarable` bool).
   `declarable` for every operator kind; `capability` for `secret-backend`,
   `git-credential-provider`, and any future code-only kind. Only declarable kinds pass the envelope.
   Each kind also carries an operator-facing `description` for `agw resource kinds`.
 - `builtin_override: Literal["allow", "reserved"]`. `allow` for catalog kinds; `reserved` elsewhere
-  as the defensive default. Post-5.5 the `reserved` tier has zero REACHABLE members (its only live
-  member was the declarable secret-backend kind, whose built-in rows an operator manifest could
-  actually collide with) -- but the tier itself stays: ten kinds declare it defensively, and the
-  draft plugin SDD's default exposed resources are its named future consumer. (This revises the
-  first-draft answer to the design review's question 25, which said delete; implementation contact
-  showed deletion would flip ten defensive declarations and force the plugin SDD to re-add the
-  tier.) Template kinds are unaffected (their defaults are synthesized, not built-in rows, so no
-  collision arises).
+  as the defensive default. The `reserved` tier currently has no reachable member (the only kinds
+  with built-in rows are catalog kinds and the non-declarable capability kinds); it stays because
+  the draft plugin SDD's default exposed resources are its named future consumer. Template kinds are
+  unaffected (their defaults are synthesized, not built-in rows, so no collision arises).
 
 Both are static per-kind declarations in the same place the miss policy lives; no new dispatch
 machinery.
@@ -236,10 +231,9 @@ thin runtime wrapper object exists per chain entry is an implementation detail.)
 - `[secret_backends.<name>]` TOML sections remain semantically empty, warned deprecated no-ops.
 - The runtime semantics of runtime-model-lld.md are unchanged: resolution is a loop over
   `active_backends(config, registry)`; a command resolves once at its composition root and threads
-  the VALUES to its `compose_env(values=...)` sites; no resolver object, no cache, no memos. The
-  "door" METAPHOR is retired with the collapse (it earned its keep enforcing
-  providers-only-via-backends; with no layer between callers and the capability, `SecretBackend` is
-  simply the API that generalizes backend capabilities).
+  the VALUES to its `compose_env(values=...)` sites; no resolver object, no cache, no memos.
+  `SecretBackend` is simply the API that generalizes backend capabilities (the earlier "door"
+  metaphor survives only in historical artifacts).
 
 Git credentials keep their shape and illustrate the general pattern: `git-credential` resources
 reference the `git-credential-provider` capability many-to-one via `spec.provider`, carrying

@@ -5,9 +5,7 @@ Backends are code capabilities (``agentworks.secrets.backends``); the
 registry rows exist so the ``[secret_config].backends`` chain and
 per-secret ``backend_mappings`` validate through the framework's
 uniform miss policy and the backends are visible in
-``agw resource list``. Read-only: not manifest-declarable (the
-capability collapse, 2026-07-07, removed the declarable instantiation
-layer this kind once carried -- see ADR 0016).
+``agw resource list``. Read-only: not manifest-declarable (ADR 0016).
 """
 
 from __future__ import annotations

@@ -1,8 +1,6 @@
 # 16. YAML Resource Manifests and the Config/Resource/Capability Split
 
-Date: 2026-07-05 (amended 2026-07-07, twice: the capability collapse -- resources reference
-capabilities directly, the declarable secret-backend layer removed and the capability taking the
-name -- and the resource-definition expansion -- capability rows ARE resources, of capability kinds)
+Date: 2026-07-05 (amended 2026-07-07)
 
 ## Status
 
@@ -41,11 +39,7 @@ Everything the CLI works with belongs to exactly one of two layers:
 | Resources | Named, referenceable things: secrets, templates, credentials, capabilities      | the resource Registry, fed by publishers  | `kind` + `name`     |
 
 **A resource is a named, referenceable registry entry -- `kind` + `name` -- regardless of where it
-comes from.** (Definition expanded 2026-07-07. An earlier revision held capabilities apart as "not
-resources, merely mirrored in as descriptor rows" -- a distinction carried entirely in prose,
-invisible on every surface, that confused every reader of `agw resource list`, its authors included.
-The registry's operational definition of a resource is shape -- a kind, a name, references, an
-origin -- and capability rows satisfy all of it.) Kinds split by whether operators can declare them:
+comes from.** Kinds split by whether operators can declare them:
 
 - **Declarable kinds** hold data: operator-declared (TOML/YAML), auto-declared, or built-in.
 - **Capability kinds** (today `secret-backend` and `git-credential-provider`) hold read-only
@@ -74,14 +68,13 @@ read-only capability-kind row, so references to it validate through the ordinary
 and it lists and describes like everything else. Other resources reference capabilities **directly,
 many-to-one**: a `git-credential` names its provider, a secret's mappings name backends, a (future)
 template names its harness. There is no dedicated "exposure" layer between a resource and a
-capability -- an earlier revision of this decision had one (`secret-backend` as a declarable
-instantiation of `secret-provider`), and it was removed (2026-07-07) once it became clear the
-instance identity carried no content: whether a kind exists is ordinary domain modeling (is there a
-real noun operators reason about, referenced from more than one place?), not a pattern requirement.
-A credential is such a noun; "a configured place to create VMs" (the plugin SDD's vm-platform) is
-such a noun; "a backend instance" was not. If a capability someday genuinely needs multiple
-configured instances (two 1Password accounts with different credentials), a declarable instance kind
-for THAT capability is an additive graduation, not a redesign.
+capability: whether a kind exists is ordinary domain modeling (is there a real noun operators reason
+about, referenced from more than one place?), not a pattern requirement. A credential is such a
+noun; "a configured place to create VMs" (the plugin SDD's vm-platform) is such a noun. (A
+declarable "backend instance" kind was considered and rejected -- the instance identity carried no
+content.) If a capability someday genuinely needs multiple configured instances (two 1Password
+accounts with different credentials), a declarable instance kind for THAT capability is an additive
+graduation, not a redesign.
 
 **Naming**: each domain calls its capability by its natural noun -- `secret-backend`,
 `git-credential-provider`, (future) `vm-provider` / `harness` -- adding a disambiguating suffix only
