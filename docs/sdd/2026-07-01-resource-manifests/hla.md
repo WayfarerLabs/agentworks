@@ -26,7 +26,7 @@ Registry, kinds, finalize pass, reference machinery, and inspection surfaces car
                                          +---------------------------+
 +---------------------------+                          ^
 | app-bundled built-ins     |--------------------------+
-| (built-in backends, ...)  |   same loader, built-in origin
+| (wired; empty post-5.5)   |   same loader, built-in origin
 +---------------------------+
 
 +---------------------------+
@@ -53,9 +53,9 @@ cli/agentworks/manifests/
 
 cli/agentworks/resources/   # unchanged framework; Origin variant rename only
 cli/agentworks/secrets/
-  providers.py        # NEW: code-side provider registry + descriptor publisher
-  env_var.py          # unchanged behavior; instantiated via provider registry
-  prompt.py           # unchanged behavior; instantiated via provider registry
+  providers.py        # code-side capability registry + descriptor publisher
+  env_var.py          # unchanged behavior; registered in the capability registry
+  prompt.py           # unchanged behavior; registered in the capability registry
 cli/agentworks/cli/commands/resource.py  # gains `agw resource migrate` + `agw resource sample`
 cli/agentworks/migrate/                  # NEW: TOML -> manifests migration tool
 ```
@@ -124,10 +124,10 @@ finalize it runs the config-consistency checks of subsystems whose settings name
 def build_registry(config: Config, manifests: ManifestSet | None = None) -> Registry:
     # manifests=None auto-loads <config-dir>/resources/ and surfaces its warnings
     registry = Registry.empty()
-    builtin_manifests.publish_to(registry)  # app-bundled resources (built-in backends)
+    builtin_manifests.publish_to(registry)  # app-bundled resources (wired; empty post-5.5)
     catalog.publish_to(registry, config)    # built-in catalog + operator TOML catalog extensions
     git_credentials.publish_to(registry)    # git credential provider descriptors
-    secrets.publish_to(registry)            # secret provider descriptors
+    secrets.publish_to(registry)            # secret-backend capability descriptors
     config.publish_to(registry)             # operator TOML resource sections (dual-path)
     manifests.publish_to(registry)          # operator YAML documents
     registry.finalize()
@@ -138,8 +138,9 @@ def build_registry(config: Config, manifests: ManifestSet | None = None) -> Regi
 Publish order matters for the built-in override policy: built-ins publish first, operator documents
 second. `Registry.add` today replaces duplicates silently by design; this SDD changes it to explicit
 collision handling. A collision between an operator row and an existing built-in row consults the
-kind's override flag: allowed (catalog kinds; operator row replaces the built-in row, exactly
-today's behavior) or reserved (`secret-backend`; `ConfigError` naming the reserved built-in). A
+kind's override flag: `allow` (catalog kinds; operator row replaces the built-in row, exactly
+today's behavior). The `reserved` tier died with its last member in the Phase 5.5 collapse
+(descriptor kinds are simply not declarable, which R3's envelope error enforces earlier). A
 collision between two operator rows is always a `ConfigError` citing both origins. The manifest
 loader already catches operator duplicates within the manifest set; the publish-time check is what
 catches a resource declared in both TOML and a manifest (a permanent dual-path condition).
@@ -156,19 +157,19 @@ loads today keeps loading (with deprecation warnings on TOML resource sections).
   (`provider` wins when both are present); `type` keeps working until the TOML resource path is
   removed in a future major (Phase 6). Manifests accept only `provider`.
 - `[secret_backends.<kind>]` TOML sections are warned deprecated no-ops as of Phase 3.6 (they were
-  semantically empty; the built-in backends ship as bundled manifests and their names are reserved
-  via `builtin_override = "reserved"` at `Registry.add`).
+  semantically empty; post-5.5 the kind is a capability descriptor and not declarable at all).
 
 ## Kind flags
 
 `ResourceKind` gains two declarative flags consumed by the envelope layer and `Registry.add`:
 
 - `manifest_declarable: bool`. True for every operator kind; False for descriptor kinds
-  (`secret-provider`, `git-credential-provider`) and any future code-only kind.
-- `builtin_override: Literal["allow", "reserved"]`. `allow` for catalog kinds; `reserved` for
-  `secret-backend` (and `secret-provider` / `git-credential-provider` trivially, since they are not
-  declarable at all). Template kinds are unaffected (their defaults are synthesized, not built-in
-  rows, so no collision arises).
+  (`secret-backend`, `git-credential-provider`) and any future code-only kind.
+- `builtin_override: Literal["allow"]` -- post-5.5 the flag has one live value (`allow`, catalog
+  kinds). The `reserved` tier's only member was the declarable secret-backend kind; it dies with the
+  collapse (decided 2026-07-07: delete rather than hedge, reintroduce on a real need -- descriptor
+  kinds are protected earlier by `manifest_declarable=False`). Template kinds are unaffected (their
+  defaults are synthesized, not built-in rows, so no collision arises).
 
 Both are static per-kind declarations in the same place the miss policy lives; no new dispatch
 machinery.
@@ -185,58 +186,58 @@ manifests may additionally carry the bundled `file`/`line` for debugging, but re
 Display updates ride along: `agw doctor`, `agw secret list/describe`, `agw resource list/describe`
 render `built-in (...)`; the `--origin` filter vocabulary becomes `operator | builtin | auto`.
 
-## Secret provider architecture
+## Secret backend architecture (revised 2026-07-07: the capability collapse)
 
 Today's `SecretSource` protocol (`would_attempt` / `get` / `batch_get` / `describe_lookup`) is
-already the capability contract. The split adds instantiation-by-name with config:
+already the capability contract. The 2026-07-07 revision (plan sequencing note) removed the
+instantiation layer that sat on top of it; the capability itself is the backend:
 
 ```text
-SECRET_PROVIDER_REGISTRY: dict[str, SecretProvider]  # raw capabilities; built-ins env-var, prompt
-  SecretProvider (protocol, stateless; visible only to the backend door):
+SECRET_BACKEND_REGISTRY: dict[str, SecretBackend]  # the capabilities; built-ins env-var, prompt
+  SecretBackend (protocol, stateless; a well-defined API, nothing more):
     name, interactive
-    validate_config(backend_name, config)        # decode-time schema (spec minus `provider`)
-    would_attempt(config, secret, mapping)
-    describe_lookup(config, secret, mapping)
-    batch_get(config, wants)
+    would_attempt(secret, mapping)
+    describe_lookup(secret, mapping)
+    batch_get(wants)
 
 registry rows:
-  secret-provider:<name>       # descriptor, built-in, error miss policy, not declarable
-  secret-backend:<name>        # THE DOOR; spec.provider references secret-provider
+  secret-backend:<name>        # descriptor, built-in, error miss policy, not declarable
 
-resolution (a loop; validate_chain already ran at build_registry):
-  backends = active_backends(config, registry)   # [secret_config].backends -> rows, in order
+resolution (a loop in secrets/resolve.py; validate_chain already ran at build_registry):
+  backends = active_backends(config, registry)   # [secret_config].backends -> capabilities, in order
   for backend in backends:
-      resolved |= backend.resolve(still_missing_and_would_attempt)
+      wants = mappings_for_still_missing_where(backend.would_attempt)  # incl. the generic `false` opt-out
+      resolved |= backend.batch_get(wants)
 ```
 
-- `SecretBackendDecl` (the `secret-backend` Resource) carries `name`, `description`, `provider`, and
-  `provider_config` -- the provider-owned blob nested under `spec.provider_config` in the manifest,
-  so the rest of the spec is provider-agnostic. Its `referenced_resources()` emits one reference to
-  `("secret-provider", provider)`.
-- **Neither built-in provider accepts configuration** (non-empty backend config is a validation
-  error from each schema); `env_var_name_for` keeps its fixed `AW_SECRET_` convention. The
-  `config_schema` / `instantiate(config)` contract is exercised end to end by a test-only provider
-  registered only in the test suite, so the plumbing is verified without shipping artificial
-  operator surface on the built-ins.
-- **Built-in backends** `env-var` and `prompt` ship as an app-bundled manifest
-  (`agentworks/manifests/builtin/secret-backends.yaml`), exercising the built-in-manifest path end
-  to end. Their names are reserved via `builtin_override = "reserved"`.
-- `backend_mappings` on secrets are keyed by BACKEND NAME (never by provider): two backends sharing
-  one provider get independent mappings and opt-outs. Default-convention display
-  (`agw secret describe`, doctor) asks the backend's door methods, so a future config-bearing
-  provider's conventions show through with no display-layer changes.
-- The legacy `SecretBackendConfig` dataclass is gone: `[secret_backends.<kind>]` TOML sections were
-  semantically empty (the kind was the only field) and are warned deprecated no-ops; the built-in
-  backends ship as bundled manifests, and `SecretBackendDecl` is the one row shape.
-- The runtime is the backends-are-the-door model (see runtime-model-lld.md, which supersedes this
-  section's original resolver design): resolution is a loop over
-  `active_backends(config, registry)`; a command resolves once at its composition root and threads
-  the VALUES to its `compose_env(values=...)` sites; no resolver object, no cache, no memos.
+(The orchestration -- mapping lookup, the generic `false` opt-out, prompt-once batching -- lives in
+the resolution loop, not on the protocol; the protocol is exactly the three methods above. Whether a
+thin runtime wrapper object exists per chain entry is an implementation detail.)
 
-Git credentials need no structural change: `GitCredentialConfig.provider` (renamed from `type`)
-keeps referencing the `git-credential-provider` descriptor kind; the provider-name-to-class registry
-in `agentworks.git_credentials` is already the code-side capability registry. The two sides now tell
-the same story, which is the point of R9.
+- There is no `SecretBackendDecl`, no declarable `secret-backend` manifest kind, no bundled backends
+  manifest, and no reserved-name machinery for backend names. The descriptor rows mirror the code
+  registry directly; the previous duplicate rows (`secret-provider/env-var` AND
+  `secret-backend/env-var`) collapse to one per capability.
+- **Neither built-in backend accepts configuration**; `env_var_name_for` keeps its fixed
+  `AW_SECRET_` convention. When the first config-bearing backend ships, its connection configuration
+  is backend-scoped (one configured form per capability); a genuine multi-instance need graduates
+  that backend to a declarable instance kind at that point (FRD R8).
+- `backend_mappings` on secrets are keyed by backend (capability) name; per-secret structured
+  mappings carry instance-flavored addressing (vault/item/field) where a store needs it.
+  Default-convention display (`agw secret describe`, doctor) asks the capability's API.
+- `[secret_backends.<name>]` TOML sections remain semantically empty, warned deprecated no-ops.
+- The runtime semantics of runtime-model-lld.md are unchanged: resolution is a loop over
+  `active_backends(config, registry)`; a command resolves once at its composition root and threads
+  the VALUES to its `compose_env(values=...)` sites; no resolver object, no cache, no memos. The
+  "door" METAPHOR is retired with the collapse (it earned its keep enforcing
+  providers-only-via-backends; with no layer between callers and the capability, `SecretBackend` is
+  simply the API that generalizes backend capabilities).
+
+Git credentials keep their shape and illustrate the general pattern: `git-credential` resources
+reference the `git-credential-provider` capability many-to-one via `spec.provider`, carrying
+provider-owned config in `spec.provider_config`. The credential keeps a dedicated kind because a
+credential is a real domain object (templates reference credentials by name; the token secret hangs
+off it) -- not because the pattern requires an exposure layer.
 
 ## Migration tool
 
@@ -277,15 +278,15 @@ run self-checking. Full semantics in `migration-tool-lld.md`.
 
 ## Validation responsibilities (updated)
 
-| Layer                      | Owns                                                                                                                                  |
-| -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
-| Config (TOML)              | config-section parse, field types, `secret_config` chain shape                                                                        |
-| Manifest loader (envelope) | YAML parse, apiVersion, kind known + declarable, metadata shape, operator duplicate detection                                         |
-| Manifest loader (spec)     | kind-specific field types / required fields / value validation (unchanged semantics)                                                  |
-| Provider capability        | provider-specific backend config (schema + defaults)                                                                                  |
-| Registry publish           | built-in override policy per kind                                                                                                     |
-| Registry finalize          | references, miss policies, reserved names, cycles, description polish (unchanged)                                                     |
-| Composition boundary       | `build_registry` runs `secrets.validate_chain(config, registry)`: chain names, backend configs, operator-declared secret reachability |
+| Layer                      | Owns                                                                                                                 |
+| -------------------------- | -------------------------------------------------------------------------------------------------------------------- |
+| Config (TOML)              | config-section parse, field types, `secret_config` chain shape                                                       |
+| Manifest loader (envelope) | YAML parse, apiVersion, kind known + declarable, metadata shape, operator duplicate detection                        |
+| Manifest loader (spec)     | kind-specific field types / required fields / value validation (unchanged semantics)                                 |
+| Capability (git-cred)      | `spec.provider_config` validation on git-credential resources                                                        |
+| Registry publish           | built-in override policy per kind                                                                                    |
+| Registry finalize          | references, miss policies, reserved names, cycles, description polish (unchanged)                                    |
+| Composition boundary       | `build_registry` runs `secrets.validate_chain(config, registry)`: chain names, operator-declared secret reachability |
 
 All raise `ConfigError`; the layer determines the framing, as today.
 
@@ -300,7 +301,7 @@ All raise `ConfigError`; the layer determines the framing, as today.
   settings file permanent, so these commands are already in their final home. `config sample` stays
   the TOML sample; the YAML teaching surface is `resource sample`.
 - `agw resource list/describe`, `agw secret list/describe`, `agw doctor`: display-only changes
-  (origin strings, `--origin builtin`, `--kind git-credential`, backend rows showing provider and
+  (origin strings, `--origin builtin`, `--kind git-credential`, backend descriptor rows showing the
   effective convention).
 - No new top-level command groups.
 
@@ -343,6 +344,10 @@ TOML resource sections warn as deprecated; removal waits for a future major.
 
 ### Reserved built-in backend names, overridable catalog names
 
+> Superseded by the Phase 5.5 capability collapse (2026-07-07): the declarable secret-backend kind
+> -- the reserved tier's only member -- no longer exists, so this decision's backend half is moot
+> and `builtin_override` keeps only `allow`. The catalog half stands. Recorded as decided:
+
 Deliberately per-kind rather than uniform. For catalog kinds, the name is the interface (templates
 reference `gh` by name), so same-name override is the only way to customize what a name installs;
 that behavior exists and is documented today. For backends, the name is not load-bearing (the chain
@@ -367,8 +372,10 @@ silently depended on Config-layer quirks before the format changes underneath it
 - **Eager template resolution home**: `load_config` currently triggers eager template resolution;
   with templates sourced from manifests, that moves to `build_registry` callers. The consumer
   repoint phase's LLD maps the exact call sites.
-- **Provider `config_schema` shape**: a small dataclass-based schema vs plain validate-callable.
-  Whatever is chosen must produce field-level `ConfigError`s naming the manifest location.
+- **Provider `config_schema` shape**: OVERTAKEN by the Phase 5.5 collapse (2026-07-07) -- the
+  decode-time backend-config validation this question served was deleted with the declarable kind.
+  The surviving instance of the question (git-credential `spec.provider_config`) is answered: the
+  capability validates, producing `ConfigError`s naming the manifest location.
 - **Sample manifest delivery**: RESOLVED 2026-07-05, differently than posed -- a new
   `agw resource sample [KIND] [--write FILENAME]` owns the YAML teaching surface (`config sample`
   stays TOML, per config-is-config); see `migration-tool-lld.md`.

@@ -26,11 +26,11 @@ auto-loaded YAML manifest files using a Kubernetes-style envelope. The motivatio
    through the same mechanism (built-in secret backends, and eventually catalog entries), and future
    plugins can do the same. This SDD lays the origin taxonomy and the built-in-manifest mechanism;
    the plugin system itself is a future SDD.
-4. **Capabilities are code, not resources.** Secret providers, VM provisioners, and git credential
-   providers have associated code. They are not manifest-declarable. This SDD formalizes the
-   provider/backend split for secrets: providers are code capabilities mirrored into the registry as
-   read-only descriptor rows; backends are the named, configured, manifest-declarable instantiations
-   of a provider.
+4. **Capabilities are code, not resources.** Secret backends, VM provisioners, and git credential
+   providers have associated code. They are not manifest-declarable; they are mirrored into the
+   registry as read-only descriptor rows, and resources reference them directly (R8; revised
+   2026-07-07 -- the original provider/backend split for secrets was collapsed, see the plan's
+   sequencing note).
 
 The move is dual-path (revised 2026-07-03 from the original hard cutover): YAML manifests and TOML
 resource sections are both fully supported publishers into the one registry, mixing included; TOML
@@ -42,9 +42,9 @@ become manifests, config sections stay).
 ### Scope
 
 In scope: the manifest loader and envelope schema, the config/resource split of the current TOML
-surface, built-in resource manifests, the origin taxonomy cleanup, the secret provider/backend
-split, the git-credential provider field alignment, the migration tool, and the deprecation of the
-TOML resource surface (its removal is deferred to a future major release).
+surface, built-in resource manifests, the origin taxonomy cleanup, the secret-backend capability
+descriptor rows (R8, revised), the git-credential provider field alignment, the migration tool, and
+the deprecation of the TOML resource surface (its removal is deferred to a future major release).
 
 Out of scope: the plugin system (system and external plugins), apply-style reconciliation against
 provisioned state, lifecycle resources (VMs, agents, sessions, consoles stay in the DB), and moving
@@ -66,11 +66,14 @@ config itself to YAML.
   credential provider, a VM provisioner. Capabilities are not manifest-declarable. Where a
   capability is referenced by name from resources, it is mirrored into the registry as a read-only
   descriptor row so references validate uniformly.
-- **Provider**: a capability that produces secret values (`env-var`, `prompt`; later `onepassword`,
-  ...) or git credentials (`github`, `azdo`). Named by the `provider` field on the resources that
-  instantiate or use them.
-- **Backend**: a named, configured instantiation of a secret provider. A resource. Multiple backends
-  may share one provider (e.g. two `onepassword` backends pointed at different vaults).
+- **Backend**: the secret-domain capability -- the code that produces secret values (`env-var`,
+  `prompt`; later `onepassword`, ...). Named by `[secret_config].backends` (the chain) and by
+  `backend_mappings` keys on secrets. Not a resource; mirrored as a `secret-backend` descriptor row.
+  (Revised 2026-07-07: originally "backend" named a declarable instantiation of a "secret-provider"
+  capability; the collapse made the capability itself the backend.)
+- **Provider**: the conventional name for a capability-reference field on a resource
+  (`git-credential.spec.provider` naming `github`/`azdo`), and the generic cross-domain word for
+  capabilities in pattern prose (ADR 0016's naming rule).
 - **Built-in resource**: a resource shipped with the app itself, published from app-bundled
   manifests or code publishers. Origin variant `built-in`.
 
@@ -89,7 +92,7 @@ Every section of today's `config.toml` gets exactly one destination:
 | `[session.config]`                        | config (TOML)                                       | non-template session settings                                                                                  |
 | `[secret_config]`                         | config (TOML)                                       | active backend chain; a setting, never published -- validated against the registry at the composition boundary |
 | `[secrets.<name>]`                        | manifest (`secret`)                                 |                                                                                                                |
-| `[secret_backends.<kind>]`                | dropped by the migrator (with a note)               | semantically empty; built-ins ship bundled, names reserved                                                     |
+| `[secret_backends.<kind>]`                | dropped by the migrator (with a note)               | semantically empty; the kind is a capability descriptor, not declarable                                        |
 | `[git_credentials.<name>]`                | manifest (`git-credential`)                         | `type` renamed to `provider` per R9                                                                            |
 | `[vm_templates.<name>]` (+ `.env`)        | manifest (`vm-template`)                            |                                                                                                                |
 | `[agent_templates.<name>]` (+ `.env`)     | manifest (`agent-template`)                         |                                                                                                                |
@@ -163,8 +166,10 @@ spec:
   Kind-specific validation semantics are unchanged from today.
 
 Not manifest-declarable, rejected with a specific error: kinds reserved to capabilities
-(`secret-provider`, `git-credential-provider`) and any future code-only kind. The error names the
-kind and explains that it is provided by the app (or a plugin).
+(`secret-backend`, `git-credential-provider`) and any future code-only kind. The error names the
+kind and explains that it is provided by the app (or a plugin). (A `kind: secret-backend` document
+gets exactly this error post-collapse -- the kind exists, as descriptor rows, and cannot be
+declared.)
 
 Singleton-shaped kinds (`admin-template`, `named-console-template`) accept only
 `metadata.name: default`; other names are load errors. For `named-console-template` the Config-side
@@ -215,16 +220,20 @@ The app ships resources of its own through the same framework:
 - **Mechanism**: app-bundled manifests (same envelope, packaged with the app) and/or code
   publishers, both landing in the registry with origin `built-in`. Which mechanism each built-in
   uses is an implementation choice; the operator-visible contract is the `built-in` origin.
-- **Initial built-ins**: the `env-var` and `prompt` secret backends (R8). The catalog (apt sources,
-  apt packages, install commands) keeps its existing code publisher and simply reports the
-  `built-in` origin (R7); moving it to bundled manifests or a system plugin is future work.
+- **Initial built-ins**: the `env-var` and `prompt` secret-backend descriptor rows (R8), published
+  by the secrets code publisher. The catalog (apt sources, apt packages, install commands) keeps its
+  existing code publisher and simply reports the `built-in` origin (R7); moving it to bundled
+  manifests or a system plugin is future work. The app-bundled-manifest mechanism itself stays wired
+  but currently empty (its original content, the bundled backend manifests, died in the 2026-07-07
+  collapse); the loader path remains exercised by tests, and plugins/future built-ins are its
+  consumers.
 - **Override policy is per kind**:
   - Catalog kinds keep today's documented behavior: an operator manifest with the same name as a
     built-in entry overrides it.
-  - `secret-backend` built-in names (`env-var`, `prompt`) are reserved: an operator manifest
-    redeclaring one is a load error. Customization is by declaring a sibling backend with the same
-    provider and adjusting `[secret_config].backends`; there is no field-level merge or shadowing,
-    consistent with the framework's declare-a-sibling philosophy.
+  - `secret-backend` is not manifest-declarable at all (revised 2026-07-07): any
+    `kind: secret-backend` document is the R3 capability-kind envelope error. The reserved-names
+    override tier died with its last member; per-secret customization is `backend_mappings`, and
+    chain composition is `[secret_config].backends`.
   - Template kinds are unaffected (their defaults remain framework-synthesized via
     always-materialize, not built-in rows; an operator declaring `default` replaces the synthesis
     exactly as today).
@@ -248,60 +257,40 @@ Surfaced everywhere origins appear today (`agw doctor`, `agw secret list/describ
 `agw resource list/describe`). The `agw resource list --origin` filter vocabulary becomes
 `operator | builtin | auto` (extended, not redefined, when plugin variants arrive).
 
-### R8: Secret providers and backends
+### R8: Secret backends (revised 2026-07-07: the capability collapse)
 
-The secret system splits into a capability layer and a resource layer. The split rides this SDD
-rather than a future plugin or onepassword SDD for two concrete reasons: the migration rewrite is
-the one cheap moment to reshape `[secret_backends.<kind>]` (keyed by provider kind, exactly one
-instance each) into named backend resources without a second operator-facing migration later, and
-the built-in backends are the first real exerciser of the built-in-manifest mechanism this SDD ships
-anyway.
+This SDD originally split secrets into a capability layer (`secret-provider`) and a declarable
+exposure layer (`secret-backend` resources instantiating providers). A maintainer-directed revision
+(2026-07-07, out of the plugin-system SDD design review; full ruling chain in the plan's sequencing
+notes) collapsed the split: the exposure layer was ceremony -- no config-bearing capability exists,
+the built-in "backends" were forced to share their providers' names, and the declarable kind's
+sample was prose-only because nothing declarable could exist. The requirements as they now stand:
 
-- **`secret-provider`** (capability, registry descriptor): the code that produces secret values.
-  Built-ins: `env-var`, `prompt`. Providers are registered code-side and mirrored into the registry
-  as read-only `built-in` rows (error miss policy, not manifest-declarable) so references to them
-  validate uniformly and they are visible in `agw resource list`.
-- **`secret-backend`** (resource, manifest-declarable): a named instantiation of a provider.
-  `spec.provider` (required) references a `secret-provider` by name; provider-owned configuration
-  nests under `spec.provider_config`, an opaque blob validated by the provider capability, not the
-  framework (pattern established 2026-07-05: everything outside `provider_config` is
-  provider-agnostic and framework-validated -- unknown top-level spec fields error with a pointer at
-  the nesting rule).
-
-```yaml
-apiVersion: agentworks/v1
-kind: secret-backend
-metadata:
-  name: work-vault
-  description: Work 1Password vault
-spec:
-  provider: onepassword
-  provider_config:
-    vault: Work
-```
-
-(Illustrative: the `onepassword` provider is future work. Today's built-in providers accept no
-configuration, so this shape earns its keep when the first config-bearing provider lands.)
-
-- **Built-in backends**: `env-var` (provider `env-var`, convention `AW_SECRET_<NAME>`) and `prompt`
-  (provider `prompt`) ship as built-in resources. Their names are reserved (R6). The zero-config
-  default chain (`env-var`, then `prompt`) is unchanged.
-- **Built-in providers accept no configuration**: a backend spec with anything beyond `provider` is
-  a validation error from their schemas. Customizing env var identifiers stays per-secret via
-  `backend_mappings`, exactly as today; a provider-level option (an env var prefix, say) would be a
-  purely additive schema field if a real ask ever lands. The provider-config plumbing itself (schema
-  validation, defaults, error framing, config reaching instantiation) is exercised by a test-only
-  provider in the test suite, not by shipping artificial configuration on the built-ins.
-- **Multiple backends per provider** is fully supported and is the point of the split (two
-  `onepassword` backends with different vaults, later).
-- **Unchanged semantics**: `backend_mappings` on secrets are keyed by backend name (now including
-  custom backends). `[secret_config].backends` lists backend names in precedence order; unknown
-  names are load errors. Per-secret resolution, prompting, batching, and the never-persist-values
-  guarantee are untouched.
-- Inspection surfaces (`agw secret describe` backend mappings and resolution preview, doctor rows)
-  enumerate the active chain's backends and compute each backend's default convention by asking the
-  provider-instantiated source, so future config-bearing providers render correctly with no
-  display-layer changes.
+- **`secret-backend`** (capability, registry descriptor): the code that produces secret values --
+  what the ecosystem calls a secrets backend. Built-ins: `env-var` (convention `AW_SECRET_<NAME>`),
+  `prompt`. Backends are registered code-side (`SECRET_BACKEND_REGISTRY`) and mirrored into the
+  registry as read-only `built-in` descriptor rows (error miss policy, not manifest-declarable) so
+  chain references validate uniformly and the capabilities are visible in `agw resource list`. There
+  is no declarable instantiation kind.
+- **Chain**: `[secret_config].backends` lists backend (capability) names in precedence order;
+  unknown names are load errors validated against the descriptor rows. The zero-config default chain
+  (`env-var`, then `prompt`) is unchanged. The v0.10.0 TOML vocabulary is unchanged and now
+  literally correct.
+- **Per-secret addressing lives in the mapping**: `backend_mappings.<backend>` values remain string
+  / structured dict / `false` (R4's forms). The structured form is where instance-flavored
+  addressing belongs -- a future 1Password backend reads
+  `backend_mappings.onepassword = { vault = "Work", item = "npm", field = "token" }` per secret.
+- **Backend-level configuration** (connection material: a service-account token, an account URL):
+  none exists today. When the first config-bearing backend ships, its configuration is
+  backend-scoped -- one configured form per capability. If a genuine multi-instance need
+  materializes (two 1Password ACCOUNTS with different credentials), that backend graduates to a
+  declarable instance kind then; graduation is additive, and the path is smooth because mappings may
+  then key either the capability name (resolving to its sole instance) or an instance name.
+- **Unchanged semantics**: per-secret resolution order, prompting, batching, per-backend opt-outs,
+  and the never-persist-values guarantee are untouched.
+- Inspection surfaces (`agw secret describe` mappings and resolution preview, doctor rows) enumerate
+  the active chain and compute each backend's default convention by asking the capability, so a
+  future config-bearing backend renders correctly with no display-layer changes.
 
 ### R9: Kind vocabulary and git credential alignment
 
@@ -317,10 +306,12 @@ Two vocabulary alignments ride this SDD's release train:
   them). The rename lands in Phase 0 so every new surface (manifests, migration output) is born
   kebab.
 
-Git credentials already follow the capability/instance pattern; this SDD aligns their vocabulary:
+Git credentials already follow the resources-reference-capabilities pattern (they were never a
+split-model example -- see the 2026-07-07 sequencing note); this SDD aligns their vocabulary:
 
 - The `type` field on git credential entries is renamed to **`provider`** (`github`, `azdo`),
-  matching `secret-backend.spec.provider`. The migration tool rewrites it.
+  matching the capability-reference field convention (ADR 0016's naming rule). The migration tool
+  rewrites it.
 - The registry kind for entries is renamed from `git_credentials` to **`git-credential`** (singular,
   consistent with every other kind identifier), riding the same Phase 0 sweep as the casing change.
 - The `git-credential-provider` descriptor kind is unchanged in behavior (read-only rows, error miss
@@ -353,8 +344,8 @@ its object is resources; the TOML edit is a side effect on the source. Full desi
   `paths.backups` before ANYTHING is written (manifests included), and the rewrite is atomic.
 - **Applies the renames**: `git_credentials.<name>.type` becomes `provider`.
   `[secret_backends.<kind>]` sections are dropped with a note whenever the tool rewrites a file
-  containing them: they were semantically empty, the built-in backends ship bundled, and their names
-  are reserved -- converting them to manifests would collide.
+  containing them: they were semantically empty, and the kind is a capability descriptor, not
+  manifest-declarable -- there is nothing to convert them into.
 - **Verifies every real run**: rebuilds the registry from the result and confirms row-for-row
   equivalence with the pre-migration registry (modulo declaration location/origin), printing
   `verified: registry unchanged (N resources)`; on mismatch it rolls back (backup + created-file
@@ -378,12 +369,11 @@ its object is resources; the TOML edit is a side effect on the source. Full desi
 - The YAML teaching surface is `agw resource sample (KIND | --all) [--write FILENAME]`: commented
   sample manifests per manifest-declarable kind (`--all` for every kind; a bare invocation errors,
   mirroring `resource migrate`), shipped bundled and guaranteed to load through the real loader --
-  and to build a full registry as a set (exception: the secret-backend sample is prose-only until a
-  config-bearing provider ships; there is nothing real to declare yet). `--write` saves into the
-  resources directory instead of stdout, appending if the file exists -- the same append-only rule
-  as the migrator, minus the `---` separator (the samples are fully commented, so appended text is
-  inert and a separator would create a null document the loader rejects). `agw config sample` is
-  unchanged: it documents the settings file, which is permanent under config-is-config.
+  and to build a full registry as a set. `--write` saves into the resources directory instead of
+  stdout, appending if the file exists -- the same append-only rule as the migrator, minus the `---`
+  separator (the samples are fully commented, so appended text is inert and a separator would create
+  a null document the loader rejects). `agw config sample` is unchanged: it documents the settings
+  file, which is permanent under config-is-config.
 
 ### R12: Framework invariance
 
@@ -411,11 +401,10 @@ now mention manifest locations; the shapes stay the same.
   only its origin display changes. Candidate for the plugin SDD.
 - **Plurifying `named-console-template` / relaxing `admin-template` to multiple names**: still
   deferred to their own SDDs; the envelope accepts only `default` for them meanwhile.
-- **New secret providers** (`onepassword`, vaults): the split makes room; implementations are future
-  work.
-- **Configuration on the built-in providers** (e.g. an env var prefix option): no known operator
-  ask; per-secret `backend_mappings` covers identifier customization. Would be a purely additive
-  provider schema field later.
+- **New secret backends** (`onepassword`, vaults): implementations are future work; R8's
+  backend-scoped-config-then-graduate story is where their configuration lands.
+- **Configuration on the built-in backends** (e.g. an env var prefix option): no known operator ask;
+  per-secret `backend_mappings` covers identifier customization.
 
 ### R13: '/' is disallowed in resource names (added 2026-07-05)
 

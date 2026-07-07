@@ -7,8 +7,9 @@ intent, not the lock). Until then, changes on the branch are "pre-lock" and the 
 file included -- remain mutable.
 
 The resource-manifests SDD shipped on one branch and PR (single-branch delivery per the 2026-07-02
-sequencing note): `feat/resource-manifests-sdd`, PR #156. Phases 0 through 5 are complete; every
-plan checkbox except Phase 6's is flipped.
+sequencing note): `feat/resource-manifests-sdd`, PR #156. Phases 0 through 5 and the pre-lock Phase
+5.5 (the 2026-07-07 capability collapse) are complete; every plan checkbox except Phase 6's is
+flipped.
 
 ### What shipped
 
@@ -26,25 +27,36 @@ plan checkbox except Phase 6's is flipped.
 - **Phase 4**: `agw resource migrate` (recurring incremental mover: selectors or explicit `--all`,
   three layouts, append-only YAML, comment/delete TOML edit with backup-first ordering, per-run
   registry-equivalence verification with rollback) and `agw resource sample` (fully-commented
-  bundled samples; the secret-backend sample is prose-only until a config-bearing provider ships).
-- **Phase 5**: per-section TOML deprecation warnings, YAML-first sample config, and the
-  permanent-doc promotions -- ADR 0016 and `docs/guides/resources.md` now carry everything
+  bundled samples, one per manifest-declarable kind).
+- **Phase 5**: per-section TOML deprecation warnings (later aggregated), YAML-first sample config,
+  and the permanent-doc promotions -- ADR 0016 and `docs/guides/resources.md` now carry everything
   load-bearing; runtime docstrings cite the ADR, not this SDD.
+- **Phase 5.5 (2026-07-07, the capability collapse)**: the provider/backend split was dissolved --
+  resources reference capabilities directly, many-to-one; the declarable `secret-backend` kind, its
+  bundled manifests, and the reserved-name tier were deleted; the capability (protocol
+  `SecretBackend`, registry `SECRET_BACKEND_REGISTRY`) took the `secret-backend` kind name as a
+  descriptor row. Released TOML configs work verbatim (`[secret_config].backends` and
+  `backend_mappings` already named backends). The "door" metaphor was retired -- `SecretBackend` is
+  a well-defined API abstracting where secrets come from, consumed by a plain resolution loop. ADR
+  0016 records the resources-reference-capabilities model and the domain-natural capability naming
+  rule.
 
 Two deliberate breaking changes, both `!`-flagged for release-please: resource names may not contain
 `/` (FRD R13, enforced at `Registry.add`), and `agw resource migrate` requires selectors or `--all`.
-Pre-lock additions: bare "provider" scoped to `SECRET_PROVIDER_REGISTRY`; the `kind/name` display
-syntax unified on `/` everywhere (including `resource describe KIND/NAME`, a third breaking CLI
-change; ADR 0016 records the display-syntax rule); deprecation warnings aggregated into one message
-with a global `--no-deprecations` silencer; `resource sample` requires a kind or `--all` (fourth
-breaking CLI change); and provider-owned configuration nests under `spec.provider_config` (ADR 0016
-records the pattern).
+Pre-lock additions: bare "provider" scoped to `SECRET_PROVIDER_REGISTRY` (itself later renamed
+`SECRET_BACKEND_REGISTRY` by Phase 5.5); the `kind/name` display syntax unified on `/` everywhere
+(including `resource describe KIND/NAME`, a third breaking CLI change; ADR 0016 records the
+display-syntax rule); deprecation warnings aggregated into one message with a global
+`--no-deprecations` silencer; `resource sample` requires a kind or `--all` (fourth breaking CLI
+change); and provider-owned configuration nests under `spec.provider_config` (ADR 0016 records the
+pattern).
 
 ### Permanent homes (the SDD-not-permanent promotions)
 
 - **ADR 0016** -- the three-layer config/resource/capability model, the vocabulary law,
-  exposed-resources-are-the-door, the envelope/auto-load decision, dual-path rationale, the slash
-  ban, and the 0013/0014 mechanism supersession.
+  resources-reference-capabilities (with the capability naming rule and the graduate-when-real
+  clause), the envelope/auto-load decision, dual-path rationale, the slash ban, and the 0013/0014
+  mechanism supersession.
 - **`docs/guides/resources.md`** -- the operator-facing story.
 - **`cli/README.md`** -- settings-vs-resources configuration reference and the command surface.
 
@@ -55,8 +67,9 @@ these artifacts are candidates for tombstoning once the dual-path era is old new
 
 - **Phase 6** (TOML resource-path retirement + loader-ownership inversion) is recorded in plan.md
   but deferred to an unscheduled future major release. Its checkboxes remain unchecked by design.
-- Config-bearing secret providers (e.g. onepassword): the model has the room; the sample and a
-  pinned test flip the day one ships.
+- Config-bearing secret backends (e.g. onepassword): per FRD R8 (revised), configuration is
+  backend-scoped when one ships; a declarable instance kind returns only on a real multi-instance
+  need.
 
 ### Follow-ups filed elsewhere
 

@@ -49,8 +49,8 @@ agw resource migrate [SELECTOR]... [--all] [--layout per-kind|single|per-resourc
 | `single`       | `resources/resources.yaml` (multi-document)    |
 | `per-resource` | `resources/vm-template/small.yaml`             |
 
-- Per-kind filenames pluralize the kind with a plain `s` (matching the bundled
-  `secret-backends.yaml` convention).
+- Per-kind filenames pluralize the kind with a plain `s` (a convention originally anchored by the
+  since-deleted bundled `secret-backends.yaml`; it stands on its own).
 - Per-resource layout REFUSES names that are not filename-safe (spaces, `\`, leading dots --
   anything outside a conservative safe set; `/` is already banned at load, but non-secret names are
   otherwise pass-through), pointing at the per-kind layout. No sanitization: a mangled filename

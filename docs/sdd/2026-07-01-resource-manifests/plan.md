@@ -396,6 +396,54 @@ Definition of done: fresh installs learn YAML first; existing TOML configs keep 
 deprecation nudge; samples, docs, completions, release notes shipped in the same release; CI green;
 reviewer-approved.
 
+## Phase 5.5: Capability collapse -- secret backends ARE the capability (maintainer-directed)
+
+Pre-lock revision (2026-07-07), driven by the plugin-system SDD design review: the
+capability/exposed-resource split is dissolved as a universal layer. Resources reference
+capabilities directly, many-to-one, carrying provider-owned config at the reference site; a
+dedicated instance kind exists only where instances need identity beyond a single reference site
+(git-credential today; vm-platform in the plugin SDD). `secret-backend` the DECLARABLE kind dies;
+`secret-provider` the capability is RENAMED `secret-backend` (the domain's natural noun, and the
+word the released v0.10.0 TOML surface already uses). See the 2026-07-07 sequencing note for the
+full ruling chain; FRD R8, the HLA secret architecture section, and ADR 0016 carry the revised
+model.
+
+- [ ] Rename the capability: `SecretProvider` protocol -> `SecretBackend`,
+      `SECRET_PROVIDER_REGISTRY` -> `SECRET_BACKEND_REGISTRY`; the `secret-provider` descriptor kind
+      is renamed `secret-backend` (still read-only, error miss policy, not manifest-declarable). One
+      registry row per capability -- the current duplicate `secret-provider/env-var` +
+      `secret-backend/env-var` pair collapses.
+- [ ] Delete the declarable layer: `SecretBackendDecl`, the `secret-backend` decode path, the
+      bundled `secret-backends.yaml` manifest, the reserved-name enforcement for backend names, and
+      the prose-only secret-backend sample (SAMPLE_KINDS shrinks; `agw resource sample` choices
+      follow).
+- [ ] Door survives keyed by capability: the resolution loop, `would_attempt` / `describe_lookup` /
+      `resolve`, prompt-once, per-backend batching, and per-backend opt-outs move onto the
+      capability row (or a thin non-resource runtime wrapper) with mappings looked up by backend
+      name -- which now IS the capability name. `active_backends` / `validate_chain` validate
+      `[secret_config].backends` against the descriptor rows.
+- [ ] TOML surface unchanged and now literally correct: `[secret_config].backends` lists backend
+      (capability) names; `backend_mappings.<backend>` keys backends. No renames, no aliases. The
+      `[secret_backends.*]` no-op deprecation and migrate's drop handling stay as-is.
+- [ ] Inspection surfaces: `agw secret describe` / doctor / `agw resource list` render the single
+      kind; describe's mappings/preview logic unchanged.
+- [ ] Update FRD R8, HLA secret architecture, ADR 0016 (the former "exposed resources are the door"
+      section becomes the resources-reference-capabilities model with the naming rule), and the
+      SDD-artifact sweep (Background/Terminology/R1/R3/R6/R9/R10/R11/non-goals in the FRD;
+      bootstrap/dual-source/kind-flags/validation/design-decision sections in the HLA;
+      manifest-schema-lld, migration-tool-lld, migration-strategy, locked.md).
+- [ ] Doc sweep with the implementation: `cli/README.md` (the "Secret Providers and Backends"
+      section, doctor wording, `--kind secret-provider,secret-backend` and
+      `describe secret-provider/env-var` examples), `docs/guides/resources.md` (the secrets
+      section), `cli/agentworks/sample-config.toml` comments -- these stay describing HEAD until the
+      code lands and ride the implementation commits.
+- [ ] **Tests**: rename sweeps; kind-collapse pins (one row per capability; declarable manifest for
+      `kind: secret-backend` is now an envelope error); chain validation against descriptor rows;
+      existing resolution/inspection suites pass with mappings keyed by capability name.
+
+Definition of done: one `secret-backend` kind (the capability); no declarable instantiation layer;
+released TOML configs work verbatim; CI green; reviewer-approved.
+
 ## Phase 6: TOML resource-path retirement (future major; unscheduled)
 
 Deferred until a future major release, on operator telemetry/feedback -- not part of this SDD's
@@ -417,6 +465,29 @@ only TOML-resource reader in the tree; CI green; reviewer-approved.
 (Recorded as they happen, per SDD convention. Deviations from FRD/HLA get an entry here and an
 artifact update.)
 
+- **2026-07-07: the capability collapse (maintainer ruling, pre-lock; Phase 5.5).** Reviewing the
+  draft plugin-system SDD (which generalized the capability/exposed-resource split to five kinds),
+  the maintainer challenged the split itself: forcing a dedicated instantiation kind per capability
+  adds ceremony where the consumer could carry the config. The ruling chain, in order: (1)
+  harness/feature exposed kinds die -- templates reference capabilities directly with inline
+  provider config (dependencies become capability-name-to-capability-name, fixing an indirection
+  wart); (2) the "discriminator" (dedicated kind iff instances need identity beyond one reference
+  site) was found to describe ordinary domain modeling, not a special pattern -- git-credential was
+  NEVER a split-model example, just resources referencing a capability many-to-one; (3)
+  secret-backend, the only kind whose ENTIRE content was the exposure, dies too: the 1Password case
+  is served by structured backend_mappings (vault+item per secret), and multi-ACCOUNT stores are a
+  graduate-when-real future (reintroduce a declarable kind then; backend-keyed mappings default to
+  the sole instance); (4) with the exposure layer gone, the capability takes the domain's natural
+  noun: secret-provider RENAMES to secret-backend ("backend" is the ecosystem's word for a pluggable
+  secret store, and the released v0.10.0 TOML keys -- [secret_config].backends, backend_mappings --
+  already say it; the name coincidence we used to apologize for becomes the compatibility bridge).
+  Naming rule: domains use their natural capability noun; a disambiguating suffix only on collision
+  (git-credential-provider, vm-provider). The tells that the layer was ceremony, for the record: a
+  prose-only sample (nothing declarable could exist), built-in names forced to coincide with their
+  providers', duplicate env-var/prompt rows across two kinds, and docstring gymnastics
+  distinguishing names "never relied on in code". Done pre-lock on this branch (maintainer: "sadly")
+  because the layer never shipped in a release and ADR 0016 would otherwise enshrine a superseded
+  model at merge.
 - **2026-07-05: provider_config nesting (maintainer ruling, pre-lock).** Provider-owned
   configuration on exposed resources nests under one `spec.provider_config` key (an opaque blob the
   provider owns) instead of spreading across the spec tail; unknown top-level spec fields error with

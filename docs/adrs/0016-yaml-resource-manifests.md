@@ -1,6 +1,7 @@
 # 16. YAML Resource Manifests and the Config/Resource/Capability Split
 
-Date: 2026-07-05
+Date: 2026-07-05 (amended 2026-07-07: the capability collapse -- resources reference capabilities
+directly; the declarable secret-backend layer was removed and the capability took the name)
 
 ## Status
 
@@ -36,57 +37,68 @@ Everything the CLI works with belongs to exactly one of three layers:
 | Layer            | What it is                                                                      | Where it lives                            | Identity vocabulary  |
 | ---------------- | ------------------------------------------------------------------------------- | ----------------------------------------- | -------------------- |
 | Config           | Settings: SSH keys, paths, defaults, the active backend chain, (future) plugins | TOML (`config.toml`), the `Config` object | section/field names  |
-| Resources        | Declared things: secrets, backends, templates, credentials, catalog entries     | the resource Registry, fed by publishers  | `kind` + `name`      |
-| Raw capabilities | Code implementations: secret providers, VM providers, git credential providers  | per-domain provider registries            | bare capability name |
+| Resources        | Declared things: secrets, templates, credentials, catalog entries               | the resource Registry, fed by publishers  | `kind` + `name`      |
+| Raw capabilities | Code implementations: secret backends, VM providers, git credential providers   | per-domain capability registries          | bare capability name |
 
-**The vocabulary law: `kind` is a resource-registry concept, full stop.** Providers (raw
-capabilities) are not resources and have no kind. The resource that exposes a capability has its own
-kind (for secrets: `secret-backend`), and `provider` is a field on that resource naming the
-capability. Nothing outside the resource registry may use the word "kind" for its identity.
+**The vocabulary law: `kind` is a resource-registry concept, full stop.** Raw capabilities are not
+resources and have no kind of their own -- they are mirrored into the registry as read-only
+descriptor rows under a per-domain kind (`secret-backend`, `git-credential-provider`). Resources
+that use a capability name it in a reference field. Nothing outside the resource registry may use
+the word "kind" for its identity.
 
 Config is just config: settings that name resources (like `[secret_config].backends`) are never
 published as pseudo-resources; the owning subsystem validates them against the finalized registry at
 the composition boundary (`build_registry`).
 
-### Exposed resources are the door
+### Resources reference capabilities
 
-A raw capability is registered code; an **exposed resource** is the declared resource that makes it
-usable (optionally with configuration). ALL runtime access to a capability goes through one of its
-exposed resources; the capability's invocation API is domain-owned and visible only to them. One
-capability may back many exposed resources (two future `onepassword` backends pointed at different
-vaults). Domain terminology varies on the exposed-resource side -- secrets say provider -> backend;
-VMs will likely say provider -> platform -- while "provider" is the stable generic term for the raw
-capability across domains. Symbols related to domain-specific capabilities spell the domain out
-(`SECRET_PROVIDER_REGISTRY`, for the `secret-provider` capability registry) in order to leave room
-for other capabilities. The bare word "provider" is reserved for the generic concept and the
-(future, not certain) possibility of a generic provider registry. An exposed resource's
-`spec.provider` field is simply a bare use of the word where the context (the owning resource) makes
-the domain clear; nothing special is reserved there.
+A raw capability is registered code, mirrored into the registry as a read-only descriptor row so
+references to it validate through the ordinary framework machinery and it is visible in
+`agw resource list`. Resources reference capabilities **directly, many-to-one**: a `git-credential`
+names its provider, a secret's mappings name backends, a (future) template names its harness. There
+is no dedicated "exposure" layer between a resource and a capability -- an earlier revision of this
+decision had one (`secret-backend` as a declarable instantiation of `secret-provider`), and it was
+removed (2026-07-07) once it became clear the instance identity carried no content: whether a kind
+exists is ordinary domain modeling (is there a real noun operators reason about, referenced from
+more than one place?), not a pattern requirement. A credential is such a noun; "a configured place
+to create VMs" (the plugin SDD's vm-platform) is such a noun; "a backend instance" was not. If a
+capability someday genuinely needs multiple configured instances (two 1Password accounts with
+different credentials), a declarable instance kind for THAT capability is an additive graduation,
+not a redesign.
 
-Providers can optionally carry configuration. For example, a `onepassword` secret provider may need
-a vault name, an AZDO git credential provider requires an organization name, a (future) Azure VM
-provider may need a subscription ID, etc. The nature and shape of this configuration is entirely
-provider-specific. The configuration is managed as part of the exposed resource, thus allowing for
-multiple instances of the same provider with different configurations.
+**Naming**: each domain calls its capability by its natural noun -- `secret-backend`,
+`git-credential-provider`, (future) `vm-provider` / `harness` -- adding a disambiguating suffix only
+when the bare noun would collide with a resource kind or lifecycle entity. Symbols spell the domain
+out (`SECRET_BACKEND_REGISTRY`). The bare word "provider" remains the generic cross-domain term for
+the pattern, the conventional name for capability-reference fields (`spec.provider`, where the
+owning resource makes the domain clear), and the (future, not certain) possibility of a generic
+provider registry.
 
-To keep the data model clean, the provider-specific configuration is limited to the
-`spec.provider_config` key on an exposed resource. This is an opaque blob the named provider owns
-and validates so that the rest of the spec stays provider-agnostic. Fields specific to the exposed
-resource's kind are generic by definition and live at the top level of the resource spec. For
-example, a `git-credential`'s `token` belongs to every credential, while `azdo`'s `org` nests.
+Capabilities can optionally carry configuration, and its nature and shape is entirely
+capability-specific. For example, an AZDO git credential provider requires an organization name; a
+(future) Azure VM provider may need a subscription ID; a (future) 1Password secret backend may need
+an account URL. Where the reference site is a resource spec, that configuration is limited to the
+`spec.provider_config` key: an opaque blob the named capability owns and validates, so the rest of
+the spec stays provider-agnostic. Fields specific to the resource's kind are generic by definition
+and live at the top level of the resource spec (a `git-credential`'s `token` belongs to every
+credential, while `azdo`'s `org` nests). Where the reference site is per-secret
+(`backend_mappings`), the structured mapping value carries the per-secret addressing (a vault, item,
+and field) -- same principle, capability-owned content at the reference site.
 
 The INTERNAL resource representation follows the nested shape too
-(`SecretBackendDecl.provider_config`, `GitCredentialConfig.provider_config`) as this represents the
-best representation available. For backwards compatibility, we continue to support the legacy TOML
-shapes which aren't as clean. However, the flat TOML section is the ONLY domain where provider-owned
-fields are allowed to sit outside the `provider_config` blob. The TOML loaders translate into the
-nested shape at their boundary. Decoders reshape before calling the shared loaders, so validation
-stays TOML-shared while the YAML surface and the internal model stay uniform.
+(`GitCredentialConfig.provider_config`) as this represents the best representation available. For
+backwards compatibility, we continue to support the legacy TOML shapes which aren't as clean.
+However, the flat TOML section is the ONLY domain where provider-owned fields are allowed to sit
+outside the `provider_config` blob. The TOML loaders translate into the nested shape at their
+boundary. Decoders reshape before calling the shared loaders, so validation stays TOML-shared while
+the YAML surface and the internal model stay uniform.
 
-For secrets concretely: backends (`SecretBackendDecl`) own `would_attempt` / `describe_lookup` /
-`resolve`; providers are stateless code invoked only from those door methods; and resolution is a
-plain loop over the active backends in chain order -- no resolver object, no cache, no memos.
-Prompt-once is structural (one resolve per command, values threaded to env composition), not cached.
+For secrets concretely: `SecretBackend` is an ordinary well-defined API (`would_attempt` /
+`describe_lookup` / `batch_get`) abstracting where secrets actually come from, and resolution is a
+plain loop over the active chain (`[secret_config].backends`, capability names in precedence order)
+-- no resolver object, no cache, no memos. Prompt-once is structural (one resolve per command,
+values threaded to env composition), not cached. Per-secret behavior (identifier overrides,
+opt-outs, store addressing) lives in `backend_mappings`, keyed by backend name.
 
 ### YAML manifests, auto-loaded, Kubernetes envelope
 
@@ -94,8 +106,9 @@ Operator resources are declared as YAML documents under `<config-dir>/resources/
 the loader walks everything), using the familiar envelope -- `apiVersion: agentworks/v1`, `kind`
 (lower-kebab), `metadata` (framework-uniform: `name`, `description`), `spec` (kind-specific).
 Manifests are auto-loaded whenever a command builds the registry: there is no `apply` step and no
-persisted registry state to reconcile. App-bundled built-in resources (the built-in secret backends)
-ship through the same loader with a `built-in` origin; future plugins reuse the mechanism.
+persisted registry state to reconcile. App-bundled built-in resources ship through the same loader
+with a `built-in` origin (the bundle is wired and currently empty; future built-ins and plugins
+reuse the mechanism).
 
 Resource names may not contain `/` (reserved for `KIND/NAME` selectors and per-resource manifest
 filenames), enforced source-independently at `Registry.add`. That ban makes `kind/name` the one
@@ -125,11 +138,11 @@ surface, while `agw config init/edit/sample` continue to own the permanent setti
 - The registry is the single source of truth for the runtime; `Config` carries settings only.
   Consumer code reads resources through registry accessors, never `Config` attributes.
 - Plugins get a paved road: resources arrive as bundled manifests with their own origin variant;
-  capabilities register in per-domain provider registries. Neither requires new framework
+  capabilities register in per-domain capability registries. Neither requires new framework
   mechanisms.
-- The secrets runtime is small enough to state in one sentence: map the configured chain onto
-  backend rows, loop over them in order, batch per backend. Inspection surfaces reuse the same loop
-  with an errors out-param instead of growing parallel code paths.
+- The secrets runtime is small enough to state in one sentence: map the configured chain onto the
+  registered backends, loop over them in order, batch per backend. Inspection surfaces reuse the
+  same loop with an errors out-param instead of growing parallel code paths.
 - Breaking change accepted knowingly: configs carrying slash-bearing quoted resource names
   (`[vm_templates."a/b"]`) stop loading, with a rename hint.
 
@@ -139,6 +152,6 @@ ADR 0013's decision (CLI-side secret injection at command time -- no VM-side sec
 0014's decision (`AcceptEnv AW_*` wildcard transport via SSH `SetEnv`) both stand unchanged. What
 this ADR supersedes is the resolution _mechanism_ those documents describe in passing: the "env var,
 then prompt" sourcing is no longer a hardcoded resolver but the default backend chain
-(`[secret_config].backends = ["env-var", "prompt"]`) over declared backend resources, resolved by
-the loop described above. Where 0013/0014 say "the CLI resolves secret values", read "the active
-backend chain resolves them through the backends-are-the-door model".
+(`[secret_config].backends = ["env-var", "prompt"]`) over registered backend capabilities, resolved
+by the loop described above. Where 0013/0014 say "the CLI resolves secret values", read "the active
+backend chain resolves them through the `SecretBackend` API".

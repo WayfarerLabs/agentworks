@@ -1,12 +1,18 @@
 # Runtime model LLD: backends are the door
 
-Status: IMPLEMENTED (Phase 3.6, 2026-07-03), as reviewed by the maintainer. This replaced the
-secrets runtime layer (which predated this SDD) and superseded the interim resolver plumbing built
-during Phases 3-3.5 (memos, registry-purity threading, the secret-config row experiment). One
-addition made during implementation: the provider API carries
-`would_attempt(config, secret, mapping)` alongside `describe_lookup` -- the backend door handles the
-generic `False` opt-out and delegates the has-convention-or-mapping decision to the provider
-(required by FRD R4's soft-skip semantics for providers without default conventions).
+Status: IMPLEMENTED (Phase 3.6, 2026-07-03), as reviewed by the maintainer; REVISED by the Phase 5.5
+capability collapse (2026-07-07). The door model survives the collapse intact -- what changed is WHO
+the door is: the provider/backend split dissolved, `SecretBackendDecl` and the declarable kind are
+gone, and the door methods live on the capability itself (protocol renamed `SecretBackend`, registry
+`SECRET_BACKEND_REGISTRY`, one descriptor row per capability under kind `secret-backend`). Read this
+document's two-row model (`secret-provider` descriptors + `secret-backend` resources) as the
+pre-collapse shape; the loop, prompt-once, batching, mapping, and inspection semantics it pins are
+unchanged. Original status note: this replaced the secrets runtime layer (which predated this SDD)
+and superseded the interim resolver plumbing built during Phases 3-3.5 (memos, registry-purity
+threading, the secret-config row experiment). One addition made during implementation: the
+capability API carries `would_attempt(secret, mapping)` alongside `describe_lookup` -- the door
+handles the generic `False` opt-out and delegates the has-convention-or-mapping decision to the
+capability (required by FRD R4's soft-skip semantics for backends without default conventions).
 
 ## Part 1: the general pattern (all capability-backed domains)
 

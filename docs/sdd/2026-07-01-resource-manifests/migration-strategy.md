@@ -104,9 +104,9 @@ resource may come from either source, declaring the same one in both errors at p
 so any config that loads today keeps loading -- with one deliberate exception (FRD R13, 2026-07-05):
 resource names containing `/` are now rejected at publish, since `/` is reserved for selectors and
 per-resource filenames. The exception is `[secret_backends.*]`, which Phase 3.6 made a warned no-op
-(the sections were semantically empty; the built-in backends ship bundled). Phase 5 adds per-section
-deprecation warnings and repoints the docs to lead with YAML; the TOML resource path's removal waits
-for an unscheduled future major (Phase 6).
+(the sections were semantically empty; post-5.5 the kind is a capability descriptor). Phase 5 adds
+per-section deprecation warnings and repoints the docs to lead with YAML; the TOML resource path's
+removal waits for an unscheduled future major (Phase 6).
 
 **For an operator**, migration is optional and self-scheduled:
 
@@ -136,9 +136,10 @@ backend_mappings.env-var = "NPM_TOKEN"
 ```
 
 Migration carries this over verbatim; per-secret `backend_mappings` remain the mechanism for
-customizing identifiers (the built-in providers accept no per-backend configuration).
-Operator-declared backends earn their keep when the first config-bearing provider (a future
-`onepassword`, say) lands; nothing about this migration needs them.
+customizing identifiers (the built-in backends accept no configuration). Post-5.5 there is no
+declarable backend kind at all; a future config-bearing backend's configuration is backend-scoped,
+graduating to a declarable instance kind only on a real multi-instance need (FRD R8). Nothing about
+this migration needs any of that.
 
 ## Risks and safeguards
 

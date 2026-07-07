@@ -32,8 +32,9 @@ Envelope rules (all violations are `ConfigError` with `file:line` of the documen
 
 - `apiVersion` (required): exactly `agentworks/v1`.
 - `kind` (required): must be a registered kind with `manifest_declarable = True`. Unknown kinds
-  error listing the valid kinds; descriptor kinds (`secret-provider` in Phase 3,
-  `git-credential-provider`) error with "provided by the app".
+  error listing the valid kinds; descriptor kinds (`git-credential-provider`, and post-Phase-5.5
+  `secret-backend` -- the capability took the name when the declarable layer was collapsed,
+  2026-07-07) error with "provided by the app".
 - `metadata` (required mapping): `name` (required string), `description` (optional string). Other
   keys under `metadata` are errors (reserved for future `labels` / `annotations`).
 - `spec` (required mapping, may be empty `{}`).
@@ -155,4 +156,6 @@ All loader errors are `ConfigError` with the document location prefix:
 `importlib.resources`, parses with the same loader, and publishes with
 `Origin.built_in(source="agentworks.manifests.builtin/<filename>")`. Warn-level issues in bundled
 manifests are app bugs and assert (CI catches a dirty bundle when content is added). Phase 2 ships
-the mechanism wired with an empty bundle; Phase 3 adds `secret-backends.yaml`.
+the mechanism wired with an empty bundle; Phase 3 added `secret-backends.yaml`, and the Phase 5.5
+capability collapse (2026-07-07) removed it again -- the bundle is wired and empty, its loader path
+kept exercised by tests, with plugins and future built-ins as its consumers.
