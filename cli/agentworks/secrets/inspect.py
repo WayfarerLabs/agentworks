@@ -7,7 +7,7 @@ view, render via ``agentworks.output``" pattern.
 
 Per FRD R10, neither command prompts the operator nor resolves a secret
 value for display; they report state by asking the active backends
-(``would_attempt`` / ``describe_lookup`` -- the door methods) directly.
+(``would_attempt`` / ``describe_lookup``) directly.
 Surfaces display BACKEND NAMES; the provider is a field visible via
 ``agw resource describe secret-backend/<name>``.
 """
@@ -314,7 +314,7 @@ def describe_secret(
     # outside the framework path may not have the field.
     references: tuple[ReferenceEntry, ...] = tuple(getattr(decl, "references", ()))
 
-    # Backend mappings: ask each active backend (the door) how it would
+    # Backend mappings: ask each active backend how it would
     # handle this secret.
     from agentworks.secrets.resolve import active_backends, preview_resolution
 

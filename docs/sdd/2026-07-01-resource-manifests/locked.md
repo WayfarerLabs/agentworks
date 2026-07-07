@@ -7,10 +7,9 @@ intent, not the lock). Until then, changes on the branch are "pre-lock" and the 
 file included -- remain mutable.
 
 The resource-manifests SDD shipped on one branch and PR (single-branch delivery per the 2026-07-02
-sequencing note): `feat/resource-manifests-sdd`, PR #156. Phases 0 through 5 are complete; the
-pre-lock Phase 5.5 (the 2026-07-07 capability collapse) has its design artifacts landed and its
-implementation in flight -- its boxes (and this sentence) flip as it lands. Every other plan
-checkbox except Phase 6's is flipped.
+sequencing note): `feat/resource-manifests-sdd`, PR #156. Phases 0 through 5 and the pre-lock Phase
+5.5 (the 2026-07-07 capability collapse) are complete; every plan checkbox except Phase 6's is
+flipped.
 
 ### What shipped
 
@@ -88,6 +87,4 @@ Phase 4 artifacts and implementation (which also relayed four maintainer rulings
 and a Copilot pass (one valid loader-robustness fix). The maintainer manually tested the dual-path
 loading, doctor, and migration surfaces against a real config during development.
 
-The FRD, HLA, plan, and LLDs describe the Phase 5.5 end state; the artifacts are accurate
-as-designed, and this file's completion claims flip with Phase 5.5's boxes before merge. They lock
-at merge.
+The FRD, HLA, plan, and LLDs are accurate as-built as of this date; they lock at merge.

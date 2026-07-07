@@ -29,17 +29,25 @@ def _uncomment(text: str) -> str:
 
 
 def test_every_kind_has_a_sample() -> None:
-    assert set(SAMPLE_KINDS) == set(KIND_SECTIONS)
+    # secret-backend is a capability descriptor post-collapse
+    # (2026-07-07): in KIND_SECTIONS for the migrator's drop table, not
+    # declarable, no sample.
+    assert set(SAMPLE_KINDS) == set(KIND_SECTIONS) - {"secret-backend"}
     for kind in SAMPLE_KINDS:
         assert sample_text(kind).strip()
+
+
+def test_secret_backend_has_no_sample() -> None:
+    """The declarable secret-backend kind died in the Phase 5.5
+    collapse; its (prose-only) sample died with it."""
+    with pytest.raises(ValidationError, match="unknown kind"):
+        sample_text("secret-backend")
 
 
 def test_all_kinds_concatenation_and_unknown_kind() -> None:
     everything = sample_text(all_kinds=True)
     for kind in SAMPLE_KINDS:
-        # Every sample opens with its prose header line -- checked
-        # explicitly (not by document substring) because secret-backend
-        # is prose-only and has no document to match.
+        # Every sample opens with its prose header line.
         assert f"## kind: {kind} --" in everything
     with pytest.raises(ValidationError, match="unknown kind"):
         sample_text("nope")
@@ -105,17 +113,6 @@ ssh_private_key = "{priv.as_posix()}"
     config = load_config(cfg, warn_issues=False)
     build_registry(config)
 
-
-def test_secret_backend_sample_is_prose_only() -> None:
-    """The secret-backend sample has NOTHING to uncomment (maintainer
-    ruling, 2026-07-05): no declarable backend can exist until a
-    config-bearing provider ships, so shipping an uncommentable
-    document would teach a lie. Every line is prose (``## ``); the
-    day a real provider lands, this test flips and the sample gains a
-    real document."""
-    text = sample_text("secret-backend")
-    for line in text.splitlines():
-        assert not line or line.startswith("##"), line
 
 
 def test_commented_samples_are_inert_through_the_loader(tmp_path: Path) -> None:

@@ -408,41 +408,41 @@ word the released v0.10.0 TOML surface already uses). See the 2026-07-07 sequenc
 full ruling chain; FRD R8, the HLA secret architecture section, and ADR 0016 carry the revised
 model.
 
-- [ ] Rename the capability: `SecretProvider` protocol -> `SecretBackend`,
+- [x] Rename the capability: `SecretProvider` protocol -> `SecretBackend`,
       `SECRET_PROVIDER_REGISTRY` -> `SECRET_BACKEND_REGISTRY`; the `secret-provider` descriptor kind
       is renamed `secret-backend` (still read-only, error miss policy, not manifest-declarable). One
       registry row per capability -- the current duplicate `secret-provider/env-var` +
       `secret-backend/env-var` pair collapses.
-- [ ] Delete the declarable layer: `SecretBackendDecl`, the `secret-backend` decode path, the
+- [x] Delete the declarable layer: `SecretBackendDecl`, the `secret-backend` decode path, the
       bundled `secret-backends.yaml` manifest, the reserved-name enforcement for backend names, and
       the prose-only secret-backend sample (SAMPLE_KINDS shrinks; `agw resource sample` choices
       follow).
-- [ ] Runtime survives keyed by capability: the `SecretBackend` API is exactly `would_attempt` /
+- [x] Runtime survives keyed by capability: the `SecretBackend` API is exactly `would_attempt` /
       `describe_lookup` / `batch_get`; orchestration (mapping lookup, the generic `false` opt-out,
       prompt-once batching) lives in the resolution loop, with mappings looked up by backend name --
       which now IS the capability name. `active_backends` / `validate_chain` validate
       `[secret_config].backends` against the descriptor rows.
-- [ ] Retire the "door" metaphor in code prose and docs (maintainer ruling, 2026-07-07): it enforced
+- [x] Retire the "door" metaphor in code prose and docs (maintainer ruling, 2026-07-07): it enforced
       providers-only-via-backends, which the collapse makes vacuous; `SecretBackend` is a
       well-defined API abstracting where secrets come from. Historical artifacts (Phase 3.6 heading,
       runtime-model-lld title/banner, checked boxes, provider-config-lld's superseded banner and
       body) keep the word as record.
-- [ ] TOML surface unchanged and now literally correct: `[secret_config].backends` lists backend
+- [x] TOML surface unchanged and now literally correct: `[secret_config].backends` lists backend
       (capability) names; `backend_mappings.<backend>` keys backends. No renames, no aliases. The
       `[secret_backends.*]` no-op deprecation and migrate's drop handling stay as-is.
-- [ ] Inspection surfaces: `agw secret describe` / doctor / `agw resource list` render the single
+- [x] Inspection surfaces: `agw secret describe` / doctor / `agw resource list` render the single
       kind; describe's mappings/preview logic unchanged.
-- [ ] Update FRD R8, HLA secret architecture, ADR 0016 (the former "exposed resources are the door"
+- [x] Update FRD R8, HLA secret architecture, ADR 0016 (the former "exposed resources are the door"
       section becomes the resources-reference-capabilities model with the naming rule), and the
       SDD-artifact sweep (Background/Terminology/R1/R3/R6/R9/R10/R11/non-goals in the FRD;
       bootstrap/dual-source/kind-flags/validation/design-decision sections in the HLA;
       manifest-schema-lld, migration-tool-lld, migration-strategy, locked.md).
-- [ ] Doc sweep with the implementation: `cli/README.md` (the "Secret Providers and Backends"
+- [x] Doc sweep with the implementation: `cli/README.md` (the "Secret Providers and Backends"
       section, doctor wording, `--kind secret-provider,secret-backend` and
       `describe secret-provider/env-var` examples), `docs/guides/resources.md` (the secrets
       section), `cli/agentworks/sample-config.toml` comments -- these stay describing HEAD until the
       code lands and ride the implementation commits.
-- [ ] **Tests**: rename sweeps; kind-collapse pins (one row per capability; declarable manifest for
+- [x] **Tests**: rename sweeps; kind-collapse pins (one row per capability; declarable manifest for
       `kind: secret-backend` is now an envelope error); chain validation against descriptor rows;
       existing resolution/inspection suites pass with mappings keyed by capability name.
 

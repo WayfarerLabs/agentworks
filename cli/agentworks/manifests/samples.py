@@ -33,7 +33,11 @@ _SAMPLES_DIR = "samples"
 # Every kind in the decoder's table is manifest-declarable and has a
 # bundled sample; the samples-exist test pins this stays true as kinds
 # are added.
-SAMPLE_KINDS: tuple[str, ...] = tuple(KIND_SECTIONS)
+# secret-backend stays in KIND_SECTIONS (the migrator's drop table) but
+# is a capability descriptor, not declarable -- no sample exists.
+SAMPLE_KINDS: tuple[str, ...] = tuple(
+    k for k in KIND_SECTIONS if k != "secret-backend"
+)
 
 _SUFFIXES = {".yaml", ".yml"}
 

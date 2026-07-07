@@ -79,11 +79,24 @@ def test_toml_declared_resource_points_at_migrate_or_config_edit(
     assert "agw config edit" in (exc.value.hint or "")
 
 
-def test_builtin_resource_has_no_file_to_edit(tmp_path: Path) -> None:
+def test_builtin_capability_has_no_file_to_edit(tmp_path: Path) -> None:
+    """Descriptor kinds get the capability wording, never a sample
+    pointer (post-collapse, `agw resource sample secret-backend` would
+    itself error)."""
     registry = _registry(tmp_path)
     with pytest.raises(ValidationError, match="built-in") as exc:
         edit_location(registry, "secret-backend", "env-var")
-    assert "agw resource sample secret-backend" in (exc.value.hint or "")
+    assert "capability provided by the app" in (exc.value.hint or "")
+    assert "resource sample" not in (exc.value.hint or "")
+
+
+def test_builtin_declarable_resource_points_at_sample(tmp_path: Path) -> None:
+    """Declarable kinds with built-in rows (catalog) keep the sample
+    pointer."""
+    registry = _registry(tmp_path)
+    with pytest.raises(ValidationError, match="built-in") as exc:
+        edit_location(registry, "apt-package", "gh")
+    assert "agw resource sample apt-package" in (exc.value.hint or "")
 
 
 def test_auto_declared_resource_has_no_file_to_edit(tmp_path: Path) -> None:

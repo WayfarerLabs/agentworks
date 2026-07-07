@@ -319,7 +319,8 @@ def test_git_credential_provider_config_rejects_kind_owned_fields(
 
 
 def test_provider_config_must_be_a_mapping(tmp_path: Path) -> None:
-    """Both capability-instance kinds reject a non-mapping blob."""
+    """A non-mapping provider_config blob is rejected. (Post-collapse,
+    git-credential is the one kind carrying the blob.)"""
     _manifest(
         tmp_path,
         """
@@ -329,14 +330,6 @@ def test_provider_config_must_be_a_mapping(tmp_path: Path) -> None:
           name: gh
         spec:
           provider: github
-          provider_config: nope
-        ---
-        apiVersion: agentworks/v1
-        kind: secret-backend
-        metadata:
-          name: my-env
-        spec:
-          provider: env-var
           provider_config: nope
         """,
     )

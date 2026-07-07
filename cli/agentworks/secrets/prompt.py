@@ -1,6 +1,6 @@
-"""The ``prompt`` secret provider: interactive last-resort. A raw
-capability -- invoked only through a ``secret-backend`` resource's door
-methods.
+"""The ``prompt`` secret backend: interactive last-resort. A raw
+capability, consumed by the resolution loop through the
+``SecretBackend`` API.
 
 Resolves nothing when stdin is not a TTY or the CLI was invoked with
 --non-interactive; the resolve loop then raises SecretUnavailableError.
@@ -13,19 +13,16 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from agentworks import output
-from agentworks.errors import ConfigError
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping
-
     from agentworks.secrets.base import MappingValue, SecretDecl
 
 
-class PromptProvider:
-    """Interactive prompt provider.
+class PromptBackend:
+    """Interactive prompt backend.
 
     Always attempts (the opt-out ``backend_mappings.<backend> = false``
-    is handled generically at the backend door). The opt-out is most
+    is handled generically by the resolution loop). The opt-out is most
     useful for testing in an interactive shell -- the operator wants to
     verify the env-var path resolves cleanly without quietly falling
     through to a prompt. Non-interactive mode (no TTY /
@@ -33,25 +30,15 @@ class PromptProvider:
     ``batch_get`` TTY check.
 
     ``interactive = True``: inspection previews must not probe this
-    provider -- calling ``batch_get`` IS the operator interaction.
+    backend -- calling ``batch_get`` IS the operator interaction.
     """
 
     name = "prompt"
+    description = "prompts interactively at resolution time"
     interactive = True
-
-    def validate_config(
-        self, backend_name: str, config: Mapping[str, object]
-    ) -> Mapping[str, object]:
-        if config:
-            raise ConfigError(
-                f'secret-backend "{backend_name}": the {self.name} provider '
-                f"accepts no configuration; got {sorted(config)}"
-            )
-        return {}
 
     def would_attempt(
         self,
-        config: Mapping[str, object],
         secret: SecretDecl,
         mapping: MappingValue | None,
     ) -> bool:
@@ -59,7 +46,6 @@ class PromptProvider:
 
     def describe_lookup(
         self,
-        config: Mapping[str, object],
         secret: SecretDecl,
         mapping: MappingValue | None,
     ) -> str | None:
@@ -69,7 +55,6 @@ class PromptProvider:
 
     def batch_get(
         self,
-        config: Mapping[str, object],
         wants: list[tuple[SecretDecl, MappingValue | None]],
     ) -> dict[str, str]:
         if not output.is_interactive():

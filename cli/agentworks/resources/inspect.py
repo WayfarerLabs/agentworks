@@ -321,25 +321,29 @@ def edit_location(registry: Registry, kind: str, name: str) -> tuple[Path, int]:
     names error identically across the resource group.
     """
     from agentworks.errors import ValidationError
+    from agentworks.resources import KIND_REGISTRY
 
     desc = describe_resource(registry, kind, name)
     origin = desc.origin
     if origin is None or origin.variant != "operator-declared":
         variant = origin.variant if origin is not None else "unknown-origin"
+        # Descriptor kinds (capabilities) have no declarable form; a
+        # sample pointer would send the operator to an error.
+        declarable = getattr(KIND_REGISTRY.get(kind), "manifest_declarable", False)
+        sample_hint = f"`agw resource sample {kind} --write {kind}s.yaml`."
         if variant == "built-in":
             raise ValidationError(
                 f"{kind}/{name} is built-in; there is no file to edit",
                 hint=(
-                    f"Declare an operator resource instead: "
-                    f"`agw resource sample {kind} --write {kind}s.yaml`."
+                    f"Declare an operator resource instead: {sample_hint}"
+                    if declarable
+                    else f"{kind} is a capability provided by the app; "
+                    f"there is nothing to declare or edit."
                 ),
             )
         raise ValidationError(
             f"{kind}/{name} is {variant}; there is no file to edit",
-            hint=(
-                f"Declare it explicitly first: "
-                f"`agw resource sample {kind} --write {kind}s.yaml`."
-            ),
+            hint=f"Declare it explicitly first: {sample_hint}",
         )
     assert origin.file is not None and origin.line is not None  # variant contract
     if origin.file.suffix == ".toml":

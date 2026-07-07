@@ -520,11 +520,11 @@ order-preserving) across template inheritance.
 
 Cross-kind inspection of the Resource Registry. The registry is the framework that owns every
 operator-declared, auto-declared, and built-in resource the CLI knows about: secrets, VM templates,
-agent templates, workspace templates, catalog entries, git credential providers, secret providers
-and their backends, etc. The two commands below stop at the framework-uniform fields (`kind`,
-`name`, `origin`, `references`, `used_by`, `description`). For kind-specific detail -- secret
-backend mappings, template inheritance chains, resolution previews -- reach for the per-kind command
-(e.g. `agw secret describe`).
+agent templates, workspace templates, catalog entries, git credential providers, secret backends and
+their backends, etc. The two commands below stop at the framework-uniform fields (`kind`, `name`,
+`origin`, `references`, `used_by`, `description`). For kind-specific detail -- secret backend
+mappings, template inheritance chains, resolution previews -- reach for the per-kind command (e.g.
+`agw secret describe`).
 
 | Command                              | Description                                                          |
 | ------------------------------------ | -------------------------------------------------------------------- |
@@ -722,8 +722,8 @@ carry an `(auto)` marker; they are exactly the secrets most likely to prompt at 
 - **WARN** when nothing in the chain would resolve it (config-valid but no path to a value, e.g.
   env-var has no matching env var set and `prompt` is opted out via
   `backend_mappings.prompt = false`).
-- **FAIL** when `backend_mappings` references an unknown backend name (not a built-in like `env-var`
-  / `prompt` and not a declared `secret-backend` manifest).
+- **FAIL** when `backend_mappings` references an unknown backend name (not a registered backend like
+  `env-var` / `prompt`).
 
 Backend-applicability detail (per-backend soft-skip reasons, inactive mappings, per-secret
 references) lives in `agw secret list` and `agw secret describe`. `AGENTWORKS_*` identity overrides
@@ -733,14 +733,13 @@ health reports here as ordinary `git-token-*` secrets (doctor has no separate gi
 group), and the Tailscale group checks only workstation connectivity -- the auth key is the
 `tailscale-auth-key` secret row.
 
-### Secret Providers and Backends
+### Secret Backends
 
-Secret resolution is layered: a **provider** is a code capability (`env-var`, `prompt`; future
-providers can carry per-backend configuration), and a **backend** is a named instantiation of one.
-The built-in `env-var` and `prompt` backends ship with the app (their names are reserved);
-additional backends are declared as `secret-backend` resources and activated by listing them in
-`[secret_config].backends`. Run `agw resource list --kind secret-provider,secret-backend` to see
-both layers; `agw resource describe secret-provider/env-var` lists the backends using a provider.
+A **backend** is a code capability that produces secret values (`env-var`, `prompt`; future backends
+like `onepassword`). Backends are registered code, not declarable resources; they show as read-only
+rows in `agw resource list --kind secret-backend`, and the chain (`[secret_config].backends`)
+activates them in precedence order. Per-secret behavior -- identifier overrides, structured store
+addressing, opt-outs -- lives in each secret's `backend_mappings.<backend>`.
 
 ### Mise (Polyglot Tool Manager)
 

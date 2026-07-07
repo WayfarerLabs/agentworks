@@ -92,26 +92,22 @@ policy is per kind:
 - **Catalog kinds** (`apt-source`, `apt-package`, `system-install-command`, `user-install-command`):
   declaring the same name overrides the built-in -- the name is the interface, and same-name
   override is how you customize what `gh` installs.
-- **Built-in secret backends** (`env-var`, `prompt`): their names are reserved; they take no
-  configuration. Customize per secret via `backend_mappings`, or (once config-bearing providers
-  exist) declare a sibling backend under a different name.
+- **Secret backends** (`env-var`, `prompt`): registered capabilities, shown as read-only rows; they
+  take no configuration. Customize per secret via `backend_mappings`.
 
-## Secrets: providers, backends, and the chain
+## Secrets: backends and the chain
 
-Three layers, one rule each:
+Two layers, one rule each:
 
-- A **secret provider** is code -- the raw capability (`env-var`, `prompt`; later `onepassword`,
-  ...). Providers are not resources and cannot be declared; plugins will register them. ("Provider"
-  is the generic term for a raw capability across domains -- VM providers and git credential
-  providers follow the same pattern -- so anything secret-specific spells it out.)
-- A **backend** is a resource of kind `secret-backend`: a named instance of a provider, optionally
-  with configuration nested under `spec.provider_config` -- an opaque blob the provider validates,
-  keeping the rest of the spec provider-agnostic (a future `onepassword` provider could back
-  `op-work` and `op-personal` backends pointed at different vaults). All secret operations go
-  through backends.
+- A **secret backend** is code -- the capability that produces secret values (`env-var`, `prompt`;
+  later `onepassword`, ...). Backends are not declarable resources; the app (and later plugins)
+  registers them, and they appear as read-only `secret-backend` rows in `agw resource list`.
+  Per-secret behavior -- identifier overrides, structured store addressing like
+  `{ vault = "Work", item = "npm" }`, and opt-outs -- lives in each secret's
+  `backend_mappings.<backend>`.
 - The **chain** is a setting: `[secret_config].backends` in `config.toml` lists the active backends
-  in precedence order (default `["env-var", "prompt"]`). Declared backends absent from the chain are
-  dormant.
+  in precedence order (default `["env-var", "prompt"]`). Registered backends absent from the chain
+  are dormant.
 
 Resolution is one pass over the chain per command: the first backend that produces a value wins, and
 interactive prompts are asked at most once per command. `agw secret list` shows how each active

@@ -150,10 +150,9 @@ ssh_private_key = "~/.ssh/id_ed25519"        # required: used for SSH connection
 #              `[secrets.<name>].backend_mappings.env-var`.
 #   prompt  -- interactive prompt. Always applies; the operator is asked once
 #              per missing secret per CLI invocation (batched up front).
-# Additional backends are declared as `secret-backend` resources (YAML
-# manifests in the resources/ directory) and their names are valid chain
-# entries here. (The old `[secret_backends.*]` TOML sections are deprecated
-# no-ops.)
+# Backends are registered code capabilities (agw resource list --kind
+# secret-backend); their names are the valid chain entries here. (The old
+# `[secret_backends.*]` TOML sections are deprecated no-ops.)
 
 #[secret_config]
 #backends = ["env-var", "prompt"]    # the default chain; explicit configuration overrides.

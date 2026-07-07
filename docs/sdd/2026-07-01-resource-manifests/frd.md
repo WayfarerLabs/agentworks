@@ -232,8 +232,9 @@ The app ships resources of its own through the same framework:
     built-in entry overrides it.
   - `secret-backend` is not manifest-declarable at all (revised 2026-07-07): any
     `kind: secret-backend` document is the R3 capability-kind envelope error. The reserved-names
-    override tier died with its last member; per-secret customization is `backend_mappings`, and
-    chain composition is `[secret_config].backends`.
+    override tier keeps its type but has no reachable member (retained for the plugin SDD's default
+    exposed resources); per-secret customization is `backend_mappings`, and chain composition is
+    `[secret_config].backends`.
   - Template kinds are unaffected (their defaults remain framework-synthesized via
     always-materialize, not built-in rows; an operator declaring `default` replaces the synthesis
     exactly as today).

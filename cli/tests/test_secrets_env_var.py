@@ -1,23 +1,21 @@
-"""Tests for the env-var provider, exercised through the backend door
-(``SecretBackendDecl`` methods) -- the only way runtime code reaches a
-provider.
+"""Tests for the env-var backend, exercised through the runtime
+``ActiveBackend`` wrapper -- how the resolution loop reaches a
+capability.
 """
 
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from agentworks.secrets import SecretBackendDecl, SecretDecl, env_var_name_for
+from agentworks.secrets import ActiveBackend, SecretDecl, env_var_name_for
+from agentworks.secrets.env_var import EnvVarBackend
 
 if TYPE_CHECKING:
     import pytest
 
 
-def _backend(name: str = "env-var") -> SecretBackendDecl:
-    """A backend exposing the env-var provider. The built-in's name
-    coincides with the provider's; ``_named`` variants exercise the
-    name/provider split."""
-    return SecretBackendDecl(name=name, provider="env-var")
+def _backend() -> ActiveBackend:
+    return ActiveBackend(capability=EnvVarBackend())
 
 
 def test_default_convention_uppercases_and_dashes_to_underscores() -> None:
@@ -66,27 +64,24 @@ def test_override_uses_alternate_env_var(monkeypatch: pytest.MonkeyPatch) -> Non
     assert _backend().resolve([decl]) == {"github-token": "from-existing-env"}
 
 
-def test_mapping_keyed_by_backend_name_not_provider(
+def test_mapping_keyed_by_backend_name(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A differently-named backend on the same provider reads ITS OWN
-    mapping entry -- the name/provider split, end to end."""
+    """Mappings key the backend name (post-collapse: the capability
+    name); an unrelated key is ignored and the default convention
+    applies."""
     monkeypatch.setenv("AW_SECRET_TOKEN", "default-convention")
-    monkeypatch.setenv("SIBLING_TOKEN", "sibling-mapped")
     decl = SecretDecl(
         name="token",
         description="t",
-        backend_mappings={"sibling-env": "SIBLING_TOKEN"},
+        backend_mappings={"some-other-backend": "OTHER_TOKEN"},
     )
-    sibling = _backend(name="sibling-env")
-    assert sibling.resolve([decl]) == {"token": "sibling-mapped"}
-    # The built-in backend has no mapping entry -> default convention.
     assert _backend().resolve([decl]) == {"token": "default-convention"}
 
 
 def test_opt_out_is_per_backend(monkeypatch: pytest.MonkeyPatch) -> None:
-    """``backend_mappings.<name> = false`` opts out ONE backend; a
-    sibling backend on the same provider still attempts."""
+    """``backend_mappings.<name> = false`` opts out ONE backend; other
+    backends' entries are untouched."""
     monkeypatch.setenv("AW_SECRET_FORCED", "value")
     decl = SecretDecl(
         name="forced",
@@ -94,7 +89,6 @@ def test_opt_out_is_per_backend(monkeypatch: pytest.MonkeyPatch) -> None:
         backend_mappings={"env-var": False},
     )
     assert _backend().would_attempt(decl) is False
-    assert _backend(name="sibling-env").would_attempt(decl) is True
 
 
 def test_resolve_omits_unset_env(monkeypatch: pytest.MonkeyPatch) -> None:

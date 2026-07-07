@@ -3,7 +3,7 @@
 Resolution is a loop over the active backends -- no resolver object, no
 cache. Fakes here are backend-shaped duck types (name / interactive /
 would_attempt / describe_lookup / resolve): the loop only speaks the
-door methods.
+``ActiveBackend`` surface.
 """
 
 from __future__ import annotations
@@ -14,12 +14,11 @@ import pytest
 
 from agentworks.errors import ConfigError, SecretMappingError, SecretUnavailableError
 from agentworks.secrets import SecretDecl
-from agentworks.secrets.base import SecretBackendDecl
-from agentworks.secrets.resolve import preview_resolution, resolve_secrets
+from agentworks.secrets.resolve import ActiveBackend, preview_resolution, resolve_secrets
 
 
 class _FakeBackend:
-    """A backend-door stub controllable per-test."""
+    """An ActiveBackend-shaped stub controllable per-test."""
 
     def __init__(
         self,
@@ -60,9 +59,10 @@ def _decl(name: str, **kw: object) -> SecretDecl:
     return SecretDecl(name=name, description=f"{name} description", **kw)  # type: ignore[arg-type]
 
 
-def _chain(*backends: object) -> list[SecretBackendDecl]:
-    """The fakes duck-type the door methods; cast for the signatures."""
-    return cast("list[SecretBackendDecl]", list(backends))
+def _chain(*backends: object) -> list[ActiveBackend]:
+    """The fakes duck-type the ActiveBackend surface; cast for the
+    signatures."""
+    return cast("list[ActiveBackend]", list(backends))
 
 
 def test_first_backend_wins() -> None:

@@ -1,10 +1,8 @@
-"""Tests for Phase 2b.2's ``secret-backend`` kind.
+"""Tests for the ``secret-backend`` descriptor kind (post-collapse).
 
-The kind makes per-backend config a framework citizen and lets
-operator-declared ``[secret_backends.<kind>]`` blocks land as overrides
-on top of the built-in known-backend rows. The ``[secret_config]``
-chain itself is a framework citizen too (the ``secret-config`` kind):
-its entries are reference edges validated at finalize.
+One read-only row per registered capability, published by the secrets
+code publisher; not manifest-declarable. The ``[secret_config]`` chain
+names these rows directly.
 """
 
 from __future__ import annotations
@@ -43,6 +41,8 @@ def test_kind_attributes() -> None:
     assert kind.kind == "secret-backend"
     assert kind.miss_policy == "error"
     assert kind.auto_declare_names is None
+    assert kind.manifest_declarable is False
+    assert "secret-provider" not in KIND_REGISTRY  # collapsed 2026-07-07
 
 
 def test_synthesize_raises() -> None:
@@ -51,41 +51,23 @@ def test_synthesize_raises() -> None:
         kind.synthesize(())
 
 
-def test_known_backends_published(tmp_path: Path) -> None:
-    """The bundled manifests seed ``SecretBackendDecl`` rows for every
-    built-in backend (``env-var``, ``prompt``); operator config doesn't
-    have to declare ``[secret_backends.*]`` for them to exist. Phase 3
-    of the resource-manifests SDD moved these rows from the code
-    publisher to ``manifests/builtin/secret-backends.yaml``.
-    """
+def test_capability_descriptors_published(tmp_path: Path) -> None:
+    """One descriptor row per registered capability, from the secrets
+    code publisher (the bundled backend manifests died in the Phase 5.5
+    collapse)."""
     cfg = load_config(_write_cfg(tmp_path / "config.toml"), warn_issues=False)
     registry = build_registry(cfg)
     for backend_name in BUILTIN_BACKENDS:
         row = registry.lookup("secret-backend", backend_name)
         assert row.name == backend_name
-        assert row.provider == backend_name
         assert row.origin.variant == "built-in"
-        assert row.origin.source == (
-            "agentworks.manifests.builtin/secret-backends.yaml"
-        )
-
-
-def test_secret_providers_published(tmp_path: Path) -> None:
-    """Every registered provider gets a read-only descriptor row that
-    backend ``provider`` references resolve against."""
-    cfg = load_config(_write_cfg(tmp_path / "config.toml"), warn_issues=False)
-    registry = build_registry(cfg)
-    for provider_name in BUILTIN_BACKENDS:
-        row = registry.lookup("secret-provider", provider_name)
-        assert row.name == provider_name
-        assert row.origin.variant == "built-in"
+        assert row.origin.source == "agentworks.secrets"
 
 
 def test_legacy_toml_backend_section_does_not_override_built_in(tmp_path: Path) -> None:
     """``[secret_backends.env-var]`` is a deprecated no-op: it publishes
-    nothing (it warns at load), and the bundled built-in row survives
-    untouched. Built-in names are reserved via builtin_override.
-    """
+    nothing (it warns at load), and the descriptor row survives
+    untouched."""
     cfg = load_config(
         _write_cfg(
             tmp_path / "config.toml",

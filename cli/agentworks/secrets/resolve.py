@@ -10,6 +10,7 @@ feature with different security properties.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from agentworks import output
@@ -18,43 +19,104 @@ from agentworks.errors import AgentworksError, ConfigError, SecretUnavailableErr
 if TYPE_CHECKING:
     from agentworks.config import Config
     from agentworks.resources.registry import Registry
-    from agentworks.secrets.base import SecretBackendDecl, SecretDecl
+    from agentworks.secrets.backends import SecretBackend
+    from agentworks.secrets.base import MappingValue, SecretDecl
 
 
-def active_backends(config: Config, registry: Registry) -> list[SecretBackendDecl]:
-    """The active chain as backend resources, in precedence order.
+@dataclass(frozen=True)
+class ActiveBackend:
+    """One chain entry at runtime: a registered capability plus the
+    loop-side orchestration (mapping lookup and the generic ``False``
+    opt-out). Not a resource -- a thin wrapper the resolution loop and
+    inspection surfaces share so the opt-out is enforced structurally
+    in one place (a ``False`` mapping never reaches the capability).
+    """
+
+    capability: SecretBackend
+
+    @property
+    def name(self) -> str:
+        return self.capability.name
+
+    @property
+    def interactive(self) -> bool:
+        """Whether resolution interacts with the operator (prompt).
+        Inspection previews must not call ``resolve`` on interactive
+        backends -- probing would BE the interaction."""
+        return self.capability.interactive
+
+    def mapping_for(self, secret: SecretDecl) -> MappingValue | None:
+        """This backend's entry in the secret's ``backend_mappings``.
+        ``None`` when absent (the backend's default convention applies,
+        if it has one)."""
+        return secret.backend_mappings.get(self.name)
+
+    def would_attempt(self, secret: SecretDecl) -> bool:
+        mapping = self.mapping_for(secret)
+        if mapping is False:
+            return False
+        return self.capability.would_attempt(secret, mapping)
+
+    def describe_lookup(self, secret: SecretDecl) -> str | None:
+        mapping = self.mapping_for(secret)
+        if mapping is False:
+            return None
+        return self.capability.describe_lookup(secret, mapping)
+
+    def resolve(self, secrets: list[SecretDecl]) -> dict[str, str]:
+        wants: list[tuple[SecretDecl, MappingValue | None]] = [
+            (s, mapping)
+            for s in secrets
+            if (mapping := self.mapping_for(s)) is not False
+        ]
+        if not wants:
+            return {}
+        return self.capability.batch_get(wants)
+
+
+def active_backends(config: Config, registry: Registry) -> list[ActiveBackend]:
+    """The active chain as runtime backends, in precedence order.
 
     Each layer in its natural role: the chain comes from CONFIG
-    (``[secret_config].backends`` -- a setting), the rows from the
-    resource Registry. An unknown chain name gets the operator's
-    vocabulary -- the chain is config, so the error is a config error,
-    not a registry-graph error -- and the hint enumerates the DECLARED
-    backends (registry rows), never provider names.
+    (``[secret_config].backends`` -- a setting), validated against the
+    ``secret-backend`` descriptor rows in the resource Registry, and the
+    capabilities come from ``SECRET_BACKEND_REGISTRY``. An unknown chain
+    name gets the operator's vocabulary -- the chain is config, so the
+    error is a config error, not a registry-graph error -- and the hint
+    enumerates the registered backends.
     """
-    backends: list[SecretBackendDecl] = []
+    from agentworks.secrets.backends import SECRET_BACKEND_REGISTRY
+
+    backends: list[ActiveBackend] = []
     for name in config.secret_config_data.backends:
         try:
-            row: SecretBackendDecl = registry.lookup("secret-backend", name)
+            registry.lookup("secret-backend", name)
         except KeyError:
-            declared = sorted(
-                decl.name for decl in registry.iter_kind("secret-backend")
+            registered = sorted(
+                entry.name for entry in registry.iter_kind("secret-backend")
             )
             raise ConfigError(
                 f"[secret_config].backends names unknown backend {name!r}",
-                hint=(
-                    f"declare {name!r} as a secret-backend manifest, or "
-                    f"use a declared backend: {declared}"
-                ),
+                hint=f"registered backends: {registered}",
             ) from None
-        backends.append(row)
+        capability = SECRET_BACKEND_REGISTRY.get(name)
+        if capability is None:
+            # The descriptor rows mirror the capability registry; a row
+            # without code means a publisher bug (or a hand-built
+            # registry that skipped the secrets publisher).
+            raise ConfigError(
+                f"secret backend {name!r} has a registry row but no "
+                f"registered implementation"
+            )
+        backends.append(ActiveBackend(capability=capability))
     return backends
 
 
 def validate_chain(config: Config, registry: Registry) -> None:
     """Secret-system config consistency, run by ``build_registry`` right
-    after finalize: the chain's names must be ``secret-backend`` rows,
-    each backend's config must satisfy its provider, and every
-    operator-declared secret must be reachable via the chain.
+    after finalize: the chain's names must be ``secret-backend``
+    descriptor rows, and every operator-declared secret must be
+    reachable via the chain.
 
     The chain is pure config consumed here the way any subsystem
     consumes its settings; this is simply the secrets subsystem
@@ -71,11 +133,6 @@ def validate_chain(config: Config, registry: Registry) -> None:
     from agentworks.resources.access import secret_decls
 
     backends = active_backends(config, registry)
-    for backend in backends:
-        # Defensive re-validation: manifest decode already ran this, but
-        # hand-built registries and future non-manifest publishers get
-        # the same guarantee here.
-        backend.validate_config()
 
     operator_decls = [
         decl
@@ -112,7 +169,7 @@ def validate_chain(config: Config, registry: Registry) -> None:
 
 def resolve_secrets(
     secrets: list[SecretDecl],
-    backends: list[SecretBackendDecl],
+    backends: list[ActiveBackend],
     *,
     errors: dict[str, str] | None = None,
 ) -> dict[str, str]:
@@ -224,7 +281,7 @@ def resolve_secrets(
 
 
 def preview_resolution(
-    secret: SecretDecl, backends: list[SecretBackendDecl]
+    secret: SecretDecl, backends: list[ActiveBackend]
 ) -> str | None:
     """The name of the first backend that would resolve ``secret``, or
     ``None`` if nothing in the chain would.

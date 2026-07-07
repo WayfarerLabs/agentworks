@@ -36,6 +36,8 @@ KIND_SECTIONS: dict[str, str] = {
     "git-credential": "git_credentials",
     "admin-template": "admin",
     "named-console-template": "named_console",
+    # secret-backend: capability descriptor, not declarable (no decoder);
+    # listed for the migrator's [secret_backends.*] drop handling only.
     "secret-backend": "secret_backends",
     "apt-source": "apt_sources",
     "apt-package": "apt_packages",
@@ -48,7 +50,6 @@ KIND_SECTIONS: dict[str, str] = {
 # so the shared loaders validate and attach it exactly as for TOML.
 _DESCRIPTION_KINDS = {
     "secret",
-    "secret-backend",
     "session-template",
     "git-credential",
     "apt-source",
@@ -231,41 +232,6 @@ def _decode_named_console_template(
     )
 
 
-def _decode_secret_backend(doc: Document, spec: dict[str, object], issues: list[str]) -> Any:
-    from agentworks.secrets.base import SecretBackendDecl
-    from agentworks.secrets.providers import SECRET_PROVIDER_REGISTRY
-
-    description = str(spec.pop("description", ""))
-    provider = spec.pop("provider", None)
-    if not isinstance(provider, str) or not provider:
-        raise ConfigError("secret-backend requires spec.provider")
-    # Provider-owned configuration nests under spec.provider_config -- an
-    # opaque blob the named provider validates -- so the rest of the spec
-    # stays provider-agnostic and framework-validated. When the provider
-    # is registered, validate the blob now (the error carries this
-    # document's location); when it isn't, defer so the framework's
-    # reference miss policy reports the unknown provider uniformly.
-    raw_config = spec.pop("provider_config", {})
-    if not isinstance(raw_config, dict):
-        raise ConfigError("spec.provider_config must be a mapping")
-    if spec:
-        extras = ", ".join(sorted(spec))
-        raise ConfigError(
-            f"unknown secret-backend spec field(s): {extras}; "
-            "provider-specific configuration goes under spec.provider_config"
-        )
-    known = SECRET_PROVIDER_REGISTRY.get(provider)
-    provider_config = dict(raw_config)
-    if known is not None:
-        provider_config = dict(known.validate_config(doc.name, provider_config))
-    return SecretBackendDecl(
-        name=doc.name,
-        provider=provider,
-        description=description,
-        provider_config=provider_config,
-        declared_at=doc.location,
-    )
-
 
 def _decode_apt_source(doc: Document, spec: dict[str, object], issues: list[str]) -> Any:
     from agentworks.catalog import _load_apt_sources
@@ -302,7 +268,6 @@ _DECODERS: dict[str, Callable[[Document, dict[str, object], list[str]], Any]] = 
     "workspace-template": _decode_workspace_template,
     "session-template": _decode_session_template,
     "git-credential": _decode_git_credential,
-    "secret-backend": _decode_secret_backend,
     "admin-template": _decode_admin_template,
     "named-console-template": _decode_named_console_template,
     "apt-source": _decode_apt_source,

@@ -412,8 +412,8 @@ def test_resolution_preview_not_available_when_no_backend_attempts(
     exempts); the chain comes from config as always.
     """
     from agentworks.resources import Origin, Registry
+    from agentworks.secrets.backends import publish_to as publish_backends
     from agentworks.secrets.base import SecretDecl
-    from agentworks.secrets.providers import publish_to as publish_providers
 
     cfg = _write_cfg(
         tmp_path,
@@ -429,7 +429,7 @@ def test_resolution_preview_not_available_when_no_backend_attempts(
 
     registry = Registry.empty()
     builtin_manifests.publish_to(registry)
-    publish_providers(registry)
+    publish_backends(registry)
     decl = SecretDecl(
         name="api-key",
         description="API key",

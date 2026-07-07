@@ -145,10 +145,7 @@ def test_resource_kinds_have_references_field_not_usage() -> None:
         VMTemplate,
         WorkspaceTemplate,
     )
-    from agentworks.secrets.base import (
-        SecretBackendDecl,
-        SecretDecl,
-    )
+    from agentworks.secrets.base import SecretDecl
 
     resource_types = [
         AptSourceEntry,
@@ -162,7 +159,6 @@ def test_resource_kinds_have_references_field_not_usage() -> None:
         SessionTemplate,
         VMTemplate,
         WorkspaceTemplate,
-        SecretBackendDecl,
         SecretDecl,
     ]
     import dataclasses

@@ -152,7 +152,10 @@ def test_unknown_kind_gets_kebab_hint(tmp_path: Path) -> None:
     assert "vm-template" in exc.value.hint
 
 
-def test_secret_backend_requires_provider(tmp_path: Path) -> None:
+def test_secret_backend_kind_rejected(tmp_path: Path) -> None:
+    """Post-collapse (2026-07-07): secret-backend is a capability
+    descriptor kind; declaring it gets the permanent R3 envelope
+    error."""
     root = tmp_path / "resources"
     _write(
         root,
@@ -165,7 +168,7 @@ def test_secret_backend_requires_provider(tmp_path: Path) -> None:
         spec: {}
         """,
     )
-    with pytest.raises(ConfigError, match="requires spec.provider"):
+    with pytest.raises(ConfigError, match="provided by the app"):
         load_manifests(root)
 
 

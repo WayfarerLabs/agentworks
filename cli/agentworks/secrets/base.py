@@ -1,11 +1,11 @@
 """Core types for the agentworks secret system.
 
-Backends are the door (ADR 0016, YAML resource manifests and the
-config/resource/capability split): every runtime secret operation is a
-method on ``SecretBackendDecl``,
-which invokes its provider (the raw capability) through the provider
-API. See ``docs/adrs/0013-cli-side-secret-injection.md`` for why values
-never persist on the VM.
+Secrets are declarations (``SecretDecl``); values come from the
+registered backend capabilities (``agentworks.secrets.backends``)
+through the resolution loop (ADR 0016, YAML resource manifests and the
+config/resource/capability split). See
+``docs/adrs/0013-cli-side-secret-injection.md`` for why values never
+persist on the VM.
 """
 
 from __future__ import annotations
@@ -22,8 +22,7 @@ if TYPE_CHECKING:
     # `from __future__ import annotations` keeps the field types as strings,
     # so the runtime imports are unnecessary.
     from agentworks.resources.origin import Origin
-    from agentworks.resources.reference import ReferenceEntry, ResourceReference
-    from agentworks.secrets.providers import SecretProvider
+    from agentworks.resources.reference import ReferenceEntry
 
 MappingValue = str | dict[str, object] | Literal[False]
 """One entry in ``SecretDecl.backend_mappings``: an identifier override
@@ -61,116 +60,6 @@ class SecretDecl:
     # direct-construction call sites (tests, framework synthesize paths).
     origin: Origin | None = None
     references: tuple[ReferenceEntry, ...] = ()
-
-
-@dataclass(frozen=True)
-class SecretBackendDecl:
-    """A secret backend: the exposed resource for a secret provider.
-
-    Backends are THE DOOR to secrets -- every runtime operation
-    (``would_attempt``, ``describe_lookup``, ``resolve``) is a method
-    here, and only these methods call the provider API. ``name`` is the
-    only identity runtime surfaces use; ``provider`` names the raw
-    capability (a field, not an identity); ``provider_config`` carries
-    the provider-owned blob (``spec.provider_config`` in the manifest),
-    validated by the provider at manifest decode -- the rest of the spec
-    is provider-agnostic. Multiple backends may share one provider.
-    """
-
-    name: str
-    provider: str
-    description: str = ""
-    provider_config: dict[str, object] = field(default_factory=dict)
-    declared_at: SourceLocation = field(default_factory=synthesized)
-    origin: Origin | None = None
-    references: tuple[ReferenceEntry, ...] = ()
-
-    def referenced_resources(self) -> list[ResourceReference]:
-        from agentworks.resources.reference import ResourceReference
-
-        return [
-            ResourceReference(
-                name=self.provider,
-                kind="secret-provider",
-                usage="the secret provider",
-                source=("secret-backend", self.name),
-            )
-        ]
-
-    # -- The door: runtime operations -----------------------------------
-
-    def _capability(self) -> SecretProvider:
-        from agentworks.errors import ConfigError
-        from agentworks.secrets.providers import SECRET_PROVIDER_REGISTRY
-
-        capability = SECRET_PROVIDER_REGISTRY.get(self.provider)
-        if capability is None:
-            # The registry graph validates provider references at
-            # finalize; reaching here means a row exists without code
-            # (a registration bug), or the decl never went through a
-            # registry at all.
-            raise ConfigError(
-                f'secret-backend "{self.name}" names provider '
-                f"{self.provider!r}, which has no registered implementation"
-            )
-        return capability
-
-    def mapping_for(self, secret: SecretDecl) -> MappingValue | None:
-        """This backend's entry in the secret's ``backend_mappings``,
-        keyed by BACKEND NAME. ``None`` when absent (provider default
-        convention applies, if it has one)."""
-        return secret.backend_mappings.get(self.name)
-
-    @property
-    def interactive(self) -> bool:
-        """Whether resolution interacts with the operator (prompt).
-        Inspection previews must not call ``resolve`` on interactive
-        backends -- probing would BE the interaction."""
-        return self._capability().interactive
-
-    def would_attempt(self, secret: SecretDecl) -> bool:
-        """Does this backend's config apply to this secret? The explicit
-        opt-out (``mapping is False``) is handled here, generically; the
-        provider decides the rest (default convention vs. soft-skip).
-        Never verifies that resolution would succeed."""
-        mapping = self.mapping_for(secret)
-        if mapping is False:
-            return False
-        return self._capability().would_attempt(self.provider_config, secret, mapping)
-
-    def describe_lookup(self, secret: SecretDecl) -> str | None:
-        """Human-readable identifier this backend would use (env var
-        name, op:// URI, ...); ``None`` for backends with no static
-        identifier. Pure config-derived; never probes."""
-        mapping = self.mapping_for(secret)
-        if mapping is False:
-            return None
-        return self._capability().describe_lookup(self.provider_config, secret, mapping)
-
-    def resolve(self, secrets: list[SecretDecl]) -> dict[str, str]:
-        """Batch-resolve through the provider. Callers pre-filter by
-        ``would_attempt``, and the door enforces the opt-out
-        structurally: a ``False`` mapping never reaches the provider,
-        so a forgotten pre-filter cannot resolve an opted-out secret.
-        Secrets the provider has no value for are simply absent from
-        the result (soft miss). A persistent-store provider raises
-        ``SecretMappingError`` when an explicit mapping definitively
-        has no value (hard miss; halts the chain)."""
-        wants: list[tuple[SecretDecl, MappingValue | None]] = [
-            (s, mapping)
-            for s in secrets
-            if (mapping := self.mapping_for(s)) is not False
-        ]
-        if not wants:
-            return {}
-        return self._capability().batch_get(self.provider_config, wants)
-
-    def validate_config(self) -> None:
-        """Re-run the provider's config schema over this backend's
-        config (decode already ran it for manifest-declared backends;
-        this covers hand-published rows and future non-manifest
-        publishers). Raises ``ConfigError`` on schema violations."""
-        self._capability().validate_config(self.name, self.provider_config)
 
 
 DEFAULT_BACKEND_CHAIN: tuple[str, ...] = ("env-var", "prompt")

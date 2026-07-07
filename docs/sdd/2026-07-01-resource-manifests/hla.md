@@ -139,11 +139,12 @@ Publish order matters for the built-in override policy: built-ins publish first,
 second. `Registry.add` today replaces duplicates silently by design; this SDD changes it to explicit
 collision handling. A collision between an operator row and an existing built-in row consults the
 kind's override flag: `allow` (catalog kinds; operator row replaces the built-in row, exactly
-today's behavior). The `reserved` tier died with its last member in the Phase 5.5 collapse
-(descriptor kinds are simply not declarable, which R3's envelope error enforces earlier). A
-collision between two operator rows is always a `ConfigError` citing both origins. The manifest
-loader already catches operator duplicates within the manifest set; the publish-time check is what
-catches a resource declared in both TOML and a manifest (a permanent dual-path condition).
+today's behavior) or `reserved` (`ConfigError`; post-5.5 defensively declared with zero reachable
+members -- descriptor kinds are not declarable, which R3's envelope error enforces earlier -- and
+retained for the plugin SDD's default exposed resources). A collision between two operator rows is
+always a `ConfigError` citing both origins. The manifest loader already catches operator duplicates
+within the manifest set; the publish-time check is what catches a resource declared in both TOML and
+a manifest (a permanent dual-path condition).
 
 ## Dual source (permanent, revised 2026-07-03)
 
@@ -165,11 +166,15 @@ loads today keeps loading (with deprecation warnings on TOML resource sections).
 
 - `manifest_declarable: bool`. True for every operator kind; False for descriptor kinds
   (`secret-backend`, `git-credential-provider`) and any future code-only kind.
-- `builtin_override: Literal["allow"]` -- post-5.5 the flag has one live value (`allow`, catalog
-  kinds). The `reserved` tier's only member was the declarable secret-backend kind; it dies with the
-  collapse (decided 2026-07-07: delete rather than hedge, reintroduce on a real need -- descriptor
-  kinds are protected earlier by `manifest_declarable=False`). Template kinds are unaffected (their
-  defaults are synthesized, not built-in rows, so no collision arises).
+- `builtin_override: Literal["allow", "reserved"]`. `allow` for catalog kinds; `reserved` elsewhere
+  as the defensive default. Post-5.5 the `reserved` tier has zero REACHABLE members (its only live
+  member was the declarable secret-backend kind, whose built-in rows an operator manifest could
+  actually collide with) -- but the tier itself stays: ten kinds declare it defensively, and the
+  draft plugin SDD's default exposed resources are its named future consumer. (This revises the
+  first-draft answer to the design review's question 25, which said delete; implementation contact
+  showed deletion would flip ten defensive declarations and force the plugin SDD to re-add the
+  tier.) Template kinds are unaffected (their defaults are synthesized, not built-in rows, so no
+  collision arises).
 
 Both are static per-kind declarations in the same place the miss policy lives; no new dispatch
 machinery.

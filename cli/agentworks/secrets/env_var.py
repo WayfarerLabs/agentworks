@@ -1,6 +1,6 @@
-"""The ``env-var`` secret provider: reads operator-side environment
-variables. A raw capability -- invoked only through a ``secret-backend``
-resource's door methods.
+"""The ``env-var`` secret backend: reads operator-side environment
+variables. A raw capability, consumed by the resolution loop through
+the ``SecretBackend`` API.
 """
 
 from __future__ import annotations
@@ -11,8 +11,6 @@ from typing import TYPE_CHECKING
 from agentworks.errors import ConfigError
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping
-
     from agentworks.secrets.base import MappingValue, SecretDecl
 
 
@@ -25,11 +23,11 @@ def env_var_name_for(secret_name: str) -> str:
     return "AW_SECRET_" + secret_name.upper().replace("-", "_")
 
 
-class EnvVarProvider:
+class EnvVarBackend:
     """Reads from operator-side environment variables.
 
     Identifier resolution (the ``False`` opt-out never reaches a
-    provider -- the backend handles it):
+    backend -- the resolution loop handles it):
 
     - mapping is a string: use it as the env var name.
     - mapping absent (or structured): derive ``AW_SECRET_<NAME>`` from
@@ -40,17 +38,8 @@ class EnvVarProvider:
     """
 
     name = "env-var"
+    description = "resolves from AW_SECRET_<NAME> environment variables"
     interactive = False
-
-    def validate_config(
-        self, backend_name: str, config: Mapping[str, object]
-    ) -> Mapping[str, object]:
-        if config:
-            raise ConfigError(
-                f'secret-backend "{backend_name}": the {self.name} provider '
-                f"accepts no configuration; got {sorted(config)}"
-            )
-        return {}
 
     def _resolved_name(self, secret: SecretDecl, mapping: MappingValue | None) -> str:
         if isinstance(mapping, str):
@@ -61,14 +50,13 @@ class EnvVarProvider:
             # from a different identifier than the operator wrote.
             raise ConfigError(
                 f"secret {secret.name!r}: backend_mappings for the "
-                f"env-var provider must be a string (an env var name) "
+                f"env-var backend must be a string (an env var name) "
                 f"or false; got a table"
             )
         return env_var_name_for(secret.name)
 
     def would_attempt(
         self,
-        config: Mapping[str, object],
         secret: SecretDecl,
         mapping: MappingValue | None,
     ) -> bool:
@@ -76,7 +64,6 @@ class EnvVarProvider:
 
     def describe_lookup(
         self,
-        config: Mapping[str, object],
         secret: SecretDecl,
         mapping: MappingValue | None,
     ) -> str | None:
@@ -84,7 +71,6 @@ class EnvVarProvider:
 
     def batch_get(
         self,
-        config: Mapping[str, object],
         wants: list[tuple[SecretDecl, MappingValue | None]],
     ) -> dict[str, str]:
         out: dict[str, str] = {}

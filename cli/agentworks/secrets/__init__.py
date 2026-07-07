@@ -1,7 +1,10 @@
 """Secret declarations, backends, and the resolve loop.
 
-Backends are the door: see ADR 0016 for the model (config chain ->
-backend resources -> provider capabilities).
+See ADR 0016 for the model: the ``[secret_config].backends`` chain
+(config) names registered backend capabilities
+(``SECRET_BACKEND_REGISTRY``), mirrored into the resource Registry as
+read-only ``secret-backend`` descriptor rows; the resolution loop
+consumes the ``SecretBackend`` API directly.
 """
 
 from __future__ import annotations
@@ -12,8 +15,8 @@ if TYPE_CHECKING:
     from agentworks.resources import Registry
 
 
+from agentworks.secrets.backends import SECRET_BACKEND_REGISTRY
 from agentworks.secrets.base import (
-    SecretBackendDecl,
     SecretConfig,
     SecretDecl,
 )
@@ -23,8 +26,8 @@ from agentworks.secrets.orchestration import (
     compute_needed_secrets,
     resolve_for_command,
 )
-from agentworks.secrets.providers import SECRET_PROVIDER_REGISTRY
 from agentworks.secrets.resolve import (
+    ActiveBackend,
     active_backends,
     resolve_secrets,
     validate_chain,
@@ -32,23 +35,19 @@ from agentworks.secrets.resolve import (
 
 
 def publish_to(registry: Registry) -> None:
-    """Publish the ``secret-provider`` descriptor rows.
-
-    The built-in BACKEND rows ship as bundled manifests
-    (``manifests/builtin/secret-backends.yaml``); this publisher
-    contributes the provider descriptors that backend ``provider``
-    references resolve against -- the resource-registry projection of
-    the capability registry (``SECRET_PROVIDER_REGISTRY``), which remains the
-    source of truth for the implementations themselves.
+    """Publish the ``secret-backend`` descriptor rows -- the
+    resource-registry projection of the capability registry
+    (``SECRET_BACKEND_REGISTRY``), which remains the source of truth for
+    the implementations themselves.
     """
-    from agentworks.secrets.providers import publish_to as publish_providers
+    from agentworks.secrets.backends import publish_to as publish_backends
 
-    publish_providers(registry)
+    publish_backends(registry)
 
 
 __all__ = [
-    "SECRET_PROVIDER_REGISTRY",
-    "SecretBackendDecl",
+    "SECRET_BACKEND_REGISTRY",
+    "ActiveBackend",
     "SecretConfig",
     "SecretDecl",
     "SecretTarget",

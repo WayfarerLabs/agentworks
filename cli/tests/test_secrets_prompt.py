@@ -1,20 +1,21 @@
-"""Tests for the prompt provider, exercised through the backend door
-(``SecretBackendDecl`` methods) -- the only way runtime code reaches a
-provider.
+"""Tests for the prompt backend, exercised through the runtime
+``ActiveBackend`` wrapper -- how the resolution loop reaches a
+capability.
 """
 
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from agentworks.secrets import SecretBackendDecl, SecretDecl
+from agentworks.secrets import ActiveBackend, SecretDecl
+from agentworks.secrets.prompt import PromptBackend
 
 if TYPE_CHECKING:
     import pytest
 
 
-def _backend() -> SecretBackendDecl:
-    return SecretBackendDecl(name="prompt", provider="prompt")
+def _backend() -> ActiveBackend:
+    return ActiveBackend(capability=PromptBackend())
 
 
 def _set_interactive(monkeypatch: pytest.MonkeyPatch, value: bool) -> None:
@@ -34,7 +35,7 @@ def test_would_attempt_false_when_opted_out() -> None:
     """``backend_mappings.prompt = false`` disables the prompt backend for
     this secret -- the way operators force a secret to error rather than
     silently fall through to interactive input when testing the env-var
-    path in an interactive shell. The opt-out is generic backend-door
+    path in an interactive shell. The opt-out is generic loop-side
     behavior; the provider never sees it."""
     decl = SecretDecl(
         name="x", description="X", backend_mappings={"prompt": False},
