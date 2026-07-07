@@ -8,8 +8,6 @@ view, render via ``agentworks.output``" pattern.
 Per FRD R10, neither command prompts the operator nor resolves a secret
 value for display; they report state by asking the active backends
 (``would_attempt`` / ``describe_lookup``) directly.
-Surfaces display BACKEND NAMES; the provider is a field visible via
-``agw resource describe secret-backend/<name>``.
 """
 
 from __future__ import annotations
@@ -89,7 +87,7 @@ def build_secret_table(config: Config, registry: Registry) -> SecretTable:
     Walks the active backends in precedence order; for each
     Registry-published secret asks each backend whether it would attempt
     and what identifier it would use. Pure config + registry derived;
-    never probes a provider or resolves a value.
+    never probes a backend or resolves a value.
     """
     from agentworks.secrets.resolve import active_backends
 
@@ -209,12 +207,11 @@ class BackendMapping:
     Fields express what the backend would do at resolution time without
     actually resolving (no I/O):
 
-    - ``backend``: the backend NAME (``"env-var"``, ``"op-work"``, ...).
+    - ``backend``: the backend name (``"env-var"``, ``"prompt"``, ...).
     - ``would_attempt``: True if the backend would try this secret at
       resolution time. False = explicit opt-out via
-      ``backend_mappings.<backend> = false``, or the backend's provider
-      has no default convention for this secret and no operator
-      override.
+      ``backend_mappings.<backend> = false``, or the backend has no
+      default convention for this secret and no operator override.
     - ``identifier``: the backend's lookup identifier (env-var name,
       ``op://`` URI, vault path, etc.) when meaningful. ``None`` for
       backends with no static identifier (prompt) or for backends that

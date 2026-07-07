@@ -34,12 +34,9 @@ class SecretDecl:
     """A declared secret. Values are never stored here; only the existence,
     description, and per-backend identifier overrides.
 
-    ``backend_mappings`` is keyed by BACKEND NAME (the ``secret-backend``
-    resource's name, e.g. ``"env-var"``, ``"op-work"``) -- never by
-    provider. Two backends sharing one provider get independent
-    mappings. The built-in backends' names coincide with their
-    providers' names by naming choice, never relied on in code. Value
-    forms per FRD R4:
+    ``backend_mappings`` is keyed by backend (capability) name
+    (``"env-var"``, ``"prompt"``; later ``"onepassword"``, ...). Value
+    forms per the env-and-secrets SDD:
 
     - ``str``: backend's identifier for this secret (env var name, op:// URI, etc.).
     - ``dict[str, object]``: structured identifier (for backends whose ID has

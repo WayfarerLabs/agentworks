@@ -42,6 +42,9 @@ def test_kind_attributes() -> None:
     assert kind.miss_policy == "error"
     assert kind.auto_declare_names is None
     assert kind.manifest_declarable is False
+    # The reserved tier stays (defensive default; plugin-SDD consumer)
+    # even though its last reachable member died in the collapse.
+    assert kind.builtin_override == "reserved"
     assert "secret-provider" not in KIND_REGISTRY  # collapsed 2026-07-07
 
 

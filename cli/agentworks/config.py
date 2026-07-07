@@ -1517,10 +1517,10 @@ def _load_secret_backends(
 ) -> tuple[str, ...]:
     """Warn ``[secret_backends.*]`` sections as deprecated no-ops.
 
-    The provider-keyed TOML sections never carried configuration (only
-    the provider name itself), and the built-in backends now ship as
-    bundled manifests -- so a section here is semantically empty. Known
-    providers warn as deprecated; unknown ones (typo ``envvar`` for
+    The backend-keyed TOML sections never carried configuration (only
+    the backend name itself), and the backends are registered code
+    capabilities -- so a section here is semantically empty. Known
+    backends warn as deprecated; unknown ones (typo ``envvar`` for
     ``env-var``) stay a hard ``ConfigError`` for typo protection.
     Nothing is stored and nothing publishes.
 
@@ -1534,20 +1534,20 @@ def _load_secret_backends(
 
     from agentworks.secrets.backends import SECRET_BACKEND_REGISTRY
 
-    known_providers = set(SECRET_BACKEND_REGISTRY)
+    known_backends = set(SECRET_BACKEND_REGISTRY)
     found: list[str] = []
     for key, bdata in raw.items():
-        provider_str = str(key)
+        backend_str = str(key)
         if not isinstance(bdata, dict):
-            raise ConfigError(f"secret_backends.{provider_str} must be a table")
-        if provider_str not in known_providers:
+            raise ConfigError(f"secret_backends.{backend_str} must be a table")
+        if backend_str not in known_backends:
             raise ConfigError(
-                f"[secret_backends.{provider_str}] names an unknown secret "
-                f"provider; supported: {sorted(known_providers)}"
+                f"[secret_backends.{backend_str}] names an unknown secret "
+                f"backend; supported: {sorted(known_backends)}"
             )
-        found.append(f"[secret_backends.{provider_str}]")
+        found.append(f"[secret_backends.{backend_str}]")
         deprecations.append(
-            f"[secret_backends.{provider_str}] is deprecated and has no effect: "
+            f"[secret_backends.{backend_str}] is deprecated and has no effect: "
             f"the built-in backends ship with agentworks, and activation is "
             f"[secret_config].backends. Remove the section, or run "
             f"`agw resource migrate --all` to drop it."

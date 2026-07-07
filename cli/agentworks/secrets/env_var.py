@@ -18,7 +18,7 @@ def env_var_name_for(secret_name: str) -> str:
     """Default convention: secret 'github-token' -> 'AW_SECRET_GITHUB_TOKEN'.
 
     Note: the Python helper name stays snake_case (Python convention); the
-    provider name ``env-var`` is kebab-case (operator-typed identifier).
+    backend name ``env-var`` is kebab-case (operator-typed identifier).
     """
     return "AW_SECRET_" + secret_name.upper().replace("-", "_")
 

@@ -32,7 +32,8 @@ def test_every_kind_has_a_sample() -> None:
     # secret-backend is a capability descriptor post-collapse
     # (2026-07-07): in KIND_SECTIONS for the migrator's drop table, not
     # declarable, no sample.
-    assert set(SAMPLE_KINDS) == set(KIND_SECTIONS) - {"secret-backend"}
+    assert "secret-backend" not in SAMPLE_KINDS
+    assert set(SAMPLE_KINDS) | {"secret-backend"} == set(KIND_SECTIONS)
     for kind in SAMPLE_KINDS:
         assert sample_text(kind).strip()
 

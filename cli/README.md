@@ -520,10 +520,10 @@ order-preserving) across template inheritance.
 
 Cross-kind inspection of the Resource Registry. The registry is the framework that owns every
 operator-declared, auto-declared, and built-in resource the CLI knows about: secrets, VM templates,
-agent templates, workspace templates, catalog entries, git credential providers, secret backends and
-their backends, etc. The two commands below stop at the framework-uniform fields (`kind`, `name`,
-`origin`, `references`, `used_by`, `description`). For kind-specific detail -- secret backend
-mappings, template inheritance chains, resolution previews -- reach for the per-kind command (e.g.
+agent templates, workspace templates, catalog entries, git credential providers, secret backends,
+etc. The two commands below stop at the framework-uniform fields (`kind`, `name`, `origin`,
+`references`, `used_by`, `description`). For kind-specific detail -- secret backend mappings,
+template inheritance chains, resolution previews -- reach for the per-kind command (e.g.
 `agw secret describe`).
 
 | Command                              | Description                                                          |
@@ -583,8 +583,8 @@ Settings sections (`config.toml`, permanent):
 - `[defaults]` -- default platform, VM host
 - `[session.config]` -- session defaults (history limit)
 - `[secret_config]` -- active secret backend chain (`[secret_backends.*]` sections are deprecated
-  no-ops; the built-in backends ship with agentworks, and new backends are declared as
-  `secret-backend` YAML manifests)
+  no-ops; backends are registered code capabilities, listed by
+  `agw resource list --kind secret-backend`)
 - `[azure]` -- Azure-specific settings
 - `[proxmox]` -- Proxmox VE API settings
 

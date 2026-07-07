@@ -177,10 +177,10 @@ def resolve_secrets(
 
     Each backend's ``resolve`` is called once with the still-missing,
     would-attempt subset; the next backend sees only what remains. Soft
-    misses (a backend's provider has no value) fall through naturally;
-    hard misses (``SecretMappingError`` from a persistent-store
-    provider) halt the chain so a misconfigured store doesn't quietly
-    fall through to a prompt.
+    misses (a backend has no value) fall through naturally; hard
+    misses (``SecretMappingError`` from a persistent-store backend)
+    halt the chain so a misconfigured store doesn't quietly fall
+    through to a prompt.
 
     ``errors`` selects the failure policy (one loop, both policies --
     same shape as the config loaders' ``issues`` out-param):
@@ -218,7 +218,7 @@ def resolve_secrets(
         except AgentworksError as exc:
             if errors is None:
                 raise
-            # Batch-level attribution: the provider's exception doesn't
+            # Batch-level attribution: the backend's exception doesn't
             # say which mapping tripped it, so every secret this backend
             # was attempting is marked failed and withheld from later
             # backends (mirrors the hard-miss halt for these secrets).
@@ -237,7 +237,7 @@ def resolve_secrets(
             output.detail(f"Resolved {name} via {backend.name}{suffix}")
         for name, value in got.items():
             # ADR 0014: embedded newlines would corrupt SSH
-            # `-o SetEnv=KEY=VALUE` arguments. The env-var provider
+            # `-o SetEnv=KEY=VALUE` arguments. The env-var backend
             # already strips trailing newlines (the common copy-paste
             # artifact); anything still containing one is a malformed
             # secret value and a hard error worth surfacing now rather
