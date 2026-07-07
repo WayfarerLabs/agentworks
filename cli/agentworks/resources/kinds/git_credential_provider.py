@@ -49,7 +49,7 @@ class _GitCredentialProviderKind:
     kind: str = "git-credential-provider"
     miss_policy: Literal["auto-declare", "error"] = "error"
     auto_declare_names: frozenset[str] | None = None
-    manifest_declarable: bool = False  # descriptor rows come from the app
+    manifest_declarable: bool = False  # capability resources come from the app
     builtin_override: Literal["allow", "reserved"] = "reserved"
 
     def synthesize(self, references: Sequence[ResourceReference]) -> Any:

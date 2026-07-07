@@ -3,7 +3,7 @@
 See ADR 0016 for the model: the ``[secret_config].backends`` chain
 (config) names registered backend capabilities
 (``SECRET_BACKEND_REGISTRY``), mirrored into the resource Registry as
-read-only ``secret-backend`` descriptor rows; the resolution loop
+read-only ``secret-backend`` capability resources; the resolution loop
 consumes the ``SecretBackend`` API directly.
 """
 
@@ -35,7 +35,7 @@ from agentworks.secrets.resolve import (
 
 
 def publish_to(registry: Registry) -> None:
-    """Publish the ``secret-backend`` descriptor rows -- the
+    """Publish the ``secret-backend`` capability resources -- the
     resource-registry projection of the capability registry
     (``SECRET_BACKEND_REGISTRY``), which remains the source of truth for
     the implementations themselves.

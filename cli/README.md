@@ -735,10 +735,10 @@ group), and the Tailscale group checks only workstation connectivity -- the auth
 
 ### Secret Backends
 
-A **backend** is a code capability that produces secret values (`env-var`, `prompt`; future backends
-like `onepassword`). Backends are registered code, not declarable resources; they show as read-only
-rows in `agw resource list --kind secret-backend`, and the chain (`[secret_config].backends`)
-activates them in precedence order. Per-secret behavior -- identifier overrides, structured store
+A **backend** is a capability resource that produces secret values (`env-var`, `prompt`; future
+backends like `onepassword`): a read-only row backed by registered code, listed by
+`agw resource list --kind secret-backend` and activated in precedence order by the chain
+(`[secret_config].backends`). Per-secret behavior -- identifier overrides, structured store
 addressing, opt-outs -- lives in each secret's `backend_mappings.<backend>`.
 
 ### Mise (Polyglot Tool Manager)

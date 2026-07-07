@@ -62,14 +62,16 @@ config itself to YAML.
   Stays in `config.toml`.
 - **Resource, reference, registry, origin, miss policy**: as defined by the resource-registry SDD.
   This SDD changes where operator-declared resources come from, not what they are.
-- **Capability**: a unit of code the app (or, later, a plugin) provides: a secret provider, a git
-  credential provider, a VM provisioner, a secret backend. Capabilities are not manifest-declarable.
-  Where a capability is referenced by name from resources, it is mirrored into the registry as a
-  read-only descriptor row so references validate uniformly.
+- **Capability**: a resource whose implementation is registered code (a git credential provider, a
+  VM provisioner, a secret backend), provided by the app or, later, a plugin. Capability kinds are
+  not manifest-declarable; the rows are read-only, and references to them validate uniformly through
+  the registry. (Definition expanded 2026-07-07: an earlier revision held capabilities apart as "not
+  resources, mirrored in as descriptor rows" -- prose-only ontology that confused every reader of
+  `agw resource list`.)
 - **Backend**: the secret-domain capability -- the code that produces secret values (`env-var`,
-  `prompt`; later `onepassword`, ...). Named by `[secret_config].backends` (the chain) and by
-  `backend_mappings` keys on secrets. Not a resource; mirrored as a `secret-backend` descriptor row.
-  (Revised 2026-07-07: originally "backend" named a declarable instantiation of a "secret-provider"
+  `prompt`; later `onepassword`, ...). A capability resource of kind `secret-backend`, named by
+  `[secret_config].backends` (the chain) and by `backend_mappings` keys on secrets. (Revised
+  2026-07-07: originally "backend" named a declarable instantiation of a "secret-provider"
   capability; the collapse made the capability itself the backend.)
 - **Provider**: the conventional name for a capability-reference field on a resource
   (`git-credential.spec.provider` naming `github`/`azdo`), and the generic cross-domain word for

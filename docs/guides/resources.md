@@ -99,10 +99,10 @@ policy is per kind:
 
 Two layers, one rule each:
 
-- A **secret backend** is code -- the capability that produces secret values (`env-var`, `prompt`;
-  later `onepassword`, ...). Backends are not declarable resources; the app (and later plugins)
-  registers them, and they appear as read-only `secret-backend` rows in `agw resource list`.
-  Per-secret behavior -- identifier overrides, structured store addressing like
+- A **secret backend** is a capability resource: a read-only `secret-backend` row whose
+  implementation is registered code (`env-var`, `prompt`; later `onepassword`, ...). You cannot
+  declare one -- the app (and later plugins) registers them -- but they list and describe like every
+  other resource. Per-secret behavior -- identifier overrides, structured store addressing like
   `{ vault = "Work", item = "npm" }`, and opt-outs -- lives in each secret's
   `backend_mappings.<backend>`.
 - The **chain** is a setting: `[secret_config].backends` in `config.toml` lists the active backends

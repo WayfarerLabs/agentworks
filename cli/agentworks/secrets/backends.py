@@ -1,19 +1,19 @@
 """The secret-backend capability registry.
 
-Three distinct layers meet in the secret system, and keeping them
+Three distinct pieces meet in the secret system, and keeping them
 distinct is the design (ADR 0016):
 
 - CONFIG: ``[secret_config].backends``, the active chain. A setting,
   not a resource.
-- RESOURCES: read-only ``secret-backend`` descriptor rows in the
-  resource Registry -- one per registered capability, so the chain and
-  per-secret ``backend_mappings`` validate through the framework's
-  uniform machinery and the backends are visible in
-  ``agw resource list``.
-- RAW CAPABILITIES: this module. ``SECRET_BACKEND_REGISTRY`` holds the
-  code implementations (``env-var``, ``prompt``; later ``onepassword``,
-  plugin-registered backends). Backends are not resources and have no
-  declarable form; ``SecretBackend`` is an ordinary well-defined API
+- RESOURCES: backends are capability resources -- read-only
+  ``secret-backend`` rows, one per registered capability, so the chain
+  and per-secret ``backend_mappings`` validate through the framework's
+  uniform machinery and the backends list/describe like every other
+  resource.
+- IMPLEMENTATIONS: this module. ``SECRET_BACKEND_REGISTRY`` holds the
+  code behind those rows (``env-var``, ``prompt``; later
+  ``onepassword``, plugin-registered backends). Capability kinds have
+  no declarable form; ``SecretBackend`` is an ordinary well-defined API
   abstracting where secrets actually come from, consumed by the
   resolution loop (``agentworks.secrets.resolve``).
 
@@ -96,14 +96,14 @@ SECRET_BACKEND_REGISTRY: dict[str, SecretBackend] = {
     "prompt": PromptBackend(),
 }
 """The capability registry. Future plugins register here (and publish
-their own descriptor rows with plugin origins)."""
+their own capability resources with plugin origins)."""
 
 
 def publish_to(registry: Registry) -> None:
-    """Publish one ``secret-backend`` descriptor row per registered
-    backend, ``built-in`` origin. Read-only rows: they exist so the
-    chain and per-secret mappings validate uniformly and the backends
-    are visible in ``agw resource list``.
+    """Publish one ``secret-backend`` capability resource per registered
+    backend, ``built-in`` origin. Read-only rows: the chain and
+    per-secret mappings validate against them uniformly, and the
+    backends list/describe like every other resource.
     """
     from agentworks.resources import Origin
     from agentworks.resources.kinds.secret_backend import SecretBackendEntry

@@ -1,5 +1,5 @@
 """``SecretBackendKind``: framework strategy for the ``"secret-backend"``
-descriptor kind.
+capability kind.
 
 Backends are code capabilities (``agentworks.secrets.backends``); the
 registry rows exist so the ``[secret_config].backends`` chain and
@@ -26,7 +26,7 @@ if TYPE_CHECKING:
 
 @dataclass(frozen=True)
 class SecretBackendEntry:
-    """A name-keyed descriptor row for one secret backend capability.
+    """The capability resource for one registered secret backend.
 
     The actual capability (the ``SecretBackend`` API) lives in
     ``agentworks.secrets.backends.SECRET_BACKEND_REGISTRY``; this row is
@@ -47,7 +47,7 @@ class _SecretBackendKind:
     kind: str = "secret-backend"
     miss_policy: Literal["auto-declare", "error"] = "error"
     auto_declare_names: frozenset[str] | None = None
-    manifest_declarable: bool = False  # descriptor rows come from the app
+    manifest_declarable: bool = False  # capability resources come from the app
     builtin_override: Literal["allow", "reserved"] = "reserved"
 
     def synthesize(self, references: Sequence[ResourceReference]) -> SecretBackendEntry:
