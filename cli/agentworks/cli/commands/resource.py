@@ -117,6 +117,47 @@ def resource_list(
     render_resource_table(listing)
 
 
+@resource_app.command("kinds")
+def resource_kinds(
+    names_only: bool = typer.Option(
+        False,
+        "--names-only",
+        help=(
+            "Emit one kind name per line (no header, no formatting). "
+            "Used by shell completion."
+        ),
+    ),
+) -> None:
+    """List every resource kind the app defines.
+
+    Read-only and code-defined: kinds are baked into the app; plugins
+    publish resources of existing kinds (declarable and capability
+    alike), never new kinds. CATEGORY is per-kind by construction --
+    `declarable` kinds hold data (operator TOML/YAML, auto-declared,
+    built-in); `capability` kinds hold read-only rows backed by
+    registered code. RESOURCES counts the current registry rows per
+    kind.
+    """
+    from agentworks import output
+    from agentworks.resources import KIND_REGISTRY
+
+    # The names-only path needs no config and no registry: kinds are
+    # static code. Keeps completion fast and working even with a broken
+    # or absent config.
+    if names_only:
+        for name in sorted(KIND_REGISTRY):
+            output.info(name)
+        return
+
+    from agentworks.bootstrap import build_registry
+    from agentworks.config import load_config
+    from agentworks.resources.inspect import list_kinds, render_kind_table
+
+    config = load_config()
+    registry = build_registry(config)
+    render_kind_table(list_kinds(registry))
+
+
 @resource_app.command("describe")
 def resource_describe(
     ref: Annotated[

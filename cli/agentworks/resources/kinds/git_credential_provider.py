@@ -47,9 +47,10 @@ class _GitCredentialProviderKind:
     """Implementation of ``ResourceKind`` for ``"git-credential-provider"``."""
 
     kind: str = "git-credential-provider"
+    description: str = "Capability: code behind git credentials (github, azdo)"
     miss_policy: Literal["auto-declare", "error"] = "error"
     auto_declare_names: frozenset[str] | None = None
-    manifest_declarable: bool = False  # capability resources come from the app
+    category: Literal["declarable", "capability"] = "capability"
     builtin_override: Literal["allow", "reserved"] = "reserved"
 
     def synthesize(self, references: Sequence[ResourceReference]) -> Any:

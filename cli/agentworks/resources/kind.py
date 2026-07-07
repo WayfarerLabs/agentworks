@@ -66,9 +66,19 @@ class ResourceKind(Protocol):
       name" (secrets). A non-empty set means "only these reserved names"
       (templates accept ``{"default"}``); requests for other missing names
       error.
-    - ``manifest_declarable``: whether operators may declare this kind
-      in YAML manifests (ADR 0016). ``False`` for descriptor kinds
-      provided by the app.
+    - ``category``: what a kind's resources ARE (ADR 0016; per-kind by
+      construction -- two resources of one kind can never differ here).
+      ``"declarable"`` kinds hold data (operator TOML/YAML,
+      auto-declared, or built-in rows); ``"capability"`` kinds hold
+      read-only capability resources registered by the app (or, later,
+      plugins), implementation in a per-domain code registry. Only
+      declarable kinds may appear in manifests; the envelope enforces
+      it. Kinds themselves are baked into the app -- plugins publish
+      resources of existing kinds (declarable rows via bundled
+      manifests, capability rows via code registration), never new
+      kinds.
+    - ``description``: one operator-facing line for ``agw resource
+      kinds``.
     - ``builtin_override``: what happens when an operator manifest
       collides with an app-published built-in row. ``"allow"`` keeps
       today's catalog behavior (operator row replaces the built-in);
@@ -116,7 +126,10 @@ class ResourceKind(Protocol):
     def auto_declare_names(self) -> frozenset[str] | None: ...
 
     @property
-    def manifest_declarable(self) -> bool: ...
+    def category(self) -> Literal["declarable", "capability"]: ...
+
+    @property
+    def description(self) -> str: ...
 
     @property
     def builtin_override(self) -> Literal["allow", "reserved"]: ...

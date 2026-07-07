@@ -44,9 +44,10 @@ class _SecretKind:
     """
 
     kind: str = SECRET_KIND_NAME
+    description: str = "Named secrets; backends produce their values at command time"
     miss_policy: Literal["auto-declare", "error"] = "auto-declare"
     auto_declare_names: frozenset[str] | None = None  # None = any name accepted
-    manifest_declarable: bool = True
+    category: Literal["declarable", "capability"] = "declarable"
     builtin_override: Literal["allow", "reserved"] = "reserved"
 
     def synthesize(self, references: Sequence[ResourceReference]) -> SecretDecl:

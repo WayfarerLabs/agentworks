@@ -31,9 +31,10 @@ class _GitCredentialKind:
     """Implementation of ``ResourceKind`` for ``"git-credential"``."""
 
     kind: str = "git-credential"
+    description: str = "Git credentials; templates reference them by name"
     miss_policy: Literal["auto-declare", "error"] = "error"
     auto_declare_names: frozenset[str] | None = None  # ignored under "error"
-    manifest_declarable: bool = True
+    category: Literal["declarable", "capability"] = "declarable"
     builtin_override: Literal["allow", "reserved"] = "reserved"
 
     def synthesize(

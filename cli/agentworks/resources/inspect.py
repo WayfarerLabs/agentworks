@@ -305,6 +305,50 @@ def describe_resource(
     )
 
 
+@dataclass(frozen=True)
+class KindRow:
+    """One row of ``agw resource kinds``: the per-kind metadata that is
+    constant across every resource of the kind (which is why it renders
+    here and not as a per-row column in ``resource list``)."""
+
+    kind: str
+    category: str
+    resources: int
+    description: str
+
+
+def list_kinds(registry: Registry) -> list[KindRow]:
+    """Every kind the app defines, sorted by name, with current registry
+    row counts. Kinds are baked into the app -- plugins publish
+    resources of existing kinds (declarable and capability alike),
+    never new kinds -- so this is a read-only, code-defined
+    inventory."""
+    from agentworks.resources import KIND_REGISTRY
+
+    return [
+        KindRow(
+            kind=name,
+            category=handler.category,
+            resources=sum(1 for _ in registry.iter_kind(name)),
+            description=handler.description,
+        )
+        for name, handler in sorted(KIND_REGISTRY.items())
+    ]
+
+
+def render_kind_table(rows: list[KindRow]) -> None:
+    kind_w = max(len("KIND"), *(len(r.kind) for r in rows))
+    cat_w = max(len("CATEGORY"), *(len(r.category) for r in rows))
+    res_w = len("RESOURCES")
+    output.info(
+        f"{'KIND':<{kind_w}}  {'CATEGORY':<{cat_w}}  {'RESOURCES':<{res_w}}  DESCRIPTION"
+    )
+    for r in rows:
+        output.info(
+            f"{r.kind:<{kind_w}}  {r.category:<{cat_w}}  {r.resources:<{res_w}}  {r.description}"
+        )
+
+
 def edit_location(registry: Registry, kind: str, name: str) -> tuple[Path, int]:
     """Resolve ``agw resource edit KIND/NAME`` to the manifest to open.
 
@@ -327,9 +371,10 @@ def edit_location(registry: Registry, kind: str, name: str) -> tuple[Path, int]:
     origin = desc.origin
     if origin is None or origin.variant != "operator-declared":
         variant = origin.variant if origin is not None else "unknown-origin"
-        # Descriptor kinds (capabilities) have no declarable form; a
-        # sample pointer would send the operator to an error.
-        declarable = getattr(KIND_REGISTRY.get(kind), "manifest_declarable", False)
+        # Capability kinds have no declarable form; a sample pointer
+        # would send the operator to an error.
+        handler = KIND_REGISTRY.get(kind)
+        declarable = handler is not None and handler.category == "declarable"
         sample_hint = f"`agw resource sample {kind} --write {kind}s.yaml`."
         if variant == "built-in":
             raise ValidationError(

@@ -41,9 +41,12 @@ flipped.
   0016 records the resources-reference-capabilities model and the domain-natural capability naming
   rule. A same-day follow-up ruling expanded the resource definition itself: capability rows ARE
   resources (of read-only capability kinds), ending the prose-only "not resources, merely mirrored
-  in" ontology; ADR 0016's three-layer table became two layers. A companion doc
-  (capability-consumers.md, marked SUGGESTION) prototypes consumer schema shapes by cardinality for
-  every current and planned capability, as feedback input for the plugin SDD.
+  in" ontology; ADR 0016's three-layer table became two layers, the classifier became the per-kind
+  `category` field (replacing `manifest_declarable`), and a read-only `agw resource kinds` command
+  lists the code-defined kind inventory (its `--names-only` completion path needs no config).
+  Plugins publish resources of existing kinds -- declarable and capability alike -- never new kinds.
+  A companion doc (capability-consumers.md, marked SUGGESTION) prototypes consumer schema shapes by
+  cardinality for every current and planned capability, as feedback input for the plugin SDD.
 
 Two deliberate breaking changes, both `!`-flagged for release-please: resource names may not contain
 `/` (FRD R13, enforced at `Registry.add`), and `agw resource migrate` requires selectors or `--all`.

@@ -55,9 +55,10 @@ class _AptSourceKind:
     """Implementation of ``ResourceKind`` for ``"apt-source"``."""
 
     kind: str = "apt-source"
+    description: str = "Apt repository definitions (key, source line)"
     miss_policy: Literal["auto-declare", "error"] = "error"
     auto_declare_names: frozenset[str] | None = None
-    manifest_declarable: bool = True
+    category: Literal["declarable", "capability"] = "declarable"
     builtin_override: Literal["allow", "reserved"] = "allow"
 
     def synthesize(self, references: Sequence[ResourceReference]) -> Any:
@@ -69,9 +70,10 @@ class _AptPackageKind:
     """Implementation of ``ResourceKind`` for ``"apt-package"``."""
 
     kind: str = "apt-package"
+    description: str = "Apt package sets, optionally tied to apt-sources"
     miss_policy: Literal["auto-declare", "error"] = "error"
     auto_declare_names: frozenset[str] | None = None
-    manifest_declarable: bool = True
+    category: Literal["declarable", "capability"] = "declarable"
     builtin_override: Literal["allow", "reserved"] = "allow"
 
     def synthesize(self, references: Sequence[ResourceReference]) -> Any:
@@ -83,9 +85,10 @@ class _SystemInstallCommandKind:
     """Implementation of ``ResourceKind`` for ``"system-install-command"``."""
 
     kind: str = "system-install-command"
+    description: str = "System-level (root) install commands for VM init"
     miss_policy: Literal["auto-declare", "error"] = "error"
     auto_declare_names: frozenset[str] | None = None
-    manifest_declarable: bool = True
+    category: Literal["declarable", "capability"] = "declarable"
     builtin_override: Literal["allow", "reserved"] = "allow"
 
     def synthesize(self, references: Sequence[ResourceReference]) -> Any:
@@ -97,9 +100,10 @@ class _UserInstallCommandKind:
     """Implementation of ``ResourceKind`` for ``"user-install-command"``."""
 
     kind: str = "user-install-command"
+    description: str = "Per-user install commands for admin/agent init"
     miss_policy: Literal["auto-declare", "error"] = "error"
     auto_declare_names: frozenset[str] | None = None
-    manifest_declarable: bool = True
+    category: Literal["declarable", "capability"] = "declarable"
     builtin_override: Literal["allow", "reserved"] = "allow"
 
     def synthesize(self, references: Sequence[ResourceReference]) -> Any:

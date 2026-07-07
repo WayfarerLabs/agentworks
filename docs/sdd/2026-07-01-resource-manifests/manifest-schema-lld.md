@@ -31,10 +31,11 @@ spec: <kind-specific fields>
 Envelope rules (all violations are `ConfigError` with `file:line` of the document):
 
 - `apiVersion` (required): exactly `agentworks/v1`.
-- `kind` (required): must be a registered kind with `manifest_declarable = True`. Unknown kinds
-  error listing the valid kinds; descriptor kinds (`git-credential-provider`, and post-Phase-5.5
-  `secret-backend` -- the capability took the name when the declarable layer was collapsed,
-  2026-07-07) error with "provided by the app".
+- `kind` (required): must be a registered kind with `category = "declarable"` (the flag was
+  `manifest_declarable` until the 2026-07-07 category revision). Unknown kinds error listing the
+  valid kinds; descriptor kinds (`git-credential-provider`, and post-Phase-5.5 `secret-backend` --
+  the capability took the name when the declarable layer was collapsed, 2026-07-07) error with
+  "provided by the app".
 - `metadata` (required mapping): `name` (required string), `description` (optional string). Other
   keys under `metadata` are errors (reserved for future `labels` / `annotations`).
 - `spec` (required mapping, may be empty `{}`).

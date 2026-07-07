@@ -28,9 +28,10 @@ class _WorkspaceTemplateKind:
     """Implementation of ``ResourceKind`` for ``"workspace-template"``."""
 
     kind: str = "workspace-template"
+    description: str = "Workspace templates (repo, tmuxinator, env)"
     miss_policy: Literal["auto-declare", "error"] = "auto-declare"
     auto_declare_names: frozenset[str] | None = frozenset({"default"})
-    manifest_declarable: bool = True
+    category: Literal["declarable", "capability"] = "declarable"
     builtin_override: Literal["allow", "reserved"] = "reserved"
 
     def synthesize(

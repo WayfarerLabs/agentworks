@@ -36,9 +36,10 @@ class _AgentTemplateKind:
     """Implementation of ``ResourceKind`` for ``"agent-template"``."""
 
     kind: str = "agent-template"
+    description: str = "Agent user environment templates (shell, dotfiles, mise, ...)"
     miss_policy: Literal["auto-declare", "error"] = "auto-declare"
     auto_declare_names: frozenset[str] | None = frozenset({"default"})
-    manifest_declarable: bool = True
+    category: Literal["declarable", "capability"] = "declarable"
     builtin_override: Literal["allow", "reserved"] = "reserved"
 
     def synthesize(self, references: Sequence[ResourceReference]) -> AgentTemplate:

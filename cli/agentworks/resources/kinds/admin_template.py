@@ -44,9 +44,10 @@ class _AdminTemplateKind:
     """Implementation of ``ResourceKind`` for ``"admin-template"``."""
 
     kind: str = "admin-template"
+    description: str = "The admin environment template (singleton: default)"
     miss_policy: Literal["auto-declare", "error"] = "auto-declare"
     auto_declare_names: frozenset[str] | None = frozenset({"default"})
-    manifest_declarable: bool = True
+    category: Literal["declarable", "capability"] = "declarable"
     builtin_override: Literal["allow", "reserved"] = "reserved"
 
     def synthesize(self, references: Sequence[ResourceReference]) -> AdminConfig:

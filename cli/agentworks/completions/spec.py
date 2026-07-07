@@ -93,9 +93,10 @@ class CommandSpec:
 #                        (sources from the Resource Registry so
 #                        auto-declared names like tailscale-auth-key
 #                        complete the same as operator-declared ones)
-#   "resource_kinds"  -> agw resource list --names-only
-#                        (kind/name per line; the snippet splits the
-#                        prefix and `sort -u`'s to get distinct kinds)
+#   "resource_kinds"  -> agw resource kinds --names-only
+#                        (one kind per line, straight from KIND_REGISTRY;
+#                        no config or registry build, so this completer
+#                        works even with a broken config)
 #   "resource_refs"   -> agw resource list --names-only
 #                        (kind/name per line, verbatim -- the candidate
 #                        IS the token for `resource describe KIND/NAME`)
@@ -120,9 +121,10 @@ class CommandSpec:
 # The per-kind Registry queries don't need `sort -u` on the shell side
 # because the Registry stores one row per `(kind, name)` and the CLI's
 # `--names-only` walks in insertion order -- names are already unique
-# per kind. `resource_kinds` uses `sort -u` because it aggregates the
-# kind prefix across ALL rows in the full listing, where duplicates
-# are the norm (one row per resource, many resources per kind).
+# per kind. `resource_kinds` reads `agw resource kinds --names-only`
+# (one kind per line, already sorted and unique). `migrate_selectors`
+# still `sort -u`'s because it aggregates the kind prefix across all
+# rows of the full listing.
 # `/` is the parse-safe separator for the kind/name stream: it cannot
 # appear in resource names (enforced at Registry.add), while `:` can.
 #

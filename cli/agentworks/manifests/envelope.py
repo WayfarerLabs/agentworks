@@ -74,7 +74,7 @@ def validate_envelope(raw: object, location: SourceLocation) -> Document:
     handler = KIND_REGISTRY.get(kind)
     if handler is None:
         valid = sorted(
-            k for k, h in KIND_REGISTRY.items() if h.manifest_declarable
+            k for k, h in KIND_REGISTRY.items() if h.category == "declarable"
         )
         hint = None
         kebab_guess = kind.replace("_", "-")
@@ -85,7 +85,7 @@ def validate_envelope(raw: object, location: SourceLocation) -> Document:
             f"unknown kind {kind!r}; valid kinds: {', '.join(valid)}",
             hint=hint,
         )
-    if not handler.manifest_declarable:
+    if handler.category != "declarable":
         raise _err(
             location,
             f"{kind} is provided by the app and cannot be declared in a manifest",

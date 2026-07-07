@@ -28,9 +28,10 @@ class _SessionTemplateKind:
     """Implementation of ``ResourceKind`` for ``"session-template"``."""
 
     kind: str = "session-template"
+    description: str = "Session launch templates (command, restart, env)"
     miss_policy: Literal["auto-declare", "error"] = "auto-declare"
     auto_declare_names: frozenset[str] | None = frozenset({"default"})
-    manifest_declarable: bool = True
+    category: Literal["declarable", "capability"] = "declarable"
     builtin_override: Literal["allow", "reserved"] = "reserved"
 
     def synthesize(

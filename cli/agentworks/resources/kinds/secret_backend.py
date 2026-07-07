@@ -45,9 +45,10 @@ class _SecretBackendKind:
     """Implementation of ``ResourceKind`` for ``"secret-backend"``."""
 
     kind: str = "secret-backend"
+    description: str = "Capability: code that produces secret values (the chain's entries)"
     miss_policy: Literal["auto-declare", "error"] = "error"
     auto_declare_names: frozenset[str] | None = None
-    manifest_declarable: bool = False  # capability resources come from the app
+    category: Literal["declarable", "capability"] = "capability"
     builtin_override: Literal["allow", "reserved"] = "reserved"
 
     def synthesize(self, references: Sequence[ResourceReference]) -> SecretBackendEntry:

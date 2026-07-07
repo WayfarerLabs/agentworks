@@ -164,8 +164,11 @@ loads today keeps loading (with deprecation warnings on TOML resource sections).
 
 `ResourceKind` gains two declarative flags consumed by the envelope layer and `Registry.add`:
 
-- `manifest_declarable: bool`. True for every operator kind; False for descriptor kinds
-  (`secret-backend`, `git-credential-provider`) and any future code-only kind.
+- `category: Literal["declarable", "capability"]` (renamed from `manifest_declarable` by the
+  2026-07-07 per-kind-category revision; the bool was the classifier's mechanical shadow).
+  `declarable` for every operator kind; `capability` for `secret-backend`,
+  `git-credential-provider`, and any future code-only kind. Only declarable kinds pass the envelope.
+  Each kind also carries an operator-facing `description` for `agw resource kinds`.
 - `builtin_override: Literal["allow", "reserved"]`. `allow` for catalog kinds; `reserved` elsewhere
   as the defensive default. Post-5.5 the `reserved` tier has zero REACHABLE members (its only live
   member was the declarable secret-backend kind, whose built-in rows an operator manifest could

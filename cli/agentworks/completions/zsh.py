@@ -85,7 +85,7 @@ _agentworks_secrets() {
     "resource_kinds": """\
 _agentworks_resource_kinds() {
     local -a kinds
-    kinds=(${(f)"$(agw resource list --names-only 2>/dev/null | awk -F/ '{print $1}' | sort -u)"})
+    kinds=(${(f)"$(agw resource kinds --names-only 2>/dev/null)"})
     _describe 'kind' kinds
 }""",
     "resource_refs": """\

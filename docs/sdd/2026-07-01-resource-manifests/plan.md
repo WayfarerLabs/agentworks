@@ -475,6 +475,19 @@ only TOML-resource reader in the tree; CI green; reviewer-approved.
 (Recorded as they happen, per SDD convention. Deviations from FRD/HLA get an entry here and an
 artifact update.)
 
+- **2026-07-07: per-kind `category` + `agw resource kinds` (maintainer request, pre-lock).**
+  Follow-through on the definition expansion: the declarable/capability classifier becomes a
+  first-class per-kind field -- `ResourceKind.category: Literal["declarable", "capability"]`,
+  REPLACING `manifest_declarable` (which was only ever its mechanical shadow; two flags encoding one
+  fact is drift) -- plus a per-kind operator-facing `description`. Category is per-kind by
+  construction (two resources of one kind can never differ), so its display home is a new
+  `agw resource kinds` command (KIND / CATEGORY / RESOURCES / DESCRIPTION), not a per-row column in
+  `resource list`. The command is read-only and code-defined; its `--names-only` path needs no
+  config or registry (kinds are static code), and the `resource_kinds` shell completer repoints to
+  it -- kind completion now works even with a broken config. Maintainer correction during
+  implementation: plugins publish resources of existing kinds -- declarable rows (bundled manifests:
+  a harness plugin's session template, a vm-provider plugin's default platform) AND capability rows
+  -- never new kinds; an early docstring draft had narrowed this to capability-only.
 - **2026-07-07: the resource definition expands -- capabilities ARE resources (maintainer ruling,
   pre-lock).** Reviewing the collapsed model in `agw resource list`, the maintainer hit the
   "capabilities are not resources, merely mirrored in as descriptor rows" clause from the outside:
@@ -482,29 +495,14 @@ artifact update.)
   resource ontology existed only in prose -- and confused its own author. Ruling (explicitly
   reversing the earlier strong stance): a resource is a named, referenceable registry entry, kind
   plus name, regardless of provenance; kinds split into declarable kinds (data) and capability kinds
-  (`manifest_declarable=False`, read-only, implementation in a per-domain code registry). What the
-  old law actually protected survives untouched: config is config, lifecycle entities stay out of
-  the registry (`instance_kind`), declarability is per-kind, implementations live in code
-  registries. The payoff: `agw resource list` needs no label or filter -- everything in it is
-  honestly a resource -- and the plugin SDD's story simplifies to "plugins ship resources; some are
-  capability resources backed by code." ADR 0016's three-layer table becomes two layers (config /
-  resources) with capability implementations as code behind capability-kind rows. Prose-only change;
-  zero behavior.
-- **2026-07-07: the resource definition expands -- capabilities ARE resources (maintainer ruling,
-  pre-lock).** Reviewing the collapsed model in `agw resource list`, the maintainer hit the
-  "capabilities are not resources, merely mirrored in as descriptor rows" clause from the outside:
-  the rows list, describe, reference, and origin-stamp exactly like resources, so the not-a-
-  resource ontology existed only in prose -- and confused its own author. Ruling (explicitly
-  reversing the earlier strong stance): a resource is a named, referenceable registry entry, kind
-  plus name, regardless of provenance; kinds split into declarable kinds (data) and capability kinds
-  (`manifest_declarable=False`, read-only, implementation in a per-domain code registry). What the
-  old law actually protected survives untouched: config is config, lifecycle entities stay out of
-  the registry (`instance_kind`), declarability is per-kind, implementations live in code
-  registries. The payoff: `agw resource list` needs no label or filter -- everything in it is
-  honestly a resource -- and the plugin SDD's story simplifies to "plugins ship resources; some are
-  capability resources backed by code." ADR 0016's three-layer table becomes two layers (config /
-  resources) with capability implementations as code behind capability-kind rows. Prose-only change;
-  zero behavior.
+  (per-kind `category` field, read-only, implementation in a per-domain code registry). What the old
+  law actually protected survives untouched: config is config, lifecycle entities stay out of the
+  registry (`instance_kind`), declarability is per-kind, implementations live in code registries.
+  The payoff: `agw resource list` needs no label or filter -- everything in it is honestly a
+  resource -- and the plugin SDD's story simplifies to "plugins ship resources; some are capability
+  resources backed by code." ADR 0016's three-layer table becomes two layers (config / resources)
+  with capability implementations as code behind capability-kind rows. Prose-only change; zero
+  behavior.
 - **2026-07-07: the capability collapse (maintainer ruling, pre-lock; Phase 5.5).** Reviewing the
   draft plugin-system SDD (which generalized the capability/exposed-resource split to five kinds),
   the maintainer challenged the split itself: forcing a dedicated instantiation kind per capability

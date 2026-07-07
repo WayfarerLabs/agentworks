@@ -18,6 +18,7 @@ registry, is identified by `kind` + `name`, and can be inspected uniformly:
 agw resource list                       # everything, all kinds and origins
 agw resource list --kind secret         # one kind
 agw resource describe vm-template/dev   # one resource, with references and usage
+agw resource kinds                      # every kind: category, counts, purpose
 ```
 
 Resources come from three origins: **operator-declared** (you wrote them, in YAML or TOML),

@@ -63,8 +63,7 @@ DYNAMIC_SNIPPETS: dict[str, str] = {
         ' Where-Object { $_ -like "$wordToComplete*" })'
     ),
     "resource_kinds": (
-        "(agw resource list --names-only 2>$null |"
-        " ForEach-Object { ($_ -split '/', 2)[0] } | Sort-Object -Unique |"
+        "(agw resource kinds --names-only 2>$null |"
         ' Where-Object { $_ -like "$wordToComplete*" })'
     ),
     "resource_refs": (

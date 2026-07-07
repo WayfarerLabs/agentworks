@@ -48,11 +48,16 @@ The registry's operational definition of a resource is shape -- a kind, a name, 
 origin -- and capability rows satisfy all of it.) Kinds split by whether operators can declare them:
 
 - **Declarable kinds** hold data: operator-declared (TOML/YAML), auto-declared, or built-in.
-- **Capability kinds** (`manifest_declarable = False`; today `secret-backend` and
-  `git-credential-provider`) hold read-only **capability resources**, registered by the app (or,
-  later, plugins) rather than declared. Their implementation is code in a per-domain registry
-  (`SECRET_BACKEND_REGISTRY`, keyed by the resource name); the manifest loader rejects documents of
-  these kinds with a "provided by the app" error.
+- **Capability kinds** (today `secret-backend` and `git-credential-provider`) hold read-only
+  **capability resources**, registered by the app (or, later, plugins) rather than declared. Their
+  implementation is code in a per-domain registry (`SECRET_BACKEND_REGISTRY`, keyed by the resource
+  name); the manifest loader rejects documents of these kinds with a "provided by the app" error.
+
+The classifier is a per-kind field (`ResourceKind.category`) -- two resources of one kind can never
+differ here -- so its display home is `agw resource kinds` (the read-only, code-defined kind
+inventory: category, row count, description per kind), not a per-row column. Kinds are baked into
+the app: plugins publish resources of existing kinds, declarable and capability alike (a harness
+plugin ships its session templates; a VM-provider plugin ships a default platform), never new kinds.
 
 **The vocabulary law: `kind` is a resource-registry concept, full stop.** Nothing outside the
 resource registry may use the word "kind" for its identity -- lifecycle entities (VMs, workspaces,

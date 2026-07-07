@@ -120,7 +120,8 @@ class _MissProbeKind:
     kind = "miss-probe"
     miss_policy = "error"
     auto_declare_names = None
-    manifest_declarable = False
+    category = "capability"
+    description = "test-only miss probe"
     builtin_override = "reserved"
 
     def synthesize(self, references: object) -> object:
