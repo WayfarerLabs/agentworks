@@ -43,6 +43,34 @@ different places.** Features co-locate them (the template both enables and confi
 split them: the chain (config) selects; per-secret maps only adjust. Both are legitimate -- the
 split form is what "ambient capability, per-consumer tuning" looks like.
 
+### The map form's limit: one entry per capability
+
+A map key appears once, so the map form cannot express two mappings to the SAME capability -- a
+secret findable under two env vars, a hypothetical mount feature activated twice with different
+paths. Not a hard requirement today, but likely a reality eventually. Three extension paths, in
+preference order:
+
+1. **Capability-owned value multiplicity** (no schema change): the map's value vocabulary already
+   belongs to the capability, so a capability that wants multiple lookups accepts a list value --
+   `env-var: [NPM_TOKEN, NODE_AUTH_TOKEN]` ("try in order"). This is the right answer for
+   adjust-style consumers: lookup multiplicity is intra-capability semantics, and the loop contract
+   (one mapping per secret/backend pair) is untouched.
+2. **Named-instance map** (the docker-compose shape): keys become operator-chosen names and the
+   capability moves into the value --
+   `features: { scratch: {feature: mount, path: /scratch}, cache: {feature: mount, path: /cache} }`.
+   Duplicates allowed, and the two properties that made the plain map win for templates survive:
+   per-key inheritance merge, and a stable identity for a child to override and for errors/status to
+   name.
+3. **Anonymous entry list** (the GitHub-Actions-steps shape):
+   `features: [{feature: mount, path: /scratch}, {feature: mount, path: /cache}]`. The simplest
+   duplicate-enabler, but a template context pays for it: no per-key inheritance merge (a child
+   replaces the whole list) and no stable identity to override or report against. Fits an ordered,
+   non-inherited consumer if one ever appears.
+
+Accepting map-or-list polymorphically on one field is possible but buys two spellings of the common
+case; the cleaner path is to keep the plain map as the default and graduate a specific consumer
+deliberately when same-capability multiplicity becomes real for it.
+
 ## The table
 
 | #   | Capability                          | Consuming resource / config         | Cardinality           | Shape                         |
@@ -236,3 +264,7 @@ passport CA directory, not per-agent validity).
    shorthand to the map shape (rule 3); pure opt-in consumers don't need it.
 6. Value shorthands are per-domain sugar (`env-var: NPM_TOKEN` as a mapping value), always
    equivalent to a spelled-out form.
+7. The map allows one entry per capability. When same-capability multiplicity becomes real for a
+   consumer, extend in this order: capability-owned list values first (no schema change), then a
+   named-instance map (keeps inheritance merge and identity), then an anonymous entry list (only for
+   ordered, non-inherited consumers).
