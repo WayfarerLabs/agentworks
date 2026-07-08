@@ -46,6 +46,7 @@ class ProxmoxProvisioner(VMProvisioner):
         cpus: int | None = None,
         memory: int | None = None,
         disk: int | None = None,
+        swap: int = 4,
         admin_username: str = "agentworks",
         tailscale_auth_key: str | None = None,
     ) -> ProvisionResult:
@@ -120,7 +121,7 @@ class ProxmoxProvisioner(VMProvisioner):
                 provisioning_packages=PROVISIONING_PACKAGES,
                 tailscale_auth_key=tailscale_auth_key,
                 hostname=vm_hostname("proxmox", vm_name),
-                swap=config.vm.swap,
+                swap=swap,
             )
             tailscale_ip = self._run_bootstrap_via_agent(node, newid, bootstrap)
             bootstrap_complete = tailscale_ip is not None

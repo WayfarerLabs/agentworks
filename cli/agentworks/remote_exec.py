@@ -32,10 +32,14 @@ class DetachedResult:
 
 
 # Shell wrapper that writes PID, runs the command, then writes exit status.
+# The command runs inside a brace group so the redirection captures ALL of
+# it: a bare `cmd1 && cmd2 > out` binds the redirect to cmd2 only, which
+# silently discarded cmd1's output (and, when cmd1 failed, produced no
+# output file at all -- the operator saw an empty "Last output").
 _WRAPPER_TEMPLATE = """\
 #!/bin/bash
 echo $$ > {pid_file}
-{command} > {output_file} 2>&1
+{{ {command} ; }} > {output_file} 2>&1
 echo $? > {status_file}
 """
 
@@ -51,11 +55,21 @@ def run_detached(
     timeout: int | None = None,
     as_root: bool = False,
     quiet: bool = False,
+    reuse_completed: bool = True,
 ) -> DetachedResult:
     """Run a command detached on a remote host, polling for completion.
 
     If a previous run is still in progress (PID file exists, process alive),
     resumes polling instead of starting a new one.
+
+    ``reuse_completed`` controls what a leftover STATUS file from an
+    earlier, already-finished run means. ``True`` (default) treats it as
+    this operation's own completed result -- right for resumable
+    operations (a reconnect after the workstation dropped mid-init).
+    ``False`` treats it as stale garbage: it is cleared (with a warning)
+    and a fresh run starts -- right for one-shot operations like VM
+    creation, where consuming a stale exit code silently reports a
+    failure (or worse, a success) for work that never ran.
 
     Running as root: prefer ``as_root=True`` to embedding ``sudo -n`` in the
     command. With ``as_root=True``, the wrapper script itself runs as root so
@@ -76,6 +90,9 @@ def run_detached(
         as_root: Run the wrapper script as root. Prefer this over embedding
             ``sudo -n`` in the command.
         quiet: Suppress progress output (still captured in the result).
+        reuse_completed: Whether a leftover status file counts as this
+            operation's completed result (resume) or stale garbage
+            (cleared; fresh start).
 
     Returns:
         DetachedResult with exit code and full output.
@@ -86,7 +103,7 @@ def run_detached(
     wrapper_file = f"{base_path}.sh"
 
     # Check for a completed previous run (reconnect after process finished)
-    if _status_file_exists(target, status_file):
+    if _status_file_exists(target, status_file) and reuse_completed:
         if not quiet:
             output.detail(f"{label}: found completed result from previous run")
     # Check for an existing running process (resume scenario)
@@ -94,6 +111,14 @@ def run_detached(
         if not quiet:
             output.detail(f"{label}: resuming in-progress operation...")
     else:
+        if not reuse_completed and _status_file_exists(target, status_file):
+            # Stale result from an interrupted earlier attempt. Loud even
+            # in quiet mode: silently consuming it once masked a VM-create
+            # failure as an empty-output error.
+            output.warn(
+                f"{label}: clearing stale result files from a previous "
+                f"interrupted run ({base_path}.*)"
+            )
         # Write and start the wrapper script
         wrapper = _WRAPPER_TEMPLATE.format(
             command=command,

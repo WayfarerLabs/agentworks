@@ -2,9 +2,10 @@
 
 Per FRD R4 and HLA "Eager prompting flow": every command that opens new
 shells resolves all needed secrets up front (within the first few
-seconds), before any state mutation. The resolver caches values across
-the command, so subsequent ``compose_env`` / ``resolver.render`` calls
-inside the command's body hit the cache and don't re-prompt.
+seconds), before any state mutation. ``resolve_for_command`` is the
+command's ONE resolve call; the returned values dict travels down the
+call chain to every ``compose_env`` site, so nothing re-prompts by
+construction (no cache exists to hit or miss).
 
 Usage at a manager entry point:
 
@@ -14,12 +15,12 @@ Usage at a manager entry point:
         SecretTarget(
             vm=vm_template.env,
             workspace=workspace_template.env,
-            admin=config.admin.env,         # admin mode: only admin scope
+            admin=admin_template(registry).env,  # admin mode: only admin scope
             session=session_template.env,
         ),
     ]
-    resolve_for_command(targets, config)  # raises on non-interactive miss
-    # ... proceed with command execution; compose_env() hits the resolver cache.
+    values = resolve_for_command(targets, config, registry)  # raises on non-interactive miss
+    # ... thread `values` down to every compose_env(values=...) site.
 
 The orchestrator is generic: it doesn't know about VMs, workspaces, or
 agents. It just walks env dicts. Future legacy-prompt migrations
@@ -35,7 +36,7 @@ only rewrites ``EnvEntry.value`` (plaintext), never ``EnvEntry.secret``
 which builds targets from un-substituted template env dicts.
 
 **Non-interactive errors:** ``resolve_for_command`` raises
-``SecretUnavailableError`` if the resolver's chain can't satisfy a
+``SecretUnavailableError`` if the active backends can't satisfy a
 secret (e.g. ``--non-interactive`` + no ``AW_SECRET_<NAME>`` set). The
 error carries a per-secret hint listing the backends tried. Manager-
 layer callers may catch and re-raise with command-level context
@@ -57,6 +58,7 @@ if TYPE_CHECKING:
 
     from agentworks.config import Config
     from agentworks.env.entry import EnvEntry
+    from agentworks.resources.registry import Registry
     from agentworks.secrets.base import SecretDecl
 
 
@@ -93,14 +95,14 @@ class SecretTarget:
 
 def compute_needed_secrets(
     targets: Sequence[SecretTarget],
-    config: Config,
+    registry: Registry,
     *,
     extra_decls: Iterable[SecretDecl] = (),
 ) -> list[SecretDecl]:
     """Union of ``SecretDecl``s referenced across the candidate target set.
 
     For each target, merges the per-scope env dicts via ``effective_env``
-    (preserving the FRD R2 precedence ladder), asks the resolver which
+    (preserving the FRD R2 precedence ladder), collects which
     declared secrets that merged env references, and unions the results
     across all targets. ``extra_decls`` adds decls that aren't referenced
     by any target's env chain -- a hook for legacy-prompt migrations
@@ -108,9 +110,14 @@ def compute_needed_secrets(
     without being modeled as env-table entries today.
 
     The result preserves first-encounter order across targets, then
-    extras, for deterministic prompting order.
+    extras, for deterministic prompting order. Referenced names are
+    looked up against the registry's ``secret`` rows -- which, after
+    finalize, cover operator-declared AND auto-declared secrets, so
+    every name a published template's env references has a decl here.
     """
-    resolver = config.secret_resolver
+    from agentworks.resources.access import secret_decls
+
+    decls = secret_decls(registry)
     seen: set[str] = set()
     out: list[SecretDecl] = []
     for target in targets:
@@ -121,10 +128,11 @@ def compute_needed_secrets(
             agent=target.agent,
             session=target.session,
         )
-        for decl in resolver.required_for(merged):
-            if decl.name not in seen:
-                seen.add(decl.name)
-                out.append(decl)
+        for entry in merged.values():
+            name = entry.secret
+            if name is not None and name in decls and name not in seen:
+                seen.add(name)
+                out.append(decls[name])
     for decl in extra_decls:
         if decl.name not in seen:
             seen.add(decl.name)
@@ -135,23 +143,22 @@ def compute_needed_secrets(
 def resolve_for_command(
     targets: Sequence[SecretTarget],
     config: Config,
+    registry: Registry,
     *,
     extra_decls: Iterable[SecretDecl] = (),
 ) -> dict[str, str]:
-    """Eagerly resolve every secret referenced by the candidate targets.
+    """Resolve every secret referenced by the candidate targets: THE
+    command's one resolve call.
 
     Computes the union of needed ``SecretDecl``s via
-    ``compute_needed_secrets`` and resolves them in a single batched
-    call through the configured backend chain. Values land in the
-    resolver's cache; subsequent ``compose_env`` / ``resolver.render``
-    calls inside the command hit the cache and never re-prompt.
-
-    Returns the ``{secret_name: value}`` mapping that
-    ``SecretResolver.resolve_all`` produced. The cache (populated as a
-    side effect) is the primary channel; the return value is for
-    callers that want logging or diagnostics ("resolved N secrets")
-    without re-deriving state. Empty target union returns ``{}``
-    without consulting any backend.
+    ``compute_needed_secrets`` and runs the resolve loop over the active
+    backends once. The returned ``{secret_name: value}`` mapping is the
+    ONLY channel -- there is no cache. The command threads the values
+    down to its ``compose_env`` sites (the same scope-dict discipline
+    that keeps the eager-resolve set and the render set from drifting);
+    "prompt-once" holds by construction because this is called once per
+    command. Empty target union returns ``{}`` without consulting any
+    backend.
 
     In non-interactive mode, missing secrets surface as
     ``SecretUnavailableError`` with a per-secret breakdown of which
@@ -166,7 +173,9 @@ def resolve_for_command(
     call it -- they inherit the env captured at shell-create time and
     consume no secrets per FRD R4 / R5.
     """
-    decls = compute_needed_secrets(targets, config, extra_decls=extra_decls)
+    decls = compute_needed_secrets(targets, registry, extra_decls=extra_decls)
     if not decls:
         return {}
-    return config.secret_resolver.resolve_all(decls)
+    from agentworks.secrets.resolve import active_backends, resolve_secrets
+
+    return resolve_secrets(decls, active_backends(config, registry))

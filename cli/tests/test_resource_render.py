@@ -37,15 +37,15 @@ def test_format_origin_line_operator_declared_without_file_returns_bare_label() 
 
 
 def test_format_origin_line_auto_declared_with_source() -> None:
-    origin = Origin.auto_declared(source=("vm_template", "default"))
-    assert format_origin_line(origin) == "auto-declared (vm_template:default)"
+    origin = Origin.auto_declared(source=("vm-template", "default"))
+    assert format_origin_line(origin) == "auto-declared (vm-template/default)"
 
 
-def test_format_origin_line_code_declared_with_source() -> None:
-    origin = Origin.code_declared(source="framework:always-materialize")
+def test_format_origin_line_built_in_with_source() -> None:
+    origin = Origin.built_in(source="framework:always-materialize")
     assert (
         format_origin_line(origin)
-        == "code-declared (framework:always-materialize)"
+        == "built-in (framework:always-materialize)"
     )
 
 

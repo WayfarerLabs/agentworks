@@ -6,8 +6,8 @@
 view, render via ``agentworks.output``" pattern.
 
 Per FRD R10, neither command prompts the operator nor resolves a secret
-value; they report state by walking the registry and the resolver's
-configured backend chain.
+value for display; they report state by asking the active backends
+(``would_attempt`` / ``describe_lookup``) directly.
 """
 
 from __future__ import annotations
@@ -17,8 +17,8 @@ from typing import TYPE_CHECKING
 
 from agentworks import output
 from agentworks.resources.inspect import used_by_for
-from agentworks.resources.kinds.secret import SECRET_KIND_NAME
 from agentworks.resources.render import format_origin_line
+from agentworks.secrets.kinds import SECRET_KIND_NAME
 
 if TYPE_CHECKING:
     from agentworks.config import Config
@@ -33,7 +33,7 @@ if TYPE_CHECKING:
 class SecretCell:
     """One (secret, backend) cell in the table."""
 
-    backend_kind: str
+    backend: str
     would_attempt: bool
     """False = this backend won't attempt this secret (mapping=false or no
     default convention and no explicit mapping). True = backend will try."""
@@ -62,36 +62,37 @@ class SecretRow:
 class SecretTable:
     """Full table for ``agw secret list``.
 
-    ``backend_kinds`` lists the columns in the configured chain order
-    (precedence order). ``rows`` is one per Registry-published secret
-    (operator-declared and auto-declared alike). ``operator_count`` /
-    ``auto_count`` drive the header summary per FRD R10.
+    ``backends`` lists the columns (backend names) in the configured
+    chain order (precedence order). ``rows`` is one per
+    Registry-published secret (operator-declared and auto-declared
+    alike). ``operator_count`` / ``auto_count`` drive the header
+    summary per FRD R10.
     """
 
-    backend_kinds: tuple[str, ...]
+    backends: tuple[str, ...]
     rows: tuple[SecretRow, ...]
     operator_count: int
     auto_count: int
 
 
 def build_secret_table(config: Config, registry: Registry) -> SecretTable:
-    """Build a (secrets x backends) table from the Registry.
+    """Build a (secrets x backends) table.
 
-    Phase 1e of the Resource Registry SDD: the table iterates the
-    Registry's ``"secret"`` kind so auto-declared secrets surface in
-    ``agw secret list`` alongside operator-declared ones (FRD R10).
-    Each row carries an Origin string so operators can tell which
-    secret came from where; the header summary reports the counts.
+    The table iterates the Registry's ``"secret"`` kind so auto-declared
+    secrets surface in ``agw secret list`` alongside operator-declared
+    ones (FRD R10). Each row carries an Origin string so operators can
+    tell which secret came from where; the header summary reports the
+    counts.
 
-    Walks ``config.secret_resolver``'s active source chain in
-    precedence order; for each Registry-published secret asks each
-    source whether it would attempt and what identifier it would use.
-    Pure config + registry derived; never probes the backend or
-    resolves a value.
+    Walks the active backends in precedence order; for each
+    Registry-published secret asks each backend whether it would attempt
+    and what identifier it would use. Pure config + registry derived;
+    never probes a backend or resolves a value.
     """
-    resolver = config.secret_resolver
-    sources = resolver.sources
-    backend_kinds = tuple(s.kind for s in sources)
+    from agentworks.secrets.resolve import active_backends
+
+    backends = active_backends(config, registry)
+    backend_names = tuple(b.name for b in backends)
 
     operator_count = 0
     auto_count = 0
@@ -103,16 +104,16 @@ def build_secret_table(config: Config, registry: Registry) -> SecretTable:
             operator_count += 1
         elif variant == "auto-declared":
             auto_count += 1
-        # code-declared not yet a path for secrets; Phase 2b's catalog
-        # publisher emits code-declared but for non-secret kinds.
+        # built-in not yet a path for secrets; Phase 2b's catalog
+        # publisher emits built-in but for non-secret kinds.
 
         cells = tuple(
             SecretCell(
-                backend_kind=s.kind,
-                would_attempt=s.would_attempt(decl),
-                identifier=s.describe_lookup(decl),
+                backend=b.name,
+                would_attempt=b.would_attempt(decl),
+                identifier=b.describe_lookup(decl),
             )
-            for s in sources
+            for b in backends
         )
         rows.append(
             SecretRow(
@@ -123,7 +124,7 @@ def build_secret_table(config: Config, registry: Registry) -> SecretTable:
         )
 
     return SecretTable(
-        backend_kinds=backend_kinds,
+        backends=backend_names,
         rows=tuple(rows),
         operator_count=operator_count,
         auto_count=auto_count,
@@ -133,10 +134,11 @@ def build_secret_table(config: Config, registry: Registry) -> SecretTable:
 def render_secret_table(table: SecretTable) -> None:
     """Emit the table as operator-friendly output.
 
-    Empty-state messages match the loader's defaults so an operator who
-    runs ``agw secret list`` on a fresh config sees one of:
+    Empty-state messages so an operator who runs ``agw secret list``
+    on a fresh config sees one of:
 
-    - ``No secrets declared in config.`` -- no `[secrets.<name>]` tables.
+    - ``No secrets in the resource registry.`` -- nothing declared or
+      auto-declared.
     - ``No active secret backends.`` -- ``[secret_config].backends = []``.
 
     Otherwise a header + table with one column per active backend in
@@ -149,7 +151,7 @@ def render_secret_table(table: SecretTable) -> None:
     if not table.rows:
         output.info("No secrets in the resource registry.")
         return
-    if not table.backend_kinds:
+    if not table.backends:
         output.info(
             "No active secret backends. Set [secret_config].backends in your "
             "config (or leave it unset to use the default chain).",
@@ -180,7 +182,7 @@ def render_secret_table(table: SecretTable) -> None:
                 cells.append("enabled")
         rendered.append(tuple(cells))
 
-    headers = ("NAME", "DESCRIPTION", *table.backend_kinds)
+    headers = ("NAME", "DESCRIPTION", *table.backends)
     widths = [
         max(len(headers[i]), *(len(r[i]) for r in rendered))
         for i in range(len(headers))
@@ -205,11 +207,10 @@ class BackendMapping:
     Fields express what the backend would do at resolution time without
     actually resolving (no I/O):
 
-    - ``backend_kind``: the backend identifier (``"env-var"``,
-      ``"prompt"``, future backends).
+    - ``backend``: the backend name (``"env-var"``, ``"prompt"``, ...).
     - ``would_attempt``: True if the backend would try this secret at
       resolution time. False = explicit opt-out via
-      ``backend_mappings.<kind> = false``, or the backend has no
+      ``backend_mappings.<backend> = false``, or the backend has no
       default convention for this secret and no operator override.
     - ``identifier``: the backend's lookup identifier (env-var name,
       ``op://`` URI, vault path, etc.) when meaningful. ``None`` for
@@ -217,7 +218,7 @@ class BackendMapping:
       won't attempt.
     """
 
-    backend_kind: str
+    backend: str
     would_attempt: bool
     identifier: str | None
 
@@ -226,7 +227,7 @@ class BackendMapping:
 class ResolutionPreview:
     """What the active backend chain would do at resolution time.
 
-    - ``resolved_by``: the kind of the first backend in the chain that
+    - ``resolved_by``: the NAME of the first backend in the chain that
       would yield a value for this secret right now (e.g. ``"env-var"``
       when ``AW_SECRET_<NAME>`` is set, ``"prompt"`` when the chain
       falls through to an interactive prompt). ``None`` = no active
@@ -271,15 +272,16 @@ class SecretDescription:
 
 
 def describe_secret(
-    registry: Registry,
     config: Config,
+    registry: Registry,
     name: str,
     db: Database | None = None,
 ) -> SecretDescription:
     """Build a ``SecretDescription`` for one secret in the registry.
 
-    Per FRD R10. Pure config + registry derived; no I/O, no prompting,
-    no resolution. Raises ``NotFoundError`` if ``name`` isn't a
+    Per FRD R10. No prompting, no resolution for display (the
+    resolution PREVIEW probes non-interactive backends only). Raises
+    ``NotFoundError`` if ``name`` isn't a
     published secret -- typed at the service layer so CLI / future
     web/API clients all see the same error shape (per the project's
     service-layer-is-the-authority rule). The ``hint`` attribute
@@ -309,27 +311,26 @@ def describe_secret(
     # outside the framework path may not have the field.
     references: tuple[ReferenceEntry, ...] = tuple(getattr(decl, "references", ()))
 
-    # Backend mappings: walk the active source chain and ask each
-    # source how it would handle this secret.
-    mappings: list[BackendMapping] = []
-    for source in config.secret_resolver.sources:
-        mappings.append(
-            BackendMapping(
-                backend_kind=source.kind,
-                would_attempt=source.would_attempt(decl),
-                identifier=source.describe_lookup(decl),
-            )
+    # Backend mappings: ask each active backend how it would
+    # handle this secret.
+    from agentworks.secrets.resolve import active_backends, preview_resolution
+
+    backends = active_backends(config, registry)
+    mappings = [
+        BackendMapping(
+            backend=b.name,
+            would_attempt=b.would_attempt(decl),
+            identifier=b.describe_lookup(decl),
         )
+        for b in backends
+    ]
 
     # Resolution preview: which active backend would actually yield a
-    # value right now. Delegate to the resolver's ``preview_resolution``
-    # so the answer reflects runtime presence (e.g. is the env var set?),
-    # not just whether the backend is configured. The local
-    # ``backend_mappings`` list above already covers configuration shape;
-    # this layer is the live probe.
-    preview_kind = config.secret_resolver.preview_resolution(decl)
-    resolved_by = preview_kind
-    available = preview_kind is not None
+    # value right now. ``preview_resolution`` reflects runtime presence
+    # (e.g. is the env var set?), not just configuration shape --
+    # interactive backends are reported without probing.
+    resolved_by = preview_resolution(decl, backends)
+    available = resolved_by is not None
 
     return SecretDescription(
         name=name,
@@ -376,7 +377,7 @@ def render_secret_description(desc: SecretDescription) -> None:
             if key in seen:
                 continue
             seen.add(key)
-            src = f"{entry.source[0]}:{entry.source[1]}"
+            src = f"{entry.source[0]}/{entry.source[1]}"
             output.detail(f"- {src} -- {entry.usage}")
 
     # --- Used by (dynamic, per current config) ---
@@ -401,7 +402,7 @@ def render_secret_description(desc: SecretDescription) -> None:
                 grouped.setdefault(ref.instance_kind, []).append(ref.instance_name)
             for instance_kind in grouped:
                 for instance_name in grouped[instance_kind]:
-                    output.detail(f"- {instance_kind}:{instance_name}")
+                    output.detail(f"- {instance_kind}/{instance_name}")
 
     # --- Backend mappings ---
     output.info("")
@@ -411,12 +412,12 @@ def render_secret_description(desc: SecretDescription) -> None:
     else:
         for mapping in desc.backend_mappings:
             if not mapping.would_attempt:
-                status = "no mapping (skipped)"
+                status = "disabled"
             elif mapping.identifier is not None:
                 status = mapping.identifier
             else:
                 status = "(prompt at resolution time)"
-            output.detail(f"- {mapping.backend_kind}: {status}")
+            output.detail(f"- {mapping.backend}: {status}")
 
     # --- Resolution preview ---
     output.info("")

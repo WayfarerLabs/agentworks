@@ -15,7 +15,7 @@ class EnvEntry:
 
     Exactly one of ``value`` or ``secret`` is set. ``value`` carries a plaintext
     value to export; ``secret`` carries the name of a declared secret
-    (``[secrets.<name>]``) that the resolver looks up at command time.
+    (``[secrets.<name>]``) resolved through the active backends at command time.
 
     ``key`` is the env var name; validation lives in the config loader so this
     type can stay pure data with no regex coupling.
@@ -53,8 +53,8 @@ class EnvEntry:
         """
         if self.secret is None:
             return []
-        from agentworks.resources.kinds.secret import SECRET_KIND_NAME
         from agentworks.resources.reference import SecretReference
+        from agentworks.secrets.kinds import SECRET_KIND_NAME
 
         return [
             SecretReference(
@@ -64,3 +64,26 @@ class EnvEntry:
                 source=source,
             )
         ]
+
+
+def env_references(
+    env: dict[str, EnvEntry] | None,
+    source: tuple[str, str],
+) -> list[SecretReference]:
+    """Aggregate ``EnvEntry.referenced_resources(source)`` across an env table.
+
+    Module-level helper shared by every env-bearing Resource type's
+    ``referenced_resources()`` method so the per-type method body stays
+    one line. ``env`` may be ``None`` (``SessionTemplate.env`` is
+    optional) or empty, in which case the result is an empty list.
+
+    The env package owns this helper because it aggregates
+    ``EnvEntry.referenced_resources``; the template dataclasses that
+    live in the domain packages import it from here.
+    """
+    if not env:
+        return []
+    out: list[SecretReference] = []
+    for entry in env.values():
+        out.extend(entry.referenced_resources(source))
+    return out

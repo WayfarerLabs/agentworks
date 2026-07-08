@@ -76,5 +76,5 @@ def secret_describe(
     config = load_config()
     registry = build_registry(config)
     db = get_db()
-    desc = describe_secret(registry, config, name, db=db)
+    desc = describe_secret(config, registry, name, db=db)
     render_secret_description(desc)

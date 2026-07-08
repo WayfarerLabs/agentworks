@@ -31,13 +31,13 @@ _agentworks_workspaces() {
     "ws_templates": """\
 _agentworks_templates() {
     local -a templates
-    templates=(${(f)"$(agw resource list --kind workspace_template --names-only 2>/dev/null | awk -F: '{print $2}')"})
+    templates=(${(f)"$(agw resource list --kind workspace-template --names-only 2>/dev/null | awk -F/ '{print $2}')"})
     _describe 'template' templates
 }""",
     "git_credentials": """\
 _agentworks_git_credentials() {
     local -a creds
-    creds=(${(f)"$(agw resource list --kind git_credentials --names-only 2>/dev/null | awk -F: '{print $2}')"})
+    creds=(${(f)"$(agw resource list --kind git-credential --names-only 2>/dev/null | awk -F/ '{print $2}')"})
     _describe 'git-credential' creds
 }""",
     "sessions": """\
@@ -61,19 +61,19 @@ _agentworks_consoles() {
     "session_templates": """\
 _agentworks_session_templates() {
     local -a templates
-    templates=(${(f)"$(agw resource list --kind session_template --names-only 2>/dev/null | awk -F: '{print $2}')"})
+    templates=(${(f)"$(agw resource list --kind session-template --names-only 2>/dev/null | awk -F/ '{print $2}')"})
     _describe 'session-template' templates
 }""",
     "vm_templates": """\
 _agentworks_vm_templates() {
     local -a templates
-    templates=(${(f)"$(agw resource list --kind vm_template --names-only 2>/dev/null | awk -F: '{print $2}')"})
+    templates=(${(f)"$(agw resource list --kind vm-template --names-only 2>/dev/null | awk -F/ '{print $2}')"})
     _describe 'vm-template' templates
 }""",
     "agent_templates": """\
 _agentworks_agent_templates() {
     local -a templates
-    templates=(${(f)"$(agw resource list --kind agent_template --names-only 2>/dev/null | awk -F: '{print $2}')"})
+    templates=(${(f)"$(agw resource list --kind agent-template --names-only 2>/dev/null | awk -F/ '{print $2}')"})
     _describe 'agent-template' templates
 }""",
     "secrets": """\
@@ -85,16 +85,21 @@ _agentworks_secrets() {
     "resource_kinds": """\
 _agentworks_resource_kinds() {
     local -a kinds
-    kinds=(${(f)"$(agw resource list --names-only 2>/dev/null | awk -F: '{print $1}' | sort -u)"})
+    kinds=(${(f)"$(agw resource kinds --names-only 2>/dev/null)"})
     _describe 'kind' kinds
 }""",
-    "resource_names": """\
-_agentworks_resource_names() {
-    local -a names kind
-    kind="${words[CURRENT-1]}"
-    [[ -z "$kind" ]] && return
-    names=(${(f)"$(agw resource list --kind "$kind" --names-only 2>/dev/null | awk -F: '{print $2}')"})
-    _describe 'name' names
+    "resource_refs": """\
+_agentworks_resource_refs() {
+    local -a refs
+    refs=(${(f)"$(agw resource list --names-only 2>/dev/null)"})
+    _describe 'resource' refs
+}""",
+    "migrate_selectors": """\
+_agentworks_migrate_selectors() {
+    local -a selectors
+    selectors=(${(f)"$(agw resource list --origin operator --names-only 2>/dev/null |
+        awk -F/ '{print $1; print $0}' | sort -u)"})
+    _describe 'selector' selectors
 }""",
 }
 
@@ -113,7 +118,8 @@ COMPLETER_FUNC_NAMES: dict[str, str] = {
     "consoles": "_agentworks_consoles",
     "secrets": "_agentworks_secrets",
     "resource_kinds": "_agentworks_resource_kinds",
-    "resource_names": "_agentworks_resource_names",
+    "resource_refs": "_agentworks_resource_refs",
+    "migrate_selectors": "_agentworks_migrate_selectors",
 }
 
 

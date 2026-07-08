@@ -1,65 +1,98 @@
-"""Env-var SecretSource: reads from operator-side environment variables."""
+"""The ``env-var`` secret backend: reads operator-side environment
+variables. A capability implementation, consumed by the resolution loop through
+the ``SecretBackend`` API.
+"""
 
 from __future__ import annotations
 
 import os
+from typing import TYPE_CHECKING
 
-from agentworks.secrets.base import SecretDecl, SecretSourceBase
+from agentworks.errors import ConfigError
+
+if TYPE_CHECKING:
+    from agentworks.secrets.base import MappingValue, SecretDecl
 
 
 def env_var_name_for(secret_name: str) -> str:
     """Default convention: secret 'github-token' -> 'AW_SECRET_GITHUB_TOKEN'.
 
     Note: the Python helper name stays snake_case (Python convention); the
-    backend-kind string ``env-var`` is kebab-case (operator-typed identifier).
+    backend name ``env-var`` is kebab-case (operator-typed identifier).
     """
     return "AW_SECRET_" + secret_name.upper().replace("-", "_")
 
 
-class EnvVarSource(SecretSourceBase):
+class EnvVarBackend:
     """Reads from operator-side environment variables.
 
-    Resolution:
+    Identifier resolution (the ``False`` opt-out never reaches a
+    backend -- the resolution loop handles it):
 
-    - ``backend_mappings.env-var`` is ``False``: opt out; return None.
-    - ``backend_mappings.env-var`` is a string: use that as the env var name.
-    - Otherwise: derive ``AW_SECRET_<NAME>`` from the secret's name.
+    - mapping is a string: use it as the env var name.
+    - mapping absent (or structured): derive ``AW_SECRET_<NAME>`` from
+      the secret's name.
 
-    ``would_attempt`` returns False only for explicit opt-out; the source
-    always tries its derived or overridden env var name, even if that var
-    isn't set in the current shell.
-
-    The kind string ``env-var`` is kebab-case (operator-typed identifier
-    convention); the Python module / class / helper stays snake_case
-    (Python convention). See HLA "Naming conventions".
+    Always attempts (a derived name always exists); an unset env var is
+    a soft miss -- just-not-set, fall through to the next backend.
     """
 
-    kind = "env-var"
+    name = "env-var"
+    description = "resolves from AW_SECRET_<NAME> environment variables"
+    interactive = False
 
-    def _resolved_name(self, secret: SecretDecl) -> str | None:
-        mapping = secret.backend_mappings.get(self.kind)
-        if mapping is False:
-            return None
+    def validate_mapping(self, owner: str, mapping: MappingValue) -> None:
+        # The load-time gate; ``_resolved_name`` keeps its own check as
+        # defense in depth for hand-built decls that never pass through
+        # validate_chain.
+        if not isinstance(mapping, str) or not mapping:
+            raise ConfigError(
+                f"{owner}: backend_mappings for the env-var backend must "
+                f"be a non-empty string (an env var name) or false"
+            )
+
+    def _resolved_name(self, secret: SecretDecl, mapping: MappingValue | None) -> str:
         if isinstance(mapping, str):
             return mapping
+        if mapping is not None:
+            # A structured (dict) mapping has no meaning for env-var;
+            # silently applying the default convention would resolve
+            # from a different identifier than the operator wrote.
+            raise ConfigError(
+                f"secret {secret.name!r}: backend_mappings for the "
+                f"env-var backend must be a non-empty string (an env "
+                f"var name) or false"
+            )
         return env_var_name_for(secret.name)
 
-    def would_attempt(self, secret: SecretDecl) -> bool:
-        return self._resolved_name(secret) is not None
+    def would_attempt(
+        self,
+        secret: SecretDecl,
+        mapping: MappingValue | None,
+    ) -> bool:
+        return True
 
-    def get(self, secret: SecretDecl) -> str | None:
-        name = self._resolved_name(secret)
-        if name is None:
-            return None
-        raw = os.environ.get(name)
-        if raw is None:
-            return None
-        # Strip trailing carriage-returns / newlines. Tokens copied from
-        # `op read`, `pbpaste`, vim-yanked lines, etc. routinely carry
-        # one. Embedded newlines (rare; usually a malformed secret) are
-        # surfaced by the resolver's resolve_all layer so the operator
-        # sees a clear error instead of an opaque SSH SetEnv rejection.
-        return raw.rstrip("\r\n")
+    def describe_lookup(
+        self,
+        secret: SecretDecl,
+        mapping: MappingValue | None,
+    ) -> str | None:
+        return self._resolved_name(secret, mapping)
 
-    def describe_lookup(self, secret: SecretDecl) -> str | None:
-        return self._resolved_name(secret)
+    def batch_get(
+        self,
+        wants: list[tuple[SecretDecl, MappingValue | None]],
+    ) -> dict[str, str]:
+        out: dict[str, str] = {}
+        for secret, mapping in wants:
+            raw = os.environ.get(self._resolved_name(secret, mapping))
+            if raw is None:
+                continue
+            # Strip trailing carriage-returns / newlines. Tokens copied
+            # from `op read`, `pbpaste`, vim-yanked lines, etc. routinely
+            # carry one. Embedded newlines (rare; usually a malformed
+            # secret) are surfaced by the resolve loop so the operator
+            # sees a clear error instead of an opaque SSH SetEnv
+            # rejection.
+            out[secret.name] = raw.rstrip("\r\n")
+        return out

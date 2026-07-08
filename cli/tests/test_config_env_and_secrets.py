@@ -9,15 +9,15 @@ These cover:
 - AGENTWORKS_* override emits a load-time warning.
 - [secrets.*] parses into SecretDecls including all backend_mappings value forms
   (string, dict, false). ``true`` is rejected.
-- [secret_config].backends drives resolver assembly; precedence preserved.
+- [secret_config].backends drives the active backend chain; precedence preserved.
 - Unknown backend kinds in [secret_config].backends raise ConfigError.
 - Unreachable secrets raise ConfigError at load time.
 - Env entries referencing undeclared secrets load cleanly (Phase 1b of the
   Resource Registry SDD removed the strict-error path; auto-decl coverage
   lives in tests/test_env_block_requirements.py, runtime-failure coverage
-  in tests/test_secrets_resolver.py).
-- Mid-config without any [secrets] / [secret_config] still loads cleanly with
-  ``secret_resolver is None``.
+  in tests/test_secrets_resolve.py).
+- Mid-config without any [secrets] / [secret_config] still loads cleanly;
+  the default chain applies with nothing to resolve.
 """
 
 from __future__ import annotations
@@ -27,7 +27,9 @@ from textwrap import dedent
 
 import pytest
 
+from agentworks.bootstrap import build_registry
 from agentworks.config import ConfigError, load_config
+from agentworks.secrets import active_backends, resolve_secrets
 
 
 def _write_base(config_path: Path, *, extras: str = "") -> None:
@@ -54,22 +56,23 @@ def _write_base(config_path: Path, *, extras: str = "") -> None:
     )
 
 
-def test_no_secrets_section_loads_with_empty_resolver(tmp_path: Path) -> None:
-    """When no secrets are configured, the resolver is a no-op resolver
-    rather than None: call sites can render env unconditionally. With no
+def test_no_secrets_section_loads_with_default_chain(tmp_path: Path) -> None:
+    """When no secrets are configured, the default chain still stands
+    up: call sites can run the resolve loop unconditionally. With no
     [secret_config] in the TOML, SecretConfig defaults to the standard
-    env-var + prompt chain, but with no declared secrets the resolver is
-    still empty in practice (no sources are consulted)."""
+    env-var + prompt chain; with no declared secrets there is nothing
+    to resolve (no backend is consulted)."""
     cfg_file = tmp_path / "config.toml"
     _write_base(cfg_file)
     cfg = load_config(cfg_file, warn_issues=False)
     assert cfg.secrets == {}
-    assert cfg.secret_backends == {}
     # Absence of [secret_config] defaults to the standard chain.
     assert cfg.secret_config_data.backends == ("env-var", "prompt")
-    assert cfg.secret_resolver is not None
-    # No declared secrets => empty resolver, renders {} -> {} without raising.
-    assert cfg.secret_resolver.render({}) == {}
+    registry = build_registry(cfg)
+    backends = active_backends(cfg, registry)
+    assert [b.name for b in backends] == ["env-var", "prompt"]
+    # No declared secrets => nothing to resolve; the loop is a no-op.
+    assert resolve_secrets([], backends) == {}
 
 
 def test_secret_config_absent_uses_default_chain(tmp_path: Path) -> None:
@@ -138,6 +141,7 @@ def test_admin_env_plaintext_and_secret(tmp_path: Path) -> None:
         """,
     )
     cfg = load_config(cfg_file, warn_issues=False)
+    assert cfg.admin is not None
     assert cfg.admin.env["HTTP_PROXY"].value == "http://proxy:3128"
     assert cfg.admin.env["TOKEN"].secret == "shared-token"
 
@@ -154,7 +158,9 @@ def test_vm_template_env(tmp_path: Path) -> None:
     cfg = load_config(cfg_file, warn_issues=False)
     assert cfg.vm_templates["default"].env["EDITOR"].value == "nvim"
     # Resolved VM also carries the env.
-    assert cfg.vm.env["EDITOR"].value == "nvim"
+    from agentworks.vms.templates import resolve_from_dict as _resolve_vm
+
+    assert _resolve_vm(cfg.vm_templates).env["EDITOR"].value == "nvim"
 
 
 def test_agent_template_env(tmp_path: Path) -> None:
@@ -296,6 +302,7 @@ def test_env_referencing_undeclared_secret_does_not_error_at_load(
     )
     # No longer raises -- the secret auto-declares through the framework.
     cfg = load_config(cfg_file, warn_issues=False)
+    assert cfg.admin is not None
     assert cfg.admin.env["API_KEY"].secret == "missing"
 
 
@@ -303,7 +310,7 @@ def test_secret_declared_with_all_mapping_forms(tmp_path: Path) -> None:
     """All three backend_mappings value shapes (string, inline table, false) parse
     onto SecretDecl. The chain uses prompt-only so even token-c (which opts out
     of env-var) and token-b (mapping for a future backend) stay reachable through
-    PromptSource."""
+    the prompt backend."""
     cfg_file = tmp_path / "config.toml"
     _write_base(
         cfg_file,
@@ -362,7 +369,7 @@ def test_secret_config_backends_preserves_precedence(tmp_path: Path) -> None:
     assert cfg.secret_config_data.backends == ("env-var", "prompt")
 
 
-def test_secret_resolver_assembled_when_backends_configured(tmp_path: Path) -> None:
+def test_active_backends_stand_up_when_configured(tmp_path: Path) -> None:
     cfg_file = tmp_path / "config.toml"
     _write_base(
         cfg_file,
@@ -375,11 +382,14 @@ def test_secret_resolver_assembled_when_backends_configured(tmp_path: Path) -> N
         """,
     )
     cfg = load_config(cfg_file, warn_issues=False)
-    assert cfg.secret_resolver is not None
-    # Smoke-check the chain by asking for the first attempting source.
-    first = cfg.secret_resolver.first_attempting_source(cfg.secrets["shared"])
+    registry = build_registry(cfg)
+    backends = active_backends(cfg, registry)
+    # Smoke-check the chain: the first attempting backend is env-var.
+    first = next(
+        (b for b in backends if b.would_attempt(cfg.secrets["shared"])), None
+    )
     assert first is not None
-    assert first.kind == "env-var"
+    assert first.name == "env-var"
 
 
 def test_unknown_backend_kind_raises(tmp_path: Path) -> None:
@@ -391,13 +401,18 @@ def test_unknown_backend_kind_raises(tmp_path: Path) -> None:
         backends = ["env-var", "totally-fake-backend"]
         """,
     )
+    # The chain is reference edges on the published secret-config row
+    # (resource-manifests SDD); an unknown name hits the secret-backend
+    # kind's error miss policy at build_registry finalize.
+    cfg = load_config(cfg_file, warn_issues=False)
     with pytest.raises(ConfigError, match="totally-fake-backend"):
-        load_config(cfg_file, warn_issues=False)
+        build_registry(cfg)
 
 
 def test_unreachable_secret_raises(tmp_path: Path) -> None:
-    """A secret with env-var = false and a backend chain with no other attempting
-    source is unreachable; the loader rejects this at load time."""
+    """A secret with env-var = false and a backend chain with no other
+    attempting backend is unreachable; ``validate_chain`` rejects it at
+    ``build_registry``."""
     cfg_file = tmp_path / "config.toml"
     _write_base(
         cfg_file,
@@ -410,8 +425,9 @@ def test_unreachable_secret_raises(tmp_path: Path) -> None:
         backends = ["env-var"]
         """,
     )
+    cfg = load_config(cfg_file, warn_issues=False)
     with pytest.raises(ConfigError, match="unreachable"):
-        load_config(cfg_file, warn_issues=False)
+        build_registry(cfg)
 
 
 def test_unreachable_secret_error_message_and_hint(tmp_path: Path) -> None:
@@ -431,8 +447,9 @@ def test_unreachable_secret_error_message_and_hint(tmp_path: Path) -> None:
         backends = ["env-var"]
         """,
     )
+    cfg = load_config(cfg_file, warn_issues=False)
     with pytest.raises(ConfigError) as exc:
-        load_config(cfg_file, warn_issues=False)
+        build_registry(cfg)
 
     # Message is short: just the affected secrets, no remediation noise.
     assert "stranded" in str(exc.value)
@@ -463,7 +480,7 @@ def test_unknown_backend_kind_in_secret_backends_errors(
         # typo: kind is 'env-var' (kebab), not 'env_var' (snake)
         """,
     )
-    with pytest.raises(ConfigError, match="unknown backend kind"):
+    with pytest.raises(ConfigError, match="unknown secret backend"):
         load_config(cfg_file, warn_issues=False)
 
 

@@ -18,12 +18,12 @@ def test_resource_reference_fields() -> None:
         name="tailscale-auth-key",
         kind="secret",
         usage="the Tailscale auth key",
-        source=("vm_template", "default"),
+        source=("vm-template", "default"),
     )
     assert ref.name == "tailscale-auth-key"
     assert ref.kind == "secret"
     assert ref.usage == "the Tailscale auth key"
-    assert ref.source == ("vm_template", "default")
+    assert ref.source == ("vm-template", "default")
 
 
 def test_resource_reference_is_immutable() -> None:
@@ -37,15 +37,15 @@ def test_secret_reference_is_a_resource_reference() -> None:
         name="api-key",
         kind="secret",
         usage="the API key",
-        source=("admin_template", "default"),
+        source=("admin-template", "default"),
     )
     assert isinstance(sec, ResourceReference)
     assert sec.kind == "secret"
 
 
 def test_reference_entry_fields() -> None:
-    entry = ReferenceEntry(source=("vm_template", "default"), usage="the auth key")
-    assert entry.source == ("vm_template", "default")
+    entry = ReferenceEntry(source=("vm-template", "default"), usage="the auth key")
+    assert entry.source == ("vm-template", "default")
     assert entry.usage == "the auth key"
 
 

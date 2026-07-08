@@ -13,8 +13,9 @@ from typing import TYPE_CHECKING
 from agentworks.errors import ConfigError
 
 if TYPE_CHECKING:
-    from agentworks.config import Config, SessionTemplate
     from agentworks.env import EnvEntry
+    from agentworks.resources.registry import Registry
+    from agentworks.sessions.template import SessionTemplate
 
 
 @dataclass
@@ -62,9 +63,11 @@ def resolve_from_dict(
     return ResolvedSessionTemplate(name="default")
 
 
-def resolve_template(config: Config, template_name: str | None = None) -> ResolvedSessionTemplate:
+def resolve_template(registry: Registry, template_name: str | None = None) -> ResolvedSessionTemplate:
     """Resolve a session template by name, applying inheritance."""
-    return resolve_from_dict(config.session_templates, template_name)
+    from agentworks.resources.access import kind_dict
+
+    return resolve_from_dict(kind_dict(registry, "session-template"), template_name)
 
 
 def _resolve(

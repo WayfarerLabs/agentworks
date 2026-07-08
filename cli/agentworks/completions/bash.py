@@ -13,34 +13,38 @@ DYNAMIC_SNIPPETS: dict[str, str] = {
     "vm_hosts": ("$(agw vm-host list --names-only 2>/dev/null)"),
     "workspaces": ("$(agw workspace list --names-only 2>/dev/null)"),
     "ws_templates": (
-        "$(agw resource list --kind workspace_template --names-only 2>/dev/null"
-        " | awk -F: '{print $2}')"
+        "$(agw resource list --kind workspace-template --names-only 2>/dev/null"
+        " | awk -F/ '{print $2}')"
     ),
     "git_credentials": (
-        "$(agw resource list --kind git_credentials --names-only 2>/dev/null"
-        " | awk -F: '{print $2}')"
+        "$(agw resource list --kind git-credential --names-only 2>/dev/null"
+        " | awk -F/ '{print $2}')"
     ),
     "sessions": ("$(agw session list --names-only 2>/dev/null)"),
     "agents": ("$(agw agent list --names-only 2>/dev/null)"),
     "consoles": ("$(agw console list --names-only 2>/dev/null)"),
     "session_templates": (
-        "$(agw resource list --kind session_template --names-only 2>/dev/null"
-        " | awk -F: '{print $2}')"
+        "$(agw resource list --kind session-template --names-only 2>/dev/null"
+        " | awk -F/ '{print $2}')"
     ),
     "vm_templates": (
-        "$(agw resource list --kind vm_template --names-only 2>/dev/null"
-        " | awk -F: '{print $2}')"
+        "$(agw resource list --kind vm-template --names-only 2>/dev/null"
+        " | awk -F/ '{print $2}')"
     ),
     "agent_templates": (
-        "$(agw resource list --kind agent_template --names-only 2>/dev/null"
-        " | awk -F: '{print $2}')"
+        "$(agw resource list --kind agent-template --names-only 2>/dev/null"
+        " | awk -F/ '{print $2}')"
     ),
     "secrets": ("$(agw secret list --names-only 2>/dev/null)"),
     "resource_kinds": (
-        "$(agw resource list --names-only 2>/dev/null | awk -F: '{print $1}' | sort -u)"
+        "$(agw resource kinds --names-only 2>/dev/null)"
     ),
-    "resource_names": (
-        "$(agw resource list --kind \"$prev\" --names-only 2>/dev/null | awk -F: '{print $2}')"
+    "resource_refs": (
+        "$(agw resource list --names-only 2>/dev/null)"
+    ),
+    "migrate_selectors": (
+        "$(agw resource list --origin operator --names-only 2>/dev/null"
+        " | awk -F/ '{print $1; print $0}' | sort -u)"
     ),
 }
 

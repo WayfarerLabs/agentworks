@@ -7,6 +7,7 @@ from textwrap import dedent
 
 import pytest
 
+from agentworks.bootstrap import build_registry
 from agentworks.config import load_config
 from agentworks.workspaces.templates import resolve_template
 
@@ -43,28 +44,28 @@ def config(tmp_path: Path):  # type: ignore[no-untyped-def]
 
 
 def test_explicit_template(config):  # type: ignore[no-untyped-def]
-    result = resolve_template(config, "base")
+    result = resolve_template(build_registry(config), "base")
     assert result.name == "base"
     assert result.repo == "https://example.com/org/base.git"
     assert result.tmuxinator is True
 
 
 def test_default_template(config):  # type: ignore[no-untyped-def]
-    result = resolve_template(config)
+    result = resolve_template(build_registry(config))
     assert result.name == "default"
     assert result.repo is None
     assert result.tmuxinator is True
 
 
 def test_inheritance_overrides(config):  # type: ignore[no-untyped-def]
-    result = resolve_template(config, "child")
+    result = resolve_template(build_registry(config), "child")
     assert result.name == "child"
     assert result.repo == "https://example.com/org/base.git"  # inherited from base
     assert result.tmuxinator is False  # overridden by child
 
 
 def test_deep_inheritance(config):  # type: ignore[no-untyped-def]
-    result = resolve_template(config, "grandchild")
+    result = resolve_template(build_registry(config), "grandchild")
     assert result.name == "grandchild"
     assert result.repo == "https://example.com/org/override.git"  # overridden
     assert result.tmuxinator is False  # inherited from child
@@ -85,7 +86,7 @@ def test_builtin_fallback(tmp_path: Path) -> None:
     """)
     )
     cfg = load_config(config_file)
-    result = resolve_template(cfg)
+    result = resolve_template(build_registry(cfg))
     assert result.name == "default"
     assert result.repo is None
     assert result.tmuxinator is True
@@ -93,4 +94,4 @@ def test_builtin_fallback(tmp_path: Path) -> None:
 
 def test_unknown_template(config):  # type: ignore[no-untyped-def]
     with pytest.raises(ValueError, match="Unknown"):
-        resolve_template(config, "nonexistent")
+        resolve_template(build_registry(config), "nonexistent")

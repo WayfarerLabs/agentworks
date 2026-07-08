@@ -45,7 +45,7 @@ def test_no_operator_secrets_still_shows_auto_declared(tmp_path: Path) -> None:
     _write_base(cfg_file)
 
     table = _build_table(cfg_file)
-    assert table.backend_kinds == ("env-var", "prompt")
+    assert table.backends == ("env-var", "prompt")
     names = [r.name for r in table.rows]
     assert "tailscale-auth-key" in names
     # The auto-declared row carries a synthesized description so the
@@ -54,7 +54,7 @@ def test_no_operator_secrets_still_shows_auto_declared(tmp_path: Path) -> None:
     # from the first requirement's usage + source: "what this secret
     # is for, and who's asking".
     ts = next(r for r in table.rows if r.name == "tailscale-auth-key")
-    assert ts.description == "(auto) the Tailscale auth key for vm_template:default"
+    assert ts.description == "(auto) the Tailscale auth key for vm-template/default"
     # Counts match the operator/auto split.
     assert table.operator_count == 0
     assert table.auto_count >= 1
@@ -105,7 +105,7 @@ def test_env_var_cell_shows_default_convention_identifier(tmp_path: Path) -> Non
     )
     table = _build_table(cfg_file)
     row = table.rows[0]
-    env_var_cell = next(c for c in row.cells if c.backend_kind == "env-var")
+    env_var_cell = next(c for c in row.cells if c.backend == "env-var")
     assert env_var_cell.would_attempt is True
     assert env_var_cell.identifier == "AW_SECRET_GITHUB_TOKEN"
 
@@ -126,7 +126,7 @@ def test_env_var_cell_shows_mapping_override(tmp_path: Path) -> None:
         """,
     )
     table = _build_table(cfg_file)
-    env_var_cell = next(c for c in table.rows[0].cells if c.backend_kind == "env-var")
+    env_var_cell = next(c for c in table.rows[0].cells if c.backend == "env-var")
     assert env_var_cell.identifier == "GITHUB_TOKEN"
 
 
@@ -146,7 +146,7 @@ def test_env_var_cell_when_opted_out_reports_disabled(tmp_path: Path) -> None:
         """,
     )
     table = _build_table(cfg_file)
-    env_var_cell = next(c for c in table.rows[0].cells if c.backend_kind == "env-var")
+    env_var_cell = next(c for c in table.rows[0].cells if c.backend == "env-var")
     assert env_var_cell.would_attempt is False
     assert env_var_cell.identifier is None
 
@@ -166,7 +166,7 @@ def test_prompt_cell_has_no_static_identifier(tmp_path: Path) -> None:
         """,
     )
     table = _build_table(cfg_file)
-    prompt_cell = next(c for c in table.rows[0].cells if c.backend_kind == "prompt")
+    prompt_cell = next(c for c in table.rows[0].cells if c.backend == "prompt")
     assert prompt_cell.would_attempt is True
     assert prompt_cell.identifier is None
 
@@ -189,7 +189,7 @@ def test_column_order_matches_backend_chain_precedence(tmp_path: Path) -> None:
         """,
     )
     table = _build_table(cfg_file)
-    assert table.backend_kinds == ("prompt", "env-var")
+    assert table.backends == ("prompt", "env-var")
 
 
 def test_names_only_lists_every_registry_secret(
@@ -249,7 +249,7 @@ def test_empty_backend_chain_yields_no_columns(tmp_path: Path) -> None:
         """,
     )
     table = _build_table(cfg_file)
-    assert table.backend_kinds == ()
+    assert table.backends == ()
     # Auto-declared rows still appear (each with empty cells, since
     # there are no backend columns).
     assert all(r.cells == () for r in table.rows)

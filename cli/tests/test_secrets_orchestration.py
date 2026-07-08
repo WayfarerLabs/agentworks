@@ -18,6 +18,7 @@ from pathlib import Path
 
 import pytest
 
+from agentworks.bootstrap import build_registry
 from agentworks.config import load_config
 from agentworks.env import EnvEntry
 from agentworks.secrets import (
@@ -65,7 +66,7 @@ shell = "zsh"
 def test_returns_empty_for_no_targets(tmp_path: Path) -> None:
     cfg = _write_config(tmp_path)
     config = load_config(cfg, warn_issues=False)
-    assert compute_needed_secrets([], config) == []
+    assert compute_needed_secrets([], build_registry(config)) == []
 
 
 def test_unions_single_target_env_chain(
@@ -85,7 +86,7 @@ backends = ["env-var"]
     config = load_config(cfg, warn_issues=False)
     vm_env = {"API_KEY": EnvEntry(key="API_KEY", secret="api-key")}
 
-    decls = compute_needed_secrets([SecretTarget(vm=vm_env)], config)
+    decls = compute_needed_secrets([SecretTarget(vm=vm_env)], build_registry(config))
     assert [d.name for d in decls] == ["api-key"]
 
 
@@ -117,7 +118,7 @@ backends = ["env-var", "prompt"]
         }
     )
 
-    decls = compute_needed_secrets([t_a, t_b], config)
+    decls = compute_needed_secrets([t_a, t_b], build_registry(config))
     names = [d.name for d in decls]
     # 'shared' should appear once. 'unique-a' from t_a is included.
     assert sorted(names) == ["shared", "unique-a"]
@@ -153,7 +154,7 @@ backends = ["env-var", "prompt"]
         admin={"A": EnvEntry(key="A", secret="admin-secret")},
         session={"S": EnvEntry(key="S", secret="session-secret")},
     )
-    decls = compute_needed_secrets([target], config)
+    decls = compute_needed_secrets([target], build_registry(config))
     assert sorted(d.name for d in decls) == [
         "admin-secret", "session-secret", "vm-secret", "ws-secret",
     ]
@@ -178,7 +179,9 @@ backends = ["env-var", "prompt"]
 
     target = SecretTarget(vm={"K": EnvEntry(key="K", secret="from-env")})
     external_decl = config.secrets["external"]
-    decls = compute_needed_secrets([target], config, extra_decls=[external_decl])
+    decls = compute_needed_secrets(
+        [target], build_registry(config), extra_decls=[external_decl]
+    )
     assert sorted(d.name for d in decls) == ["external", "from-env"]
 
 
@@ -211,8 +214,9 @@ backends = ["env-var", "prompt"]
         "API": EnvEntry(key="API", secret="api"),
         "GREETING": EnvEntry(key="GREETING", value="hello mysession"),
     }
-    pre = compute_needed_secrets([SecretTarget(vm=pre_subst)], config)
-    post = compute_needed_secrets([SecretTarget(vm=post_subst)], config)
+    registry = build_registry(config)
+    pre = compute_needed_secrets([SecretTarget(vm=pre_subst)], registry)
+    post = compute_needed_secrets([SecretTarget(vm=post_subst)], registry)
     assert [d.name for d in pre] == [d.name for d in post] == ["api"]
 
 
@@ -231,7 +235,7 @@ def test_admin_and_agent_in_same_target_raises(tmp_path: Path) -> None:
         agent={"B": EnvEntry(key="B", value="y")},
     )
     with pytest.raises(ValueError, match="admin.*agent|agent.*admin"):
-        compute_needed_secrets([target], config)
+        compute_needed_secrets([target], build_registry(config))
 
 
 def test_cross_target_first_encounter_ordering(tmp_path: Path) -> None:
@@ -255,7 +259,7 @@ backends = ["env-var", "prompt"]
     target_b = SecretTarget(vm={"B": EnvEntry(key="B", secret="b-secret")})
     target_a = SecretTarget(vm={"A": EnvEntry(key="A", secret="a-secret")})
 
-    decls = compute_needed_secrets([target_b, target_a], config)
+    decls = compute_needed_secrets([target_b, target_a], build_registry(config))
     # b-secret encountered first (target_b is first in the list), so
     # it leads the order even though a-secret sorts alphabetically before.
     assert [d.name for d in decls] == ["b-secret", "a-secret"]
@@ -278,7 +282,9 @@ backends = ["env-var", "prompt"]
 
     target = SecretTarget(vm={"K": EnvEntry(key="K", secret="shared")})
     shared = config.secrets["shared"]
-    decls = compute_needed_secrets([target], config, extra_decls=[shared])
+    decls = compute_needed_secrets(
+        [target], build_registry(config), extra_decls=[shared]
+    )
     assert [d.name for d in decls] == ["shared"]
 
 
@@ -290,9 +296,8 @@ backends = ["env-var", "prompt"]
 def test_resolve_for_command_returns_resolved_values(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """The return value mirrors what SecretResolver.resolve_all
-    produced -- useful for callers that want to log "resolved N
-    secrets" without re-deriving state from the cache."""
+    """The returned values dict IS the channel: the command threads it
+    down to its compose_env sites (there is no cache)."""
     monkeypatch.setenv("AW_SECRET_API_KEY", "from-env")
     cfg = _write_config(
         tmp_path,
@@ -306,19 +311,16 @@ backends = ["env-var"]
     )
     config = load_config(cfg, warn_issues=False)
     target = SecretTarget(vm={"K": EnvEntry(key="K", secret="api-key")})
-    resolved = resolve_for_command([target], config)
+    resolved = resolve_for_command([target], config, build_registry(config))
     assert resolved == {"api-key": "from-env"}
 
 
-def test_resolve_for_command_cache_wins_over_late_env_changes(
+def test_resolved_values_are_plain_data(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Behavior pin for the cache contract: once resolve_for_command
-    has captured a value, subsequent renders inside the same command
-    use the cached value even if the backing source value changes.
-    This is the operator-facing guarantee that "we don't re-prompt /
-    re-read mid-command" -- testable via the resolver's public API
-    without reaching into private source lists."""
+    """The one resolve call captures values at that moment; later
+    environment mutation cannot change what the command threads down.
+    (The prompt-once guarantee is structural: one resolve per command.)"""
     monkeypatch.setenv("AW_SECRET_API_KEY", "first")
     cfg = _write_config(
         tmp_path,
@@ -331,50 +333,56 @@ backends = ["env-var"]
 """,
     )
     config = load_config(cfg, warn_issues=False)
+    registry = build_registry(config)
     target = SecretTarget(vm={"K": EnvEntry(key="K", secret="api-key")})
-    resolved = resolve_for_command([target], config)
-    assert resolved == {"api-key": "first"}
+    values = resolve_for_command([target], config, registry)
+    assert values == {"api-key": "first"}
 
-    # Mutate the env after eager-resolve. A naive (uncached)
-    # resolution would pick up "second"; the cache guarantees we
-    # still see "first".
     monkeypatch.setenv("AW_SECRET_API_KEY", "second")
-    rendered = config.secret_resolver.render(
-        {"K": EnvEntry(key="K", secret="api-key")}
+    from agentworks.env import compose_env
+    from agentworks.env.identity import ResourceContext
+
+    env = compose_env(
+        values=values,
+        ctx=ResourceContext(
+            vm_name="v", vm_host="h", platform="lima", user="u"
+        ),
+        vm={"K": EnvEntry(key="K", secret="api-key")},
     )
-    assert rendered == {"K": "first"}
+    assert env["K"] == "first"
 
 
-def test_resolve_for_command_skips_resolver_when_no_secrets(
+def test_resolve_for_command_skips_loop_when_no_secrets(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """An empty target list (or targets whose envs reference no secrets)
-    must not call resolve_all -- avoids spinning up prompt machinery for
-    commands that need nothing."""
+    must not run the resolve loop -- avoids spinning up prompt machinery
+    for commands that need nothing."""
     cfg = _write_config(tmp_path)
     config = load_config(cfg, warn_issues=False)
+    registry = build_registry(config)
 
     called = {"count": 0}
 
-    def _spy(decls: list[SecretDecl]) -> dict[str, str]:
+    def _spy(*args: object, **kwargs: object) -> dict[str, str]:
         called["count"] += 1
         return {}
 
-    monkeypatch.setattr(config.secret_resolver, "resolve_all", _spy)
+    monkeypatch.setattr("agentworks.secrets.resolve.resolve_secrets", _spy)
 
-    resolve_for_command([], config)
+    resolve_for_command([], config, registry)
     assert called["count"] == 0
 
     plaintext_target = SecretTarget(vm={"K": EnvEntry(key="K", value="plain")})
-    resolve_for_command([plaintext_target], config)
+    resolve_for_command([plaintext_target], config, registry)
     assert called["count"] == 0
 
 
 def test_resolve_for_command_passes_extra_decls_through(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """extra_decls reach resolve_all even when no target references any
-    secret -- pinning the legacy-migration hook."""
+    """extra_decls reach the resolve loop even when no target references
+    any secret -- pinning the legacy-migration hook."""
     monkeypatch.setenv("AW_SECRET_EXTERNAL", "x")
     cfg = _write_config(
         tmp_path,
@@ -387,18 +395,20 @@ backends = ["env-var"]
 """,
     )
     config = load_config(cfg, warn_issues=False)
+    registry = build_registry(config)
+
+    from agentworks.secrets.resolve import resolve_secrets as _real
 
     calls: list[list[str]] = []
-    original = config.secret_resolver.resolve_all
 
-    def _spy(decls: list[SecretDecl]) -> dict[str, str]:
+    def _spy(decls: list[SecretDecl], backends: list[object]) -> dict[str, str]:
         calls.append([d.name for d in decls])
-        return original(decls)
+        return _real(decls, backends)  # type: ignore[arg-type]
 
-    monkeypatch.setattr(config.secret_resolver, "resolve_all", _spy)
+    monkeypatch.setattr("agentworks.secrets.resolve.resolve_secrets", _spy)
 
     resolve_for_command(
-        [], config, extra_decls=[config.secrets["external"]]
+        [], config, registry, extra_decls=[config.secrets["external"]]
     )
     assert calls == [["external"]]
 

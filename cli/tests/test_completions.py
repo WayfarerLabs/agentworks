@@ -94,6 +94,9 @@ class TestDynamicCompletionsMapping:
             )
 
     def test_completer_ids_are_known(self) -> None:
+        from agentworks.completions.bash import (
+            DYNAMIC_SNIPPETS as BASH_SNIPPETS,
+        )
         from agentworks.completions.powershell import DYNAMIC_SNIPPETS
         from agentworks.completions.zsh import COMPLETER_FUNC_NAMES
 
@@ -103,6 +106,12 @@ class TestDynamicCompletionsMapping:
             )
             assert completer_id in DYNAMIC_SNIPPETS, (
                 f"Completer '{completer_id}' from ({command_path}, {param_name}) has no PowerShell snippet mapping"
+            )
+            # The bash generator silently skips unknown completer ids, so
+            # a rename missed in bash alone would ship as silently-dead
+            # completion -- pin all three shell maps.
+            assert completer_id in BASH_SNIPPETS, (
+                f"Completer '{completer_id}' from ({command_path}, {param_name}) has no bash snippet mapping"
             )
 
 
@@ -161,11 +170,11 @@ class TestRegistrySourcedCompleters:
     """
 
     _REGISTRY_SOURCED = (
-        ("ws_templates", "workspace_template"),
-        ("git_credentials", "git_credentials"),
-        ("session_templates", "session_template"),
-        ("vm_templates", "vm_template"),
-        ("agent_templates", "agent_template"),
+        ("ws_templates", "workspace-template"),
+        ("git_credentials", "git-credential"),
+        ("session_templates", "session-template"),
+        ("vm_templates", "vm-template"),
+        ("agent_templates", "agent-template"),
     )
 
     def test_bash_snippets_source_from_registry(self) -> None:
@@ -555,3 +564,75 @@ class TestVariadicPositionalCompletion:
         # Same idea: -ge for the variadic.
         assert "tokenCount -ge" in output
         assert "tokenCount -eq" in output
+
+
+class TestKindsSourcedCompleter:
+    """The resource_kinds completer sources `agw resource kinds
+    --names-only` in all three shells -- the config-free static path --
+    not a scrape of the resource list."""
+
+    def test_all_shells_call_resource_kinds(self) -> None:
+        from agentworks.completions.bash import (
+            DYNAMIC_SNIPPETS as BASH_SNIPPETS,
+        )
+        from agentworks.completions.powershell import (
+            DYNAMIC_SNIPPETS as PS_SNIPPETS,
+        )
+        from agentworks.completions.zsh import DYNAMIC_FUNCTIONS
+
+        for shell, source in (
+            ("bash", BASH_SNIPPETS["resource_kinds"]),
+            ("zsh", DYNAMIC_FUNCTIONS["resource_kinds"]),
+            ("powershell", PS_SNIPPETS["resource_kinds"]),
+        ):
+            assert "resource kinds --names-only" in source, (
+                f"{shell} resource_kinds should call the config-free "
+                f"kinds command; got: {source!r}"
+            )
+            assert "resource list" not in source, (
+                f"{shell} resource_kinds still scrapes resource list: "
+                f"{source!r}"
+            )
+
+
+class TestStaticChoiceCompletion:
+    """click.Choice values reach the completion tree. Typer wraps
+    ``click_type=`` params in ``FuncParamType`` (the real type hides on
+    ``.func``); the spec extraction unwraps one level -- without it,
+    every Choice-typed option silently loses static completion (the
+    generators' choices branches were dead code)."""
+
+    def test_migrate_option_choices_extracted(self) -> None:
+        from agentworks.cli import app
+        from agentworks.completions.spec import build_spec
+
+        migrate = build_spec(app).subcommands["resource"].subcommands["migrate"]
+        by_name = {p.name: p.choices for p in migrate.params}
+        assert by_name["layout"] == ["per-kind", "single", "per-resource"]
+        assert by_name["toml"] == ["comment", "delete"]
+
+    def test_sample_kind_choices_extracted(self) -> None:
+        from agentworks.cli import app
+        from agentworks.completions.spec import build_spec
+        from agentworks.manifests.samples import SAMPLE_KINDS
+
+        sample = build_spec(app).subcommands["resource"].subcommands["sample"]
+        (kind,) = [p for p in sample.params if p.name == "kind"]
+        assert kind.choices == list(SAMPLE_KINDS)
+
+    def test_all_shells_emit_toml_choices(self) -> None:
+        from agentworks.cli import app
+        from agentworks.completions.bash import generate_bash
+        from agentworks.completions.powershell import generate_powershell
+        from agentworks.completions.spec import build_spec
+        from agentworks.completions.zsh import generate_zsh
+
+        spec = build_spec(app)
+        # Shell-specific emission shapes (the zsh/bash forms put both
+        # choices on one line; powershell emits one CompletionResult per
+        # choice).
+        assert ":toml:(comment delete)" in generate_zsh(spec, "t")
+        assert 'compgen -W "comment delete"' in generate_bash(spec, "t")
+        ps = generate_powershell(spec, "t")
+        assert "::new('comment', 'comment'" in ps
+        assert "::new('delete', 'delete'" in ps

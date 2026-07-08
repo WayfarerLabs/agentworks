@@ -449,6 +449,7 @@ class WSL2Provisioner(VMProvisioner):
         vm_name: str,
         config: Config,
         *,
+        swap: int = 4,
         admin_username: str = "agentworks",
     ) -> ProvisionResult:
         output.info(f"Provisioning WSL2 VM '{vm_name}'...")
@@ -513,9 +514,9 @@ class WSL2Provisioner(VMProvisioner):
         )
 
         # Configure swap file
-        if config.vm.swap > 0:
-            swap_mb = config.vm.swap * 1024
-            output.detail(f"Setting up {config.vm.swap} GiB swap file...")
+        if swap > 0:
+            swap_mb = swap * 1024
+            output.detail(f"Setting up {swap} GiB swap file...")
             _wsl(
                 [
                     "--distribution",

@@ -72,19 +72,93 @@ class Registry:
     ) -> None:
         """Add a Resource from any publisher. The publisher constructs
         the appropriate ``Origin`` variant (``operator_declared`` /
-        ``code_declared`` / future variants) and passes it in; the
+        ``built_in`` / future variants) and passes it in; the
         Registry attaches it to the Resource via ``dataclasses.replace``
         and stores the result keyed by ``(kind, name)``.
 
         Raises ``RuntimeError`` if the Registry has been finalized.
-        Adding the same ``(kind, name)`` twice replaces the prior entry
-        (publishers are expected not to publish duplicates; the test
-        suite covers this; production publishers don't do it).
+
+        Collisions (same ``(kind, name)`` added twice) are handled
+        explicitly (dual-path sources, ADR 0016):
+
+        - operator row over operator row: ``ConfigError`` citing both
+          declaration locations. The manifest loader catches duplicates
+          within its own set; this is the backstop that also catches a
+          resource declared in both TOML and a manifest (a permanent
+          dual-path condition).
+        - operator row over built-in row: consults the kind's
+          ``builtin_override`` flag. ``"allow"`` keeps the catalog
+          behavior (operator row replaces the built-in); ``"reserved"``
+          raises ``ConfigError`` naming the reserved built-in.
+        - built-in row over built-in row: replaces (idempotent
+          republish).
+        - anything else (built-in over operator) is a publisher
+          ordering conflict and raises ``ConfigError`` (operator data
+          can reach it, so it must not be an assert).
         """
         if self._frozen:
             raise RuntimeError("registry is frozen; add must precede finalize")
+        if "/" in name:
+            # Uniform, source-independent rule (maintainer ruling,
+            # 2026-07-05): '/' is reserved -- kind/name selectors,
+            # per-resource manifest filenames -- so no publisher may
+            # register a name containing it. Enforced here rather than
+            # per-loader so TOML, YAML, and future plugin publishers
+            # cannot drift.
+            from agentworks.errors import ConfigError
+            from agentworks.resources.render import format_origin_line
+
+            raise ConfigError(
+                f"{kind} name {name!r} contains '/', which is not allowed "
+                f"in resource names ({format_origin_line(origin)})",
+                hint=(
+                    "Rename the resource: '/' is reserved for kind/name "
+                    "selectors and per-resource manifest filenames."
+                ),
+            )
+        existing = self._resources.get(kind, {}).get(name)
+        if existing is not None:
+            self._check_collision(kind, name, existing, origin)
         stamped = dataclasses.replace(resource, origin=origin)
         self._resources.setdefault(kind, {})[name] = stamped
+
+    @staticmethod
+    def _check_collision(
+        kind: str, name: str, existing: Any, incoming: Origin
+    ) -> None:
+        """Raise unless the incoming publish may replace ``existing``.
+
+        Built-in over built-in replaces unconditionally: republish is
+        idempotent, and a future app publisher shadowing another's row
+        is accepted (the surviving origin's source says who won).
+        """
+        from agentworks.resources.render import format_origin_line
+
+        existing_origin: Origin | None = getattr(existing, "origin", None)
+        existing_variant = getattr(existing_origin, "variant", None)
+        if existing_variant == "built-in" and incoming.variant == "built-in":
+            return
+        if existing_variant == "built-in" and incoming.variant == "operator-declared":
+            handler = KIND_REGISTRY.get(kind)
+            if handler is not None and handler.builtin_override == "allow":
+                return
+            raise ConfigError(
+                f'{kind} "{name}" is a built-in resource with a reserved '
+                f"name; declare a differently-named {kind} instead",
+            )
+        if (
+            existing_variant == "operator-declared"
+            and incoming.variant == "operator-declared"
+        ):
+            raise ConfigError(
+                f'duplicate {kind} "{name}": declared at '
+                f"{format_origin_line(existing_origin)} and "
+                f"{format_origin_line(incoming)}",
+            )
+        raise ConfigError(
+            f"publisher ordering conflict: {incoming.variant} row published "
+            f"over {existing_variant} row for {kind}/{name}"
+        )
 
     # -- Finalize phase ------------------------------------------------
 
@@ -113,7 +187,7 @@ class Registry:
            accumulated reference map is preserved across iterations so
            the post-loop usage-attachment pass sees the complete graph.
         2. **Usage attachment + description polish**: every Resource
-           (operator-declared, code-declared, auto-declared) gets a
+           (operator-declared, built-in, auto-declared) gets a
            ``usage`` tuple attached via ``dataclasses.replace`` -- empty
            if nothing referenced it. The kind-agnostic
            description-polish runs in the same pass: for any Resource
@@ -126,6 +200,13 @@ class Registry:
            iterative DFS three-coloring; raises ``ConfigError`` on the
            first cycle with the offending path.
         4. **Freeze**.
+
+        Semantic checks that need CONFIG alongside the finalized graph
+        (e.g. the secret chain's names and reachability) are not the
+        Registry's job -- config isn't published here. They run at the
+        boundary that holds both worlds: ``bootstrap.build_registry``
+        invokes the owning subsystem's check
+        (``secrets.validate_chain``) right after finalize returns.
 
         First-encountered reference order (for the
         ``Origin.auto_declared(source=...)`` rule) is preserved by
@@ -263,7 +344,7 @@ class Registry:
                 raise ConfigError(
                     f"{kind} kind only auto-declares the reserved name(s) "
                     f"{sorted(allowed)!r}; got {name!r} "
-                    f"(required by {first.source[0]}:{first.source[1]})"
+                    f"(required by {first.source[0]}/{first.source[1]})"
                 )
             synthesized = kind_handler.synthesize(refs)
             self._resources.setdefault(kind, {})[name] = synthesized
@@ -271,7 +352,7 @@ class Registry:
         if kind_handler.miss_policy == "error":
             raise ConfigError(
                 f"{first.source[0]} {first.source[1]!r} references "
-                f"unknown {kind} {name!r}"
+                f"unknown {kind} {name!r} ({first.usage})"
             )
         raise RuntimeError(
             f"unexpected miss_policy {kind_handler.miss_policy!r} on "
@@ -301,7 +382,7 @@ class Registry:
         need the framework's canonical name (the Registry's per-kind
         dict key) regardless of whether the Resource type carries it on
         a ``.name`` field (most do) or on a different field
-        (``SecretBackendConfig.kind``). Empty iterator if the kind has
+        (capability resources). Empty iterator if the kind has
         no Resources.
         """
         return iter(self._resources.get(kind, {}).items())
@@ -358,11 +439,11 @@ def _polish_auto_declared_description(resource: Any, kind: str) -> Any:
 
     - **Usage-driven** (auto-declared via incoming reference): set
       from the first matching reference as
-      ``"(auto) <usage> for <kind>:<name>"`` plus ``" (and N more)"``
+      ``"(auto) <usage> for <kind>/<name>"`` plus ``" (and N more)"``
       when more than one distinct source matches.
     - **Empty-usage** (always-materialized reserved default; no incoming
       references): set as ``"(auto) auto-declared default <kind>"``,
-      e.g. ``"(auto) auto-declared default vm_template"``.
+      e.g. ``"(auto) auto-declared default vm-template"``.
 
     Kind-agnostic by design: the framework checks structurally
     (``hasattr(resource, "description")`` + falsy test), not by kind, so
@@ -388,7 +469,7 @@ def _polish_auto_declared_description(resource: Any, kind: str) -> Any:
         distinct_other = {entry.source for entry in references} - {first.source}
         suffix = f" (and {len(distinct_other)} more)" if distinct_other else ""
         description = (
-            f"(auto) {first.usage} for {first.source[0]}:{first.source[1]}{suffix}"
+            f"(auto) {first.usage} for {first.source[0]}/{first.source[1]}{suffix}"
         )
     return dataclasses.replace(resource, description=description)
 
@@ -454,7 +535,7 @@ def _detect_cycles(resources: dict[str, dict[str, Any]]) -> None:
                 target_color = color.get(target, WHITE)
                 if target_color == GRAY:
                     cycle = path[path.index(target):] + [target]
-                    cycle_path = " -> ".join(f"{k}:{n}" for k, n in cycle)
+                    cycle_path = " -> ".join(f"{k}/{n}" for k, n in cycle)
                     raise ConfigError(
                         f"resource reference cycle detected: {cycle_path}"
                     )

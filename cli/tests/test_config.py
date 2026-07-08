@@ -62,16 +62,19 @@ def config_dir(tmp_path: Path) -> Path:
 
 def test_load_valid_config(config_dir: Path) -> None:
     cfg = load_config(config_dir)
+    assert cfg.admin is not None
     assert cfg.admin.shell == "zsh"
-    assert cfg.vm.apt == ["zsh", "tmux"]
+    from agentworks.vms.templates import resolve_from_dict as _resolve_vm
+
+    assert _resolve_vm(cfg.vm_templates).apt == ["zsh", "tmux"]
     assert cfg.admin.user_install_commands == ["hello"]
     assert "hello" in cfg.user_install_commands
     assert "default" in cfg.workspace_templates
     assert "gruntweave" in cfg.workspace_templates
     assert cfg.workspace_templates["child"].inherits == ["gruntweave"]
     assert cfg.workspace_templates["child"].tmuxinator is False
-    assert cfg.git_credentials["github"].type == "github"
-    assert cfg.git_credentials["azdo"].org == "my-org"
+    assert cfg.git_credentials["github"].provider == "github"
+    assert cfg.git_credentials["azdo"].provider_config == {"org": "my-org"}
     assert cfg.admin.git_credentials == ["github"]
 
 
@@ -136,8 +139,66 @@ def test_invalid_git_credential_type(tmp_path: Path) -> None:
     """)
     )
     cfg = load_config(config_file)
-    with pytest.raises(ConfigError, match="git_credential_provider 'gitlab'"):
+    with pytest.raises(ConfigError, match="git-credential-provider 'gitlab'"):
         build_registry(cfg)
+
+
+def _git_credential_config(tmp_path: Path, section: str) -> Path:
+    pub = tmp_path / "id.pub"
+    priv = tmp_path / "id"
+    pub.write_text("key")
+    priv.write_text("key")
+
+    config_file = tmp_path / "config.toml"
+    config_file.write_text(
+        dedent(f"""\
+        [operator]
+        ssh_public_key = "{pub.as_posix()}"
+        ssh_private_key = "{priv.as_posix()}"
+
+        {section}
+    """)
+    )
+    return config_file
+
+
+def test_git_credential_provider_key(tmp_path: Path) -> None:
+    """``provider`` is the going-forward vocabulary for the credential
+    provider, matching secret-backend manifests."""
+    config_file = _git_credential_config(
+        tmp_path,
+        '[git_credentials.gh]\nprovider = "github"',
+    )
+    cfg = load_config(config_file)
+    assert cfg.git_credentials["gh"].provider == "github"
+
+
+def test_git_credential_type_still_accepted(tmp_path: Path) -> None:
+    """Legacy ``type`` keeps working until the TOML cutover deletes it."""
+    config_file = _git_credential_config(
+        tmp_path,
+        '[git_credentials.gh]\ntype = "github"',
+    )
+    cfg = load_config(config_file, warn_issues=False)
+    assert cfg.git_credentials["gh"].provider == "github"
+    # Deprecation nudges travel on deprecation_issues, so this pin stays
+    # sharp: the legacy key must not produce any real issue.
+    assert not cfg.config_issues
+
+
+def test_git_credential_provider_wins_over_type(tmp_path: Path) -> None:
+    """When both keys are present, ``provider`` wins; a disagreement is
+    surfaced as a config issue rather than silently swallowed."""
+    config_file = _git_credential_config(
+        tmp_path,
+        '[git_credentials.ado]\nprovider = "azdo"\ntype = "github"\norg = "my-org"',
+    )
+    cfg = load_config(config_file, warn_issues=False)
+    assert cfg.git_credentials["ado"].provider == "azdo"
+    assert any(
+        "git_credentials.ado" in issue and "provider wins" in issue
+        for issue in cfg.config_issues
+    )
 
 
 def test_unexpected_top_level_keys_warns(tmp_path: Path) -> None:
@@ -411,6 +472,7 @@ def test_claude_marketplaces_loads_cleanly(tmp_path: Path) -> None:
         claude_plugins = ["my-plugin@my-marketplace"]
     """)
     cfg = load_config(config_file, warn_issues=False)
+    assert cfg.admin is not None
     assert cfg.admin.claude_marketplaces == ["https://github.com/example/tools#v1"]
     assert cfg.admin.claude_plugins == ["my-plugin@my-marketplace"]
 
@@ -440,12 +502,17 @@ def test_claude_marketplaces_rejects_string(tmp_path: Path) -> None:
 
 
 def test_named_console_tmux_layout_default_when_section_missing(tmp_path: Path) -> None:
-    """No [named_console] section produces the aw-session-vertical default
-    -- the layout the Named Console feature was designed around (one
-    privileged session pane on top, helper shells underneath)."""
+    """No [named_console] section: the loader publishes nothing and the
+    framework auto-declares the default, whose tmux_layout is the
+    aw-session-vertical default the Named Console feature was designed
+    around (one privileged session pane on top, helper shells under)."""
+    from agentworks.bootstrap import build_registry
+
     config_file = _minimal_config(tmp_path)
     cfg = load_config(config_file)
-    assert cfg.named_console.tmux_layout == "aw-session-vertical"
+    assert cfg.named_console is None
+    nc = build_registry(cfg).lookup("named-console-template", "default")
+    assert nc.tmux_layout == "aw-session-vertical"
 
 
 @pytest.mark.parametrize(
@@ -467,6 +534,7 @@ def test_named_console_tmux_layout_accepts_valid_presets(tmp_path: Path, layout:
         tmux_layout = "{layout}"
     """)
     cfg = load_config(config_file)
+    assert cfg.named_console is not None
     assert cfg.named_console.tmux_layout == layout
 
 

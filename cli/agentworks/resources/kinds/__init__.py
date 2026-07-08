@@ -1,22 +1,27 @@
-"""Concrete ``ResourceKind`` implementations.
+"""Registration index for the framework's resource kinds.
 
-Each kind module declares its kind instance and self-registers into
-``KIND_REGISTRY`` at import. This module imports every kind so a single
-``import agentworks.resources`` populates the registry.
+Kind definitions do NOT live here. Each kind is defined and registered in
+the domain package next to the code that implements it (the declarable
+row dataclasses AND the capability kinds live together with their
+domain): ``agentworks.catalog`` (the catalog kinds),
+``agentworks.secrets.kinds``, ``agentworks.git_credentials.kinds``,
+``agentworks.vms.kinds``, ``agentworks.agents.kinds``,
+``agentworks.workspaces.kinds``, ``agentworks.sessions.kinds``.
+
+This module exists only because Python populates ``KIND_REGISTRY`` via
+import side effects: importing each domain's kind module runs its
+``KIND_REGISTRY[...] = ...`` registration. A single
+``import agentworks.resources`` imports this index, which imports every
+domain kind module, so the registry is fully populated. One line per
+domain, no logic.
 """
 
 from __future__ import annotations
 
-from agentworks.resources.kinds import (  # noqa: F401
-    admin_template,
-    agent_template,
-    catalog,
-    git_credential_provider,
-    git_credentials,
-    named_console_template,
-    secret,
-    secret_backend,
-    session_template,
-    vm_template,
-    workspace_template,
-)
+import agentworks.agents.kinds  # noqa: F401
+import agentworks.catalog  # noqa: F401
+import agentworks.git_credentials.kinds  # noqa: F401
+import agentworks.secrets.kinds  # noqa: F401
+import agentworks.sessions.kinds  # noqa: F401
+import agentworks.vms.kinds  # noqa: F401
+import agentworks.workspaces.kinds  # noqa: F401

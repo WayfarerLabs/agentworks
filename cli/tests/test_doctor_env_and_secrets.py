@@ -6,6 +6,7 @@ from pathlib import Path
 
 import pytest
 
+from agentworks.bootstrap import build_registry
 from agentworks.config import load_config
 from agentworks.doctor import Status, _check_config, _check_secrets
 
@@ -39,16 +40,22 @@ shell = "zsh"
 # ---------------------------------------------------------------------------
 
 
-def test_no_secrets_shows_declared_secrets_none(tmp_path: Path) -> None:
-    """No secrets declared: a single info row stating 'none'. Doctor does
-    not surface the backend chain -- that's per-secret detail, and there
-    are no secrets to report against."""
+def test_auto_declared_secrets_are_reported(tmp_path: Path) -> None:
+    """Doctor reports EVERY registry secret, auto-declared included --
+    they are exactly the ones most likely to prompt at command time,
+    so hiding them made doctor unable to predict the next command.
+    A bare config still carries the framework-auto-declared
+    ``tailscale-auth-key`` (vm-template requirement); it shows with an
+    ``(auto)`` marker and an honest would-resolve-via-prompt heads-up.
+    """
     cfg = _write_config(tmp_path)
     config = load_config(cfg, warn_issues=False)
-    g = _check_secrets(config)
+    g = _check_secrets(config, build_registry(config))
     assert g.name == "Secrets"
     statuses = [(c.name, c.status, c.message) for c in g.checks]
-    assert statuses == [("Declared secrets", Status.INFO, "none")], statuses
+    assert statuses == [
+        ("Secret 'tailscale-auth-key' (auto)", Status.OK, "would resolve via prompt")
+    ], statuses
 
 
 def test_secret_resolves_via_env_var_when_set(
@@ -71,7 +78,7 @@ backends = ["env-var", "prompt"]
 """,
     )
     config = load_config(cfg, warn_issues=False)
-    g = _check_secrets(config)
+    g = _check_secrets(config, build_registry(config))
     msgs = [(c.status, c.name, c.message) for c in g.checks]
     assert any(
         status == Status.OK
@@ -101,7 +108,7 @@ backends = ["env-var", "prompt"]
 """,
     )
     config = load_config(cfg, warn_issues=False)
-    g = _check_secrets(config)
+    g = _check_secrets(config, build_registry(config))
     oks = [c for c in g.checks if c.status == Status.OK]
     assert any(
         "shared" in c.name and "would resolve via prompt" in (c.message or "")
@@ -131,7 +138,7 @@ backends = ["env-var", "prompt"]
 """,
     )
     config = load_config(cfg, warn_issues=False)
-    g = _check_secrets(config)
+    g = _check_secrets(config, build_registry(config))
     warns = [c for c in g.checks if c.status == Status.WARN]
     assert any(
         "opted-out" in c.name and "not available" in (c.message or "")
@@ -160,7 +167,7 @@ backends = ["env-var", "prompt"]
 """,
     )
     config = load_config(cfg, warn_issues=False)
-    g = _check_secrets(config)
+    g = _check_secrets(config, build_registry(config))
     shared_rows = [c for c in g.checks if "shared" in c.name]
     assert len(shared_rows) == 1, shared_rows
     assert shared_rows[0].status == Status.FAIL
@@ -187,7 +194,7 @@ backends = ["env-var", "prompt"]
 """,
     )
     config = load_config(cfg, warn_issues=False)
-    g = _check_secrets(config)
+    g = _check_secrets(config, build_registry(config))
     shared_rows = [c for c in g.checks if "shared" in c.name]
     assert len(shared_rows) == 1, shared_rows
     assert shared_rows[0].status == Status.FAIL
@@ -215,8 +222,61 @@ AGENTWORKS_SESSION = "operator-override"
 """,
     )
     monkeypatch.setattr("agentworks.config.CONFIG_PATH", cfg)
-    g, _ = _check_config()
+    g, _, _ = _check_config()
     warns = [c for c in g.checks if c.status == Status.WARN]
     assert any("AGENTWORKS_SESSION" in (c.message or "") for c in warns), (
         [(c.name, c.message) for c in warns]
     )
+
+
+def test_doctor_surfaces_deprecation_nudges(tmp_path: Path, monkeypatch) -> None:
+    """Deprecations moved off config_issues onto their own channel (so
+    --no-deprecations can silence the ambient per-command warning);
+    doctor is the explicit full-health surface and must still show them
+    -- the channel split silently dropped them from doctor once.
+
+    Doctor renders the FACT as a tidy one-liner (maintainer ruling,
+    2026-07-06): one next step (`agw resource migrate`), no section
+    list, no teaching text -- that stays on the ambient warning."""
+    cfg = _write_config(tmp_path)  # has [vm_templates.default] + [admin.config]
+    monkeypatch.setattr("agentworks.config.CONFIG_PATH", cfg)
+    g, _, _ = _check_config()
+    warns = [
+        (c.name, c.message or "")
+        for c in g.checks
+        if c.status == Status.WARN
+    ]
+    ((name, message),) = [
+        w for w in warns if "deprecated TOML resource" in w[0]
+    ]
+    # Maintainer-specified row shape: the check NAME carries the fact,
+    # the parenthetical carries the one next step.
+    assert name == "Config has deprecated TOML resource declarations"
+    assert message == "migrate to YAML with `agw resource migrate`"
+    # The tidy pin: none of the ambient teaching text leaks into doctor.
+    line = f"{name} {message}"
+    assert "--no-deprecations" not in line
+    assert "resource sample" not in line
+    assert "[vm_templates.*]" not in line
+
+
+def test_doctor_shows_noop_secret_backend_sections(
+    tmp_path: Path, monkeypatch
+) -> None:
+    cfg = _write_config(
+        tmp_path,
+        extras="""
+[secret_backends.env-var]
+""",
+    )
+    monkeypatch.setattr("agentworks.config.CONFIG_PATH", cfg)
+    g, _, _ = _check_config()
+    warns = [
+        (c.name, c.message or "")
+        for c in g.checks
+        if c.status == Status.WARN
+    ]
+    assert any(
+        "[secret_backends.env-var]" in name and "remove it" in message
+        for name, message in warns
+    ), warns

@@ -16,6 +16,7 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from agentworks.config import Config
+    from agentworks.resources.registry import Registry
 
 
 class Status(Enum):
@@ -102,14 +103,11 @@ def run_checks(*, completion_version: str | None = None) -> HealthReport:
     report.groups.append(_check_vm_platforms())
     report.groups.append(_check_tailscale())
 
-    config_group, config = _check_config()
+    config_group, config, registry = _check_config()
     report.groups.append(config_group)
 
-    if config is not None and config.git_credentials:
-        report.groups.append(_check_git_credentials(config))
-
-    if config is not None:
-        report.groups.append(_check_secrets(config))
+    if config is not None and registry is not None:
+        report.groups.append(_check_secrets(config, registry))
 
     report.groups.append(_check_database())
 
@@ -179,10 +177,16 @@ def _check_vm_platforms() -> HealthGroup:
 
 
 def _check_tailscale() -> HealthGroup:
+    """WORKSTATION Tailscale state only: is this machine connected to
+    the tailnet? Binary presence is Required tools' row; the auth key
+    is an ordinary secret and reports in the Secrets group like any
+    other (`agw secret describe tailscale-auth-key` for detail).
+    """
     g = HealthGroup("Tailscale")
-    ts = shutil.which("tailscale")
-    if not ts:
-        g.fail("tailscale", "not installed")
+    if not shutil.which("tailscale"):
+        # Required tools already fails the missing binary; nothing to
+        # add here without it.
+        g.info("Connectivity", "skipped (tailscale not installed)")
         return g
 
     try:
@@ -195,18 +199,7 @@ def _check_tailscale() -> HealthGroup:
             timeout=10,
         )
         if result.returncode == 0:
-            # Phase 1c of the Resource Registry SDD routed the Tailscale
-            # auth key through the framework; the legacy hard-coded
-            # `AW_TAILSCALE_AUTH_KEY` env var no longer has a special
-            # name. The auth key is now a `secret` Resource (default
-            # name `tailscale-auth-key`); its resolution path is the
-            # configured backend chain. `agw secret describe
-            # tailscale-auth-key` (Phase 1e) is the right diagnostic
-            # surface; this section just reports connectivity.
-            g.ok(
-                "Connected to tailnet",
-                "auth key resolved via the secret framework at VM-init time",
-            )
+            g.ok("Connected to tailnet")
         else:
             g.fail("Not connected", "run 'tailscale up'")
     except subprocess.TimeoutExpired:
@@ -214,8 +207,8 @@ def _check_tailscale() -> HealthGroup:
     return g
 
 
-def _check_config() -> tuple[HealthGroup, Config | None]:
-    """Returns (group, config_or_none)."""
+def _check_config() -> tuple[HealthGroup, Config | None, Registry | None]:
+    """Returns (group, config_or_none, registry_or_none)."""
     from agentworks.config import CONFIG_PATH, ConfigError
 
     g = HealthGroup("Configuration")
@@ -223,7 +216,7 @@ def _check_config() -> tuple[HealthGroup, Config | None]:
 
     if not CONFIG_PATH.exists():
         g.fail("Config file", f"not found: {CONFIG_PATH}. Run 'agw config init' to create one.")
-        return g, None
+        return g, None, None
 
     g.ok("Config file", str(CONFIG_PATH))
 
@@ -233,31 +226,62 @@ def _check_config() -> tuple[HealthGroup, Config | None]:
         config = load_config(warn_issues=False)
     except ConfigError as e:
         g.fail("Config", str(e), hint=e.hint)
-        return g, None
+        return g, None, None
     except SystemExit:
         g.fail("Config", "failed to load")
-        return g, None
+        return g, None, None
 
     for issue in config.config_issues:
         g.warn("Config", issue)
     if not config.config_issues:
         g.ok("Config is valid")
+    # Deprecation nudges ride their own channel (so --no-deprecations
+    # can silence the ambient per-command warning), but doctor is the
+    # explicit full-health surface. Doctor rows are scannable one-liners
+    # (maintainer ruling, 2026-07-06): render the FACT with one next
+    # step; the full teaching text (sample pointer, silencer flag,
+    # removal forecast) stays on the ambient command warning.
+    if config.deprecated_sections:
+        g.warn(
+            "Config has deprecated TOML resource declarations",
+            "migrate to YAML with `agw resource migrate`",
+        )
+    for section in config.noop_secret_backend_sections:
+        g.warn(
+            f"Config has a no-op {section} section",
+            "deprecated and ignored; remove it, or `agw resource migrate "
+            "--all` drops it",
+        )
 
     # SSH keys
     _check_ssh_key(g, config.operator.ssh_public_key, "public")
     _check_ssh_key(g, config.operator.ssh_private_key, "private")
 
+    # Resource registry (framework validation: references, miss
+    # policies, cycles). A failure here is a config problem, reported
+    # like any other; the resource-dependent checks below are skipped.
+    from agentworks.bootstrap import build_registry
+
+    try:
+        registry = build_registry(config)
+    except ConfigError as e:
+        g.fail("Resource registry", str(e), hint=e.hint)
+        return g, config, None
+
     # Dotfiles
-    if config.admin.dotfiles_source:
+    from agentworks.resources.access import admin_template
+
+    admin = admin_template(registry)
+    if admin.dotfiles_source:
         from agentworks.sources import parse_source_ref
 
-        ref = parse_source_ref(config.admin.dotfiles_source)
+        ref = parse_source_ref(admin.dotfiles_source)
         if ref.kind == "git" or Path(ref.path).expanduser().exists():
-            g.ok("Admin dotfiles", config.admin.dotfiles_source)
+            g.ok("Admin dotfiles", admin.dotfiles_source)
         else:
-            g.warn("Admin dotfiles", f"source missing: {config.admin.dotfiles_source}")
+            g.warn("Admin dotfiles", f"source missing: {admin.dotfiles_source}")
 
-    return g, config
+    return g, config, registry
 
 
 def _check_ssh_key(g: HealthGroup, path: object, label: str) -> None:
@@ -283,95 +307,70 @@ def _check_ssh_key(g: HealthGroup, path: object, label: str) -> None:
             g.warn("SSH private key permissions", f"{oct(mode)}, recommend 600")
 
 
-def _check_git_credentials(config: Config) -> HealthGroup:
-    """Check git credential providers."""
-    from agentworks.vms.initializer import resolve_git_credential_providers
 
-    g = HealthGroup("Git credentials")
+def _check_secrets(config: Config, registry: Registry) -> HealthGroup:
+    """Check every registry secret per env-and-secrets SDD FRD R6.
 
-    # Collect all credential names from admin and agent templates
-    all_cred_names: list[str] = list(config.admin.git_credentials)
-    for tmpl in config.agent_templates.values():
-        if tmpl.git_credentials is not None:
-            for name in tmpl.git_credentials:
-                if name not in all_cred_names:
-                    all_cred_names.append(name)
-
-    try:
-        providers = resolve_git_credential_providers(config, all_cred_names)
-    except Exception as e:
-        g.warn("Git credentials", f"could not resolve providers: {e}")
-        return g
-
-    # Phase 1d: tokens flow through the framework's resolver chain
-    # (env-var backend + prompt fallback by default; operator-typed
-    # backends layered in via [secret_config].backends). Doctor stays
-    # at the connectivity / authn-precondition layer; per-credential
-    # token diagnostic detail lives in `agw secret describe
-    # git-token-<name>` (Phase 1e).
-    for provider in providers.values():
-        label = provider.display_name
-        try:
-            if not provider.verify_auth():
-                g.warn(label, f"auth check failed ({provider.auth_hint()})")
-                continue
-            g.ok(label, "ready (token resolved via the secret framework at VM-init time)")
-        except Exception as e:
-            g.warn(label, f"auth check error: {e}")
-
-    return g
-
-
-def _check_secrets(config: Config) -> HealthGroup:
-    """Check declared secrets per env-and-secrets SDD FRD R6.
-
-    Emits exactly one row per declared secret:
+    One row per secret -- operator-declared AND auto-declared alike
+    (the auto-declared ones, e.g. ``tailscale-auth-key`` and the
+    ``git-token-*`` family, are exactly the secrets most likely to
+    prompt or fail at command time, so a doctor that hides them cannot
+    predict the next command). Auto-declared rows carry an ``(auto)``
+    marker.
 
     - OK: at least one active backend in the chain would resolve the
-      secret at runtime.
+      secret at runtime (the message says which -- "would resolve via
+      prompt" is the heads-up that a prompt is coming).
     - WARN: no active backend would resolve it (config is valid but
       there's no path to a value -- e.g. env-var has no matching env
       var set and prompt is opted out).
     - FAIL: the secret's ``backend_mappings`` references an unknown
-      backend kind (no ``[secret_backends.<kind>]`` section and not a
-      built-in like env-var / prompt). Config error; nothing to resolve
-      against. FAIL takes precedence over OK / WARN so the operator
-      fixes the typo before we tell them about resolution.
+      backend name. Config error; nothing to resolve against. FAIL
+      takes precedence over OK / WARN so the operator fixes the typo
+      before we tell them about resolution.
 
     Backend-applicability detail (per-backend soft-skip reasons,
     inactive mappings) lives in ``agw secret list``; unused declarations
     surface in ``agw secret describe``'s ``Referenced by:`` section.
     Doctor stays one row per secret so the summary line stays scannable.
     """
+    from agentworks.resources.access import kind_dict, secret_decls
+
     g = HealthGroup("Secrets")
 
-    if not config.secrets:
+    secrets = secret_decls(registry)
+    if not secrets:
         g.info("Declared secrets", "none")
         return g
 
-    declared_backend_kinds = set(config.secret_backends.keys())
-    builtin_kinds = {"env-var", "prompt"}
-    resolver = config.secret_resolver
+    # The registry always carries the built-in env-var / prompt backend
+    # rows, so this set covers built-ins and manifest declarations both.
+    known_backends = set(kind_dict(registry, "secret-backend").keys())
+    from agentworks.secrets.resolve import active_backends, preview_resolution
 
-    for name, decl in sorted(config.secrets.items()):
-        invalid_kinds = sorted(
-            kind
-            for kind in decl.backend_mappings
-            if kind not in declared_backend_kinds and kind not in builtin_kinds
+    backends = active_backends(config, registry)
+
+    for name, decl in sorted(secrets.items()):
+        auto = getattr(decl.origin, "variant", None) == "auto-declared"
+        label = f"Secret {name!r} (auto)" if auto else f"Secret {name!r}"
+        invalid = sorted(
+            backend
+            for backend in decl.backend_mappings
+            if backend not in known_backends
         )
-        if invalid_kinds:
-            noun = "backend" if len(invalid_kinds) == 1 else "backends"
+        if invalid:
+            noun = "backend" if len(invalid) == 1 else "backends"
             g.fail(
-                f"Secret {name!r}",
-                f"references unknown {noun}: {', '.join(invalid_kinds)}",
+                label,
+                f"references unknown {noun}: {', '.join(invalid)}",
             )
             continue
 
-        kind = resolver.preview_resolution(decl)
-        if kind is not None:
-            g.ok(f"Secret {name!r}", f"would resolve via {kind}")
+        resolved_by = preview_resolution(decl, backends)
+        if resolved_by is not None:
+            g.ok(label, f"would resolve via {resolved_by}")
         else:
-            g.warn(f"Secret {name!r}", "not available in any active backend")
+            g.warn(label, "not available in any active backend")
 
     return g
 

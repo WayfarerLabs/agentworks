@@ -1,0 +1,14 @@
+## kind: user-install-command -- a shell command installing per-user
+## tooling, run for admin and agents (should be idempotent). Referenced
+## by name from admin/agent template `user_install_commands`. For
+## test_file/test_dir, ~ resolves to the target user's home.
+##
+#apiVersion: agentworks/v1
+#kind: user-install-command
+#metadata:
+#  name: my-tool
+#  description: Custom per-user tool
+#spec:
+#  command: curl -fsSL https://example.com/install.sh | bash
+#  path: [~/.my-tool/bin]
+#  test_exec: my-tool

@@ -85,28 +85,32 @@ class ConnectivityError(AgentworksError):
 class SecretUnavailableError(AgentworksError):
     """No active secret backend could resolve the requested secret.
 
-    Raised by ``SecretResolver`` when every source in the active chain returned
-    None for at least one needed secret. The ``hint`` field carries the list of
-    backends that were tried so the operator can act (e.g. set
-    ``AW_SECRET_<NAME>``, configure 1Password, or run interactively).
+    Raised by the resolve loop when every backend in the active chain
+    came up empty for at least one needed secret. The ``hint`` field
+    carries the list of backends that were tried so the operator can act
+    (e.g. set ``AW_SECRET_<NAME>``, configure 1Password, or run
+    interactively).
     """
 
 
 class SecretMappingError(SecretUnavailableError):
     """A backend with a configured mapping reports the mapping doesn't resolve.
 
-    Distinct from a soft miss (where ``SecretSource.get`` returns ``None`` to
-    fall through to the next backend in the chain). A source raises this when
-    the operator has explicitly told it where to look and the lookup definitively
-    returns "not present" -- a 1Password URI pointing at a deleted item, a Vault
-    path with no value, etc. The resolver halts the chain on this exception so
-    a misconfigured persistent store doesn't quietly fall through to a prompt.
+    Distinct from a soft miss (where a provider omits the secret from its
+    ``batch_get`` result to fall through to the next backend in the
+    chain). A provider raises this when the operator has explicitly told
+    it where to look and the lookup definitively returns "not present" --
+    a 1Password URI pointing at a deleted item, a Vault path with no
+    value, etc. The resolve loop halts the chain on this exception so a
+    misconfigured persistent store doesn't quietly fall through to a
+    prompt.
 
-    Conventional sources (env-var, prompt) keep returning ``None`` for the soft-
-    miss case; only persistent-store backends raise this. Future per-backend
-    config (e.g. a ``strict_on_miss`` toggle on ``[secret_backends.<kind>]``)
+    Conventional providers (env-var, prompt) keep soft-missing; only
+    persistent-store providers raise this. Future per-backend config
+    (e.g. a ``strict_on_miss`` field on a ``secret-backend`` manifest)
     could let operators opt persistent stores back into fall-through; not
-    wired today since no backend that would honor it ships in this surface.
+    wired today since no provider that would honor it ships in this
+    surface.
 
     Transport / authentication failures (vault locked, network down) are
     distinct from a mapping miss and surface as ``ConnectivityError`` or

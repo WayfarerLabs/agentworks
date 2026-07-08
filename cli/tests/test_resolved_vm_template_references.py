@@ -22,7 +22,7 @@ def test_resolved_vm_template_emits_tailscale_requirement_by_default() -> None:
     assert ts.name == "tailscale-auth-key"
     assert ts.kind == "secret"
     assert ts.usage == "the Tailscale auth key"
-    assert ts.source == ("vm_template", "azure-prod")
+    assert ts.source == ("vm-template", "azure-prod")
 
 
 def test_resolved_vm_template_emits_custom_tailscale_secret_name() -> None:
@@ -50,7 +50,7 @@ def test_resolved_vm_template_emits_env_requirements_alongside_tailscale() -> No
     names = sorted(r.name for r in reqs)
     assert names == ["api-secret", "tailscale-auth-key"]
     # All requirements use the resolved template's source.
-    assert all(r.source == ("vm_template", "azure-prod") for r in reqs)
+    assert all(r.source == ("vm-template", "azure-prod") for r in reqs)
 
 
 def test_resolved_vm_template_inheritance_threads_tailscale_auth_key() -> None:

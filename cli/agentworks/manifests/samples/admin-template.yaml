@@ -1,0 +1,20 @@
+## kind: admin-template -- per-user settings for the admin (operator)
+## user on VMs, applied during init/reinit. There is exactly one; the
+## envelope accepts only the name `default`.
+## The `git_credentials: [github]` reference pairs with the
+## git-credential sample -- declare that resource too (or drop the
+## field) or loading will fail on the missing reference.
+##
+#apiVersion: agentworks/v1
+#kind: admin-template
+#metadata:
+#  name: default
+#spec:
+#  username: agentworks
+#  shell: zsh
+#  git_credentials: [github]
+#  user_install_commands: [bun]
+#  dotfiles_source: git::https://github.com/user/dotfiles
+#  mise_activate: true
+#  env:
+#    EDITOR: nvim

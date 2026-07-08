@@ -1,28 +1,67 @@
 """Base interface for git credential providers.
 
-Phase 1d of the Resource Registry SDD: providers now own only the
-type-specific formatting (``credential_lines``) and authn pre-flight
-(``verify_auth`` / ``auth_hint``). Token resolution moved to the
-framework -- each ``GitCredentialConfig`` emits a ``SecretReference``
-for its ``token`` field; the resolver chain (env-var / 1Password /
-prompt / ...) handles the lookup. The previous provider-side env-var
-helpers and prompt method are gone.
+Providers own the type-specific formatting (``credential_lines``) and
+the validation of their own ``provider_config`` block
+(``validate_config``). Token resolution lives in the framework -- each
+``GitCredentialConfig`` emits a ``SecretReference`` for its ``token``
+field; the active backend chain (env-var / 1Password / prompt / ...)
+handles the lookup, and the token secret's health reports through the
+doctor Secrets group and ``agw secret describe git-token-<name>`` like
+any other secret.
 """
 
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from typing import TYPE_CHECKING, ClassVar
+
+from agentworks.errors import ConfigError
+
+if TYPE_CHECKING:
+    from collections.abc import Mapping
+
+    from agentworks.resources.reference import ConfigReference
 
 
 class GitCredentialProvider(ABC):
     """Interface for configuring git credentials on VMs.
 
     Each provider knows how to format the credential line(s) for
-    ``~/.git-credentials`` and how to pre-flight authn (e.g., warn
-    the operator before provisioning if their CLI / browser state
-    isn't ready to mint a token). Tokens themselves come from the
-    framework's resolver chain, not from this class.
+    ``~/.git-credentials``. Tokens themselves come from the framework's
+    backend chain, not from this class.
     """
+
+    provider_name: ClassVar[str]
+
+    @classmethod
+    def validate_config(
+        cls, owner: str, config: Mapping[str, object]
+    ) -> tuple[ConfigReference, ...]:
+        """Validate ``config`` (the ``provider_config`` block owned by
+        ``owner``) and return the resource references it implies.
+
+        Invoked at each source's blob boundary (manifest decode with
+        ``file:line`` framing; the TOML loader) and by the owning
+        resource's ``referenced_resources()`` at finalize. ``owner`` is
+        display context for error messages.
+
+        Base behavior: accepts no configuration. Subclasses with config
+        override wholesale.
+
+        NOTE: this invoked-validation API may be deprecated in favor of
+        capabilities pushing a declarative config schema definition at
+        registration time (fields typed as resource references to
+        specific kinds, with usage information), letting the core
+        engine validate and derive references without invoking the
+        capability.
+        """
+        if config:
+            display = getattr(cls, "provider_name", cls.__name__)
+            raise ConfigError(
+                f"{owner}: the {display} provider accepts no "
+                f"configuration; got {sorted(config)}"
+            )
+        return ()
 
     def __init__(self, config_name: str, description: str | None = None) -> None:
         self._config_name = config_name
@@ -34,17 +73,6 @@ class GitCredentialProvider(ABC):
         if self._description:
             return f"{self._config_name} ({self._description})"
         return self._config_name
-
-    @abstractmethod
-    def verify_auth(self) -> bool:
-        """Check if authentication is possible (e.g. CLI tools present).
-
-        For prompt-based providers, this always returns True.
-        """
-
-    @abstractmethod
-    def auth_hint(self) -> str:
-        """Return a human-readable hint for how to authenticate."""
 
     @abstractmethod
     def credential_lines(self, token: str) -> list[str]:

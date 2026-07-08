@@ -60,5 +60,5 @@ def test_sample_config_parses_with_phase_1c_field(sample_config: Path) -> None:
     # the auto-declare path produces it.
     assert ts_secret.origin.variant == "auto-declared"
     # First-matching-source rule: VMTemplate.referenced_resources emits
-    # the requirement; the source is the vm_template that published it.
-    assert ts_secret.origin.source == ("vm_template", "default")
+    # the requirement; the source is the vm-template that published it.
+    assert ts_secret.origin.source == ("vm-template", "default")

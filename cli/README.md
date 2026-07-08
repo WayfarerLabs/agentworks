@@ -68,6 +68,7 @@ agw console delete my-console              # Extra shells are lost but sessions 
 | ------------------- | ---------------------------------------------------------------------------- |
 | `--non-interactive` | Disable all interactive prompts                                              |
 | `--debug`           | Print the full Python traceback on unhandled errors (also via `AGW_DEBUG=1`) |
+| `--no-deprecations` | Suppress deprecation warnings (e.g. the TOML resource-section nudge)         |
 
 When `--non-interactive` is set (or stdin is not a TTY), commands that would normally prompt for
 missing values (VM selection, workspace selection, name generation) will fail with a clear error
@@ -478,15 +479,21 @@ via `--workspace <ws>`). Use these when you just need a terminal without the con
 
 Templates define the command a session runs. The built-in `default` template runs a login shell
 (`$SHELL --login`), respecting whatever shell the user (admin or agent) is configured with. Define
-custom templates in config:
+custom templates as `session-template` resources:
 
-```toml
-[session_templates.default]            # override the built-in default
-command = "claude --name {{session_name}}"
-restart_command = "claude --resume {{session_name}}"
-required_commands = ["claude"]
-description = "Claude Code interactive session"
+```yaml
+apiVersion: agentworks/v1
+kind: session-template
+metadata:
+  name: default # override the built-in default
+  description: Claude Code interactive session
+spec:
+  command: claude --name {{session_name}}
+  restart_command: claude --resume {{session_name}}
+  required_commands: [claude]
 ```
+
+(TOML equivalent: `[session_templates.default]` in `config.toml`, deprecated but supported.)
 
 Template commands support `{{session_name}}` and `{{workspace_name}}` variable substitution
 (double-brace syntax). The optional `restart_command` is used by `session restart` -- useful for
@@ -512,49 +519,93 @@ order-preserving) across template inheritance.
 ### Resource Registry
 
 Cross-kind inspection of the Resource Registry. The registry is the framework that owns every
-operator-, auto-, and code-declared resource the CLI knows about: secrets, VM templates, agent
-templates, workspace templates, catalog entries, git credential providers, secret backends, etc. The
-two commands below stop at the framework-uniform fields (`kind`, `name`, `origin`, `references`,
-`used_by`, `description`). For kind-specific detail -- secret backend mappings, template inheritance
-chains, resolution previews -- reach for the per-kind command (e.g. `agw secret describe`).
+operator-declared, auto-declared, and built-in resource the CLI knows about: secrets, VM templates,
+agent templates, workspace templates, catalog entries, git credential providers, secret backends,
+etc. The two commands below stop at the framework-uniform fields (`kind`, `name`, `origin`,
+`references`, `used_by`, `description`). For kind-specific detail -- secret backend mappings,
+template inheritance chains, resolution previews -- reach for the per-kind command (e.g.
+`agw secret describe`).
 
-| Command                               | Description                                                          |
-| ------------------------------------- | -------------------------------------------------------------------- |
-| `agw resource list`                   | List every resource in the registry across all kinds                 |
-| `agw resource describe <kind> <name>` | Show the per-resource detail view (header + Referenced by + Used by) |
+| Command                              | Description                                                          |
+| ------------------------------------ | -------------------------------------------------------------------- |
+| `agw resource list`                  | List every resource in the registry across all kinds                 |
+| `agw resource kinds`                 | List every kind: category (declarable/capability), counts, purpose   |
+| `agw resource describe KIND/NAME`    | Show the per-resource detail view (header + Referenced by + Used by) |
+| `agw resource edit KIND/NAME`        | Open the declaring YAML manifest in $EDITOR                          |
+| `agw resource migrate [SELECTOR]...` | Move resources from config.toml to YAML manifests                    |
+| `agw resource sample KIND [--write]` | Print (or save) a kind's commented sample manifest (--all for all)   |
 
-`resource list` accepts `--kind <csv>` (e.g. `--kind secret,vm_template`) and `--origin <variant>`
-where variant is `operator`, `auto`, or `code`. `--names-only` emits `kind:name` per line and backs
-shell completion.
+`resource list` accepts `--kind <csv>` (e.g. `--kind secret,vm-template`) and `--origin <variant>`
+where variant is `operator`, `auto`, or `builtin`. `--names-only` emits `kind/name` per line and
+backs shell completion (`/` cannot appear in resource names, so the split is unambiguous). The
+`kind/name` token is the one grammar across the resource group: `resource describe secret/npm-token`
+and `resource migrate vm-template/dev` take the same shape.
+
+`resource migrate` is a recurring, incremental mover -- run it any time you want to move resources
+(or a subset) from TOML to YAML manifests. Selectors scope the run: `KIND` one kind, `KIND/NAME` one
+resource (overlaps union), or `--all` for everything TOML-declared -- a bare invocation errors
+rather than migrating the whole config by accident. `--layout per-kind|single|per-resource` picks
+the file mapping (default one multi-document file per kind, e.g. `resources/vm-templates.yaml`).
+Output is append-only: existing YAML files are never parsed or rewritten, new documents are appended
+after a `---` separator. Because a resource declared in both sources is a hard load error, the
+migrated TOML sections are commented out in place with a `# migrated to resources/<file>` marker
+(default) or removed with `--toml delete`; either way the original `config.toml` is backed up to
+`paths.backups` first and the rewrite is atomic. Deprecated `[secret_backends.*]` sections are
+dropped (with a note) by any run, including a bare run with nothing else to migrate. Every real run
+finishes by rebuilding the registry and verifying it is row-for-row identical to the pre-migration
+one -- on mismatch the run rolls back and reports. `--dry-run` prints a summary of what would
+migrate where and writes nothing; add `--full` for the complete YAML documents and the config.toml
+diff.
+
+`resource sample` prints a kind's fully-commented-out sample manifest (`--all` for every kind) --
+the YAML teaching surface, mirroring `agw config sample` for the settings file. `--write <file>`
+saves under the resources directory instead (relative `.yaml`/`.yml` path; appends if the file
+exists). Written samples are inert until you uncomment them (delete one leading `#` per line), so
+`--write` can never create a live resource or a duplicate.
 
 ## Configuration
 
-Config lives at `~/.config/agentworks/config.toml`. Run `agw config init` to generate a sample with
-all options documented. See [sample-config.toml](agentworks/sample-config.toml) for the full
-reference.
+Configuration splits into two surfaces:
 
-Key sections:
+- **Settings** live in `~/.config/agentworks/config.toml` -- your identity, paths, defaults,
+  platform connections, and the secret backend chain. Run `agw config init` to generate a sample;
+  see [sample-config.toml](agentworks/sample-config.toml) for the full reference.
+- **Resources** -- secrets, templates, git credentials, catalog entries -- are declared as YAML
+  manifests under `~/.config/agentworks/resources/`, auto-loaded whenever a command needs them.
+  `agw resource sample <kind>` prints a commented starter (`--all` for every kind). The classic TOML
+  resource sections keep working (deprecated, with one aggregated load warning naming the sections
+  present; silence it with the global `--no-deprecations` flag); `agw resource migrate` moves them
+  to YAML whenever you like. See [docs/guides/resources.md](../docs/guides/resources.md).
+
+Settings sections (`config.toml`, permanent):
 
 - `[operator]` -- SSH keys (required), additional authorized keys, SSH config management
-- `[paths]` -- VM workspace and VS Code workspace file directories
+- `[paths]` -- VM workspace, VS Code workspace file, and backup directories
 - `[defaults]` -- default platform, VM host
-- `[vm_templates.*]` -- VM resources, apt packages, system install commands, mise
-- `[admin.config]` -- admin user shell, dotfiles, git credentials, user install commands, mise
-- `[agent_templates.*]` -- agent user shell, dotfiles, git credentials, user install commands, mise
 - `[session.config]` -- session defaults (history limit)
-- `[session_templates.*]` -- session templates with variable substitution
-- `[workspace_templates.*]` -- workspace templates with inheritance
-- `[named_console]` -- named-console layout (tmux preset names + `aw-session-vertical`)
-- `[git_credentials.*]` -- git credential providers (GitHub, Azure DevOps)
-- `[<scope>.env]` -- env vars at vm / workspace / admin / agent / session scope
-- `[secrets.*]` -- secret declarations referenced by `{ secret = "name" }` env entries
-- `[secret_backends.*]` / `[secret_config]` -- active secret backend chain
-- `[apt_sources.*]` -- user-defined third-party apt repositories
-- `[apt_packages.*]` -- user-defined named apt package sets
-- `[system_install_commands.*]` -- user-defined system-level install commands
-- `[user_install_commands.*]` -- user-defined per-user install commands
+- `[secret_config]` -- active secret backend chain (`[secret_backends.*]` sections are deprecated
+  no-ops; see Secret Backends below)
 - `[azure]` -- Azure-specific settings
 - `[proxmox]` -- Proxmox VE API settings
+
+Resource kinds (YAML manifests; the deprecated TOML section is noted for each):
+
+- `vm-template` (`[vm_templates.*]`) -- VM resources, apt packages, system install commands, mise
+- `admin-template` (`[admin.config]`) -- admin user shell, dotfiles, git credentials, user install
+  commands, mise
+- `agent-template` (`[agent_templates.*]`) -- agent user shell, dotfiles, git credentials, user
+  install commands, mise
+- `session-template` (`[session_templates.*]`) -- session commands with variable substitution
+- `workspace-template` (`[workspace_templates.*]`) -- workspace templates with inheritance
+- `named-console-template` (`[named_console]`) -- named-console layout (tmux preset names +
+  `aw-session-vertical`)
+- `git-credential` (`[git_credentials.*]`) -- git credentials; `spec.provider` selects github or
+  azdo (TOML also accepts the legacy `type`)
+- `secret` (`[secrets.*]`) -- secret declarations referenced by `{secret: name}` env entries
+- `apt-source` / `apt-package` / `system-install-command` / `user-install-command`
+  (`[apt_sources.*]` etc.) -- catalog extensions
+- Env vars ride their owning resource: an `env` map in the template's `spec` (TOML: `[<scope>.env]`
+  subsections) at vm / workspace / admin / agent / session scope
 
 ### Environment Variables and Secrets
 
@@ -566,25 +617,29 @@ session > (agent | admin) > workspace > vm           (AGENTWORKS_* identity over
 ```
 
 Admin and agent scopes are mutually exclusive: a shell opened as the admin user (e.g.
-`agw vm shell`) sees admin scope; an agent-mode session sees agent scope. Each scope is a TOML table
-mapping env-var name to either a plaintext string or `{ secret = "<name>" }`:
+`agw vm shell`) sees admin scope; an agent-mode session sees agent scope. Each scope is an env map
+on the owning resource, mapping env-var name to either a plaintext string or a secret reference:
 
-```toml
-[vm_templates.default.env]
-HTTP_PROXY = "http://proxy:3128"
-NPM_TOKEN = { secret = "npm-token" }
-
-[admin.env]
-EDITOR = "nvim"
+```yaml
+apiVersion: agentworks/v1
+kind: vm-template
+metadata:
+  name: default
+spec:
+  env:
+    HTTP_PROXY: http://proxy:3128
+    NPM_TOKEN: { secret: npm-token }
 ```
 
-Every `{ secret = "<name>" }` reference must point to a `[secrets.<name>]` declaration. Active
-backends (and their precedence order) are listed in `[secret_config].backends`. Today the
-implemented backends are:
+(TOML equivalent: `[vm_templates.default.env]` with `NPM_TOKEN = { secret = "npm-token" }`.)
+
+Every secret reference points to a `secret` resource declaration (auto-declared with a
+framework-synthesized description if you skip it). Active backends (and their precedence order) are
+listed in `[secret_config].backends`. Today the implemented backends are:
 
 - `env-var` -- reads from the operator's process env. Default convention is
-  `AW_SECRET_<UPPER_SNAKE_CASE>`, overridable per secret via
-  `[secrets.<name>].backend_mappings.env-var = "CUSTOM_NAME"`.
+  `AW_SECRET_<UPPER_SNAKE_CASE>`, overridable per secret via the secret's `backend_mappings`
+  (`env-var: CUSTOM_NAME`).
 - `prompt` -- interactive prompt; batched at the start of the CLI run.
 
 **Eager prompting (FRD R4):** every command that opens new shells resolves all needed secrets up
@@ -622,7 +677,7 @@ agw secret list
 # api-key              OpenAI key for the operator's service                                      OPENAI_API_KEY                enabled
 # force-prompt         Always prompted at command time                                            disabled                      enabled
 # git-token-github     (auto) the auth token for git_credentials:github                           AW_SECRET_GIT_TOKEN_GITHUB    enabled
-# tailscale-auth-key   (auto) the Tailscale auth key for vm_template:default (and 1 more)   AW_SECRET_TAILSCALE_AUTH_KEY  enabled
+# tailscale-auth-key   (auto) the Tailscale auth key for vm-template:default (and 1 more)   AW_SECRET_TAILSCALE_AUTH_KEY  enabled
 ```
 
 Columns are the active backends in `[secret_config].backends` precedence order. Cells show each
@@ -640,12 +695,12 @@ this secret), per-backend mapping table, and a resolution preview, use `agw secr
 agw secret describe tailscale-auth-key
 # Secret: tailscale-auth-key
 #   Kind: secret
-#   Description: (auto) the Tailscale auth key for vm_template:default (and 1 more)
-#   Origin: auto-declared (vm_template:default)
+#   Description: (auto) the Tailscale auth key for vm-template:default (and 1 more)
+#   Origin: auto-declared (vm-template:default)
 #
 # Referenced by:
-#   - vm_template:default -- the Tailscale auth key
-#   - vm_template:heavy -- the Tailscale auth key
+#   - vm-template:default -- the Tailscale auth key
+#   - vm-template:heavy -- the Tailscale auth key
 #
 # Backend mappings:
 #   - env-var: AW_SECRET_TAILSCALE_AUTH_KEY
@@ -657,21 +712,34 @@ agw secret describe tailscale-auth-key
 
 `describe` reports state -- it does not prompt and does not resolve the secret's value.
 
-`agw doctor`'s Secrets group emits exactly one row per declared secret:
+`agw doctor`'s Secrets group emits exactly one row per registry secret -- operator-declared and
+auto-declared alike (auto-declared rows, e.g. `tailscale-auth-key` and the `git-token-*` family,
+carry an `(auto)` marker; they are exactly the secrets most likely to prompt at command time):
 
 - **OK** when at least one active backend would resolve the secret at runtime
-  (`would resolve via env-var`, `would resolve via prompt`, ...).
+  (`would resolve via env-var`, `would resolve via prompt`, ...). `would resolve via prompt` is the
+  heads-up that the next command needing this secret will ask for it interactively.
 - **WARN** when nothing in the chain would resolve it (config-valid but no path to a value, e.g.
   env-var has no matching env var set and `prompt` is opted out via
   `backend_mappings.prompt = false`).
-- **FAIL** when `backend_mappings` references an unknown backend kind (no `[secret_backends.<kind>]`
-  section and not a built-in like `env-var` / `prompt`).
+- **FAIL** when `backend_mappings` references an unknown backend name (not a registered backend like
+  `env-var` / `prompt`).
 
-When no secrets are declared, a single info row states `Declared secrets: none`.
 Backend-applicability detail (per-backend soft-skip reasons, inactive mappings, per-secret
 references) lives in `agw secret list` and `agw secret describe`. `AGENTWORKS_*` identity overrides
 surface in the Configuration group (they're a config-load warning). Broken `{ secret = "..." }`
-references are caught earlier as a hard config-load error before doctor runs.
+references are caught earlier as a hard config-load error before doctor runs. Git-credential token
+health reports here as ordinary `git-token-*` secrets (doctor has no separate git-credentials
+group), and the Tailscale group checks only workstation connectivity -- the auth key is the
+`tailscale-auth-key` secret row.
+
+### Secret Backends
+
+A **backend** is a capability resource that produces secret values (`env-var`, `prompt`; future
+backends like `onepassword`): a read-only row backed by registered code, listed by
+`agw resource list --kind secret-backend` and activated in precedence order by the chain
+(`[secret_config].backends`). Per-secret behavior -- identifier overrides, structured store
+addressing, opt-outs -- lives in each secret's `backend_mappings.<backend>`.
 
 ### Mise (Polyglot Tool Manager)
 
@@ -682,24 +750,29 @@ Agentworks installs [mise](https://mise.jdx.dev/) by default on all VMs for mana
 ### Claude Code Plugins
 
 Agentworks can register Claude Code marketplaces and install plugins automatically per user (admin
-and per-agent). Configure via `claude_marketplaces` and `claude_plugins` in `admin.config` or any
-`agent_templates.*`. Requires the `claude` CLI on PATH (typically installed via
+and per-agent). Configure via `claude_marketplaces` and `claude_plugins` on the admin template or
+any agent template. Requires the `claude` CLI on PATH (typically installed via
 `user_install_commands`). To install nerftools this way:
 
-```toml
-[admin.config]
-claude_marketplaces = ["https://github.com/WayfarerLabs/nerftools#4.1.0"]
-claude_plugins = ["nerftools-default@nerftools"]
+```yaml
+apiVersion: agentworks/v1
+kind: admin-template
+metadata:
+  name: default
+spec:
+  claude_marketplaces: ["https://github.com/WayfarerLabs/nerftools#4.1.0"]
+  claude_plugins: [nerftools-default@nerftools]
 ```
+
+(TOML equivalent: `[admin.config]` in `config.toml`, deprecated but supported.)
 
 ### Built-in Catalog
 
 Agentworks ships a built-in catalog of common tools (apt sources, apt packages, system install
 commands, and user install commands). Run
-`agw resource list --kind apt_package,system_install_command,user_install_command,apt_source` to see
-what is available (or filter to any single kind). Reference catalog entries by name in
-`vm_templates`, `admin.config`, and `agent_templates`. User-defined entries in your config override
-built-in entries with the same name.
+`agw resource list --kind apt-package,system-install-command,user-install-command,apt-source` to see
+what is available (or filter to any single kind). Reference catalog entries by name from VM, admin,
+and agent templates. User-defined entries override built-in entries with the same name.
 
 ## VM Initialization
 
@@ -755,7 +828,7 @@ Secret values are read from the operator's shell via the `env-var` backend, whic
 convention `AW_SECRET_<UPPER_SNAKE_CASE>` derived from the secret's name. The Tailscale auth key
 (secret `tailscale-auth-key`) reads from `AW_SECRET_TAILSCALE_AUTH_KEY`; a git credential's PAT
 (secret `git-token-<name>`) reads from `AW_SECRET_GIT_TOKEN_<NAME>`; and so on. Override the
-convention per secret via `[secrets.<name>].backend_mappings.env-var = "CUSTOM_NAME"`.
+convention per secret via the secret's `backend_mappings` (`env-var: CUSTOM_NAME`).
 
 Use `agw secret list` to see the exact env var name for each declared or auto-declared secret, and
 `agw secret describe <name>` for the full per-secret view (origin, usages, backend mappings,

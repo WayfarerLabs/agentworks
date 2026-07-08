@@ -13,9 +13,10 @@ from typing import TYPE_CHECKING
 from agentworks.errors import ConfigError
 
 if TYPE_CHECKING:
-    from agentworks.config import Config, VMTemplate
     from agentworks.env import EnvEntry
     from agentworks.resources.reference import ResourceReference
+    from agentworks.resources.registry import Registry
+    from agentworks.vms.template import VMTemplate
 
 
 @dataclass
@@ -46,15 +47,13 @@ class ResolvedVMTemplate:
         the Tailscale auth-key secret. Used by ``vm create`` / ``vm     reinit``
         for the eager-resolve subgraph walk.
         """
-        from agentworks.config import (
-            _env_references,
-            _tailscale_secret_reference,
-        )
+        from agentworks.env.entry import env_references
+        from agentworks.vms.template import tailscale_secret_reference
 
         refs: list[ResourceReference] = list(
-            _env_references(self.env, ("vm_template", self.name))
+            env_references(self.env, ("vm-template", self.name))
         )
-        refs.append(_tailscale_secret_reference(self.tailscale_auth_key, self.name))
+        refs.append(tailscale_secret_reference(self.tailscale_auth_key, self.name))
         return refs
 
 
@@ -117,7 +116,7 @@ def _resolve_from_dict(
     return result
 
 
-def resolve_template(config: Config, template_name: str | None = None) -> ResolvedVMTemplate:
+def resolve_template(registry: Registry, template_name: str | None = None) -> ResolvedVMTemplate:
     """Resolve a VM template by name, applying inheritance.
 
     Selection order:
@@ -125,7 +124,9 @@ def resolve_template(config: Config, template_name: str | None = None) -> Resolv
     2. "default" template if it exists
     3. Built-in default template
     """
-    return resolve_from_dict(config.vm_templates, template_name)
+    from agentworks.resources.access import kind_dict
+
+    return resolve_from_dict(kind_dict(registry, "vm-template"), template_name)
 
 
 def _append_dedupe(target: list[str], source: list[str]) -> list[str]:

@@ -22,10 +22,10 @@ from agentworks.errors import ValidationError
 
 if TYPE_CHECKING:
     from agentworks.agents.templates import ResolvedAgentTemplate
-    from agentworks.config import Config
+    from agentworks.config import Config  # noqa: F401 - used in signatures
     from agentworks.db import AgentRow, Database, SessionRow, VMRow, WorkspaceRow
     from agentworks.env.entry import EnvEntry
-    from agentworks.secrets import SecretResolver
+    from agentworks.resources.registry import Registry
     from agentworks.sessions.templates import ResolvedSessionTemplate
     from agentworks.vms.templates import ResolvedVMTemplate
     from agentworks.workspaces.templates import ResolvedTemplate as ResolvedWorkspaceTemplate
@@ -96,8 +96,11 @@ def show_env(
 
     # Per-scope env dicts (each scope contributes only its own EnvEntry map;
     # template inheritance is already merged into the resolved templates).
+    from agentworks.bootstrap import build_registry
+
+    registry = build_registry(config)
     vm_env, workspace_env, admin_env, agent_env, session_env = _resolve_scope_envs(
-        config, ctx
+        registry, ctx
     )
 
     # Build the resource context for identity vars.
@@ -122,6 +125,13 @@ def show_env(
         session=session_env,
     )
 
+    # Reveal mode resolves each referenced secret exactly once (deduped
+    # by name; several keys may reference one secret), per-secret so one
+    # failure renders inline as <error: ...> without aborting the table.
+    values, errors = _reveal_values(
+        config, registry, user_env_merged, reveal=reveal_secrets
+    )
+
     rows: list[ResolvedEnvRow] = []
     for key in sorted(user_env_merged.keys() | identity_env.keys()):
         if key in identity_env:
@@ -137,7 +147,7 @@ def show_env(
             continue
         entry = user_env_merged[key]
         scope = user_provenance[key]
-        rendered, is_secret = _render_value(entry, config.secret_resolver, reveal_secrets)
+        rendered, is_secret = _render_value(entry, values, errors, reveal_secrets)
         rows.append(
             ResolvedEnvRow(
                 key=key,
@@ -241,7 +251,7 @@ def _resolve_context(
 
 
 def _resolve_scope_envs(
-    config: Config,
+    registry: Registry,
     ctx: _ResolvedContext,
 ) -> tuple[
     dict[str, EnvEntry],
@@ -256,20 +266,21 @@ def _resolve_scope_envs(
     are mutually exclusive: a context with an agent uses the agent scope,
     otherwise the admin scope.
     """
-    from agentworks.agents.templates import resolve_from_dict as _resolve_agent_template
-    from agentworks.sessions.templates import resolve_from_dict as _resolve_session_template
-    from agentworks.vms.templates import resolve_from_dict as _resolve_vm_template
+    from agentworks.agents.templates import resolve_template as _resolve_agent_template
+    from agentworks.resources.access import admin_template as _admin_template
+    from agentworks.sessions.templates import resolve_template as _resolve_session_template
+    from agentworks.vms.templates import resolve_template as _resolve_vm_template
     from agentworks.workspaces.templates import resolve_template as _resolve_ws_template
 
     vm_template: ResolvedVMTemplate = _resolve_vm_template(
-        config.vm_templates, ctx.vm.template,
+        registry, ctx.vm.template,
     )
     vm_env = vm_template.env
 
     workspace_env: dict[str, EnvEntry] | None = None
     if ctx.workspace is not None:
         ws_template: ResolvedWorkspaceTemplate = _resolve_ws_template(
-            config, ctx.workspace.template,
+            registry, ctx.workspace.template,
         )
         workspace_env = ws_template.env
 
@@ -277,16 +288,16 @@ def _resolve_scope_envs(
     agent_env: dict[str, EnvEntry] | None = None
     if ctx.agent is not None:
         agent_template: ResolvedAgentTemplate = _resolve_agent_template(
-            config.agent_templates, ctx.agent.template,
+            registry, ctx.agent.template,
         )
         agent_env = agent_template.env
     else:
-        admin_env = config.admin.env
+        admin_env = _admin_template(registry).env
 
     session_env: dict[str, EnvEntry] | None = None
     if ctx.session is not None:
         session_template: ResolvedSessionTemplate = _resolve_session_template(
-            config.session_templates, ctx.session.template,
+            registry, ctx.session.template,
         )
         session_env = session_template.env
 
@@ -357,31 +368,68 @@ def _per_key_provenance(
 # ---------------------------------------------------------------------------
 
 
+def _reveal_values(
+    config: Config,
+    registry: Registry,
+    merged: dict[str, EnvEntry],
+    *,
+    reveal: bool,
+) -> tuple[dict[str, str], dict[str, str]]:
+    """Resolve every secret referenced by ``merged`` when revealing.
+
+    Returns ``(values, errors)`` keyed by secret name: ONE batched
+    resolve for every referenced secret (deduped by name; several env
+    keys may reference one secret) so interactive prompts arrive up
+    front in a single interaction, run in the loop's collect mode --
+    per-secret failures land in ``errors`` and render inline instead of
+    aborting the table, while successfully-resolved values (including
+    already-answered prompts) are kept. That covers the resolve loop's
+    transport-safety guard too: a backend value containing newline / CR
+    / NUL bytes renders as ``<error: secret 'X': resolved value
+    contains a control character...>``.
+    """
+    if not reveal:
+        return {}, {}
+    from agentworks.resources.access import secret_decls
+    from agentworks.secrets import SecretDecl, active_backends, resolve_secrets
+
+    decls = secret_decls(registry)
+    backends = active_backends(config, registry)
+    needed: list[SecretDecl] = []
+    seen: set[str] = set()
+    for entry in merged.values():
+        name = entry.secret
+        if name is None or name in seen:
+            continue
+        seen.add(name)
+        needed.append(decls.get(name) or SecretDecl(name=name, description=""))
+    if not needed:
+        return {}, {}
+
+    errors: dict[str, str] = {}
+    values = resolve_secrets(needed, backends, errors=errors)
+    return values, errors
+
+
 def _render_value(
     entry: EnvEntry,
-    resolver: SecretResolver,
+    values: dict[str, str],
+    errors: dict[str, str],
     reveal_secrets: bool,
 ) -> tuple[str, bool]:
     """Return ``(rendered_value, is_secret)`` for one EnvEntry.
 
     Plaintext entries render as their value verbatim. Secret entries
     render as ``<from secret: NAME>`` by default; ``reveal_secrets``
-    pulls the value through the resolver. Resolution failures surface
-    inline as ``<error: ...>`` so the table still completes. That
-    includes the resolver's transport-safety guard: a backend value
-    containing newline / CR / NUL bytes raises ``ConfigError`` (the
-    same guard that protects SSH SetEnv from corruption) and the
-    operator sees it here as ``<error: secret 'X': resolved value
-    contains a control character...>``.
+    shows the pre-resolved value (or its inline error) from
+    ``_reveal_values``.
     """
     if entry.secret is not None:
         if not reveal_secrets:
             return f"<from secret: {entry.secret}>", True
-        try:
-            resolved = resolver.render({entry.key: entry})
-            return resolved[entry.key], True
-        except Exception as exc:  # noqa: BLE001 - render any failure inline
-            return f"<error: {exc}>", True
+        if entry.secret in errors:
+            return f"<error: {errors[entry.secret]}>", True
+        return values[entry.secret], True
     assert entry.value is not None  # EnvEntry invariant
     return entry.value, False
 

@@ -33,7 +33,7 @@ import shlex
 from typing import TYPE_CHECKING
 
 from agentworks import output
-from agentworks.config import AW_SESSION_VERTICAL_LAYOUT
+from agentworks.sessions.layouts import AW_SESSION_VERTICAL_LAYOUT
 
 if TYPE_CHECKING:
     from agentworks.transports import Transport

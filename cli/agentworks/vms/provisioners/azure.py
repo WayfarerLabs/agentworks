@@ -126,6 +126,7 @@ class AzureProvisioner(VMProvisioner):
         *,
         azure_vm_size: str = "Standard_B2s",
         disk: int = 50,
+        swap: int = 4,
         admin_username: str = "agentworks",
         tailscale_auth_key: str | None = None,
     ) -> ProvisionResult:
@@ -134,8 +135,8 @@ class AzureProvisioner(VMProvisioner):
 
         output.info("Connecting to Azure...")
         output.info(f"Provisioning Azure VM '{vm_name}' in {az.region} (size: {azure_vm_size})...")
-        if config.vm.swap > 0:
-            output.detail(f"Swap: {config.vm.swap} GiB")
+        if swap > 0:
+            output.detail(f"Swap: {swap} GiB")
 
         ssh_pub_key = config.operator.ssh_public_key.read_text().strip()
 
@@ -148,7 +149,7 @@ class AzureProvisioner(VMProvisioner):
                 provisioning_packages=PROVISIONING_PACKAGES,
                 tailscale_auth_key=tailscale_auth_key,
                 hostname=vm_hostname("azure", vm_name),
-                swap=config.vm.swap,
+                swap=swap,
             )
             cloud_init = generate_cloud_init(bootstrap)
         else:

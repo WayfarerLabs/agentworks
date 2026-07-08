@@ -20,11 +20,11 @@ from agentworks.errors import (
     ValidationError,
 )
 from agentworks.vms.initializer import (
+    announce_git_credentials,
     initialize_vm,
     rejoin_tailscale,
     resolve_git_credential_providers,
     run_initialization,
-    verify_git_credential_auth,
     verify_tailscale_available,
 )
 
@@ -57,38 +57,35 @@ class _VmAdminEnvScopes(NamedTuple):
 
 
 def _resolve_vm_admin_env_scopes(
-    config: Config,
-    vm: VMRow | None = None,
+    registry: Registry,
+    vm: VMRow,
     *,
     ws: WorkspaceRow | None = None,
 ) -> _VmAdminEnvScopes:
     """Resolve per-scope env dicts for vm-level commands.
 
     When ``vm`` is provided (reinit / shell / exec), the vm-scope env
-    comes from the VM's actual template (``config.vm_templates[vm.template]``)
-    -- NOT ``config.vm``, which is the config-time default and may not
-    match the VM's actual template.
+    comes from the VM's actual template (the ``vm.template`` DB row),
+    NOT the config-time default, which may not match.
 
-    When ``vm`` is None (``create_vm``, where the VM doesn't exist in the
-    DB yet), the caller is expected to have already
-    ``_replace(config, vm=resolved_template)``'d from the operator's
-    ``--template`` flag, so ``config.vm`` is authoritative.
+    When ``vm`` is None, the default template resolved from the registry
+    is used.
 
     When ``ws`` is supplied (``vm shell --workspace`` / ``vm exec
     --workspace``), the workspace template's env enters the chain.
     """
-    if vm is None:
-        vm_env = config.vm.env
-    else:
-        from agentworks.vms.templates import resolve_from_dict as _resolve_vm_template
-        vm_env = _resolve_vm_template(config.vm_templates, vm.template).env
+    from agentworks.vms.templates import resolve_template as _resolve_vm_template
+
+    vm_env = _resolve_vm_template(registry, vm.template).env
 
     ws_env: dict[str, EnvEntry] | None = None
     if ws is not None:
         from agentworks.workspaces.templates import resolve_template as _resolve_ws_template
-        ws_env = _resolve_ws_template(config, ws.template).env
+        ws_env = _resolve_ws_template(registry, ws.template).env
 
-    return _VmAdminEnvScopes(vm=vm_env, workspace=ws_env, admin=config.admin.env)
+    from agentworks.resources.access import admin_template
+
+    return _VmAdminEnvScopes(vm=vm_env, workspace=ws_env, admin=admin_template(registry).env)
 
 
 def _vm_secret_target(
@@ -218,7 +215,6 @@ def create_vm(
     admin_username: str | None = None,
 ) -> None:
     """Create a new VM: provision + initialize."""
-    from dataclasses import replace as _replace
 
     from agentworks.bootstrap import build_registry
     from agentworks.vms.templates import resolve_template
@@ -228,12 +224,7 @@ def create_vm(
     # surface before any template / DB / VM business logic.
     registry = build_registry(config)
 
-    vm_tmpl = resolve_template(config, template)
-
-    # Replace config.vm with the resolved template so downstream code
-    # (initializer, provisioners) uses the right template values.
-    if template is not None:
-        config = _replace(config, vm=vm_tmpl)
+    vm_tmpl = resolve_template(registry, template)
 
     # Resolve defaults
     platform = platform or config.defaults.platform or "lima"
@@ -278,18 +269,20 @@ def create_vm(
     resolved_memory = memory if memory is not None else vm_tmpl.memory
     resolved_disk = disk if disk is not None else vm_tmpl.disk
     resolved_azure_size = azure_vm_size or vm_tmpl.azure_vm_size
-    resolved_admin_username = admin_username or config.admin.username
+    from agentworks.resources.access import admin_template
+
+    admin = admin_template(registry)
+    resolved_admin_username = admin_username or admin.username
     validate_admin_username(resolved_admin_username)
 
     verify_tailscale_available()
-    providers = resolve_git_credential_providers(config, config.admin.git_credentials)
-    verify_git_credential_auth(providers)
+    providers = resolve_git_credential_providers(registry, admin.git_credentials)
+    announce_git_credentials(providers)
 
     # Collect provisioning-time secrets upfront (tailscale auth, git creds).
     # Provisioning is hermetic: operator [admin.env] / [vm_templates.*.env]
     # secrets are NOT prompted here -- they're not used until runtime
-    # shells, and the resolver caches them when the shell-opening code
-    # invokes resolve_for_command later.
+    # shells, which perform their own resolve at their composition root.
     tailscale_auth_key, git_tokens = _collect_secrets(
         config, registry, providers, vm_name, vm_tmpl
     )
@@ -332,6 +325,8 @@ def create_vm(
                 cpus=resolved_cpus,
                 memory=resolved_memory,
                 disk=resolved_disk,
+                swap=vm_tmpl.swap,
+                admin_username=resolved_admin_username,
                 tailscale_auth_key=tailscale_auth_key,
             )
         elif platform == "azure":
@@ -343,6 +338,7 @@ def create_vm(
                 config,
                 azure_vm_size=resolved_azure_size,
                 disk=resolved_disk,
+                swap=vm_tmpl.swap,
                 admin_username=resolved_admin_username,
                 tailscale_auth_key=tailscale_auth_key,
             )
@@ -353,6 +349,7 @@ def create_vm(
             result = wsl2.create(
                 vm_name,
                 config,
+                swap=vm_tmpl.swap,
                 admin_username=resolved_admin_username,
             )
         elif platform == "proxmox":
@@ -365,6 +362,7 @@ def create_vm(
                 cpus=resolved_cpus,
                 memory=resolved_memory,
                 disk=resolved_disk,
+                swap=vm_tmpl.swap,
                 admin_username=resolved_admin_username,
                 tailscale_auth_key=tailscale_auth_key,
             )
@@ -406,6 +404,9 @@ def create_vm(
         initialize_vm(
             db,
             config,
+            registry,
+            vm_tmpl,
+            admin,
             vm_name,
             exec_target=result.provisioner_transport,
             providers=providers,
@@ -659,12 +660,15 @@ def shell_vm(
     # the interactive session. The same scope dicts feed both the
     # SecretTarget (via _vm_secret_target) and compose_env so the two
     # consumers can't drift. Crucially the vm scope comes from
-    # vm.template (DB row), not config.vm (which is the config-default
-    # template and would silently route the wrong env into a shell on a
-    # non-default-template VM).
-    scopes = _resolve_vm_admin_env_scopes(config, vm, ws=ws)
-    resolve_for_command(
-        [_vm_secret_target(scopes, label=f"vm-shell={vm.name}")], config,
+    # vm.template (DB row), not the config-default template, which may
+    # not match and would silently route the wrong env into a shell on
+    # a non-default-template VM.
+    from agentworks.bootstrap import build_registry
+
+    registry = build_registry(config)
+    scopes = _resolve_vm_admin_env_scopes(registry, vm, ws=ws)
+    values = resolve_for_command(
+        [_vm_secret_target(scopes, label=f"vm-shell={vm.name}")], config, registry,
     )
 
     ctx = ResourceContext(
@@ -676,7 +680,7 @@ def shell_vm(
         workspace_dir=ws.workspace_path if ws else None,
     )
     env = compose_env(
-        resolver=config.secret_resolver,
+        values=values,
         ctx=ctx,
         vm=scopes.vm,
         workspace=scopes.workspace,
@@ -747,10 +751,13 @@ def exec_vm(
     # secret referenced by the admin exec env chain BEFORE running the
     # remote command. The same scope dicts feed both the SecretTarget
     # and compose_env so the two consumers can't drift. The vm scope
-    # comes from vm.template (DB row), not config.vm.
-    scopes = _resolve_vm_admin_env_scopes(config, vm, ws=ws)
-    resolve_for_command(
-        [_vm_secret_target(scopes, label=f"vm-exec={vm.name}")], config,
+    # comes from vm.template (DB row), not the config-default template.
+    from agentworks.bootstrap import build_registry
+
+    registry = build_registry(config)
+    scopes = _resolve_vm_admin_env_scopes(registry, vm, ws=ws)
+    values = resolve_for_command(
+        [_vm_secret_target(scopes, label=f"vm-exec={vm.name}")], config, registry,
     )
 
     ctx = ResourceContext(
@@ -762,7 +769,7 @@ def exec_vm(
         workspace_dir=ws.workspace_path if ws else None,
     )
     env = compose_env(
-        resolver=config.secret_resolver,
+        values=values,
         ctx=ctx,
         vm=scopes.vm,
         workspace=scopes.workspace,
@@ -797,7 +804,9 @@ def add_git_credential(db: Database, config: Config, name: str, credential_name:
             hint="VM init may not be complete. Check 'vm describe' for status.",
         )
 
-    cred_config = config.git_credentials.get(credential_name)
+    from agentworks.resources.access import git_credential
+
+    cred_config = git_credential(registry, credential_name)
     if cred_config is None:
         raise NotFoundError(
             f"git credential '{credential_name}' not found in config",
@@ -805,10 +814,10 @@ def add_git_credential(db: Database, config: Config, name: str, credential_name:
             entity_name=credential_name,
         )
 
-    providers = resolve_git_credential_providers(config, [credential_name])
+    providers = resolve_git_credential_providers(registry, [credential_name])
     provider = providers[credential_name]
 
-    # Phase 1d: resolve the token via the framework (the resolver chain
+    # Phase 1d: resolve the token via the framework (the backend chain
     # handles env-var lookup + prompt fallback uniformly across every
     # site that needs a token).
     tokens = _collect_git_tokens(config, registry, [credential_name])
@@ -918,7 +927,7 @@ def rekey_vm(
         )
 
     # Collect the new auth key via the framework (Phase 1c). The
-    # resolver chain handles env-var lookup, then falls through to the
+    # backend chain handles env-var lookup, then falls through to the
     # prompt backend. ``ignore_env`` is preserved by temporarily
     # masking the env-var (the env-var source reads ``os.environ`` at
     # ``would_attempt`` time, so removing the var skips it cleanly and
@@ -927,14 +936,14 @@ def rekey_vm(
     from agentworks.secrets import resolve_for_command
     from agentworks.vms.templates import resolve_template
 
-    rekey_vm_tmpl = resolve_template(config, vm.template)
     registry = build_registry(config)
+    rekey_vm_tmpl = resolve_template(registry, vm.template)
     ts_decl = _lookup_or_synthesize_secret(
         registry, rekey_vm_tmpl.tailscale_auth_key
     )
 
     with _mask_env_var_backend_for(ts_decl, masked=ignore_env):
-        resolved = resolve_for_command([], config, extra_decls=[ts_decl])
+        resolved = resolve_for_command([], config, registry, extra_decls=[ts_decl])
     ts_auth_key = resolved[rekey_vm_tmpl.tailscale_auth_key]
 
     output.info(f"Rekeying '{name}'...")
@@ -1120,12 +1129,10 @@ def reinit_vm(
     vm = _require_vm(db, name)
 
     # Resolve the VM's template so init uses the right values
-    if vm.template and vm.template != "default":
-        from dataclasses import replace as _replace
+    from agentworks.resources.access import admin_template
+    from agentworks.vms.templates import resolve_template
 
-        from agentworks.vms.templates import resolve_template
-
-        config = _replace(config, vm=resolve_template(config, vm.template))
+    reinit_vm_tmpl = resolve_template(registry, vm.template)
 
     if vm.provisioning_status != ProvisioningStatus.COMPLETE.value:
         raise StateError(
@@ -1143,8 +1150,9 @@ def reinit_vm(
         )
 
     verify_tailscale_available()
-    providers = resolve_git_credential_providers(config, config.admin.git_credentials)
-    verify_git_credential_auth(providers)
+    admin = admin_template(registry)
+    providers = resolve_git_credential_providers(registry, admin.git_credentials)
+    announce_git_credentials(providers)
 
     # Collect git tokens via the framework (Phase 1d).
     git_tokens = _collect_git_tokens(config, registry, providers.keys())
@@ -1172,6 +1180,9 @@ def reinit_vm(
                 run_initialization(
                     db,
                     config,
+                    registry,
+                    reinit_vm_tmpl,
+                    admin,
                     name,
                     ts_target,
                     providers,
@@ -1284,7 +1295,7 @@ def _mask_env_var_backend_for(
     """Mask the env-var backend's view of ``decl`` for the duration of
     the block when ``masked`` is True; pass-through otherwise.
 
-    Used by ``vm rekey --ignore-env`` to force the resolver chain to
+    Used by ``vm rekey --ignore-env`` to force the backend chain to
     skip the env-var backend and fall through to the prompt backend.
     The env-var source reads ``os.environ`` at ``would_attempt`` time,
     so popping the matching env vars during the resolve call makes the
@@ -1332,9 +1343,9 @@ def _collect_git_tokens(
     Each credential's ``token`` field (default ``"git-token-<name>"``;
     operator-overridable per ``[git_credentials.<name>]``) names a
     secret; the registry's finalize pass auto-declared each one via
-    ``GitCredentialConfig.referenced_resources``. The resolver chain
-    resolves them all in one batched call so the cache picks up every
-    token in one prompt (or one round-trip to a persistent store).
+    ``GitCredentialConfig.referenced_resources``. The backend chain
+    resolves them all in one batched call so the operator is prompted
+    once for the whole batch (or one round-trip to a persistent store).
 
     Missing-from-registry secrets get a synthesized ``SecretDecl``
     matching the auto-declare shape -- same fallback as
@@ -1354,8 +1365,10 @@ def _collect_git_tokens(
 
     decls: list[SecretDecl] = []
     token_name_for: dict[str, str] = {}
+    from agentworks.resources.access import git_credential
+
     for cred_name in names:
-        cred = config.git_credentials.get(cred_name)
+        cred = git_credential(registry, cred_name)
         if cred is None:
             raise ConfigError(
                 f"git credential {cred_name!r} not declared; "
@@ -1366,7 +1379,7 @@ def _collect_git_tokens(
         token_name_for[cred_name] = cred.token
         decls.append(_lookup_or_synthesize_secret(registry, cred.token))
 
-    resolved = resolve_for_command([], config, extra_decls=decls)
+    resolved = resolve_for_command([], config, registry, extra_decls=decls)
     return {
         cred_name: resolved[token_name]
         for cred_name, token_name in token_name_for.items()
@@ -1390,8 +1403,8 @@ def _lookup_or_synthesize_secret(registry: Registry, name: str) -> SecretDecl:
     template's references and make this fallback redundant for the
     common case.
     """
-    from agentworks.resources.kinds.secret import SECRET_KIND_NAME
     from agentworks.secrets.base import SecretDecl
+    from agentworks.secrets.kinds import SECRET_KIND_NAME
 
     try:
         found: SecretDecl = registry.lookup(SECRET_KIND_NAME, name)
@@ -1424,7 +1437,7 @@ def _collect_secrets(
     rather than ``collect_secrets_for`` (registry walk). This matters
     when the operator omits ``[vm_templates.default]`` entirely: the
     raw default template isn't published to the registry, so a
-    registry-rooted walk from ``("vm_template", "default")`` would
+    registry-rooted walk from ``("vm-template", "default")`` would
     error. The resolved template always exists (built-in defaults
     apply); a direct secret lookup with fallback is the right shape.
     Phase 2a's ``VMTemplateKind`` will move the auto-decl plumbing
@@ -1444,7 +1457,7 @@ def _collect_secrets(
     ts_decl = _lookup_or_synthesize_secret(
         registry, vm_tmpl.tailscale_auth_key
     )
-    resolved = resolve_for_command([], config, extra_decls=[ts_decl])
+    resolved = resolve_for_command([], config, registry, extra_decls=[ts_decl])
     ts_auth_key = resolved[vm_tmpl.tailscale_auth_key]
 
     # Git credentials via the framework (Phase 1d). Pulls token values
@@ -1697,19 +1710,19 @@ def _ensure_tailscale(
         db.clear_vm_tailscale(vm.name)
 
     # Resolve a fresh Tailscale auth key via the framework before
-    # entering the provisioner-transport block; the resolver handles
+    # entering the provisioner-transport block; the backend chain handles
     # backend chain + prompt fallback. Phase 1c plumbed this through
     # the kwarg path so initializer.py has no env-var fallback.
     from agentworks.bootstrap import build_registry
     from agentworks.secrets import resolve_for_command
     from agentworks.vms.templates import resolve_template
 
-    rejoin_vm_tmpl = resolve_template(config, vm.template)
     registry = build_registry(config)
+    rejoin_vm_tmpl = resolve_template(registry, vm.template)
     ts_decl = _lookup_or_synthesize_secret(
         registry, rejoin_vm_tmpl.tailscale_auth_key
     )
-    resolved = resolve_for_command([], config, extra_decls=[ts_decl])
+    resolved = resolve_for_command([], config, registry, extra_decls=[ts_decl])
     auth_key = resolved[rejoin_vm_tmpl.tailscale_auth_key]
 
     # provisioner_transport() composes Azure's attach/detach via

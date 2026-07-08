@@ -120,6 +120,91 @@ def test_run_detached_fresh_start(mock_time: MagicMock) -> None:
 
 
 @patch("agentworks.remote_exec.time")
+def test_wrapper_redirect_covers_the_whole_command(mock_time: MagicMock) -> None:
+    """Regression: `cmd1 && cmd2 > out` binds the redirect to cmd2 only,
+    so cmd1's failure output vanished (empty "Last output" on every
+    remote limactl create failure). The wrapper must group the command
+    so the redirection captures all of it."""
+    mock_time.monotonic.return_value = 0
+    mock_time.sleep = MagicMock()
+
+    target = _mock_target(status_exists_after=1, exit_code="0")
+    run_detached(
+        target,
+        "limactl create --name x --tty=false /tmp/x.yaml && limactl start x",
+        base_path="/tmp/agentworks-test",
+        poll_interval=0,
+    )
+
+    wrapper = target.write_file.call_args.args[1]
+    assert (
+        "{ limactl create --name x --tty=false /tmp/x.yaml"
+        " && limactl start x ; } > /tmp/agentworks-test.out 2>&1" in wrapper
+    )
+
+
+@patch("agentworks.remote_exec.time")
+def test_stale_status_reused_by_default(mock_time: MagicMock) -> None:
+    """Default (resumable operations): a leftover status file counts as
+    this operation's completed result; no new run starts."""
+    mock_time.monotonic.return_value = 0
+    mock_time.sleep = MagicMock()
+
+    # status_exists_after=0: the status file exists from the first check.
+    target = _mock_target(status_exists_after=0, exit_code="7")
+    result = run_detached(
+        target,
+        "echo hello",
+        base_path="/tmp/agentworks-test",
+        poll_interval=0,
+    )
+
+    assert result.exit_code == 7
+    target.write_file.assert_not_called()
+
+
+@patch("agentworks.remote_exec.time")
+def test_stale_status_cleared_when_reuse_disabled(mock_time: MagicMock) -> None:
+    """One-shot operations (reuse_completed=False): a leftover status
+    file is stale garbage -- warn, clear, and start a fresh run instead
+    of silently reporting a phantom result (the ddvm1 failure shape)."""
+    mock_time.monotonic.return_value = 0
+    mock_time.sleep = MagicMock()
+
+    target = _mock_target(status_exists_after=0, exit_code="0")
+
+    from agentworks import output as _output
+    from agentworks.output import get_handler, set_handler
+
+    warnings: list[str] = []
+
+    class _WarnCapture:
+        def __getattr__(self, name: str):  # noqa: ANN204 - test stub
+            if name == "warn":
+                return warnings.append
+            return lambda *a, **k: None
+
+    previous = get_handler()
+    set_handler(_WarnCapture())  # type: ignore[arg-type]
+    try:
+        result = run_detached(
+            target,
+            "echo hello",
+            base_path="/tmp/agentworks-test",
+            poll_interval=0,
+            reuse_completed=False,
+        )
+    finally:
+        set_handler(previous)
+    _ = _output  # keep import for the handler module
+
+    assert result.exit_code == 0
+    # A fresh run started: wrapper written, and the stale state warned.
+    target.write_file.assert_called_once()
+    assert any("stale result files" in w for w in warnings)
+
+
+@patch("agentworks.remote_exec.time")
 def test_run_detached_resume(mock_time: MagicMock) -> None:
     """Existing process detected, resume polling."""
     mock_time.monotonic.return_value = 0

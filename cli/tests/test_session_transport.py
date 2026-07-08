@@ -395,7 +395,7 @@ def test_exec_agent_uses_direct_agent_ssh(
 
     # Phase 6.5 added eager-resolve + env composition; stub both out so the
     # SimpleNamespace config below doesn't need vm_templates / agent_templates
-    # / secret_resolver. This test focuses on the SSH transport, not env.
+    # / secrets plumbing. This test focuses on the SSH transport, not env.
     monkeypatch.setattr(
         agent_mgr, "_resolve_agent_direct_env_scopes",
         lambda *a, **k: agent_mgr._AgentDirectEnvScopes(vm={}, workspace=None, agent={}),
@@ -414,7 +414,6 @@ def test_exec_agent_uses_direct_agent_ssh(
 
     config = SimpleNamespace(
         operator=SimpleNamespace(ssh_private_key=None),
-        secret_resolver=None,
     )
 
     rc = agent_mgr.exec_agent(db, config, name="a1", command=["echo", "hi"])  # type: ignore[arg-type]

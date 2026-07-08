@@ -2,47 +2,57 @@
 
 Each provider implementation (``GitHubCredentialProvider``,
 ``AzDOCredentialProvider``) is the code-side handle for one
-``[git_credentials.<name>].type = "..."`` value. The framework's
-``git_credential_provider`` kind (Phase 2b.1) holds one row per known
-provider so a typo in the operator's ``type`` field surfaces as a
-clean miss-policy error at ``build_registry`` time.
+``[git_credentials.<name>].provider = "..."`` value (``type`` is the
+accepted legacy alias). The framework's ``git-credential-provider``
+kind (Phase 2b.1) holds one row per known provider so a typo in the
+operator's ``provider`` field surfaces as a clean miss-policy error at
+``build_registry`` time.
 """
 
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from agentworks.git_credentials.azdo import AzDOCredentialProvider
+from agentworks.git_credentials.github import GitHubCredentialProvider
+
 if TYPE_CHECKING:
+    from agentworks.git_credentials.base import GitCredentialProvider
     from agentworks.resources import Registry
 
 
-# Known provider type identifiers. Order is non-meaningful (alphabetical
-# for readability); the framework looks rows up by name.
-PROVIDER_TYPES: tuple[str, ...] = ("azdo", "github")
+# The capability registry (the canonical provider list): provider name
+# -> implementation class. ``validate_config`` (blob validation +
+# implied references) is invoked through this dict at each source's
+# blob boundary and at finalize; descriptor rows publish from it.
+GIT_CREDENTIAL_PROVIDER_REGISTRY: dict[str, type[GitCredentialProvider]] = {
+    "azdo": AzDOCredentialProvider,
+    "github": GitHubCredentialProvider,
+}
 
 
 def publish_to(registry: Registry) -> None:
     """Publish the known git credential provider types into the registry.
 
-    Each entry lands as a ``GitCredentialProviderEntry`` row, code-declared
+    Each entry lands as a ``GitCredentialProviderEntry`` row, built-in
     with source ``"agentworks.git_credentials"``. Phase 2b.1.
 
-    Unlike the catalog and secret_backend publishers, this kind has no
+    Unlike the catalog kinds, this kind has no
     operator-override path today: ``Config.publish_to`` publishes
     ``git_credentials`` entries (the per-credential config), not
-    ``git_credential_provider`` rows. The kind is read-only from the
+    ``git-credential-provider`` rows. The kind is read-only from the
     operator's perspective; a future SDD that wants to let operators
     register new provider types would add an operator-publish path.
     """
-    from agentworks.resources import Origin
-    from agentworks.resources.kinds.git_credential_provider import (
+    from agentworks.git_credentials.kinds import (
         GitCredentialProviderEntry,
     )
+    from agentworks.resources import Origin
 
-    code_origin = Origin.code_declared(source="agentworks.git_credentials")
-    for type_name in PROVIDER_TYPES:
+    code_origin = Origin.built_in(source="agentworks.git_credentials")
+    for type_name in sorted(GIT_CREDENTIAL_PROVIDER_REGISTRY):
         registry.add(
-            "git_credential_provider",
+            "git-credential-provider",
             type_name,
             GitCredentialProviderEntry(name=type_name),
             code_origin,

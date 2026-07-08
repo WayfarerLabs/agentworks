@@ -91,6 +91,8 @@ class LimaProvisioner(VMProvisioner):
         cpus: int = 4,
         memory: int = 8,
         disk: int = 50,
+        swap: int = 4,
+        admin_username: str = "agentworks",
         tailscale_auth_key: str | None = None,
     ) -> ProvisionResult:
         if not self.is_remote:
@@ -115,20 +117,20 @@ class LimaProvisioner(VMProvisioner):
             output.info(f"Connecting to VM host '{self._vm_host_ssh}'...")
         output.info(f"Creating Lima VM '{vm_name}' ({'remote' if self.is_remote else 'local'})...")
         output.detail(f"Resources: {cpus} CPUs, {memory} GiB memory, {disk} GiB disk")
-        if config.vm.swap > 0:
-            output.detail(f"Swap: {config.vm.swap} GiB")
+        if swap > 0:
+            output.detail(f"Swap: {swap} GiB")
 
         # Generate the full bootstrap script and embed in the Lima provision block.
         # This handles user creation, system packages, swap, SSH key, and Tailscale.
         if tailscale_auth_key:
             ssh_pub_key = config.operator.ssh_public_key.read_text().strip()
             provision_script = generate_bootstrap_script(
-                admin_username=config.admin.username,
+                admin_username=admin_username,
                 ssh_public_key=ssh_pub_key,
                 provisioning_packages=PROVISIONING_PACKAGES,
                 tailscale_auth_key=tailscale_auth_key,
                 hostname=vm_hostname("lima", vm_name),
-                swap=config.vm.swap,
+                swap=swap,
             )
         else:
             # No Tailscale key -- provision block is a no-op.
@@ -220,6 +222,10 @@ class LimaProvisioner(VMProvisioner):
         )
         lima_cmd = f"limactl create --name {vm_name} --tty=false {remote_template} && limactl start {vm_name}"
         output.detail("Starting and provisioning VM via Lima (this may take several minutes)...")
+        # reuse_completed=False: creation is one-shot, so a leftover
+        # status file can only be stale garbage from an interrupted
+        # attempt -- consuming it would report a phantom result for a
+        # limactl run that never happened.
         result = run_detached(
             host_target,
             lima_cmd,
@@ -227,26 +233,29 @@ class LimaProvisioner(VMProvisioner):
             base_path=f"/tmp/agentworks-lima-{vm_name}",
             timeout=600,
             quiet=True,
+            reuse_completed=False,
         )
-        if result.exit_code != 0:
-            # Parse structured markers from provision script output if present
-            bootstrap = parse_bootstrap_output(result.output, result.exit_code)
-            for step in bootstrap.steps:
-                if step.error:
-                    ssh_logger.log_error(f"Provision step '{step.name}': {step.error}")
+        try:
+            if result.exit_code != 0:
+                # Parse structured markers from provision script output if present
+                bootstrap = parse_bootstrap_output(result.output, result.exit_code)
+                for step in bootstrap.steps:
+                    if step.error:
+                        ssh_logger.log_error(f"Provision step '{step.name}': {step.error}")
 
-            ssh_logger.log_error(f"limactl failed (exit {result.exit_code})")
-            ssh_logger.log_error(result.output)
+                ssh_logger.log_error(f"limactl failed (exit {result.exit_code})")
+                ssh_logger.log_error(result.output)
+                ssh_logger.close()
+                raise SSHError(
+                    f"limactl create/start failed (exit {result.exit_code})\n"
+                    f"SSH log: {ssh_logger.path}\n"
+                    f"Last output:\n{result.output[-1000:]}"
+                )
             ssh_logger.close()
-            raise SSHError(
-                f"limactl create/start failed (exit {result.exit_code})\n"
-                f"SSH log: {ssh_logger.path}\n"
-                f"Last output:\n{result.output[-1000:]}"
-            )
-        ssh_logger.close()
-
-        # Clean up remote temp file
-        ssh_run(target, f"rm -f {remote_template}", check=False)
+        finally:
+            # Clean up the remote temp file on success AND failure (these
+            # were accumulating in /tmp on the VM host after failures).
+            ssh_run(target, f"rm -f {remote_template}", check=False)
 
     def _log_provision_errors(self, vm_name: str) -> None:
         """Attempt to surface provision script errors from Lima logs."""

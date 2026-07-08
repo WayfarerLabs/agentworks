@@ -48,7 +48,7 @@ def create_workspace(
 
     # build_registry runs first so framework miss-policies fire before
     # any template / DB / VM business logic.
-    build_registry(config)
+    registry = build_registry(config)
 
     ws_name = name
     validate_name(ws_name)
@@ -60,7 +60,7 @@ def create_workspace(
             entity_name=ws_name,
         )
 
-    template = resolve_template(config, template_name)
+    template = resolve_template(registry, template_name)
     template_resolved_name = template.name
 
     vm = _resolve_vm(db, vm_name)

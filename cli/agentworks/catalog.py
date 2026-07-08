@@ -12,11 +12,14 @@ import tomllib
 from dataclasses import dataclass, field
 from functools import cache
 from pathlib import Path
-from typing import TYPE_CHECKING, TypedDict
+from typing import TYPE_CHECKING, Any, Literal, TypedDict
 
 from agentworks.errors import ExternalError
+from agentworks.resources.kind import KIND_REGISTRY, NoUnreferencedDefaultError
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
+
     from agentworks.config import Config
     from agentworks.resources import Origin, Registry
     from agentworks.resources.reference import ReferenceEntry, ResourceReference
@@ -56,7 +59,7 @@ class AptPackageEntry:
     apt: list[str]
     apt_sources: list[str] = field(default_factory=list)
     # Phase 2b: catalog entries become first-class Registry citizens.
-    # ``origin`` is set by the publisher (``code-declared by
+    # ``origin`` is set by the publisher (``built-in by
     # agentworks.catalog`` for built-in entries); ``references`` is attached
     # by the framework's finalize pass from incoming references.
     origin: Origin | None = None
@@ -64,7 +67,7 @@ class AptPackageEntry:
 
     def referenced_resources(self) -> list[ResourceReference]:
         """Emit one ``ResourceReference`` per name in ``apt_sources``. The
-        framework's ``apt_source`` kind uses an ``error`` miss policy, so
+        framework's ``apt-source`` kind uses an ``error`` miss policy, so
         an unknown source name surfaces as a clean ``ConfigError`` at
         ``build_registry`` time with the referencing package's identity
         attached (rather than the pre-Phase-2b silent ordering assumption
@@ -72,7 +75,7 @@ class AptPackageEntry:
 
         The registry attaches the corresponding ``ReferenceEntry`` to
         each ``AptSourceEntry`` during finalize, so
-        ``agw resource describe apt_source github`` shows every apt_package
+        ``agw resource describe apt-source/github`` shows every apt-package
         that depends on it -- the dependency graph that was previously
         implicit is now visible.
         """
@@ -81,9 +84,9 @@ class AptPackageEntry:
         return [
             ResourceReference(
                 name=source_name,
-                kind="apt_source",
+                kind="apt-source",
                 usage=f"the {source_name} apt source",
-                source=("apt_package", self.name),
+                source=("apt-package", self.name),
             )
             for source_name in self.apt_sources
         ]
@@ -276,11 +279,34 @@ def _parse_catalog(data: dict[str, object]) -> ResolvedCatalog:
     )
 
 
+def catalog_from_registry(registry: Registry) -> ResolvedCatalog:
+    """Build the merged catalog view from the finalized registry.
+
+    Built-in and operator-declared entries are both registry rows (the
+    operator-over-built-in override happens at publish), so this is a
+    plain read. Consumers use this; ``load_catalog`` remains only as
+    the parse-and-merge reference used by the catalog parsing tests.
+    """
+    from agentworks.resources.access import kind_dict
+
+    return ResolvedCatalog(
+        apt_sources=kind_dict(registry, "apt-source"),
+        apt_packages=kind_dict(registry, "apt-package"),
+        system_install_commands=kind_dict(registry, "system-install-command"),
+        user_install_commands=kind_dict(registry, "user-install-command"),
+    )
+
+
 def load_catalog(config: Config) -> ResolvedCatalog:
     """Load and merge built-in + custom catalog entries.
 
     Custom entries override built-in entries with the same name.
     Cross-references (apt_sources in apt_packages) are validated.
+    Production consumers read ``catalog_from_registry`` instead; this
+    parse-level merge survives for the catalog parsing tests and is
+    deleted only when the TOML resource surface retires (a future
+    major release; ADR 0016's dual-path decision) along
+    with the rest of the TOML resource surface.
     """
     builtin = load_builtin_catalog()
 
@@ -305,7 +331,7 @@ def load_catalog(config: Config) -> ResolvedCatalog:
 
 
 # ``_validate_references`` retired: the framework validates
-# apt_package -> apt_source edges via ``AptSourceKind``'s ``error`` miss
+# apt-package -> apt-source edges via ``AptSourceKind``'s ``error`` miss
 # policy at ``Registry.finalize`` time (the reference is emitted by
 # ``AptPackageEntry.referenced_resources()``). Same pattern as Phase 2b.0
 # dropping ``validate_selections``: single source of truth for
@@ -316,14 +342,14 @@ def publish_to(registry: Registry, config: Config | None = None) -> None:
     """Publish catalog entries into the registry as first-class Resources.
 
     Phase 2b: built-in catalog entries become Registry citizens with
-    ``Origin.code_declared(source="agentworks.catalog")``. The four
-    catalog kinds (``apt_source``, ``apt_package``,
-    ``system_install_command``, ``user_install_command``) use the
+    ``Origin.built_in(source="agentworks.catalog")``. The four
+    catalog kinds (``apt-source``, ``apt-package``,
+    ``system-install-command``, ``user-install-command``) use the
     framework's error miss policy, so a typo'd reference from
     ``[vm_templates.*].apt_packages = ["..."]`` etc. surfaces as a
     framework error citing the reference's source.
 
-    ``apt_source`` is published even though operators don't reference
+    ``apt-source`` is published even though operators don't reference
     sources directly from templates: apt_packages reference them via
     their ``apt_sources`` field, so the framework needs the sources in
     the registry to resolve the ``AptPackageEntry.referenced_resources()``
@@ -337,26 +363,27 @@ def publish_to(registry: Registry, config: Config | None = None) -> None:
     ``[system_install_commands.<name>]``,
     ``[user_install_commands.<name>]`` in the operator's TOML) are
     published on top of the built-in entries with
-    ``Origin.operator_declared(...)``. Same last-writer-wins pattern
-    the other publishers use: catalog runs first, then Config, then
-    other publishers -- an operator's override lands on top of the
-    code-declared base. Config-side publishing lives here (rather than
+    ``Origin.operator_declared(...)``. Publish order + the catalog
+    kinds' ``builtin_override = "allow"`` policy is what lets the
+    operator row replace the built-in at ``Registry.add``: catalog runs
+    first, then Config, then other publishers -- an operator's override
+    lands on top of the built-in base. Config-side publishing lives here (rather than
     in ``Config.publish_to``) because parsing operator catalog entries
     is catalog's expertise; Config just stashes the raw TOML dicts.
     """
     from agentworks.resources import Origin
 
     builtin = load_builtin_catalog()
-    code_origin = Origin.code_declared(source="agentworks.catalog")
+    code_origin = Origin.built_in(source="agentworks.catalog")
 
     for src_name, src in builtin.apt_sources.items():
-        registry.add("apt_source", src_name, src, code_origin)
+        registry.add("apt-source", src_name, src, code_origin)
     for pkg_name, pkg in builtin.apt_packages.items():
-        registry.add("apt_package", pkg_name, pkg, code_origin)
+        registry.add("apt-package", pkg_name, pkg, code_origin)
     for sys_name, sys_cmd in builtin.system_install_commands.items():
-        registry.add("system_install_command", sys_name, sys_cmd, code_origin)
+        registry.add("system-install-command", sys_name, sys_cmd, code_origin)
     for user_name, user_cmd in builtin.user_install_commands.items():
-        registry.add("user_install_command", user_name, user_cmd, code_origin)
+        registry.add("user-install-command", user_name, user_cmd, code_origin)
 
     if config is None:
         return
@@ -368,9 +395,9 @@ def publish_to(registry: Registry, config: Config | None = None) -> None:
     # loaders don't consume Phase 0's ``_SectionLineMap`` and Config
     # stores raw dicts (not typed entries) for these sections. Publishing
     # here uses ``Origin.operator_declared(file=CONFIG_PATH, line=0)`` --
-    # matches the same sentinel Phase 0 uses for singleton-omitted-
-    # section defaults (``named_console_template:default`` when there's
-    # no ``[named_console]``). The renderer drops the parenthetical for
+    # the sentinel for "real file, no single declaration line" (see
+    # ``source_location.synthesized``'s docstring). The renderer drops
+    # the parenthetical for
     # ``line=0``, so operators see "operator-declared" without file:line
     # for now.
     #
@@ -379,23 +406,23 @@ def publish_to(registry: Registry, config: Config | None = None) -> None:
     # dataclasses, thread ``_SectionLineMap`` into the ``_load_*``
     # helpers, either at load_config time or via a public
     # ``config.declared_at_for(...)`` helper); tracked alongside the
-    # ``named_console_template`` singleton-omitted case in the SDD
+    # ``named-console-template`` singleton-omitted case in the SDD
     # follow-ups.
     from agentworks.config import CONFIG_PATH
 
     op_origin = Origin.operator_declared(file=CONFIG_PATH, line=0)
     for src_name, src in _load_apt_sources(config.apt_sources).items():
-        registry.add("apt_source", src_name, src, op_origin)
+        registry.add("apt-source", src_name, src, op_origin)
     for pkg_name, pkg in _load_apt_packages(config.apt_packages).items():
-        registry.add("apt_package", pkg_name, pkg, op_origin)
+        registry.add("apt-package", pkg_name, pkg, op_origin)
     for sys_name, sys_cmd in _load_system_commands(
         config.system_install_commands
     ).items():
-        registry.add("system_install_command", sys_name, sys_cmd, op_origin)
+        registry.add("system-install-command", sys_name, sys_cmd, op_origin)
     for user_name, user_cmd in _load_user_commands(
         config.user_install_commands
     ).items():
-        registry.add("user_install_command", user_name, user_cmd, op_origin)
+        registry.add("user-install-command", user_name, user_cmd, op_origin)
 
 
 # validate_selections removed in Phase 2b.0: the framework's catalog
@@ -403,3 +430,113 @@ def publish_to(registry: Registry, config: Config | None = None) -> None:
 # which every manager-entry function calls before any business logic
 # (per Phase 2a.0's hoist sweep). The function had no remaining
 # production callers; tests covering the old contract were also dropped.
+
+
+# -- Framework kind strategies -------------------------------------------------
+#
+# The catalog kinds (``apt-source``, ``apt-package``,
+# ``system-install-command``, ``user-install-command``) live in this
+# single-module domain next to the code that implements the catalog.
+# ``agentworks.resources.kinds.__init__`` imports this module so the kinds
+# self-register into ``KIND_REGISTRY`` at load.
+#
+# All four use the **error miss policy**: a typo in
+# ``[vm_templates.*].apt_packages = ["..."]`` etc. -- or in an apt package's
+# own ``apt_sources`` list -- surfaces as a framework miss-policy error at
+# ``build_registry`` time, citing the reference's source. There is no
+# auto-declare path: catalog entries are built-in (the built-in catalog ships
+# with the framework) or operator-declared in the operator's TOML, and
+# references must resolve to a known name.
+#
+# ``apt-source`` was originally not a framework kind (only operator-facing
+# config referenced by name got promoted in Phase 2b.0). It joined the
+# framework later so the ``apt-package -> apt-source`` dependency graph
+# becomes visible on ``agw resource describe apt-source/<name>``'s
+# ``Referenced by:`` section, and so unknown-source errors flow through
+# the same miss-policy pipeline as everything else instead of a
+# catalog-specific validator.
+
+
+def _synthesize_no_default(kind: str, references: Sequence[ResourceReference]) -> Any:
+    """Shared synthesize body for the catalog kinds. Unreachable under
+    the ``error`` miss policy (Registry.finalize raises ConfigError
+    before dispatching to synthesize for error-policy kinds). Honors
+    the Phase 2a empty-references contract by raising the typed
+    framework error so a hypothetical future change that gives a
+    catalog kind a reserved default has an obvious landing pad.
+    """
+    if not references:
+        raise NoUnreferencedDefaultError(
+            f"the {kind} kind has no reserved default name; "
+            f"synthesize is never invoked under the error miss policy"
+        )
+    raise NoUnreferencedDefaultError(
+        f"the {kind} kind has miss_policy='error'; synthesize should "
+        f"never be invoked (the framework raises ConfigError first)"
+    )
+
+
+@dataclass(frozen=True)
+class _AptSourceKind:
+    """Implementation of ``ResourceKind`` for ``"apt-source"``."""
+
+    kind: str = "apt-source"
+    description: str = "3rd party apt repository definitions (key, source line)"
+    miss_policy: Literal["auto-declare", "error"] = "error"
+    auto_declare_names: frozenset[str] | None = None
+    category: Literal["declarable", "capability"] = "declarable"
+    builtin_override: Literal["allow", "reserved"] = "allow"
+
+    def synthesize(self, references: Sequence[ResourceReference]) -> Any:
+        return _synthesize_no_default(self.kind, references)
+
+
+@dataclass(frozen=True)
+class _AptPackageKind:
+    """Implementation of ``ResourceKind`` for ``"apt-package"``."""
+
+    kind: str = "apt-package"
+    description: str = "Named apt packages, optionally tied to apt-sources"
+    miss_policy: Literal["auto-declare", "error"] = "error"
+    auto_declare_names: frozenset[str] | None = None
+    category: Literal["declarable", "capability"] = "declarable"
+    builtin_override: Literal["allow", "reserved"] = "allow"
+
+    def synthesize(self, references: Sequence[ResourceReference]) -> Any:
+        return _synthesize_no_default(self.kind, references)
+
+
+@dataclass(frozen=True)
+class _SystemInstallCommandKind:
+    """Implementation of ``ResourceKind`` for ``"system-install-command"``."""
+
+    kind: str = "system-install-command"
+    description: str = "System-level (root) install commands for VM init"
+    miss_policy: Literal["auto-declare", "error"] = "error"
+    auto_declare_names: frozenset[str] | None = None
+    category: Literal["declarable", "capability"] = "declarable"
+    builtin_override: Literal["allow", "reserved"] = "allow"
+
+    def synthesize(self, references: Sequence[ResourceReference]) -> Any:
+        return _synthesize_no_default(self.kind, references)
+
+
+@dataclass(frozen=True)
+class _UserInstallCommandKind:
+    """Implementation of ``ResourceKind`` for ``"user-install-command"``."""
+
+    kind: str = "user-install-command"
+    description: str = "Per-user install commands for admin/agent init"
+    miss_policy: Literal["auto-declare", "error"] = "error"
+    auto_declare_names: frozenset[str] | None = None
+    category: Literal["declarable", "capability"] = "declarable"
+    builtin_override: Literal["allow", "reserved"] = "allow"
+
+    def synthesize(self, references: Sequence[ResourceReference]) -> Any:
+        return _synthesize_no_default(self.kind, references)
+
+
+KIND_REGISTRY["apt-source"] = _AptSourceKind()
+KIND_REGISTRY["apt-package"] = _AptPackageKind()
+KIND_REGISTRY["system-install-command"] = _SystemInstallCommandKind()
+KIND_REGISTRY["user-install-command"] = _UserInstallCommandKind()

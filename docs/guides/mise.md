@@ -17,18 +17,25 @@ itself. Agentworks does not reinvent mise's integrity mechanisms.
 
 ## Quick start
 
-Add packages to your agentworks config:
+Add packages to your admin template -- as a YAML manifest in `~/.config/agentworks/resources/`:
 
-```toml
-[admin.config]
-mise_packages = ["terraform@1.14.5", "adr-tools@3.0.0"]
+```yaml
+apiVersion: agentworks/v1
+kind: admin-template
+metadata:
+  name: default
+spec:
+  mise_packages: [terraform@1.14.5, adr-tools@3.0.0]
 ```
+
+(The classic TOML form, `[admin.config]` with `mise_packages = [...]` in `config.toml`, keeps
+working but is deprecated; see [resources.md](resources.md).)
 
 Run `agw vm create <name>` or `agw vm reinit <name>` and the tools will be available.
 
 ## Config reference
 
-These settings are available in `[admin.config]` (for the admin user) and `[agent_templates.*]` (for
+These settings are available on the admin template (for the admin user) and on agent templates (for
 agents). Mise itself is always installed as a system package on every VM.
 
 | Setting                | Default | Description                                                 |
@@ -44,9 +51,13 @@ agents). Mise itself is always installed as a system package on every VM.
 
 Agents default to nothing. They only get mise tools if explicitly configured in an agent template:
 
-```toml
-[agent_templates.default]
-mise_packages = ["terraform@1.14.5"]
+```yaml
+apiVersion: agentworks/v1
+kind: agent-template
+metadata:
+  name: default
+spec:
+  mise_packages: [terraform@1.14.5]
 ```
 
 ## Lockfiles
@@ -83,18 +94,18 @@ lockfile to see what your tools support.
 
 Point `mise_lockfile` at your lockfile using a local path or a [source reference](source-refs.md):
 
-```toml
-[admin.config]
-mise_packages = ["terraform@1.14.5", "adr-tools@3.0.0"]
-mise_lockfile = "~/.config/agentworks/mise.lock"
+```yaml
+spec:
+  mise_packages: [terraform@1.14.5, adr-tools@3.0.0]
+  mise_lockfile: ~/.config/agentworks/mise.lock
 ```
 
 Or from a git repository:
 
-```toml
-[admin.config]
-mise_packages = ["terraform@1.14.5", "adr-tools@3.0.0"]
-mise_lockfile = "git::https://github.com/myorg/tool-locks.git//mise.lock?ref=v1.0"
+```yaml
+spec:
+  mise_packages: [terraform@1.14.5, adr-tools@3.0.0]
+  mise_lockfile: git::https://github.com/myorg/tool-locks.git//mise.lock?ref=v1.0
 ```
 
 Git source references are fetched after git credentials are configured, so private repos work.
@@ -137,9 +148,9 @@ This means:
 The `mise_install_before` setting filters out tool versions newer than the specified age. This
 provides defense-in-depth against supply chain attacks on newly published versions.
 
-```toml
-[admin.config]
-mise_install_before = "7d"    # reject versions less than 7 days old
+```yaml
+spec:
+  mise_install_before: 7d # reject versions less than 7 days old
 ```
 
 Supports relative durations (`7d`, `90d`, `6m`, `1y`) and absolute dates (`2024-06-01`). This only

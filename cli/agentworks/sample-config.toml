@@ -4,22 +4,24 @@
 # Required fields are uncommented. Everything else shows the default value
 # commented out -- uncomment and change only what you need.
 #
+# RESOURCES ARE YAML-FIRST: declare secrets, templates, git credentials, and
+# catalog entries as YAML manifests in the resources/ directory next to this
+# file (`agw resource sample <kind>` prints a commented starter; --all for every kind).
+# The TOML resource sections below keep working, but they are deprecated --
+# they load with a deprecation warning, and `agw resource migrate` moves them to
+# YAML whenever you're ready. This file remains the permanent home for
+# SETTINGS: operator identity, paths, defaults, platform connections, and
+# the secret backend chain.
+#
 # Comment convention: examples are written as `#key = "value"` (no space
 # after `#`), so you can uncomment a line in place by deleting one `#`.
 # Prose comments use `# <text>` (with space). Pinned by tests in
 # `cli/tests/test_sample_config.py`.
 #
-# Agentworks ships a built-in catalog of common tools (apt sources, apt
-# packages, system install commands, user install commands). Run
-# `agw resource list --kind apt_package,system_install_command,user_install_command,apt_source`
-# to see what is available (or filter to any single kind). You can
-# reference catalog entries by name in templates and define your own
-# entries below to extend or override the catalog.
-#
 # Naming conventions:
 #   - Framework keys (section names, field names) use snake_case:
 #     [vm_templates.foo], ssh_public_key, mise_activate, backend_mappings.
-#   - Operator-typed identifiers (entity names, backend kinds, secret names)
+#   - Operator-typed identifiers (entity names, backend names, secret names)
 #     use kebab-case: [vm_templates.dev-host], `secret = "github-token"`,
 #     `backends = ["env-var", "prompt"]`. The validator is permissive so
 #     legacy names continue to load, but new names should follow kebab.
@@ -47,7 +49,7 @@ ssh_private_key = "~/.ssh/id_ed25519"        # required: used for SSH connection
 [paths]
 #vm_workspaces = "/opt/agentworks/workspaces"  # workspace directory on VMs
 #vscode_workspaces = "~/aw-vscode-workspaces"   # .code-workspace file directory
-#backups = "~/.config/agentworks/backups"       # vm backup directory
+#backups = "~/.config/agentworks/backups"       # backup directory (vm backups, config.toml backups from `agw resource migrate`)
 
 # --- Default values for CLI flags ---
 
@@ -69,7 +71,7 @@ ssh_private_key = "~/.ssh/id_ed25519"        # required: used for SSH connection
 # `agw console attach <name> --recreate` (or adding/restoring a shell on a
 # live console) is enough to switch layouts.
 
-[named_console]
+#[named_console]
 #tmux_layout = "aw-session-vertical"
 # Valid values:
 #   aw-session-vertical  - single column; session pane takes the top 50%
@@ -94,13 +96,13 @@ ssh_private_key = "~/.ssh/id_ed25519"        # required: used for SSH connection
 # `~/.git-credentials` via git's credential-store helper.
 
 #[git_credentials.github]
-#type = "github"
+#provider = "github"                              # `type` is accepted as a legacy alias
 #description = "GitHub full access"               # optional, shown in prompts and logs
 #token = "git-token-github"                       # optional; default is `git-token-<name>` (bare secret name; no { secret = "..." } polymorphism)
 # Resolved secret value is the PAT (create at https://github.com/settings/tokens, repo scope).
 
 #[git_credentials.azdo]
-#type = "azdo"
+#provider = "azdo"                                # `type` is accepted as a legacy alias
 #org = "my-org"
 #description = "Azure DevOps for my-org"          # optional, shown in prompts and logs
 #token = "git-token-azdo"                         # optional; default is `git-token-<name>`
@@ -121,9 +123,9 @@ ssh_private_key = "~/.ssh/id_ed25519"        # required: used for SSH connection
 # Secret declarations -- one per `{ secret = "<name>" }` reference used anywhere
 # in your config. `description` is required and shown in prompts and
 # `agw doctor`; `hint` (optional) is shown alongside the prompt.
-# `backend_mappings.<kind>` (optional) overrides that backend's default
-# identifier for this one secret, or sets `false` to opt out of that backend
-# entirely.
+# `backend_mappings.<backend>` (optional, keyed by BACKEND NAME) overrides that
+# backend's default identifier for this one secret, or sets `false` to opt out
+# of that backend entirely.
 
 #[secrets.npm-token]
 #description = "npm registry token"
@@ -133,24 +135,23 @@ ssh_private_key = "~/.ssh/id_ed25519"        # required: used for SSH connection
 #description = "OpenAI API key"
 #backend_mappings.env-var = "OPENAI_API_KEY"    # override default convention
 
-# Backend declarations. Backends are activated by listing them in
-# `[secret_config].backends` in precedence order. Currently implemented kinds:
-# `env-var`, `prompt`.
-
-#[secret_backends.env-var]
-# Reads from process env. Default convention is AW_SECRET_<UPPER_SNAKE_CASE>,
-# so secret "npm-token" reads from AW_SECRET_NPM_TOKEN unless overridden via
-# `[secrets.<name>].backend_mappings.env-var`.
-
-#[secret_backends.prompt]
-# Interactive prompt. Always applies; the operator is asked once per missing
-# secret per CLI invocation (batched at the start where possible).
+# Backends are activated by listing them in `[secret_config].backends` in
+# precedence order. The built-in backends ship with agentworks:
+#   env-var -- reads from process env. Default convention is
+#              AW_SECRET_<UPPER_SNAKE_CASE>, so secret "npm-token" reads from
+#              AW_SECRET_NPM_TOKEN unless overridden via
+#              `[secrets.<name>].backend_mappings.env-var`.
+#   prompt  -- interactive prompt. Always applies; the operator is asked once
+#              per missing secret per CLI invocation (batched up front).
+# Backends are registered code capabilities (agw resource list --kind
+# secret-backend); their names are the valid chain entries here. (The old
+# `[secret_backends.*]` TOML sections are deprecated no-ops.)
 
 #[secret_config]
 #backends = ["env-var", "prompt"]    # the default chain; explicit configuration overrides.
-# Backends declared above but absent from this list are dormant. Order is
-# resolution precedence: the first backend that produces a value wins. An
-# explicit empty list `backends = []` disables resolution entirely.
+# Declared backends absent from this list are dormant. Order is resolution
+# precedence: the first backend that produces a value wins. An explicit
+# empty list `backends = []` disables resolution entirely.
 
 # --- Azure settings (only needed for --platform azure) ---
 
@@ -201,7 +202,7 @@ ssh_private_key = "~/.ssh/id_ed25519"        # required: used for SSH connection
 # unzip) during init, in addition to provisioning packages (openssh-server,
 # curl, sudo, ca-certificates, gnupg) installed at VM create time.
 
-[vm_templates.default]
+#[vm_templates.default]
 # -- Provisioning (set once at create time) --
 #cpus = 4                                   # number of CPUs (Lima)
 #memory = 8                                 # memory in GiB (Lima)
@@ -374,8 +375,8 @@ ssh_private_key = "~/.ssh/id_ed25519"        # required: used for SSH connection
 # =============================================================================
 #
 # Operator-defined entries extend the built-in catalog. Entries with the same name
-# as a built-in entry override it. Run `agw resource list --kind apt_package` (or
-# apt_source / system_install_command / user_install_command) to see all available
+# as a built-in entry override it. Run `agw resource list --kind apt-package` (or
+# apt-source / system-install-command / user-install-command) to see all available
 # entries (built-in and operator-defined).
 
 # --- Custom apt sources ---

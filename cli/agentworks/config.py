@@ -1,6 +1,16 @@
 """Agentworks configuration loading and validation.
 
 Config lives at ~/.config/agentworks/config.toml. It is read-only at runtime.
+
+Post-move contract (resource-manifests SDD): this module holds the
+settings dataclasses plus the legacy TOML resource loaders/publisher
+(``Config.publish_to`` and the ``_load_*`` helpers) that die in Phase 6 --
+nothing else. The declarable-resource dataclasses (VMTemplate,
+AgentTemplate, AdminConfig, WorkspaceTemplate, SessionTemplate,
+NamedConsoleConfig, GitCredentialConfig) and the console/tmux layout
+constants now live in their domain packages; the loaders import them from
+there. Kind definitions live in the domain packages too (see
+``agentworks.resources.kinds`` for the registration index).
 """
 
 from __future__ import annotations
@@ -12,31 +22,29 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal
 
+from agentworks.agents.template import AgentTemplate
+
 # ConfigError is defined in agentworks.errors and re-exported here for backward
 # compatibility with existing `from agentworks.config import ConfigError` users.
 # The `X as X` shape marks the name as an explicit re-export for mypy strict mode.
 from agentworks.env import EnvEntry
 from agentworks.errors import ConfigError as ConfigError
+from agentworks.git_credentials.credential import GitCredentialConfig
 from agentworks.secrets import (
-    SecretBackendConfig,
     SecretConfig,
     SecretDecl,
 )
-from agentworks.source_location import SourceLocation, scan_section_lines, synthesized
+from agentworks.sessions.layouts import AW_SESSION_VERTICAL_LAYOUT, VALID_TMUX_LAYOUTS
+from agentworks.sessions.template import NamedConsoleConfig, SessionTemplate
+from agentworks.source_location import SourceLocation, scan_section_lines
+from agentworks.vms.admin import AdminConfig
+from agentworks.vms.template import VMTemplate
+from agentworks.workspaces.template import WorkspaceTemplate
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
 
-    from agentworks.agents.templates import ResolvedAgentTemplate
     from agentworks.resources.origin import Origin
-    from agentworks.resources.reference import (
-        ReferenceEntry,
-        ResourceReference,
-        SecretReference,
-    )
     from agentworks.resources.registry import Registry
-    from agentworks.secrets import SecretResolver, SecretSource
-    from agentworks.vms.templates import ResolvedVMTemplate
 
 CONFIG_DIR = Path.home() / ".config" / "agentworks"
 CONFIG_PATH = CONFIG_DIR / "config.toml"
@@ -97,9 +105,9 @@ def validate_admin_username(admin_username: str) -> None:
 
 
 # Valid values for enum-like fields. Git credential ``type`` validation
-# moved to the framework's ``git_credential_provider`` kind in Phase 2b.1
-# (see ``agentworks.git_credentials.PROVIDER_TYPES`` for the canonical
-# list).
+# moved to the framework's ``git-credential-provider`` kind in Phase 2b.1
+# (``agentworks.git_credentials.GIT_CREDENTIAL_PROVIDER_REGISTRY`` is
+# the canonical list).
 VALID_PLATFORMS = ("lima", "azure", "wsl2", "proxmox")
 
 
@@ -134,435 +142,6 @@ class DefaultsConfig:
     vm_host: str | None = None
 
 
-# Agentworks-specific layout: session pane (pane 0) takes the top 50% of
-# the window, shell panes stack vertically in the bottom 50% with equal
-# heights. tmux has no preset that matches this geometry, so apply-time
-# builds a custom tmux layout string from the live window dimensions and
-# pane IDs and feeds it to `tmux select-layout`. See
-# `_apply_aw_session_vertical_layout` in sessions/multi_console_layout.py.
-AW_SESSION_VERTICAL_LAYOUT = "aw-session-vertical"
-
-# Valid layouts for named-console session windows. All values besides
-# AW_SESSION_VERTICAL_LAYOUT map 1:1 to tmux's built-in select-layout
-# names so operators can apply the same value to a window via
-# `tmux select-layout` on the fly.
-VALID_TMUX_LAYOUTS = (
-    "tiled",
-    "even-vertical",
-    "even-horizontal",
-    "main-vertical",
-    "main-horizontal",
-    AW_SESSION_VERTICAL_LAYOUT,
-)
-
-
-def _env_references(
-    env: dict[str, EnvEntry] | None,
-    source: tuple[str, str],
-) -> list[SecretReference]:
-    """Aggregate ``EnvEntry.referenced_resources(source)`` across an env table.
-
-    Module-level helper shared by every env-bearing Resource type's
-    ``referenced_resources()`` method so the per-type method body stays
-    one line. ``env`` may be ``None`` (``SessionTemplate.env`` is
-    optional) or empty, in which case the result is an empty list.
-    """
-    if not env:
-        return []
-    out: list[SecretReference] = []
-    for entry in env.values():
-        out.extend(entry.referenced_resources(source))
-    return out
-
-
-def _git_credential_references(
-    git_credentials: list[str] | None,
-    source: tuple[str, str],
-) -> list[ResourceReference]:
-    """Emit a ``ResourceReference`` of kind ``"git_credentials"`` per
-    name in ``git_credentials``. Used by ``AdminConfig.referenced_resources``
-    and ``AgentTemplate.referenced_resources`` to feed the
-    ``GitCredentialKind``'s error miss policy: a typo'd or undeclared
-    name errors at finalize with the reference source pointing at the
-    declaring Resource.
-    """
-    from agentworks.resources.reference import ResourceReference
-
-    if not git_credentials:
-        return []
-    return [
-        ResourceReference(
-            name=cred_name,
-            kind="git_credentials",
-            usage="the git credential",
-            source=source,
-        )
-        for cred_name in git_credentials
-    ]
-
-
-def _tailscale_secret_reference(
-    tailscale_auth_key: str,
-    template_name: str,
-) -> SecretReference:
-    """Build the ``SecretReference`` a VMTemplate publishes for its
-    Tailscale auth key. Used by both ``VMTemplate.referenced_resources``
-    (raw, in this module) and ``ResolvedVMTemplate.referenced_resources``
-    (resolved, in ``agentworks.vms.templates``) so the reference shape
-    is single-sourced.
-    """
-    from agentworks.resources.reference import SecretReference
-
-    return SecretReference(
-        name=tailscale_auth_key,
-        kind="secret",
-        usage="the Tailscale auth key",
-        source=("vm_template", template_name),
-    )
-
-
-@dataclass(frozen=True)
-class NamedConsoleConfig:
-    """Settings for the `console` subcommand group (named multi-session
-    consoles). Section is `[named_console]` in the TOML to disambiguate from
-    the legacy `vm console` and the workspace console template. Only named
-    consoles read these values today.
-    """
-
-    tmux_layout: str = AW_SESSION_VERTICAL_LAYOUT
-    declared_at: SourceLocation = field(default_factory=synthesized)
-    origin: Origin | None = None
-    references: tuple[ReferenceEntry, ...] = ()
-
-
-@dataclass(frozen=True)
-class VMTemplate:
-    """VM template definition. All optional fields use ``None = inherit``
-    semantics except ``tailscale_auth_key``, which is a non-optional
-    bare-string secret name (default ``"tailscale-auth-key"``). The
-    tailscale field carries no inherit shape because the secret name is a
-    deployment-wide convention; operators who want a different name per
-    template set it on the specific template.
-    """
-
-    name: str
-    inherits: list[str] = field(default_factory=list)
-    # Provisioning
-    cpus: int | None = None
-    memory: int | None = None
-    disk: int | None = None
-    azure_vm_size: str | None = None
-    swap: int | None = None
-    # System-wide initialization
-    apt: list[str] | None = None
-    apt_packages: list[str] | None = None
-    snap: list[str] | None = None
-    system_install_commands: list[str] | None = None
-    # Env (declared per-template; merged child-overrides-parent at resolution).
-    # Plaintext or secret references; the loader produces EnvEntry instances.
-    env: dict[str, EnvEntry] = field(default_factory=dict)
-    # Secret name for the Tailscale auth key. ``None = inherit`` per the
-    # convention used by VMTemplate's other optional fields; the loader
-    # sets it to the operator's string when explicit, to ``None`` when
-    # omitted. ResolvedVMTemplate (in agentworks.vms.templates) carries
-    # the post-inheritance resolved string (default ``"tailscale-auth-key"``).
-    # Bare-string only -- no ``{ secret = "..." }`` polymorphism per the
-    # SDD; the field IS the secret reference.
-    tailscale_auth_key: str | None = None
-    declared_at: SourceLocation = field(default_factory=synthesized)
-    origin: Origin | None = None
-    references: tuple[ReferenceEntry, ...] = ()
-
-    def referenced_resources(self) -> list[ResourceReference]:
-        from agentworks.resources.reference import (
-            ResourceReference as _ResourceReq,
-        )
-        from agentworks.resources.reference import (
-            TemplateReference,
-        )
-
-        source = ("vm_template", self.name)
-        refs: list[ResourceReference] = list(_env_references(self.env, source))
-        # Inherits: each parent template name in ``inherits = [...]`` is a
-        # TemplateReference targeting the same kind. The framework's
-        # VMTemplateKind miss policy auto-declares "default" when missing
-        # and errors on any other unknown name; framework cycle detection
-        # catches inheritance loops. Per-template field-merging stays in
-        # ``agentworks.vms.templates``.
-        for parent in self.inherits:
-            refs.append(
-                TemplateReference(
-                    name=parent,
-                    kind="vm_template",
-                    usage="a parent template",
-                    source=source,
-                )
-            )
-        # Catalog references: each name in apt_packages /
-        # system_install_commands resolves to a code-declared catalog
-        # Resource via the framework's miss policy (error on typo,
-        # citing this template's source). Phase 2b.
-        for pkg in self.apt_packages or []:
-            refs.append(
-                _ResourceReq(
-                    name=pkg,
-                    kind="apt_package",
-                    usage="an apt package",
-                    source=source,
-                )
-            )
-        for cmd in self.system_install_commands or []:
-            refs.append(
-                _ResourceReq(
-                    name=cmd,
-                    kind="system_install_command",
-                    usage="a system install command",
-                    source=source,
-                )
-            )
-        # When the raw template doesn't set tailscale_auth_key, emit the
-        # default secret name's reference so the registry finalizes
-        # cleanly even before any inheritance walk. ResolvedVMTemplate's
-        # referenced_resources emits the inherited value at manager-entry
-        # call time.
-        ts_name = self.tailscale_auth_key or "tailscale-auth-key"
-        refs.append(_tailscale_secret_reference(ts_name, self.name))
-        return refs
-
-
-@dataclass(frozen=True)
-class AdminConfig:
-    """Per-user config for the admin user on VMs.
-
-    Phase 2a.3 plurified the underlying ``admin_template`` kind from
-    singleton-conceptual to named-multi-instance: ``AdminConfig`` now
-    carries its own ``name`` (default ``"default"``) just like the other
-    template kinds. The operator-facing surface is unchanged in this
-    phase -- the loader only accepts the ``[admin]`` block and produces
-    one instance with name ``"default"``. A future SDD adds
-    ``[admin_templates.<name>]`` parsing, the ``--admin-template`` CLI
-    flag, and the VM DB column; that work can land without re-touching
-    the framework.
-    """
-
-    name: str = "default"
-    username: str = "agentworks"
-    shell: str = "bash"
-    git_credentials: list[str] = field(default_factory=list)
-    user_install_commands: list[str] = field(default_factory=list)
-    dotfiles_source: str | None = None
-    dotfiles_destination: str = "~/.dotfiles"
-    dotfiles_install_cmd: str = "./install.sh"
-    mise_activate: bool = True
-    mise_packages: list[str] = field(default_factory=list)
-    mise_lockfile: str | None = None
-    mise_allow_unlocked: bool = False
-    mise_install_before: str = "7d"
-    mise_prune_on_reinit: bool = True
-    git_force_safe_directory: bool = True
-    # Claude Code
-    claude_marketplaces: list[str] = field(default_factory=list)
-    claude_plugins: list[str] = field(default_factory=list)
-    # Env that applies whenever a shell is opened as the admin user.
-    env: dict[str, EnvEntry] = field(default_factory=dict)
-    declared_at: SourceLocation = field(default_factory=synthesized)
-    origin: Origin | None = None
-    references: tuple[ReferenceEntry, ...] = ()
-
-    def referenced_resources(self) -> list[ResourceReference]:
-        from agentworks.resources.reference import (
-            ResourceReference as _ResourceReq,
-        )
-
-        source = ("admin_template", self.name)
-        refs: list[ResourceReference] = list(
-            _env_references(self.env, source)
-        )
-        refs.extend(_git_credential_references(self.git_credentials, source))
-        # Catalog references for user_install_commands (Phase 2b).
-        for cmd in self.user_install_commands:
-            refs.append(
-                _ResourceReq(
-                    name=cmd,
-                    kind="user_install_command",
-                    usage="a user install command",
-                    source=source,
-                )
-            )
-        return refs
-
-
-@dataclass(frozen=True)
-class AgentTemplate:
-    """Agent template definition. All fields are optional (None = inherit/default)."""
-
-    name: str
-    inherits: list[str] = field(default_factory=list)
-    shell: str | None = None
-    git_credentials: list[str] | None = None
-    user_install_commands: list[str] | None = None
-    dotfiles_source: str | None = None
-    dotfiles_destination: str | None = None
-    dotfiles_install_cmd: str | None = None
-    mise_activate: bool | None = None
-    mise_packages: list[str] | None = None
-    mise_lockfile: str | None = None
-    mise_allow_unlocked: bool | None = None
-    mise_install_before: str | None = None
-    mise_prune_on_reinit: bool | None = None
-    claude_marketplaces: list[str] | None = None
-    claude_plugins: list[str] | None = None
-    env: dict[str, EnvEntry] = field(default_factory=dict)
-    declared_at: SourceLocation = field(default_factory=synthesized)
-    origin: Origin | None = None
-    references: tuple[ReferenceEntry, ...] = ()
-
-    def referenced_resources(self) -> list[ResourceReference]:
-        from agentworks.resources.reference import (
-            ResourceReference as _ResourceReq,
-        )
-        from agentworks.resources.reference import (
-            TemplateReference,
-        )
-
-        source = ("agent_template", self.name)
-        refs: list[ResourceReference] = list(
-            _env_references(self.env, source)
-        )
-        refs.extend(_git_credential_references(self.git_credentials, source))
-        for parent in self.inherits:
-            refs.append(
-                TemplateReference(
-                    name=parent,
-                    kind="agent_template",
-                    usage="a parent template",
-                    source=source,
-                )
-            )
-        # Catalog references for user_install_commands (Phase 2b).
-        for cmd in self.user_install_commands or []:
-            refs.append(
-                _ResourceReq(
-                    name=cmd,
-                    kind="user_install_command",
-                    usage="a user install command",
-                    source=source,
-                )
-            )
-        return refs
-
-
-@dataclass(frozen=True)
-class WorkspaceTemplate:
-    name: str
-    inherits: list[str] = field(default_factory=list)
-    repo: str | None = None
-    tmuxinator: bool | None = None  # None = not explicitly set (inherit/default to True)
-    env: dict[str, EnvEntry] = field(default_factory=dict)
-    declared_at: SourceLocation = field(default_factory=synthesized)
-    origin: Origin | None = None
-    references: tuple[ReferenceEntry, ...] = ()
-
-    def referenced_resources(self) -> list[ResourceReference]:
-        from agentworks.resources.reference import TemplateReference
-
-        source = ("workspace_template", self.name)
-        refs: list[ResourceReference] = list(_env_references(self.env, source))
-        for parent in self.inherits:
-            refs.append(
-                TemplateReference(
-                    name=parent,
-                    kind="workspace_template",
-                    usage="a parent template",
-                    source=source,
-                )
-            )
-        return refs
-
-
-@dataclass(frozen=True)
-class GitCredentialConfig:
-    name: str
-    type: str
-    org: str | None = None
-    description: str | None = None
-    # Secret name for the auth token. Default ``"git-token-<name>"`` is
-    # computed in ``__post_init__`` (the per-credential default depends
-    # on the credential's own name, which a class-level literal can't
-    # express). Operators may override with a custom secret name; the
-    # framework's ``"secret"`` kind then resolves the value. Bare-string
-    # only per Phase 1c's pattern; no ``{ secret = "..." }``
-    # polymorphism.
-    token: str = ""
-    declared_at: SourceLocation = field(default_factory=synthesized)
-    origin: Origin | None = None
-    references: tuple[ReferenceEntry, ...] = ()
-
-    def __post_init__(self) -> None:
-        # Frozen dataclasses can still ``object.__setattr__`` during
-        # construction. The default ``""`` sentinel triggers the
-        # name-interpolated default; an operator-typed string survives
-        # unchanged.
-        if not self.token:
-            object.__setattr__(self, "token", f"git-token-{self.name}")
-
-    def referenced_resources(self) -> list[ResourceReference]:
-        from agentworks.resources.reference import (
-            ResourceReference as _ResourceReq,
-        )
-        from agentworks.resources.reference import SecretReference
-
-        source = ("git_credentials", self.name)
-        return [
-            SecretReference(
-                name=self.token,
-                kind="secret",
-                usage="the auth token",
-                source=source,
-            ),
-            # Phase 2b.1: the ``type`` field references a known provider
-            # kind; framework miss policy catches typos.
-            _ResourceReq(
-                name=self.type,
-                kind="git_credential_provider",
-                usage="the provider type",
-                source=source,
-            ),
-        ]
-
-
-@dataclass(frozen=True)
-class SessionTemplate:
-    """Session template definition. All fields optional (None = inherit/default)."""
-
-    name: str
-    inherits: list[str] = field(default_factory=list)
-    command: str | None = None
-    description: str | None = None
-    restart_command: str | None = None
-    required_commands: list[str] | None = None
-    env: dict[str, EnvEntry] | None = None
-    declared_at: SourceLocation = field(default_factory=synthesized)
-    origin: Origin | None = None
-    references: tuple[ReferenceEntry, ...] = ()
-
-    def referenced_resources(self) -> list[ResourceReference]:
-        from agentworks.resources.reference import TemplateReference
-
-        source = ("session_template", self.name)
-        refs: list[ResourceReference] = list(_env_references(self.env, source))
-        for parent in self.inherits:
-            refs.append(
-                TemplateReference(
-                    name=parent,
-                    kind="session_template",
-                    usage="a parent template",
-                    source=source,
-                )
-            )
-        return refs
-
-
 @dataclass(frozen=True)
 class SessionConfig:
     history_limit: int = 50_000
@@ -593,12 +172,18 @@ class Config:
     operator: OperatorConfig
     paths: PathsConfig
     defaults: DefaultsConfig
-    named_console: NamedConsoleConfig
+    # None = the operator's TOML has no [named_console] section; the
+    # framework's always-materialize pre-step auto-declares the default.
+    named_console: NamedConsoleConfig | None
     vm_templates: dict[str, VMTemplate]
-    vm: ResolvedVMTemplate
-    admin: AdminConfig
+    # The file this Config was loaded from. The resources directory
+    # (YAML manifests) is resolved relative to it, so tests loading
+    # from tmp paths never pick up the developer's real manifests.
+    source_path: Path
+    # None = the operator's TOML has no [admin.*] sections (see
+    # named_console above).
+    admin: AdminConfig | None
     agent_templates: dict[str, AgentTemplate]
-    agent: ResolvedAgentTemplate
     session: SessionConfig
     session_templates: dict[str, SessionTemplate]
     workspace_templates: dict[str, WorkspaceTemplate]
@@ -613,19 +198,24 @@ class Config:
     # Declared secrets, keyed by name. Empty when [secrets.*] is absent.
     secrets: dict[str, SecretDecl] = field(default_factory=dict)
     # Per-backend connection config keyed by kind ("env-var", "onepassword", ...).
-    secret_backends: dict[str, SecretBackendConfig] = field(default_factory=dict)
+
     # Top-level [secret_config] table; carries the enabled-backends precedence list.
     secret_config_data: SecretConfig = field(default_factory=SecretConfig)
-    # Resolver assembled from secret_config_data.backends in precedence order.
-    # An empty SecretResolver (no sources, no secrets) is constructed when the
-    # operator hasn't opted into secrets - callers always get a usable resolver,
-    # so call sites can `.render(env)` unconditionally instead of branching on
-    # None. Plaintext env entries resolve trivially; secret-ref env entries fall
-    # through to an empty backend chain and surface `SecretUnavailableError` at
-    # command time. Phase 1b of the Resource Registry SDD made that the intended
-    # runtime failure mode (no longer a `ConfigError` at config load).
-    secret_resolver: SecretResolver = field(default_factory=lambda: _empty_resolver())
     config_issues: tuple[str, ...] = ()
+    # Deprecation nudges (TOML resource sections, [secret_backends.*]
+    # no-ops): a separate channel so real issues stay sharp for tests
+    # and callers, and so --no-deprecations can silence only these.
+    # ``deprecation_issues`` holds the ambient teaching messages;
+    # ``deprecated_sections`` / ``noop_secret_backend_sections`` hold
+    # the bare facts (display shapes of the sections present) for
+    # surfaces that render their own tidy lines (doctor).
+    deprecation_issues: tuple[str, ...] = ()
+    deprecated_sections: tuple[str, ...] = ()
+    noop_secret_backend_sections: tuple[str, ...] = ()
+    # False when loaded with ``load_config(resources=False)`` (settings-only
+    # callers); ``build_registry`` refuses such a Config so the TOML side
+    # can never silently publish as empty.
+    resources_loaded: bool = True
 
     def publish_to(self, registry: Registry) -> None:
         """Publish every operator-declared Resource into ``registry``.
@@ -634,19 +224,20 @@ class Config:
         ``Origin.operator_declared(file=..., line=...)`` built from its
         ``declared_at: SourceLocation``. ``Config.admin`` and
         ``Config.named_console`` are operator-surface singletons today
-        (one TOML block, one row published as ``admin_template:default``
-        / ``named_console_template:default``), but their kinds are
-        named-multi-instance in the framework: a future SDD can grow the
-        operator surface to ``[admin_templates.<name>]`` /
-        ``[named_console_templates.<name>]`` without re-touching the
-        framework. Phase 0's loader always produces an instance even
-        when the operator's TOML omits all sections; Config.publish_to
-        always publishes it.
+        (one TOML block, one row published as ``admin-template:default``
+        / ``named-console-template:default``), but their kinds are
+        named-multi-instance in the framework. They publish only when
+        the operator actually declared the sections (``None`` = absent);
+        otherwise the framework's always-materialize pre-step
+        auto-declares the default, exactly like vm-template and
+        agent-template.
 
-        ``secret_config`` is the secret-system policy envelope consumed
-        directly by ``agentworks.secrets``; it is NOT published as a
-        Registry kind. Its individual ``secret_backends`` entries are
-        published under the ``"secret_backend"`` kind.
+        ``secret_config`` is pure config and is NOT published: the
+        chain is a setting that names resources, consumed by the
+        secrets subsystem directly (validated against the finalized
+        registry by ``secrets.validate_chain`` in ``build_registry``,
+        read again at resolve time). Settings don't become
+        pseudo-resources just because they point at resources.
 
         Imports ``Registry`` and ``Origin`` from ``agentworks.resources``
         -- the explicit layer handoff. Config's data structures (parsed
@@ -665,37 +256,38 @@ class Config:
             )
 
         # Multi-named kinds: one Resource per (container, name) pair.
+        # secret_backends is deliberately absent: the TOML sections are
+        # deprecated no-ops (built-in backends ship as bundled
+        # manifests; new backends are manifest-declared).
         for kind, kind_dict in (
             ("secret", self.secrets),
-            ("vm_template", self.vm_templates),
-            ("agent_template", self.agent_templates),
-            ("workspace_template", self.workspace_templates),
-            ("session_template", self.session_templates),
-            ("git_credentials", self.git_credentials),
-            ("secret_backend", self.secret_backends),
+            ("vm-template", self.vm_templates),
+            ("agent-template", self.agent_templates),
+            ("workspace-template", self.workspace_templates),
+            ("session-template", self.session_templates),
+            ("git-credential", self.git_credentials),
         ):
             for name, resource in kind_dict.items():
                 registry.add(kind, name, resource, op_origin(resource.declared_at))
 
-        # Operator-surface-singleton kinds: framework treats them as
-        # named-multi-instance per Phase 2a.3, but today's loader only
-        # produces one row each (``admin_template:default`` /
-        # ``named_console_template:default``). admin_template's name is
-        # carried on the AdminConfig itself now -- still defaults to
-        # "default" -- so the future plurified surface can land without
-        # changing this publish line.
-        registry.add(
-            "admin_template",
-            self.admin.name,
-            self.admin,
-            op_origin(self.admin.declared_at),
-        )
-        registry.add(
-            "named_console_template",
-            "default",
-            self.named_console,
-            op_origin(self.named_console.declared_at),
-        )
+        # Operator-surface-singleton kinds publish only when declared;
+        # an absent section means the framework auto-declares the
+        # default at finalize (no synthesized placeholder rows, no
+        # collision exemption).
+        if self.admin is not None:
+            registry.add(
+                "admin-template",
+                self.admin.name,
+                self.admin,
+                op_origin(self.admin.declared_at),
+            )
+        if self.named_console is not None:
+            registry.add(
+                "named-console-template",
+                "default",
+                self.named_console,
+                op_origin(self.named_console.declared_at),
+            )
 
 
 # -- Loading ---------------------------------------------------------------
@@ -812,7 +404,7 @@ def _parse_env_table(
             # ADR 0014: newlines in env values would corrupt the SSH
             # `-o SetEnv=KEY=VALUE` argument shape. Warn at load time so
             # operators catch accidental trailing newlines (a common
-            # copy-paste artifact). The runtime resolver applies the
+            # copy-paste artifact). The resolve loop applies the
             # same check defensively to secret-resolved values.
             if "\n" in val or "\r" in val:
                 issues.append(
@@ -964,7 +556,13 @@ def _load_named_console(
     data: dict[str, object],
     issues: list[str],
     decls: _SectionLineMap,
-) -> NamedConsoleConfig:
+) -> NamedConsoleConfig | None:
+    if "named_console" not in data:
+        # Nothing declared: the framework auto-declares the default row
+        # (always-materialize), same as every other reserved-default
+        # kind. The manifest decoder always passes the key, so this
+        # None path is TOML-only.
+        return None
     raw = data.get("named_console", {})
     if not isinstance(raw, dict):
         raise ConfigError("[named_console] must be a table")
@@ -1105,8 +703,15 @@ def _load_admin_config(
     data: dict[str, object],
     issues: list[str],
     decls: _SectionLineMap,
-) -> AdminConfig:
-    """Load admin per-user config from [admin.config]."""
+) -> AdminConfig | None:
+    """Load admin per-user config from [admin.config].
+
+    Returns ``None`` when the TOML has no ``[admin.*]`` sections at all:
+    the framework auto-declares ``admin-template:default`` instead
+    (always-materialize). The manifest decoder always passes the key.
+    """
+    if "admin" not in data:
+        return None
     top = data.get("admin", {})
     if not isinstance(top, dict):
         raise ConfigError("[admin] must be a table")
@@ -1191,9 +796,8 @@ def _load_agent_templates(
     # Phase 2a.2: inherits-reference validation and cycle detection move
     # to the framework (AgentTemplateKind's miss policy +
     # Registry.finalize's cycle pass). The agents/templates.py resolver
-    # also has its own visited-set guard for the load-time eager-resolve
-    # path (load_config calls ``resolve_from_dict`` to populate
-    # ``config.agent`` before any registry is built).
+    # also has its own visited-set guard as a safety net for callers
+    # that resolve without going through build_registry.
     return templates
 
 
@@ -1262,6 +866,7 @@ def _load_workspace_templates(
 
 def _load_git_credentials(
     data: dict[str, object],
+    issues: list[str],
     decls: _SectionLineMap,
 ) -> dict[str, GitCredentialConfig]:
     raw = data.get("git_credentials", {})
@@ -1275,13 +880,30 @@ def _load_git_credentials(
         # Phase 2b.1: the ``type`` field's reference-existence check
         # moves to the framework via
         # ``GitCredentialConfig.referenced_resources`` emitting a
-        # ``ResourceReference(kind="git_credential_provider", ...)``;
+        # ``ResourceReference(kind="git-credential-provider", ...)``;
         # ``_GitCredentialProviderKind``'s error miss policy fires at
         # build_registry time with the framework's consistent error
         # shape if the type isn't a known provider.
-        cred_type = str(_require(cdata, "type", f"git_credentials.{name}"))
-        if cred_type == "azdo" and "org" not in cdata:
-            raise ConfigError(f"git_credentials.{name}.org is required for azdo type")
+        # ``provider`` is the vocabulary going forward (matching
+        # secret-backend manifests); ``type`` remains accepted until the
+        # TOML resource surface is deleted at the cutover. ``provider``
+        # wins when both are present.
+        if "provider" in cdata:
+            cred_type = str(cdata["provider"])
+            if "type" in cdata and str(cdata["type"]) != cred_type:
+                issues.append(
+                    f"git_credentials.{name}: both provider ({cred_type!r}) "
+                    f"and type ({cdata['type']!r}) are set and disagree; "
+                    "provider wins"
+                )
+        elif "type" in cdata:
+            cred_type = str(cdata["type"])
+        else:
+            raise ConfigError(f"git_credentials.{name}.provider is required")
+        # (TOML keeps org at the section top level -- the only flat
+        # domain; it nests into provider_config below, and the provider
+        # capability validates the assembled blob. Unknown provider
+        # names defer to the framework's miss policy at finalize.)
 
         # ``token`` is a bare secret name; same rules as
         # ``tailscale_auth_key``. Omission triggers GitCredentialConfig's
@@ -1303,10 +925,23 @@ def _load_git_credentials(
                 )
             token_raw = cdata["token"]
 
+        provider_config: dict[str, object] = {}
+        # The flat TOML shape only ever read ``org``, and only for azdo;
+        # hoisting it into the blob for other providers would promote a
+        # historically-ignored stray key into a validation error and
+        # break released configs (loads-today). The flat domain's
+        # stray-key silence stays until Phase 6 retires it.
+        if cred_type == "azdo" and "org" in cdata:
+            provider_config["org"] = str(cdata["org"])
+        from agentworks.git_credentials import GIT_CREDENTIAL_PROVIDER_REGISTRY
+
+        capability = GIT_CREDENTIAL_PROVIDER_REGISTRY.get(cred_type)
+        if capability is not None:
+            capability.validate_config(f"git_credentials.{name}", provider_config)
         creds[name] = GitCredentialConfig(
             name=name,
-            type=cred_type,
-            org=str(cdata["org"]) if "org" in cdata else None,
+            provider=cred_type,
+            provider_config=provider_config,
             description=str(cdata["description"]) if "description" in cdata else None,
             token=token_raw,
             declared_at=decls.lookup("git_credentials", name),
@@ -1478,46 +1113,92 @@ def _load_secrets(
 
 def _load_secret_backends(
     data: dict[str, object],
-    issues: list[str],  # noqa: ARG001 - kept for caller-symmetry with _load_secret_config
-    decls: _SectionLineMap,
-) -> dict[str, SecretBackendConfig]:
-    """Load [secret_backends.*] sections into SecretBackendConfig entries.
+    deprecations: list[str],
+) -> tuple[str, ...]:
+    """Warn ``[secret_backends.*]`` sections as deprecated no-ops.
 
-    v1 only carries the ``kind`` field; per-backend subclasses (with account /
-    vault / etc.) arrive when those backends ship. Extra fields in v1
-    sections are accepted but ignored.
+    The backend-keyed TOML sections never carried configuration (only
+    the backend name itself), and the backends are registered code
+    capabilities -- so a section here is semantically empty. Known
+    backends warn as deprecated; unknown ones (typo ``envvar`` for
+    ``env-var``) stay a hard ``ConfigError`` for typo protection.
+    Nothing is stored and nothing publishes.
 
-    A declared kind not in the known-factory map (e.g. typo ``envvar`` for
-    ``env-var``) is a load-time ``ConfigError`` -- Phase 2b.2 elevated
-    this from a soft warning to a hard error so the surface treats it
-    the same as ``[git_credentials.<name>].type`` typos.
+    Returns the display shapes of the sections found (facts for
+    surfaces with their own rendering, mirroring
+    ``_warn_deprecated_resource_sections``).
     """
     raw = data.get("secret_backends", {})
     if not isinstance(raw, dict):
         raise ConfigError("[secret_backends] must be a table")
 
-    known_kinds = set(_v1_source_factories().keys())
-    backends: dict[str, SecretBackendConfig] = {}
-    for kind, bdata in raw.items():
-        kind_str = str(kind)
+    from agentworks.secrets.backends import SECRET_BACKEND_REGISTRY
+
+    known_backends = set(SECRET_BACKEND_REGISTRY)
+    found: list[str] = []
+    for key, bdata in raw.items():
+        backend_str = str(key)
         if not isinstance(bdata, dict):
-            raise ConfigError(f"secret_backends.{kind_str} must be a table")
-        # Phase 2b.2: unknown backend kinds in [secret_backends.<kind>]
-        # are a hard error (matching git_credentials.<name>.type's
-        # treatment). Previously a soft config-load warning; the
-        # asymmetry between "operator typo'd a provider type" (error)
-        # and "operator typo'd a backend kind" (warn) wasn't earning
-        # its keep.
-        if kind_str not in known_kinds:
+            raise ConfigError(f"secret_backends.{backend_str} must be a table")
+        if backend_str not in known_backends:
             raise ConfigError(
-                f"[secret_backends.{kind_str}] declares an unknown backend kind; "
-                f"v1 supports {sorted(known_kinds)}"
+                f"[secret_backends.{backend_str}] names an unknown secret "
+                f"backend; supported: {sorted(known_backends)}"
             )
-        backends[kind_str] = SecretBackendConfig(
-            kind=kind_str,
-            declared_at=decls.lookup("secret_backends", kind_str),
+        found.append(f"[secret_backends.{backend_str}]")
+        deprecations.append(
+            f"[secret_backends.{backend_str}] is deprecated and has no effect: "
+            f"the built-in backends ship with agentworks, and activation is "
+            f"[secret_config].backends. Remove the section, or run "
+            f"`agw resource migrate --all` to drop it."
         )
-    return backends
+    return tuple(found)
+
+
+def _warn_deprecated_resource_sections(
+    data: dict[str, object],
+    deprecations: list[str],
+) -> tuple[str, ...]:
+    """ONE aggregated deprecation issue for the TOML resource sections
+    present (Phase 5, aggregated at maintainer direction -- a warning
+    per section was obnoxious on real configs).
+
+    Dual-path is permanent policy short of a future major release: these
+    sections keep loading with exactly today's semantics. The warning is
+    the nudge toward the YAML manifest surface. ``[secret_backends.*]``
+    is excluded -- it has its own no-op message above -- and
+    ``[secret_config]`` is config, not a resource section.
+
+    Returns the display shapes of the sections found, so surfaces with
+    their own rendering (doctor's tidy one-line row) can compose from
+    the fact instead of reusing this ambient teaching text.
+    """
+    from agentworks.manifests.decode import KIND_SECTIONS
+
+    present: list[str] = []
+    for _kind, section in KIND_SECTIONS.items():
+        if section == "secret_backends" or section not in data:
+            continue
+        # Display the header shape operators can actually grep for:
+        # [admin.config] and [named_console] are the two non-family
+        # sections; everything else nests names ([secrets.<name>]).
+        if section == "admin":
+            present.append("[admin.config]")
+        elif section == "named_console":
+            present.append("[named_console]")
+        else:
+            present.append(f"[{section}.*]")
+    if not present:
+        return ()
+    noun = "section" if len(present) == 1 else "sections"
+    deprecations.append(
+        f"deprecated TOML resource {noun}: {', '.join(present)}. Move "
+        f"these with `agw resource migrate` (per kind, or --all), declare "
+        f"new resources as YAML manifests (`agw resource sample <kind>`), "
+        f"or silence this warning with --no-deprecations. TOML resource "
+        f"support will likely be removed in a future major release."
+    )
+    return tuple(present)
 
 
 def _load_secret_config(
@@ -1549,94 +1230,10 @@ def _load_secret_config(
     return SecretConfig(backends=tuple(backends_raw), declared_at=declared_at)
 
 
-def _empty_resolver() -> SecretResolver:
-    """A no-op SecretResolver used as the default when no secrets are configured.
-
-    Lets call sites depend on `Config.secret_resolver` always being a valid
-    SecretResolver instead of branching on None. Plaintext env entries
-    resolve trivially through `render`; secret-ref env entries fall through
-    to the (empty) backend chain and raise `SecretUnavailableError` at
-    command time -- the intended runtime failure mode per Phase 1b of the
-    Resource Registry SDD.
-    """
-    from agentworks.secrets import SecretResolver
-
-    return SecretResolver([], {})
-
-
-# Backend kinds whose source class is built in to v1. Source factories
-# accept no constructor args today; later backends accepting a
-# ``SecretBackendConfig`` will widen this signature when they ship.
-def _v1_source_factories() -> dict[str, Callable[[], SecretSource]]:
-    from agentworks.secrets import EnvVarSource, PromptSource
-
-    return {
-        "env-var": EnvVarSource,
-        "prompt": PromptSource,
-    }
-
-
-def _build_secret_resolver(
-    secret_config_data: SecretConfig,
-    secret_backends: dict[str, SecretBackendConfig],  # noqa: ARG001 - reserved for future per-backend ctor wiring
-    secrets: dict[str, SecretDecl],
-) -> SecretResolver:
-    """Assemble a SecretResolver from the configured backend chain.
-
-    Returns a no-op resolver when no backends are configured (and no secrets
-    are declared). When backends ARE configured, validates:
-
-    - every kind in ``[secret_config].backends`` has a known source factory;
-    - no declared secret is unreachable through the configured chain.
-    """
-    from agentworks.secrets import SecretResolver
-
-    if not secret_config_data.backends and not secrets:
-        return _empty_resolver()
-
-    factories = _v1_source_factories()
-    sources: list[SecretSource] = []
-    for kind in secret_config_data.backends:
-        factory = factories.get(kind)
-        if factory is None:
-            raise ConfigError(
-                f"[secret_config].backends: unknown backend kind {kind!r}; "
-                f"v1 supports {sorted(factories.keys())}"
-            )
-        sources.append(factory())
-
-    resolver = SecretResolver(sources, secrets)
-
-    unreachable = resolver.unreachable_secrets()
-    if unreachable:
-        names = ", ".join(sorted(d.name for d in unreachable))
-        chain_str = ", ".join(secret_config_data.backends) or "(empty)"
-        # The unreachable-secret case is tight by construction: with the
-        # default chain (``env-var``, ``prompt``), prompt's would_attempt
-        # returns True for every secret, so nothing is unreachable.
-        # Reaching this error means the operator has either:
-        # (a) explicitly stripped prompt from [secret_config].backends, AND
-        # (b) the remaining backends opt out via backend_mappings (env-var
-        #     respects `false`; backends without default conventions like
-        #     1password require an explicit mapping), OR
-        # (c) explicitly set backends = [] (resolution disabled).
-        # The hint enumerates the three remediations in the order they're
-        # most often the right fix.
-        raise ConfigError(
-            f"unreachable secret(s): {names}",
-            hint=(
-                f"active backend chain: [{chain_str}]. Each declared secret "
-                "needs at least one backend in the chain that would attempt "
-                "it. To fix: add 'prompt' (or another always-attempting backend) "
-                "to [secret_config].backends; drop a "
-                "`backend_mappings.<kind> = false` opt-out on the affected "
-                "secret(s); add `backend_mappings.<kind>` for a backend that "
-                "has no default convention (e.g. 1password); or remove the "
-                "unused secret declaration."
-            ),
-        )
-
-    return resolver
+# Secret resolution lives in ``agentworks.secrets.resolve`` (ADR 0016):
+# the chain can name manifest-declared backends, which are unknowable at
+# config-load time, so the chain-name and unreachable-secret checks run
+# at the composition boundary instead of here.
 
 
 EXPECTED_TOP_LEVEL_KEYS = {
@@ -1675,13 +1272,30 @@ def _warn_unexpected_top_level_keys(data: dict[str, object], issues: list[str]) 
         issues.append(f"unexpected top-level keys in config: {keys}")
 
 
-def load_config(path: Path | None = None, *, warn_issues: bool = True) -> Config:
+def load_config(
+    path: Path | None = None,
+    *,
+    warn_issues: bool = True,
+    warn_deprecations: bool = True,
+    resources: bool = True,
+) -> Config:
     """Load and validate the agentworks configuration.
 
     Args:
         path: Override config file path (default: ~/.config/agentworks/config.toml).
         warn_issues: Emit config issues as warnings to stderr (default: True).
             Set to False when the caller handles issues itself (e.g. doctor).
+        warn_deprecations: Emit the TOML-resource deprecation nudge (default:
+            True; also silenceable per-invocation via --no-deprecations). Set
+            to False for commands that ARE the remediation the nudge points at
+            (e.g. ``agw resource migrate``) -- nagging them is noise.
+        resources: Load the TOML resource sections into Config (default:
+            True). Settings-only callers (e.g. ``agw resource sample --write``,
+            which only needs ``source_path``) pass False: resource sections are
+            neither validated nor deprecation-warned, and the resulting Config
+            carries ``resources_loaded=False`` -- ``build_registry`` refuses it,
+            so a settings-only Config can never silently publish an empty TOML
+            side into a registry.
 
     Returns:
         Validated Config object.
@@ -1721,53 +1335,46 @@ def load_config(path: Path | None = None, *, warn_issues: bool = True) -> Config
             "[admin.config] (dotfiles_source, dotfiles_destination, dotfiles_install_cmd)."
         )
 
-    git_credentials = _load_git_credentials(data, decls)
-    apt_sources, apt_packages, system_cmds, user_cmds = _load_catalog_sections(data)
+    # Settings-only mode: resource loaders see an empty document, so they
+    # produce their framework defaults with zero issues or deprecations.
+    # Settings loaders (operator, paths, defaults, session, azure,
+    # proxmox, secret_config) always see the real data -- they are config.
+    resource_data = data if resources else {}
+
+    git_credentials = _load_git_credentials(resource_data, issues, decls)
+    apt_sources, apt_packages, system_cmds, user_cmds = _load_catalog_sections(resource_data)
 
     session_config = _load_session_config(data, issues)
-    session_templates = _load_session_templates(data, issues, decls)
+    session_templates = _load_session_templates(resource_data, issues, decls)
 
-    loaded_vm_templates = _load_vm_templates(data, issues, decls)
-    loaded_agent_templates = _load_agent_templates(data, issues, decls)
+    loaded_vm_templates = _load_vm_templates(resource_data, issues, decls)
+    loaded_agent_templates = _load_agent_templates(resource_data, issues, decls)
 
-    # Resolve default templates eagerly so config.vm / config.agent work everywhere
-    from agentworks.vms.templates import resolve_from_dict as _resolve_vm
 
-    resolved_vm = _resolve_vm(loaded_vm_templates)
+    admin = _load_admin_config(resource_data, issues, decls)
+    workspace_templates = _load_workspace_templates(resource_data, issues, decls)
 
-    from agentworks.agents.templates import resolve_from_dict as _resolve_agent
-
-    resolved_agent = _resolve_agent(loaded_agent_templates)
-
-    admin = _load_admin_config(data, issues, decls)
-    workspace_templates = _load_workspace_templates(data, issues, decls)
-
-    secrets = _load_secrets(data, issues, decls)
-    secret_backends = _load_secret_backends(data, issues, decls)
+    secrets = _load_secrets(resource_data, issues, decls)
+    deprecations: list[str] = []
+    noop_backend_sections = _load_secret_backends(resource_data, deprecations)
+    deprecated_sections = _warn_deprecated_resource_sections(
+        resource_data, deprecations
+    )
     secret_config_data = _load_secret_config(data, issues, decls)
     # Phase 1b: env-block secret references no longer error at config load
-    # when they don't match a [secrets.<name>] block. The Resource Registry's
-    # finalize pass auto-declares missing secrets (per the framework's
-    # miss policy for the "secret" kind, in `agentworks/resources/kinds/
-    # secret.py`); operators see them in `agw secret list` with origin =
-    # auto-declared. Render-time resolution falls through the backend chain
-    # naturally; an unresolved secret raises `SecretUnavailableError`
-    # ("no active backend resolved ...") at command time rather than
-    # `ConfigError` at config load.
-    secret_resolver = _build_secret_resolver(
-        secret_config_data, secret_backends, secrets
-    )
+    # when they don't match a [secrets.<name>] block; the framework
+    # auto-declares them at finalize. Resolution runs through the active
+    # backends (``agentworks.secrets.resolve``).
 
     config = Config(
         operator=_load_operator(data, issues),
         paths=_load_paths(data),
         defaults=_load_defaults(data, issues),
-        named_console=_load_named_console(data, issues, decls),
+        named_console=_load_named_console(resource_data, issues, decls),
         vm_templates=loaded_vm_templates,
-        vm=resolved_vm,
+        source_path=config_path,
         admin=admin,
         agent_templates=loaded_agent_templates,
-        agent=resolved_agent,
         session=session_config,
         session_templates=session_templates,
         workspace_templates=workspace_templates,
@@ -1779,10 +1386,12 @@ def load_config(path: Path | None = None, *, warn_issues: bool = True) -> Config
         azure=_load_azure(data),
         proxmox=_load_proxmox(data),
         secrets=secrets,
-        secret_backends=secret_backends,
         secret_config_data=secret_config_data,
-        secret_resolver=secret_resolver,
         config_issues=tuple(issues),
+        deprecation_issues=tuple(deprecations),
+        deprecated_sections=deprecated_sections,
+        noop_secret_backend_sections=noop_backend_sections,
+        resources_loaded=resources,
     )
 
     if warn_issues and config.config_issues:
@@ -1790,5 +1399,11 @@ def load_config(path: Path | None = None, *, warn_issues: bool = True) -> Config
 
         for issue in config.config_issues:
             warn(f"Config: {issue}")
+    if warn_issues and warn_deprecations and config.deprecation_issues:
+        from agentworks.output import deprecations_suppressed, warn
+
+        if not deprecations_suppressed():
+            for issue in config.deprecation_issues:
+                warn(f"Config: {issue}")
 
     return config

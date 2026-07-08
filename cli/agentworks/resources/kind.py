@@ -6,10 +6,16 @@ a reference's ``(kind, name)`` doesn't resolve to a published Resource,
 which names auto-declare is allowed to synthesize, and how to build the
 synthesized Resource.
 
-Each kind lives in its own module under ``kinds/`` and self-registers a
-single instance into ``KIND_REGISTRY`` at import. ``kinds/__init__.py``
-imports every kind module so a single ``from agentworks.resources import     KIND_REGISTRY``
-populates the registry.
+The framework/domain split: ``resources/`` owns the framework
+(``KIND_REGISTRY``, the ``ResourceKind`` protocol, ``Registry.finalize``).
+Each domain package defines AND registers its own kinds -- both the
+declarable row dataclasses and the capability kinds live next to the
+code that implements them (``agentworks.vms.kinds``,
+``agentworks.secrets.kinds``, ``agentworks.catalog``, etc.). Every kind
+self-registers a single instance into ``KIND_REGISTRY`` at import.
+``resources/kinds/__init__`` is only the registration index: it imports
+each domain's kind module so a single ``from agentworks.resources import
+KIND_REGISTRY`` populates the registry.
 """
 
 from __future__ import annotations
@@ -66,6 +72,23 @@ class ResourceKind(Protocol):
       name" (secrets). A non-empty set means "only these reserved names"
       (templates accept ``{"default"}``); requests for other missing names
       error.
+    - ``category``: what a kind's resources ARE (ADR 0016; per-kind by
+      construction -- two resources of one kind can never differ here).
+      ``"declarable"`` kinds hold data (operator TOML/YAML,
+      auto-declared, or built-in rows); ``"capability"`` kinds hold
+      read-only capability resources registered by the app (or, later,
+      plugins), implementation in a per-domain code registry. Only
+      declarable kinds may appear in manifests; the envelope enforces
+      it. Kinds themselves are baked into the app -- plugins publish
+      resources of existing kinds (declarable rows via bundled
+      manifests, capability rows via code registration), never new
+      kinds.
+    - ``description``: one operator-facing line for ``agw resource
+      kinds``.
+    - ``builtin_override``: what happens when an operator manifest
+      collides with an app-published built-in row. ``"allow"`` keeps
+      today's catalog behavior (operator row replaces the built-in);
+      ``"reserved"`` makes the collision a ``ConfigError``.
     - ``synthesize(references)``: called when an auto-declare-allowed
       missing name is being synthesized. Receives all matching references
       known so far (in config-load walk order). Returns the synthesized
@@ -90,8 +113,9 @@ class ResourceKind(Protocol):
 
     The return type of ``synthesize`` is ``Any`` because Resources are
     diverse types from different modules (``SecretDecl`` from
-    ``agentworks.secrets.base``, ``AdminConfig`` from ``agentworks.config``,
-    etc.). The Registry stores whatever ``synthesize`` returns; the kind
+    ``agentworks.secrets.base``, ``AdminConfig`` from
+    ``agentworks.agents.template``, etc.). The Registry stores whatever
+    ``synthesize`` returns; the kind
     knows the right shape for its kind.
 
     The attributes are declared as ``@property`` so frozen-dataclass
@@ -108,13 +132,22 @@ class ResourceKind(Protocol):
     @property
     def auto_declare_names(self) -> frozenset[str] | None: ...
 
+    @property
+    def category(self) -> Literal["declarable", "capability"]: ...
+
+    @property
+    def description(self) -> str: ...
+
+    @property
+    def builtin_override(self) -> Literal["allow", "reserved"]: ...
+
     def synthesize(self, references: Sequence[ResourceReference]) -> Any: ...
 
     # The optional ``instances(db, registry, resource) -> Iterable[InstanceRef]``
     # method is intentionally NOT declared on this Protocol. Kinds with a
     # per-instance lifecycle concept (the four named template kinds plus
-    # ``admin_template`` plus ``secret``) implement it; kinds without
-    # (catalog, ``git_credential_provider``, ``secret_backend``) omit it
+    # ``admin-template`` plus ``secret``) implement it; kinds without
+    # (catalog, ``git-credential-provider``, ``secret-backend``) omit it
     # entirely. The framework's consumer (``agentworks.resources.inspect``)
     # uses ``getattr(handler, "instances", None)`` to gate the call, so
     # absent-on-class IS the "no instance concept" signal. Declaring the
@@ -131,6 +164,12 @@ class ResourceKind(Protocol):
     # would add a sibling ``provisioned_instances(...)`` hook returning
     # the same ``InstanceRef`` shape from manifests; today's
     # ``instances`` is the config-projected dimension.
+    #
+    # Deliberately ABSENT: a kind-level semantic-validation hook.
+    # Checks that need config alongside the finalized graph (the secret
+    # chain's names and reachability) are the owning subsystem's job,
+    # run from ``bootstrap.build_registry`` after finalize -- config is
+    # a setting, not a resource, and the Registry never sees it.
 
 
 class NoUnreferencedDefaultError(Exception):
@@ -156,8 +195,10 @@ ALWAYS_MATERIALIZE_SOURCE: tuple[str, str] = ("framework", "always-materialize")
 KIND_REGISTRY: dict[str, ResourceKind] = {}
 """Module-level registry mapping kind identifier -> ``ResourceKind`` instance.
 
-Populated by side-effect: each ``kinds/*.py`` module instantiates its kind
-and writes ``KIND_REGISTRY[<kind>] = <instance>`` at module-load.
-``kinds/__init__.py`` imports every kind module so the registry is
-populated after ``import agentworks.resources``.
+Populated by side-effect: each domain's kind module (``agentworks.vms.kinds``,
+``agentworks.secrets.kinds``, ``agentworks.catalog``, etc.) instantiates its
+kind and writes ``KIND_REGISTRY[<kind>] = <instance>`` at module-load.
+``resources/kinds/__init__.py`` is the registration index that imports every
+domain kind module so the registry is populated after
+``import agentworks.resources``.
 """

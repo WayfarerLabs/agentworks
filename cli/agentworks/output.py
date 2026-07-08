@@ -303,11 +303,30 @@ def set_non_interactive(value: bool) -> None:
 def is_interactive() -> bool:
     """True iff stdin is a TTY and --non-interactive was not passed.
 
-    Service-layer helpers (e.g. ``agentworks.secrets.PromptSource``) consult
+    Service-layer helpers (e.g. the prompt secret provider) consult
     this rather than the cli/_app module to stay Typer-isolated.
     """
     if _non_interactive:
         return False
     return sys.stdin.isatty()
+
+
+_suppress_deprecations: bool = False
+
+
+def set_suppress_deprecations(value: bool) -> None:
+    """Seed the --no-deprecations flag for this CLI invocation.
+
+    Same pattern as ``set_non_interactive``: set once from the Typer
+    global-options callback; service-layer code reads via
+    ``deprecations_suppressed()``.
+    """
+    global _suppress_deprecations  # noqa: PLW0603
+    _suppress_deprecations = value
+
+
+def deprecations_suppressed() -> bool:
+    """True iff --no-deprecations was passed for this invocation."""
+    return _suppress_deprecations
 
 

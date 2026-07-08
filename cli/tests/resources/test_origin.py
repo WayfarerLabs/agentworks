@@ -1,5 +1,5 @@
 """Tests for ``Origin`` -- variant invariants and immutability across all
-three variants. The ``code-declared`` factory is exercised here even though
+three variants. The ``built-in`` factory is exercised here even though
 its first real producer (the catalog publisher) doesn't land until Phase 2b;
 the type is defined in Phase 1a, so its invariants are pinned here.
 """
@@ -22,18 +22,18 @@ def test_operator_declared_factory_populates_file_and_line() -> None:
     assert o.source is None
 
 
-def test_code_declared_factory_populates_source_str() -> None:
-    o = Origin.code_declared(source="agentworks.catalog")
-    assert o.variant == "code-declared"
+def test_built_in_factory_populates_source_str() -> None:
+    o = Origin.built_in(source="agentworks.catalog")
+    assert o.variant == "built-in"
     assert o.source == "agentworks.catalog"
     assert o.file is None
     assert o.line is None
 
 
 def test_auto_declared_factory_populates_source_tuple() -> None:
-    o = Origin.auto_declared(source=("vm_template", "azure-prod"))
+    o = Origin.auto_declared(source=("vm-template", "azure-prod"))
     assert o.variant == "auto-declared"
-    assert o.source == ("vm_template", "azure-prod")
+    assert o.source == ("vm-template", "azure-prod")
     assert o.file is None
     assert o.line is None
 
@@ -51,15 +51,15 @@ def test_origin_equality_per_variant() -> None:
     assert a == b
     assert a != c
 
-    d = Origin.code_declared(source="agentworks.catalog")
-    e = Origin.code_declared(source="agentworks.catalog")
-    f = Origin.code_declared(source="other")
+    d = Origin.built_in(source="agentworks.catalog")
+    e = Origin.built_in(source="agentworks.catalog")
+    f = Origin.built_in(source="other")
     assert d == e
     assert d != f
 
-    g = Origin.auto_declared(source=("vm_template", "default"))
-    h = Origin.auto_declared(source=("vm_template", "default"))
-    i = Origin.auto_declared(source=("vm_template", "other"))
+    g = Origin.auto_declared(source=("vm-template", "default"))
+    h = Origin.auto_declared(source=("vm-template", "default"))
+    i = Origin.auto_declared(source=("vm-template", "other"))
     assert g == h
     assert g != i
 
@@ -68,8 +68,8 @@ def test_variants_do_not_cross_compare_equal() -> None:
     # An operator-declared and auto-declared with same-looking incidental
     # data still differ by variant.
     op = Origin.operator_declared(file=Path("/x"), line=1)
-    code = Origin.code_declared(source="agentworks.catalog")
-    auto = Origin.auto_declared(source=("vm_template", "default"))
+    code = Origin.built_in(source="agentworks.catalog")
+    auto = Origin.auto_declared(source=("vm-template", "default"))
     assert op != code
     assert op != auto
     assert code != auto

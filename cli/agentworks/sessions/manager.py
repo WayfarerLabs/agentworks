@@ -35,9 +35,12 @@ _TEMPLATE_VAR_RE = re.compile(r"\{\{(\w+)\}\}")
 _KNOWN_TEMPLATE_VARS = {"session_name", "workspace_name"}
 
 if TYPE_CHECKING:
+    from collections.abc import Mapping
+
     from agentworks.config import Config
     from agentworks.db import AgentRow, Database, SessionRow, VMRow, WorkspaceRow
     from agentworks.env import EnvEntry
+    from agentworks.resources.registry import Registry
     from agentworks.secrets import SecretTarget
     from agentworks.sessions.templates import ResolvedSessionTemplate
     from agentworks.sessions.tmux import RunCommand
@@ -392,12 +395,12 @@ def _distinct_vms_for_sessions(db: Database, sessions: list[SessionRow]) -> list
     return distinct
 
 
-def _resolve_template(config: Config, template_name: str | None) -> ResolvedSessionTemplate:
+def _resolve_template(registry: Registry, template_name: str | None) -> ResolvedSessionTemplate:
     """Resolve a session template by name, applying inheritance."""
     from agentworks.sessions.templates import resolve_template
 
     try:
-        return resolve_template(config, template_name)
+        return resolve_template(registry, template_name)
     except ValueError as e:
         raise ValidationError(
             str(e),
@@ -460,7 +463,7 @@ class _SessionEnvScopes(NamedTuple):
 
 
 def _resolve_session_env_scopes(
-    config: Config,
+    registry: Registry,
     *,
     db: Database,
     vm: VMRow,
@@ -481,17 +484,18 @@ def _resolve_session_env_scopes(
     mutation). Sharing this helper avoids duplicate template resolution
     and guarantees the two consumers see identical scope state.
     """
-    from agentworks.agents.templates import resolve_from_dict as _resolve_agent_template
-    from agentworks.vms.templates import resolve_from_dict as _resolve_vm_template
+    from agentworks.agents.templates import resolve_template as _resolve_agent_template
+    from agentworks.resources.access import admin_template as _admin_template
+    from agentworks.vms.templates import resolve_template as _resolve_vm_template
     from agentworks.workspaces.templates import resolve_template as _resolve_ws_template
 
-    vm_template = _resolve_vm_template(config.vm_templates, vm.template)
-    workspace_template = _resolve_ws_template(config, ws.template)
+    vm_template = _resolve_vm_template(registry, vm.template)
+    workspace_template = _resolve_ws_template(registry, ws.template)
 
     admin_env: dict[str, EnvEntry] | None
     agent_env: dict[str, EnvEntry] | None
     if mode == SessionMode.ADMIN:
-        admin_env = config.admin.env
+        admin_env = _admin_template(registry).env
         agent_env = None
     else:
         assert agent_name is not None  # caller enforces; agent mode requires an agent
@@ -504,7 +508,7 @@ def _resolve_session_env_scopes(
                 entity_name=agent_name,
             )
         resolved_agent_template = _resolve_agent_template(
-            config.agent_templates, agent_row.template
+            registry, agent_row.template
         )
         agent_env = resolved_agent_template.env
 
@@ -523,7 +527,7 @@ def _resolve_session_env_scopes(
 
 
 def _session_secret_target_pre_create(
-    config: Config,
+    registry: Registry,
     *,
     name: str,
     workspace_name: str,
@@ -546,26 +550,27 @@ def _session_secret_target_pre_create(
     any of the optional ephemeral creates.
     """
     from agentworks.agents.templates import resolve_template as _resolve_agent_tmpl
+    from agentworks.resources.access import admin_template as _admin_template
     from agentworks.secrets import SecretTarget
-    from agentworks.vms.templates import resolve_from_dict as _resolve_vm_tmpl
+    from agentworks.vms.templates import resolve_template as _resolve_vm_tmpl
     from agentworks.workspaces.templates import resolve_template as _resolve_ws_tmpl
 
-    vm_template = _resolve_vm_tmpl(config.vm_templates, vm.template)
+    vm_template = _resolve_vm_tmpl(registry, vm.template)
 
     if new_workspace:
-        workspace_env = _resolve_ws_tmpl(config, workspace_template).env
+        workspace_env = _resolve_ws_tmpl(registry, workspace_template).env
     else:
         assert existing_workspace is not None
-        workspace_env = _resolve_ws_tmpl(config, existing_workspace.template).env
+        workspace_env = _resolve_ws_tmpl(registry, existing_workspace.template).env
 
     agent_env: dict[str, EnvEntry] | None = None
     admin_scope: dict[str, EnvEntry] | None = None
     if is_admin_mode:
-        admin_scope = config.admin.env
+        admin_scope = _admin_template(registry).env
     elif new_agent:
-        agent_env = _resolve_agent_tmpl(config, agent_template).env
+        agent_env = _resolve_agent_tmpl(registry, agent_template).env
     elif existing_agent is not None:
-        agent_env = _resolve_agent_tmpl(config, existing_agent.template).env
+        agent_env = _resolve_agent_tmpl(registry, existing_agent.template).env
 
     session_env = _substitute_template_vars_in_env(
         session_template.env,
@@ -582,7 +587,7 @@ def _session_secret_target_pre_create(
 
 
 def _session_secret_target(
-    config: Config,
+    registry: Registry,
     *,
     db: Database,
     vm: VMRow,
@@ -601,7 +606,7 @@ def _session_secret_target(
     from agentworks.secrets import SecretTarget
 
     scopes = _resolve_session_env_scopes(
-        config,
+        registry,
         db=db,
         vm=vm,
         ws=ws,
@@ -621,8 +626,9 @@ def _session_secret_target(
 
 
 def _resolve_session_env(
-    config: Config,
+    registry: Registry,
     *,
+    values: Mapping[str, str],
     db: Database,
     vm: VMRow,
     ws: WorkspaceRow,
@@ -637,13 +643,13 @@ def _resolve_session_env(
     Resolves the per-VM / per-workspace / per-agent templates, builds the
     ResourceContext, applies template-variable substitution to the session
     template's env values, and runs the merged dict through
-    ``compose_env`` (which renders secrets via the config resolver and
-    overlays per-context identity vars).
+    ``compose_env`` (which renders secrets from the command's
+    pre-resolved ``values`` and overlays per-context identity vars).
     """
     from agentworks.env import ResourceContext, compose_env
 
     scopes = _resolve_session_env_scopes(
-        config,
+        registry,
         db=db,
         vm=vm,
         ws=ws,
@@ -666,7 +672,7 @@ def _resolve_session_env(
     )
 
     return compose_env(
-        resolver=config.secret_resolver,
+        values=values,
         ctx=ctx,
         vm=scopes.vm,
         workspace=scopes.workspace,
@@ -1145,7 +1151,7 @@ def create_session(
     # secrets resolve via resolve_for_command's SecretTarget shape later),
     # but constructing it here makes the entry point's error-surface
     # consistent with create_vm / create_agent / reinit_*.
-    build_registry(config)
+    registry = build_registry(config)
 
     # ===== Flag-shape validation (mutexes + ephemeral-arg gating) ===========
 
@@ -1390,7 +1396,7 @@ def create_session(
 
     # ===== Template resolution (no SSH, no mutations) =======================
 
-    template = _resolve_template(config, template_name)
+    template = _resolve_template(registry, template_name)
 
     # ===== Ensure VM running + Tailscale reachable (SSH, no mutations) ======
 
@@ -1415,10 +1421,10 @@ def create_session(
 
     from agentworks.secrets import resolve_for_command
 
-    resolve_for_command(
+    secret_values = resolve_for_command(
         [
             _session_secret_target_pre_create(
-                config,
+                registry,
                 name=name,
                 workspace_name=workspace_name,
                 vm=vm,
@@ -1433,10 +1439,13 @@ def create_session(
             ),
         ],
         config,
+        registry,
     )
-    # If we reach here, every secret prompt is done and the resolver cache
-    # is warm. The downstream create_workspace / create_agent / inner
-    # session-internal block will not re-prompt the operator.
+    # If we reach here, every secret the SESSION ENV references is
+    # resolved into secret_values (threaded to the compose site below).
+    # A downstream create_agent still performs its own git-token
+    # resolve; those secrets are disjoint from env references in
+    # practice (token names default to git-token-<name>).
 
     # ===== Atomic state mutations with rollback =============================
 
@@ -1654,7 +1663,8 @@ def create_session(
                     template, session_name=name, workspace_name=workspace_name
                 )
                 session_env = _resolve_session_env(
-                    config,
+                    registry,
+                    values=secret_values,
                     db=db,
                     vm=vm_check,
                     ws=ws,
@@ -1927,12 +1937,15 @@ def restart_session(
     yes: bool = False,
 ) -> None:
     """Restart a session. Prompts if running (--yes to skip). --force for BROKEN."""
+    from agentworks.bootstrap import build_registry
     from agentworks.sessions.tmux import (
         create_session as create_tmux_session,
     )
     from agentworks.sessions.tmux import (
         deploy_restricted_config,
     )
+
+    registry = build_registry(config)
 
     session = _require_session(db, name)
     ws, vm, run_command, _run_as_root, admin_target = _prepare_vm(
@@ -2000,7 +2013,7 @@ def restart_session(
         # secret referenced by this session's env chain BEFORE any kill /
         # destructive step. Non-interactive failures surface as
         # SecretUnavailableError with no partial state to clean up.
-        template = _resolve_template(config, session.template)
+        template = _resolve_template(registry, session.template)
 
         # Pre-flight the template's required commands before the destructive
         # kill below, so a missing binary aborts the restart with a clear
@@ -2015,10 +2028,10 @@ def restart_session(
 
         from agentworks.secrets import resolve_for_command
 
-        resolve_for_command(
+        secret_values = resolve_for_command(
             [
                 _session_secret_target(
-                    config,
+                    registry,
                     db=db,
                     vm=vm,
                     ws=ws,
@@ -2029,6 +2042,7 @@ def restart_session(
                 ),
             ],
             config,
+            registry,
         )
 
         output.info(f"Restarting session '{name}'...")
@@ -2085,7 +2099,8 @@ def restart_session(
         )
         linux_user = _resolve_session_linux_user(db, session, vm)
         session_env = _resolve_session_env(
-            config,
+            registry,
+            values=secret_values,
             db=db,
             vm=vm,
             ws=ws,

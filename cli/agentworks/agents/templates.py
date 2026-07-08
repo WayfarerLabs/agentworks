@@ -13,8 +13,9 @@ from typing import TYPE_CHECKING
 from agentworks.errors import ConfigError
 
 if TYPE_CHECKING:
-    from agentworks.config import AgentTemplate, Config
+    from agentworks.agents.template import AgentTemplate
     from agentworks.env import EnvEntry
+    from agentworks.resources.registry import Registry
 
 
 @dataclass
@@ -56,9 +57,11 @@ def resolve_from_dict(
     return ResolvedAgentTemplate(name="default")
 
 
-def resolve_template(config: Config, template_name: str | None = None) -> ResolvedAgentTemplate:
+def resolve_template(registry: Registry, template_name: str | None = None) -> ResolvedAgentTemplate:
     """Resolve an agent template by name, applying inheritance."""
-    return resolve_from_dict(config.agent_templates, template_name)
+    from agentworks.resources.access import kind_dict
+
+    return resolve_from_dict(kind_dict(registry, "agent-template"), template_name)
 
 
 def _resolve(

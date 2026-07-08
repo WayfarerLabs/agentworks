@@ -17,16 +17,14 @@ from textwrap import dedent
 
 import pytest
 
+from agentworks.agents.template import AgentTemplate
 from agentworks.bootstrap import build_registry
-from agentworks.config import (
-    AdminConfig,
-    AgentTemplate,
-    SessionTemplate,
-    VMTemplate,
-    WorkspaceTemplate,
-    load_config,
-)
+from agentworks.config import load_config
 from agentworks.env.entry import EnvEntry
+from agentworks.sessions.template import SessionTemplate
+from agentworks.vms.admin import AdminConfig
+from agentworks.vms.template import VMTemplate
+from agentworks.workspaces.template import WorkspaceTemplate
 
 
 @pytest.fixture()
@@ -60,18 +58,18 @@ def _write_cfg(tmp_path: Path, body: str, ssh_keys: tuple[Path, Path]) -> Path:
 
 def test_env_entry_plaintext_returns_empty_list() -> None:
     entry = EnvEntry(key="FOO", value="bar")
-    assert entry.referenced_resources(("admin_template", "default")) == []
+    assert entry.referenced_resources(("admin-template", "default")) == []
 
 
 def test_env_entry_secret_ref_emits_secret_requirement() -> None:
     entry = EnvEntry(key="API_KEY", secret="anthropic-api-key")
-    reqs = entry.referenced_resources(("admin_template", "default"))
+    reqs = entry.referenced_resources(("admin-template", "default"))
     assert len(reqs) == 1
     req = reqs[0]
     assert req.name == "anthropic-api-key"
     assert req.kind == "secret"
     assert req.usage == "the API_KEY env var"
-    assert req.source == ("admin_template", "default")
+    assert req.source == ("admin-template", "default")
 
 
 # -- Resource-type required_resources() aggregation -------------------------
@@ -87,7 +85,7 @@ def test_admin_config_required_resources_aggregates_env() -> None:
     )
     reqs = admin.referenced_resources()
     assert {r.name for r in reqs} == {"sec-a", "sec-c"}
-    assert all(r.source == ("admin_template", "default") for r in reqs)
+    assert all(r.source == ("admin-template", "default") for r in reqs)
 
 
 def test_vm_template_required_resources_uses_template_name_in_source() -> None:
@@ -102,7 +100,7 @@ def test_vm_template_required_resources_uses_template_name_in_source() -> None:
     # 1 env-block + 1 tailscale (Phase 1c)
     assert len(reqs) == 2
     # All requirements carry the template's source.
-    assert all(r.source == ("vm_template", "azure-prod") for r in reqs)
+    assert all(r.source == ("vm-template", "azure-prod") for r in reqs)
     # The env-block requirement is for the secret `ts-key`.
     env_reqs = [r for r in reqs if r.name == "ts-key"]
     assert len(env_reqs) == 1
@@ -119,7 +117,7 @@ def test_workspace_template_required_resources() -> None:
         env={"K": EnvEntry(key="K", secret="ws-secret")},
     )
     reqs = tmpl.referenced_resources()
-    assert reqs[0].source == ("workspace_template", "default")
+    assert reqs[0].source == ("workspace-template", "default")
 
 
 def test_agent_template_required_resources() -> None:
@@ -128,7 +126,7 @@ def test_agent_template_required_resources() -> None:
         env={"K": EnvEntry(key="K", secret="claude-key")},
     )
     reqs = tmpl.referenced_resources()
-    assert reqs[0].source == ("agent_template", "claude")
+    assert reqs[0].source == ("agent-template", "claude")
 
 
 def test_session_template_required_resources_with_none_env() -> None:
@@ -146,7 +144,7 @@ def test_session_template_required_resources_with_secrets() -> None:
         env={"K": EnvEntry(key="K", secret="cc-secret")},
     )
     reqs = tmpl.referenced_resources()
-    assert reqs[0].source == ("session_template", "claude-coder")
+    assert reqs[0].source == ("session-template", "claude-coder")
 
 
 # -- End-to-end: undeclared secret auto-declares through the framework -------
@@ -173,7 +171,7 @@ def test_undeclared_env_secret_auto_declares_through_build_registry(
     auto = registry.lookup("secret", "anthropic-api-ky")
     assert auto.origin is not None
     assert auto.origin.variant == "auto-declared"
-    assert auto.origin.source == ("admin_template", "default")
+    assert auto.origin.source == ("admin-template", "default")
     # Usage carries the env-var key so operators see what referenced it.
     assert len(auto.references) == 1
     assert auto.references[0].usage == "the API_KEY env var"
@@ -214,8 +212,8 @@ def test_operator_declared_secret_referenced_from_env_gets_usage_populated(
     assert len(decl.references) == 2
     sources = sorted(u.source for u in decl.references)
     assert sources == [
-        ("admin_template", "default"),
-        ("vm_template", "azure-prod"),
+        ("admin-template", "default"),
+        ("vm-template", "azure-prod"),
     ]
 
 

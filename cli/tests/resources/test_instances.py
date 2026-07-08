@@ -105,14 +105,14 @@ def _seed_basic(tmp_path: Path) -> tuple[Database, Registry]:
 def test_vm_template_instances_counts_matching_vms(tmp_path: Path) -> None:
     db, registry = _seed_basic(tmp_path)
 
-    vm_default = registry.lookup("vm_template", "default")
-    vm_custom = registry.lookup("vm_template", "custom")
+    vm_default = registry.lookup("vm-template", "default")
+    vm_custom = registry.lookup("vm-template", "custom")
 
     default_instances = list(
-        _instances("vm_template", db, registry, vm_default)
+        _instances("vm-template", db, registry, vm_default)
     )
     custom_instances = list(
-        _instances("vm_template", db, registry, vm_custom)
+        _instances("vm-template", db, registry, vm_custom)
     )
 
     # vm-default has template=NULL (defaults to ``default``); vm-custom
@@ -128,9 +128,9 @@ def test_workspace_template_instances_counts_matching_workspaces(
 ) -> None:
     db, registry = _seed_basic(tmp_path)
 
-    ws_default = registry.lookup("workspace_template", "default")
+    ws_default = registry.lookup("workspace-template", "default")
     instances = list(
-        _instances("workspace_template", db, registry, ws_default)
+        _instances("workspace-template", db, registry, ws_default)
     )
     # Both workspaces are NULL-template; both fall back to ``default``.
     assert {r.instance_name for r in instances} == {"ws-a", "ws-b"}
@@ -140,9 +140,9 @@ def test_workspace_template_instances_counts_matching_workspaces(
 def test_agent_template_instances_counts_matching_agents(tmp_path: Path) -> None:
     db, registry = _seed_basic(tmp_path)
 
-    agent_default = registry.lookup("agent_template", "default")
+    agent_default = registry.lookup("agent-template", "default")
     instances = list(
-        _instances("agent_template", db, registry, agent_default)
+        _instances("agent-template", db, registry, agent_default)
     )
     # Both agents are NULL-template; both fall back to ``default``.
     assert {r.instance_name for r in instances} == {"agent-a", "agent-b"}
@@ -153,9 +153,9 @@ def test_session_template_instances_counts_matching_sessions(
 ) -> None:
     db, registry = _seed_basic(tmp_path)
 
-    sess_default = registry.lookup("session_template", "default")
+    sess_default = registry.lookup("session-template", "default")
     instances = list(
-        _instances("session_template", db, registry, sess_default)
+        _instances("session-template", db, registry, sess_default)
     )
     # SessionRow.template is non-optional; both sessions explicitly use
     # ``default`` so the NULL-fallback path doesn't apply.
@@ -163,16 +163,16 @@ def test_session_template_instances_counts_matching_sessions(
 
 
 def test_admin_template_instances_counts_every_vm(tmp_path: Path) -> None:
-    """Every VM uses the singleton admin_template:default. The kind is
+    """Every VM uses the singleton admin-template:default. The kind is
     plurified at the framework level (Phase 2a.3) but the operator
     surface is still singleton, so any name other than ``default``
     yields no instances.
     """
     db, registry = _seed_basic(tmp_path)
 
-    admin = registry.lookup("admin_template", "default")
+    admin = registry.lookup("admin-template", "default")
     instances = list(
-        _instances("admin_template", db, registry, admin)
+        _instances("admin-template", db, registry, admin)
     )
     assert {r.instance_name for r in instances} == {"vm-default", "vm-custom"}
 
@@ -180,7 +180,7 @@ def test_admin_template_instances_counts_every_vm(tmp_path: Path) -> None:
 def test_named_console_template_instances_counts_every_console(
     tmp_path: Path,
 ) -> None:
-    """Same shape as admin_template: every console uses the singleton."""
+    """Same shape as admin-template: every console uses the singleton."""
     db, registry = _seed_basic(tmp_path)
     db._conn.execute(
         "INSERT INTO consoles (name, vm_name) VALUES ('con-a', 'vm-default')"
@@ -190,9 +190,9 @@ def test_named_console_template_instances_counts_every_console(
     )
     db._conn.commit()
 
-    nc = registry.lookup("named_console_template", "default")
+    nc = registry.lookup("named-console-template", "default")
     instances = list(
-        _instances("named_console_template", db, registry, nc)
+        _instances("named-console-template", db, registry, nc)
     )
     assert {r.instance_name for r in instances} == {"con-a", "con-b"}
 
@@ -390,7 +390,7 @@ def test_secret_instances_admin_secret_not_attributed_to_agent_session(
     "used by" an agent-mode session even though both sessions live on
     the same VM. The projection answers "what does this session's shell
     see?" not "what does this session's VM need provisioned?". The
-    admin secret surfaces under admin_template's own ``Used by:`` row.
+    admin secret surfaces under admin-template's own ``Used by:`` row.
     """
     cfg = tmp_path / "config.toml"
     _write_base(
@@ -422,7 +422,7 @@ def test_secret_instances_admin_secret_not_attributed_to_agent_session(
 
     secret = registry.lookup("secret", "admin-only-secret")
     instances = list(_instances("secret", db, registry, secret))
-    # Only the admin-mode session reaches admin_template's env.
+    # Only the admin-mode session reaches admin-template's env.
     assert [r.instance_name for r in instances] == ["sess-admin"]
 
 
@@ -483,13 +483,13 @@ def test_list_resources_populates_used_by_count_when_db_provided(
     db, registry = _seed_basic(tmp_path)
     from agentworks.resources.inspect import list_resources
 
-    listing = list_resources(registry, db, kinds=("vm_template",))
+    listing = list_resources(registry, db, kinds=("vm-template",))
     by_name = {row.name: row for row in listing.rows}
     assert by_name["default"].used_by_count == 1  # vm-default
     assert by_name["custom"].used_by_count == 1  # vm-custom
 
     # Without db, the field stays None (renderer shows ``-``).
-    listing_no_db = list_resources(registry, None, kinds=("vm_template",))
+    listing_no_db = list_resources(registry, None, kinds=("vm-template",))
     assert all(row.used_by_count is None for row in listing_no_db.rows)
 
 
@@ -503,11 +503,11 @@ def test_describe_resource_populates_used_by_when_db_provided(
     db, registry = _seed_basic(tmp_path)
     from agentworks.resources.inspect import describe_resource
 
-    desc = describe_resource(registry, "vm_template", "custom", db=db)
+    desc = describe_resource(registry, "vm-template", "custom", db=db)
     assert desc.used_by is not None
     assert {r.instance_name for r in desc.used_by} == {"vm-custom"}
 
-    desc_no_db = describe_resource(registry, "vm_template", "custom")
+    desc_no_db = describe_resource(registry, "vm-template", "custom")
     assert desc_no_db.used_by is None
 
 
@@ -517,7 +517,7 @@ def test_describe_resource_returns_none_used_by_for_no_instance_kinds(
     """A kind without an `instances` hook (e.g. secret_backend) yields
     ``used_by = None`` even with a db: the renderer treats None as
     "kind has no instance concept" and omits the section. Uses
-    ``secret_backend`` rather than ``apt_package`` because every config
+    ``secret-backend`` rather than ``apt-package`` because every config
     publishes at least one secret_backend (the always-materialized
     ``env-var`` and ``prompt`` defaults), so the assertion isn't
     fixture-dependent.
@@ -530,14 +530,14 @@ def test_describe_resource_returns_none_used_by_for_no_instance_kinds(
 
     from agentworks.resources.inspect import describe_resource
 
-    # secret_backend kinds (env-var, prompt) have no ``instances`` method;
+    # secret-backend kinds (env-var, prompt) have no ``instances`` method;
     # describe_resource must return ``used_by = None`` for them.
     backend_names = [
-        name for name, _ in registry.iter_kind_items("secret_backend")
+        name for name, _ in registry.iter_kind_items("secret-backend")
     ]
     assert backend_names, "expected at least one secret_backend in the registry"
     for name in backend_names:
-        desc = describe_resource(registry, "secret_backend", name, db=db)
+        desc = describe_resource(registry, "secret-backend", name, db=db)
         assert desc.used_by is None, (
             f"secret_backend {name!r} should yield used_by=None "
             f"(kind has no instance concept) but got {desc.used_by!r}"
@@ -569,11 +569,11 @@ def test_list_view_renders_dash_for_no_instance_kinds(
         "agentworks.cli.commands.resource.get_db", return_value=db
     ):
         result = CliRunner().invoke(
-            app, ["resource", "list", "--kind", "secret_backend"]
+            app, ["resource", "list", "--kind", "secret-backend"]
         )
     assert result.exit_code == 0, result.stdout
     assert "USED BY" in result.stdout
-    # secret_backend rows render ``-`` in the USED BY column (kind has
+    # secret-backend rows render ``-`` in the USED BY column (kind has
     # no instance concept). Conservative assertion: at least one ``-``
     # appears in the rendered output.
     assert "-" in result.stdout
@@ -586,13 +586,13 @@ def test_kinds_without_instances_hook_inherit_dash(tmp_path: Path) -> None:
     """
 
     expected_no_instances = (
-        "apt_source",
-        "apt_package",
-        "system_install_command",
-        "user_install_command",
-        "git_credential_provider",
-        "secret_backend",
-        "git_credentials",
+        "apt-source",
+        "apt-package",
+        "system-install-command",
+        "user-install-command",
+        "git-credential-provider",
+        "secret-backend",
+        "git-credential",
     )
     for kind in expected_no_instances:
         handler = KIND_REGISTRY[kind]

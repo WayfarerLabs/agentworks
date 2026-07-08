@@ -2,7 +2,7 @@
 
 ``list_resources`` / ``render_resource_table`` back ``agw resource list``;
 ``describe_resource`` / ``render_resource_description`` back
-``agw resource describe <kind> <name>`` (FRD R12 / Phase 2c).
+``agw resource describe KIND/NAME`` (FRD R12 / Phase 2c).
 
 The cross-kind shape **stops at framework-uniform fields**: kind, name,
 origin (variant + sub-fields), usage list, description. Kind-specific
@@ -15,7 +15,7 @@ Description is reliably populated across kinds thanks to Phase 2a's
 generalized polish: operator-declared resources carry the operator's
 text (when their Resource type has a ``description`` field), and
 auto-declared resources get a framework-synthesized
-``"(auto) <usage> for <kind>:<name>"`` / ``"(auto) auto-declared default
+``"(auto) <usage> for <kind>/<name>"`` / ``"(auto) auto-declared default
 <kind>"``. Kinds whose Resource type has no ``description`` field
 render an empty cell -- that's the cross-kind cost the SDD accepts.
 
@@ -33,9 +33,11 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Literal
 
 from agentworks import output
-from agentworks.resources.render import format_origin_line
+from agentworks.resources.render import format_file_path, format_origin_line
 
 if TYPE_CHECKING:
+    from pathlib import Path
+
     from agentworks.db import Database
     from agentworks.resources import Registry
     from agentworks.resources.kind import InstanceRef
@@ -43,7 +45,7 @@ if TYPE_CHECKING:
     from agentworks.resources.reference import ReferenceEntry
 
 
-OriginFilter = Literal["operator", "auto", "code"]
+OriginFilter = Literal["operator", "auto", "builtin"]
 
 
 @dataclass(frozen=True)
@@ -111,7 +113,7 @@ class ResourceDescription:
 _ORIGIN_FILTER_MAP: dict[str, str] = {
     "operator": "operator-declared",
     "auto": "auto-declared",
-    "code": "code-declared",
+    "builtin": "built-in",
 }
 
 
@@ -195,7 +197,7 @@ def list_resources(
                 operator_count += 1
             elif variant == "auto-declared":
                 auto_count += 1
-            elif variant == "code-declared":
+            elif variant == "built-in":
                 code_count += 1
 
     return ResourceListing(
@@ -303,6 +305,105 @@ def describe_resource(
     )
 
 
+@dataclass(frozen=True)
+class KindRow:
+    """One row of ``agw resource kinds``: the per-kind metadata that is
+    constant across every resource of the kind (which is why it renders
+    here and not as a per-row column in ``resource list``)."""
+
+    kind: str
+    category: str
+    resources: int
+    description: str
+
+
+def list_kinds(registry: Registry) -> list[KindRow]:
+    """Every kind the app defines, sorted by name, with current registry
+    row counts. Kinds are baked into the app -- plugins publish
+    resources of existing kinds (declarable and capability alike),
+    never new kinds -- so this is a read-only, code-defined
+    inventory."""
+    from agentworks.resources import KIND_REGISTRY
+
+    return [
+        KindRow(
+            kind=name,
+            category=handler.category,
+            resources=sum(1 for _ in registry.iter_kind(name)),
+            description=handler.description,
+        )
+        for name, handler in sorted(KIND_REGISTRY.items())
+    ]
+
+
+def render_kind_table(rows: list[KindRow]) -> None:
+    kind_w = max(len("KIND"), *(len(r.kind) for r in rows))
+    cat_w = max(len("CATEGORY"), *(len(r.category) for r in rows))
+    res_w = len("RESOURCES")
+    output.info(
+        f"{'KIND':<{kind_w}}  {'CATEGORY':<{cat_w}}  {'RESOURCES':<{res_w}}  DESCRIPTION"
+    )
+    for r in rows:
+        output.info(
+            f"{r.kind:<{kind_w}}  {r.category:<{cat_w}}  {r.resources:<{res_w}}  {r.description}"
+        )
+
+
+def edit_location(registry: Registry, kind: str, name: str) -> tuple[Path, int]:
+    """Resolve ``agw resource edit KIND/NAME`` to the manifest to open.
+
+    Only operator-declared YAML manifests are editable through this
+    command. The other origins error with the right next step
+    (maintainer ruling, 2026-07-05, keep-it-simple scope):
+
+    - operator-declared in TOML: point at ``agw resource migrate`` or
+      ``agw config edit`` rather than opening config.toml here.
+    - built-in: not on disk in editable form.
+    - auto-declared: nothing on disk at all.
+
+    Reuses ``describe_resource``'s validated lookup so unknown kinds and
+    names error identically across the resource group.
+    """
+    from agentworks.errors import ValidationError
+    from agentworks.resources import KIND_REGISTRY
+
+    desc = describe_resource(registry, kind, name)
+    origin = desc.origin
+    if origin is None or origin.variant != "operator-declared":
+        variant = origin.variant if origin is not None else "unknown-origin"
+        # Capability kinds have no declarable form; a sample pointer
+        # would send the operator to an error.
+        handler = KIND_REGISTRY.get(kind)
+        declarable = handler is not None and handler.category == "declarable"
+        sample_hint = f"`agw resource sample {kind} --write {kind}s.yaml`."
+        if variant == "built-in":
+            raise ValidationError(
+                f"{kind}/{name} is built-in; there is no file to edit",
+                hint=(
+                    f"Declare an operator resource instead: {sample_hint}"
+                    if declarable
+                    else f"{kind} is a capability provided by the app; "
+                    f"there is nothing to declare or edit."
+                ),
+            )
+        raise ValidationError(
+            f"{kind}/{name} is {variant}; there is no file to edit",
+            hint=f"Declare it explicitly first: {sample_hint}",
+        )
+    assert origin.file is not None and origin.line is not None  # variant contract
+    if origin.file.suffix == ".toml":
+        raise ValidationError(
+            f"{kind}/{name} is declared in TOML "
+            f"({format_file_path(origin.file)}:{origin.line})",
+            hint=(
+                f"Move it to a YAML manifest with `agw resource migrate "
+                f"{kind}/{name}`, or edit the config directly with "
+                f"`agw config edit`."
+            ),
+        )
+    return origin.file, origin.line
+
+
 # ``_collect_used_by`` previously duplicated ``used_by_for``'s guard
 # structure with a near-identical body. Both call sites now go through
 # ``used_by_for`` (the describe builder calls it directly; the list
@@ -330,7 +431,7 @@ def render_resource_table(listing: ResourceListing) -> None:
     if listing.auto_count:
         parts.append(f"{listing.auto_count} auto-declared")
     if listing.code_count:
-        parts.append(f"{listing.code_count} code-declared")
+        parts.append(f"{listing.code_count} built-in")
     breakdown = f" ({', '.join(parts)})" if parts else ""
     output.info(f"{total} resource{'s' if total != 1 else ''}{breakdown}")
     output.info("")
@@ -372,7 +473,7 @@ def render_resource_description(desc: ResourceDescription) -> None:
     Mirrors the shape of ``agw secret describe`` minus the
     secret-specific sections (backend mappings, resolution preview).
     """
-    output.info(f"Resource: {desc.kind}:{desc.name}")
+    output.info(f"Resource: {desc.kind}/{desc.name}")
     if desc.description:
         output.detail(f"Description: {desc.description}")
     else:
@@ -392,7 +493,7 @@ def render_resource_description(desc: ResourceDescription) -> None:
             if key in seen:
                 continue
             seen.add(key)
-            src = f"{entry.source[0]}:{entry.source[1]}"
+            src = f"{entry.source[0]}/{entry.source[1]}"
             output.detail(f"- {src} -- {entry.usage}")
 
     if desc.used_by is not None:
@@ -408,4 +509,4 @@ def render_resource_description(desc: ResourceDescription) -> None:
                 grouped.setdefault(ref.instance_kind, []).append(ref.instance_name)
             for instance_kind in grouped:
                 for instance_name in grouped[instance_kind]:
-                    output.detail(f"- {instance_kind}:{instance_name}")
+                    output.detail(f"- {instance_kind}/{instance_name}")

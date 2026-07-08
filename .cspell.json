@@ -9,6 +9,8 @@
     "authkey",
     "awagent",
     "awvm",
+    "pyyaml",
+    "tomllib",
     "backgrounded",
     "batchable",
     "bigred",

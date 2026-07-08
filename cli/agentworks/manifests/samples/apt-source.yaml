@@ -1,0 +1,15 @@
+## kind: apt-source -- a third-party apt repository, referenced by name
+## from apt-package entries. {arch} is a placeholder for the VM
+## architecture (amd64 or arm64). Same name as a built-in catalog entry
+## overrides it.
+##
+#apiVersion: agentworks/v1
+#kind: apt-source
+#metadata:
+#  name: my-repo
+#  description: My internal apt repository
+#spec:
+#  key_url: https://apt.example.com/key.gpg
+#  key_path: /etc/apt/keyrings/my-repo.gpg
+#  source: deb [arch={arch} signed-by=/etc/apt/keyrings/my-repo.gpg] https://apt.example.com/debian bookworm main
+#  source_file: my-repo.list

@@ -1,7 +1,7 @@
 """Parametrized tests for the three template kinds Phase 2a.2 adds:
-``agent_template``, ``workspace_template``, ``session_template``.
+``agent-template``, ``workspace-template``, ``session-template``.
 
-Each kind has the same shape as ``vm_template`` (covered separately in
+Each kind has the same shape as ``vm-template`` (covered separately in
 ``test_vm_template_kind.py``). This file pins the parallel behavior:
 kind shape, ``synthesize`` empty + non-empty paths, framework miss-
 policy on typo'd ``inherits``, cycle detection at build_registry, and
@@ -17,14 +17,17 @@ from typing import Any
 
 import pytest
 
+from agentworks.agents.template import AgentTemplate
 from agentworks.bootstrap import build_registry
-from agentworks.config import AgentTemplate, SessionTemplate, WorkspaceTemplate, load_config
+from agentworks.config import load_config
 from agentworks.errors import ConfigError
 from agentworks.resources import (
     ALWAYS_MATERIALIZE_SOURCE,
     KIND_REGISTRY,
     TemplateReference,
 )
+from agentworks.sessions.template import SessionTemplate
+from agentworks.workspaces.template import WorkspaceTemplate
 
 
 @dataclass(frozen=True)
@@ -37,9 +40,9 @@ class _KindSpec:
 
 
 SPECS: tuple[_KindSpec, ...] = (
-    _KindSpec("agent_template", "agent_templates", AgentTemplate),
-    _KindSpec("workspace_template", "workspace_templates", WorkspaceTemplate),
-    _KindSpec("session_template", "session_templates", SessionTemplate),
+    _KindSpec("agent-template", "agent_templates", AgentTemplate),
+    _KindSpec("workspace-template", "workspace_templates", WorkspaceTemplate),
+    _KindSpec("session-template", "session_templates", SessionTemplate),
 )
 
 
@@ -209,20 +212,13 @@ def test_inherits_cycle_caught_by_framework(spec: _KindSpec, tmp_path: Path) -> 
         build_registry(cfg)
 
 
-def test_agent_template_default_cycle_caught_at_load(tmp_path: Path) -> None:
-    """For agent_templates specifically, ``load_config`` eagerly resolves
-    the default via the per-template field-merging resolver. A cycle
-    through ``default`` therefore hits the resolver's internal
-    visited-set guard at load time, not the framework's pass at
-    build_registry time.
-
-    Non-parametrized because only ``agent_template`` (and
-    ``vm_template``, tested in ``test_vm_template_kind.py``) is
-    eagerly resolved at load time. ``workspace_template`` and
-    ``session_template`` resolve lazily; cycles in them slip past
-    load_config and are caught by the framework instead, which the
-    parametrized ``test_inherits_cycle_caught_by_framework`` above
-    covers for all three.
+def test_agent_template_default_cycle_caught_at_build_registry(tmp_path: Path) -> None:
+    """A cycle through ``default`` loads cleanly (Phase 1 of the
+    resource-manifests SDD removed load_config's eager default
+    resolve) and is caught by the framework's cycle pass at
+    build_registry time. The resolver's internal visited-set guard
+    remains as a safety net for callers that resolve without going
+    through build_registry.
     """
     cfg_file = _write_cfg(
         tmp_path / "config.toml",
@@ -234,5 +230,6 @@ def test_agent_template_default_cycle_caught_at_load(tmp_path: Path) -> None:
         inherits = ["default"]
         """,
     )
+    cfg = load_config(cfg_file, warn_issues=False)
     with pytest.raises(ConfigError, match="cycle"):
-        load_config(cfg_file, warn_issues=False)
+        build_registry(cfg)

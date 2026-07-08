@@ -1,5 +1,5 @@
 """Tests for ``agentworks.resources.inspect.describe_resource`` --
-the service layer behind ``agw resource describe <kind> <name>``
+the service layer behind ``agw resource describe KIND/NAME``
 (Phase 2c).
 
 Stops at framework-uniform fields: kind, name, origin, description,
@@ -148,7 +148,7 @@ def test_unknown_name_under_known_kind_raises_not_found_with_hint(
 def test_cli_describe_renders_header_and_usage_sections(
     tmp_path: Path, monkeypatch
 ) -> None:
-    """End-to-end ``agw resource describe <kind> <name>`` emits the
+    """End-to-end ``agw resource describe KIND/NAME`` emits the
     framework-uniform sections: header (kind/name/description/origin)
     then a Usages list. We don't pin exact whitespace; just confirm
     each section's anchor strings appear in the rendered output.
@@ -168,10 +168,10 @@ def test_cli_describe_renders_header_and_usage_sections(
     monkeypatch.setattr("agentworks.config.CONFIG_PATH", cfg_file)
 
     result = CliRunner().invoke(
-        app, ["resource", "describe", "secret", "tailscale-auth-key"]
+        app, ["resource", "describe", "secret/tailscale-auth-key"]
     )
     assert result.exit_code == 0, result.stdout
-    assert "Resource: secret:tailscale-auth-key" in result.stdout
+    assert "Resource: secret/tailscale-auth-key" in result.stdout
     assert "Origin:" in result.stdout
     assert "Description:" in result.stdout
     assert "Referenced by:" in result.stdout
@@ -189,7 +189,7 @@ def test_cli_describe_unknown_name_exits_nonzero(
     monkeypatch.setattr("agentworks.config.CONFIG_PATH", cfg_file)
 
     result = CliRunner().invoke(
-        app, ["resource", "describe", "secret", "no-such-secret"]
+        app, ["resource", "describe", "secret/no-such-secret"]
     )
     assert result.exit_code != 0
 
@@ -206,6 +206,26 @@ def test_cli_describe_unknown_kind_exits_nonzero(
     monkeypatch.setattr("agentworks.config.CONFIG_PATH", cfg_file)
 
     result = CliRunner().invoke(
-        app, ["resource", "describe", "no_such_kind", "name"]
+        app, ["resource", "describe", "no_such_kind/name"]
     )
     assert result.exit_code != 0
+
+
+def test_cli_describe_rejects_token_without_slash(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """The single-token grammar is KIND/NAME: a bare kind (or a token
+    with an empty name half) errors with the example hint before any
+    registry work."""
+    from typer.testing import CliRunner
+
+    from agentworks.cli import app
+
+    cfg_file = tmp_path / "config.toml"
+    _write_base(cfg_file)
+    monkeypatch.setattr("agentworks.config.CONFIG_PATH", cfg_file)
+
+    for token in ("secret", "secret/"):
+        result = CliRunner().invoke(app, ["resource", "describe", token])
+        assert result.exit_code != 0
+        assert "expected KIND/NAME" in str(result.exception)

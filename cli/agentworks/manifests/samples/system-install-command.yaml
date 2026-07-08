@@ -1,0 +1,14 @@
+## kind: system-install-command -- a shell command installing
+## system-wide tooling, run during vm init/reinit (should be
+## idempotent). Referenced by name from vm-template
+## `system_install_commands`. Use only one of: test_exec, test_file,
+## test_dir (skips installation when already present).
+##
+#apiVersion: agentworks/v1
+#kind: system-install-command
+#metadata:
+#  name: my-system-tool
+#  description: Custom system-wide tool
+#spec:
+#  command: curl -fsSL https://example.com/install.sh | sudo bash
+#  test_exec: my-system-tool

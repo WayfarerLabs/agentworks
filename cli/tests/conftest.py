@@ -201,10 +201,11 @@ def stub_session_resolvers(monkeypatch: pytest.MonkeyPatch) -> None:
     ``sessions.manager``.
 
     Several tests construct a ``SimpleNamespace`` config that omits the
-    ``vm_templates`` / ``agent_templates`` / ``secret_resolver`` attributes
-    the real Phase 3+ resolvers read. Patching the resolvers themselves
-    keeps those tests scope-correct (they exercise rollback / transport
-    plumbing, not env composition) without expanding the fake config.
+    ``vm_templates`` / ``agent_templates`` attributes (and can't publish
+    the registry rows) the real resolvers read. Patching the resolvers
+    themselves keeps those tests scope-correct (they exercise rollback /
+    transport plumbing, not env composition) without expanding the fake
+    config.
 
     Also stubs the Phase 6 eager-prompting orchestration: ``create_session``
     and ``restart_session`` call ``_session_secret_target`` +
@@ -233,18 +234,83 @@ def stub_session_resolvers(monkeypatch: pytest.MonkeyPatch) -> None:
     )
 
 
-def stub_build_registry(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Stub ``agentworks.bootstrap.build_registry`` to a no-op.
+class _StubRegistry:
+    """Registry test double serving the consumer read surface from a
+    (possibly ``SimpleNamespace``) config.
 
-    Phase 2a's manager-entry hoist (Phase 2a.0) calls
-    ``build_registry(config)`` at the top of ``create_session``,
-    ``create_agent``, ``reinit_agent``, ``create_workspace``,
-    ``reinit_workspace``, ``create_vm``, ``reinit_vm``, and
-    ``add_git_credential`` before any business logic. Tests that pass
-    ``SimpleNamespace`` configs (which don't carry ``publish_to``) need
-    this stub so the hoist doesn't crash on the mock config. Real
-    ``Config`` flows still exercise the hoist's framework-error
-    guarantee via ``tests/resources/``.
+    The Phase 1 consumer repoint (resource-manifests SDD) routed all
+    resource reads through Registry queries (``lookup`` /
+    ``iter_kind`` / ``iter_kind_items``, usually via
+    ``agentworks.resources.access``). Tests that fabricate minimal
+    namespace configs can't feed the real ``build_registry`` (no
+    ``publish_to``, rows aren't dataclasses), so this double answers
+    the same queries straight off the config's attributes, falling
+    back to real code-default singletons where the fake omits them.
+    """
+
+    _KIND_ATTRS = {
+        "secret": "secrets",
+        "vm-template": "vm_templates",
+        "agent-template": "agent_templates",
+        "workspace-template": "workspace_templates",
+        "session-template": "session_templates",
+        "git-credential": "git_credentials",
+        "apt-source": "apt_sources",
+        "apt-package": "apt_packages",
+        "system-install-command": "system_install_commands",
+        "user-install-command": "user_install_commands",
+    }
+
+    def __init__(self, config: object) -> None:
+        self._config = config
+
+    def _kind_dict(self, kind: str) -> dict[str, object]:
+        attr = self._KIND_ATTRS.get(kind)
+        if attr is None:
+            return {}
+        return dict(getattr(self._config, attr, None) or {})
+
+    def lookup(self, kind: str, name: str) -> object:
+        # Mirrors the real Registry's miss semantics: ``lookup`` raises
+        # KeyError on unknown kinds and names so stubbed tests fail the
+        # same way production does. The singleton kinds fall back to
+        # code-default rows only for the reserved name.
+        if kind == "admin-template":
+            from agentworks.vms.admin import AdminConfig
+
+            if name != "default":
+                raise KeyError(name)
+            admin = getattr(self._config, "admin", None)
+            return admin if admin is not None else AdminConfig()
+        if kind == "named-console-template":
+            from agentworks.sessions.template import NamedConsoleConfig
+
+            if name != "default":
+                raise KeyError(name)
+            console = getattr(self._config, "named_console", None)
+            return console if console is not None else NamedConsoleConfig()
+        if kind not in self._KIND_ATTRS:
+            raise KeyError(kind)
+        return self._kind_dict(kind)[name]
+
+    def iter_kind(self, kind: str):  # noqa: ANN201 - mirrors Registry
+        return iter(self._kind_dict(kind).values())
+
+    def iter_kind_items(self, kind: str):  # noqa: ANN201 - mirrors Registry
+        return iter(self._kind_dict(kind).items())
+
+
+def stub_build_registry(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Stub ``agentworks.bootstrap.build_registry`` with ``_StubRegistry``.
+
+    Manager entries call ``build_registry(config)`` before business
+    logic and thread the result to every resource read (Phase 1 of the
+    resource-manifests SDD). Tests that pass ``SimpleNamespace`` configs
+    (which don't carry ``publish_to``) need this stub so those entries
+    get a Registry-shaped object that answers reads from the fake
+    config. Real ``Config`` flows still exercise the real
+    ``build_registry`` via ``tests/resources/`` and the integration
+    suites.
 
     Usage: bind to an autouse fixture in each test module that uses
     mock configs::
@@ -254,5 +320,21 @@ def stub_build_registry(monkeypatch: pytest.MonkeyPatch) -> None:
             stub_build_registry(monkeypatch)
     """
     monkeypatch.setattr(
-        "agentworks.bootstrap.build_registry", lambda config: None
+        "agentworks.bootstrap.build_registry", _StubRegistry
     )
+
+    # Namespace configs lack secret_config_data (and the stub registry
+    # carries no backend rows), so stub the orchestration seam: eager
+    # resolution returns no values, and compose_env sites receive {}
+    # (namespace-config tests carry no secret-referencing env entries).
+    def _stub_resolve_for_command(*args: object, **kwargs: object) -> dict[str, str]:
+        return {}
+
+    # Production consumers import resolve_for_command function-locally
+    # from agentworks.secrets; patch the defining module and the
+    # re-export so both binding shapes see the stub.
+    for site in (
+        "agentworks.secrets.orchestration.resolve_for_command",
+        "agentworks.secrets.resolve_for_command",
+    ):
+        monkeypatch.setattr(site, _stub_resolve_for_command)

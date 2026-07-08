@@ -564,6 +564,74 @@ def test_eager_resolve_fires_exactly_once_for_new_workspace_and_new_agent(
     db.close()
 
 
+def test_nested_creates_are_their_own_composition_units(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Pin the composition-unit seam (resource-manifests SDD, Phase 3.6
+    follow-up): ``create_session`` passes the nested ``create_workspace``
+    / ``create_agent`` calls CLI-shaped args ONLY -- no resolved values,
+    no registry. Each nested create is its own composition unit that
+    builds its own registry and resolves its own secrets; the parent's
+    single eager resolve covers the session's needs (union prompt), and
+    the secret sets are disjoint in practice. If someone threads
+    ``values=`` or ``registry=`` through this seam to "save" a resolve,
+    this test trips."""
+    from agentworks.sessions.manager import create_session
+
+    db = Database(tmp_path / "test.db")
+    db._conn.execute(
+        "INSERT INTO vms (name, platform, admin_username, tailscale_host) "
+        "VALUES ('vm1', 'lima', 'admin', '100.64.0.5')"
+    )
+    db._conn.commit()
+    _install_session_prep_stubs(monkeypatch)
+
+    seam_kwargs: dict[str, set[str]] = {}
+
+    def _ws_spy(db: object, config: object, **kwargs: object) -> None:
+        seam_kwargs["create_workspace"] = set(kwargs)
+        db._conn.execute(  # type: ignore[attr-defined]
+            "INSERT INTO workspaces (name, vm_name, workspace_path, linux_group) "
+            "VALUES (?, ?, ?, ?)",
+            (kwargs["name"], kwargs["vm_name"], "/tmp/ws", f"ws-{kwargs['name']}"),
+        )
+        db._conn.commit()  # type: ignore[attr-defined]
+
+    def _ag_spy(db: object, config: object, **kwargs: object) -> None:
+        seam_kwargs["create_agent"] = set(kwargs)
+        db.insert_agent(kwargs["name"], kwargs["vm_name"], f"aw-{kwargs['name']}")  # type: ignore[attr-defined]
+
+    monkeypatch.setattr("agentworks.secrets.resolve_for_command", lambda *a, **k: {})
+    monkeypatch.setattr("agentworks.workspaces.manager.create_workspace", _ws_spy)
+    monkeypatch.setattr("agentworks.agents.manager.create_agent", _ag_spy)
+
+    class _Stop(Exception):
+        pass
+
+    monkeypatch.setattr(
+        "agentworks.sessions.manager._prepare_vm",
+        lambda *a, **k: (_ for _ in ()).throw(_Stop()),
+    )
+
+    config = SimpleNamespace(session=SimpleNamespace(history_limit=50000))
+    with pytest.raises(_Stop):
+        create_session(
+            db,
+            config,  # type: ignore[arg-type]
+            name="s1",
+            new_workspace=True,
+            new_agent=True,
+            vm_name="vm1",
+        )
+
+    # Allowlist, not denylist: the seam contract is CLI-shaped args and
+    # NOTHING else, so any smuggled kwarg (values, registry, resolved,
+    # parent_registry, ...) trips this regardless of its name.
+    assert seam_kwargs["create_workspace"] == {"name", "vm_name", "template_name"}
+    assert seam_kwargs["create_agent"] == {"name", "vm_name", "template"}
+    db.close()
+
+
 def test_failure_after_ephemeral_create_rolls_back_ephemerals(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -1337,10 +1405,13 @@ def test_secret_target_pre_create_parity_with_session_secret_target(
     assert vm is not None
     assert ws is not None
     agent = db.get_agent("agt1") if mode == "agent" else None
-    session_template = _resolve_template(config, None)
+    from agentworks.bootstrap import build_registry
+
+    registry = build_registry(config)
+    session_template = _resolve_template(registry, None)
 
     post = _session_secret_target(
-        config,
+        registry,
         db=db,
         vm=vm,
         ws=ws,
@@ -1350,7 +1421,7 @@ def test_secret_target_pre_create_parity_with_session_secret_target(
         agent_name="agt1" if mode == "agent" else None,
     )
     pre = _session_secret_target_pre_create(
-        config,
+        registry,
         name="s1",
         workspace_name="ws1",
         vm=vm,
@@ -1365,6 +1436,11 @@ def test_secret_target_pre_create_parity_with_session_secret_target(
     )
 
     assert pre == post
-    assert compute_needed_secrets([pre], config) == compute_needed_secrets([post], config)
+    from agentworks.bootstrap import build_registry
+
+    registry = build_registry(config)
+    assert compute_needed_secrets([pre], registry) == compute_needed_secrets(
+        [post], registry
+    )
 
     db.close()

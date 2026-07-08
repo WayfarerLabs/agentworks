@@ -144,9 +144,9 @@ def test_user_entries_extend_builtin() -> None:
 
 def test_bad_apt_source_reference_defers_to_framework() -> None:
     """The catalog loader used to raise ``CatalogError`` at load time
-    for an apt_package referencing an unknown apt_source. That validation
+    for an apt_package referencing an unknown apt-source. That validation
     moved to the framework: ``AptPackageEntry.referenced_resources()``
-    emits a ``ResourceReference(kind="apt_source", ...)`` per source,
+    emits a ``ResourceReference(kind="apt-source", ...)`` per source,
     and ``AptSourceKind``'s ``error`` miss policy at finalize raises the
     framework's ``ConfigError`` when the source doesn't resolve.
 

@@ -63,7 +63,7 @@ def test_operator_declared_secret_shows_file_and_line(
     )
     config = load_config(cfg, warn_issues=False)
     registry = build_registry(config)
-    desc = describe_secret(registry, config, "api-key")
+    desc = describe_secret(config, registry, "api-key")
 
     assert desc.name == "api-key"
     assert desc.kind == "secret"
@@ -100,16 +100,16 @@ def test_auto_declared_secret_shows_first_requirement_source(
     )
     config = load_config(cfg, warn_issues=False)
     registry = build_registry(config)
-    desc = describe_secret(registry, config, "auto-key")
+    desc = describe_secret(config, registry, "auto-key")
 
     assert desc.origin is not None
     assert desc.origin.variant == "auto-declared"
-    assert desc.origin.source == ("admin_template", "default")
+    assert desc.origin.source == ("admin-template", "default")
     # Description synthesized at finalize time from the first
     # requirement's usage text + source. Reads as "what this is for,
     # who's asking". No "(and N more)" suffix when there's only one
     # source.
-    assert desc.description == "(auto) the API_KEY env var for admin_template:default"
+    assert desc.description == "(auto) the API_KEY env var for admin-template/default"
 
 
 def test_auto_declared_description_suffix_counts_other_sources(
@@ -142,10 +142,10 @@ def test_auto_declared_description_suffix_counts_other_sources(
     )
     config = load_config(cfg, warn_issues=False)
     registry = build_registry(config)
-    desc = describe_secret(registry, config, "shared")
+    desc = describe_secret(config, registry, "shared")
 
-    # Two distinct sources require this secret: admin_template:default
-    # and vm_template:azure-prod. Whichever the framework walks first
+    # Two distinct sources require this secret: admin-template/default
+    # and vm-template/azure-prod. Whichever the framework walks first
     # is named in the description (publish order, not asserted here);
     # the second contributes to "(and 1 more)". The two references
     # inside azure-prod's env block share a source and do not inflate
@@ -156,8 +156,8 @@ def test_auto_declared_description_suffix_counts_other_sources(
     assert desc.description.endswith("(and 1 more)")
     # First-named source is one of the two requiring templates.
     assert (
-        " for admin_template:default " in desc.description
-        or " for vm_template:azure-prod " in desc.description
+        " for admin-template/default " in desc.description
+        or " for vm-template/azure-prod " in desc.description
     )
 
 
@@ -189,13 +189,13 @@ def test_multiple_usages_render_one_row_each(
     )
     config = load_config(cfg, warn_issues=False)
     registry = build_registry(config)
-    desc = describe_secret(registry, config, "shared-key")
+    desc = describe_secret(config, registry, "shared-key")
 
     assert len(desc.references) == 2
     sources = sorted(u.source for u in desc.references)
     assert sources == [
-        ("admin_template", "default"),
-        ("vm_template", "azure-prod"),
+        ("admin-template", "default"),
+        ("vm-template", "azure-prod"),
     ]
     # Usage prose reflects the env-var key.
     texts = sorted(u.usage for u in desc.references)
@@ -218,7 +218,7 @@ def test_no_usages_for_unreferenced_operator_declared_secret(
     )
     config = load_config(cfg, warn_issues=False)
     registry = build_registry(config)
-    desc = describe_secret(registry, config, "lonely-key")
+    desc = describe_secret(config, registry, "lonely-key")
     assert desc.references == ()
 
 
@@ -245,16 +245,16 @@ def test_backend_mappings_show_each_active_backend(
     )
     config = load_config(cfg, warn_issues=False)
     registry = build_registry(config)
-    desc = describe_secret(registry, config, "api-key")
+    desc = describe_secret(config, registry, "api-key")
 
-    kinds = [m.backend_kind for m in desc.backend_mappings]
-    assert kinds == ["env-var", "prompt"]
+    backends = [m.backend for m in desc.backend_mappings]
+    assert backends == ["env-var", "prompt"]
 
-    env_var = next(m for m in desc.backend_mappings if m.backend_kind == "env-var")
+    env_var = next(m for m in desc.backend_mappings if m.backend == "env-var")
     assert env_var.would_attempt
     assert env_var.identifier == "AW_SECRET_API_KEY"
 
-    prompt = next(m for m in desc.backend_mappings if m.backend_kind == "prompt")
+    prompt = next(m for m in desc.backend_mappings if m.backend == "prompt")
     assert prompt.would_attempt
     assert prompt.identifier is None
 
@@ -279,9 +279,9 @@ def test_backend_mapping_respects_operator_override(
     )
     config = load_config(cfg, warn_issues=False)
     registry = build_registry(config)
-    desc = describe_secret(registry, config, "api-key")
+    desc = describe_secret(config, registry, "api-key")
 
-    env_var = next(m for m in desc.backend_mappings if m.backend_kind == "env-var")
+    env_var = next(m for m in desc.backend_mappings if m.backend == "env-var")
     assert env_var.identifier == "CUSTOM_API_KEY"
 
 
@@ -305,12 +305,12 @@ def test_backend_mapping_respects_opt_out(
     )
     config = load_config(cfg, warn_issues=False)
     registry = build_registry(config)
-    desc = describe_secret(registry, config, "api-key")
+    desc = describe_secret(config, registry, "api-key")
 
-    env_var = next(m for m in desc.backend_mappings if m.backend_kind == "env-var")
+    env_var = next(m for m in desc.backend_mappings if m.backend == "env-var")
     assert env_var.would_attempt is False
     # Prompt still attempts.
-    prompt = next(m for m in desc.backend_mappings if m.backend_kind == "prompt")
+    prompt = next(m for m in desc.backend_mappings if m.backend == "prompt")
     assert prompt.would_attempt
 
 
@@ -338,7 +338,7 @@ def test_resolution_preview_picks_env_var_when_var_is_set(
     monkeypatch.setenv("AW_SECRET_API_KEY", "from-shell")
     config = load_config(cfg, warn_issues=False)
     registry = build_registry(config)
-    desc = describe_secret(registry, config, "api-key")
+    desc = describe_secret(config, registry, "api-key")
 
     assert desc.resolution.available
     assert desc.resolution.resolved_by == "env-var"
@@ -369,7 +369,7 @@ def test_resolution_preview_falls_through_when_env_var_is_unset(
     monkeypatch.delenv("AW_SECRET_API_KEY", raising=False)
     config = load_config(cfg, warn_issues=False)
     registry = build_registry(config)
-    desc = describe_secret(registry, config, "api-key")
+    desc = describe_secret(config, registry, "api-key")
 
     assert desc.resolution.available
     assert desc.resolution.resolved_by == "prompt"
@@ -392,7 +392,7 @@ def test_resolution_preview_falls_through_to_prompt(
     )
     config = load_config(cfg, warn_issues=False)
     registry = build_registry(config)
-    desc = describe_secret(registry, config, "api-key")
+    desc = describe_secret(config, registry, "api-key")
 
     assert desc.resolution.available
     assert desc.resolution.resolved_by == "prompt"
@@ -406,11 +406,13 @@ def test_resolution_preview_not_available_when_no_backend_attempts(
 
     Construction: a chain with only ``env-var`` (no prompt fallback)
     and an explicit ``backend_mappings.env-var = false`` opt-out.
-    The env-and-secrets SDD's config-load reachability check would
-    error on this combo, so this test exercises the describe layer
-    against a hand-built registry rather than a loaded Config.
+    ``validate_chain`` (at build_registry) hard-errors when an
+    OPERATOR-declared secret is unreachable, so the decl is
+    hand-published as auto-declared (the origin the reachability check
+    exempts); the chain comes from config as always.
     """
     from agentworks.resources import Origin, Registry
+    from agentworks.secrets.backends import publish_to as publish_backends
     from agentworks.secrets.base import SecretDecl
 
     cfg = _write_cfg(
@@ -423,9 +425,11 @@ def test_resolution_preview_not_available_when_no_backend_attempts(
     )
     config = load_config(cfg, warn_issues=False)
 
-    # Hand-publish an opt-out SecretDecl into a fresh registry so the
-    # config-load reachability check doesn't fire.
+    from agentworks.manifests import builtin as builtin_manifests
+
     registry = Registry.empty()
+    builtin_manifests.publish_to(registry)
+    publish_backends(registry)
     decl = SecretDecl(
         name="api-key",
         description="API key",
@@ -433,11 +437,11 @@ def test_resolution_preview_not_available_when_no_backend_attempts(
     )
     registry.add(
         "secret", "api-key", decl,
-        Origin.operator_declared(file=cfg, line=1),
+        Origin.auto_declared(source=("test", "api-key")),
     )
     registry.finalize()
 
-    desc = describe_secret(registry, config, "api-key")
+    desc = describe_secret(config, registry, "api-key")
     assert desc.resolution.available is False
     assert desc.resolution.resolved_by is None
 
@@ -472,7 +476,7 @@ def test_render_emits_header_usages_mappings_preview(
     monkeypatch.setenv("AW_SECRET_API_KEY", "from-shell")
     config = load_config(cfg, warn_issues=False)
     registry = build_registry(config)
-    desc = describe_secret(registry, config, "api-key")
+    desc = describe_secret(config, registry, "api-key")
     render_secret_description(desc)
 
     out = capsys.readouterr().out
@@ -486,7 +490,7 @@ def test_render_emits_header_usages_mappings_preview(
     assert out.index("Description:") < out.index("Origin:")
     # References (inbound)
     assert "Referenced by:" in out
-    assert "admin_template:default" in out
+    assert "admin-template/default" in out
     assert "the ADMIN_KEY env var" in out
     # Backend mappings
     assert "Backend mappings:" in out
@@ -521,7 +525,7 @@ def test_describe_secret_used_by_is_none_without_db(
     )
     config = load_config(cfg, warn_issues=False)
     registry = build_registry(config)
-    desc = describe_secret(registry, config, "api-key")
+    desc = describe_secret(config, registry, "api-key")
     assert desc.used_by is None
 
 
@@ -556,7 +560,7 @@ def test_describe_secret_used_by_populated_with_db(
     )
     db._conn.commit()
 
-    desc = describe_secret(registry, config, "shared-key", db=db)
+    desc = describe_secret(config, registry, "shared-key", db=db)
     assert desc.used_by is not None
     assert [(r.instance_kind, r.instance_name) for r in desc.used_by] == [
         ("session", "sess-1")
@@ -597,12 +601,12 @@ def test_render_emits_used_by_section_when_populated(
     )
     db._conn.commit()
 
-    desc = describe_secret(registry, config, "shared-key", db=db)
+    desc = describe_secret(config, registry, "shared-key", db=db)
     render_secret_description(desc)
     out = capsys.readouterr().out
 
     assert "Used by (per current config):" in out
-    assert "session:sess-1" in out
+    assert "session/sess-1" in out
     # Section ordering: Referenced by -> Used by -> Backend mappings.
     assert out.index("Referenced by:") < out.index("Used by (per current config):")
     assert out.index("Used by (per current config):") < out.index("Backend mappings:")
@@ -637,7 +641,7 @@ def test_render_used_by_empty_shows_friendly_message(
     # DB with no sessions -- dead-key's used_by is empty (but non-None).
     db = Database(tmp_path / "no_sessions.db")
 
-    desc = describe_secret(registry, config, "dead-key", db=db)
+    desc = describe_secret(config, registry, "dead-key", db=db)
     assert desc.used_by == ()
     render_secret_description(desc)
     out = capsys.readouterr().out
@@ -670,7 +674,7 @@ def test_render_omits_used_by_section_when_none(
     config = load_config(cfg, warn_issues=False)
     registry = build_registry(config)
 
-    desc = describe_secret(registry, config, "api-key")
+    desc = describe_secret(config, registry, "api-key")
     render_secret_description(desc)
     out = capsys.readouterr().out
 
@@ -696,7 +700,7 @@ def test_describe_secret_raises_not_found_for_unknown_name(
     config = load_config(cfg, warn_issues=False)
     registry = build_registry(config)
     with pytest.raises(NotFoundError) as exc:
-        describe_secret(registry, config, "no-such-secret")
+        describe_secret(config, registry, "no-such-secret")
     assert exc.value.entity_kind == "secret"
     assert exc.value.entity_name == "no-such-secret"
     assert exc.value.hint is not None
