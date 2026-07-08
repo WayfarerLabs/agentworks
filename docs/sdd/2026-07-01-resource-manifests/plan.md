@@ -556,9 +556,9 @@ declarable row dataclasses and capability kinds alike live next to the code that
       "(only 'default' selectable today)" instead of "(singleton: default)". Issue #165 adds
       `vm create --admin-template` and `console create --template` to close the loop, with per-type
       conversion specifics. (Superseded in part the same day: a maintainer description-polish pass
-      across the kinds dropped the caveat again -- descriptions now read e.g. "Admin user setup for
-      VMs" -- so #165's drop-the-caveat conversion step is already done; the envelope gate and its
-      rationale stand.)
+      across the kinds dropped the caveat again (descriptions were re-polished further afterward) --
+      so #165's drop-the-caveat conversion step is already done; the envelope gate and its rationale
+      stand.)
 
 - [x] Placeholder rows die (maintainer): the TOML publisher publishes admin-template /
       named-console-template ONLY when the operator actually declared the sections (`Config.admin` /
