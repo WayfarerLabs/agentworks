@@ -82,6 +82,12 @@ these artifacts are candidates for tombstoning once the dual-path era is old new
   the 2026-07-05 Phase 5 review.
 - VM base-image pinning is issue #161 (separate track; surfaced during this SDD's testing but not
   part of it).
+- Relocating the declared-resource dataclasses out of `config.py` into their domain packages
+  (VMTemplate -> vms/, AgentTemplate -> agents/, ...): deliberately deferred (2026-07-08) -- nothing
+  locks module placement, and the plugin SDD reshapes these exact types, so the move is a natural
+  plugin-SDD Phase 0 (one touch, with design context for the two dataclasses that lack an obvious
+  home: AdminConfig, NamedConsoleConfig). Independent of Phase 6, which retires the TOML LOADERS;
+  the dataclasses can move any time.
 
 ### Review history
 
