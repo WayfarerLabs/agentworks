@@ -1150,13 +1150,13 @@ def resolve_git_credential_providers(
             # Re-validate rather than isinstance-and-drop: a bad value
             # slipping past the loaders must fail loudly, not silently
             # WIDEN the credential by unscoping it.
-            repo, scope_owner = _validated_scope(
+            repos, scope_owner = _validated_scope(
                 f"git-credential/{name}", cred_config.provider_config
             )
             providers[name] = GitHubCredentialProvider(
                 config_name=name,
                 description=desc,
-                repo=repo,
+                repos=repos,
                 owner=scope_owner,
             )
     return providers

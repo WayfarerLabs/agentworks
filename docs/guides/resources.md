@@ -67,11 +67,11 @@ declaring a resource in `$EDITOR` (YAML-declared resources only: TOML-declared o
 ## Scoped GitHub credentials (fine-grained PATs)
 
 A `git-credential` with `provider: github` may carry a scope in its `provider_config`:
-`repo: "owner/name"` pins the credential to one repository (matching the shape of a single-repo
-fine-grained PAT), while `owner: "org"` covers every repository under that user or org -- including
-repos an agent clones ad hoc that no workspace ever declared. The two are mutually exclusive; a
-credential with neither is the unscoped fallback. Scopes are manifest-only (the legacy flat TOML
-shape has no GitHub fields).
+`repos: ["owner/name", ...]` pins the credential to specific repositories (always a list, even for
+one -- matching a fine-grained PAT's selected repos), while `owner: "org"` covers every repository
+under that user or org -- including repos an agent clones ad hoc that no workspace ever declared.
+The two are mutually exclusive; a credential with neither is the unscoped fallback. Scopes are
+manifest-only (the legacy flat TOML shape has no GitHub fields).
 
 Selection happens inside git itself, not in agentworks: initialization writes credential-context
 sections into an agentworks-owned gitconfig include (`~/.agentworks-git-scopes.gitconfig`), git

@@ -947,7 +947,7 @@ def _load_git_credentials(
         # github scope keys, where silence would ship a credential with
         # BROADER authority than the operator declared; those warn.
         if warn_ignored_scope_keys and cred_type == "github":
-            ignored_scopes = sorted({"repo", "owner"} & set(cdata))
+            ignored_scopes = sorted({"repos", "owner"} & set(cdata))
             if ignored_scopes:
                 issues.append(
                     f"git_credentials.{name}: github scope field(s) "

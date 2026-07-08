@@ -29,7 +29,7 @@ from agentworks.vms.initializer import resolve_git_credential_providers
 
 @pytest.mark.parametrize(
     "blob",
-    [{}, {"repo": "acme/widgets"}, {"owner": "acme"}],
+    [{}, {"repos": ["acme/widgets"]}, {"repos": ["acme/widgets", "acme/gadgets"]}, {"owner": "acme"}],
 )
 def test_valid_scopes_accepted(blob: dict[str, object]) -> None:
     assert GitHubCredentialProvider.validate_config("t", blob) == ()
@@ -38,13 +38,18 @@ def test_valid_scopes_accepted(blob: dict[str, object]) -> None:
 @pytest.mark.parametrize(
     ("blob", "match"),
     [
-        ({"repo": "acme/widgets", "owner": "acme"}, "mutually exclusive"),
-        ({"repo": "no-slash"}, '"owner/name"'),
-        ({"repo": "a/b/c"}, '"owner/name"'),
-        ({"repo": "/leading"}, '"owner/name"'),
+        ({"repos": ["acme/widgets"], "owner": "acme"}, "mutually exclusive"),
+        ({"repos": ["no-slash"]}, '"owner/name"'),
+        ({"repos": []}, '"owner/name"'),
+        ({"repos": "acme/widgets"}, '"owner/name"'),
+        ({"repo": "acme/widgets"}, "the field is 'repos'"),
+        ({"repos": ["a/b/c"]}, '"owner/name"'),
+        ({"repos": ["/leading"]}, '"owner/name"'),
         ({"owner": "acme/"}, "no slash"),
         ({"owner": ""}, "no slash"),
         ({"org": "acme"}, "unknown github provider field"),
+        ({"repos": [123]}, '"owner/name"'),
+        ({"owner": 123}, "user/org name"),
     ],
 )
 def test_invalid_scopes_rejected(blob: dict[str, object], match: str) -> None:
@@ -66,7 +71,7 @@ def test_unscoped_store_line_unchanged() -> None:
 def test_repo_scope_covers_both_remote_spellings() -> None:
     """Context matching is slash-boundary-exact, so ``repo`` does not
     prefix-match ``repo.git``; both spellings get a section."""
-    p = GitHubCredentialProvider(config_name="widgets-bot", repo="acme/widgets")
+    p = GitHubCredentialProvider(config_name="widgets-bot", repos=["acme/widgets"])
     assert p.credential_lines("tok") == ["https://widgets-bot:tok@github.com"]
     assert p.gitconfig_sections() == [
         ("https://github.com/acme/widgets", "widgets-bot"),
@@ -145,7 +150,7 @@ def _registry_with_scoped_cred(tmp_path: Path):  # noqa: ANN202
         spec:
           provider: github
           provider_config:
-            repo: acme/widgets
+            repos: [acme/widgets]
         """)
     )
     return build_registry(load_config(cfg, warn_issues=False))
@@ -173,7 +178,7 @@ def test_manifest_scope_validation_has_file_line(tmp_path: Path) -> None:
         spec:
           provider: github
           provider_config:
-            repo: not-a-repo
+            repos: [not-a-repo]
         """)
     )
     with pytest.raises(ConfigError, match='"owner/name"') as exc:
@@ -189,7 +194,7 @@ def test_repo_and_owner_scopes_on_same_org_coexist() -> None:
     another is fine -- git's longest-prefix match resolves it."""
     providers = {
         "widgets-bot": GitHubCredentialProvider(
-            config_name="widgets-bot", repo="acme/widgets"
+            config_name="widgets-bot", repos=["acme/widgets"]
         ),
         "acme-bot": GitHubCredentialProvider(config_name="acme-bot", owner="acme"),
     }
@@ -354,7 +359,7 @@ def test_toml_github_scope_keys_warn_and_unscope(tmp_path: Path) -> None:
 
         [git_credentials.gh]
         provider = "github"
-        repo = "acme/widgets"
+        repos = ["acme/widgets"]
         """)
     )
     config = load_config(cfg, warn_issues=False)
@@ -386,3 +391,19 @@ def test_workspace_repo_userinfo_warns(tmp_path: Path) -> None:
     )
     config = load_config(cfg, warn_issues=False)
     assert any("embeds a username" in issue for issue in config.config_issues)
+
+
+def test_multi_repo_list_emits_sections_per_repo() -> None:
+    """`repos` is always a list; every entry gets both remote-spelling
+    sections, all sharing one username and one store line."""
+    p = GitHubCredentialProvider(
+        config_name="wf-bot", repos=["acme/widgets", "acme/gadgets"]
+    )
+    assert p.credential_lines("tok") == ["https://wf-bot:tok@github.com"]
+    urls = [url for url, _u in p.gitconfig_sections()]
+    assert urls == [
+        "https://github.com/acme/widgets",
+        "https://github.com/acme/widgets.git",
+        "https://github.com/acme/gadgets",
+        "https://github.com/acme/gadgets.git",
+    ]

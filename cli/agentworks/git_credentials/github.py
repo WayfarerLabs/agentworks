@@ -20,11 +20,11 @@ from agentworks.errors import ConfigError
 from agentworks.git_credentials.base import GitCredentialProvider
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping
+    from collections.abc import Mapping, Sequence
 
     from agentworks.resources.reference import ConfigReference
 
-_SCOPE_FIELDS = {"repo", "owner"}
+_SCOPE_FIELDS = {"repos", "owner"}
 
 # GitHub owner/repo name charset. Interpolated verbatim into gitconfig
 # section headers and store URLs, so anything outside this set (quotes,
@@ -34,45 +34,64 @@ _NAME_RE = re.compile(r"^[A-Za-z0-9._-]+$")
 
 def _validated_scope(
     owner_ctx: str, config: Mapping[str, object]
-) -> tuple[str | None, str | None]:
+) -> tuple[tuple[str, ...], str | None]:
     """Shared shape validation for the github ``provider_config`` blob.
 
-    Returns ``(repo, owner)``; at most one is non-None. Raises
-    ``ConfigError`` with ``owner_ctx`` framing on any violation.
+    Returns ``(repos, owner)``; at most one is non-empty/non-None.
+    ``repos`` is always a list in the config (even for one repo -- a
+    fine-grained PAT may cover several selected repos, and the plural
+    field makes that visible). Raises ``ConfigError`` with
+    ``owner_ctx`` framing on any violation.
     """
     unknown = sorted(set(config) - _SCOPE_FIELDS)
+    if unknown == ["repo"]:
+        raise ConfigError(
+            f"{owner_ctx}: unknown github provider field 'repo'; the "
+            f"field is 'repos' (a list, even for one repo)"
+        )
     if unknown:
         raise ConfigError(
             f"{owner_ctx}: unknown github provider field(s): {', '.join(unknown)}"
         )
-    repo = config.get("repo")
+    repos_raw = config.get("repos")
     org = config.get("owner")
-    if repo is not None and org is not None:
+    if repos_raw is not None and org is not None:
         raise ConfigError(
-            f"{owner_ctx}: repo and owner are mutually exclusive (a "
+            f"{owner_ctx}: repos and owner are mutually exclusive (a "
             f"fine-grained PAT is scoped to one or the other)"
         )
-    if repo is not None and (
-        not isinstance(repo, str)
-        or repo.count("/") != 1
-        or not all(_NAME_RE.match(part) for part in repo.split("/"))
-    ):
-        raise ConfigError(
-            f'{owner_ctx}.repo must be an "owner/name" string '
-            f"(GitHub name characters only)"
+
+    def _valid_repo(value: object) -> bool:
+        return (
+            isinstance(value, str)
+            and value.count("/") == 1
+            and all(_NAME_RE.match(part) for part in value.split("/"))
         )
+
+    repos: tuple[str, ...] = ()
+    if repos_raw is not None:
+        if (
+            not isinstance(repos_raw, list)
+            or not repos_raw
+            or not all(_valid_repo(entry) for entry in repos_raw)
+        ):
+            raise ConfigError(
+                f'{owner_ctx}.repos must be a non-empty list of '
+                f'"owner/name" strings (GitHub name characters only)'
+            )
+        repos = tuple(dict.fromkeys(repos_raw))  # preserve order, drop repeats
     if org is not None and (not isinstance(org, str) or not _NAME_RE.match(org)):
         raise ConfigError(
             f"{owner_ctx}.owner must be a GitHub user/org name (no slash)"
         )
-    return (repo if isinstance(repo, str) else None, org if isinstance(org, str) else None)
+    return (repos, org if isinstance(org, str) else None)
 
 
 class GitHubCredentialProvider(GitCredentialProvider):
     """Configures git credentials for GitHub via a personal access token.
 
-    Optionally scoped via ``provider_config``: ``repo: "owner/name"``
-    (a single-repo fine-grained PAT) or ``owner: "org"`` (an
+    Optionally scoped via ``provider_config``: ``repos: ["owner/name", ...]``
+    (the fine-grained PAT's selected repos) or ``owner: "org"`` (an
     owner-scoped PAT covering any repo under that owner, including
     repos cloned ad hoc that no workspace declared). Unscoped
     credentials keep the released host-level line verbatim.
@@ -92,15 +111,15 @@ class GitHubCredentialProvider(GitCredentialProvider):
         config_name: str,
         description: str | None = None,
         *,
-        repo: str | None = None,
+        repos: Sequence[str] = (),
         owner: str | None = None,
     ) -> None:
         super().__init__(config_name, description)
-        self._repo = repo
+        self._repos = tuple(repos)
         self._owner = owner
 
     def credential_lines(self, token: str) -> list[str]:
-        if self._repo or self._owner:
+        if self._repos or self._owner:
             # Scoped: the credential's resource name doubles as the
             # store username -- the join key the gitconfig context
             # sections select by. GitHub ignores the username when the
@@ -109,14 +128,16 @@ class GitHubCredentialProvider(GitCredentialProvider):
         return [f"https://x-access-token:{token}@github.com"]
 
     def gitconfig_sections(self) -> list[tuple[str, str]]:
-        if self._repo:
-            # Cover both remote spellings: agents clone with and
-            # without the .git suffix, and context matching is
+        if self._repos:
+            # Cover both remote spellings per repo: agents clone with
+            # and without the .git suffix, and context matching is
             # slash-boundary-exact, so "repo" does not prefix-match
-            # "repo.git".
+            # "repo.git". All repos share this credential's username
+            # (and therefore its single store line).
             return [
-                (f"https://github.com/{self._repo}", self._config_name),
-                (f"https://github.com/{self._repo}.git", self._config_name),
+                (f"https://github.com/{repo}{suffix}", self._config_name)
+                for repo in self._repos
+                for suffix in ("", ".git")
             ]
         if self._owner:
             return [(f"https://github.com/{self._owner}/", self._config_name)]
