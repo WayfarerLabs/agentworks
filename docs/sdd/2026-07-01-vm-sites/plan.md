@@ -1,0 +1,257 @@
+# VM sites and platforms -- implementation plan
+
+**Status**: not started. Phases follow the HLA's sequencing sketch, with two refinements recorded
+there-vs-here: `defaults.site` parsing (plus the deprecated `defaults.platform` alias) and the
+`vm-template.site` field land in Phase 1 with the rest of the config/kind surface, so Phase 3's
+selection precedence has both to read; only the operator-facing flag/completion work stays in
+Phase 5.
+
+**Compile boundaries**: Phases 1 through 3 are one logical commit boundary, mirroring the
+polymorphic-transports precedent. Phase 1 opens a non-compiling window when the platform classes
+reshape to the new protocol (old dispatch and manager callers break); Phase 2 provides the DB
+columns the new read paths need; Phase 3 rewires the callers and closes the window. If work must
+pause partway, the pause point is the end of Phase 3. Remote-Lima VMs are additionally
+non-functional between the Phase 2 migration and the operator adding their site manifests; that is
+the designed R3 stranded state, and mid-branch it also applies to dev databases.
+
+## Phase 1: Kinds, protocol, registry, dispatch
+
+New resource machinery plus the platform-class reshape. Additive pieces first; the reshape opens the
+non-compiling window at the end of the phase.
+
+- [ ] `cli/agentworks/vms/base.py`: add `ProvisionRequest` (vm_name, hostname, system_slug,
+      admin_username, ssh_public_key, tailscale_auth_key nullable,
+      cpus/memory_gib/disk_gib/swap_gib, azure_vm_size) and reshape `ProvisionResult`
+      (native_transport, platform_metadata, bootstrap_complete, tailscale_ip). Rename the ABC
+      `VMProvisioner` to `VMPlatform` with the R8 surface: abstract
+      create/start/stop/delete/status/display_backend_name; concrete native_transport (None default)
+      / post_tailscale_ready / transient_route / vm_active. Class-level contract: `name`,
+      `validate_config(owner, config) -> tuple[ConfigReference, ...]` (classmethod,
+      `GitCredentialProvider` shape, including the may-be-deprecated note),
+      `shared_backend(platform_config) -> bool` (classmethod), and
+      `legacy_platform_metadata(row, legacy)` (pure).
+- [ ] `cli/agentworks/vms/platforms/`: `git mv` from `vms/provisioners/`; class renames
+      (`LimaProvisioner` to `LimaPlatform`, etc.). Constructors become uniform
+      `cls(site_name, platform_config, secret_values)`:
+  - [ ] `lima.py`: `vm_host` optional key in platform_config replaces the `vm_host_ssh` constructor
+        arg; `is_remote` derives from it; `shared_backend` computes from it; read paths move to
+        `platform_metadata['instance_name']`.
+  - [ ] `azure.py`: platform_config = subscription_id / resource_group / region (replaces
+        `config.azure` reads); read paths move to `platform_metadata['resource_id']`;
+        `display_backend_name` returns the VM-name portion.
+  - [ ] `wsl2.py`: read paths (`_keepalive`, start/stop/delete/status) move from `vm.name` to
+        `platform_metadata['distro_name']`.
+  - [ ] `proxmox.py`: delete the `PROXMOX_TOKEN_SECRET` env read; the token arrives via
+        `secret_values` (declared by `validate_config` as `token_secret`, default
+        `proxmox-token-secret`); ops read `platform_metadata['vmid']` and `['node']` with the
+        platform_config-node fallback plus opportunistic write-back; `native_transport` returns
+        `None`; the operator-facing error embedding a `docs/sdd/` path is rewritten.
+  - [ ] `__init__.py`: `VM_PLATFORM_REGISTRY`, `@register`, and the capability publisher
+        (`vm-platform` rows, `Origin.built_in(source="agentworks.vms")`).
+- [ ] `cli/agentworks/vms/base.py` + `cli/agentworks/errors.py` +
+      `cli/agentworks/transports/__init__.py`: the noun-retirement renames:
+      `provisioner_transport()` method to `native_transport()`, the transports factory
+      `provisioner_transport` to `native_transport` (None check replaces the proxmox name branch),
+      `ProvisionerError` to `ProvisioningError`.
+- [ ] `cli/agentworks/vms/kinds.py`: register both kinds alongside the existing vm-template kind.
+      `vm-platform`: category `capability`, error miss policy, description "VM backend
+      implementations (code)". `vm-site`: category `declarable`, `builtin_override = "reserved"`,
+      error miss policy; decode takes `spec.platform` (required, `ResourceReference` to
+      `vm-platform/<name>`) + `spec.platform_config` (optional mapping, no shadowing of top-level
+      spec keys); registered platforms validate at decode via `validate_config`
+      (defer-on-unknown-platform to the finalize miss policy). `VMSiteDecl` dataclass with nested
+      `platform_config` and `referenced_resources()` emitting the platform edge plus
+      `validate_config`'s ConfigReferences with the site as source.
+- [ ] `cli/agentworks/vms/kinds.py` + `cli/agentworks/vms/template.py`: vm-template gains the
+      optional `site` field (bare-name reference, edge to `vm-site`); TOML and YAML decode parity.
+- [ ] `cli/agentworks/manifests/builtin/vm-sites.yaml`: bundled `lima` and `wsl2` sites (platform
+      matching the name, empty platform_config). First real bundle content; wire through
+      `manifests/builtin.py`.
+- [ ] `cli/agentworks/manifests/samples/vm-site.yaml`: sample documents (an azure site with
+      platform_config, a remote-lima site); loader-verified via the existing samples test.
+- [ ] `cli/agentworks/config.py`: legacy `[azure]` / `[proxmox]` loader/publisher (per ADR 0016 this
+      is their home): parse flat sections, nest into `platform_config` at the boundary, publish
+      `vm-site/azure` / `vm-site/proxmox` rows with TOML `file:line`, join the aggregated
+      deprecation warning. `defaults.site` parsing with `defaults.platform` as a one-release
+      deprecated alias; `defaults.vm_host` becomes the hard `ConfigError` with the site-manifest
+      snippet.
+- [ ] `cli/agentworks/vms/sites.py`: `resolve_site(name, registry, *, secret_values=None)` (KeyError
+      from `registry.lookup` maps to the `ConfigError` + ready-to-paste manifest hint),
+      `platform_for(vm, registry, **kw)`, `_config_secrets`, `vms.validate_sites(config, registry)`
+      (wired into `build_registry` beside `secrets.validate_chain`), `_site_manifest_hint`.
+- [ ] `cli/agentworks/manifests/decode.py`: `KIND_SECTIONS` grows the multi-section-per-kind shape;
+      vm-site maps to the `azure` and `proxmox` sections with section-name-becomes-resource-name
+      semantics; `cli/agentworks/migrate/planning.py` follows.
+- [ ] Tests (new): `cli/tests/vms/test_vm_site_kind.py` (decode, shadowing rejection, reserved
+      built-in names, unknown-platform deferral, reference emission),
+      `cli/tests/vms/test_vm_platform_kind.py` (capability rows, not declarable),
+      `cli/tests/vms/test_sites_dispatch.py` (resolve_site happy path, stranded ConfigError + hint,
+      secret threading), `cli/tests/vms/test_platform_validate_config.py` (all four platforms:
+      unknown keys, lima vm_host, proxmox token_secret reference + default, azure required keys) --
+      joins the pinned `test_capability_config_contract.py` patterns.
+- [ ] Tests (updated): `cli/tests/manifests/test_samples.py` and `test_decode_parity.py` pick up
+      vm-site; `cli/tests/test_resource_kinds.py` counts the two new kinds;
+      `cli/tests/test_config_deprecation_warnings.py` covers `[azure]` / `[proxmox]` and the
+      `defaults.platform` alias; `cli/tests/test_resource_migrate.py` covers the vm-site section
+      mapping end to end (migrate `[azure]` to a manifest, registry-equivalence verification).
+
+**Definition of done**: kinds, publishers, dispatch, and samples in place with their tests green in
+isolation. The platform-class reshape has landed, so old dispatch (`get_provisioner*`) and manager
+callers DO NOT compile; that is the expected open window (closed end of Phase 3).
+
+## Phase 2: DB migration
+
+One Python migration version; runner support first.
+
+- [ ] `cli/agentworks/db.py`: `MIGRATIONS` values become `str | Callable`; callables receive
+      `(conn, context)` where `context.legacy` is the best-effort, unvalidated parse of the config
+      file's legacy TOML sections (missing/unreadable config yields an empty mapping; tolerant by
+      construction -- nothing may depend on it succeeding).
+- [ ] The migration step, in order:
+  - [ ] Add `platform_metadata TEXT NOT NULL DEFAULT '{}'`,
+        `operator_stopped INTEGER NOT NULL     DEFAULT 0`, `hostname TEXT`.
+  - [ ] Backfill `platform_metadata` per row via the owning platform's
+        `legacy_platform_metadata(row, context.legacy)` hook (lima instance_name, wsl2 distro_name,
+        azure resource_id, proxmox vmid + node-if-present; absent keys omitted, never empty
+        strings). Backfill `hostname = '{platform}--{name}'`.
+  - [ ] Site rename: remote-Lima rows (`vm_host_name` set) get `site = vm_host_name`; collect the
+        referenced `vm_hosts` rows and print ready-to-paste `vm-site` manifest documents once at the
+        end (suffix `-host` on reserved-name collision, and say so). All other rows keep their value
+        (already the right site name).
+  - [ ] Rebuild the `vms` table (the `vm_host_name` FK blocks `DROP COLUMN`): drop
+        `azure_resource_id` / `wsl_distro_name` / `proxmox_vmid` / `vm_host_name`, rename `platform`
+        to `site`, declare `hostname NOT NULL`. Drop `vm_hosts`.
+  - [ ] `CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT)`.
+- [ ] `cli/agentworks/db.py`: `VMRow` becomes `site: str`, `platform_metadata: dict[str, str]`
+      (JSON-parsed), `operator_stopped: bool`, `hostname: str`; legacy fields removed; `insert_vm` /
+      `update_vm_*` helpers follow (including `set_operator_stopped`); `VMHostRow` and the vm_hosts
+      accessors delete.
+- [ ] Mechanical sweep: `vm.platform` readers become `vm.site` where they name the site
+      (`vms/manager.py` list/describe, `sessions/`, `agents/`, `workspaces/`, `cli/_helpers.py`,
+      `env/show.py`); display strings stay correct because the values are unchanged.
+- [ ] Tests: `cli/tests/test_db_migration_vm_sites.py` -- fixture DBs at the prior schema version
+      covering all four platforms plus a remote-Lima row; assert backfilled metadata shapes, the
+      hostname backfill, the site rename, the printed snippet, the NOT NULL rebuild, empty-`legacy`
+      behavior (proxmox node omitted), and settings-table creation. `cli/tests/conftest.py` VM
+      fixtures move to the new row shape.
+
+**Definition of done**: a pre-SDD database opens cleanly and lands on the new schema with correct
+data; row helpers and fixtures compile against the new shape. The Phase 1 window is still open
+(manager callers unmigrated).
+
+## Phase 3: Manager rewiring
+
+Close the window: every caller onto the new dispatch, gate, and request shapes.
+
+- [ ] `cli/agentworks/vms/manager.py`: `create_vm` resolves the site (flag, then `template.site`,
+      then `defaults.site`, then `lima`), runs the composition-root ordering from the HLA (registry
+      -> site decl -> `extra_decls` for site secrets -> single resolve -> bind), computes the R11
+      hostname, builds `ProvisionRequest`, and calls `platform.create(request)`; writes
+      `platform_metadata` verbatim, `hostname`, and `operator_stopped = False`. Legacy
+      `update_vm_azure_resource_id`-style writes delete.
+- [ ] `cli/agentworks/vms/manager.py`: `ensure_active(db, config, vm, platform)` (fast-path
+      tailscale probe; STOPPED/DEALLOCATED honoring `operator_stopped`; UNKNOWN proceeds; post-start
+      `_ensure_tailscale` inside `vm_active`) and `keep_active(db, config, vm, platform)` /
+      `keep_actives` taking the BOUND platform. `keep_vm_active` / `keep_vms_active` /
+      `get_provisioner` / `get_provisioner_for_vm` delete.
+- [ ] `cli/agentworks/vms/manager.py`: `start_vm` clears `operator_stopped` then starts; `stop_vm`
+      sets it BEFORE the already-stopped short-circuit; `describe_vm` shows Site, Platform, and
+      `display_backend_name()`; `vm list` header PLATFORM becomes SITE; status rendering pairs
+      observed state with the flag (`stopped (operator)` vs `stopped (idle)`).
+- [ ] `cli/agentworks/workspaces/manager.py`: `_ensure_vm_running` deletes; its callers
+      (`sessions/console.py`, `sessions/multi_console.py`, `agents/manager.py`, and the in-module
+      sites) move to the public gate, with their composition roots binding the platform per the HLA
+      ordering. The existing `keep_vm_active` call sites across `sessions/`, `agents/`,
+      `workspaces/` migrate to `keep_active` with the bound platform threaded.
+- [ ] `cli/agentworks/vms/initializer.py`: Phase A reads `vm.hostname` (stop re-deriving via
+      `vm_hostname`) and `platform_metadata`; `bootstrap_script.vm_hostname()` deletes;
+      `initialize_vm` / `reinit` composition roots bind the platform (a stranded remote-Lima VM
+      fails here with the R3 ConfigError, before any env baking).
+- [ ] `cli/agentworks/transports/__init__.py` + `cli/agentworks/vms/backup.py` + remaining callers:
+      adopt the renamed factory and `platform_for`; `vm shell --provisioner`'s internals go through
+      the bound platform.
+- [ ] Tests: gate semantics (`cli/tests/vms/test_ensure_active.py`: fast path skips `status()`,
+      auto-resume, operator_stopped StateError, UNKNOWN proceeds, stop-sets-flag-before-shortcut);
+      `create_vm` request shape per platform; proxmox token end to end (resolve pass carries
+      `proxmox-token-secret`, platform receives the value, no env read); existing suites
+      (`test_initializer.py`, `test_vm_shell_provisioner.py`, session/agent/workspace suites)
+      updated to the new shapes.
+
+**Definition of done**: the codebase compiles cleanly; full pytest passes; `git grep` finds no
+`VMProvisioner`, `get_provisioner`, `keep_vm_active`, `ProvisionerError`, or `vm_hosts` references
+outside historical SDDs. Pause point if needed.
+
+## Phase 4: Slug, prompts, SSH config, hostname, identity env
+
+- [ ] `cli/agentworks/vms/manager.py` (create path): first-create slug prompt (settings row absent;
+      empty answer writes the empty-value declined row; non-interactive neither prompts nor writes);
+      deferred shared-backend nudge (platform's `shared_backend(platform_config)`, skipped
+      non-interactively, `never-remind-me` suppression key); slug format validation (3-20, lowercase
+      alnum + dash, no leading/trailing dash).
+- [ ] Slug consumption: `ProvisionRequest.system_slug` + R11 hostname (`{slug}-{vm.name}` /
+      `{vm.name}`); per-platform backend-side naming with the R9 collision pre-flight (auto-suffix
+      for soft-name backends later; StateError with guidance for all four in-tree platforms).
+- [ ] `cli/agentworks/ssh_config.py`: managed file `agentworks-{slug}.conf` when slug set (fallback
+      `agentworks.conf`); first sync after the slug is set removes the old file; legacy
+      (non-config.d) mode untouched.
+- [ ] `cli/agentworks/env/identity.py`: `ResourceContext.vm_host` removed, `site` added;
+      `AGENTWORKS_SITE` emitted; `AGENTWORKS_VM_HOST` gone; `AGENTWORKS_PLATFORM` resolved at the
+      init/reinit composition root via the site declaration. Permanent env-var docs (not the locked
+      env-and-secrets SDD) updated in Phase 6.
+- [ ] Tests: settings encoding (absent vs empty vs value), prompt one-shot behavior including
+      non-interactive, nudge suppression, hostname composition + 51-char bound, ssh-config file
+      naming + old-file removal, identity env emission.
+
+**Definition of done**: slug-null behavior identical to Phase 3; slug-set behavior covered by tests;
+existing VMs keep hostnames and env values.
+
+## Phase 5: CLI surface and completions
+
+- [ ] `cli/agentworks/cli/commands/vm.py`: `--platform` becomes `--site` (static Choice removed;
+      validation at dispatch); `vm shell --provisioner` becomes boolean `--platform` with
+      `--provisioner` as a hidden alias for one release; help text sweep.
+- [ ] `cli/agentworks/cli/commands/vm_host.py` + `cli/agentworks/vm_hosts/`: removed.
+- [ ] `cli/agentworks/completions/spec.py`: `("vm.create", "site")` maps to a `sites` completer
+      (sourced from `agw resource list --kind vm-site --names-only`, splitting `vm-site/<name>` like
+      `resource_names`); `vm_host` entries removed; shell generators + `agw completion` regenerated.
+- [ ] `agw doctor`: every `vm.site` resolves (stranded rows report the paste-ready snippet); slug
+      row.
+- [ ] `cli/agentworks/sample-config.toml`: `[azure]` / `[proxmox]` examples replaced by a pointer at
+      `agw resource sample vm-site`; `defaults.site` documented with the deprecated
+      `defaults.platform` alias noted.
+- [ ] Tests: `test_completions.py` (new completer, removed entries), CLI smoke tests for the renamed
+      flags, doctor rows, `test_sample_config.py`.
+
+**Definition of done**: full CLI surface matches FRD R13; completions regenerate cleanly.
+
+## Phase 6: Tests, docs, release notes, PR
+
+- [ ] Full pytest; no regressions vs the pre-branch count.
+- [ ] `ruff` / `mypy` package-wide; `./scripts/lint-files.sh`.
+- [ ] `docs/guides/resources.md`: vm-site and vm-platform join the kind story; `cli/README.md`:
+      env-var inventory (`AGENTWORKS_SITE` added, `AGENTWORKS_VM_HOST` retired) and the
+      settings-vs-resources reference; ADR 0016 gets a one-line cross-reference to this SDD as the
+      vm-site implementation.
+- [ ] Release-notes text: the `!`-flagged breaks (`--platform` to `--site`, `vm shell` flag,
+      `PROXMOX_TOKEN_SECRET` sourcing) with their one-line remediations.
+- [ ] Open the PR; agentworks-reviewer round on the branch.
+
+**Definition of done**: PR open, CI green, reviewer findings addressed. `locked.md` lands after
+merge per the SDD lifecycle.
+
+## Risk and mitigations
+
+- **Non-compiling window (Phases 1-3)**: the protocol reshape breaks old dispatch until the manager
+  rewires. Mitigated by the declared pause point (end of Phase 3) and by Phase 1's new machinery
+  carrying isolated tests that pass before the window opens.
+- **One-shot destructive migration (Phase 2)**: the vms rebuild drops columns and a table. Mitigated
+  by fixture-DB tests for every platform shape, the remote-Lima snippet printing being part of the
+  same step (nothing to forget), and the pure backfill hooks being unit-testable without a database.
+- **Proxmox token threading (Phase 3)**: the one platform whose gate calls need secrets; a missed
+  composition root surfaces as a `secret_values` KeyError instead of a silent env fallback (the env
+  read is deleted, so there is no shadow path). The end-to-end test pins the resolve pass.
+- **Remote-Lima stranding**: designed (R3), but operators must see the snippet more than once.
+  Mitigated by printing at migration, repeating in the per-op `ConfigError`, and the doctor row.
+- **Breadth of the `keep_vm_active` sweep**: many call sites across sessions/agents/workspaces.
+  Mitigated by deleting the old names in the same phase (stale callers fail loudly at import, not
+  silently at runtime).

@@ -3,14 +3,17 @@
   "import": ["../../../.cspell.json"],
   "words": [
     "abstractmethod",
+    "alnum",
     "contextlib",
     "contextmanager",
     "declarable",
     "hostnames",
     "memberless",
     "nullcontext",
+    "remediations",
     "repoint",
     "tombstoning",
+    "unmigrated",
     "unvalidated"
   ]
 }
