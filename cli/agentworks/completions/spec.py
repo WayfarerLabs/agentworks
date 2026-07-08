@@ -298,9 +298,18 @@ def _build_param_spec(param: _ClickParameter, command_path: str) -> ParamSpec:
 
     choices = None
     # ``Choice`` param types expose ``.choices``; other ParamType subclasses
-    # (STRING, INT, etc.) do not.
-    if hasattr(param.type, "choices"):
-        choices = list(param.type.choices)
+    # (STRING, INT, etc.) do not. Typer wraps ``click_type=`` params in its
+    # ``FuncParamType``, which hides the real type on ``.func`` -- unwrap
+    # one level so Choice values survive into the completion tree
+    # (without this, every ``click_type=click.Choice(...)`` option
+    # silently loses static completion).
+    ptype = param.type
+    if not hasattr(ptype, "choices"):
+        inner = getattr(ptype, "func", None)
+        if inner is not None and hasattr(inner, "choices"):
+            ptype = inner
+    if hasattr(ptype, "choices"):
+        choices = list(ptype.choices)
 
     opts: list[str] = []
     if is_option:

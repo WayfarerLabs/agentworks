@@ -593,3 +593,46 @@ class TestKindsSourcedCompleter:
                 f"{shell} resource_kinds still scrapes resource list: "
                 f"{source!r}"
             )
+
+
+class TestStaticChoiceCompletion:
+    """click.Choice values reach the completion tree. Typer wraps
+    ``click_type=`` params in ``FuncParamType`` (the real type hides on
+    ``.func``); the spec extraction unwraps one level -- without it,
+    every Choice-typed option silently loses static completion (the
+    generators' choices branches were dead code)."""
+
+    def test_migrate_option_choices_extracted(self) -> None:
+        from agentworks.cli import app
+        from agentworks.completions.spec import build_spec
+
+        migrate = build_spec(app).subcommands["resource"].subcommands["migrate"]
+        by_name = {p.name: p.choices for p in migrate.params}
+        assert by_name["layout"] == ["per-kind", "single", "per-resource"]
+        assert by_name["toml"] == ["comment", "delete"]
+
+    def test_sample_kind_choices_extracted(self) -> None:
+        from agentworks.cli import app
+        from agentworks.completions.spec import build_spec
+        from agentworks.manifests.samples import SAMPLE_KINDS
+
+        sample = build_spec(app).subcommands["resource"].subcommands["sample"]
+        (kind,) = [p for p in sample.params if p.name == "kind"]
+        assert kind.choices == list(SAMPLE_KINDS)
+
+    def test_all_shells_emit_toml_choices(self) -> None:
+        from agentworks.cli import app
+        from agentworks.completions.bash import generate_bash
+        from agentworks.completions.powershell import generate_powershell
+        from agentworks.completions.spec import build_spec
+        from agentworks.completions.zsh import generate_zsh
+
+        spec = build_spec(app)
+        # Shell-specific emission shapes (the zsh/bash forms put both
+        # choices on one line; powershell emits one CompletionResult per
+        # choice).
+        assert ":toml:(comment delete)" in generate_zsh(spec, "t")
+        assert 'compgen -W "comment delete"' in generate_bash(spec, "t")
+        ps = generate_powershell(spec, "t")
+        assert "::new('comment', 'comment'" in ps
+        assert "::new('delete', 'delete'" in ps
