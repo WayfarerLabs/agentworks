@@ -22,7 +22,7 @@ import dataclasses
 from typing import TYPE_CHECKING, Any
 
 from agentworks.errors import ConfigError
-from agentworks.resources.kind import KIND_REGISTRY, SYNTHESIZED_SINGLETON_KINDS
+from agentworks.resources.kind import KIND_REGISTRY
 
 if TYPE_CHECKING:
     from collections.abc import Iterator, Sequence
@@ -150,18 +150,6 @@ class Registry:
             existing_variant == "operator-declared"
             and incoming.variant == "operator-declared"
         ):
-            # The TOML publisher always publishes the two singleton rows,
-            # synthesizing empty defaults (SourceLocation line == 0) when
-            # the operator omitted the sections. Only those synthesized
-            # singletons are replaceable by a real operator declaration;
-            # every other operator-vs-operator collision (including
-            # TOML-vs-manifest) is a duplicate. The exemption lives as
-            # long as the TOML publisher does (future-major retirement).
-            if (
-                kind in SYNTHESIZED_SINGLETON_KINDS
-                and getattr(existing_origin, "line", None) == 0
-            ):
-                return
             raise ConfigError(
                 f'duplicate {kind} "{name}": declared at '
                 f"{format_origin_line(existing_origin)} and "

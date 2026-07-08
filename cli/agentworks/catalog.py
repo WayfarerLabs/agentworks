@@ -481,7 +481,7 @@ class _AptSourceKind:
     """Implementation of ``ResourceKind`` for ``"apt-source"``."""
 
     kind: str = "apt-source"
-    description: str = "Apt repository definitions (key, source line)"
+    description: str = "3rd party apt repository definitions (key, source line)"
     miss_policy: Literal["auto-declare", "error"] = "error"
     auto_declare_names: frozenset[str] | None = None
     category: Literal["declarable", "capability"] = "declarable"
@@ -496,7 +496,7 @@ class _AptPackageKind:
     """Implementation of ``ResourceKind`` for ``"apt-package"``."""
 
     kind: str = "apt-package"
-    description: str = "Apt package sets, optionally tied to apt-sources"
+    description: str = "Named apt packages, optionally tied to apt-sources"
     miss_policy: Literal["auto-declare", "error"] = "error"
     auto_declare_names: frozenset[str] | None = None
     category: Literal["declarable", "capability"] = "declarable"

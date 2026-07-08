@@ -172,13 +172,17 @@ class Config:
     operator: OperatorConfig
     paths: PathsConfig
     defaults: DefaultsConfig
-    named_console: NamedConsoleConfig
+    # None = the operator's TOML has no [named_console] section; the
+    # framework's always-materialize pre-step auto-declares the default.
+    named_console: NamedConsoleConfig | None
     vm_templates: dict[str, VMTemplate]
     # The file this Config was loaded from. The resources directory
     # (YAML manifests) is resolved relative to it, so tests loading
     # from tmp paths never pick up the developer's real manifests.
     source_path: Path
-    admin: AdminConfig
+    # None = the operator's TOML has no [admin.*] sections (see
+    # named_console above).
+    admin: AdminConfig | None
     agent_templates: dict[str, AgentTemplate]
     session: SessionConfig
     session_templates: dict[str, SessionTemplate]
@@ -222,12 +226,11 @@ class Config:
         ``Config.named_console`` are operator-surface singletons today
         (one TOML block, one row published as ``admin-template:default``
         / ``named-console-template:default``), but their kinds are
-        named-multi-instance in the framework: a future SDD can grow the
-        operator surface to ``[admin_templates.<name>]`` /
-        ``[named_console_templates.<name>]`` without re-touching the
-        framework. Phase 0's loader always produces an instance even
-        when the operator's TOML omits all sections; Config.publish_to
-        always publishes it.
+        named-multi-instance in the framework. They publish only when
+        the operator actually declared the sections (``None`` = absent);
+        otherwise the framework's always-materialize pre-step
+        auto-declares the default, exactly like vm-template and
+        agent-template.
 
         ``secret_config`` is pure config and is NOT published: the
         chain is a setting that names resources, consumed by the
@@ -267,25 +270,24 @@ class Config:
             for name, resource in kind_dict.items():
                 registry.add(kind, name, resource, op_origin(resource.declared_at))
 
-        # Operator-surface-singleton kinds: framework treats them as
-        # named-multi-instance per Phase 2a.3, but today's loader only
-        # produces one row each (``admin-template:default`` /
-        # ``named-console-template:default``). admin-template's name is
-        # carried on the AdminConfig itself now -- still defaults to
-        # "default" -- so the future plurified surface can land without
-        # changing this publish line.
-        registry.add(
-            "admin-template",
-            self.admin.name,
-            self.admin,
-            op_origin(self.admin.declared_at),
-        )
-        registry.add(
-            "named-console-template",
-            "default",
-            self.named_console,
-            op_origin(self.named_console.declared_at),
-        )
+        # Operator-surface-singleton kinds publish only when declared;
+        # an absent section means the framework auto-declares the
+        # default at finalize (no synthesized placeholder rows, no
+        # collision exemption).
+        if self.admin is not None:
+            registry.add(
+                "admin-template",
+                self.admin.name,
+                self.admin,
+                op_origin(self.admin.declared_at),
+            )
+        if self.named_console is not None:
+            registry.add(
+                "named-console-template",
+                "default",
+                self.named_console,
+                op_origin(self.named_console.declared_at),
+            )
 
 
 # -- Loading ---------------------------------------------------------------
@@ -554,7 +556,13 @@ def _load_named_console(
     data: dict[str, object],
     issues: list[str],
     decls: _SectionLineMap,
-) -> NamedConsoleConfig:
+) -> NamedConsoleConfig | None:
+    if "named_console" not in data:
+        # Nothing declared: the framework auto-declares the default row
+        # (always-materialize), same as every other reserved-default
+        # kind. The manifest decoder always passes the key, so this
+        # None path is TOML-only.
+        return None
     raw = data.get("named_console", {})
     if not isinstance(raw, dict):
         raise ConfigError("[named_console] must be a table")
@@ -695,8 +703,15 @@ def _load_admin_config(
     data: dict[str, object],
     issues: list[str],
     decls: _SectionLineMap,
-) -> AdminConfig:
-    """Load admin per-user config from [admin.config]."""
+) -> AdminConfig | None:
+    """Load admin per-user config from [admin.config].
+
+    Returns ``None`` when the TOML has no ``[admin.*]`` sections at all:
+    the framework auto-declares ``admin-template:default`` instead
+    (always-materialize). The manifest decoder always passes the key.
+    """
+    if "admin" not in data:
+        return None
     top = data.get("admin", {})
     if not isinstance(top, dict):
         raise ConfigError("[admin] must be a table")

@@ -62,6 +62,7 @@ def config_dir(tmp_path: Path) -> Path:
 
 def test_load_valid_config(config_dir: Path) -> None:
     cfg = load_config(config_dir)
+    assert cfg.admin is not None
     assert cfg.admin.shell == "zsh"
     from agentworks.vms.templates import resolve_from_dict as _resolve_vm
 
@@ -74,6 +75,7 @@ def test_load_valid_config(config_dir: Path) -> None:
     assert cfg.workspace_templates["child"].tmuxinator is False
     assert cfg.git_credentials["github"].provider == "github"
     assert cfg.git_credentials["azdo"].provider_config == {"org": "my-org"}
+    assert cfg.admin is not None
     assert cfg.admin.git_credentials == ["github"]
 
 
@@ -471,6 +473,7 @@ def test_claude_marketplaces_loads_cleanly(tmp_path: Path) -> None:
         claude_plugins = ["my-plugin@my-marketplace"]
     """)
     cfg = load_config(config_file, warn_issues=False)
+    assert cfg.admin is not None
     assert cfg.admin.claude_marketplaces == ["https://github.com/example/tools#v1"]
     assert cfg.admin.claude_plugins == ["my-plugin@my-marketplace"]
 
@@ -500,12 +503,17 @@ def test_claude_marketplaces_rejects_string(tmp_path: Path) -> None:
 
 
 def test_named_console_tmux_layout_default_when_section_missing(tmp_path: Path) -> None:
-    """No [named_console] section produces the aw-session-vertical default
-    -- the layout the Named Console feature was designed around (one
-    privileged session pane on top, helper shells underneath)."""
+    """No [named_console] section: the loader publishes nothing and the
+    framework auto-declares the default, whose tmux_layout is the
+    aw-session-vertical default the Named Console feature was designed
+    around (one privileged session pane on top, helper shells under)."""
+    from agentworks.bootstrap import build_registry
+
     config_file = _minimal_config(tmp_path)
     cfg = load_config(config_file)
-    assert cfg.named_console.tmux_layout == "aw-session-vertical"
+    assert cfg.named_console is None
+    nc = build_registry(cfg).lookup("named-console-template", "default")
+    assert nc.tmux_layout == "aw-session-vertical"
 
 
 @pytest.mark.parametrize(
@@ -527,6 +535,7 @@ def test_named_console_tmux_layout_accepts_valid_presets(tmp_path: Path, layout:
         tmux_layout = "{layout}"
     """)
     cfg = load_config(config_file)
+    assert cfg.named_console is not None
     assert cfg.named_console.tmux_layout == layout
 
 

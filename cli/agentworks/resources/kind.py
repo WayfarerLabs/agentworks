@@ -187,11 +187,6 @@ class NoUnreferencedDefaultError(Exception):
     """
 
 
-# Operator-surface singleton kinds whose rows the TOML publisher
-# synthesizes (SourceLocation line == 0) when the operator omits the
-# sections; see Registry._check_collision.
-SYNTHESIZED_SINGLETON_KINDS = frozenset({"admin-template", "named-console-template"})
-
 # Reserved Origin source kind for always-materialized rows. The string
 # "framework" must not be used as a real kind name in ``KIND_REGISTRY``.
 ALWAYS_MATERIALIZE_SOURCE: tuple[str, str] = ("framework", "always-materialize")

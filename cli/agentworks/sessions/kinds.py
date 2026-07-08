@@ -44,7 +44,7 @@ class _SessionTemplateKind:
     """Implementation of ``ResourceKind`` for ``"session-template"``."""
 
     kind: str = "session-template"
-    description: str = "Session launch templates (command, restart, env)"
+    description: str = "Session templates (command, restart, env)"
     miss_policy: Literal["auto-declare", "error"] = "auto-declare"
     auto_declare_names: frozenset[str] | None = frozenset({"default"})
     category: Literal["declarable", "capability"] = "declarable"
@@ -83,7 +83,7 @@ class _NamedConsoleTemplateKind:
     """Implementation of ``ResourceKind`` for ``"named-console-template"``."""
 
     kind: str = "named-console-template"
-    description: str = "Named-console settings (only 'default' selectable today)"
+    description: str = "Named console settings"
     miss_policy: Literal["auto-declare", "error"] = "auto-declare"
     auto_declare_names: frozenset[str] | None = frozenset({"default"})
     category: Literal["declarable", "capability"] = "declarable"

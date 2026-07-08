@@ -557,6 +557,17 @@ declarable row dataclasses and capability kinds alike live next to the code that
       `vm create --admin-template` and `console create --template` to close the loop, with per-type
       conversion specifics.
 
+- [x] Placeholder rows die (maintainer): the TOML publisher publishes admin-template /
+      named-console-template ONLY when the operator actually declared the sections (`Config.admin` /
+      `Config.named_console` are now Optional; the loaders return None for absent sections); an
+      undeclared default is auto-declared by the framework's always-materialize pre-step, exactly
+      like vm-template/agent-template. This deletes `SYNTHESIZED_SINGLETON_KINDS` and the registry's
+      collision exemption outright -- the last domain knowledge in the framework module and the wart
+      the Phase 6 sweep would otherwise have had to remember. Origin display for undeclared defaults
+      changes from operator-declared (config.toml:0) to auto -- more honest. Pins flipped
+      accordingly, plus a new end-to-end pin that a manifest-declared default with no TOML sections
+      is simply the only row (the scenario the exemption existed for).
+
 Definition of done: `import agentworks.resources` fully populates KIND_REGISTRY (14 kinds);
 `config.py` contains no resource dataclasses or kind logic; CI green; reviewer-approved.
 

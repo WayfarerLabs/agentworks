@@ -184,11 +184,10 @@ def test_admin_template_kind_errors_on_unreserved_name_reference(
 
 
 def test_loader_produces_admin_template_default_unchanged(tmp_path: Path) -> None:
-    """A config with no ``[admin.*]`` sections still loads and produces
-    an operator-declared (sentinel-line=0) ``admin-template:default``
-    row at the Registry level. The plurification didn't change the
-    operator-facing behavior.
-    """
+    """A config with no ``[admin.*]`` sections still yields an
+    ``admin-template:default`` row at the Registry level -- auto-declared
+    by the always-materialize pre-step, since the TOML publisher no
+    longer publishes placeholder rows for omitted sections."""
     cfg = load_config(_write_cfg(tmp_path / "config.toml"), warn_issues=False)
     registry = build_registry(cfg)
 
@@ -196,7 +195,7 @@ def test_loader_produces_admin_template_default_unchanged(tmp_path: Path) -> Non
     assert isinstance(admin, AdminConfig)
     assert admin.name == "default"
     assert admin.origin is not None
-    assert admin.origin.variant == "operator-declared"
+    assert admin.origin.variant == "auto-declared"
 
 
 def test_loader_admin_config_section_still_parses(tmp_path: Path) -> None:
@@ -211,6 +210,7 @@ def test_loader_admin_config_section_still_parses(tmp_path: Path) -> None:
         """,
     )
     cfg = load_config(cfg_file, warn_issues=False)
+    assert cfg.admin is not None
     assert cfg.admin.name == "default"
     assert cfg.admin.shell == "fish"
 
@@ -233,6 +233,7 @@ def test_plurified_operator_surface_not_yet_parsed(tmp_path: Path) -> None:
     )
     cfg = load_config(cfg_file, warn_issues=False)
     # The singleton admin still parses normally.
+    assert cfg.admin is not None
     assert cfg.admin.name == "default"
     assert cfg.admin.shell == "zsh"
     # The unrecognized [admin_templates.*] block doesn't produce

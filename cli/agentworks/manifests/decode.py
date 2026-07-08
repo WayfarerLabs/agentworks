@@ -243,9 +243,11 @@ def _decode_admin_template(doc: Document, spec: dict[str, object], issues: list[
 
     body = dict(spec)
     env = body.pop("env", {})
-    return _load_admin_config(
+    result = _load_admin_config(
         {"admin": {"config": body, "env": env}}, issues, _decls(doc.location)
     )
+    assert result is not None  # the key is always present on this path
+    return result
 
 
 def _decode_named_console_template(
@@ -253,9 +255,11 @@ def _decode_named_console_template(
 ) -> Any:
     from agentworks.config import _load_named_console
 
-    return _load_named_console(
+    result = _load_named_console(
         {"named_console": spec}, issues, _decls(doc.location)
     )
+    assert result is not None  # the key is always present on this path
+    return result
 
 
 

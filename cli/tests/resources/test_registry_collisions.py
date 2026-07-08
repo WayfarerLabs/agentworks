@@ -72,15 +72,16 @@ def test_builtin_over_operator_is_an_ordering_conflict() -> None:
         registry.add("secret", "s1", _decl("s1"), Origin.built_in(source="app"))
 
 
-def test_synthesized_singleton_is_replaceable_by_operator_row() -> None:
-    """The TOML publisher's omitted-singleton rows (line == 0) yield to a
-    real operator declaration; the same sentinel on any other kind does
-    NOT exempt the collision."""
+def test_operator_collision_has_no_singleton_exemption() -> None:
+    """The synthesized-singleton exemption is gone: the TOML publisher no
+    longer publishes placeholder rows for omitted sections (the framework
+    auto-declares instead), so ANY operator-vs-operator collision is a
+    duplicate -- including admin-template with a line-0 origin."""
     registry = Registry.empty()
-    synthesized = Origin.operator_declared(file=Path("config.toml"), line=0)
-    registry.add("admin-template", "default", _decl("default"), synthesized)
-    registry.add("admin-template", "default", _decl("default"), _operator(7))
-    assert registry.lookup("admin-template", "default").origin.line == 7
+    line_zero = Origin.operator_declared(file=Path("config.toml"), line=0)
+    registry.add("admin-template", "default", _decl("default"), line_zero)
+    with pytest.raises(ConfigError, match="duplicate admin-template"):
+        registry.add("admin-template", "default", _decl("default"), _operator(7))
 
 
 def test_line_zero_on_non_singleton_kind_still_collides() -> None:

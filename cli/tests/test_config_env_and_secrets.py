@@ -141,6 +141,7 @@ def test_admin_env_plaintext_and_secret(tmp_path: Path) -> None:
         """,
     )
     cfg = load_config(cfg_file, warn_issues=False)
+    assert cfg.admin is not None
     assert cfg.admin.env["HTTP_PROXY"].value == "http://proxy:3128"
     assert cfg.admin.env["TOKEN"].secret == "shared-token"
 
@@ -301,6 +302,7 @@ def test_env_referencing_undeclared_secret_does_not_error_at_load(
     )
     # No longer raises -- the secret auto-declares through the framework.
     cfg = load_config(cfg_file, warn_issues=False)
+    assert cfg.admin is not None
     assert cfg.admin.env["API_KEY"].secret == "missing"
 
 
