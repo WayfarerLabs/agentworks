@@ -130,7 +130,7 @@ def publish_to(registry: Registry) -> None:
     backends list/describe like every other resource.
     """
     from agentworks.resources import Origin
-    from agentworks.resources.kinds.secret_backend import SecretBackendEntry
+    from agentworks.secrets.kinds import SecretBackendEntry
 
     origin = Origin.built_in(source="agentworks.secrets")
     for name, backend in SECRET_BACKEND_REGISTRY.items():

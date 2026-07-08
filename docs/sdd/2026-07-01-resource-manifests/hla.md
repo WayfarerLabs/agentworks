@@ -51,20 +51,26 @@ cli/agentworks/manifests/
   decode.py           # per-kind spec -> existing Resource dataclass construction
   builtin.py          # app-bundled built-in manifests (importlib.resources discovery)
 
-cli/agentworks/resources/   # unchanged framework; Origin variant rename only
+cli/agentworks/resources/   # framework only: kind registry/protocol, registry, origins, references
+  kinds/__init__.py   # pure registration index: one import line per domain, no logic
+cli/agentworks/<domain>/    # each domain owns its kinds (Phase 5.8): vms/, agents/, workspaces/,
+  template.py         #   sessions/, git_credentials/ (credential.py), secrets/, catalog.py --
+  kinds.py            #   declared-resource dataclasses + kind strategies + registration
 cli/agentworks/secrets/
-  providers.py        # code-side capability registry + descriptor publisher
-  env_var.py          # unchanged behavior; registered in the capability registry
-  prompt.py           # unchanged behavior; registered in the capability registry
+  backends.py         # SecretBackend protocol + capability registry + descriptor publisher
+  env_var.py          # registered in the capability registry
+  prompt.py           # registered in the capability registry
 cli/agentworks/cli/commands/resource.py  # gains `agw resource migrate` + `agw resource sample`
 cli/agentworks/migrate/                  # NEW: TOML -> manifests migration tool
 ```
 
 The loader is pure Python with no Typer dependency, consistent with the typer-isolation rule.
-`decode.py` constructs the same Resource dataclasses the TOML parser constructs today (`SecretDecl`,
-`VMTemplate`, `AdminConfig`, ...); the types do not move or change shape. The optional
-`*Config`-suffix rename deferred by the prior HLA (its "Naming follow-up" section) remains optional
-and is not required by this design.
+`decode.py` constructs the same Resource dataclasses the TOML loaders construct (`SecretDecl`,
+`VMTemplate`, `AdminConfig`, ...); the shapes are unchanged, and since Phase 5.8 the dataclasses
+live in their domain packages while `config.py` keeps only settings plus the legacy TOML resource
+loaders/publisher (which import the dataclasses from the domains and are deleted wholesale in Phase
+6). The optional `*Config`-suffix rename deferred by the prior HLA (its "Naming follow-up" section)
+remains optional and is not required by this design.
 
 ## Layer changes
 

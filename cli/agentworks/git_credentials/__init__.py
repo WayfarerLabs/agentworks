@@ -44,10 +44,10 @@ def publish_to(registry: Registry) -> None:
     operator's perspective; a future SDD that wants to let operators
     register new provider types would add an operator-publish path.
     """
-    from agentworks.resources import Origin
-    from agentworks.resources.kinds.git_credential_provider import (
+    from agentworks.git_credentials.kinds import (
         GitCredentialProviderEntry,
     )
+    from agentworks.resources import Origin
 
     code_origin = Origin.built_in(source="agentworks.git_credentials")
     for type_name in sorted(GIT_CREDENTIAL_PROVIDER_REGISTRY):

@@ -30,8 +30,9 @@ from textwrap import dedent
 
 import pytest
 
+from agentworks.agents.template import AdminConfig
 from agentworks.bootstrap import build_registry
-from agentworks.config import AdminConfig, load_config
+from agentworks.config import load_config
 from agentworks.env import EnvEntry
 from agentworks.errors import ConfigError
 from agentworks.resources import (

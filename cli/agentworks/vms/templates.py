@@ -13,10 +13,10 @@ from typing import TYPE_CHECKING
 from agentworks.errors import ConfigError
 
 if TYPE_CHECKING:
-    from agentworks.config import VMTemplate
     from agentworks.env import EnvEntry
     from agentworks.resources.reference import ResourceReference
     from agentworks.resources.registry import Registry
+    from agentworks.vms.template import VMTemplate
 
 
 @dataclass
@@ -47,15 +47,13 @@ class ResolvedVMTemplate:
         the Tailscale auth-key secret. Used by ``vm create`` / ``vm     reinit``
         for the eager-resolve subgraph walk.
         """
-        from agentworks.config import (
-            _env_references,
-            _tailscale_secret_reference,
-        )
+        from agentworks.env.entry import env_references
+        from agentworks.vms.template import tailscale_secret_reference
 
         refs: list[ResourceReference] = list(
-            _env_references(self.env, ("vm-template", self.name))
+            env_references(self.env, ("vm-template", self.name))
         )
-        refs.append(_tailscale_secret_reference(self.tailscale_auth_key, self.name))
+        refs.append(tailscale_secret_reference(self.tailscale_auth_key, self.name))
         return refs
 
 

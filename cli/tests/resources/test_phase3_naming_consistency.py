@@ -22,30 +22,18 @@ from types import ModuleType
 import pytest
 
 import agentworks.resources as resources_pkg
+from agentworks import catalog as catalog_mod
+from agentworks.agents import kinds as agents_kinds_mod
 from agentworks.env.entry import EnvEntry
+from agentworks.git_credentials import kinds as git_credentials_kinds_mod
 from agentworks.resources import inspect as inspect_mod
 from agentworks.resources import reference as reference_mod
 from agentworks.resources import registry as registry_mod
 from agentworks.resources import walk as walk_mod
-from agentworks.resources.kinds import (
-    admin_template,
-    agent_template,
-    git_credential_provider,
-    named_console_template,
-    secret_backend,
-    session_template,
-    vm_template,
-    workspace_template,
-)
-from agentworks.resources.kinds import (
-    catalog as catalog_kind_mod,
-)
-from agentworks.resources.kinds import (
-    git_credential as git_credential_kind_mod,
-)
-from agentworks.resources.kinds import (
-    secret as secret_kind_mod,
-)
+from agentworks.secrets import kinds as secrets_kinds_mod
+from agentworks.sessions import kinds as sessions_kinds_mod
+from agentworks.vms import kinds as vms_kinds_mod
+from agentworks.workspaces import kinds as workspaces_kinds_mod
 
 _BANNED_SUBSTRINGS = ("Requirement", "UsageEntry")
 
@@ -62,17 +50,13 @@ def _public_names(module: ModuleType) -> list[str]:
         registry_mod,
         walk_mod,
         inspect_mod,
-        admin_template,
-        agent_template,
-        catalog_kind_mod,
-        git_credential_provider,
-        git_credential_kind_mod,
-        named_console_template,
-        secret_kind_mod,
-        secret_backend,
-        session_template,
-        vm_template,
-        workspace_template,
+        agents_kinds_mod,
+        catalog_mod,
+        git_credentials_kinds_mod,
+        secrets_kinds_mod,
+        sessions_kinds_mod,
+        vms_kinds_mod,
+        workspaces_kinds_mod,
     ],
 )
 def test_framework_module_has_no_old_vocabulary(module: ModuleType) -> None:
@@ -130,22 +114,18 @@ def test_resource_kinds_have_references_field_not_usage() -> None:
     """Every Resource type in the framework's kind set carries the
     collection field as ``references``, not the pre-rename ``usage``.
     """
+    from agentworks.agents.template import AdminConfig, AgentTemplate
     from agentworks.catalog import (
         AptPackageEntry,
         AptSourceEntry,
         SystemInstallCommandEntry,
         UserInstallCommandEntry,
     )
-    from agentworks.config import (
-        AdminConfig,
-        AgentTemplate,
-        GitCredentialConfig,
-        NamedConsoleConfig,
-        SessionTemplate,
-        VMTemplate,
-        WorkspaceTemplate,
-    )
+    from agentworks.git_credentials.credential import GitCredentialConfig
     from agentworks.secrets.base import SecretDecl
+    from agentworks.sessions.template import NamedConsoleConfig, SessionTemplate
+    from agentworks.vms.template import VMTemplate
+    from agentworks.workspaces.template import WorkspaceTemplate
 
     resource_types = [
         AptSourceEntry,

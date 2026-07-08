@@ -36,8 +36,9 @@ from agentworks.vms.skel import BASHRC, ZSHRC
 if TYPE_CHECKING:
     from collections.abc import Mapping
 
+    from agentworks.agents.template import AdminConfig
     from agentworks.catalog import AptSourceEntry, SystemInstallCommandEntry, UserInstallCommandEntry
-    from agentworks.config import AdminConfig, Config
+    from agentworks.config import Config
     from agentworks.db import Database
     from agentworks.git_credentials.base import GitCredentialProvider
     from agentworks.resources.registry import Registry

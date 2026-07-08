@@ -7,9 +7,9 @@ intent, not the lock). Until then, changes on the branch are "pre-lock" and the 
 file included -- remain mutable.
 
 The resource-manifests SDD shipped on one branch and PR (single-branch delivery per the 2026-07-02
-sequencing note): `feat/resource-manifests-sdd`, PR #156. Phases 0 through 5 and the pre-lock Phase
-5.5 (the 2026-07-07 capability collapse) are complete; every plan checkbox except Phase 6's is
-flipped.
+sequencing note): `feat/resource-manifests-sdd`, PR #156. Phases 0 through 5 and the pre-lock Phases
+5.5 (the capability collapse), 5.7 (the capability config-validation contract), and 5.8 (domains own
+their kinds) are complete; every plan checkbox except Phase 6's is flipped.
 
 ### What shipped
 
@@ -47,6 +47,13 @@ returning implied `ConfigReference`s, invoked at blob boundaries and finalize, p
 `SecretBackend.validate_mapping` for the per-secret host; both noted as potentially superseded by
 registration-time schemas.
 
+And Phase 5.8 (domains own their kinds): the declared-resource dataclasses and every kind strategy
+moved out of `config.py` / `resources/kinds/` into their domain packages;
+`resources/kinds/__init__.py` is a pure registration index and `config.py` keeps only settings plus
+the legacy TOML loaders/publisher. Initially deferred to the plugin SDD, pulled in pre-merge on the
+maintainer's fan-out rationale: parallel post-merge tracks (VM abstractions, harness) would
+otherwise enshrine or diverge the placement pattern.
+
 Four deliberate operator-facing breaking changes, `!`-flagged for release-please: resource names may
 not contain `/` (FRD R13); `agw resource migrate` requires selectors (and `agw resource sample` a
 kind) or `--all`; and `resource describe` takes a single `KIND/NAME` token (the `/` display-syntax
@@ -82,12 +89,9 @@ these artifacts are candidates for tombstoning once the dual-path era is old new
   the 2026-07-05 Phase 5 review.
 - VM base-image pinning is issue #161 (separate track; surfaced during this SDD's testing but not
   part of it).
-- Relocating the declared-resource dataclasses out of `config.py` into their domain packages
-  (VMTemplate -> vms/, AgentTemplate -> agents/, ...): deliberately deferred (2026-07-08) -- nothing
-  locks module placement, and the plugin SDD reshapes these exact types, so the move is a natural
-  plugin-SDD Phase 0 (one touch, with design context for the two dataclasses that lack an obvious
-  home: AdminConfig, NamedConsoleConfig). Independent of Phase 6, which retires the TOML LOADERS;
-  the dataclasses can move any time.
+- Relocating the declared-resource dataclasses was briefly recorded here as deferred to the plugin
+  SDD, then pulled back in pre-merge (same day) on the maintainer's fan-out rationale -- executed as
+  Phase 5.8 (see "What shipped" above). Kept for the honest record of the reversal.
 
 ### Review history
 

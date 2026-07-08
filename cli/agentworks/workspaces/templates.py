@@ -12,9 +12,9 @@ from typing import TYPE_CHECKING
 from agentworks.errors import ConfigError
 
 if TYPE_CHECKING:
-    from agentworks.config import WorkspaceTemplate
     from agentworks.env import EnvEntry
     from agentworks.resources.registry import Registry
+    from agentworks.workspaces.template import WorkspaceTemplate
 
 
 @dataclass

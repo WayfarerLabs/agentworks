@@ -1,11 +1,26 @@
-"""``SecretKind``: the framework's strategy for the ``"secret"`` kind.
+"""Framework strategies for the ``"secret"`` and ``"secret-backend"``
+kinds, plus the ``SECRET_KIND_NAME`` identifier and the
+``SecretBackendEntry`` capability row.
 
-Miss policy is ``auto-declare`` with no name restriction -- any name a
-``SecretReference`` references will be auto-synthesized when not
-operator-declared. The synthesized ``SecretDecl`` carries an empty
-``description``; operators are warned (per FRD R9) that auto-declared
-secrets should be promoted to explicit ``[secrets.<name>]`` blocks so they
-can carry a description.
+Both live in the ``secrets`` domain package next to the code that
+implements secrets and backends; ``agentworks.resources.kinds.__init__``
+imports this module so the kinds self-register into ``KIND_REGISTRY`` at
+load. ``SecretDecl`` (the declarable row) already lives in
+``agentworks.secrets.base`` -- imported from there as today.
+
+``SecretKind`` uses the ``auto-declare`` miss policy with no name
+restriction -- any name a ``SecretReference`` references is
+auto-synthesized when not operator-declared. The synthesized
+``SecretDecl`` carries an empty ``description``; operators are warned
+(per FRD R9) that auto-declared secrets should be promoted to explicit
+``[secrets.<name>]`` blocks so they can carry a description.
+
+``SecretBackendKind`` is a read-only capability kind. Backends are code
+capabilities (``agentworks.secrets.backends``); the registry rows exist
+so the ``[secret_config].backends`` chain and per-secret
+``backend_mappings`` validate through the framework's uniform miss
+policy and the backends are visible in ``agw resource list``. Not
+manifest-declarable (ADR 0016).
 """
 
 from __future__ import annotations
@@ -26,7 +41,7 @@ if TYPE_CHECKING:
     from collections.abc import Iterable, Sequence
 
     from agentworks.db import Database, SessionRow
-    from agentworks.resources.reference import ResourceReference
+    from agentworks.resources.reference import ReferenceEntry, ResourceReference
     from agentworks.resources.registry import Registry
 
 
@@ -35,6 +50,22 @@ SECRET_KIND_NAME = "secret"
 that need to render or compare against the kind name import this rather
 than re-typing the literal -- a hypothetical rename then flows through
 every site by construction."""
+
+
+@dataclass(frozen=True)
+class SecretBackendEntry:
+    """The capability resource for one registered secret backend.
+
+    The actual capability (the ``SecretBackend`` API) lives in
+    ``agentworks.secrets.backends.SECRET_BACKEND_REGISTRY``; this row is
+    what the chain and mapping names resolve against in the framework.
+    ``description`` comes from the capability, for inspection surfaces.
+    """
+
+    name: str
+    description: str = ""
+    origin: Origin | None = None
+    references: tuple[ReferenceEntry, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -171,4 +202,23 @@ class _SecretKind:
         return names
 
 
+@dataclass(frozen=True)
+class _SecretBackendKind:
+    """Implementation of ``ResourceKind`` for ``"secret-backend"``."""
+
+    kind: str = "secret-backend"
+    description: str = "Code that produces secret values (the chain's entries)"
+    miss_policy: Literal["auto-declare", "error"] = "error"
+    auto_declare_names: frozenset[str] | None = None
+    category: Literal["declarable", "capability"] = "capability"
+    builtin_override: Literal["allow", "reserved"] = "reserved"
+
+    def synthesize(self, references: Sequence[ResourceReference]) -> SecretBackendEntry:
+        raise NoUnreferencedDefaultError(
+            "the secret-backend kind has miss_policy='error'; synthesize "
+            "should never be dispatched"
+        )
+
+
 KIND_REGISTRY[SECRET_KIND_NAME] = _SecretKind()
+KIND_REGISTRY["secret-backend"] = _SecretBackendKind()

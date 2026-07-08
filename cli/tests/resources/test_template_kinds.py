@@ -17,14 +17,17 @@ from typing import Any
 
 import pytest
 
+from agentworks.agents.template import AgentTemplate
 from agentworks.bootstrap import build_registry
-from agentworks.config import AgentTemplate, SessionTemplate, WorkspaceTemplate, load_config
+from agentworks.config import load_config
 from agentworks.errors import ConfigError
 from agentworks.resources import (
     ALWAYS_MATERIALIZE_SOURCE,
     KIND_REGISTRY,
     TemplateReference,
 )
+from agentworks.sessions.template import SessionTemplate
+from agentworks.workspaces.template import WorkspaceTemplate
 
 
 @dataclass(frozen=True)

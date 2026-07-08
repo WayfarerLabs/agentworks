@@ -1,6 +1,16 @@
 """Agentworks configuration loading and validation.
 
 Config lives at ~/.config/agentworks/config.toml. It is read-only at runtime.
+
+Post-move contract (resource-manifests SDD): this module holds the
+settings dataclasses plus the legacy TOML resource loaders/publisher
+(``Config.publish_to`` and the ``_load_*`` helpers) that die in Phase 6 --
+nothing else. The declarable-resource dataclasses (VMTemplate,
+AgentTemplate, AdminConfig, WorkspaceTemplate, SessionTemplate,
+NamedConsoleConfig, GitCredentialConfig) and the console/tmux layout
+constants now live in their domain packages; the loaders import them from
+there. Kind definitions live in the domain packages too (see
+``agentworks.resources.kinds`` for the registration index).
 """
 
 from __future__ import annotations
@@ -12,25 +22,27 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal
 
+from agentworks.agents.template import AdminConfig, AgentTemplate
+
 # ConfigError is defined in agentworks.errors and re-exported here for backward
 # compatibility with existing `from agentworks.config import ConfigError` users.
 # The `X as X` shape marks the name as an explicit re-export for mypy strict mode.
 from agentworks.env import EnvEntry
 from agentworks.errors import ConfigError as ConfigError
+from agentworks.git_credentials.credential import GitCredentialConfig
 from agentworks.secrets import (
     SecretConfig,
     SecretDecl,
 )
-from agentworks.source_location import SourceLocation, scan_section_lines, synthesized
+from agentworks.sessions.layouts import AW_SESSION_VERTICAL_LAYOUT, VALID_TMUX_LAYOUTS
+from agentworks.sessions.template import NamedConsoleConfig, SessionTemplate
+from agentworks.source_location import SourceLocation, scan_section_lines
+from agentworks.vms.template import VMTemplate
+from agentworks.workspaces.template import WorkspaceTemplate
 
 if TYPE_CHECKING:
 
     from agentworks.resources.origin import Origin
-    from agentworks.resources.reference import (
-        ReferenceEntry,
-        ResourceReference,
-        SecretReference,
-    )
     from agentworks.resources.registry import Registry
 
 CONFIG_DIR = Path.home() / ".config" / "agentworks"
@@ -127,464 +139,6 @@ class PathsConfig:
 class DefaultsConfig:
     platform: str | None = None
     vm_host: str | None = None
-
-
-# Agentworks-specific layout: session pane (pane 0) takes the top 50% of
-# the window, shell panes stack vertically in the bottom 50% with equal
-# heights. tmux has no preset that matches this geometry, so apply-time
-# builds a custom tmux layout string from the live window dimensions and
-# pane IDs and feeds it to `tmux select-layout`. See
-# `_apply_aw_session_vertical_layout` in sessions/multi_console_layout.py.
-AW_SESSION_VERTICAL_LAYOUT = "aw-session-vertical"
-
-# Valid layouts for named-console session windows. All values besides
-# AW_SESSION_VERTICAL_LAYOUT map 1:1 to tmux's built-in select-layout
-# names so operators can apply the same value to a window via
-# `tmux select-layout` on the fly.
-VALID_TMUX_LAYOUTS = (
-    "tiled",
-    "even-vertical",
-    "even-horizontal",
-    "main-vertical",
-    "main-horizontal",
-    AW_SESSION_VERTICAL_LAYOUT,
-)
-
-
-def _env_references(
-    env: dict[str, EnvEntry] | None,
-    source: tuple[str, str],
-) -> list[SecretReference]:
-    """Aggregate ``EnvEntry.referenced_resources(source)`` across an env table.
-
-    Module-level helper shared by every env-bearing Resource type's
-    ``referenced_resources()`` method so the per-type method body stays
-    one line. ``env`` may be ``None`` (``SessionTemplate.env`` is
-    optional) or empty, in which case the result is an empty list.
-    """
-    if not env:
-        return []
-    out: list[SecretReference] = []
-    for entry in env.values():
-        out.extend(entry.referenced_resources(source))
-    return out
-
-
-def _git_credential_references(
-    git_credentials: list[str] | None,
-    source: tuple[str, str],
-) -> list[ResourceReference]:
-    """Emit a ``ResourceReference`` of kind ``"git-credential"`` per
-    name in ``git_credentials``. Used by ``AdminConfig.referenced_resources``
-    and ``AgentTemplate.referenced_resources`` to feed the
-    ``GitCredentialKind``'s error miss policy: a typo'd or undeclared
-    name errors at finalize with the reference source pointing at the
-    declaring Resource.
-    """
-    from agentworks.resources.reference import ResourceReference
-
-    if not git_credentials:
-        return []
-    return [
-        ResourceReference(
-            name=cred_name,
-            kind="git-credential",
-            usage="the git credential",
-            source=source,
-        )
-        for cred_name in git_credentials
-    ]
-
-
-def _tailscale_secret_reference(
-    tailscale_auth_key: str,
-    template_name: str,
-) -> SecretReference:
-    """Build the ``SecretReference`` a VMTemplate publishes for its
-    Tailscale auth key. Used by both ``VMTemplate.referenced_resources``
-    (raw, in this module) and ``ResolvedVMTemplate.referenced_resources``
-    (resolved, in ``agentworks.vms.templates``) so the reference shape
-    is single-sourced.
-    """
-    from agentworks.resources.reference import SecretReference
-
-    return SecretReference(
-        name=tailscale_auth_key,
-        kind="secret",
-        usage="the Tailscale auth key",
-        source=("vm-template", template_name),
-    )
-
-
-@dataclass(frozen=True)
-class NamedConsoleConfig:
-    """Settings for the `console` subcommand group (named multi-session
-    consoles). Section is `[named_console]` in the TOML to disambiguate from
-    the legacy `vm console` and the workspace console template. Only named
-    consoles read these values today.
-    """
-
-    tmux_layout: str = AW_SESSION_VERTICAL_LAYOUT
-    declared_at: SourceLocation = field(default_factory=synthesized)
-    origin: Origin | None = None
-    references: tuple[ReferenceEntry, ...] = ()
-
-
-@dataclass(frozen=True)
-class VMTemplate:
-    """VM template definition. All optional fields use ``None = inherit``
-    semantics except ``tailscale_auth_key``, which is a non-optional
-    bare-string secret name (default ``"tailscale-auth-key"``). The
-    tailscale field carries no inherit shape because the secret name is a
-    deployment-wide convention; operators who want a different name per
-    template set it on the specific template.
-    """
-
-    name: str
-    inherits: list[str] = field(default_factory=list)
-    # Provisioning
-    cpus: int | None = None
-    memory: int | None = None
-    disk: int | None = None
-    azure_vm_size: str | None = None
-    swap: int | None = None
-    # System-wide initialization
-    apt: list[str] | None = None
-    apt_packages: list[str] | None = None
-    snap: list[str] | None = None
-    system_install_commands: list[str] | None = None
-    # Env (declared per-template; merged child-overrides-parent at resolution).
-    # Plaintext or secret references; the loader produces EnvEntry instances.
-    env: dict[str, EnvEntry] = field(default_factory=dict)
-    # Secret name for the Tailscale auth key. ``None = inherit`` per the
-    # convention used by VMTemplate's other optional fields; the loader
-    # sets it to the operator's string when explicit, to ``None`` when
-    # omitted. ResolvedVMTemplate (in agentworks.vms.templates) carries
-    # the post-inheritance resolved string (default ``"tailscale-auth-key"``).
-    # Bare-string only -- no ``{ secret = "..." }`` polymorphism per the
-    # SDD; the field IS the secret reference.
-    tailscale_auth_key: str | None = None
-    declared_at: SourceLocation = field(default_factory=synthesized)
-    origin: Origin | None = None
-    references: tuple[ReferenceEntry, ...] = ()
-
-    def referenced_resources(self) -> list[ResourceReference]:
-        from agentworks.resources.reference import (
-            ResourceReference as _ResourceReq,
-        )
-        from agentworks.resources.reference import (
-            TemplateReference,
-        )
-
-        source = ("vm-template", self.name)
-        refs: list[ResourceReference] = list(_env_references(self.env, source))
-        # Inherits: each parent template name in ``inherits = [...]`` is a
-        # TemplateReference targeting the same kind. The framework's
-        # VMTemplateKind miss policy auto-declares "default" when missing
-        # and errors on any other unknown name; framework cycle detection
-        # catches inheritance loops. Per-template field-merging stays in
-        # ``agentworks.vms.templates``.
-        for parent in self.inherits:
-            refs.append(
-                TemplateReference(
-                    name=parent,
-                    kind="vm-template",
-                    usage="a parent template",
-                    source=source,
-                )
-            )
-        # Catalog references: each name in apt_packages /
-        # system_install_commands resolves to a built-in catalog
-        # Resource via the framework's miss policy (error on typo,
-        # citing this template's source). Phase 2b.
-        for pkg in self.apt_packages or []:
-            refs.append(
-                _ResourceReq(
-                    name=pkg,
-                    kind="apt-package",
-                    usage="an apt package",
-                    source=source,
-                )
-            )
-        for cmd in self.system_install_commands or []:
-            refs.append(
-                _ResourceReq(
-                    name=cmd,
-                    kind="system-install-command",
-                    usage="a system install command",
-                    source=source,
-                )
-            )
-        # When the raw template doesn't set tailscale_auth_key, emit the
-        # default secret name's reference so the registry finalizes
-        # cleanly even before any inheritance walk. ResolvedVMTemplate's
-        # referenced_resources emits the inherited value at manager-entry
-        # call time.
-        ts_name = self.tailscale_auth_key or "tailscale-auth-key"
-        refs.append(_tailscale_secret_reference(ts_name, self.name))
-        return refs
-
-
-@dataclass(frozen=True)
-class AdminConfig:
-    """Per-user config for the admin user on VMs.
-
-    Phase 2a.3 plurified the underlying ``admin-template`` kind from
-    singleton-conceptual to named-multi-instance: ``AdminConfig`` now
-    carries its own ``name`` (default ``"default"``) just like the other
-    template kinds. The operator-facing surface is unchanged in this
-    phase -- the loader only accepts the ``[admin]`` block and produces
-    one instance with name ``"default"``. A future SDD adds
-    ``[admin_templates.<name>]`` parsing, the ``--admin-template`` CLI
-    flag, and the VM DB column; that work can land without re-touching
-    the framework.
-    """
-
-    name: str = "default"
-    username: str = "agentworks"
-    shell: str = "bash"
-    git_credentials: list[str] = field(default_factory=list)
-    user_install_commands: list[str] = field(default_factory=list)
-    dotfiles_source: str | None = None
-    dotfiles_destination: str = "~/.dotfiles"
-    dotfiles_install_cmd: str = "./install.sh"
-    mise_activate: bool = True
-    mise_packages: list[str] = field(default_factory=list)
-    mise_lockfile: str | None = None
-    mise_allow_unlocked: bool = False
-    mise_install_before: str = "7d"
-    mise_prune_on_reinit: bool = True
-    git_force_safe_directory: bool = True
-    # Claude Code
-    claude_marketplaces: list[str] = field(default_factory=list)
-    claude_plugins: list[str] = field(default_factory=list)
-    # Env that applies whenever a shell is opened as the admin user.
-    env: dict[str, EnvEntry] = field(default_factory=dict)
-    declared_at: SourceLocation = field(default_factory=synthesized)
-    origin: Origin | None = None
-    references: tuple[ReferenceEntry, ...] = ()
-
-    def referenced_resources(self) -> list[ResourceReference]:
-        from agentworks.resources.reference import (
-            ResourceReference as _ResourceReq,
-        )
-
-        source = ("admin-template", self.name)
-        refs: list[ResourceReference] = list(
-            _env_references(self.env, source)
-        )
-        refs.extend(_git_credential_references(self.git_credentials, source))
-        # Catalog references for user_install_commands (Phase 2b).
-        for cmd in self.user_install_commands:
-            refs.append(
-                _ResourceReq(
-                    name=cmd,
-                    kind="user-install-command",
-                    usage="a user install command",
-                    source=source,
-                )
-            )
-        return refs
-
-
-@dataclass(frozen=True)
-class AgentTemplate:
-    """Agent template definition. All fields are optional (None = inherit/default)."""
-
-    name: str
-    inherits: list[str] = field(default_factory=list)
-    shell: str | None = None
-    git_credentials: list[str] | None = None
-    user_install_commands: list[str] | None = None
-    dotfiles_source: str | None = None
-    dotfiles_destination: str | None = None
-    dotfiles_install_cmd: str | None = None
-    mise_activate: bool | None = None
-    mise_packages: list[str] | None = None
-    mise_lockfile: str | None = None
-    mise_allow_unlocked: bool | None = None
-    mise_install_before: str | None = None
-    mise_prune_on_reinit: bool | None = None
-    claude_marketplaces: list[str] | None = None
-    claude_plugins: list[str] | None = None
-    env: dict[str, EnvEntry] = field(default_factory=dict)
-    declared_at: SourceLocation = field(default_factory=synthesized)
-    origin: Origin | None = None
-    references: tuple[ReferenceEntry, ...] = ()
-
-    def referenced_resources(self) -> list[ResourceReference]:
-        from agentworks.resources.reference import (
-            ResourceReference as _ResourceReq,
-        )
-        from agentworks.resources.reference import (
-            TemplateReference,
-        )
-
-        source = ("agent-template", self.name)
-        refs: list[ResourceReference] = list(
-            _env_references(self.env, source)
-        )
-        refs.extend(_git_credential_references(self.git_credentials, source))
-        for parent in self.inherits:
-            refs.append(
-                TemplateReference(
-                    name=parent,
-                    kind="agent-template",
-                    usage="a parent template",
-                    source=source,
-                )
-            )
-        # Catalog references for user_install_commands (Phase 2b).
-        for cmd in self.user_install_commands or []:
-            refs.append(
-                _ResourceReq(
-                    name=cmd,
-                    kind="user-install-command",
-                    usage="a user install command",
-                    source=source,
-                )
-            )
-        return refs
-
-
-@dataclass(frozen=True)
-class WorkspaceTemplate:
-    name: str
-    inherits: list[str] = field(default_factory=list)
-    repo: str | None = None
-    tmuxinator: bool | None = None  # None = not explicitly set (inherit/default to True)
-    env: dict[str, EnvEntry] = field(default_factory=dict)
-    declared_at: SourceLocation = field(default_factory=synthesized)
-    origin: Origin | None = None
-    references: tuple[ReferenceEntry, ...] = ()
-
-    def referenced_resources(self) -> list[ResourceReference]:
-        from agentworks.resources.reference import TemplateReference
-
-        source = ("workspace-template", self.name)
-        refs: list[ResourceReference] = list(_env_references(self.env, source))
-        for parent in self.inherits:
-            refs.append(
-                TemplateReference(
-                    name=parent,
-                    kind="workspace-template",
-                    usage="a parent template",
-                    source=source,
-                )
-            )
-        return refs
-
-
-@dataclass(frozen=True)
-class GitCredentialConfig:
-    name: str
-    # The internal representation follows the YAML manifest shape (ADR
-    # 0016): field name ``provider``, matching ``spec.provider``. Only
-    # the TOML section still spells ``type`` (with ``provider`` as the
-    # preferred alias); the loader maps at its boundary.
-    provider: str
-    # Provider-owned configuration (azdo's org), nested per the
-    # provider_config pattern (ADR 0016). The flat TOML section is the
-    # ONLY place org lives at the top level; this loader nests it at
-    # the boundary, so the internal representation matches the YAML
-    # manifest shape.
-    provider_config: dict[str, object] = field(default_factory=dict)
-    description: str | None = None
-    # Secret name for the auth token. Default ``"git-token-<name>"`` is
-    # computed in ``__post_init__`` (the per-credential default depends
-    # on the credential's own name, which a class-level literal can't
-    # express). Operators may override with a custom secret name; the
-    # framework's ``"secret"`` kind then resolves the value. Bare-string
-    # only per Phase 1c's pattern; no ``{ secret = "..." }``
-    # polymorphism.
-    token: str = ""
-    declared_at: SourceLocation = field(default_factory=synthesized)
-    origin: Origin | None = None
-    references: tuple[ReferenceEntry, ...] = ()
-
-    def __post_init__(self) -> None:
-        # Frozen dataclasses can still ``object.__setattr__`` during
-        # construction. The default ``""`` sentinel triggers the
-        # name-interpolated default; an operator-typed string survives
-        # unchanged.
-        if not self.token:
-            object.__setattr__(self, "token", f"git-token-{self.name}")
-
-    def referenced_resources(self) -> list[ResourceReference]:
-        from agentworks.resources.reference import (
-            ResourceReference as _ResourceReq,
-        )
-        from agentworks.resources.reference import SecretReference
-
-        source = ("git-credential", self.name)
-        refs: list[ResourceReference] = [
-            SecretReference(
-                name=self.token,
-                kind="secret",
-                usage="the auth token",
-                source=source,
-            ),
-            # Phase 2b.1: the ``provider`` field references a known
-            # provider kind; framework miss policy catches typos.
-            _ResourceReq(
-                name=self.provider,
-                kind="git-credential-provider",
-                usage="the provider",
-                source=source,
-            ),
-        ]
-        # Capability-implied references: the provider validates its
-        # config block and returns the references it implies; this
-        # resource (the config block's owner) attributes them to itself.
-        from agentworks.git_credentials import GIT_CREDENTIAL_PROVIDER_REGISTRY
-
-        capability = GIT_CREDENTIAL_PROVIDER_REGISTRY.get(self.provider)
-        if capability is not None:
-            for cref in capability.validate_config(
-                f"git-credential/{self.name}", self.provider_config
-            ):
-                ref_cls = SecretReference if cref.kind == "secret" else _ResourceReq
-                refs.append(
-                    ref_cls(
-                        name=cref.name,
-                        kind=cref.kind,
-                        usage=cref.usage,
-                        source=source,
-                    )
-                )
-        return refs
-
-
-@dataclass(frozen=True)
-class SessionTemplate:
-    """Session template definition. All fields optional (None = inherit/default)."""
-
-    name: str
-    inherits: list[str] = field(default_factory=list)
-    command: str | None = None
-    description: str | None = None
-    restart_command: str | None = None
-    required_commands: list[str] | None = None
-    env: dict[str, EnvEntry] | None = None
-    declared_at: SourceLocation = field(default_factory=synthesized)
-    origin: Origin | None = None
-    references: tuple[ReferenceEntry, ...] = ()
-
-    def referenced_resources(self) -> list[ResourceReference]:
-        from agentworks.resources.reference import TemplateReference
-
-        source = ("session-template", self.name)
-        refs: list[ResourceReference] = list(_env_references(self.env, source))
-        for parent in self.inherits:
-            refs.append(
-                TemplateReference(
-                    name=parent,
-                    kind="session-template",
-                    usage="a parent template",
-                    source=source,
-                )
-            )
-        return refs
 
 
 @dataclass(frozen=True)

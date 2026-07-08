@@ -26,13 +26,14 @@ from textwrap import dedent
 import pytest
 
 from agentworks.bootstrap import build_registry
-from agentworks.config import VMTemplate, load_config
+from agentworks.config import load_config
 from agentworks.errors import ConfigError
 from agentworks.resources import (
     ALWAYS_MATERIALIZE_SOURCE,
     KIND_REGISTRY,
     TemplateReference,
 )
+from agentworks.vms.template import VMTemplate
 
 
 def _write_cfg(path: Path, body: str) -> Path:
@@ -222,8 +223,8 @@ def test_framework_cycle_detector_catches_registry_cycles(tmp_path: Path) -> Non
     publishing VMTemplates directly into a Registry, then finalize.
     The framework pass should detect the cycle and raise.
     """
-    from agentworks.config import VMTemplate
     from agentworks.resources import Origin, Registry
+    from agentworks.vms.template import VMTemplate
 
     registry = Registry.empty()
     fake_origin = Origin.operator_declared(file=tmp_path / "c.toml", line=1)

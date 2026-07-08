@@ -506,6 +506,43 @@ API carries a deprecation note pointing at it.
 Definition of done: the contract works inside the established framework (both hosts exercised, one
 real migration + one test-only reference exerciser); CI green; reviewer-approved.
 
+## Phase 5.8: Domains own their kinds (maintainer-directed)
+
+Pre-lock, pre-merge: with post-merge work fanning out into parallel tracks (VM abstractions,
+harness), leaving the placement pattern half-formed risked enshrinement or divergence. Two
+maintainer rulings: (1) `config.py` keeps ONLY settings plus the legacy code that builds and
+publishes resources from TOML; (2) every domain package defines and registers its own kinds --
+declarable row dataclasses and capability kinds alike live next to the code that implements them
+(the secrets/SecretDecl pattern, made universal). `resources/` keeps only the framework;
+`resources/kinds/__init__.py` survives as a pure registration index (Python populates
+`KIND_REGISTRY` via imports -- one line per domain, no logic).
+
+- [x] Domain modules created: `vms/template.py` + `vms/kinds.py`, `agents/template.py`
+      (AgentTemplate + AdminConfig -- the admin user is agent-shaped) + `agents/kinds.py`,
+      `workspaces/template.py` + `workspaces/kinds.py`, `sessions/layouts.py` +
+      `sessions/template.py` (SessionTemplate + NamedConsoleConfig -- multi_console is the runtime
+      home) + `sessions/kinds.py`, `git_credentials/credential.py` + `git_credentials/kinds.py`,
+      `secrets/kinds.py` (SECRET_KIND_NAME, both kind strategies, SecretBackendEntry); catalog
+      strategies appended to `catalog.py` (single-module domain).
+- [x] Shared helpers moved to public homes: `env_references` -> `env/entry.py`,
+      `credential_references` -> `git_credentials/credential.py`, `tailscale_secret_reference` ->
+      `vms/template.py`; tmux layout constants -> `sessions/layouts.py`.
+- [x] `config.py` slimmed to its post-move contract (settings + legacy TOML loaders/publisher,
+      importing the dataclasses FROM the domains -- direction reversed); all 11 per-kind files under
+      `resources/kinds/` deleted; the index rewritten; `resources/kind.py` docstring codifies the
+      framework/domain split.
+- [x] All import sites repointed (runtime + tests); no cycles (domain kind modules import only
+      framework leaf modules; nothing in the domain chains imports `config` or the `resources`
+      package `__init__` at module level).
+- [x] Zero behavior change verified: suite green (1460; the 4-test delta vs 1464 is
+      `test_phase3_naming_consistency`'s parametrize over kind MODULES, 16 -> 12 after the
+      per-domain collapse -- same symbols scanned), mypy strict, ruff, lint-files; net -1,250 lines.
+- [x] Artifacts: HLA package layout, ADR 0016 placement sentence, locked.md (Phase 5.8 paragraph;
+      the deferred-to-plugin-SDD follow-up bullet revised to record the same-day reversal).
+
+Definition of done: `import agentworks.resources` fully populates KIND_REGISTRY (13 kinds);
+`config.py` contains no resource dataclasses or kind logic; CI green; reviewer-approved.
+
 ## Phase 6: TOML resource-path retirement (future major; unscheduled)
 
 Deferred until a future major release, on operator telemetry/feedback -- not part of this SDD's
@@ -542,6 +579,17 @@ artifact update.)
   declarations. A same-day revision made prompt's `validate_mapping` strict (reject any non-`false`
   mapping): the permissive first cut protected released configs, but mappings are not yet in use in
   the wild, so silence would only hide typos.
+
+- **2026-07-08: domains own their kinds (maintainer rulings, pre-lock; Phase 5.8).** The kind-logic
+  split question ("some in resources/kinds/, some in native packages -- defensible?") surfaced two
+  rulings: config.py is settings + legacy TOML machinery only, and all code registers its own kinds
+  -- with the capability kinds especially belonging next to their implementations. The relocation
+  had been recorded as deferred to the plugin SDD earlier the same day; the maintainer's fan-out
+  plan (parallel VM + harness tracks post-merge) reversed that: "there's a real risk that any
+  incomplete patterns we leave in this will get enshrined or, worse, will get pulled in different
+  directions." Executed with zero behavior change (net -1,250 lines); AdminConfig homed in agents/
+  (field-set mirrors AgentTemplate), NamedConsoleConfig in sessions/ (multi_console is its only
+  runtime consumer).
 
 - **2026-07-07: per-kind `category` + `agw resource kinds` (maintainer request, pre-lock).**
   Follow-through on the definition expansion: the declarable/capability classifier becomes a

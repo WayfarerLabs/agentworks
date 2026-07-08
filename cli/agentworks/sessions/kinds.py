@@ -1,17 +1,21 @@
-"""``NamedConsoleTemplateKind``: the framework's strategy for the
-``"named-console-template"`` kind.
+"""``_SessionTemplateKind`` and ``_NamedConsoleTemplateKind``: framework
+strategies for the ``"session-template"`` and ``"named-console-template"``
+kinds.
 
-Operator-surface-singleton today: ``Config.publish_to`` always publishes
-``named-console-template:default`` (even when no ``[named_console]``
-section exists), so the auto-declare path is a safety net for typo'd
-references rather than a routine occurrence. Phase 2a.3 plurified
-``admin-template`` at the framework level (matching the other template
-kinds) but deliberately scoped that change to admin only; this kind
+Both live in the ``sessions`` domain package next to the code that
+implements sessions and named consoles;
+``agentworks.resources.kinds.__init__`` imports this module so the kinds
+self-register into ``KIND_REGISTRY`` at load.
+
+``SessionTemplateKind`` has the same shape as the other template kinds.
+``NamedConsoleTemplateKind`` is an operator-surface-singleton today:
+``Config.publish_to`` always publishes ``named-console-template:default``
+(even when no ``[named_console]`` section exists), so the auto-declare
+path is a safety net for typo'd references rather than a routine
+occurrence. Phase 2a.3 plurified ``admin-template`` at the framework
+level but deliberately scoped that change to admin only; this kind
 follows when there's an operator need to declare named console
-templates. The kind shape (``auto_declare_names = {"default"}``,
-synthesize tolerating ``references=()``) is already aligned with the
-named-multi-instance template kinds, so plurifying the operator surface
-later is a parser/loader change, not a framework change.
+templates.
 """
 
 from __future__ import annotations
@@ -19,13 +23,13 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Literal
 
-from agentworks.config import NamedConsoleConfig
 from agentworks.resources.kind import (
     ALWAYS_MATERIALIZE_SOURCE,
     KIND_REGISTRY,
     InstanceRef,
 )
 from agentworks.resources.origin import Origin
+from agentworks.sessions.template import NamedConsoleConfig, SessionTemplate
 
 if TYPE_CHECKING:
     from collections.abc import Iterable, Sequence
@@ -33,6 +37,45 @@ if TYPE_CHECKING:
     from agentworks.db import Database
     from agentworks.resources.reference import ResourceReference
     from agentworks.resources.registry import Registry
+
+
+@dataclass(frozen=True)
+class _SessionTemplateKind:
+    """Implementation of ``ResourceKind`` for ``"session-template"``."""
+
+    kind: str = "session-template"
+    description: str = "Session launch templates (command, restart, env)"
+    miss_policy: Literal["auto-declare", "error"] = "auto-declare"
+    auto_declare_names: frozenset[str] | None = frozenset({"default"})
+    category: Literal["declarable", "capability"] = "declarable"
+    builtin_override: Literal["allow", "reserved"] = "reserved"
+
+    def synthesize(
+        self,
+        references: Sequence[ResourceReference],
+    ) -> SessionTemplate:
+        """Build the code-defined default ``SessionTemplate``. See
+        ``agentworks.vms.kinds``'s ``synthesize`` for the rationale on why
+        the non-empty-``references`` path is preserved.
+        """
+        source = references[0].source if references else ALWAYS_MATERIALIZE_SOURCE
+        return SessionTemplate(
+            name="default", origin=Origin.auto_declared(source=source)
+        )
+
+    def instances(
+        self, db: Database, registry: Registry, resource: Any
+    ) -> Iterable[InstanceRef]:
+        """Every session whose ``template`` column matches this
+        SessionTemplate's name. ``SessionRow.template`` is non-optional,
+        so the NULL-as-default fallback used by other template kinds
+        doesn't apply here -- sessions are always created with an
+        explicit template value (``default`` when none is specified).
+        """
+        name = resource.name
+        for sess in db.list_sessions():
+            if sess.template == name:
+                yield InstanceRef(instance_kind="session", instance_name=sess.name)
 
 
 @dataclass(frozen=True)
@@ -88,4 +131,5 @@ class _NamedConsoleTemplateKind:
             yield InstanceRef(instance_kind="console", instance_name=console.name)
 
 
+KIND_REGISTRY["session-template"] = _SessionTemplateKind()
 KIND_REGISTRY["named-console-template"] = _NamedConsoleTemplateKind()

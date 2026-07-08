@@ -276,14 +276,14 @@ class _StubRegistry:
         # same way production does. The singleton kinds fall back to
         # code-default rows only for the reserved name.
         if kind == "admin-template":
-            from agentworks.config import AdminConfig
+            from agentworks.agents.template import AdminConfig
 
             if name != "default":
                 raise KeyError(name)
             admin = getattr(self._config, "admin", None)
             return admin if admin is not None else AdminConfig()
         if kind == "named-console-template":
-            from agentworks.config import NamedConsoleConfig
+            from agentworks.sessions.template import NamedConsoleConfig
 
             if name != "default":
                 raise KeyError(name)

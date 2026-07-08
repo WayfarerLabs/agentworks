@@ -12,11 +12,14 @@ import tomllib
 from dataclasses import dataclass, field
 from functools import cache
 from pathlib import Path
-from typing import TYPE_CHECKING, TypedDict
+from typing import TYPE_CHECKING, Any, Literal, TypedDict
 
 from agentworks.errors import ExternalError
+from agentworks.resources.kind import KIND_REGISTRY, NoUnreferencedDefaultError
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
+
     from agentworks.config import Config
     from agentworks.resources import Origin, Registry
     from agentworks.resources.reference import ReferenceEntry, ResourceReference
@@ -427,3 +430,113 @@ def publish_to(registry: Registry, config: Config | None = None) -> None:
 # which every manager-entry function calls before any business logic
 # (per Phase 2a.0's hoist sweep). The function had no remaining
 # production callers; tests covering the old contract were also dropped.
+
+
+# -- Framework kind strategies -------------------------------------------------
+#
+# The catalog kinds (``apt-source``, ``apt-package``,
+# ``system-install-command``, ``user-install-command``) live in this
+# single-module domain next to the code that implements the catalog.
+# ``agentworks.resources.kinds.__init__`` imports this module so the kinds
+# self-register into ``KIND_REGISTRY`` at load.
+#
+# All four use the **error miss policy**: a typo in
+# ``[vm_templates.*].apt_packages = ["..."]`` etc. -- or in an apt package's
+# own ``apt_sources`` list -- surfaces as a framework miss-policy error at
+# ``build_registry`` time, citing the reference's source. There is no
+# auto-declare path: catalog entries are built-in (the built-in catalog ships
+# with the framework) or operator-declared in the operator's TOML, and
+# references must resolve to a known name.
+#
+# ``apt-source`` was originally not a framework kind (only operator-facing
+# config referenced by name got promoted in Phase 2b.0). It joined the
+# framework later so the ``apt-package -> apt-source`` dependency graph
+# becomes visible on ``agw resource describe apt-source/<name>``'s
+# ``Referenced by:`` section, and so unknown-source errors flow through
+# the same miss-policy pipeline as everything else instead of a
+# catalog-specific validator.
+
+
+def _synthesize_no_default(kind: str, references: Sequence[ResourceReference]) -> Any:
+    """Shared synthesize body for the catalog kinds. Unreachable under
+    the ``error`` miss policy (Registry.finalize raises ConfigError
+    before dispatching to synthesize for error-policy kinds). Honors
+    the Phase 2a empty-references contract by raising the typed
+    framework error so a hypothetical future change that gives a
+    catalog kind a reserved default has an obvious landing pad.
+    """
+    if not references:
+        raise NoUnreferencedDefaultError(
+            f"the {kind} kind has no reserved default name; "
+            f"synthesize is never invoked under the error miss policy"
+        )
+    raise NoUnreferencedDefaultError(
+        f"the {kind} kind has miss_policy='error'; synthesize should "
+        f"never be invoked (the framework raises ConfigError first)"
+    )
+
+
+@dataclass(frozen=True)
+class _AptSourceKind:
+    """Implementation of ``ResourceKind`` for ``"apt-source"``."""
+
+    kind: str = "apt-source"
+    description: str = "Apt repository definitions (key, source line)"
+    miss_policy: Literal["auto-declare", "error"] = "error"
+    auto_declare_names: frozenset[str] | None = None
+    category: Literal["declarable", "capability"] = "declarable"
+    builtin_override: Literal["allow", "reserved"] = "allow"
+
+    def synthesize(self, references: Sequence[ResourceReference]) -> Any:
+        return _synthesize_no_default(self.kind, references)
+
+
+@dataclass(frozen=True)
+class _AptPackageKind:
+    """Implementation of ``ResourceKind`` for ``"apt-package"``."""
+
+    kind: str = "apt-package"
+    description: str = "Apt package sets, optionally tied to apt-sources"
+    miss_policy: Literal["auto-declare", "error"] = "error"
+    auto_declare_names: frozenset[str] | None = None
+    category: Literal["declarable", "capability"] = "declarable"
+    builtin_override: Literal["allow", "reserved"] = "allow"
+
+    def synthesize(self, references: Sequence[ResourceReference]) -> Any:
+        return _synthesize_no_default(self.kind, references)
+
+
+@dataclass(frozen=True)
+class _SystemInstallCommandKind:
+    """Implementation of ``ResourceKind`` for ``"system-install-command"``."""
+
+    kind: str = "system-install-command"
+    description: str = "System-level (root) install commands for VM init"
+    miss_policy: Literal["auto-declare", "error"] = "error"
+    auto_declare_names: frozenset[str] | None = None
+    category: Literal["declarable", "capability"] = "declarable"
+    builtin_override: Literal["allow", "reserved"] = "allow"
+
+    def synthesize(self, references: Sequence[ResourceReference]) -> Any:
+        return _synthesize_no_default(self.kind, references)
+
+
+@dataclass(frozen=True)
+class _UserInstallCommandKind:
+    """Implementation of ``ResourceKind`` for ``"user-install-command"``."""
+
+    kind: str = "user-install-command"
+    description: str = "Per-user install commands for admin/agent init"
+    miss_policy: Literal["auto-declare", "error"] = "error"
+    auto_declare_names: frozenset[str] | None = None
+    category: Literal["declarable", "capability"] = "declarable"
+    builtin_override: Literal["allow", "reserved"] = "allow"
+
+    def synthesize(self, references: Sequence[ResourceReference]) -> Any:
+        return _synthesize_no_default(self.kind, references)
+
+
+KIND_REGISTRY["apt-source"] = _AptSourceKind()
+KIND_REGISTRY["apt-package"] = _AptPackageKind()
+KIND_REGISTRY["system-install-command"] = _SystemInstallCommandKind()
+KIND_REGISTRY["user-install-command"] = _UserInstallCommandKind()

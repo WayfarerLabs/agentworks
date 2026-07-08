@@ -16,7 +16,7 @@ from typing import TYPE_CHECKING, Literal
 from agentworks.source_location import SourceLocation, synthesized
 
 if TYPE_CHECKING:
-    # Type-only imports to avoid the cycle: agentworks.resources.kinds.secret
+    # Type-only imports to avoid the cycle: agentworks.secrets.kinds
     # imports SecretDecl from this module to write its synthesize(); having
     # this module import Origin / ReferenceEntry at runtime would loop.
     # `from __future__ import annotations` keeps the field types as strings,

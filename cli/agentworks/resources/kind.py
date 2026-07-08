@@ -6,10 +6,16 @@ a reference's ``(kind, name)`` doesn't resolve to a published Resource,
 which names auto-declare is allowed to synthesize, and how to build the
 synthesized Resource.
 
-Each kind lives in its own module under ``kinds/`` and self-registers a
-single instance into ``KIND_REGISTRY`` at import. ``kinds/__init__.py``
-imports every kind module so a single ``from agentworks.resources import     KIND_REGISTRY``
-populates the registry.
+The framework/domain split: ``resources/`` owns the framework
+(``KIND_REGISTRY``, the ``ResourceKind`` protocol, ``Registry.finalize``).
+Each domain package defines AND registers its own kinds -- both the
+declarable row dataclasses and the capability kinds live next to the
+code that implements them (``agentworks.vms.kinds``,
+``agentworks.secrets.kinds``, ``agentworks.catalog``, etc.). Every kind
+self-registers a single instance into ``KIND_REGISTRY`` at import.
+``resources/kinds/__init__`` is only the registration index: it imports
+each domain's kind module so a single ``from agentworks.resources import
+KIND_REGISTRY`` populates the registry.
 """
 
 from __future__ import annotations
@@ -107,8 +113,9 @@ class ResourceKind(Protocol):
 
     The return type of ``synthesize`` is ``Any`` because Resources are
     diverse types from different modules (``SecretDecl`` from
-    ``agentworks.secrets.base``, ``AdminConfig`` from ``agentworks.config``,
-    etc.). The Registry stores whatever ``synthesize`` returns; the kind
+    ``agentworks.secrets.base``, ``AdminConfig`` from
+    ``agentworks.agents.template``, etc.). The Registry stores whatever
+    ``synthesize`` returns; the kind
     knows the right shape for its kind.
 
     The attributes are declared as ``@property`` so frozen-dataclass
@@ -193,8 +200,10 @@ ALWAYS_MATERIALIZE_SOURCE: tuple[str, str] = ("framework", "always-materialize")
 KIND_REGISTRY: dict[str, ResourceKind] = {}
 """Module-level registry mapping kind identifier -> ``ResourceKind`` instance.
 
-Populated by side-effect: each ``kinds/*.py`` module instantiates its kind
-and writes ``KIND_REGISTRY[<kind>] = <instance>`` at module-load.
-``kinds/__init__.py`` imports every kind module so the registry is
-populated after ``import agentworks.resources``.
+Populated by side-effect: each domain's kind module (``agentworks.vms.kinds``,
+``agentworks.secrets.kinds``, ``agentworks.catalog``, etc.) instantiates its
+kind and writes ``KIND_REGISTRY[<kind>] = <instance>`` at module-load.
+``resources/kinds/__init__.py`` is the registration index that imports every
+domain kind module so the registry is populated after
+``import agentworks.resources``.
 """

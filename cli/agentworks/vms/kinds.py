@@ -1,4 +1,8 @@
-"""``VMTemplateKind``: framework strategy for the ``"vm-template"`` kind.
+"""``_VMTemplateKind``: framework strategy for the ``"vm-template"`` kind.
+
+Lives in the ``vms`` domain package next to the code that implements VM
+templates; ``agentworks.resources.kinds.__init__`` imports this module so
+the kind self-registers into ``KIND_REGISTRY`` at load.
 
 Miss policy ``auto-declare`` with reserved name ``"default"`` -- the
 framework synthesizes ``vm-template:default`` (and only ``"default"``)
@@ -19,13 +23,13 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Literal
 
-from agentworks.config import VMTemplate
 from agentworks.resources.kind import (
     ALWAYS_MATERIALIZE_SOURCE,
     KIND_REGISTRY,
     InstanceRef,
 )
 from agentworks.resources.origin import Origin
+from agentworks.vms.template import VMTemplate
 
 if TYPE_CHECKING:
     from collections.abc import Iterable, Sequence

@@ -15,12 +15,13 @@ from __future__ import annotations
 
 import pytest
 
-from agentworks.config import AdminConfig, NamedConsoleConfig
+from agentworks.agents.template import AdminConfig
 from agentworks.resources import (
     ALWAYS_MATERIALIZE_SOURCE,
     KIND_REGISTRY,
     NoUnreferencedDefaultError,
 )
+from agentworks.sessions.template import NamedConsoleConfig
 
 
 def test_secret_kind_raises_on_empty_requirements() -> None:

@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
-from agentworks.config import AdminConfig, NamedConsoleConfig
+from agentworks.agents.template import AdminConfig
 from agentworks.resources import KIND_REGISTRY, SecretReference
 from agentworks.secrets.base import SecretDecl
+from agentworks.sessions.template import NamedConsoleConfig
 
 
 def _secret_req(name: str, source: tuple[str, str], usage: str = "the X env var") -> SecretReference:

@@ -1,5 +1,10 @@
-"""``WorkspaceTemplateKind``: framework strategy for the
+"""``_WorkspaceTemplateKind``: framework strategy for the
 ``"workspace-template"`` kind. Same shape as the other template kinds.
+
+Lives in the ``workspaces`` domain package next to the code that
+implements workspace templates; ``agentworks.resources.kinds.__init__``
+imports this module so the kind self-registers into ``KIND_REGISTRY`` at
+load.
 """
 
 from __future__ import annotations
@@ -7,13 +12,13 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Literal
 
-from agentworks.config import WorkspaceTemplate
 from agentworks.resources.kind import (
     ALWAYS_MATERIALIZE_SOURCE,
     KIND_REGISTRY,
     InstanceRef,
 )
 from agentworks.resources.origin import Origin
+from agentworks.workspaces.template import WorkspaceTemplate
 
 if TYPE_CHECKING:
     from collections.abc import Iterable, Sequence
@@ -39,8 +44,8 @@ class _WorkspaceTemplateKind:
         references: Sequence[ResourceReference],
     ) -> WorkspaceTemplate:
         """Build the code-defined default ``WorkspaceTemplate``. See
-        ``vm_template.py``'s ``synthesize`` for the rationale on why the
-        non-empty-``references`` path is preserved.
+        ``agentworks.vms.kinds``'s ``synthesize`` for the rationale on why
+        the non-empty-``references`` path is preserved.
         """
         source = references[0].source if references else ALWAYS_MATERIALIZE_SOURCE
         return WorkspaceTemplate(

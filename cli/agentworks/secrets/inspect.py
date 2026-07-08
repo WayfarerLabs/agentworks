@@ -17,8 +17,8 @@ from typing import TYPE_CHECKING
 
 from agentworks import output
 from agentworks.resources.inspect import used_by_for
-from agentworks.resources.kinds.secret import SECRET_KIND_NAME
 from agentworks.resources.render import format_origin_line
+from agentworks.secrets.kinds import SECRET_KIND_NAME
 
 if TYPE_CHECKING:
     from agentworks.config import Config

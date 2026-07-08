@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING
 from agentworks.errors import ConfigError
 
 if TYPE_CHECKING:
-    from agentworks.config import AgentTemplate
+    from agentworks.agents.template import AgentTemplate
     from agentworks.env import EnvEntry
     from agentworks.resources.registry import Registry
 
