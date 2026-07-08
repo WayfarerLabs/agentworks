@@ -42,6 +42,9 @@ class EnvVarBackend:
     interactive = False
 
     def validate_mapping(self, owner: str, mapping: MappingValue) -> None:
+        # The load-time gate; ``_resolved_name`` keeps its own check as
+        # defense in depth for hand-built decls that never pass through
+        # validate_chain.
         if not isinstance(mapping, str) or not mapping:
             raise ConfigError(
                 f"{owner}: backend_mappings for the env-var backend must "
@@ -57,8 +60,8 @@ class EnvVarBackend:
             # from a different identifier than the operator wrote.
             raise ConfigError(
                 f"secret {secret.name!r}: backend_mappings for the "
-                f"env-var backend must be a string (an env var name) "
-                f"or false; got a table"
+                f"env-var backend must be a non-empty string (an env "
+                f"var name) or false"
             )
         return env_var_name_for(secret.name)
 

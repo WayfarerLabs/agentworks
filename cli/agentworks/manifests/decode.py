@@ -7,6 +7,12 @@ entry rule, and unknown-key warning is shared verbatim between the TOML
 and manifest sources. When the TOML resource surface is deleted at the
 cutover, these loaders become manifest-only and can be renamed in place.
 
+Capability-owned blobs are the one deliberate exception to shared
+validation: the named capability validates its ``provider_config``
+(invoked here on the TRUE blob, with the loader's flat shape validating
+its own assembled blob), and the two sources diverge on stray blob
+keys by design (the flat domain stays silently loose until Phase 6).
+
 ``KIND_SECTIONS`` maps kind identifiers to their legacy TOML section
 names; it is the shared table the Phase 4 migrator consumes so the two
 sides cannot disagree about what maps to what.

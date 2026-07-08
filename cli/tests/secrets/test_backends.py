@@ -57,6 +57,13 @@ class _TestOnlyBackend:
     def __init__(self) -> None:
         self.batch_get_calls: list[list[str]] = []
 
+    def validate_mapping(self, owner: str, mapping: Any) -> None:
+        # Store semantics: string or structured addressing accepted.
+        if not isinstance(mapping, (str, dict)):
+            from agentworks.errors import ConfigError
+
+            raise ConfigError(f"{owner}: test-only mapping must be str or dict")
+
     def would_attempt(self, secret: Any, mapping: Any) -> bool:
         # Store semantics: only attempts explicitly-mapped secrets
         # (soft-skip otherwise), unlike the always-attempt built-ins.

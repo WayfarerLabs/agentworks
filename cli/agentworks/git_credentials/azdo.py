@@ -28,7 +28,10 @@ class AzDOCredentialProvider(GitCredentialProvider):
     ) -> tuple[ConfigReference, ...]:
         org = config.get("org")
         if not isinstance(org, str) or not org:
-            raise ConfigError(f"{owner}.org is required for the azdo provider")
+            raise ConfigError(
+                f"{owner}.org is required for the azdo provider and must "
+                f"be a non-empty string"
+            )
         unknown = sorted(set(config) - {"org"})
         if unknown:
             raise ConfigError(

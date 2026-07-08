@@ -14,23 +14,21 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from agentworks.git_credentials.azdo import AzDOCredentialProvider
-from agentworks.git_credentials.base import GitCredentialProvider
 from agentworks.git_credentials.github import GitHubCredentialProvider
 
 if TYPE_CHECKING:
+    from agentworks.git_credentials.base import GitCredentialProvider
     from agentworks.resources import Registry
 
 
-# The capability registry: provider name -> implementation class.
-# ``validate_config`` (blob validation + implied references) is invoked
-# through this dict at each source's blob boundary and at finalize.
+# The capability registry (the canonical provider list): provider name
+# -> implementation class. ``validate_config`` (blob validation +
+# implied references) is invoked through this dict at each source's
+# blob boundary and at finalize; descriptor rows publish from it.
 GIT_CREDENTIAL_PROVIDER_REGISTRY: dict[str, type[GitCredentialProvider]] = {
     "azdo": AzDOCredentialProvider,
     "github": GitHubCredentialProvider,
 }
-
-# Known provider type identifiers (registry keys, sorted).
-PROVIDER_TYPES: tuple[str, ...] = tuple(sorted(GIT_CREDENTIAL_PROVIDER_REGISTRY))
 
 
 def publish_to(registry: Registry) -> None:

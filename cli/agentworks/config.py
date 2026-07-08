@@ -93,8 +93,8 @@ def validate_admin_username(admin_username: str) -> None:
 
 # Valid values for enum-like fields. Git credential ``type`` validation
 # moved to the framework's ``git-credential-provider`` kind in Phase 2b.1
-# (see ``agentworks.git_credentials.PROVIDER_TYPES`` for the canonical
-# list).
+# (``agentworks.git_credentials.GIT_CREDENTIAL_PROVIDER_REGISTRY`` is
+# the canonical list).
 VALID_PLATFORMS = ("lima", "azure", "wsl2", "proxmox")
 
 
@@ -1356,7 +1356,12 @@ def _load_git_credentials(
             token_raw = cdata["token"]
 
         provider_config: dict[str, object] = {}
-        if "org" in cdata:
+        # The flat TOML shape only ever read ``org``, and only for azdo;
+        # hoisting it into the blob for other providers would promote a
+        # historically-ignored stray key into a validation error and
+        # break released configs (loads-today). The flat domain's
+        # stray-key silence stays until Phase 6 retires it.
+        if cred_type == "azdo" and "org" in cdata:
             provider_config["org"] = str(cdata["org"])
         from agentworks.git_credentials import GIT_CREDENTIAL_PROVIDER_REGISTRY
 

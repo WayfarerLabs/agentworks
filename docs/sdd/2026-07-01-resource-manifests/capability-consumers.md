@@ -305,6 +305,10 @@ instead of first resolution; dormant backends' mappings are not validated, exact
 used). A test-only capability whose config names a secret pins the reference half end to end
 (auto-declare, per-consumer attribution, operator override).
 
+(Shape note for the plugin SDD: `validate_config` is a classmethod on a registry of classes;
+`validate_mapping` is an instance method on a registry of instances -- per-registry pragmatism,
+worth unifying when the plugin capability contract is designed.)
+
 A further enhancement could be a schema-specification mechanism where capabilities register their
 schemas, allowing the core engine to validate and generate resource references without invoking the
 capability -- and, as a nice side effect, naturally documenting the capability config schema (e.g.

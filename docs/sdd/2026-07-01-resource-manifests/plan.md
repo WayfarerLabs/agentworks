@@ -488,7 +488,20 @@ API carries a deprecation note pointing at it.
       -- backend mappings are not yet in use in the wild, so the loads-today concern the permissive
       first cut served was moot; any non-`false` prompt mapping is dead config (a typo for another
       backend) and errors at `build_registry`. Supersedes the prompt-stays-permissive wording in the
-      checked boxes above.
+      checked boxes above. The same mappings-not-yet-in-use ruling covers env-var's tightening (dict
+      and empty-string mappings now fail at `build_registry`; the dict case previously failed at
+      every use anyway).
+- [x] Review fixes (verdict: design sound, two blockers, all addressed): the TOML loader hoists
+      `org` into the blob only for azdo -- hoisting it for every provider promoted a
+      historically-ignored stray key on released github credentials into a load error (loads-today
+      regression, probe-confirmed; pinned by `test_github_toml_stray_org_keeps_loading`); a ruff
+      TC001 in the new registry module; migrate validates emitted git-credential blobs at PLAN time
+      so a stray flat key fails before any write, in TOML vocabulary (was: verification failure
+      after write, rollback, and an error citing the rolled-back file; pinned); `_TestOnlyBackend`
+      implements `validate_mapping` and the protocol docstring states the method is required
+      (Protocol bodies are not inherited structurally); `PROVIDER_TYPES` snapshot removed (the
+      registry dict is canonical); plus message/docstring alignment minors and a prompt
+      structured-mapping pin.
 
 Definition of done: the contract works inside the established framework (both hosts exercised, one
 real migration + one test-only reference exerciser); CI green; reviewer-approved.

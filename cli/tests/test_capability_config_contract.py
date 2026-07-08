@@ -277,3 +277,36 @@ def test_dormant_backend_mappings_not_validated(tmp_path: Path) -> None:
         """,
     )
     build_registry(config)  # env-var not in chain -> not validated
+
+
+def test_prompt_rejects_structured_mapping_too(tmp_path: Path) -> None:
+    config = _config(
+        tmp_path,
+        """
+        [secrets.npm-token]
+        description = "npm token"
+        backend_mappings.prompt = { vault = "Work" }
+        """,
+    )
+    with pytest.raises(ConfigError, match="prompt backend has no meaning"):
+        build_registry(config)
+
+
+def test_github_toml_stray_org_keeps_loading(tmp_path: Path) -> None:
+    """Loads-today: the flat TOML shape only ever read `org` for azdo,
+    so a released github credential carrying a stray `org` key loaded
+    with the key silently ignored. The capability validates the blob
+    the loader assembles, and the loader must therefore hoist `org`
+    into the blob only for azdo -- a stray key must not be promoted
+    into a validation error on released surface."""
+    config = _config(
+        tmp_path,
+        """
+        [git_credentials.hub]
+        provider = "github"
+        org = "accidental"
+        """,
+    )
+    registry = build_registry(config)
+    cred = registry.lookup("git-credential", "hub")
+    assert cred.provider_config == {}  # stray key stays ignored, as released

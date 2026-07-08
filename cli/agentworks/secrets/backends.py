@@ -85,6 +85,11 @@ class SecretBackend(Protocol):
         vocabulary instead of at first resolution. The generic ``False``
         opt-out never reaches this. ``owner`` is display context.
 
+        REQUIRED, not defaulted: Protocol bodies are not inherited by
+        structural implementers, so every registered backend must
+        implement this (a backend with no mapping vocabulary rejects
+        everything, as prompt does).
+
         NOTE: this invoked-validation API may be deprecated in favor of
         capabilities pushing a declarative config schema definition at
         registration time, letting the core engine validate (and derive

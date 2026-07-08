@@ -10,7 +10,7 @@ import pytest
 from agentworks.bootstrap import build_registry
 from agentworks.config import load_config
 from agentworks.errors import ConfigError
-from agentworks.git_credentials import PROVIDER_TYPES
+from agentworks.git_credentials import GIT_CREDENTIAL_PROVIDER_REGISTRY
 from agentworks.resources import KIND_REGISTRY, NoUnreferencedDefaultError
 
 
@@ -82,10 +82,10 @@ def test_unknown_provider_errors_with_framework_shape(tmp_path: Path) -> None:
 
 
 def test_publisher_publishes_full_known_set(tmp_path: Path) -> None:
-    """Round-trip: every name in PROVIDER_TYPES lands in the registry
+    """Round-trip: every registered provider lands in the registry
     even without any operator references.
     """
     cfg = load_config(_write_cfg(tmp_path / "config.toml"), warn_issues=False)
     registry = build_registry(cfg)
     names = {r.name for r in registry.iter_kind("git-credential-provider")}
-    assert names == set(PROVIDER_TYPES)
+    assert names == set(GIT_CREDENTIAL_PROVIDER_REGISTRY)

@@ -92,12 +92,11 @@ single sibling key named after the reference field (`provider` -> `spec.provider
 inline selector like `harness` -> `harness_config`): an opaque blob the named capability owns and
 validates -- the capability is invoked with its block and returns the resource references it
 implies, which the consuming resource emits as its own -- so the rest of the spec stays
-provider-agnostic. Per-secret `backend_mappings` values are the same capability-owned configuration
-in a second host, validated the same way. Fields specific to the resource's kind are generic by
-definition and live at the top level of the resource spec (a `git-credential`'s `token` belongs to
-every credential, while `azdo`'s `org` nests). Where the reference site is per-secret
-(`backend_mappings`), the structured mapping value carries the per-secret addressing (a vault, item,
-and field) -- same principle, capability-owned content at the reference site.
+provider-agnostic. Fields specific to the resource's kind are generic by definition and live at the
+top level of the resource spec (a `git-credential`'s `token` belongs to every credential, while
+`azdo`'s `org` nests). Where the reference site is per-secret (`backend_mappings`), the mapping
+value carries the capability-owned content (an identifier override or structured store addressing)
+and is validated the same way -- same principle, capability-owned config at the reference site.
 
 The INTERNAL resource representation follows the nested shape too
 (`GitCredentialConfig.provider_config`) as this represents the best representation available. For

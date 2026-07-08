@@ -56,8 +56,9 @@ class GitCredentialProvider(ABC):
         capability.
         """
         if config:
+            display = getattr(cls, "provider_name", cls.__name__)
             raise ConfigError(
-                f"{owner}: the {cls.provider_name} provider accepts no "
+                f"{owner}: the {display} provider accepts no "
                 f"configuration; got {sorted(config)}"
             )
         return ()

@@ -150,7 +150,7 @@ def validate_chain(config: Config, registry: Registry) -> None:
 
     operator_decls = [
         decl
-        for decl in secret_decls(registry).values()
+        for decl in all_decls.values()
         if getattr(getattr(decl, "origin", None), "variant", None)
         == "operator-declared"
     ]

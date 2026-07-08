@@ -445,6 +445,30 @@ def _emit_document(doc: tomlkit.TOMLDocument, unit: MigrationUnit) -> str:
             rebuilt["token"] = token
         if spec:
             rebuilt["provider_config"] = dict(spec)
+        # The sweep above nests EVERYTHING the flat section carried
+        # beyond the kind-owned fields -- including stray keys the TOML
+        # loader silently ignores. The manifest loader validates blobs
+        # strictly, so an unvalidated emission would fail the post-run
+        # verification AFTER writing (rollback fires and the error cites
+        # a rolled-back file). Validate here instead: fail before
+        # anything is written, in the operator's TOML vocabulary.
+        from agentworks.git_credentials import GIT_CREDENTIAL_PROVIDER_REGISTRY
+
+        capability = GIT_CREDENTIAL_PROVIDER_REGISTRY.get(str(provider))
+        if capability is not None and "provider_config" in rebuilt:
+            try:
+                capability.validate_config(
+                    f"git_credentials.{unit.name}", rebuilt["provider_config"]
+                )
+            except ConfigError as exc:
+                raise ConfigError(
+                    f"cannot migrate git-credential/{unit.name}: {exc}",
+                    hint=(
+                        "The flat TOML section carries key(s) its provider "
+                        "does not accept (silently ignored by the TOML "
+                        "loader). Remove them from config.toml, then re-run."
+                    ),
+                ) from exc
         spec = rebuilt
 
     envelope: dict[str, Any] = {

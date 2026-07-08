@@ -790,3 +790,26 @@ def test_verification_mismatch_rolls_back(
     assert cfg.read_text() == original
     assert not (resources / "vm-template").exists()  # created dirs removed
     assert existing.read_text() == hand_written  # untouched by rollback
+
+
+def test_git_credential_stray_key_fails_at_plan_time(tmp_path: Path) -> None:
+    """The emission sweep nests every non-kind-owned flat key into
+    provider_config, including stray keys the TOML loader silently
+    ignores. The manifest loader validates blobs strictly, so planning
+    validates the emitted blob up front: the run fails BEFORE anything
+    is written, in TOML vocabulary, instead of failing verification
+    after the write and citing a rolled-back file."""
+    cfg = _write_config(
+        tmp_path,
+        resources="""\
+[git_credentials.ado]
+type = "azdo"
+org = "my-org"
+bogus = "stray"
+""",
+    )
+    with pytest.raises(ConfigError, match="cannot migrate git-credential/ado") as exc:
+        _plan(cfg, ["git-credential/ado"])
+    assert "unknown azdo provider field" in str(exc.value)
+    assert "Remove them from config.toml" in (exc.value.hint or "")
+    assert not (tmp_path / "resources").exists()  # nothing written
