@@ -280,3 +280,48 @@ def test_doctor_shows_noop_secret_backend_sections(
         "[secret_backends.env-var]" in name and "remove it" in message
         for name, message in warns
     ), warns
+
+
+def test_manifest_issues_surface_as_doctor_rows(tmp_path: Path, monkeypatch) -> None:
+    """A typo'd key on a manifest-declared resource (e.g.
+    ``github_credentials`` for ``git_credentials`` on an agent-template)
+    used to warn ambiently above the report while the Config row said
+    ok. Doctor now renders manifest issues as warn rows, and passing
+    the pre-loaded set into build_registry keeps the ambient print out
+    of doctor's output entirely."""
+    from textwrap import dedent
+
+    cfg = _write_config(tmp_path)
+    resources = tmp_path / "resources"
+    resources.mkdir()
+    (resources / "agent.yaml").write_text(
+        dedent("""\
+        apiVersion: agentworks/v1
+        kind: agent-template
+        metadata:
+          name: other
+        spec:
+          github_credentials: ["github"]
+        """)
+    )
+    monkeypatch.setattr("agentworks.config.CONFIG_PATH", cfg)
+    g, config, registry = _check_config()
+
+    manifest_rows = [c for c in g.checks if c.name == "Manifest"]
+    assert manifest_rows, [c.name for c in g.checks]
+    assert manifest_rows[0].status == Status.WARN
+    assert "github_credentials" in (manifest_rows[0].message or "")
+    assert "agent.yaml" in (manifest_rows[0].message or "")
+    # The ok row is withheld when any issue exists.
+    assert not any(c.name == "Config is valid" for c in g.checks)
+    # The registry still builds (warn, not fail).
+    assert registry is not None
+
+
+def test_clean_manifests_keep_config_valid_row(tmp_path: Path, monkeypatch) -> None:
+    cfg = _write_config(tmp_path)
+    monkeypatch.setattr("agentworks.config.CONFIG_PATH", cfg)
+    g, _, registry = _check_config()
+    assert any(c.name == "Config is valid" for c in g.checks)
+    assert not any(c.name == "Manifest" for c in g.checks)
+    assert registry is not None

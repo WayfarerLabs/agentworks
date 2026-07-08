@@ -231,9 +231,26 @@ def _check_config() -> tuple[HealthGroup, Config | None, Registry | None]:
         g.fail("Config", "failed to load")
         return g, None, None
 
+    # Manifest spec-level warnings (unknown keys with file:line, env
+    # hygiene, ...) surface as doctor rows, exactly like TOML
+    # config_issues below. Loading here (and passing the set into
+    # build_registry) also keeps build_registry's auto-load from
+    # printing ambient warnings above the report -- doctor rows ARE the
+    # surface. A typo'd key on a manifest-declared resource previously
+    # warned ambiently while the Config row said ok.
+    from agentworks.manifests import RESOURCES_DIRNAME, load_manifests
+
+    try:
+        manifests = load_manifests(config.source_path.parent / RESOURCES_DIRNAME)
+    except ConfigError as e:
+        g.fail("Manifests", str(e), hint=e.hint)
+        return g, config, None
+
     for issue in config.config_issues:
         g.warn("Config", issue)
-    if not config.config_issues:
+    for issue in manifests.issues:
+        g.warn("Manifest", issue)
+    if not config.config_issues and not manifests.issues:
         g.ok("Config is valid")
     # Deprecation nudges ride their own channel (so --no-deprecations
     # can silence the ambient per-command warning), but doctor is the
@@ -263,7 +280,7 @@ def _check_config() -> tuple[HealthGroup, Config | None, Registry | None]:
     from agentworks.bootstrap import build_registry
 
     try:
-        registry = build_registry(config)
+        registry = build_registry(config, manifests=manifests)
     except ConfigError as e:
         g.fail("Resource registry", str(e), hint=e.hint)
         return g, config, None
