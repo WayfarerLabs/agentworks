@@ -251,6 +251,34 @@ should pick) plus one namespaced table per plugin for plugin-level settings. Cap
 still lives at the reference sites above; the namespaced table is for plugin-wide concerns (the
 passport CA directory, not per-agent validity).
 
+## Secrets in capability config
+
+Capability config will sometimes need secrets (an AWS vm-provider's client secret, a 1Password
+service-account token). These are ordinary secret REFERENCES -- a bare secret name in a config
+field, never a value -- and the existing machinery covers them end to end, in both flavors:
+
+- **Defaulted, overridable** (the `git-token-<name>` / `tailscale-auth-key` precedent): the field
+  defaults to a well-known secret name (`aws-client-secret`), and the operator may point it at any
+  secret instead. Auto-declaration means the default Just Works with zero secret ceremony: the
+  reference materializes a `secret` row at finalize with a synthesized description
+  (`(auto) the client secret for vm-platform/aws-prod`), reachability is validated, doctor predicts
+  resolution per row, and the default chain's prompt makes it resolvable out of the box.
+- **Required, explicit**: same mechanism minus the default; the loader errors if the field is
+  absent.
+
+One extension is needed, because the blob is opaque: the framework cannot know that
+`provider_config.client_secret` holds a secret name. The capability surfaces its secret-typed config
+fields -- naturally at the same hook where it already validates the blob -- and the hosting
+resource's `referenced_resources()` includes them; everything downstream (auto-declare,
+reachability, doctor, `backend_mappings` customization of the secret itself) is stock.
+
+Resolution happens at the consuming command's composition root, never at registry build (the
+registry never resolves values). The hook exists today:
+`compute_needed_secrets(..., extra_decls=...)` is exactly how tailscale keys and git-credential
+tokens -- secrets needed by machinery rather than by env tables -- join a command's single resolve
+pass. Capability-config secrets ride the same path: `vm create` against an AWS platform adds the
+platform's secret decls to its resolve set.
+
 ## The rules, restated for the plugin SDD
 
 1. One capability, dedicated kind (instance-identity test passes: vm-platform, git-credential):
@@ -268,3 +296,7 @@ passport CA directory, not per-agent validity).
    consumer, extend in this order: capability-owned list values first (no schema change), then a
    named-instance map (keeps inheritance merge and identity), then an anonymous entry list (only for
    ordered, non-inherited consumers).
+8. Secret-name fields inside capability config are ordinary secret references (defaulted and
+   overridable, or required): the capability surfaces which blob fields are secret names, the
+   hosting resource emits the references, and auto-declaration, validation, doctor, and
+   composition-root resolution are stock machinery.
