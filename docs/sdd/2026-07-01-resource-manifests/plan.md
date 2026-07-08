@@ -402,7 +402,7 @@ Pre-lock revision (2026-07-07), driven by the plugin-system SDD design review: t
 capability/exposed-resource split is dissolved as a universal layer. Resources reference
 capabilities directly, many-to-one, carrying provider-owned config at the reference site; a
 dedicated instance kind exists only where instances need identity beyond a single reference site
-(git-credential today; vm-platform in the plugin SDD). `secret-backend` the DECLARABLE kind dies;
+(git-credential today; vm-site in the plugin SDD). `secret-backend` the DECLARABLE kind dies;
 `secret-provider` the capability is RENAMED `secret-backend` (the domain's natural noun, and the
 word the released v0.10.0 TOML surface already uses). See the 2026-07-07 sequencing note for the
 full ruling chain; FRD R8, the HLA secret architecture section, and ADR 0016 carry the revised
@@ -610,6 +610,20 @@ artifact update.)
   declarations. A same-day revision made prompt's `validate_mapping` strict (reject any non-`false`
   mapping): the permissive first cut protected released configs, but mappings are not yet in use in
   the wild, so silence would only hide typos.
+
+- **2026-07-08: VM naming ratified -- vm-platform (capability) / vm-site (declarable).** The draft
+  plugin SDD's vm-provider (capability) / vm-platform (declarable) read backwards to the maintainer:
+  "platform" speaks of a capability (azure IS a platform -- the technology, which is also what
+  `vm create --platform` means today, and what the code calls "provisioner"; the synonym retires in
+  the VM SDD). An intermediate vm-platform-provider proposal (suffix per the git-credential pattern)
+  was rejected too: with two distinct natural nouns, no suffix is needed anywhere. The declarable --
+  the configured API surface for a platform, where VMs are created, managed, and shelled into -- is
+  `vm-site` (candidates weighed: factory [birth-only + OOP baggage], target, context, profile,
+  connection, facility). The CLI always refers to the site: `--platform` becomes `--site` when sites
+  land (maintainer-sanctioned break). Field convention inside vm-site: `platform` +
+  `platform_config` -- a reference field is named for what it references. Supersedes the
+  "(git-credential-provider, vm-provider)" example in the 2026-07-07 collapse note.
+  Documentation-only on this branch; the VM/plugin SDDs carry the implementation.
 
 - **2026-07-08: domains own their kinds (maintainer rulings, pre-lock; Phase 5.8).** The kind-logic
   split question ("some in resources/kinds/, some in native packages -- defensible?") surfaced two

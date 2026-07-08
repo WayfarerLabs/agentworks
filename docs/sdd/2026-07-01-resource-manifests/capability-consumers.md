@@ -28,8 +28,9 @@ The inline form drops the `provider` envelope: when a template field selects exa
 the FIELD is the selector -- it's not a "harness provider", it's simply the template's harness -- so
 `harness: claude-code` plus a sibling `harness_config: {...}` (validated by the selected harness)
 says everything the nested form said with one less layer. The `provider` / `provider_config`
-spelling survives only where a dedicated kind's whole identity is "a configured capability instance"
-(git-credential, vm-platform), where the generic field name is the honest one.
+spelling survives only where the capability has no domain noun of its own (git-credential); where it
+does, the field takes it even in a dedicated kind (vm-site's `platform` / `platform_config`) -- a
+reference field is named for what it references.
 
 The map-vs-list split is the cardinality wrinkle: a keyed map gives uniqueness by construction,
 per-key config with no envelope ceremony, and -- decisive for templates -- **per-key merge under
@@ -78,7 +79,7 @@ deliberately when same-capability multiplicity becomes real for it.
 | 1   | `secret-backend`                    | `[secret_config].backends` (config) | many, ordered         | ordered name list             |
 | 2   | `secret-backend`                    | `secret.spec.backend_mappings`      | many, adjusts ambient | map keyed by name             |
 | 3   | `git-credential-provider`           | `git-credential.spec`               | one                   | reference + blob              |
-| 4   | `vm-platform-provider` (planned)    | `vm-platform.spec` (dedicated kind) | one                   | reference + blob              |
+| 4   | `vm-platform` (planned)             | `vm-site.spec` (dedicated kind)     | one                   | reference + blob              |
 | 5   | `harness` (planned)                 | `session-template.spec.harness`     | one                   | reference + blob, inline      |
 | 6   | `feature` (planned, per level)      | `<level>-template.spec.features`    | many, order-free      | map keyed by name             |
 | 7   | plugin (trust unit, not capability) | `[plugins]` (config)                | many, order-free      | name list + namespaced tables |
@@ -139,35 +140,38 @@ spec:
 The canonical single-reference shape (rule 1), hosted by a dedicated kind because a credential is a
 real domain noun (templates reference credentials by name; the token secret hangs off it).
 
-### 4. vm-platform: one capability, dedicated kind (planned)
+### 4. vm-site: one capability, dedicated kind (planned)
 
-Naming ruling (2026-07-08): the capability kind is `vm-platform-provider`, not the draft's bare
-`vm-provider` -- the declarable owns the natural noun and the capability takes the suffix, exactly
-like `git-credential` / `git-credential-provider`. "Platform" stays where operators already are
-(`vm create --platform`, `defaults.platform` are released vocabulary): once instances exist,
-`--platform` selects a `vm-platform` row, and released values like `"azure"` keep working because
-each capability ships a bundled default instance named after itself (the secret-backend trick).
+Naming ruling (2026-07-08, superseding the draft's vm-provider/vm-platform and an earlier
+vm-platform-provider proposal): **`vm-platform` is the capability** (the technology: lima, azure,
+wsl2, proxmox -- "platform" speaks of a capability, and it is what the word already means in
+`vm create --platform` and the code's "provisioner", which retires as a synonym) and **`vm-site` is
+the declarable** (the configured API surface for a platform -- the place where VMs are created,
+managed, and shelled into). Two distinct natural nouns, so no disambiguating suffix anywhere. The
+CLI always refers to the site: `--platform` becomes `--site` when sites land (a sanctioned break).
+Inside vm-site's spec the selector field takes the capability's noun, `platform` +
+`platform_config`, per the field-named-for-what-it-references rule.
 
 ```yaml
 apiVersion: agentworks/v1
-kind: vm-platform
+kind: vm-site
 metadata:
   name: azure-prod
   description: Production subscription, East US
 spec:
-  provider: azure
-  provider_config:
+  platform: azure
+  platform_config:
     subscription: 1234-...
     resource_group: agw-prod
     region: eastus
 ```
 
 Same shape as row 3. The dedicated kind is justified by the instance-identity test, not by the
-pattern: many consumers name the platform (`vm-template.spec.platform: azure-prod`,
-`agw vm create --platform azure-prod`, DB provenance), and "create a VM HERE" wants multiple named
-heres per provider without carrying connection config on the create command. Note the consumers
-reference the PLATFORM (a resource) by bare name -- resource-to-resource references don't use this
-doc's shapes at all.
+pattern: many consumers name the site (`vm-template.spec.site: azure-prod`,
+`agw vm create --site azure-prod`, DB provenance), and "create a VM HERE" wants multiple named heres
+per platform without carrying connection config on the create command. Note the consumers reference
+the SITE (a resource) by bare name -- resource-to-resource references don't use this doc's shapes at
+all.
 
 ### 5. harness: one capability, inline in the template (planned)
 
@@ -263,7 +267,7 @@ field, never a value -- and the existing machinery covers them end to end, in bo
   operator may explicitly define the field to point it at an alternate secret instead.
   Auto-declaration means that the referenced secret (whether defaulted or overridden) Just Works
   with zero secret ceremony: the reference materializes a `secret` row at finalize with a
-  synthesized description (`(auto) the client secret for vm-platform/aws-prod`), reachability is
+  synthesized description (`(auto) the client secret for vm-site/aws-prod`), reachability is
   validated, doctor predicts resolution per row, and the default chain's prompt makes it resolvable
   out of the box.
 - **Required, explicit**: same mechanism minus the default; the loader errors if the field is
@@ -275,13 +279,13 @@ One extension is needed, because the blob is opaque: the framework cannot know t
 - **The capability contributes schema knowledge only** ("field `client_secret` of my blob is a
   secret name, defaulting to `aws-client-secret`") -- via the validation invocation described in the
   next section. It declares no references: it has no config of its own, and the secret name is
-  per-consumer (two AWS platforms can name different secrets).
+  per-consumer (two AWS sites can name different secrets).
 - **The consuming resource declares the reference**, with ITSELF as the source -- exactly how
   `git-credential/ado` emits its `token` reference today while the `azdo` capability declares
   nothing. That attribution is what makes every downstream surface useful: the auto-declared
-  description reads `(auto) the client secret for vm-platform/aws-prod` (not "for the aws provider"
-  across all platforms), `Referenced by:` on the secret lists the platforms individually, and the
-  needed-secrets walk reaches only the secrets of the platform actually in play.
+  description reads `(auto) the client secret for vm-site/aws-prod` (not "for the aws platform"
+  across all sites), `Referenced by:` on the secret lists the sites individually, and the
+  needed-secrets walk reaches only the secrets of the site actually in play.
 
 The general rule: **whoever hosts the config that names the secret emits the reference.** (If
 capability-scoped config ever materializes -- a backend-wide connection token -- the capability
@@ -334,18 +338,18 @@ so encapsulation alone never earns built-in status; neutrality does.
 
 - Built-in: the `shell` harness (the core needs A harness; shell is neutral); the `env-var` and
   `prompt` secret backends (secrets are useless without A resolution path; both vendor-free); `lima`
-  among VM platform providers (local VMs, no vendor).
+  among VM platforms (local VMs, no vendor).
 - Plugin: `claude-code` / `codex` harnesses (system plugins -- and since a built-in that later
   becomes enablement-gated is a breaking flip, they must be BORN as plugins, which sequences plugin
   infrastructure before or alongside the first tool-specific harness); `onepassword`; future vendor
-  VM platform providers (e.g. AWS). `azure` / `proxmox` fail the neutrality prong too: the
-  maintainer plans to move them out into plugins (a `!`-flagged breaking change -- released
-  always-on today, opt-in after; accepted).
+  VM platforms (e.g. AWS). `azure` / `proxmox` fail the neutrality prong too: the maintainer plans
+  to move them out into plugins (a `!`-flagged breaking change -- released always-on today, opt-in
+  after; accepted).
 
 ## The rules, restated for the plugin SDD
 
-1. One capability, dedicated kind (instance-identity test passes: vm-platform, git-credential):
-   `provider` + `provider_config`.
+1. One capability, dedicated kind (instance-identity test passes: vm-site, git-credential): a
+   reference field named for the capability (`provider`, `platform`) + its `_config` sibling.
 2. One capability, inline in a consumer (the test fails: harness): the field is the selector
    (`harness: <name>`) with a sibling `<field>_config` blob; the pair inherits as a unit.
 3. Many capabilities, order-free: a map keyed by capability name, value = capability-owned blob,

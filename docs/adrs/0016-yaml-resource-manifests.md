@@ -75,37 +75,41 @@ many-to-one**: a `git-credential` names its provider, a secret's mappings name b
 template names its harness. There is no dedicated "exposure" layer between a resource and a
 capability: whether a kind exists is ordinary domain modeling (is there a real noun operators reason
 about, referenced from more than one place?), not a pattern requirement. A credential is such a
-noun; "a configured place to create VMs" (the plugin SDD's vm-platform) is such a noun. (A
-declarable "backend instance" kind was considered and rejected -- the instance identity carried no
-content.) If a capability someday genuinely needs multiple configured instances (two 1Password
-accounts with different credentials), a declarable instance kind for THAT capability is an additive
-graduation, not a redesign.
+noun; "a configured place to create VMs" (the plugin SDD's vm-site) is such a noun. (A declarable
+"backend instance" kind was considered and rejected -- the instance identity carried no content.) If
+a capability someday genuinely needs multiple configured instances (two 1Password accounts with
+different credentials), a declarable instance kind for THAT capability is an additive graduation,
+not a redesign.
 
 **Naming**: each domain calls its capability by its natural noun -- `secret-backend`,
-`git-credential-provider`, (future) `vm-platform-provider` / `harness` -- adding a disambiguating
-suffix only when the bare noun would collide with a resource kind or lifecycle entity. Where a
-domain has BOTH a declarable kind and its capability, the declarable owns the natural noun and the
-capability takes the suffix: `git-credential` / `git-credential-provider`, and (future)
-`vm-platform` (the configured instance operators select -- `--platform` is released vocabulary) /
-`vm-platform-provider` (the code: lima, azure, ...). Symbols spell the domain out
-(`SECRET_BACKEND_REGISTRY`). The bare word "provider" is never a domain noun -- it is the generic
-cross-domain term for the pattern, the conventional name for capability-reference fields
-(`spec.provider`, where the owning resource makes the domain clear), and the (future, not certain)
-possibility of a generic provider registry.
+`git-credential-provider`, (future) `vm-platform` / `harness` -- adding a disambiguating suffix only
+when the bare noun would collide with a resource kind or lifecycle entity (`git-credential` forced
+`git-credential-provider`). Where a domain has distinct natural nouns for the capability and its
+declarable, no suffix appears at all: (future) `vm-platform` is the capability (the technology:
+lima, azure, wsl2, proxmox -- what operators mean by "platform" today) and `vm-site` is the
+declarable (the configured place where VMs are created and managed; the CLI's `--platform` becomes
+`--site` when sites land, a sanctioned break, because the released flag names the capability and the
+selector must name the site). Symbols spell the domain out (`SECRET_BACKEND_REGISTRY`). The bare
+word "provider" is never a domain noun -- it is the generic cross-domain term for the pattern, the
+possibility of a (future, not certain) generic provider registry, and the conventional
+capability-reference field name where the capability has no domain noun of its own (`spec.provider`
+on a git-credential); where it does, the field takes it (`harness`, vm-site's `platform`) -- a
+reference field is named for what it references.
 
 Capabilities can optionally carry configuration, and its nature and shape is entirely
-capability-specific. For example, an AZDO git credential provider requires an organization name; a
-(future) Azure VM provider may need a subscription ID; a (future) 1Password secret backend may need
+capability-specific. For example, an AZDO git credential provider requires an organization name; the
+(future) azure VM platform may need a subscription ID; a (future) 1Password secret backend may need
 an account URL. Where the reference site is a resource spec, that configuration is limited to a
-single sibling key named after the reference field (`provider` -> `spec.provider_config`; a future
-inline selector like `harness` -> `harness_config`): an opaque blob the named capability owns and
-validates -- the capability is invoked with its block and returns the resource references it
-implies, which the consuming resource emits as its own -- so the rest of the spec stays
-provider-agnostic. Fields specific to the resource's kind are generic by definition and live at the
-top level of the resource spec (a `git-credential`'s `token` belongs to every credential, while
-`azdo`'s `org` nests). Where the reference site is per-secret (`backend_mappings`), the mapping
-value carries the capability-owned content (an identifier override or structured store addressing)
-and is validated the same way -- same principle, capability-owned config at the reference site.
+single sibling key named after the reference field (`provider` -> `spec.provider_config`; future:
+vm-site's `platform` -> `platform_config`, an inline `harness` -> `harness_config`): an opaque blob
+the named capability owns and validates -- the capability is invoked with its block and returns the
+resource references it implies, which the consuming resource emits as its own -- so the rest of the
+spec stays provider-agnostic. Fields specific to the resource's kind are generic by definition and
+live at the top level of the resource spec (a `git-credential`'s `token` belongs to every
+credential, while `azdo`'s `org` nests). Where the reference site is per-secret
+(`backend_mappings`), the mapping value carries the capability-owned content (an identifier override
+or structured store addressing) and is validated the same way -- same principle, capability-owned
+config at the reference site.
 
 The INTERNAL resource representation follows the nested shape too
 (`GitCredentialConfig.provider_config`) as this represents the best representation available. For
