@@ -42,17 +42,18 @@ flipped.
   plan's 2026-07-07 sequencing notes; ADR 0016 carries the model. Companion doc
   capability-consumers.md (marked SUGGESTION) prototypes consumer schema shapes for the plugin SDD.
 
-Four deliberate breaking changes, all `!`-flagged for release-please: resource names may not contain
-`/` (FRD R13); `agw resource migrate` and `agw resource sample` each require selectors or `--all`;
-and `resource describe` takes a single `KIND/NAME` token (the `/` display-syntax unification, ADR
-0016). Other pre-lock additions: deprecation warnings aggregated behind a global `--no-deprecations`
-silencer, and provider-owned configuration nests under `spec.provider_config` (ADR 0016). See the
-plan's sequencing notes for detail.
+Four deliberate operator-facing breaking changes, `!`-flagged for release-please: resource names may
+not contain `/` (FRD R13); `agw resource migrate` requires selectors (and `agw resource sample` a
+kind) or `--all`; and `resource describe` takes a single `KIND/NAME` token (the `/` display-syntax
+unification, ADR 0016). Two further `!` commits cover branch-internal secrets surface that never
+shipped in a release. Other pre-lock additions: deprecation warnings aggregated behind a global
+`--no-deprecations` silencer, and provider-owned configuration nests under `spec.provider_config`
+(ADR 0016). See the plan's sequencing notes for detail.
 
 ### Permanent homes (the SDD-not-permanent promotions)
 
-- **ADR 0016** -- the three-layer config/resource/capability model, the vocabulary law,
-  resources-reference-capabilities (with the capability naming rule and the graduate-when-real
+- **ADR 0016** -- the two-layer config/resource model (capability kinds included), the vocabulary
+  law, resources-reference-capabilities (with the capability naming rule and the graduate-when-real
   clause), the envelope/auto-load decision, dual-path rationale, the slash ban, and the 0013/0014
   mechanism supersession.
 - **`docs/guides/resources.md`** -- the operator-facing story.

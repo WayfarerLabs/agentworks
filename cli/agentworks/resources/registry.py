@@ -451,7 +451,7 @@ def _polish_auto_declared_description(resource: Any, kind: str) -> Any:
 
     - **Usage-driven** (auto-declared via incoming reference): set
       from the first matching reference as
-      ``"(auto) <usage> for <kind>:<name>"`` plus ``" (and N more)"``
+      ``"(auto) <usage> for <kind>/<name>"`` plus ``" (and N more)"``
       when more than one distinct source matches.
     - **Empty-usage** (always-materialized reserved default; no incoming
       references): set as ``"(auto) auto-declared default <kind>"``,

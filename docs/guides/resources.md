@@ -123,5 +123,5 @@ agw resource describe secret/npm-token  # where it's referenced, what uses it
 agw doctor                              # health: would every secret resolve?
 ```
 
-The design rationale (the config/resource/capability split, the vocabulary rules, and why dual
-sources are permanent) is recorded in ADR 0016.
+The design rationale (the config/resource split, capability kinds, the vocabulary rules, and why
+dual sources are permanent) is recorded in ADR 0016.
