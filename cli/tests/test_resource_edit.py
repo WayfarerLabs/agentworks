@@ -185,3 +185,100 @@ def test_cli_edit_rejects_token_without_slash(
     result = CliRunner().invoke(app, ["resource", "edit", "secret"])
     assert result.exit_code != 0
     assert "expected KIND/NAME" in str(result.exception)
+
+
+def test_cli_edit_works_when_config_fails_validation(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """The fix-it path: a broken config is exactly when edit is needed
+    most (the maintainer hit this breaking YAML intentionally). A
+    ConfigError from the strict path falls back to a tolerant,
+    validation-free envelope scan; the declaring file still opens, with
+    a warning naming the validation failure."""
+    from typer.testing import CliRunner
+
+    from agentworks.cli import app
+
+    cfg = tmp_path / "config.toml"
+    _write_base(cfg)
+    resources = tmp_path / "resources"
+    resources.mkdir()
+    (resources / "secrets.yaml").write_text(
+        dedent("""\
+        apiVersion: agentworks/v1
+        kind: secret
+        metadata:
+          name: openai-api-key
+          description: OpenAI key
+        spec:
+          backend_mappings:
+            prompt: broken-on-purpose
+        """)
+    )
+    monkeypatch.setattr("agentworks.config.CONFIG_PATH", cfg)
+    monkeypatch.setenv("EDITOR", "test-editor")
+    calls: list[list[str]] = []
+    monkeypatch.setattr("subprocess.call", lambda argv: calls.append(argv) or 0)
+
+    result = CliRunner().invoke(
+        app, ["resource", "edit", "secret/openai-api-key"]
+    )
+    assert result.exit_code == 0, result.output
+    assert calls == [["test-editor", str(resources / "secrets.yaml")]]
+    assert "config is currently failing validation" in result.output
+    assert "prompt backend has no meaning" in result.output
+
+
+def test_fallback_scan_tolerates_broken_sibling_files(tmp_path: Path) -> None:
+    """A file with a YAML syntax error is skipped (and reported); the
+    target in a parseable file is still found."""
+    from agentworks.manifests.loader import locate_document
+
+    resources = tmp_path / "resources"
+    resources.mkdir()
+    (resources / "broken.yaml").write_text("kind: [unclosed\n")
+    (resources / "ok.yaml").write_text(
+        dedent("""\
+        apiVersion: agentworks/v1
+        kind: secret
+        metadata:
+          name: findable
+        spec: {}
+        """)
+    )
+    found = locate_document(resources, "secret", "findable")
+    assert found.location is not None
+    assert found.location.file == resources / "ok.yaml"
+    assert found.location.line == 1
+    assert found.unreadable == (resources / "broken.yaml",)
+
+
+def test_fallback_miss_names_unreadable_files(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """When the target isn't found AND some files couldn't be parsed,
+    the original config error re-raises with a hint naming them --
+    the resource may live in the unparseable file."""
+    from typer.testing import CliRunner
+
+    from agentworks.cli import app
+
+    cfg = tmp_path / "config.toml"
+    _write_base(
+        cfg,
+        """
+        [secrets.bad]
+        description = "d"
+        backend_mappings.prompt = "nope"
+        """,
+    )
+    resources = tmp_path / "resources"
+    resources.mkdir()
+    (resources / "broken.yaml").write_text("kind: [unclosed\n")
+    monkeypatch.setattr("agentworks.config.CONFIG_PATH", cfg)
+    monkeypatch.setenv("EDITOR", "test-editor")
+
+    result = CliRunner().invoke(app, ["resource", "edit", "secret/mystery"])
+    assert result.exit_code != 0
+    assert "broken.yaml" in str(result.exception)
+    assert "edit the file directly" in (result.exception.hint or "")  # type: ignore[union-attr]

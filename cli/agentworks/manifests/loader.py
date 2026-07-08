@@ -182,6 +182,42 @@ def _iter_documents(path: Path) -> Iterator[tuple[object, SourceLocation]]:
         raise ConfigError(f"{path}{line}: invalid YAML: {exc}") from exc
 
 
+@dataclass(frozen=True)
+class LocateResult:
+    """Outcome of the tolerant declaration scan (``locate_document``)."""
+
+    location: SourceLocation | None
+    unreadable: tuple[Path, ...]
+
+
+def locate_document(resources_dir: Path, kind: str, name: str) -> LocateResult:
+    """Best-effort ``(file, line)`` of the manifest document declaring
+    ``kind``/``name`` -- WITHOUT validating anything.
+
+    The fix-it path for ``agw resource edit``: when the config is
+    failing validation, the strict registry lookup is unavailable, but
+    the operator needs the declaring file MORE, not less. This scan
+    reads raw envelopes only (``kind`` / ``metadata.name``), skips
+    files that fail to parse (collected in ``unreadable`` so the caller
+    can point at them), and never decodes specs.
+    """
+    unreadable: list[Path] = []
+    for path in _iter_manifest_files(resources_dir):
+        try:
+            documents = list(_iter_documents(path))
+        except ConfigError:
+            unreadable.append(path)
+            continue
+        for value, location in documents:
+            if not isinstance(value, dict):
+                continue
+            metadata = value.get("metadata")
+            doc_name = metadata.get("name") if isinstance(metadata, dict) else None
+            if value.get("kind") == kind and doc_name == name:
+                return LocateResult(location=location, unreadable=tuple(unreadable))
+    return LocateResult(location=None, unreadable=tuple(unreadable))
+
+
 def load_manifests(resources_dir: Path) -> ManifestSet:
     """Load, validate, and decode every manifest under ``resources_dir``.
 

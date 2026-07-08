@@ -241,9 +241,40 @@ def resource_edit(
         typer.echo("Error: $EDITOR is not set. Set it to your preferred editor.", err=True)
         raise typer.Exit(1)
 
-    config = load_config()
-    registry = build_registry(config)
-    path, line = edit_location(registry, kind, name)
+    from agentworks.errors import ConfigError
+
+    try:
+        config = load_config()
+        registry = build_registry(config)
+        path, line = edit_location(registry, kind, name)
+    except ConfigError as exc:
+        # The fix-it path: a config failing validation is exactly when
+        # the operator needs edit most, so fall back to a tolerant,
+        # validation-free scan of the manifests directory. Only
+        # ConfigError (config-broken) triggers this; ValidationError /
+        # NotFoundError (wrong invocation, wrong name) propagate with
+        # their better messages.
+        from agentworks.config import load_config as load_settings
+        from agentworks.manifests import RESOURCES_DIRNAME
+        from agentworks.manifests.loader import locate_document
+
+        settings = load_settings(resources=False)
+        resources_dir = settings.source_path.parent / RESOURCES_DIRNAME
+        found = locate_document(resources_dir, kind, name)
+        if found.location is None:
+            if found.unreadable:
+                files = ", ".join(str(p) for p in found.unreadable)
+                exc.hint = (
+                    f"{exc.hint + ' ' if exc.hint else ''}Also: {files} "
+                    f"failed to parse and could not be searched; edit "
+                    f"the file directly if the resource lives there."
+                )
+            raise
+        output.warn(
+            f"config is currently failing validation ({exc}); opening "
+            f"the declaring manifest anyway"
+        )
+        path, line = found.location.file, found.location.line
     # Per-kind layout files hold many documents; the line tells the
     # operator where to look. (No editor +line heuristics -- keep it
     # simple, per the maintainer's scope ruling.)
