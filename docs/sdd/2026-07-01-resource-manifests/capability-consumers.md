@@ -297,13 +297,15 @@ associate with the consuming resource (the one that owns the config block). Toda
 than the contract because nothing yet needs it: the sole config-bearing capability field (azdo's
 `org`, a plain string) is validated in the git-credential kind's shared loader, and references are
 hand-coded on the resource; no capability exposes a validate API, and no shipped blob contains a
-resource reference. A further enhancement could be a schema-specification mechanism where
-capabilities register their schemas, allowing the core engine to validate and generate resource
-references without invoking the capability -- and, as a nice side effect, naturally documenting the
-capability config schema (e.g. rendered by `agw resource describe <capability-kind>/<name>`). For
-that to work, the schema would need to be able to describe fields as resource references to specific
-kinds (secrets as well as other resources), and to include usage information to populate on those
-references.
+resource reference. The capability RUNTIME APIs do ship (`SecretBackend`'s resolution methods,
+`GitCredentialProvider.credential_lines`), each invoked by the framework at a well-defined moment --
+so the contract is additive: one more method, one more moment, on API surfaces that already exist. A
+further enhancement could be a schema-specification mechanism where capabilities register their
+schemas, allowing the core engine to validate and generate resource references without invoking the
+capability -- and, as a nice side effect, naturally documenting the capability config schema (e.g.
+rendered by `agw resource describe <capability-kind>/<name>`). For that to work, the schema would
+need to be able to describe fields as resource references to specific kinds (secrets as well as
+other resources), and to include usage information to populate on those references.
 
 ## The rules, restated for the plugin SDD
 
