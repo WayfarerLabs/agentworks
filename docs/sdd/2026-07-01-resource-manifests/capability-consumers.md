@@ -291,15 +291,19 @@ platform's secret decls to its resolve set.
 
 ## Capability config validation
 
-For now, capabilities are invoked during validation of the consuming resource: they validate their
-own config schema and identify the resource references to associate with the consuming resource (the
-one that owns the defined config block). This works. A future enhancement could be a
-schema-specification mechanism where capabilities register their schemas, allowing the core engine
-to validate and generate resource references without invoking the capability -- and, as a nice side
-effect, naturally documenting the capability config schema (e.g. rendered by
-`agw resource describe <capability-kind>/<name>`). For that to work, the schema would need to be
-able to describe fields as resource references to specific kinds (secrets as well as other
-resources), and to include usage information to populate on those references.
+The contract (for the plugin SDD to build): capabilities are invoked during validation of the
+consuming resource -- they validate their own config block and return the resource references to
+associate with the consuming resource (the one that owns the config block). Today's code is simpler
+than the contract because nothing yet needs it: the sole config-bearing capability field (azdo's
+`org`, a plain string) is validated in the git-credential kind's shared loader, and references are
+hand-coded on the resource; no capability exposes a validate API, and no shipped blob contains a
+resource reference. A further enhancement could be a schema-specification mechanism where
+capabilities register their schemas, allowing the core engine to validate and generate resource
+references without invoking the capability -- and, as a nice side effect, naturally documenting the
+capability config schema (e.g. rendered by `agw resource describe <capability-kind>/<name>`). For
+that to work, the schema would need to be able to describe fields as resource references to specific
+kinds (secrets as well as other resources), and to include usage information to populate on those
+references.
 
 ## The rules, restated for the plugin SDD
 
@@ -318,6 +322,6 @@ resources), and to include usage information to populate on those references.
    becomes real (see "The map form's limit").
 8. Secret-name fields inside capability config are ordinary secret references (see "Secrets in
    capability config").
-9. Capability config: the capability is invoked to validate its blob and identify the references it
-   implies; a future schema-registration mechanism could let the core engine do both without
-   invocation (see "Capability config validation").
+9. Capability config: the contract is invoking the capability to validate its blob and return the
+   references it implies (not yet needed by shipped code); a further schema-registration enhancement
+   could let the core engine do both without invocation (see "Capability config validation").
