@@ -331,8 +331,9 @@ so encapsulation alone never earns built-in status; neutrality does.
 - Plugin: `claude-code` / `codex` harnesses (system plugins -- and since a built-in that later
   becomes enablement-gated is a breaking flip, they must be BORN as plugins, which sequences plugin
   infrastructure before or alongside the first tool-specific harness); `onepassword`; future vendor
-  VM providers (e.g. AWS). `azure` / `proxmox` are grandfathered built-ins (released, always-on
-  today); re-tiering them is a future-major question at most.
+  VM providers (e.g. AWS). `azure` / `proxmox` fail the neutrality prong too: the maintainer plans
+  to move them out into plugins (a `!`-flagged breaking change -- released always-on today, opt-in
+  after; accepted).
 
 ## The rules, restated for the plugin SDD
 
