@@ -647,8 +647,8 @@ artifact update.)
   config or registry (kinds are static code), and the `resource_kinds` shell completer repoints to
   it -- kind completion now works even with a broken config. Maintainer correction during
   implementation: plugins publish resources of existing kinds -- declarable rows (bundled manifests:
-  a harness plugin's session template, a vm-provider plugin's default platform) AND capability rows
-  -- never new kinds; an early docstring draft had narrowed this to capability-only.
+  a harness plugin's session template, a vm-platform plugin's default site) AND capability rows --
+  never new kinds; an early docstring draft had narrowed this to capability-only.
 - **2026-07-07: the resource definition expands -- capabilities ARE resources (maintainer ruling,
   pre-lock).** Reviewing the collapsed model in `agw resource list`, the maintainer hit the
   "capabilities are not resources, merely mirrored in as descriptor rows" clause from the outside:

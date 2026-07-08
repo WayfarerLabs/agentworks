@@ -4,8 +4,9 @@ Status: SUGGESTION (2026-07-07). A prototype of what consuming a capability shou
 every current and planned capability, written as feedback input for the plugin-system SDD (draft,
 `docs/sdd/2026-07-06-plugin-system/`) and future work. The first three rows describe shipped
 behavior; the rest are proposals and bind nothing. ADR 0016 carries the rules that ARE decided
-(resources reference capabilities many-to-one; `provider` + `provider_config` on dedicated
-capability-instance kinds; dedicated kinds only for real domain nouns).
+(resources reference capabilities many-to-one; a capability-reference field named for what it
+references plus its `_config` sibling on dedicated kinds; dedicated kinds only for real domain
+nouns).
 
 ## The observation this doc is built on
 
@@ -19,7 +20,7 @@ Three schema shapes cover every case (the first has two hosting forms):
 
 | Shape                 | When                                    | Grammar                                                |
 | --------------------- | --------------------------------------- | ------------------------------------------------------ |
-| **Reference + blob**  | one capability, dedicated kind          | `provider: <name>` + optional `provider_config: {...}` |
+| **Reference + blob**  | one capability, dedicated kind          | `<field>: <name>` + optional `<field>_config: {...}`   |
 |                       | one capability, inline in a consumer    | `<domain>: <name>` + optional `<domain>_config: {...}` |
 | **Map keyed by name** | many capabilities, order-free           | `<field>: { <capability>: <blob-or-shorthand>, ... }`  |
 | **Ordered name list** | many capabilities, order IS the meaning | `<field> = ["a", "b"]`; config lives elsewhere         |
@@ -258,7 +259,7 @@ passport CA directory, not per-agent validity).
 
 ## Secrets in capability config
 
-Capability config will sometimes need secrets (an AWS platform provider's client secret, a 1Password
+Capability config will sometimes need secrets (an AWS site's client secret, a 1Password
 service-account token). These are ordinary secret REFERENCES -- a bare secret name in a config
 field, never a value -- and the existing machinery covers them end to end, in both flavors:
 
@@ -297,8 +298,8 @@ Resolution happens at the consuming command's composition root, never at registr
 registry never resolves values). The hook exists today:
 `compute_needed_secrets(..., extra_decls=...)` is exactly how tailscale keys and git-credential
 tokens -- secrets needed by machinery rather than by env tables -- join a command's single resolve
-pass. Capability-config secrets ride the same path: `vm create` against an AWS platform adds the
-platform's secret decls to its resolve set.
+pass. Capability-config secrets ride the same path: `vm create` against an AWS site adds the site's
+secret decls to its resolve set.
 
 ## Capability config validation
 

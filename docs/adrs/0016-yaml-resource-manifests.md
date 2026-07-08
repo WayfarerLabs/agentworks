@@ -51,7 +51,7 @@ The classifier is a per-kind field (`ResourceKind.category`) -- two resources of
 differ here -- so its display home is `agw resource kinds` (the read-only, code-defined kind
 inventory: category, row count, description per kind), not a per-row column. Kinds are baked into
 the app: plugins publish resources of existing kinds, declarable and capability alike (a harness
-plugin ships its session templates; a VM-provider plugin ships a default platform), never new kinds.
+plugin ships its session templates; a vm-platform plugin ships a default site), never new kinds.
 Code placement follows ownership: each domain package defines and registers its own kinds -- the
 declarable row dataclasses AND the capability kinds live next to the code that implements them --
 while `resources/` owns only the framework (the kind registry and protocol, finalize, origins,
