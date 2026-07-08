@@ -114,7 +114,7 @@ def test_resource_kinds_have_references_field_not_usage() -> None:
     """Every Resource type in the framework's kind set carries the
     collection field as ``references``, not the pre-rename ``usage``.
     """
-    from agentworks.agents.template import AdminConfig, AgentTemplate
+    from agentworks.agents.template import AgentTemplate
     from agentworks.catalog import (
         AptPackageEntry,
         AptSourceEntry,
@@ -124,6 +124,7 @@ def test_resource_kinds_have_references_field_not_usage() -> None:
     from agentworks.git_credentials.credential import GitCredentialConfig
     from agentworks.secrets.base import SecretDecl
     from agentworks.sessions.template import NamedConsoleConfig, SessionTemplate
+    from agentworks.vms.admin import AdminConfig
     from agentworks.vms.template import VMTemplate
     from agentworks.workspaces.template import WorkspaceTemplate
 

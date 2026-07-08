@@ -1,4 +1,6 @@
-"""``_VMTemplateKind``: framework strategy for the ``"vm-template"`` kind.
+"""Kind registrations for the vms domain: ``vm-template`` and
+``admin-template`` (the admin user is a per-VM concept -- provisioned by
+``vms/initializer``, one per VM; its ``instances()`` iterates VMs).
 
 Lives in the ``vms`` domain package next to the code that implements VM
 templates; ``agentworks.resources.kinds.__init__`` imports this module so
@@ -29,6 +31,7 @@ from agentworks.resources.kind import (
     InstanceRef,
 )
 from agentworks.resources.origin import Origin
+from agentworks.vms.admin import AdminConfig
 from agentworks.vms.template import VMTemplate
 
 if TYPE_CHECKING:
@@ -89,3 +92,52 @@ class _VMTemplateKind:
 
 
 KIND_REGISTRY["vm-template"] = _VMTemplateKind()
+
+
+@dataclass(frozen=True)
+class _AdminTemplateKind:
+    """Implementation of ``ResourceKind`` for ``"admin-template"``."""
+
+    kind: str = "admin-template"
+    description: str = "The admin environment template (singleton: default)"
+    miss_policy: Literal["auto-declare", "error"] = "auto-declare"
+    auto_declare_names: frozenset[str] | None = frozenset({"default"})
+    category: Literal["declarable", "capability"] = "declarable"
+    builtin_override: Literal["allow", "reserved"] = "reserved"
+
+    def synthesize(self, references: Sequence[ResourceReference]) -> AdminConfig:
+        """Build an empty-defaults ``AdminConfig`` for an auto-declared
+        ``admin-template:default``.
+
+        Rarely actually called: ``Config.publish_to`` always publishes a
+        real ``admin-template:default`` from ``Config.admin`` (even when
+        the operator omits every ``[admin.*]`` section -- the loader
+        synthesizes an empty-defaults instance), so the always-materialize
+        pre-step's "is the name already in the registry?" short-circuits
+        before reaching this method. See ``agentworks.vms.kinds``'s
+        ``synthesize`` for the rationale on why the non-empty-
+        ``references`` path is preserved.
+        """
+        source = references[0].source if references else ALWAYS_MATERIALIZE_SOURCE
+        return AdminConfig(name="default", origin=Origin.auto_declared(source=source))
+
+    def instances(
+        self, db: Database, registry: Registry, resource: Any
+    ) -> Iterable[InstanceRef]:
+        """Every VM uses the singleton ``admin-template:default`` -- the
+        admin template defines the admin user on each VM, and there's one
+        admin user per VM. No DB column ties VMs to a non-default admin
+        template yet (Phase 2a.3 plurified the framework but the operator
+        surface still publishes only ``default``). When/if a future SDD
+        adds ``[admin_templates.<name>]`` parsing plus a ``vm.admin-template``
+        column, this method changes to filter by that column the same way
+        the other template kinds do.
+        """
+        name = resource.name
+        if name != "default":
+            return
+        for vm in db.list_vms():
+            yield InstanceRef(instance_kind="vm", instance_name=vm.name)
+
+
+KIND_REGISTRY["admin-template"] = _AdminTemplateKind()

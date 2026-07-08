@@ -22,7 +22,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal
 
-from agentworks.agents.template import AdminConfig, AgentTemplate
+from agentworks.agents.template import AgentTemplate
 
 # ConfigError is defined in agentworks.errors and re-exported here for backward
 # compatibility with existing `from agentworks.config import ConfigError` users.
@@ -37,6 +37,7 @@ from agentworks.secrets import (
 from agentworks.sessions.layouts import AW_SESSION_VERTICAL_LAYOUT, VALID_TMUX_LAYOUTS
 from agentworks.sessions.template import NamedConsoleConfig, SessionTemplate
 from agentworks.source_location import SourceLocation, scan_section_lines
+from agentworks.vms.admin import AdminConfig
 from agentworks.vms.template import VMTemplate
 from agentworks.workspaces.template import WorkspaceTemplate
 

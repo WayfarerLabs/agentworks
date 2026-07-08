@@ -540,7 +540,15 @@ declarable row dataclasses and capability kinds alike live next to the code that
 - [x] Artifacts: HLA package layout, ADR 0016 placement sentence, locked.md (Phase 5.8 paragraph;
       the deferred-to-plugin-SDD follow-up bullet revised to record the same-day reversal).
 
-Definition of done: `import agentworks.resources` fully populates KIND_REGISTRY (13 kinds);
+- [x] Corrections (maintainer + reviewer, same day): AdminConfig re-homed agents/ -> vms/admin.py
+      with `_AdminTemplateKind` joining vms/kinds.py -- lifecycle owns placement, not field shape
+      (the admin user is provisioned per-VM by vms/initializer; the kind's instances() iterates
+      VMs); supersedes the agents/ placement in the checked boxes above. Reviewer numeric fixes:
+      KIND_REGISTRY holds 14 kinds (not 13); the relocation is net +133 lines (+1,273/-1,140; the
+      -1,250 in the checked box above was derived from a diff that predated tracking the 12 new
+      files and is superseded).
+
+Definition of done: `import agentworks.resources` fully populates KIND_REGISTRY (14 kinds);
 `config.py` contains no resource dataclasses or kind logic; CI green; reviewer-approved.
 
 ## Phase 6: TOML resource-path retirement (future major; unscheduled)

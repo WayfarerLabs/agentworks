@@ -17,11 +17,12 @@ from textwrap import dedent
 
 import pytest
 
-from agentworks.agents.template import AdminConfig, AgentTemplate
+from agentworks.agents.template import AgentTemplate
 from agentworks.bootstrap import build_registry
 from agentworks.config import load_config
 from agentworks.env.entry import EnvEntry
 from agentworks.sessions.template import SessionTemplate
+from agentworks.vms.admin import AdminConfig
 from agentworks.vms.template import VMTemplate
 from agentworks.workspaces.template import WorkspaceTemplate
 

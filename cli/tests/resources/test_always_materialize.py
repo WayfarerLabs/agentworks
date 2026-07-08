@@ -17,10 +17,10 @@ from __future__ import annotations
 from pathlib import Path
 from textwrap import dedent
 
-from agentworks.agents.template import AdminConfig
 from agentworks.bootstrap import build_registry
 from agentworks.config import load_config
 from agentworks.sessions.template import NamedConsoleConfig
+from agentworks.vms.admin import AdminConfig
 
 
 def _write_minimal(path: Path) -> Path:

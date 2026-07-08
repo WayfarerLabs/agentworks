@@ -17,11 +17,11 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any, cast
 
 if TYPE_CHECKING:
-    from agentworks.agents.template import AdminConfig
     from agentworks.git_credentials.credential import GitCredentialConfig
     from agentworks.resources.registry import Registry
     from agentworks.secrets.base import SecretDecl
     from agentworks.sessions.template import NamedConsoleConfig
+    from agentworks.vms.admin import AdminConfig
 
 
 def kind_dict(registry: Registry, kind: str) -> dict[str, Any]:

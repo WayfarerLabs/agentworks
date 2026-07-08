@@ -30,7 +30,6 @@ from textwrap import dedent
 
 import pytest
 
-from agentworks.agents.template import AdminConfig
 from agentworks.bootstrap import build_registry
 from agentworks.config import load_config
 from agentworks.env import EnvEntry
@@ -40,6 +39,7 @@ from agentworks.resources import (
     Origin,
     Registry,
 )
+from agentworks.vms.admin import AdminConfig
 
 
 def _write_cfg(path: Path, body: str = "") -> Path:

@@ -276,7 +276,7 @@ class _StubRegistry:
         # same way production does. The singleton kinds fall back to
         # code-default rows only for the reserved name.
         if kind == "admin-template":
-            from agentworks.agents.template import AdminConfig
+            from agentworks.vms.admin import AdminConfig
 
             if name != "default":
                 raise KeyError(name)

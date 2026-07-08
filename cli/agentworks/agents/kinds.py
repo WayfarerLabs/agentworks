@@ -28,7 +28,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Literal
 
-from agentworks.agents.template import AdminConfig, AgentTemplate
+from agentworks.agents.template import AgentTemplate
 from agentworks.resources.kind import (
     ALWAYS_MATERIALIZE_SOURCE,
     KIND_REGISTRY,
@@ -79,51 +79,4 @@ class _AgentTemplateKind:
                 yield InstanceRef(instance_kind="agent", instance_name=agent.name)
 
 
-@dataclass(frozen=True)
-class _AdminTemplateKind:
-    """Implementation of ``ResourceKind`` for ``"admin-template"``."""
-
-    kind: str = "admin-template"
-    description: str = "The admin environment template (singleton: default)"
-    miss_policy: Literal["auto-declare", "error"] = "auto-declare"
-    auto_declare_names: frozenset[str] | None = frozenset({"default"})
-    category: Literal["declarable", "capability"] = "declarable"
-    builtin_override: Literal["allow", "reserved"] = "reserved"
-
-    def synthesize(self, references: Sequence[ResourceReference]) -> AdminConfig:
-        """Build an empty-defaults ``AdminConfig`` for an auto-declared
-        ``admin-template:default``.
-
-        Rarely actually called: ``Config.publish_to`` always publishes a
-        real ``admin-template:default`` from ``Config.admin`` (even when
-        the operator omits every ``[admin.*]`` section -- the loader
-        synthesizes an empty-defaults instance), so the always-materialize
-        pre-step's "is the name already in the registry?" short-circuits
-        before reaching this method. See ``agentworks.vms.kinds``'s
-        ``synthesize`` for the rationale on why the non-empty-
-        ``references`` path is preserved.
-        """
-        source = references[0].source if references else ALWAYS_MATERIALIZE_SOURCE
-        return AdminConfig(name="default", origin=Origin.auto_declared(source=source))
-
-    def instances(
-        self, db: Database, registry: Registry, resource: Any
-    ) -> Iterable[InstanceRef]:
-        """Every VM uses the singleton ``admin-template:default`` -- the
-        admin template defines the admin user on each VM, and there's one
-        admin user per VM. No DB column ties VMs to a non-default admin
-        template yet (Phase 2a.3 plurified the framework but the operator
-        surface still publishes only ``default``). When/if a future SDD
-        adds ``[admin_templates.<name>]`` parsing plus a ``vm.admin-template``
-        column, this method changes to filter by that column the same way
-        the other template kinds do.
-        """
-        name = resource.name
-        if name != "default":
-            return
-        for vm in db.list_vms():
-            yield InstanceRef(instance_kind="vm", instance_name=vm.name)
-
-
 KIND_REGISTRY["agent-template"] = _AgentTemplateKind()
-KIND_REGISTRY["admin-template"] = _AdminTemplateKind()
