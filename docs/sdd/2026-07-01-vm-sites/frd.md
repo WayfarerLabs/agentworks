@@ -23,8 +23,8 @@ expensive than it should be, and that leak backend specifics into surrounding co
 3. **Backend-specific fields on shared types.** `ProvisionResult` carries `azure_resource_id`,
    `wsl_distro_name`, and `proxmox_vmid` as named fields, with one DB column each. Adding AWS adds a
    field and a column.
-4. **`create()` signatures diverge per backend.** Lima takes `cpus/memory/disk`, Azure takes
-   `azure_vm_size/admin_username`, WSL2 takes only `admin_username`, Proxmox takes several more. The
+4. **`create()` signatures diverge per backend.** Each provisioner takes its own subset of
+   `cpus/memory/disk/swap/azure_vm_size/admin_username/tailscale_auth_key`, no two alike. The
    manager unpacks resolved template values differently per backend to satisfy each shape.
 5. **Remote Lima is encoded three ways at once.** A DB table `vm_hosts` (with `platform` and `os`
    columns pretending to be generic but only ever used by Lima); a constructor arg `vm_host_ssh`;
@@ -63,9 +63,11 @@ capability-consumers companion.
 VMs reference a site by name. Nothing outside the site layer knows or cares which platform a site
 resolves to; platform selection and invocation are encapsulated behind site resolution.
 
-A follow-on SDD adds the AWS platform on top of the cleaned interface. Session lifecycle intent and
-hibernate are called out as future work; they build on the operator-intent-vs-observed-state pattern
-this SDD introduces but do not need to land together.
+AWS arrives on top of the cleaned interface in follow-on work; per the 2026-07-08 tiering ruling
+(see Dependencies and coordination) it likely arrives as a plugin platform, which makes this
+refactor its prerequisite either way. Session lifecycle intent and hibernate are also called out as
+future work; they build on the operator-intent-vs-observed-state pattern this SDD introduces but do
+not need to land together.
 
 ## Dependencies and coordination
 
@@ -86,10 +88,16 @@ Two coordination notes:
   (TOML)" with the note "provisioner capability settings; plugin SDD may revisit". This SDD is that
   revisit: those sections become legacy TOML declarations of `vm-site` resources (R2), riding the
   dual-path deprecation like every other TOML resource section.
-- **Plugin SDD boundary**: the vm-platform/vm-site reshape lands HERE (it gates AWS and needs none
-  of the plugin machinery); the plugin SDD builds on it later (plugin-registered `vm-platform`
-  capabilities, plugin-shipped sites under the plugin origin tiers). More capabilities land before
-  plugins become worthwhile; this is deliberately the first.
+- **Plugin SDD boundary and the tiering ruling**: the vm-platform/vm-site reshape lands HERE (it
+  needs none of the plugin machinery); the plugin SDD builds on it later (plugin-registered
+  `vm-platform` capabilities, plugin-shipped sites under the plugin origin tiers). The
+  capability-consumers companion's 2026-07-08 tiering ruling (built-in requires necessary AND
+  vendor-neutral) additionally plans to move `azure` / `proxmox` out into plugins and to ship vendor
+  platforms like AWS as plugins from birth. This SDD is deliberately tier-neutral: it reshapes all
+  four existing in-tree platforms into the capability shape without changing their distribution
+  tier, and that shape (`VM_PLATFORM_REGISTRY` registration, capability rows, bundled sites) is
+  exactly what the plugin SDD's move-out and any AWS work will reuse. Sequencing of AWS relative to
+  plugin infrastructure is that SDD's call, not this one's.
 
 ## Terminology
 
@@ -120,8 +128,10 @@ Two coordination notes:
 - **`vm_active`**: the per-platform idle-hold context manager. Prevents the backend's own
   idle-shutdown mechanism from firing while an operation is in progress.
 - **Provisioning** (the activity) keeps its name everywhere: `provisioning_status`,
-  `ProvisionerError`, `ProvisionRequest`, vm event names. Only the noun retires: "provisioner" was a
-  synonym for the platform and disappears from code and docs.
+  `ProvisionRequest`, vm event names. The noun retires: "provisioner" was a synonym for the platform
+  and disappears from code and docs, including `ProvisionerError` (renamed `ProvisioningError`; it
+  is morphologically the noun) and the `agentworks.transports.provisioner_transport()` factory
+  (renamed `native_transport()`, R8).
 
 ## Requirements
 
@@ -141,9 +151,10 @@ Two coordination notes:
   the whole point of the site noun is that nothing else needs to pick a platform.
 - Code identifiers follow the model: the ABC becomes `VMPlatform` (concrete `LimaPlatform`,
   `AzurePlatform`, `WSL2Platform`, `ProxmoxPlatform`), the module directory becomes
-  `vms/platforms/`, and "provisioner" as a noun disappears from code and docs. Names that refer to
-  the provisioning activity (`ProvisionRequest`, `ProvisionerError`, `provisioning_status`) are
-  retained.
+  `vms/platforms/`, and "provisioner" as a noun disappears from code and docs: `ProvisionerError`
+  becomes `ProvisioningError`, and the `agentworks.transports.provisioner_transport()` factory
+  becomes `native_transport()` alongside the R8 method rename. Names that refer to the provisioning
+  activity (`ProvisionRequest`, `provisioning_status`, vm event names) are retained.
 
 ### R2: Sites are `vm-site` resources
 
@@ -205,18 +216,20 @@ spec:
   zero-config sites (rather than letting VMs reference the capability directly) keeps `vms.site` one
   uniform reference space: every VM points at a `vm-site`, never sometimes at a capability.
 - **Legacy TOML sections**: `[azure]` and `[proxmox]` become legacy TOML declarations of `vm-site`
-  resources. The config-side publisher (living with the VM domain per the domains-own-their-kinds
-  ruling) publishes them as `vm-site/azure` and `vm-site/proxmox` rows (operator-declared origin,
-  TOML `file:line`), the standard aggregated dual-path deprecation warning points at
-  `agw resource migrate`, and the migrator's kind-to-section mapping gains the (irregular) shape:
-  section name becomes the site name, `spec.platform` is synthesized, section keys nest under
-  `platform_config`. Flat TOML is the one place platform-owned fields sit outside the blob (ADR
-  0016); the TOML loader nests at its boundary, exactly as git-credential's loader does. Existing DB
-  rows for `azure` and `proxmox` keep resolving with zero operator edits.
-- **Site names** follow the VM-name rules (lowercase alphanumeric plus dash); the framework's `/`
-  ban applies as to every resource. A site named after a known platform must declare that platform
-  (redeclaring a reserved built-in name is already an error; this rule covers non-bundled platform
-  names like `azure`).
+  resources. The legacy loader lives in `config.py`, which ADR 0016 designates as the home of
+  settings plus the legacy TOML resource loaders/publisher (the domains-own-their-kinds ruling moved
+  kind definitions and row dataclasses, not TOML loaders; the shipped git-credential legacy loader
+  is the precedent). It publishes them as `vm-site/azure` and `vm-site/proxmox` rows
+  (operator-declared origin, TOML `file:line`), the standard aggregated dual-path deprecation
+  warning points at `agw resource migrate`, and the migrator's kind-to-section mapping gains the
+  (irregular) shape: section name becomes the site name, `spec.platform` is synthesized, section
+  keys nest under `platform_config`. Flat TOML is the one place platform-owned fields sit outside
+  the blob (ADR 0016); the TOML loader nests at its boundary, exactly as git-credential's loader
+  does. Existing DB rows for `azure` and `proxmox` keep resolving with zero operator edits.
+- **Site names** follow the VM-name rules (`validate_name`: lowercase alphanumeric, hyphens,
+  underscores, max 30 chars); the framework's `/` ban applies as to every resource. A site named
+  after a known platform must declare that platform (redeclaring a reserved built-in name is already
+  an error; this rule covers non-bundled platform names like `azure`).
 - **Site selection**: `agw vm create --site` replaces `--platform` (the sanctioned break; the old
   flag's values were always capability names, and the new flag names the site); `vm-template` gains
   an optional `site` field (a resource-to-resource reference by bare name, emitted as a
@@ -243,7 +256,9 @@ Lima site's `platform_config`.
   `--vm-host` flag on `vm create`, and `defaults.vm_host` are all removed. A remote Lima host _is_ a
   site declaration now.
 - Config compat: a config file that still sets `defaults.vm_host` gets a config error carrying the
-  replacement `vm-site` manifest snippet.
+  replacement `vm-site` manifest snippet. This is a hard error where `defaults.platform` gets a
+  one-release alias (R2) because no automatic alias is possible here: the replacement points at a
+  site manifest only the operator can author.
 - Migration (see R14): rows with a `vm_host_name` are rewritten to `site = <vm_host_name>`, and the
   migration prints ready-to-paste `vm-site` manifest documents built from the old `vm_hosts` rows,
   to be saved under the resources directory (agentworks does not write operator manifests unasked).
@@ -264,8 +279,13 @@ A new `settings` table stores install-level state; the `system_slug` key holds t
   > Proxmox cluster, or Windows/Mac user. Leave blank if this install is the only one using its
   > sites' backends. [system slug]:
 
-  An empty response is accepted and recorded (as null), so the prompt fires once regardless of the
-  answer.
+  An empty response is accepted and recorded as declined (the settings row is written with an empty
+  value, distinct from the absent row that means never-asked), so the prompt fires once regardless
+  of the answer.
+
+- **Non-interactive runs never prompt**: a non-interactive `vm create` proceeds with a null slug and
+  does NOT write the settings row (a later interactive create still asks), and the deferred nudge
+  below is skipped entirely when non-interactive.
 
 - **Effectively immutable**: no rename command in this SDD. The design (R5, R10, R11) is such that a
   slug change would not corrupt existing state, but the operation is not exposed.
@@ -430,7 +450,8 @@ Key shape changes:
   behavior as today's `NotImplementedError` catch). Proxmox returns `None`. The
   `agw vm shell --provisioner` flag is renamed `--platform` (a boolean: connect via the platform's
   native transport instead of Tailscale; the value-taking `--platform` is gone from the surface, so
-  no clash), keeping `--provisioner` as a hidden alias.
+  no clash), keeping `--provisioner` as a hidden alias for one release (the same window as the
+  `defaults.platform` alias, R2).
 - **Constructors are uniform**: every platform is constructed by the site layer from the site name
   and its validated `platform_config`. No special-case branches anywhere.
 - **`display_backend_name()`** (was sketched as `display_platform_name`; renamed because "platform
@@ -444,8 +465,10 @@ intended name already exist? If yes, either:
 
 1. Append a short random suffix and retry (for backends where the name is a soft identifier, e.g. an
    AWS Name tag), or
-2. Raise `StateError` with clear guidance (for backends where the name is the primary identifier:
-   Lima, WSL2, Azure).
+2. Raise `StateError` with clear guidance. This is the policy for all four in-tree platforms: Lima,
+   WSL2, and Azure because the name is the primary identifier there, and Proxmox because although
+   PVE names are soft platform-side (the vmid identifies), a duplicate name on the node is almost
+   certainly operator confusion worth surfacing.
 
 The check catches: an operator-created colliding resource, a DB row removed while the backend
 resource survived, and slug-less collisions across installs.
@@ -459,8 +482,9 @@ managed section remains single-install only and is documented as such.
   stays `agentworks.conf` when the slug is null.
 - The existing `Include ~/.ssh/config.d/*` directive already matches both shapes; no new include
   directive is needed.
-- When the slug is set, the first sync after migration writes the new file and removes the old
-  `agentworks.conf` so stale aliases cannot shadow fresh ones.
+- The first sync after the slug is set (the slug arrives at first `vm create`, not at DB migration)
+  writes the new file and removes the old `agentworks.conf` so stale aliases cannot shadow fresh
+  ones.
 - Host aliases inside the file continue to use `vm.name`. **Known limitation**: aliases
   (`awvm--{vm.name}`) can still collide across installs that use identical VM names; the existing
   per-install `operator.ssh_host_prefix` / `ssh_agent_host_prefix` settings are the supported
@@ -472,7 +496,9 @@ Today `bootstrap_script.vm_hostname()` derives `{platform}--{vm_name}` and bakes
 hostname, which tailscaled picks up as the node name. Changes:
 
 - New scheme: `{slug}-{vm.name}` when a slug is set, `{vm.name}` otherwise. The platform prefix is
-  dropped (backend identity should not leak into hostnames).
+  dropped (backend identity should not leak into hostnames). The composite is bounded by
+  construction: slug max 20 (R4) plus dash plus name max 30 (`validate_name`) is 51 characters,
+  inside the 63-character hostname-label limit and Azure's 64-character computer-name limit.
 - The chosen hostname is recorded in a new `vms.hostname` column at create time. `vm reinit` reuses
   the recorded value, so reinitializing an existing VM does not silently rename it. Migration
   backfills `hostname = '{platform}--{name}'` for existing rows (the value the bootstrap script
@@ -525,9 +551,14 @@ dispatch) is preserved.
 
 All schema and data changes land in a single migration version on next agw run. The migration runner
 gains support for Python migration steps alongside SQL strings, because the platform_metadata
-backfill is platform-owned code: each platform supplies a pure `legacy_platform_metadata(row)` hook
-that maps the legacy column values to its metadata conventions (no network, no site configuration).
-The migration:
+backfill is platform-owned code: each platform supplies a pure
+`legacy_platform_metadata(row, legacy)` hook mapping the legacy column values to its metadata
+conventions. `legacy` is a best-effort parse of the config's legacy TOML sections supplied by the
+migration step; migrations run at `Database()` open where no validated `Config` exists, so the parse
+is unvalidated and a missing or unreadable config yields an empty mapping (hooks are pure over their
+two inputs; no network). Proxmox is the one consumer: it records the node from `legacy['proxmox']`
+when present and omits the key otherwise, in which case ops fall back to the site's
+`platform_config` node and opportunistically write it back to metadata (see HLA). The migration:
 
 1. Adds `platform_metadata`, `operator_stopped`, and `hostname` columns.
 2. Backfills `platform_metadata` per row via the owning platform's hook, and `hostname` per R11.
@@ -545,7 +576,8 @@ that shape). `operator_stopped` defaults to false for all existing rows.
 
 ## Out of scope
 
-- **The AWS platform itself.** This SDD prepares the interface; a follow-on SDD adds AWS. Note the
+- **The AWS platform itself.** This SDD prepares the interface; AWS arrives in follow-on work,
+  likely as a plugin platform per the tiering ruling (see Dependencies and coordination). Note the
   capability-config secret machinery (R2) means AWS credentials-by-secret needs no new design.
 - **Session lifecycle intent.** The operator-intent vs observed-state pattern applies naturally to
   sessions; separate SDD. Nothing here blocks it.
@@ -563,8 +595,10 @@ that shape). `operator_stopped` defaults to false for all existing rows.
   installs coexist on one workstation is a prerequisite for the slug to fully deliver there, but is
   not changed in this SDD.
 - **Cross-install visibility** (`agw vm list --other-systems`). Interesting; not in scope.
-- **Plugin-registered VM platforms and plugin-shipped sites.** Platforms stay baked in;
+- **Plugin-registered VM platforms, plugin-shipped sites, and the tiering move-out.** All four
+  existing platforms stay in-tree at their current distribution tier in this SDD;
   `VM_PLATFORM_REGISTRY`, the `vm-platform` capability kind, and the bundled-site mechanism are the
-  paved road the plugin SDD extends (see Dependencies and coordination).
+  paved road the plugin SDD extends when it executes the tiering ruling (`azure` / `proxmox` to
+  plugins, vendor platforms born as plugins; see Dependencies and coordination).
 - **Schema-registration for capability config.** This SDD uses the shipped invoked-validation API
   as-is; the declarative-schema upgrade the API's docstrings reserve is future work.
