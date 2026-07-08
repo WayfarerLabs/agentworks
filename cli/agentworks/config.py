@@ -517,7 +517,7 @@ class GitCredentialConfig:
         from agentworks.resources.reference import SecretReference
 
         source = ("git-credential", self.name)
-        return [
+        refs: list[ResourceReference] = [
             SecretReference(
                 name=self.token,
                 kind="secret",
@@ -533,6 +533,26 @@ class GitCredentialConfig:
                 source=source,
             ),
         ]
+        # Capability-implied references: the provider validates its
+        # config block and returns the references it implies; this
+        # resource (the config block's owner) attributes them to itself.
+        from agentworks.git_credentials import GIT_CREDENTIAL_PROVIDER_REGISTRY
+
+        capability = GIT_CREDENTIAL_PROVIDER_REGISTRY.get(self.provider)
+        if capability is not None:
+            for cref in capability.validate_config(
+                f"git-credential/{self.name}", self.provider_config
+            ):
+                ref_cls = SecretReference if cref.kind == "secret" else _ResourceReq
+                refs.append(
+                    ref_cls(
+                        name=cref.name,
+                        kind=cref.kind,
+                        usage=cref.usage,
+                        source=source,
+                    )
+                )
+        return refs
 
 
 @dataclass(frozen=True)
@@ -1310,10 +1330,10 @@ def _load_git_credentials(
             cred_type = str(cdata["type"])
         else:
             raise ConfigError(f"git_credentials.{name}.provider is required")
-        if cred_type == "azdo" and "org" not in cdata:
-            raise ConfigError(f"git_credentials.{name}.org is required for azdo type")
         # (TOML keeps org at the section top level -- the only flat
-        # domain; it nests into provider_config below.)
+        # domain; it nests into provider_config below, and the provider
+        # capability validates the assembled blob. Unknown provider
+        # names defer to the framework's miss policy at finalize.)
 
         # ``token`` is a bare secret name; same rules as
         # ``tailscale_auth_key``. Omission triggers GitCredentialConfig's
@@ -1338,6 +1358,11 @@ def _load_git_credentials(
         provider_config: dict[str, object] = {}
         if "org" in cdata:
             provider_config["org"] = str(cdata["org"])
+        from agentworks.git_credentials import GIT_CREDENTIAL_PROVIDER_REGISTRY
+
+        capability = GIT_CREDENTIAL_PROVIDER_REGISTRY.get(cred_type)
+        if capability is not None:
+            capability.validate_config(f"git_credentials.{name}", provider_config)
         creds[name] = GitCredentialConfig(
             name=name,
             provider=cred_type,

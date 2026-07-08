@@ -41,6 +41,13 @@ class EnvVarBackend:
     description = "resolves from AW_SECRET_<NAME> environment variables"
     interactive = False
 
+    def validate_mapping(self, owner: str, mapping: MappingValue) -> None:
+        if not isinstance(mapping, str) or not mapping:
+            raise ConfigError(
+                f"{owner}: backend_mappings for the env-var backend must "
+                f"be a non-empty string (an env var name) or false"
+            )
+
     def _resolved_name(self, secret: SecretDecl, mapping: MappingValue | None) -> str:
         if isinstance(mapping, str):
             return mapping

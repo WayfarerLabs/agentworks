@@ -13,13 +13,24 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from agentworks.git_credentials.azdo import AzDOCredentialProvider
+from agentworks.git_credentials.base import GitCredentialProvider
+from agentworks.git_credentials.github import GitHubCredentialProvider
+
 if TYPE_CHECKING:
     from agentworks.resources import Registry
 
 
-# Known provider type identifiers. Order is non-meaningful (alphabetical
-# for readability); the framework looks rows up by name.
-PROVIDER_TYPES: tuple[str, ...] = ("azdo", "github")
+# The capability registry: provider name -> implementation class.
+# ``validate_config`` (blob validation + implied references) is invoked
+# through this dict at each source's blob boundary and at finalize.
+GIT_CREDENTIAL_PROVIDER_REGISTRY: dict[str, type[GitCredentialProvider]] = {
+    "azdo": AzDOCredentialProvider,
+    "github": GitHubCredentialProvider,
+}
+
+# Known provider type identifiers (registry keys, sorted).
+PROVIDER_TYPES: tuple[str, ...] = tuple(sorted(GIT_CREDENTIAL_PROVIDER_REGISTRY))
 
 
 def publish_to(registry: Registry) -> None:
@@ -41,7 +52,7 @@ def publish_to(registry: Registry) -> None:
     )
 
     code_origin = Origin.built_in(source="agentworks.git_credentials")
-    for type_name in PROVIDER_TYPES:
+    for type_name in sorted(GIT_CREDENTIAL_PROVIDER_REGISTRY):
         registry.add(
             "git-credential-provider",
             type_name,

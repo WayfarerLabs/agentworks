@@ -42,6 +42,11 @@ flipped.
   plan's 2026-07-07 sequencing notes; ADR 0016 carries the model. Companion doc
   capability-consumers.md (marked SUGGESTION) prototypes consumer schema shapes for the plugin SDD.
 
+A late pre-lock addition (Phase 5.7): the capability config-validation contract -- `validate_config`
+returning implied `ConfigReference`s, invoked at blob boundaries and finalize, plus
+`SecretBackend.validate_mapping` for the per-secret host; both noted as potentially superseded by
+registration-time schemas.
+
 Four deliberate operator-facing breaking changes, `!`-flagged for release-please: resource names may
 not contain `/` (FRD R13); `agw resource migrate` requires selectors (and `agw resource sample` a
 kind) or `--all`; and `resource describe` takes a single `KIND/NAME` token (the `/` display-syntax

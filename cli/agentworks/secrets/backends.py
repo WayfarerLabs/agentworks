@@ -73,6 +73,25 @@ class SecretBackend(Protocol):
     @property
     def interactive(self) -> bool: ...
 
+    def validate_mapping(
+        self,
+        owner: str,
+        mapping: MappingValue,
+    ) -> None:
+        """Validate one ``backend_mappings`` value addressed to this
+        backend -- capability-owned config in its per-secret host.
+        Invoked by ``validate_chain`` for active-chain backends so a
+        malformed mapping fails at ``build_registry`` with config
+        vocabulary instead of at first resolution. The generic ``False``
+        opt-out never reaches this. ``owner`` is display context.
+
+        NOTE: this invoked-validation API may be deprecated in favor of
+        capabilities pushing a declarative config schema definition at
+        registration time, letting the core engine validate (and derive
+        any implied references) without invoking the capability.
+        """
+        ...
+
     def would_attempt(
         self,
         secret: SecretDecl,

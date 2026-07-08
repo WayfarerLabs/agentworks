@@ -6,11 +6,35 @@ formats the URL line.
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
+from agentworks.errors import ConfigError
 from agentworks.git_credentials.base import GitCredentialProvider
+
+if TYPE_CHECKING:
+    from collections.abc import Mapping
+
+    from agentworks.resources.reference import ConfigReference
 
 
 class AzDOCredentialProvider(GitCredentialProvider):
     """Configures git credentials for Azure DevOps via a personal access token."""
+
+    provider_name = "azdo"
+
+    @classmethod
+    def validate_config(
+        cls, owner: str, config: Mapping[str, object]
+    ) -> tuple[ConfigReference, ...]:
+        org = config.get("org")
+        if not isinstance(org, str) or not org:
+            raise ConfigError(f"{owner}.org is required for the azdo provider")
+        unknown = sorted(set(config) - {"org"})
+        if unknown:
+            raise ConfigError(
+                f"{owner}: unknown azdo provider field(s): {', '.join(unknown)}"
+            )
+        return ()
 
     def __init__(self, config_name: str, org: str, description: str | None = None) -> None:
         super().__init__(config_name, description=description)

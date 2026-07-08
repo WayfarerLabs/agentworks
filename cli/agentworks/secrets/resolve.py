@@ -134,6 +134,20 @@ def validate_chain(config: Config, registry: Registry) -> None:
 
     backends = active_backends(config, registry)
 
+    # Per-secret mapping values are capability-owned config; each
+    # active-chain backend validates its own (the generic ``False``
+    # opt-out is loop-owned and skipped). Mappings addressed to
+    # backends outside the chain stay dormant and unvalidated, exactly
+    # as they stay unused.
+    all_decls = secret_decls(registry)
+    for backend in backends:
+        for decl in all_decls.values():
+            mapping = decl.backend_mappings.get(backend.name)
+            if mapping is not None and mapping is not False:
+                backend.capability.validate_mapping(
+                    f"secret {decl.name!r}", mapping
+                )
+
     operator_decls = [
         decl
         for decl in secret_decls(registry).values()

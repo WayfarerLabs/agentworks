@@ -454,6 +454,40 @@ model.
 Definition of done: one `secret-backend` kind (the capability); no declarable instantiation layer;
 released TOML configs work verbatim; CI green; reviewer-approved.
 
+## Phase 5.7: Capability config-validation contract (maintainer-directed)
+
+Pre-lock (2026-07-08): punting the invoked-validation contract to the plugin SDD was ruled not
+defensible -- this branch owns the capability APIs, so the contract must be proven inside the
+framework now (see the sequencing note). Schema REGISTRATION remains explicitly future; the shipped
+API carries a deprecation note pointing at it.
+
+- [x] `ConfigReference(kind, name, usage)` in `resources/reference.py`: sourceless references
+      returned by capability validation; the consuming resource emits them as itself.
+- [x] `GitCredentialProvider.validate_config(owner, config) -> tuple[ConfigReference, ...]`
+      (classmethod; base = accepts-no-configuration; azdo owns its org requirement and unknown blob
+      fields); `GIT_CREDENTIAL_PROVIDER_REGISTRY` dict formalized, descriptor rows published from
+      it.
+- [x] Invocation points: manifest decode validates the TRUE blob (file:line framing; the loader
+      flatten drops unknown blob keys, so the decoder also re-attaches the validated blob to the
+      decoded row -- a plumbing gap the contract flushed out); the TOML loader validates its
+      assembled blob (org-only; the flat domain's stray-key looseness stays, per loads-today);
+      `GitCredentialConfig.referenced_resources()` derives capability-implied references at
+      finalize. Unknown provider names defer to the miss policy everywhere.
+- [x] `SecretBackend.validate_mapping(owner, mapping)`: per-secret mapping values are capability
+      config in a second host; `validate_chain` invokes it for active-chain backends (env-var's
+      string-only rule moves from lazy describe/resolve-time failure to `build_registry`; prompt
+      stays permissive for released configs; dormant backends' mappings are not validated).
+- [x] **Tests** (`test_capability_config_contract.py`): azdo/github blob validation on both paths;
+      stray-blob-field file:line; miss-policy deferral; a test-only signing capability pinning the
+      reference half end to end (default name auto-declared with per-consumer description, operator
+      override via manifest, source attribution); mapping validation (env-var early failure, prompt
+      permissive, dormant not validated).
+- [x] Artifacts: companion doc section flipped to SHIPPED; ADR sentence; this phase + sequencing
+      note; locked.md.
+
+Definition of done: the contract works inside the established framework (both hosts exercised, one
+real migration + one test-only reference exerciser); CI green; reviewer-approved.
+
 ## Phase 6: TOML resource-path retirement (future major; unscheduled)
 
 Deferred until a future major release, on operator telemetry/feedback -- not part of this SDD's
@@ -474,6 +508,20 @@ only TOML-resource reader in the tree; CI green; reviewer-approved.
 
 (Recorded as they happen, per SDD convention. Deviations from FRD/HLA get an entry here and an
 artifact update.)
+
+- **2026-07-08: the capability config-validation contract ships (maintainer ruling, pre-lock; Phase
+  5.7).** The companion doc had recorded the invoked-validation contract as plugin-SDD work; the
+  maintainer ruled the punt not defensible: this branch owns the capability APIs, and the contract
+  either fits the established framework or the framework needs adjusting -- pre-lock is the moment
+  to find out. It fits, using two existing seams (decode-time capability invocation with
+  defer-on-unknown, the pre-collapse precedent; `referenced_resources()` as the attribution point),
+  and implementing it surfaced one real plumbing gap: the loader flatten dropped YAML blob fields it
+  didn't know, so decoded rows lost capability config -- the decoder now re-attaches the validated
+  blob. A second maintainer observation folded in: `backend_mappings` values are capability config
+  in a per-secret host, so `SecretBackend.validate_mapping` ships too (env-var's mapping vocabulary
+  was previously enforced lazily at describe/resolve time; now at `build_registry`). Per maintainer
+  direction, both APIs carry a note that they may be deprecated in favor of registration-time schema
+  declarations.
 
 - **2026-07-07: per-kind `category` + `agw resource kinds` (maintainer request, pre-lock).**
   Follow-through on the definition expansion: the declarable/capability classifier becomes a

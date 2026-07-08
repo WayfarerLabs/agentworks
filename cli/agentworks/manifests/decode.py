@@ -206,10 +206,30 @@ def _decode_git_credential(doc: Document, spec: dict[str, object], issues: list[
             "provider-specific configuration (e.g. azdo's org) goes under "
             "spec.provider_config"
         )
+    # Capability validation on the TRUE blob (the loader flatten drops
+    # keys it doesn't know, so stray blob fields must be caught here,
+    # where the error carries this document's file:line). Runs after the
+    # spec-shape checks so a misplaced field gets the nesting hint, not
+    # a confusing capability complaint. Unknown provider names defer to
+    # the framework's miss policy.
+    from agentworks.git_credentials import GIT_CREDENTIAL_PROVIDER_REGISTRY
+
+    capability = GIT_CREDENTIAL_PROVIDER_REGISTRY.get(provider)
+    if capability is not None:
+        capability.validate_config("spec.provider_config", raw_config)
     result = _load_git_credentials(
         {"git_credentials": {doc.name: loader_spec}}, issues, _decls(doc.location)
-    )
-    return result[doc.name]
+    )[doc.name]
+    # The loader flatten only carries the blob columns the legacy TOML
+    # shape knows (org); re-attach the full validated blob so manifest
+    # rows keep every capability field (reference derivation at finalize
+    # reads it). TOML rows keep the loader's blob -- the flat domain
+    # cannot express richer capability config.
+    if raw_config:
+        import dataclasses
+
+        result = dataclasses.replace(result, provider_config=dict(raw_config))
+    return result
 
 
 def _decode_admin_template(doc: Document, spec: dict[str, object], issues: list[str]) -> Any:

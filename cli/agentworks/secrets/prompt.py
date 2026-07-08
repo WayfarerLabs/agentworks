@@ -37,6 +37,11 @@ class PromptBackend:
     description = "prompts interactively at resolution time"
     interactive = True
 
+    def validate_mapping(self, owner: str, mapping: MappingValue) -> None:
+        # Accept anything: prompt has no identifier vocabulary, and
+        # released configs may carry mapping values it ignores.
+        return
+
     def would_attempt(
         self,
         secret: SecretDecl,

@@ -291,21 +291,27 @@ platform's secret decls to its resolve set.
 
 ## Capability config validation
 
-The contract (for the plugin SDD to build): capabilities are invoked during validation of the
-consuming resource -- they validate their own config block and return the resource references to
-associate with the consuming resource (the one that owns the config block). Today's code is simpler
-than the contract because nothing yet needs it: the sole config-bearing capability field (azdo's
-`org`, a plain string) is validated in the git-credential kind's shared loader, and references are
-hand-coded on the resource; no capability exposes a validate API, and no shipped blob contains a
-resource reference. The capability RUNTIME APIs do ship (`SecretBackend`'s resolution methods,
-`GitCredentialProvider.credential_lines`), each invoked by the framework at a well-defined moment --
-so the contract is additive: one more method, one more moment, on API surfaces that already exist. A
-further enhancement could be a schema-specification mechanism where capabilities register their
+SHIPPED (this SDD): capabilities are invoked during validation of the consuming resource -- they
+validate their own config block and return the resource references to associate with the consuming
+resource (`validate_config(owner, config) -> tuple[ConfigReference, ...]`; the references are
+sourceless, and the consuming resource emits them with itself as source). Invocation points: each
+source's blob boundary (manifest decode with `file:line` framing on the TRUE blob; the TOML loader)
+and the owning resource's `referenced_resources()` at finalize. Unknown capability names defer to
+the framework's miss policy. Two hosts exercise it: the git-credential `provider_config` blob
+(azdo's `org` requirement lives on the capability; the base class supplies accepts-no-configuration)
+and per-secret `backend_mappings` values (`SecretBackend.validate_mapping`, invoked by
+`validate_chain` for active-chain backends -- a malformed mapping now fails at `build_registry`
+instead of first resolution; dormant backends' mappings are not validated, exactly as they are not
+used). A test-only capability whose config names a secret pins the reference half end to end
+(auto-declare, per-consumer attribution, operator override).
+
+A further enhancement could be a schema-specification mechanism where capabilities register their
 schemas, allowing the core engine to validate and generate resource references without invoking the
 capability -- and, as a nice side effect, naturally documenting the capability config schema (e.g.
 rendered by `agw resource describe <capability-kind>/<name>`). For that to work, the schema would
 need to be able to describe fields as resource references to specific kinds (secrets as well as
-other resources), and to include usage information to populate on those references.
+other resources), and to include usage information to populate on those references. The shipped API
+carries a note that it may be deprecated in favor of this.
 
 ## The rules, restated for the plugin SDD
 
@@ -324,6 +330,7 @@ other resources), and to include usage information to populate on those referenc
    becomes real (see "The map form's limit").
 8. Secret-name fields inside capability config are ordinary secret references (see "Secrets in
    capability config").
-9. Capability config: the contract is invoking the capability to validate its blob and return the
-   references it implies (not yet needed by shipped code); a further schema-registration enhancement
-   could let the core engine do both without invocation (see "Capability config validation").
+9. Capability config is validated by invoking the capability, which returns the references its
+   config implies (shipped: git-credential blobs and secret backend mappings); a further
+   schema-registration enhancement could let the core engine do both without invocation (see
+   "Capability config validation").

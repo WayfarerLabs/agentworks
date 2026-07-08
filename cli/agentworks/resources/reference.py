@@ -86,6 +86,21 @@ class ResourceReference:
 
 
 @dataclass(frozen=True)
+class ConfigReference:
+    """A resource reference implied by a capability's config block,
+    returned by the capability's ``validate_config``. Sourceless by
+    design: the consuming resource that owns the config block attaches
+    itself as the ``source`` when it emits the corresponding
+    ``ResourceReference`` (whoever hosts the config that names the
+    resource emits the reference).
+    """
+
+    kind: str
+    name: str
+    usage: str
+
+
+@dataclass(frozen=True)
 class SecretReference(ResourceReference):
     """Outbound reference targeting a ``"secret"`` Resource.
 
