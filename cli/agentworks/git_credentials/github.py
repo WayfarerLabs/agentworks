@@ -13,6 +13,7 @@ which would break every unscoped credential.
 
 from __future__ import annotations
 
+import re
 from typing import TYPE_CHECKING
 
 from agentworks.errors import ConfigError
@@ -24,6 +25,11 @@ if TYPE_CHECKING:
     from agentworks.resources.reference import ConfigReference
 
 _SCOPE_FIELDS = {"repo", "owner"}
+
+# GitHub owner/repo name charset. Interpolated verbatim into gitconfig
+# section headers and store URLs, so anything outside this set (quotes,
+# whitespace, ...) would corrupt the VM's git config at first use.
+_NAME_RE = re.compile(r"^[A-Za-z0-9._-]+$")
 
 
 def _validated_scope(
@@ -49,10 +55,13 @@ def _validated_scope(
     if repo is not None and (
         not isinstance(repo, str)
         or repo.count("/") != 1
-        or not all(part for part in repo.split("/"))
+        or not all(_NAME_RE.match(part) for part in repo.split("/"))
     ):
-        raise ConfigError(f'{owner_ctx}.repo must be an "owner/name" string')
-    if org is not None and (not isinstance(org, str) or not org or "/" in org):
+        raise ConfigError(
+            f'{owner_ctx}.repo must be an "owner/name" string '
+            f"(GitHub name characters only)"
+        )
+    if org is not None and (not isinstance(org, str) or not _NAME_RE.match(org)):
         raise ConfigError(
             f"{owner_ctx}.owner must be a GitHub user/org name (no slash)"
         )

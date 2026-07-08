@@ -1145,13 +1145,19 @@ def resolve_git_credential_providers(
             assert isinstance(org, str)  # loader guarantees org for azdo
             providers[name] = AzDOCredentialProvider(config_name=name, org=org, description=desc)
         elif cred_config.provider == "github":
-            repo = cred_config.provider_config.get("repo")
-            scope_owner = cred_config.provider_config.get("owner")
+            from agentworks.git_credentials.github import _validated_scope
+
+            # Re-validate rather than isinstance-and-drop: a bad value
+            # slipping past the loaders must fail loudly, not silently
+            # WIDEN the credential by unscoping it.
+            repo, scope_owner = _validated_scope(
+                f"git-credential/{name}", cred_config.provider_config
+            )
             providers[name] = GitHubCredentialProvider(
                 config_name=name,
                 description=desc,
-                repo=repo if isinstance(repo, str) else None,
-                owner=scope_owner if isinstance(scope_owner, str) else None,
+                repo=repo,
+                owner=scope_owner,
             )
     return providers
 
@@ -1984,12 +1990,6 @@ def install_claude_plugins(
         output.warn(msg)
 
 
-# The agentworks-owned gitconfig include carrying credential-context
-# sections for scoped credentials. Referenced from ~/.gitconfig via
-# include.path (added once); overwritten wholesale on every init.
-_GIT_SCOPES_INCLUDE = "~/.agentworks-git-scopes.gitconfig"
-
-
 def _configure_git_credentials(
     vm_name: str,
     ts_target: Transport,
@@ -2009,6 +2009,12 @@ def _configure_git_credentials(
     raise loudly rather than silently dropping the credential, since
     silently shipping a VM with a missing credential the operator
     asked for is the worst kind of footgun.
+
+    Deliberate error-semantics change with #166: the old per-credential
+    try/except warn-and-continue around ``credential_lines`` is gone --
+    materials build atomically, so a failure (e.g. a scope collision)
+    aborts credential config as a whole rather than shipping a partial
+    store.
     """
     logger.step("Git credentials")
     output.detail("Configuring git credentials...")
@@ -2023,7 +2029,11 @@ def _configure_git_credentials(
             entity_name=missing[0],
         )
 
-    from agentworks.git_credentials import build_credential_materials
+    from agentworks.git_credentials import (
+        GIT_CRED_WARN_HELPER_PATH,
+        GIT_SCOPES_INCLUDE_PATH,
+        build_credential_materials,
+    )
 
     if not providers:
         return
@@ -2042,12 +2052,15 @@ def _configure_git_credentials(
             "~/.git-credentials", materials.store_content, mode="600"
         )
         ts_target.write_file(
-            _GIT_SCOPES_INCLUDE, materials.gitconfig_content, mode="600"
+            GIT_SCOPES_INCLUDE_PATH, materials.gitconfig_content, mode="600"
+        )
+        ts_target.write_file(
+            GIT_CRED_WARN_HELPER_PATH, materials.warn_helper_script, mode="700"
         )
         ts_target.run(
             "git config --global credential.helper store && "
-            f"(git config --global --get-all include.path | grep -qxF '{_GIT_SCOPES_INCLUDE}' "
-            f"|| git config --global --add include.path '{_GIT_SCOPES_INCLUDE}')",
+            f"(git config --global --get-all include.path | grep -qxF '{GIT_SCOPES_INCLUDE_PATH}' "
+            f"|| git config --global --add include.path '{GIT_SCOPES_INCLUDE_PATH}')",
         )
         output.detail(f"Git credentials configured for {len(providers)} provider(s)")
     except SSHError as e:

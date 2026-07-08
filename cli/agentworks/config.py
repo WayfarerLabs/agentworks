@@ -104,6 +104,9 @@ def validate_admin_username(admin_username: str) -> None:
         )
 
 
+# https/http git URL with embedded userinfo ("https://user@host/...").
+_HTTP_USERINFO_RE = re.compile(r"^https?://[^/@]+@")
+
 # Valid values for enum-like fields. Git credential ``type`` validation
 # moved to the framework's ``git-credential-provider`` kind in Phase 2b.1
 # (``agentworks.git_credentials.GIT_CREDENTIAL_PROVIDER_REGISTRY`` is
@@ -844,10 +847,18 @@ def _load_workspace_templates(
     for name, tdata in raw.items():
         if not isinstance(tdata, dict):
             raise ConfigError(f"workspace_templates.{name} must be a table")
+        repo = str(tdata["repo"]) if "repo" in tdata else None
+        if repo is not None and _HTTP_USERINFO_RE.match(repo):
+            issues.append(
+                f"workspace_templates.{name}.repo embeds a username; use a "
+                f"plain https remote -- git credential scoping selects "
+                f"credentials automatically, and an embedded username "
+                f"bypasses it"
+            )
         templates[name] = WorkspaceTemplate(
             name=name,
             inherits=list(tdata.get("inherits", [])),
-            repo=str(tdata["repo"]) if "repo" in tdata else None,
+            repo=repo,
             tmuxinator=bool(tdata["tmuxinator"]) if "tmuxinator" in tdata else None,
             env=_parse_env_table(
                 tdata.get("env"),
@@ -868,6 +879,8 @@ def _load_git_credentials(
     data: dict[str, object],
     issues: list[str],
     decls: _SectionLineMap,
+    *,
+    warn_ignored_scope_keys: bool = True,
 ) -> dict[str, GitCredentialConfig]:
     raw = data.get("git_credentials", {})
     if not isinstance(raw, dict):
@@ -930,7 +943,19 @@ def _load_git_credentials(
         # hoisting it into the blob for other providers would promote a
         # historically-ignored stray key into a validation error and
         # break released configs (loads-today). The flat domain's
-        # stray-key silence stays until Phase 6 retires it.
+        # stray-key silence stays until Phase 6 retires it -- EXCEPT
+        # github scope keys, where silence would ship a credential with
+        # BROADER authority than the operator declared; those warn.
+        if warn_ignored_scope_keys and cred_type == "github":
+            ignored_scopes = sorted({"repo", "owner"} & set(cdata))
+            if ignored_scopes:
+                issues.append(
+                    f"git_credentials.{name}: github scope field(s) "
+                    f"{', '.join(ignored_scopes)} are manifest-only and "
+                    f"IGNORED here -- the credential is provisioned "
+                    f"unscoped; migrate it to YAML "
+                    f"(agw resource migrate git-credential)"
+                )
         if cred_type == "azdo" and "org" in cdata:
             provider_config["org"] = str(cdata["org"])
         from agentworks.git_credentials import GIT_CREDENTIAL_PROVIDER_REGISTRY

@@ -73,12 +73,19 @@ repos an agent clones ad hoc that no workspace ever declared. The two are mutual
 credential with neither is the unscoped fallback. Scopes are manifest-only (the legacy flat TOML
 shape has no GitHub fields).
 
-Selection happens inside git itself, not in agentworks: provisioning writes credential-context
+Selection happens inside git itself, not in agentworks: initialization writes credential-context
 sections into an agentworks-owned gitconfig include (`~/.agentworks-git-scopes.gitconfig`), git
 injects a per-credential username for matching remotes (most specific wins: exact repo, then owner,
 then fallback), and the username picks the token out of `~/.git-credentials`. Two credentials
-claiming the same scope is a configuration error at provisioning time. Declaring a repo under one
-credential and its org under another is fine -- the more specific scope wins.
+claiming the same scope is a configuration error at initialization time, evaluated per user (admin
+and each agent get their own store and include, built from their own credential lists). Declaring a
+repo under one credential and its org under another is fine -- the more specific scope wins.
+
+Clone with plain https URLs -- no username needed anywhere; git injects it internally. The
+credential's resource name doubles as that internal username, so it appears in `git config -l`
+output and provider-side logs (remotes are never rewritten). Do not embed usernames in remote URLs:
+an embedded username bypasses scoping, and initialization installs a warn-only credential helper
+that says so on stderr right above the resulting auth failure.
 
 ## TOML resource sections: deprecated but supported
 

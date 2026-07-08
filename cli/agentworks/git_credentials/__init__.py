@@ -25,17 +25,43 @@ if TYPE_CHECKING:
 
 @dataclass(frozen=True)
 class CredentialMaterials:
-    """Everything the provisioning flow writes for git auth.
+    """Everything the initialization flow writes for git auth.
 
     ``store_content`` is the full ``~/.git-credentials`` body.
     ``gitconfig_content`` is the body of the agentworks-owned gitconfig
     include file (credential-context sections selecting per-credential
-    usernames); present even when empty so re-provisioning after
-    removing scopes is idempotent.
+    usernames); present even when empty so re-initialization after
+    removing scopes is idempotent (while at least one credential remains).
     """
 
     store_content: str
     gitconfig_content: str
+    # A warn-only git credential helper (POSIX sh): when a github.com
+    # query carries a username outside the known set (an agent added a
+    # remote with an embedded username, bypassing scoping), it prints a
+    # diagnosis to stderr -- which git surfaces above the auth failure
+    # -- and returns nothing so the chain proceeds. No-op body when no
+    # scoped credentials exist.
+    warn_helper_script: str
+
+
+# The warn-only helper's on-VM path. A shell-executed helper value
+# (contains a slash), so the shell expands the tilde -- per-user, which
+# is what makes the same include content work for admin and agents.
+GIT_CRED_WARN_HELPER_PATH = "~/.agentworks-git-cred-warn.sh"
+
+# The agentworks-owned gitconfig include carrying the credential-context
+# sections. Referenced from the user's global gitconfig via include.path
+# (tilde-literal, expanded per-user by git); overwritten wholesale on
+# every init, so removing scopes degrades cleanly while at least one
+# credential remains (removing ALL credentials leaves both files stale
+# -- a pre-existing gap shared with the store itself).
+GIT_SCOPES_INCLUDE_PATH = "~/.agentworks-git-scopes.gitconfig"
+
+_WARN_HELPER_HEADER = """\
+#!/bin/sh
+# Managed by agentworks (git credential scoping); do not edit.
+"""
 
 
 def build_credential_materials(
@@ -82,9 +108,54 @@ def build_credential_materials(
     header = (
         "# Managed by agentworks (git credential scoping); do not edit.\n"
     )
+    if sections:
+        rendered.insert(
+            0, f'[credential]\n\thelper = {GIT_CRED_WARN_HELPER_PATH}'
+        )
     return CredentialMaterials(
         store_content="\n".join(store_unscoped + store_scoped) + "\n",
         gitconfig_content=header + "\n".join(rendered) + ("\n" if rendered else ""),
+        warn_helper_script=_warn_helper_script(sections),
+    )
+
+
+
+def _warn_helper_script(sections: list[tuple[str, str]]) -> str:
+    """Render the warn-only credential helper.
+
+    The allowlist is every scoped username plus the released unscoped
+    username. Only github.com queries are inspected (azdo's host is
+    dev.azure.com and azdo has no scoping). Without scoped credentials
+    the script is a no-op body -- still written, so re-initialization
+    after removing scopes degrades cleanly.
+    """
+    if not sections:
+        return _WARN_HELPER_HEADER + "exit 0\n"
+    allow = " ".join(
+        sorted({username for _url, username in sections} | {"x-access-token"})
+    )
+    return (
+        _WARN_HELPER_HEADER
+        + f'''[ "$1" = "get" ] || exit 0
+host=""; username=""
+while IFS='=' read -r key value; do
+    case "$key" in
+        host) host="$value" ;;
+        username) username="$value" ;;
+    esac
+done
+[ "$host" = "github.com" ] || exit 0
+[ -n "$username" ] || exit 0
+case " {allow} " in
+    *" $username "*) exit 0 ;;
+esac
+{{
+    echo "agentworks: this remote embeds username '$username', which"
+    echo "bypasses git credential scoping for github.com; use a plain https"
+    echo "remote (scoping selects the credential automatically)"
+}} >&2
+exit 0
+'''
     )
 
 

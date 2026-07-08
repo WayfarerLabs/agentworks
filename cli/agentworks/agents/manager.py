@@ -1157,14 +1157,38 @@ def _create_agent_on_vm(
                 entity_kind="git-credential",
                 entity_name=missing[0],
             )
-        cred_lines: list[str] = []
-        for cred_name, provider in providers.items():
-            assert git_tokens is not None  # missing-check above narrows it
-            cred_lines.extend(provider.credential_lines(git_tokens[cred_name]))
-        if cred_lines:
-            cred_content = "\n".join(cred_lines) + "\n"
-            agent_target.write_file(f"{home}/.git-credentials", cred_content, mode="0600")
-            agent_target.run("git config --global credential.helper store")
+        assert git_tokens is not None  # missing-check above narrows it
+        from agentworks.git_credentials import (
+            GIT_CRED_WARN_HELPER_PATH,
+            GIT_SCOPES_INCLUDE_PATH,
+            build_credential_materials,
+        )
+
+        # Same materials as the VM-level (admin) flow: store lines with
+        # the unscoped-first ordering contract, gitconfig context
+        # sections for scoped credentials, and the warn-only helper.
+        # ``git config --global`` runs as the agent user, so the
+        # tilde-literal include.path resolves to the agent's home; the
+        # write_file paths spell the home out (agent_target conventions).
+        materials = build_credential_materials(providers, git_tokens)
+        agent_target.write_file(
+            f"{home}/.git-credentials", materials.store_content, mode="0600"
+        )
+        agent_target.write_file(
+            f"{home}/{GIT_SCOPES_INCLUDE_PATH.removeprefix('~/')}",
+            materials.gitconfig_content,
+            mode="0600",
+        )
+        agent_target.write_file(
+            f"{home}/{GIT_CRED_WARN_HELPER_PATH.removeprefix('~/')}",
+            materials.warn_helper_script,
+            mode="0700",
+        )
+        agent_target.run(
+            "git config --global credential.helper store && "
+            f"(git config --global --get-all include.path | grep -qxF '{GIT_SCOPES_INCLUDE_PATH}' "
+            f"|| git config --global --add include.path '{GIT_SCOPES_INCLUDE_PATH}')"
+        )
 
     # User install commands + login-shell PATH profile fragment.
     _run_agent_install_commands(

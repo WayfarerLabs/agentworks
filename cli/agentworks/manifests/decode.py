@@ -224,7 +224,13 @@ def _decode_git_credential(doc: Document, spec: dict[str, object], issues: list[
     if capability is not None:
         capability.validate_config("spec.provider_config", raw_config)
     result = _load_git_credentials(
-        {"git_credentials": {doc.name: loader_spec}}, issues, _decls(doc.location)
+        {"git_credentials": {doc.name: loader_spec}},
+        issues,
+        _decls(doc.location),
+        # The flatten passes blob keys through the loader shape, but the
+        # TRUE blob is re-attached below -- scopes ARE honored on this
+        # path, so the TOML-only ignored-scope warning must not fire.
+        warn_ignored_scope_keys=False,
     )[doc.name]
     # The loader flatten only carries the blob columns the legacy TOML
     # shape knows (org); re-attach the full validated blob so manifest

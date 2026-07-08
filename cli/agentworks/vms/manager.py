@@ -820,6 +820,15 @@ def add_git_credential(db: Database, config: Config, name: str, credential_name:
     # Phase 1d: resolve the token via the framework (the backend chain
     # handles env-var lookup + prompt fallback uniformly across every
     # site that needs a token).
+    if provider.gitconfig_sections():
+        # Scoped credentials need their gitconfig context sections and
+        # the store-wide ordering contract -- a single-line merge can't
+        # provide either. The full-rebuild path can.
+        raise ValidationError(
+            f"git credential '{credential_name}' is scoped (fine-grained "
+            f"PAT); add it to the admin or agent template and run "
+            f"'agw vm reinit {name}' instead of add-git-credential"
+        )
     tokens = _collect_git_tokens(config, registry, [credential_name])
     token = tokens[credential_name]
     new_lines = provider.credential_lines(token)
@@ -827,23 +836,39 @@ def add_git_credential(db: Database, config: Config, name: str, credential_name:
     with keep_vm_active(db, config, vm):
         target = transport(vm, config)
 
-        # Read existing credentials, filter out entries for the same host/path
+        # Read existing credentials, filter out entries this credential
+        # replaces. The key is (username, host/path): scoped github
+        # lines are path-less and share the host, so a host-only key
+        # would evict every github line including the scoped ones.
         result = target.run("cat ~/.git-credentials 2>/dev/null || true")
         existing = result.stdout.strip().splitlines() if result.stdout.strip() else []
 
-        # Extract host/path from new lines for matching: "https://user:tok@host/path" -> "host/path"
-        new_hostpaths = {line.split("@", 1)[1] for line in new_lines if "@" in line}
+        new_keys = {_credential_line_key(line) for line in new_lines} - {None}
+        filtered = [e for e in existing if _credential_line_key(e) not in new_keys]
 
-        # Filter out old entries whose host/path matches any new entry
-        filtered = [e for e in existing if "@" not in e or e.split("@", 1)[1] not in new_hostpaths]
-
-        # Write back filtered + new
-        all_lines = filtered + new_lines
+        # New (always unscoped -- see the guard above) lines go FIRST:
+        # a username-less query takes the first matching store line, so
+        # the host-level fallback must precede username-tagged scoped
+        # lines that may already be on the VM.
+        all_lines = new_lines + filtered
         cred_content = "\n".join(all_lines) + "\n"
         target.write_file("~/.git-credentials", cred_content, mode="600")
         target.run("git config --global credential.helper store")
 
     output.info(f"Git credential '{credential_name}' configured on VM '{name}'")
+
+
+def _credential_line_key(line: str) -> tuple[str, str] | None:
+    """Identity of a ``~/.git-credentials`` line: (username, host/path).
+
+    Scoped github lines are path-less and share the host, so a
+    host-only key would evict every github line at once; the username
+    disambiguates. Non-URL lines get ``None`` (never matched).
+    """
+    if "@" not in line or "//" not in line:
+        return None
+    userinfo = line.split("//", 1)[1].split("@", 1)[0]
+    return (userinfo.split(":", 1)[0], line.split("@", 1)[1])
 
 
 def start_vm(db: Database, config: Config, name: str) -> None:
