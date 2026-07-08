@@ -35,28 +35,19 @@ flipped.
   resources reference capabilities directly, many-to-one; the declarable `secret-backend` kind, its
   bundled manifests, and the reserved-name tier were deleted; the capability (protocol
   `SecretBackend`, registry `SECRET_BACKEND_REGISTRY`) took the `secret-backend` kind name as a
-  descriptor row. Released TOML configs work verbatim (`[secret_config].backends` and
-  `backend_mappings` already named backends). The "door" metaphor was retired -- `SecretBackend` is
-  a well-defined API abstracting where secrets come from, consumed by a plain resolution loop. ADR
-  0016 records the resources-reference-capabilities model and the domain-natural capability naming
-  rule. A same-day follow-up ruling expanded the resource definition itself: capability rows ARE
-  resources (of read-only capability kinds), ending the prose-only "not resources, merely mirrored
-  in" ontology; ADR 0016's three-layer table became two layers, the classifier became the per-kind
-  `category` field (replacing `manifest_declarable`), and a read-only `agw resource kinds` command
-  lists the code-defined kind inventory (its `--names-only` completion path needs no config).
-  Plugins publish resources of existing kinds -- declarable and capability alike -- never new kinds.
-  A companion doc (capability-consumers.md, marked SUGGESTION) prototypes consumer schema shapes by
-  cardinality for every current and planned capability, as feedback input for the plugin SDD.
+  descriptor row, and the "door" metaphor was retired. A same-day follow-up expanded the resource
+  definition: capability rows ARE resources, so the classifier became the per-kind `category` field
+  (replacing `manifest_declarable`) and a read-only `agw resource kinds` command lists the kind
+  inventory. Plugins publish resources of existing kinds, never new kinds. Full ruling chain in the
+  plan's 2026-07-07 sequencing notes; ADR 0016 carries the model. Companion doc
+  capability-consumers.md (marked SUGGESTION) prototypes consumer schema shapes for the plugin SDD.
 
-Two deliberate breaking changes, both `!`-flagged for release-please: resource names may not contain
-`/` (FRD R13, enforced at `Registry.add`), and `agw resource migrate` requires selectors or `--all`.
-Pre-lock additions: bare "provider" scoped to `SECRET_PROVIDER_REGISTRY` (itself later renamed
-`SECRET_BACKEND_REGISTRY` by Phase 5.5); the `kind/name` display syntax unified on `/` everywhere
-(including `resource describe KIND/NAME`, a third breaking CLI change; ADR 0016 records the
-display-syntax rule); deprecation warnings aggregated into one message with a global
-`--no-deprecations` silencer; `resource sample` requires a kind or `--all` (fourth breaking CLI
-change); and provider-owned configuration nests under `spec.provider_config` (ADR 0016 records the
-pattern).
+Four deliberate breaking changes, all `!`-flagged for release-please: resource names may not contain
+`/` (FRD R13); `agw resource migrate` and `agw resource sample` each require selectors or `--all`;
+and `resource describe` takes a single `KIND/NAME` token (the `/` display-syntax unification, ADR
+0016). Other pre-lock additions: deprecation warnings aggregated behind a global `--no-deprecations`
+silencer, and provider-owned configuration nests under `spec.provider_config` (ADR 0016). See the
+plan's sequencing notes for detail.
 
 ### Permanent homes (the SDD-not-permanent promotions)
 

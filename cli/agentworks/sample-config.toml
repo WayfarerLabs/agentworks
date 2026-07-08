@@ -18,13 +18,6 @@
 # Prose comments use `# <text>` (with space). Pinned by tests in
 # `cli/tests/test_sample_config.py`.
 #
-# Agentworks ships a built-in catalog of common tools (apt sources, apt
-# packages, system install commands, user install commands). Run
-# `agw resource list --kind apt-package,system-install-command,user-install-command,apt-source`
-# to see what is available (or filter to any single kind). You can
-# reference catalog entries by name in templates and define your own
-# entries below to extend or override the catalog.
-#
 # Naming conventions:
 #   - Framework keys (section names, field names) use snake_case:
 #     [vm_templates.foo], ssh_public_key, mise_activate, backend_mappings.

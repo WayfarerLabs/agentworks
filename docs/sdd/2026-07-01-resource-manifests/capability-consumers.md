@@ -136,8 +136,8 @@ spec:
     org: my-org # capability-owned
 ```
 
-The canonical single-reference shape, hosted by a dedicated kind because a credential is a real
-domain noun (templates reference credentials by name; the token secret hangs off it).
+The canonical single-reference shape (rule 1), hosted by a dedicated kind because a credential is a
+real domain noun (templates reference credentials by name; the token secret hangs off it).
 
 ### 4. vm-platform: one capability, dedicated kind (planned)
 
@@ -178,9 +178,8 @@ spec:
       - nerftools-default@nerftools
 ```
 
-The inline form of reference+blob: the template is the only consumer (no dedicated `harness` kind),
-so the field IS the selector and `harness_config` is the sibling blob the selected harness
-validates. No config needed? Just the selector:
+The inline form of reference+blob (rule 2): the template is the only consumer (no dedicated
+`harness` kind). No config needed? Just the selector:
 
 ```yaml
 spec:
@@ -212,17 +211,11 @@ spec:
 
 Map keyed by capability name, value = the capability-owned blob directly (`{}` for none). No
 `provider:` key and no `provider_config:` envelope -- the map key IS the selection and the value IS
-the blob, so the single-reference envelope would be pure ceremony here. Three properties make the
-map the right multi-shape for templates:
-
-- **Uniqueness by construction**: a feature can't be enabled twice with conflicting configs; a list
-  needs a validation rule for that.
-- **Inheritance merges per key**: a child template can override just `passport-agent.validity_days`
-  or disable inheritance-supplied `az-cli` (see below) without restating the whole set. An
-  entry-list would force whole-list replacement semantics.
-- **Order-free is honest**: activation order is the framework's job (same-level dependency
-  topological sort, plugin SDD R8), so operator-supplied order would be dead information at best and
-  a false promise at worst.
+the blob. This is the map form the intro argues for (uniqueness by construction, per-key inheritance
+merge, order-free); a child can override just `passport-agent.validity_days` or disable
+inheritance-supplied `az-cli` (see below) without restating the set. Order-free is honest here
+because activation order is the framework's job (same-level dependency topological sort, plugin SDD
+R8).
 
 Open sub-question for the plugin SDD: whether inheritance needs a disable shorthand (`az-cli: false`
 -- borrowed from row 2's vocabulary -- to drop a parent-enabled feature). Opt-in-plus-inheritance
@@ -306,12 +299,7 @@ platform's secret decls to its resolve set.
    shorthand to the map shape (rule 3); pure opt-in consumers don't need it.
 6. Value shorthands are per-domain sugar (`env-var: NPM_TOKEN` as a mapping value), always
    equivalent to a spelled-out form.
-7. The map allows one entry per capability. When same-capability multiplicity becomes real for a
-   consumer, extend in this order: capability-owned list values first (no schema change), then a
-   named-instance map (keeps inheritance merge and identity), then an anonymous entry list (only for
-   ordered, non-inherited consumers).
-8. Secret-name fields inside capability config are ordinary secret references (defaulted and
-   overridable, or required). The capability contributes schema knowledge only (which blob fields
-   are secret names); the CONSUMING resource declares the reference with itself as the source --
-   whoever hosts the config that names the secret emits the reference. Auto-declaration, validation,
-   doctor, and composition-root resolution are stock machinery.
+7. The map allows one entry per capability; extend deliberately when same-capability multiplicity
+   becomes real (see "The map form's limit").
+8. Secret-name fields inside capability config are ordinary secret references (see "Secrets in
+   capability config").

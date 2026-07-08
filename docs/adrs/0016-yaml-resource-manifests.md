@@ -126,10 +126,9 @@ filenames), enforced source-independently at `Registry.add`. That ban makes `kin
 parse-safe display syntax, and it is uniform everywhere a typed name appears: CLI tokens
 (`resource describe secret/npm-token`, `resource migrate vm-template/dev`), rendered output
 (headers, references, auto-declared descriptions, `--names-only`), and the live-instance lines in
-`Used by:` sections (`session/foo`). Lifecycle entities (VMs, workspaces, agents, sessions,
-consoles) are NOT registry kinds -- the vocabulary law is unchanged, and code keeps calling their
-type `instance_kind` -- but they share the display syntax: the section context, not the punctuation,
-tells the reader whether a pair is a config resource or a live instance.
+`Used by:` sections (`session/foo`). Lifecycle entities share the display syntax even though they
+are not registry kinds: the section context, not the punctuation, tells the reader whether a pair is
+a config resource or a live instance.
 
 ### Dual-path: deprecate, don't break
 
@@ -151,9 +150,8 @@ surface, while `agw config init/edit/sample` continue to own the permanent setti
 - Plugins get a paved road: resources arrive as bundled manifests with their own origin variant;
   capabilities register in per-domain capability registries. Neither requires new framework
   mechanisms.
-- The secrets runtime is small enough to state in one sentence: map the configured chain onto the
-  registered backends, loop over them in order, batch per backend. Inspection surfaces reuse the
-  same loop with an errors out-param instead of growing parallel code paths.
+- The secrets runtime is small (the plain loop described above); inspection surfaces reuse it with
+  an errors out-param instead of growing parallel code paths.
 - Breaking change accepted knowingly: configs carrying slash-bearing quoted resource names
   (`[vm_templates."a/b"]`) stop loading, with a rename hint.
 

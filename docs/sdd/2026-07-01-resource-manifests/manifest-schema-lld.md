@@ -121,10 +121,9 @@ Spec fields per kind are exactly today's TOML fields (survey pinned; highlights 
   fields) plus `env` (was `[admin.env]`). Name restricted to `default`.
 - **named-console-template**: `tmux_layout` (enum `VALID_TMUX_LAYOUTS`). Name restricted to
   `default`.
-- **secret-backend**: not manifest-declarable. (History: Phase 2 deferred the manifest form to Phase
-  3's reshape, Phase 3 shipped a declarable `spec.provider` + provider-config shape, and the Phase
-  5.5 collapse, 2026-07-07, removed it -- the kind is now the capability descriptor, and declaring
-  it gets R3's permanent capability-kind error.)
+- **secret-backend**: not manifest-declarable -- the kind is the capability descriptor, and
+  declaring it gets R3's permanent capability-kind error. (History in the plan's 2026-07-07
+  sequencing note: Phase 2 deferred it, Phase 3 shipped a declarable shape, Phase 5.5 removed it.)
 - **catalog kinds**: fields exactly per the survey (`key_url`/`key_path`/`source`/`source_file` (+
   `_SAFE_FILENAME_RE`) / `key_dearmor`; `apt` required list + `apt_sources`; `command` + `path` +
   at-most-one of `test_exec`/`test_file`/`test_dir`).

@@ -136,10 +136,8 @@ backend_mappings.env-var = "NPM_TOKEN"
 ```
 
 Migration carries this over verbatim; per-secret `backend_mappings` remain the mechanism for
-customizing identifiers (the built-in backends accept no configuration). Post-5.5 there is no
-declarable backend kind at all; a future config-bearing backend's configuration is backend-scoped,
-graduating to a declarable instance kind only on a real multi-instance need (FRD R8). Nothing about
-this migration needs any of that.
+customizing identifiers (the built-in backends accept no configuration). Config-bearing and
+multi-instance backends are FRD R8's story; nothing about this migration needs any of it.
 
 ## Risks and safeguards
 

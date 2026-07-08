@@ -27,8 +27,8 @@ auto-loaded YAML manifest files using a Kubernetes-style envelope. The motivatio
    plugins can do the same. This SDD lays the origin taxonomy and the built-in-manifest mechanism;
    the plugin system itself is a future SDD.
 4. **Capabilities are code-backed resources.** Secret backends, VM provisioners, and git credential
-   providers are resources whose implementation is registered code: read-only rows of capability
-   kinds, not manifest-declarable, referenced directly by other resources (R8).
+   providers are resources whose implementation is registered code, referenced directly by other
+   resources (R8); see Terminology.
 
 The move is dual-path (revised 2026-07-03 from the original hard cutover): YAML manifests and TOML
 resource sections are both fully supported publishers into the one registry, mixing included; TOML
@@ -104,10 +104,9 @@ Every section of today's `config.toml` gets exactly one destination:
 TOML resource sections keep loading, with a per-section deprecation warning pointing at
 `agw resource migrate` (R11). They become load errors only in a future major release.
 
-Config sections that reference resources by name (`[secret_config].backends` referencing backend
-names) keep doing so; the owning subsystem validates the names against the finalized registry at the
-composition boundary (`build_registry`), with config vocabulary in the errors. Settings do not
-become pseudo-resources.
+Config sections that reference resources by name (`[secret_config].backends`) keep doing so; the
+owning subsystem validates the names against the finalized registry at the composition boundary
+(`build_registry`), with config vocabulary in the errors. Settings do not become pseudo-resources.
 
 ### R2: Manifest directory and auto-loading
 
@@ -227,8 +226,8 @@ The app ships resources of its own through the same framework:
     built-in entry overrides it.
   - `secret-backend` is not manifest-declarable: any `kind: secret-backend` document is the R3
     capability-kind envelope error. The reserved-names override tier keeps its type but has no
-    reachable member (retained for the plugin SDD's default exposed resources); per-secret
-    customization is `backend_mappings`, and chain composition is `[secret_config].backends`.
+    reachable member (retained for the plugin SDD's default exposed resources); customization is via
+    `backend_mappings` and the chain (R8).
   - Template kinds are unaffected (their defaults remain framework-synthesized via
     always-materialize, not built-in rows; an operator declaring `default` replaces the synthesis
     exactly as today).
@@ -257,12 +256,11 @@ Surfaced everywhere origins appear today (`agw doctor`, `agw secret list/describ
 (As revised by the capability collapse; the original provider/backend split and the ruling chain
 that removed it are in the plan's sequencing notes.)
 
-- **`secret-backend`** (capability kind): the code that produces secret values -- what the ecosystem
-  calls a secrets backend. Built-ins: `env-var` (convention `AW_SECRET_<NAME>`), `prompt`. Backends
-  are registered code-side (`SECRET_BACKEND_REGISTRY`) and published as read-only `built-in`
-  capability resources (error miss policy, not manifest-declarable) so chain references validate
-  uniformly and the backends are visible in `agw resource list`. There is no declarable
-  instantiation kind.
+- **`secret-backend`** (capability kind, defined in Terminology): built-ins `env-var` (convention
+  `AW_SECRET_<NAME>`), `prompt`. Backends are registered code-side (`SECRET_BACKEND_REGISTRY`) and
+  published as read-only `built-in` capability resources (error miss policy, not declarable) so
+  chain references validate uniformly and the backends are visible in `agw resource list`. There is
+  no declarable instantiation kind.
 - **Chain**: `[secret_config].backends` lists backend (capability) names in precedence order;
   unknown names are load errors validated against the capability resources. The zero-config default
   chain (`env-var`, then `prompt`) is unchanged. The v0.10.0 TOML vocabulary is unchanged and now

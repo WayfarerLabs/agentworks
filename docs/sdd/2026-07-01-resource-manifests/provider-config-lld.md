@@ -1,14 +1,10 @@
 # Phase 3 LLD: secret providers, backends, and the resolver swap
 
-> Status: SUPERSEDED. First (2026-07-03) by [runtime-model-lld.md](runtime-model-lld.md), which
-> replaced this document's runtime design with the backends-are-the-door model. Then (2026-07-07,
-> Phase 5.5 capability collapse) the provider/backend SPLIT itself -- this document's remaining
-> current content -- was dissolved: the declarable `secret-backend` kind, the decode-time
-> `validate_config` delegation, the bundled built-in backend manifests, and the reserved backend
-> names are all gone; the capability (renamed `secret-backend`) is referenced directly by the chain
-> and by per-secret mappings. Still current here: the git-credential `provider` alias. The rest
-> stands as the historical record of two interim designs; see FRD R8 (revised), the HLA
-> secret-backend section, and the plan's 2026-07-07 sequencing note.
+> Status: SUPERSEDED -- by [runtime-model-lld.md](runtime-model-lld.md) (2026-07-03, runtime design)
+> and the Phase 5.5 capability collapse (2026-07-07, which dissolved the provider/backend split this
+> document pins). Still current: the git-credential `provider` alias. Current design lives in FRD R8
+> (revised), the HLA secret-backend section, and the plan's 2026-07-07 sequencing note; the body
+> below is historical record.
 
 The capability/resource split for secrets: providers are code, backends are resources. This LLD pins
 the provider protocol, the registry surfaces, the manifest shape, the resolver construction swap

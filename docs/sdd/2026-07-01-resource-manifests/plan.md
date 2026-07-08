@@ -491,17 +491,15 @@ artifact update.)
 - **2026-07-07: the resource definition expands -- capabilities ARE resources (maintainer ruling,
   pre-lock).** Reviewing the collapsed model in `agw resource list`, the maintainer hit the
   "capabilities are not resources, merely mirrored in as descriptor rows" clause from the outside:
-  the rows list, describe, reference, and origin-stamp exactly like resources, so the not-a-
-  resource ontology existed only in prose -- and confused its own author. Ruling (explicitly
-  reversing the earlier strong stance): a resource is a named, referenceable registry entry, kind
-  plus name, regardless of provenance; kinds split into declarable kinds (data) and capability kinds
-  (per-kind `category` field, read-only, implementation in a per-domain code registry). What the old
-  law actually protected survives untouched: config is config, lifecycle entities stay out of the
-  registry (`instance_kind`), declarability is per-kind, implementations live in code registries.
-  The payoff: `agw resource list` needs no label or filter -- everything in it is honestly a
-  resource -- and the plugin SDD's story simplifies to "plugins ship resources; some are capability
-  resources backed by code." ADR 0016's three-layer table becomes two layers (config / resources)
-  with capability implementations as code behind capability-kind rows. Prose-only change; zero
+  the rows list, describe, reference, and origin-stamp exactly like resources, so the not-a-resource
+  ontology existed only in prose. Ruling (explicitly reversing the earlier strong stance): a
+  resource is a named, referenceable registry entry, kind plus name, regardless of provenance; kinds
+  split into declarable kinds (data) and capability kinds (per-kind `category` field, read-only,
+  implementation in a per-domain code registry). What the old law protected survives untouched:
+  config is config, lifecycle entities stay out of the registry (`instance_kind`), declarability is
+  per-kind, implementations live in code registries. The payoff: `agw resource list` needs no label
+  or filter, and the plugin SDD's story simplifies to "plugins ship resources; some are capability
+  resources backed by code." ADR 0016's three-layer table becomes two layers. Prose-only; zero
   behavior.
 - **2026-07-07: the capability collapse (maintainer ruling, pre-lock; Phase 5.5).** Reviewing the
   draft plugin-system SDD (which generalized the capability/exposed-resource split to five kinds),
@@ -516,16 +514,13 @@ artifact update.)
   is served by structured backend_mappings (vault+item per secret), and multi-ACCOUNT stores are a
   graduate-when-real future (reintroduce a declarable kind then; backend-keyed mappings default to
   the sole instance); (4) with the exposure layer gone, the capability takes the domain's natural
-  noun: secret-provider RENAMES to secret-backend ("backend" is the ecosystem's word for a pluggable
-  secret store, and the released v0.10.0 TOML keys -- [secret_config].backends, backend_mappings --
-  already say it; the name coincidence we used to apologize for becomes the compatibility bridge).
-  Naming rule: domains use their natural capability noun; a disambiguating suffix only on collision
-  (git-credential-provider, vm-provider). The tells that the layer was ceremony, for the record: a
-  prose-only sample (nothing declarable could exist), built-in names forced to coincide with their
-  providers', duplicate env-var/prompt rows across two kinds, and docstring gymnastics
-  distinguishing names "never relied on in code". Done pre-lock on this branch (maintainer: "sadly")
-  because the layer never shipped in a release and ADR 0016 would otherwise enshrine a superseded
-  model at merge.
+  noun: secret-provider RENAMES to secret-backend, which the released v0.10.0 TOML keys
+  ([secret_config].backends, backend_mappings) already use. Naming rule: domains use their natural
+  capability noun; a disambiguating suffix only on collision (git-credential-provider, vm-provider).
+  The tells that the layer was ceremony: a prose-only sample, built-in names forced to coincide with
+  their providers', duplicate env-var/prompt rows across two kinds, and docstrings distinguishing
+  names "never relied on in code". Done pre-lock (maintainer: "sadly") because the layer never
+  shipped in a release and ADR 0016 would otherwise enshrine a superseded model at merge.
 - **2026-07-05: provider_config nesting (maintainer ruling, pre-lock).** Provider-owned
   configuration on exposed resources nests under one `spec.provider_config` key (an opaque blob the
   provider owns) instead of spreading across the spec tail; unknown top-level spec fields error with
@@ -535,16 +530,14 @@ artifact update.)
   maintainer's push ("YAML can have a different shape than TOML"): `org` nests in manifests too (the
   decoder flattens back into the shared TOML loader, so validation is unchanged, and the migrator
   emits the nested shape -- proven shape-only by its own registry-equivalence verification);
-  kind-owned `token`/`description` stay top-level. A follow-up clarification made the INTERNAL
-  representation follow the nested shape as well (`GitCredentialConfig.org` became
-  `provider_config`; the TOML loader nests at its boundary, so the flat section is the only flat
-  domain). A full audit then compared every kind's internal dataclass against its YAML spec
-  vocabulary (the maintainer's "best representations" rule: internal shapes match YAML shapes; TOML
-  is the lone divergent domain, mapped at its loader): twelve kinds were already 1:1; the one
-  offender was `GitCredentialConfig.type`, renamed `provider` to match `spec.provider` (the TOML
-  section still accepts `type`/`provider`, mapped at the boundary). ADR 0016 records the pattern.
-  Also extended `--all` to `resource sample` and aggregated the deprecation warnings behind
-  `--no-deprecations` in this same pre-lock batch.
+  kind-owned `token`/`description` stay top-level. The INTERNAL representation follows the nested
+  shape too (`GitCredentialConfig.org` became `provider_config`), under the maintainer's "best
+  representations" rule: internal shapes match YAML shapes, and TOML is the lone divergent domain,
+  mapped at its loader. An audit of every kind against this rule found one further offender,
+  `GitCredentialConfig.type`, renamed `provider` to match `spec.provider` (the TOML section still
+  accepts `type`/`provider`, mapped at the boundary). ADR 0016 records the pattern. Also extended
+  `--all` to `resource sample` and aggregated the deprecation warnings behind `--no-deprecations` in
+  this same pre-lock batch.
 - **2026-07-05: `agw resource edit KIND/NAME` (maintainer request, pre-lock).** Opens the YAML
   manifest declaring a resource in $EDITOR (same contract as `config edit`), printing `file:line`
   first since per-kind layout files hold many documents. Deliberately minimal per the maintainer's

@@ -142,9 +142,8 @@ kind's override flag: `allow` (catalog kinds; operator row replaces the built-in
 today's behavior) or `reserved` (`ConfigError`; post-5.5 defensively declared with zero reachable
 members -- descriptor kinds are not declarable, which R3's envelope error enforces earlier -- and
 retained for the plugin SDD's default exposed resources). A collision between two operator rows is
-always a `ConfigError` citing both origins. The manifest loader already catches operator duplicates
-within the manifest set; the publish-time check is what catches a resource declared in both TOML and
-a manifest (a permanent dual-path condition).
+always a `ConfigError` citing both origins. The loader catches operator duplicates within the
+manifest set; the publish-time check catches a resource declared in both TOML and a manifest.
 
 ## Dual source (permanent, revised 2026-07-03)
 
@@ -152,8 +151,7 @@ TOML resource sections and manifests coexist indefinitely -- different publisher
 as a shipped architecture rather than a development window. The governing rule: any config that
 loads today keeps loading (with deprecation warnings on TOML resource sections). Concretely:
 
-- Cross-source collisions (same `(kind, name)` from TOML and a manifest) error at `Registry.add` per
-  the collision handling above.
+- Cross-source collisions (same `(kind, name)` from TOML and a manifest) error at `Registry.add`.
 - `git_credentials.<name>` TOML entries accept `provider` as an alias for `type` from Phase 3
   (`provider` wins when both are present); `type` keeps working until the TOML resource path is
   removed in a future major (Phase 6). Manifests accept only `provider`.
@@ -169,9 +167,7 @@ loads today keeps loading (with deprecation warnings on TOML resource sections).
   `git-credential-provider`, and any future code-only kind. Only declarable kinds pass the envelope.
   Each kind also carries an operator-facing `description` for `agw resource kinds`.
 - `builtin_override: Literal["allow", "reserved"]`. `allow` for catalog kinds; `reserved` elsewhere
-  as the defensive default. The `reserved` tier currently has no reachable member (the only kinds
-  with built-in rows are catalog kinds and the non-declarable capability kinds); it stays because
-  the draft plugin SDD's default exposed resources are its named future consumer. Template kinds are
+  as the defensive default (currently no reachable member; see Bootstrap). Template kinds are
   unaffected (their defaults are synthesized, not built-in rows, so no collision arises).
 
 Both are static per-kind declarations in the same place the miss policy lives; no new dispatch
@@ -213,27 +209,23 @@ resolution (a loop in secrets/resolve.py; validate_chain already ran at build_re
       resolved |= backend.batch_get(wants)
 ```
 
-(The orchestration -- mapping lookup, the generic `false` opt-out, prompt-once batching -- lives in
-the resolution loop, not on the protocol; the protocol is exactly the three methods above. Whether a
-thin runtime wrapper object exists per chain entry is an implementation detail.)
+Orchestration (mapping lookup, the generic `false` opt-out, prompt-once batching) lives in the
+resolution loop, not on the protocol; whether a thin runtime wrapper object exists per chain entry
+is an implementation detail.
 
 - There is no `SecretBackendDecl`, no declarable `secret-backend` manifest kind, no bundled backends
   manifest, and no reserved-name machinery for backend names. The descriptor rows mirror the code
   registry directly; the previous duplicate rows (`secret-provider/env-var` AND
   `secret-backend/env-var`) collapse to one per capability.
 - **Neither built-in backend accepts configuration**; `env_var_name_for` keeps its fixed
-  `AW_SECRET_` convention. When the first config-bearing backend ships, its connection configuration
-  is backend-scoped (one configured form per capability); a genuine multi-instance need graduates
-  that backend to a declarable instance kind at that point (FRD R8).
+  `AW_SECRET_` convention. Config-bearing and multi-instance backends are FRD R8's story.
 - `backend_mappings` on secrets are keyed by backend (capability) name; per-secret structured
   mappings carry instance-flavored addressing (vault/item/field) where a store needs it.
   Default-convention display (`agw secret describe`, doctor) asks the capability's API.
 - `[secret_backends.<name>]` TOML sections remain semantically empty, warned deprecated no-ops.
-- The runtime semantics of runtime-model-lld.md are unchanged: resolution is a loop over
-  `active_backends(config, registry)`; a command resolves once at its composition root and threads
-  the VALUES to its `compose_env(values=...)` sites; no resolver object, no cache, no memos.
-  `SecretBackend` is simply the API that generalizes backend capabilities (the earlier "door"
-  metaphor survives only in historical artifacts).
+- The runtime semantics of runtime-model-lld.md are unchanged. `SecretBackend` is simply the API
+  that generalizes backend capabilities (the earlier "door" metaphor survives only in historical
+  artifacts).
 
 Git credentials keep their shape and illustrate the general pattern: `git-credential` resources
 reference the `git-credential-provider` capability many-to-one via `spec.provider`, carrying
@@ -352,10 +344,8 @@ TOML resource sections warn as deprecated; removal waits for a future major.
 
 Deliberately per-kind rather than uniform. For catalog kinds, the name is the interface (templates
 reference `gh` by name), so same-name override is the only way to customize what a name installs;
-that behavior exists and is documented today. For backends, the name is not load-bearing (the chain
-selects backends): identifier customization is per-secret `backend_mappings` today, and once
-config-bearing providers exist, a sibling backend plus the chain covers instance-level
-customization. Reserving the names keeps built-in behavior trustworthy.
+that behavior exists and is documented today. For backends, the name was not load-bearing (the chain
+selects backends), so reserving the names kept built-in behavior trustworthy.
 
 ### Consumer repoint before source swap
 

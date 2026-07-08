@@ -584,8 +584,7 @@ Settings sections (`config.toml`, permanent):
 - `[defaults]` -- default platform, VM host
 - `[session.config]` -- session defaults (history limit)
 - `[secret_config]` -- active secret backend chain (`[secret_backends.*]` sections are deprecated
-  no-ops; backends are registered code capabilities, listed by
-  `agw resource list --kind secret-backend`)
+  no-ops; see Secret Backends below)
 - `[azure]` -- Azure-specific settings
 - `[proxmox]` -- Proxmox VE API settings
 

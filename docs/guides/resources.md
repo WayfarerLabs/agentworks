@@ -93,8 +93,8 @@ policy is per kind:
 - **Catalog kinds** (`apt-source`, `apt-package`, `system-install-command`, `user-install-command`):
   declaring the same name overrides the built-in -- the name is the interface, and same-name
   override is how you customize what `gh` installs.
-- **Secret backends** (`env-var`, `prompt`): registered capabilities, shown as read-only rows; they
-  take no configuration. Customize per secret via `backend_mappings`.
+- **Secret backends** (`env-var`, `prompt`): registered capabilities, shown as read-only rows (see
+  Secrets below). You cannot override them by name; customize per secret via `backend_mappings`.
 
 ## Secrets: backends and the chain
 
