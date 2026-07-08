@@ -240,17 +240,22 @@ def _check_config() -> tuple[HealthGroup, Config | None, Registry | None]:
     # warned ambiently while the Config row said ok.
     from agentworks.manifests import RESOURCES_DIRNAME, load_manifests
 
+    # A manifest load failure gets its fail row but does NOT short-circuit
+    # the report: the TOML issue rows, deprecation rows, and SSH checks
+    # below still render (doctor's job is maximal visibility in one run);
+    # only the registry-dependent tail is skipped.
+    manifests = None
     try:
         manifests = load_manifests(config.source_path.parent / RESOURCES_DIRNAME)
     except ConfigError as e:
-        g.fail("Manifests", str(e), hint=e.hint)
-        return g, config, None
+        g.fail("Manifest", str(e), hint=e.hint)
 
     for issue in config.config_issues:
         g.warn("Config", issue)
-    for issue in manifests.issues:
-        g.warn("Manifest", issue)
-    if not config.config_issues and not manifests.issues:
+    if manifests is not None:
+        for issue in manifests.issues:
+            g.warn("Manifest", issue)
+    if not config.config_issues and manifests is not None and not manifests.issues:
         g.ok("Config is valid")
     # Deprecation nudges ride their own channel (so --no-deprecations
     # can silence the ambient per-command warning), but doctor is the
@@ -278,6 +283,9 @@ def _check_config() -> tuple[HealthGroup, Config | None, Registry | None]:
     # policies, cycles). A failure here is a config problem, reported
     # like any other; the resource-dependent checks below are skipped.
     from agentworks.bootstrap import build_registry
+
+    if manifests is None:
+        return g, config, None
 
     try:
         registry = build_registry(config, manifests=manifests)
