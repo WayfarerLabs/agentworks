@@ -82,12 +82,16 @@ accounts with different credentials), a declarable instance kind for THAT capabi
 graduation, not a redesign.
 
 **Naming**: each domain calls its capability by its natural noun -- `secret-backend`,
-`git-credential-provider`, (future) `vm-provider` / `harness` -- adding a disambiguating suffix only
-when the bare noun would collide with a resource kind or lifecycle entity. Symbols spell the domain
-out (`SECRET_BACKEND_REGISTRY`). The bare word "provider" remains the generic cross-domain term for
-the pattern, the conventional name for capability-reference fields (`spec.provider`, where the
-owning resource makes the domain clear), and the (future, not certain) possibility of a generic
-provider registry.
+`git-credential-provider`, (future) `vm-platform-provider` / `harness` -- adding a disambiguating
+suffix only when the bare noun would collide with a resource kind or lifecycle entity. Where a
+domain has BOTH a declarable kind and its capability, the declarable owns the natural noun and the
+capability takes the suffix: `git-credential` / `git-credential-provider`, and (future)
+`vm-platform` (the configured instance operators select -- `--platform` is released vocabulary) /
+`vm-platform-provider` (the code: lima, azure, ...). Symbols spell the domain out
+(`SECRET_BACKEND_REGISTRY`). The bare word "provider" is never a domain noun -- it is the generic
+cross-domain term for the pattern, the conventional name for capability-reference fields
+(`spec.provider`, where the owning resource makes the domain clear), and the (future, not certain)
+possibility of a generic provider registry.
 
 Capabilities can optionally carry configuration, and its nature and shape is entirely
 capability-specific. For example, an AZDO git credential provider requires an organization name; a

@@ -78,7 +78,7 @@ deliberately when same-capability multiplicity becomes real for it.
 | 1   | `secret-backend`                    | `[secret_config].backends` (config) | many, ordered         | ordered name list             |
 | 2   | `secret-backend`                    | `secret.spec.backend_mappings`      | many, adjusts ambient | map keyed by name             |
 | 3   | `git-credential-provider`           | `git-credential.spec`               | one                   | reference + blob              |
-| 4   | `vm-provider` (planned)             | `vm-platform.spec` (dedicated kind) | one                   | reference + blob              |
+| 4   | `vm-platform-provider` (planned)    | `vm-platform.spec` (dedicated kind) | one                   | reference + blob              |
 | 5   | `harness` (planned)                 | `session-template.spec.harness`     | one                   | reference + blob, inline      |
 | 6   | `feature` (planned, per level)      | `<level>-template.spec.features`    | many, order-free      | map keyed by name             |
 | 7   | plugin (trust unit, not capability) | `[plugins]` (config)                | many, order-free      | name list + namespaced tables |
@@ -140,6 +140,13 @@ The canonical single-reference shape (rule 1), hosted by a dedicated kind becaus
 real domain noun (templates reference credentials by name; the token secret hangs off it).
 
 ### 4. vm-platform: one capability, dedicated kind (planned)
+
+Naming ruling (2026-07-08): the capability kind is `vm-platform-provider`, not the draft's bare
+`vm-provider` -- the declarable owns the natural noun and the capability takes the suffix, exactly
+like `git-credential` / `git-credential-provider`. "Platform" stays where operators already are
+(`vm create --platform`, `defaults.platform` are released vocabulary): once instances exist,
+`--platform` selects a `vm-platform` row, and released values like `"azure"` keep working because
+each capability ships a bundled default instance named after itself (the secret-backend trick).
 
 ```yaml
 apiVersion: agentworks/v1
@@ -247,7 +254,7 @@ passport CA directory, not per-agent validity).
 
 ## Secrets in capability config
 
-Capability config will sometimes need secrets (an AWS vm-provider's client secret, a 1Password
+Capability config will sometimes need secrets (an AWS platform provider's client secret, a 1Password
 service-account token). These are ordinary secret REFERENCES -- a bare secret name in a config
 field, never a value -- and the existing machinery covers them end to end, in both flavors:
 
@@ -327,13 +334,13 @@ so encapsulation alone never earns built-in status; neutrality does.
 
 - Built-in: the `shell` harness (the core needs A harness; shell is neutral); the `env-var` and
   `prompt` secret backends (secrets are useless without A resolution path; both vendor-free); `lima`
-  among VM providers (local VMs, no vendor).
+  among VM platform providers (local VMs, no vendor).
 - Plugin: `claude-code` / `codex` harnesses (system plugins -- and since a built-in that later
   becomes enablement-gated is a breaking flip, they must be BORN as plugins, which sequences plugin
   infrastructure before or alongside the first tool-specific harness); `onepassword`; future vendor
-  VM providers (e.g. AWS). `azure` / `proxmox` fail the neutrality prong too: the maintainer plans
-  to move them out into plugins (a `!`-flagged breaking change -- released always-on today, opt-in
-  after; accepted).
+  VM platform providers (e.g. AWS). `azure` / `proxmox` fail the neutrality prong too: the
+  maintainer plans to move them out into plugins (a `!`-flagged breaking change -- released
+  always-on today, opt-in after; accepted).
 
 ## The rules, restated for the plugin SDD
 
