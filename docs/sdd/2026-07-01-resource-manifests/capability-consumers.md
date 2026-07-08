@@ -267,10 +267,24 @@ field, never a value -- and the existing machinery covers them end to end, in bo
   absent.
 
 One extension is needed, because the blob is opaque: the framework cannot know that
-`provider_config.client_secret` holds a secret name. The capability surfaces its secret-typed config
-fields -- naturally at the same hook where it already validates the blob -- and the hosting
-resource's `referenced_resources()` includes them; everything downstream (auto-declare,
-reachability, doctor, `backend_mappings` customization of the secret itself) is stock.
+`provider_config.client_secret` holds a secret name. The split of responsibilities matters:
+
+- **The capability contributes schema knowledge only** ("field `client_secret` of my blob is a
+  secret name, defaulting to `aws-client-secret`") -- naturally at the same hook where it already
+  validates the blob. It declares no references: it has no config of its own, and the secret name is
+  per-consumer (two AWS platforms can name different secrets).
+- **The consuming resource declares the reference**, with ITSELF as the source -- exactly how
+  `git-credential/ado` emits its `token` reference today while the `azdo` capability declares
+  nothing. That attribution is what makes every downstream surface useful: the auto-declared
+  description reads `(auto) the client secret for vm-platform/aws-prod` (not "for the aws provider"
+  across all platforms), `Referenced by:` on the secret lists the platforms individually, and the
+  needed-secrets walk reaches only the secrets of the platform actually in play.
+
+The general rule: **whoever hosts the config that names the secret emits the reference.** (If
+capability-scoped config ever materializes -- a backend-wide connection token -- the capability
+resource would host that config and correctly become the source for that secret.) Everything
+downstream (auto-declare, reachability, doctor, `backend_mappings` customization of the secret
+itself) is stock.
 
 Resolution happens at the consuming command's composition root, never at registry build (the
 registry never resolves values). The hook exists today:
@@ -297,6 +311,7 @@ platform's secret decls to its resolve set.
    named-instance map (keeps inheritance merge and identity), then an anonymous entry list (only for
    ordered, non-inherited consumers).
 8. Secret-name fields inside capability config are ordinary secret references (defaulted and
-   overridable, or required): the capability surfaces which blob fields are secret names, the
-   hosting resource emits the references, and auto-declaration, validation, doctor, and
-   composition-root resolution are stock machinery.
+   overridable, or required). The capability contributes schema knowledge only (which blob fields
+   are secret names); the CONSUMING resource declares the reference with itself as the source --
+   whoever hosts the config that names the secret emits the reference. Auto-declaration, validation,
+   doctor, and composition-root resolution are stock machinery.
