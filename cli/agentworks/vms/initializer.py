@@ -1145,7 +1145,14 @@ def resolve_git_credential_providers(
             assert isinstance(org, str)  # loader guarantees org for azdo
             providers[name] = AzDOCredentialProvider(config_name=name, org=org, description=desc)
         elif cred_config.provider == "github":
-            providers[name] = GitHubCredentialProvider(config_name=name, description=desc)
+            repo = cred_config.provider_config.get("repo")
+            scope_owner = cred_config.provider_config.get("owner")
+            providers[name] = GitHubCredentialProvider(
+                config_name=name,
+                description=desc,
+                repo=repo if isinstance(repo, str) else None,
+                owner=scope_owner if isinstance(scope_owner, str) else None,
+            )
     return providers
 
 
@@ -1977,6 +1984,12 @@ def install_claude_plugins(
         output.warn(msg)
 
 
+# The agentworks-owned gitconfig include carrying credential-context
+# sections for scoped credentials. Referenced from ~/.gitconfig via
+# include.path (added once); overwritten wholesale on every init.
+_GIT_SCOPES_INCLUDE = "~/.agentworks-git-scopes.gitconfig"
+
+
 def _configure_git_credentials(
     vm_name: str,
     ts_target: Transport,
@@ -2010,27 +2023,31 @@ def _configure_git_credentials(
             entity_name=missing[0],
         )
 
-    # Collect credential lines from all providers.
-    credential_lines: list[str] = []
-    for name, provider in providers.items():
-        try:
-            credential_lines.extend(
-                provider.credential_lines(git_tokens[name])
-            )
-        except Exception as e:
-            msg = f"git credential setup failed for {name}: {e}"
-            logger.warning(msg)
-            output.warn(msg)
+    from agentworks.git_credentials import build_credential_materials
 
-    if not credential_lines:
+    if not providers:
         return
+    # Store lines + gitconfig credential-context sections (scoped
+    # credentials select per-repo/per-owner via context-injected
+    # usernames; issue #166). Scope collisions raise here -- before
+    # anything is written.
+    materials = build_credential_materials(providers, git_tokens)
 
-    # Write credentials and configure git on the VM
+    # Write credentials and configure git on the VM. The context
+    # sections live in an agentworks-owned include file (overwritten
+    # wholesale every init, so removing scopes from config is
+    # idempotent) rather than in ~/.gitconfig itself.
     try:
-        cred_content = "\n".join(credential_lines) + "\n"
-        ts_target.write_file("~/.git-credentials", cred_content, mode="600")
+        ts_target.write_file(
+            "~/.git-credentials", materials.store_content, mode="600"
+        )
+        ts_target.write_file(
+            _GIT_SCOPES_INCLUDE, materials.gitconfig_content, mode="600"
+        )
         ts_target.run(
-            "git config --global credential.helper store",
+            "git config --global credential.helper store && "
+            f"(git config --global --get-all include.path | grep -qxF '{_GIT_SCOPES_INCLUDE}' "
+            f"|| git config --global --add include.path '{_GIT_SCOPES_INCLUDE}')",
         )
         output.detail(f"Git credentials configured for {len(providers)} provider(s)")
     except SSHError as e:

@@ -74,6 +74,21 @@ class GitCredentialProvider(ABC):
             return f"{self._config_name} ({self._description})"
         return self._config_name
 
+    def gitconfig_sections(self) -> list[tuple[str, str]]:
+        """``(context_url, username)`` pairs for scoped credentials.
+
+        Each pair becomes a provisioned
+        ``[credential "<context_url>"]\\nusername = <username>`` section:
+        git injects the username for remotes matching the context
+        (longest-prefix match on slash boundaries), and the
+        username-tagged store line supplies the token. Empty (the
+        default) means the credential is unscoped -- its store line is
+        the host-level fallback and must be emitted BEFORE scoped lines
+        (username-less queries take the first matching line; scoped
+        queries carry an injected username that filters lines).
+        """
+        return []
+
     @abstractmethod
     def credential_lines(self, token: str) -> list[str]:
         """Return lines for ~/.git-credentials.

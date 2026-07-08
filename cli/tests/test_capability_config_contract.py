@@ -86,9 +86,23 @@ def test_azdo_rejects_unknown_blob_fields_yaml(tmp_path: Path) -> None:
     assert "res.yaml" in str(exc.value)
 
 
-def test_github_accepts_no_configuration(tmp_path: Path) -> None:
+def test_base_class_accepts_no_configuration() -> None:
     """The base-class default: capabilities without config reject any
-    blob content."""
+    blob content. (github grew scope fields in #166, so the pin uses a
+    minimal subclass.)"""
+
+    class _Bare(GitCredentialProvider):
+        provider_name = "bare"
+
+        def credential_lines(self, token: str) -> list[str]:
+            return []
+
+    with pytest.raises(ConfigError, match="accepts no configuration"):
+        _Bare.validate_config("spec.provider_config", {"anything": 1})
+
+
+def test_github_rejects_unknown_blob_fields(tmp_path: Path) -> None:
+    """github validates its own vocabulary (scope fields only)."""
     _manifest(
         tmp_path,
         """
@@ -102,7 +116,7 @@ def test_github_accepts_no_configuration(tmp_path: Path) -> None:
             org: nope
         """,
     )
-    with pytest.raises(ConfigError, match="accepts no configuration"):
+    with pytest.raises(ConfigError, match="unknown github provider field"):
         load_manifests(tmp_path / "resources")
 
 

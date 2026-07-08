@@ -64,6 +64,22 @@ delete one leading `#` per line to activate. `agw resource edit KIND/NAME` opens
 declaring a resource in `$EDITOR` (YAML-declared resources only: TOML-declared ones point at
 `agw resource migrate` or `agw config edit`).
 
+## Scoped GitHub credentials (fine-grained PATs)
+
+A `git-credential` with `provider: github` may carry a scope in its `provider_config`:
+`repo: "owner/name"` pins the credential to one repository (matching the shape of a single-repo
+fine-grained PAT), while `owner: "org"` covers every repository under that user or org -- including
+repos an agent clones ad hoc that no workspace ever declared. The two are mutually exclusive; a
+credential with neither is the unscoped fallback. Scopes are manifest-only (the legacy flat TOML
+shape has no GitHub fields).
+
+Selection happens inside git itself, not in agentworks: provisioning writes credential-context
+sections into an agentworks-owned gitconfig include (`~/.agentworks-git-scopes.gitconfig`), git
+injects a per-credential username for matching remotes (most specific wins: exact repo, then owner,
+then fallback), and the username picks the token out of `~/.git-credentials`. Two credentials
+claiming the same scope is a configuration error at provisioning time. Declaring a repo under one
+credential and its org under another is fine -- the more specific scope wins.
+
 ## TOML resource sections: deprecated but supported
 
 The classic TOML resource sections (`[secrets.*]`, `[vm_templates.*]`, `[git_credentials.*]`, ...)

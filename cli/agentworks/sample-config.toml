@@ -95,6 +95,9 @@ ssh_private_key = "~/.ssh/id_ed25519"        # required: used for SSH connection
 # (env-var, prompt, ...) at VM-init time; the resolved value is written to
 # `~/.git-credentials` via git's credential-store helper.
 
+# Scoped GitHub credentials (fine-grained PATs pinned to a repo or org)
+# are declared in YAML manifests, not TOML: see
+# `agw resource sample git-credential`.
 #[git_credentials.github]
 #provider = "github"                              # `type` is accepted as a legacy alias
 #description = "GitHub full access"               # optional, shown in prompts and logs
