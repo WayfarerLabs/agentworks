@@ -109,14 +109,13 @@ class _AdminTemplateKind:
         """Build an empty-defaults ``AdminConfig`` for an auto-declared
         ``admin-template:default``.
 
-        Rarely actually called: ``Config.publish_to`` always publishes a
-        real ``admin-template:default`` from ``Config.admin`` (even when
-        the operator omits every ``[admin.*]`` section -- the loader
-        synthesizes an empty-defaults instance), so the always-materialize
-        pre-step's "is the name already in the registry?" short-circuits
-        before reaching this method. See ``agentworks.vms.kinds``'s
-        ``synthesize`` for the rationale on why the non-empty-
-        ``references`` path is preserved.
+        The routine path whenever the operator declares no admin
+        template (no ``[admin.*]`` TOML sections, no manifest document):
+        the TOML publisher publishes these kinds only when declared, so
+        the always-materialize pre-step seeds the default through here,
+        same as every other reserved-default kind. See
+        ``_VMTemplateKind.synthesize`` for the rationale on why the
+        non-empty-``references`` path is preserved.
         """
         source = references[0].source if references else ALWAYS_MATERIALIZE_SOURCE
         return AdminConfig(name="default", origin=Origin.auto_declared(source=source))

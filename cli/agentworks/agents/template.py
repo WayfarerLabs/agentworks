@@ -24,8 +24,6 @@ if TYPE_CHECKING:
     from agentworks.resources.reference import ReferenceEntry, ResourceReference
 
 
-
-
 @dataclass(frozen=True)
 class AgentTemplate:
     """Agent template definition. All fields are optional (None = inherit/default)."""

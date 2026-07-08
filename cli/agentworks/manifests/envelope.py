@@ -28,7 +28,7 @@ _METADATA_KEYS = {"name", "description"}
 # (no `vm create --admin-template`, no `console create --template`), so
 # a named declaration would be dead config; reject it loudly instead of
 # letting it sit inert. Each kind leaves this set when its selector
-# ships (issue filed).
+# ships (issue #165).
 _NO_SELECTOR_KINDS = {"admin-template", "named-console-template"}
 
 

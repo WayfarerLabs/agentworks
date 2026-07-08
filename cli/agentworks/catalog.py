@@ -395,9 +395,9 @@ def publish_to(registry: Registry, config: Config | None = None) -> None:
     # loaders don't consume Phase 0's ``_SectionLineMap`` and Config
     # stores raw dicts (not typed entries) for these sections. Publishing
     # here uses ``Origin.operator_declared(file=CONFIG_PATH, line=0)`` --
-    # matches the same sentinel Phase 0 uses for singleton-omitted-
-    # section defaults (``named-console-template:default`` when there's
-    # no ``[named_console]``). The renderer drops the parenthetical for
+    # the sentinel for "real file, no single declaration line" (see
+    # ``source_location.synthesized``'s docstring). The renderer drops
+    # the parenthetical for
     # ``line=0``, so operators see "operator-declared" without file:line
     # for now.
     #

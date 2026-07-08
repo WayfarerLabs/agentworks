@@ -2,10 +2,10 @@
 for the ``"agent-template"`` and ``"admin-template"`` kinds.
 
 Both live in the ``agents`` domain package next to the code that
-implements agent-shaped templates (``AgentTemplate`` / ``AdminConfig``
-in ``agentworks.agents.template``);
-``agentworks.resources.kinds.__init__`` imports this module so the kinds
-self-register into ``KIND_REGISTRY`` at load.
+implements agent templates (``AgentTemplate`` in
+``agentworks.agents.template``);
+``agentworks.resources.kinds.__init__`` imports this module so the kind
+self-registers into ``KIND_REGISTRY`` at load.
 
 ``AgentTemplateKind`` uses the ``auto-declare`` miss policy with reserved
 name ``"default"``. ``synthesize`` returns a code-defined default
@@ -14,13 +14,9 @@ the resolver in ``agentworks.agents.templates`` layers concrete defaults
 via ``ResolvedAgentTemplate``). Per-template field-merging stays in the
 resolver; the framework owns reference validation and cycle detection.
 
-``AdminTemplateKind`` was plurified in Phase 2a.3 from
-singleton-conceptual to named-multi-instance, matching the shape of the
-other template kinds. The operator-facing surface is unchanged: the
-loader still only accepts the singleton ``[admin]`` block and publishes
-one ``admin-template:default`` row. A future SDD adds
-``[admin_templates.<name>]`` parsing, the ``--admin-template`` CLI flag,
-and the VM DB column without re-touching the framework.
+``admin-template`` lives in ``agentworks.vms.kinds``: the admin user is
+a per-VM concept, provisioned by the VM initializer (issue #165 adds
+the per-VM selector).
 """
 
 from __future__ import annotations

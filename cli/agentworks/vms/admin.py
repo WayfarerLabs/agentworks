@@ -31,7 +31,7 @@ class AdminConfig:
     carries its own ``name`` (default ``"default"``) just like the other
     template kinds. The operator-facing surface is unchanged in this
     phase -- the loader only accepts the ``[admin]`` block and produces
-    one instance with name ``"default"``. A future SDD adds
+    one instance with name ``"default"``. Issue #165 adds
     ``[admin_templates.<name>]`` parsing, the ``--admin-template`` CLI
     flag, and the VM DB column; that work can land without re-touching
     the framework.

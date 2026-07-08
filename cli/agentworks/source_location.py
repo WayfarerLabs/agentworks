@@ -36,11 +36,11 @@ class SourceLocation:
     ``line == 0`` is the sentinel marker for "this Resource was not introduced
     by a specific section header." Two situations produce it:
 
-    - **Loader-synthesized singleton** (``file=<real config path>``, ``line=0``):
-      the operator omitted the singleton's section entirely (e.g., no
-      ``[admin.*]`` sections); the loader filled in empty defaults. The file
-      path is the operator's config file so downstream Origin rendering can
-      still show "this came from your config (default values)."
+    - **No-declaration-site fallback** (``file=<real path>``, ``line=0``):
+      the Resource carries a real file but no single declaration line -- the
+      catalog publisher's rows, and ``_SectionLineMap.lookup``'s no-match
+      fallback. The path lets downstream Origin rendering still name the
+      source file.
     - **Code/test-synthesized Resource** (``file=Path("<synthesized>")``,
       ``line=0``): produced by ``synthesized()`` below; used as the dataclass
       default so direct Resource construction in tests / framework synthesize

@@ -84,7 +84,7 @@ def test_operator_collision_has_no_singleton_exemption() -> None:
         registry.add("admin-template", "default", _decl("default"), _operator(7))
 
 
-def test_line_zero_on_non_singleton_kind_still_collides() -> None:
+def test_line_zero_origin_collides_on_every_kind() -> None:
     registry = Registry.empty()
     line_zero = Origin.operator_declared(file=Path("config.toml"), line=0)
     registry.add("apt-package", "tool", _decl("tool"), line_zero)

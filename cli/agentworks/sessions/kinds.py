@@ -8,14 +8,12 @@ implements sessions and named consoles;
 self-register into ``KIND_REGISTRY`` at load.
 
 ``SessionTemplateKind`` has the same shape as the other template kinds.
-``NamedConsoleTemplateKind`` is an operator-surface-singleton today:
-``Config.publish_to`` always publishes ``named-console-template:default``
-(even when no ``[named_console]`` section exists), so the auto-declare
-path is a safety net for typo'd references rather than a routine
-occurrence. Phase 2a.3 plurified ``admin-template`` at the framework
-level but deliberately scoped that change to admin only; this kind
-follows when there's an operator need to declare named console
-templates.
+``NamedConsoleTemplateKind`` is named-multi-instance in the framework
+like everything else; the TOML shape is a singleton ``[named_console]``
+block, published only when the operator declares it, and an undeclared
+default is auto-declared by the always-materialize pre-step. Named
+instances stay rejected at the manifest envelope until a console
+selector exists (issue #165).
 """
 
 from __future__ import annotations
@@ -95,8 +93,8 @@ class _NamedConsoleTemplateKind:
     ) -> NamedConsoleConfig:
         """Build an empty-defaults ``NamedConsoleConfig`` for an
         auto-declared ``named-console-template:default``. Same shape as
-        the admin template kind: ``Config.publish_to`` always publishes
-        a real one so the always-materialize pre-step short-circuits.
+        the admin template kind: the routine path whenever the operator
+        declares no ``[named_console]`` section and no manifest.
 
         Tolerates ``references=()`` per the Phase 2a contract; uses
         the synthetic ``("framework", "always-materialize")`` source

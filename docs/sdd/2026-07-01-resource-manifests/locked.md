@@ -48,10 +48,15 @@ returning implied `ConfigReference`s, invoked at blob boundaries and finalize, p
 registration-time schemas.
 
 And Phase 5.8 (domains own their kinds): the declared-resource dataclasses and every kind strategy
-moved out of `config.py` / `resources/kinds/` into their domain packages;
-`resources/kinds/__init__.py` is a pure registration index and `config.py` keeps only settings plus
-the legacy TOML loaders/publisher. Initially deferred to the plugin SDD, pulled in pre-merge on the
-maintainer's fan-out rationale: parallel post-merge tracks (VM abstractions, harness) would
+moved out of `config.py` / `resources/kinds/` into their domain packages; same-day corrections
+re-homed AdminConfig to `vms/` (lifecycle over field shape), reframed the manifest envelope's
+admin/named-console name gate as no-selector dead-config protection (issue #165 adds the selectors),
+and deleted the TOML placeholder rows outright -- undeclared singleton defaults are auto-declared by
+the always-materialize pre-step (their origin displays as auto rather than operator-declared at
+`config.toml:0`), and `SYNTHESIZED_SINGLETON_KINDS` plus the registry's collision exemption are
+gone; `resources/kinds/__init__.py` is a pure registration index and `config.py` keeps only settings
+plus the legacy TOML loaders/publisher. Initially deferred to the plugin SDD, pulled in pre-merge on
+the maintainer's fan-out rationale: parallel post-merge tracks (VM abstractions, harness) would
 otherwise enshrine or diverge the placement pattern.
 
 Four deliberate operator-facing breaking changes, `!`-flagged for release-please: resource names may

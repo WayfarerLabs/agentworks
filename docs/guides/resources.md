@@ -50,8 +50,10 @@ spec:
 - `kind` is the lower-kebab resource kind (`secret`, `vm-template`, `session-template`,
   `git-credential`, `apt-package`, ...).
 - `metadata` carries the framework-uniform fields: `name` (required; `/` is not allowed in resource
-  names) and `description`. Two kinds are singletons: `admin-template` and `named-console-template`
-  accept only `name: default`.
+  names) and `description`. Two kinds accept only `name: default` for now: `admin-template` and
+  `named-console-template` are ordinary multi-instance kinds in the framework, but no command can
+  select a named instance yet, so a named declaration would be dead config (issue #165 adds the
+  selectors).
 - `spec` carries the kind-specific fields -- the same fields, with the same validation, as the TOML
   sections (both sources decode through the same loaders, so they cannot drift).
 - Multiple documents per file are separated with `---`.

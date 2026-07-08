@@ -75,7 +75,6 @@ def test_load_valid_config(config_dir: Path) -> None:
     assert cfg.workspace_templates["child"].tmuxinator is False
     assert cfg.git_credentials["github"].provider == "github"
     assert cfg.git_credentials["azdo"].provider_config == {"org": "my-org"}
-    assert cfg.admin is not None
     assert cfg.admin.git_credentials == ["github"]
 
 

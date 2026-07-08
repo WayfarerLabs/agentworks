@@ -413,9 +413,11 @@ def test_catalog_kind_decode_error_carries_location(tmp_path: Path) -> None:
     assert "test" in str(exc.value)
 
 
-def test_manifest_admin_replaces_omitted_toml_singleton(tmp_path: Path) -> None:
-    """Dual-window semantics: TOML omitted [admin.*] entirely, so its
-    synthesized default yields to the manifest declaration."""
+def test_manifest_admin_default_is_only_row_when_toml_omits(tmp_path: Path) -> None:
+    """A manifest-declared admin-template/default with no [admin.*] TOML
+    sections is simply the only declaration: the TOML publisher no longer
+    publishes placeholder rows for omitted sections, so no collision
+    handling is involved."""
     _manifest(
         tmp_path,
         """

@@ -106,7 +106,6 @@ def test_admin_config_declared_at_points_at_admin_subtree(
     cfg = load_config(config_file, warn_issues=False)
     assert cfg.admin is not None
     assert cfg.admin.declared_at.file == config_file
-    assert cfg.admin is not None
     assert cfg.admin.declared_at.line == 5  # earliest under [admin.*]
 
 
@@ -138,7 +137,6 @@ def test_named_console_declared_at(
     cfg = load_config(config_file, warn_issues=False)
     assert cfg.named_console is not None
     assert cfg.named_console.declared_at.file == config_file
-    assert cfg.named_console is not None
     assert cfg.named_console.declared_at.line == 5
 
 
