@@ -266,8 +266,8 @@ One extension is needed, because the blob is opaque: the framework cannot know t
 `provider_config.client_secret` holds a secret name. The split of responsibilities matters:
 
 - **The capability contributes schema knowledge only** ("field `client_secret` of my blob is a
-  secret name, defaulting to `aws-client-secret`") -- formalized as a registered config schema, next
-  section. It declares no references: it has no config of its own, and the secret name is
+  secret name, defaulting to `aws-client-secret`") -- via the validation invocation described in the
+  next section. It declares no references: it has no config of its own, and the secret name is
   per-consumer (two AWS platforms can name different secrets).
 - **The consuming resource declares the reference**, with ITSELF as the source -- exactly how
   `git-credential/ado` emits its `token` reference today while the `azdo` capability declares
@@ -289,31 +289,17 @@ tokens -- secrets needed by machinery rather than by env tables -- join a comman
 pass. Capability-config secrets ride the same path: `vm create` against an AWS platform adds the
 platform's secret decls to its resolve set.
 
-## Registered config schemas
+## Capability config validation
 
-The "capability contributes schema knowledge" hook is worth formalizing: a capability REGISTERS its
-config schema rather than exposing a validate callable. The schema is a flat field list -- one entry
-per blob field carrying name, type, required/default, and a description -- and a field may be typed
-as a **reference to a resource of kind `<abc>`** (kind `secret` covers the secrets story above; the
-generalization covers any kind), with a usage phrase and optional default name.
-
-A validate callable can only validate. A readable schema feeds three consumers, uniformly across
-every blob host (`spec.provider_config`, inline `harness_config`, feature map values):
-
-- **Validation**: types, required fields, unknown-field rejection, `file:line` framing -- all
-  framework-generic. An empty schema yields "accepts no configuration" for free.
-- **Reference emission**: the hosting resource's references for ref-typed fields are derived
-  mechanically (consuming resource as source, per the rule above); a ref field's default IS the
-  defaulted-and-overridable pattern, and its usage phrase feeds the auto-declared description.
-- **Self-description**: `agw resource describe <capability-kind>/<name>` renders the schema (fields,
-  types, defaults, what each references) -- capabilities become self-documenting, which is exactly
-  the usage info a schema must carry anyway to do the first two jobs well.
-
-Two boundaries keep this from growing into a schema language: the schema is a FLAT field list (no
-nesting, no conditionals -- a capability wanting internal structure keeps it opaque within one
-field), and cross-field rules live in an optional validate hook that runs after the schema checks.
-The plugin SDD's namespaced plugin settings (its R5) could plausibly reuse the same field-list
-machinery; noted, not designed.
+For now, capabilities are invoked during validation of the consuming resource: they validate their
+own config schema and identify the resource references to associate with the consuming resource (the
+one that owns the defined config block). This works. A future enhancement could be a
+schema-specification mechanism where capabilities register their schemas, allowing the core engine
+to validate and generate resource references without invoking the capability -- and, as a nice side
+effect, naturally documenting the capability config schema (e.g. rendered by
+`agw resource describe <capability-kind>/<name>`). For that to work, the schema would need to be
+able to describe fields as resource references to specific kinds (secrets as well as other
+resources), and to include usage information to populate on those references.
 
 ## The rules, restated for the plugin SDD
 
@@ -332,6 +318,6 @@ machinery; noted, not designed.
    becomes real (see "The map form's limit").
 8. Secret-name fields inside capability config are ordinary secret references (see "Secrets in
    capability config").
-9. Capabilities register a config schema (flat field list; fields may be typed as references to a
-   resource kind): validation, reference emission, and CLI self-description all derive from it --
-   see "Registered config schemas".
+9. Capability config: the capability is invoked to validate its blob and identify the references it
+   implies; a future schema-registration mechanism could let the core engine do both without
+   invocation (see "Capability config validation").
