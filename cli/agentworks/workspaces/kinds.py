@@ -33,7 +33,7 @@ class _WorkspaceTemplateKind:
     """Implementation of ``ResourceKind`` for ``"workspace-template"``."""
 
     kind: str = "workspace-template"
-    description: str = "Workspace templates (repo, tmuxinator, env)"
+    description: str = "Workspace configuration (repo, env, ...)"
     miss_policy: Literal["auto-declare", "error"] = "auto-declare"
     auto_declare_names: frozenset[str] | None = frozenset({"default"})
     category: Literal["declarable", "capability"] = "declarable"

@@ -45,7 +45,7 @@ class _AgentTemplateKind:
     """Implementation of ``ResourceKind`` for ``"agent-template"``."""
 
     kind: str = "agent-template"
-    description: str = "Agent user environment templates (shell, tools, dotfiles, mise, ...)"
+    description: str = "Agent user environment configuration (shell, tools, dotfiles, mise, ...)"
     miss_policy: Literal["auto-declare", "error"] = "auto-declare"
     auto_declare_names: frozenset[str] | None = frozenset({"default"})
     category: Literal["declarable", "capability"] = "declarable"

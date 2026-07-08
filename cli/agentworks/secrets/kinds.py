@@ -75,7 +75,7 @@ class _SecretKind:
     """
 
     kind: str = SECRET_KIND_NAME
-    description: str = "Declared secrets"
+    description: str = "Declared secrets and their backend mappings"
     miss_policy: Literal["auto-declare", "error"] = "auto-declare"
     auto_declare_names: frozenset[str] | None = None  # None = any name accepted
     category: Literal["declarable", "capability"] = "declarable"
@@ -207,7 +207,7 @@ class _SecretBackendKind:
     """Implementation of ``ResourceKind`` for ``"secret-backend"``."""
 
     kind: str = "secret-backend"
-    description: str = "Capability that provides secret values"
+    description: str = "Capability for resolving secret values"
     miss_policy: Literal["auto-declare", "error"] = "error"
     auto_declare_names: frozenset[str] | None = None
     category: Literal["declarable", "capability"] = "capability"

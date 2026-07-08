@@ -60,7 +60,7 @@ class _GitCredentialKind:
     """Implementation of ``ResourceKind`` for ``"git-credential"``."""
 
     kind: str = "git-credential"
-    description: str = "Defined git credentials"
+    description: str = "Declared git credentials"
     miss_policy: Literal["auto-declare", "error"] = "error"
     auto_declare_names: frozenset[str] | None = None  # ignored under "error"
     category: Literal["declarable", "capability"] = "declarable"
@@ -88,7 +88,7 @@ class _GitCredentialProviderKind:
     """Implementation of ``ResourceKind`` for ``"git-credential-provider"``."""
 
     kind: str = "git-credential-provider"
-    description: str = "Git provider associated with git credentials (github, azdo)"
+    description: str = "Capability for provisioning git credentials based on the provider (github, azdo)"
     miss_policy: Literal["auto-declare", "error"] = "error"
     auto_declare_names: frozenset[str] | None = None
     category: Literal["declarable", "capability"] = "capability"

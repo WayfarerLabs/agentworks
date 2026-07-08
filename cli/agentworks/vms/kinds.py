@@ -47,7 +47,7 @@ class _VMTemplateKind:
     """Implementation of ``ResourceKind`` for ``"vm-template"``."""
 
     kind: str = "vm-template"
-    description: str = "VM templates (sizing, installed tools, etc.)"
+    description: str = "VM configuration (sizing, installed tools, ...)"
     miss_policy: Literal["auto-declare", "error"] = "auto-declare"
     auto_declare_names: frozenset[str] | None = frozenset({"default"})
     category: Literal["declarable", "capability"] = "declarable"
@@ -99,7 +99,7 @@ class _AdminTemplateKind:
     """Implementation of ``ResourceKind`` for ``"admin-template"``."""
 
     kind: str = "admin-template"
-    description: str = "Admin user setup for VMs"
+    description: str = "VM admin user environment configuration (shell, tools, dotfiles, mise, ...)"
     miss_policy: Literal["auto-declare", "error"] = "auto-declare"
     auto_declare_names: frozenset[str] | None = frozenset({"default"})
     category: Literal["declarable", "capability"] = "declarable"
