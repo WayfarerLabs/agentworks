@@ -484,6 +484,11 @@ API carries a deprecation note pointing at it.
       permissive, dormant not validated).
 - [x] Artifacts: companion doc section flipped to SHIPPED; ADR sentence; this phase + sequencing
       note; locked.md.
+- [x] Revision (maintainer ruling, same day): prompt's `validate_mapping` is STRICT, not permissive
+      -- backend mappings are not yet in use in the wild, so the loads-today concern the permissive
+      first cut served was moot; any non-`false` prompt mapping is dead config (a typo for another
+      backend) and errors at `build_registry`. Supersedes the prompt-stays-permissive wording in the
+      checked boxes above.
 
 Definition of done: the contract works inside the established framework (both hosts exercised, one
 real migration + one test-only reference exerciser); CI green; reviewer-approved.
@@ -521,7 +526,9 @@ artifact update.)
   in a per-secret host, so `SecretBackend.validate_mapping` ships too (env-var's mapping vocabulary
   was previously enforced lazily at describe/resolve time; now at `build_registry`). Per maintainer
   direction, both APIs carry a note that they may be deprecated in favor of registration-time schema
-  declarations.
+  declarations. A same-day revision made prompt's `validate_mapping` strict (reject any non-`false`
+  mapping): the permissive first cut protected released configs, but mappings are not yet in use in
+  the wild, so silence would only hide typos.
 
 - **2026-07-07: per-kind `category` + `agw resource kinds` (maintainer request, pre-lock).**
   Follow-through on the definition expansion: the declarable/capability classifier becomes a

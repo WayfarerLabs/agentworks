@@ -232,15 +232,31 @@ def test_env_var_mapping_validated_at_build_registry(tmp_path: Path) -> None:
         build_registry(config)
 
 
-def test_prompt_mapping_stays_permissive(tmp_path: Path) -> None:
-    """Prompt ignores mapping values it has no vocabulary for; released
-    configs carrying one keep loading."""
+def test_prompt_rejects_any_mapping(tmp_path: Path) -> None:
+    """Prompt has no mapping vocabulary: any non-false value is dead
+    config (a typo for another backend) and errors at build_registry.
+    The generic false opt-out is loop-owned and never reaches the
+    capability."""
     config = _config(
         tmp_path,
         """
         [secrets.npm-token]
         description = "npm token"
         backend_mappings.prompt = "ignored"
+        """,
+    )
+    with pytest.raises(ConfigError, match="prompt backend has no meaning"):
+        build_registry(config)
+
+
+def test_prompt_false_opt_out_still_loads(tmp_path: Path) -> None:
+    config = _config(
+        tmp_path,
+        """
+        [secrets.npm-token]
+        description = "npm token"
+        backend_mappings.env-var = "NPM_TOKEN"
+        backend_mappings.prompt = false
         """,
     )
     build_registry(config)  # no error

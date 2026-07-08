@@ -13,6 +13,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from agentworks import output
+from agentworks.errors import ConfigError
 
 if TYPE_CHECKING:
     from agentworks.secrets.base import MappingValue, SecretDecl
@@ -38,9 +39,15 @@ class PromptBackend:
     interactive = True
 
     def validate_mapping(self, owner: str, mapping: MappingValue) -> None:
-        # Accept anything: prompt has no identifier vocabulary, and
-        # released configs may carry mapping values it ignores.
-        return
+        # Prompt has no mapping vocabulary, so any value that reaches
+        # here (the loop owns the generic ``false`` opt-out) is dead
+        # config -- almost certainly a typo for another backend. Reject
+        # rather than silently ignore (maintainer ruling: mappings are
+        # not yet in use in the wild, so strictness costs nothing).
+        raise ConfigError(
+            f"{owner}: backend_mappings for the prompt backend has no "
+            f"meaning; remove it, or use false to opt out"
+        )
 
     def would_attempt(
         self,
