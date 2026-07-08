@@ -46,15 +46,12 @@ def _validated_scope(
             f"{owner_ctx}: repo and owner are mutually exclusive (a "
             f"fine-grained PAT is scoped to one or the other)"
         )
-    if repo is not None:
-        if (
-            not isinstance(repo, str)
-            or repo.count("/") != 1
-            or not all(part for part in repo.split("/"))
-        ):
-            raise ConfigError(
-                f'{owner_ctx}.repo must be an "owner/name" string'
-            )
+    if repo is not None and (
+        not isinstance(repo, str)
+        or repo.count("/") != 1
+        or not all(part for part in repo.split("/"))
+    ):
+        raise ConfigError(f'{owner_ctx}.repo must be an "owner/name" string')
     if org is not None and (not isinstance(org, str) or not org or "/" in org):
         raise ConfigError(
             f"{owner_ctx}.owner must be a GitHub user/org name (no slash)"
