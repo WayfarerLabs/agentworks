@@ -22,9 +22,14 @@ API_VERSION = "agentworks/v1"
 _ENVELOPE_KEYS = {"apiVersion", "kind", "metadata", "spec"}
 _METADATA_KEYS = {"name", "description"}
 
-# Kinds whose Config-layer shape is a singleton; the envelope accepts
-# only the reserved name until their plurification SDDs land.
-_SINGLETON_KINDS = {"admin-template", "named-console-template"}
+# Kinds with no instance selector yet. Both are framework-plurified
+# (named multi-instance) -- only the legacy TOML shape is inherently a
+# singleton -- but no command can SELECT a non-default instance today
+# (no `vm create --admin-template`, no `console create --template`), so
+# a named declaration would be dead config; reject it loudly instead of
+# letting it sit inert. Each kind leaves this set when its selector
+# ships (issue filed).
+_NO_SELECTOR_KINDS = {"admin-template", "named-console-template"}
 
 
 @dataclass(frozen=True)
@@ -108,10 +113,12 @@ def validate_envelope(raw: object, location: SourceLocation) -> Document:
     if description is not None and not isinstance(description, str):
         raise _err(location, "metadata.description must be a string")
 
-    if kind in _SINGLETON_KINDS and name != "default":
+    if kind in _NO_SELECTOR_KINDS and name != "default":
         raise _err(
             location,
-            f'{kind} accepts only metadata.name "default"; got {name!r}',
+            f'{kind} accepts only metadata.name "default" for now: no '
+            f"command can select a named {kind} yet, so {name!r} would "
+            f"be dead config",
         )
 
     if "spec" not in raw:

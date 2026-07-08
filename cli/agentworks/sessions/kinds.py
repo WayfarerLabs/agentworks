@@ -83,7 +83,7 @@ class _NamedConsoleTemplateKind:
     """Implementation of ``ResourceKind`` for ``"named-console-template"``."""
 
     kind: str = "named-console-template"
-    description: str = "The named-console template (singleton: default)"
+    description: str = "Named-console settings (only 'default' selectable today)"
     miss_policy: Literal["auto-declare", "error"] = "auto-declare"
     auto_declare_names: frozenset[str] | None = frozenset({"default"})
     category: Literal["declarable", "capability"] = "declarable"

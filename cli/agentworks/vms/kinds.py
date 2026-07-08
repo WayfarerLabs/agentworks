@@ -99,7 +99,7 @@ class _AdminTemplateKind:
     """Implementation of ``ResourceKind`` for ``"admin-template"``."""
 
     kind: str = "admin-template"
-    description: str = "The admin environment template (singleton: default)"
+    description: str = "Admin user environment on VMs (only 'default' selectable today)"
     miss_policy: Literal["auto-declare", "error"] = "auto-declare"
     auto_declare_names: frozenset[str] | None = frozenset({"default"})
     category: Literal["declarable", "capability"] = "declarable"

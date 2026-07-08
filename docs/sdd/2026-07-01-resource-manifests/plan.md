@@ -548,6 +548,15 @@ declarable row dataclasses and capability kinds alike live next to the code that
       -1,250 in the checked box above was derived from a diff that predated tracking the 12 new
       files and is superseded).
 
+- [x] Singleton reframe (maintainer): the envelope's gate on admin-template / named-console-template
+      names is NOT a singleton model -- both kinds are framework-plurified, and only the legacy TOML
+      shape is inherently singleton. The set is renamed `_NO_SELECTOR_KINDS` with the honest
+      rationale (no command can select a named instance yet, so a named declaration is dead config;
+      same principle as the prompt-mapping strictness); the error says so; the kind descriptions say
+      "(only 'default' selectable today)" instead of "(singleton: default)". Issue #165 adds
+      `vm create --admin-template` and `console create --template` to close the loop, with per-type
+      conversion specifics.
+
 Definition of done: `import agentworks.resources` fully populates KIND_REGISTRY (14 kinds);
 `config.py` contains no resource dataclasses or kind logic; CI green; reviewer-approved.
 
