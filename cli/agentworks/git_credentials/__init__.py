@@ -45,9 +45,10 @@ class CredentialMaterials:
     warn_helper_script: str
 
 
-# The warn-only helper's on-VM path. A shell-executed helper value
-# (contains a slash), so the shell expands the tilde -- per-user, which
-# is what makes the same include content work for admin and agents.
+# The warn-only helper's on-VM path, registered as "!<path>": git
+# only shell-executes helper values starting with "!" or an absolute
+# path, and the shell is what expands the tilde -- per-user, which is
+# what makes the same include content work for admin and agents.
 GIT_CRED_WARN_HELPER_PATH = "~/.agentworks-git-cred-warn.sh"
 
 # The agentworks-owned gitconfig include carrying the credential-context
@@ -110,7 +111,12 @@ def build_credential_materials(
     )
     if sections:
         rendered.insert(
-            0, f'[credential]\n\thelper = {GIT_CRED_WARN_HELPER_PATH}'
+            # The "!" prefix is load-bearing: git shell-executes a
+            # helper value ONLY when it begins with "!" (or an absolute
+            # path); anything else gets "git credential-" prepended and
+            # errors on every credential-needing operation. The shell
+            # is also what expands the tilde, per-user.
+            0, f'[credential]\n\thelper = !{GIT_CRED_WARN_HELPER_PATH}'
         )
     return CredentialMaterials(
         store_content="\n".join(store_unscoped + store_scoped) + "\n",

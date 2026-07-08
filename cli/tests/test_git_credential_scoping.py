@@ -277,7 +277,7 @@ def test_include_registers_helper_only_when_scoped() -> None:
         "acme-bot": GitHubCredentialProvider(config_name="acme-bot", owner="acme")
     }
     m = build_credential_materials(scoped, {"acme-bot": "x"})
-    assert "helper = ~/.agentworks-git-cred-warn.sh" in m.gitconfig_content
+    assert "helper = !~/.agentworks-git-cred-warn.sh" in m.gitconfig_content
     unscoped = {"gh": GitHubCredentialProvider(config_name="gh")}
     m2 = build_credential_materials(unscoped, {"gh": "y"})
     assert "helper" not in m2.gitconfig_content
@@ -407,3 +407,79 @@ def test_multi_repo_list_emits_sections_per_repo() -> None:
         "https://github.com/acme/gadgets",
         "https://github.com/acme/gadgets.git",
     ]
+
+
+# -- real git against the generated materials ----------------------------------
+
+
+def _fill(home: Path, url_line: str) -> tuple[int, str, str]:
+    import os
+    import subprocess
+
+    env = {
+        **os.environ,
+        "HOME": str(home),
+        "XDG_CONFIG_HOME": str(home / ".config"),
+        "GIT_CONFIG_SYSTEM": "/dev/null",
+        "GIT_TERMINAL_PROMPT": "0",
+    }
+    result = subprocess.run(
+        ["git", "credential", "fill"],
+        input=f"{url_line}\n\n",
+        capture_output=True,
+        text=True,
+        timeout=30,
+        env=env,
+    )
+    return result.returncode, result.stdout, result.stderr
+
+
+def test_generated_materials_work_with_real_git(tmp_path: Path) -> None:
+    """The invocation contract, pinned against git itself: the include's
+    "!"-prefixed helper line must not produce git's
+    "'credential-~/...' is not a git command" error (a helper value
+    without "!" or an absolute path gets "git credential-" prepended),
+    the org context must select the scoped token for a plain URL, and a
+    foreign embedded username must draw the helper's warning."""
+    import shutil
+
+    if shutil.which("git") is None:  # pragma: no cover
+        pytest.skip("git not available")
+
+    providers = {
+        "gh": GitHubCredentialProvider(config_name="gh"),
+        "acme-bot": GitHubCredentialProvider(config_name="acme-bot", owner="acme"),
+    }
+    m = build_credential_materials(providers, {"gh": "tokF", "acme-bot": "tokS"})
+    home = tmp_path / "home"
+    home.mkdir()
+    (home / ".git-credentials").write_text(m.store_content)
+    (home / ".agentworks-git-scopes.gitconfig").write_text(m.gitconfig_content)
+    helper = home / ".agentworks-git-cred-warn.sh"
+    helper.write_text(m.warn_helper_script)
+    helper.chmod(0o700)
+    (home / ".gitconfig").write_text(
+        "[credential]\n\thelper = store\n"
+        "[include]\n\tpath = ~/.agentworks-git-scopes.gitconfig\n"
+    )
+
+    # Plain URL under the scoped org: context injects the username,
+    # store supplies the scoped token, no warning, no invocation error.
+    rc, out, err = _fill(home, "url=https://github.com/acme/anything.git")
+    assert "is not a git command" not in err, err
+    assert rc == 0, err
+    assert "username=acme-bot" in out
+    assert "password=tokS" in out
+    assert "bypasses git credential scoping" not in err
+
+    # Plain URL outside the org: the fallback line wins.
+    rc, out, err = _fill(home, "url=https://github.com/other/repo.git")
+    assert rc == 0, err
+    assert "password=tokF" in out
+
+    # Foreign embedded username: the warn helper speaks, right above
+    # the (expected) auth failure.
+    rc, out, err = _fill(home, "url=https://alice@github.com/acme/x.git")
+    assert "is not a git command" not in err, err
+    assert "bypasses git credential scoping" in err
+    assert rc != 0  # store has no alice line; prompts disabled
