@@ -172,6 +172,7 @@ metadata:
 spec:
   harness: claude-code
   harness_config:
+    permissionMode: auto
     marketplaces:
       - https://github.com/WayfarerLabs/nerftools#v4.0.0
     plugins:
@@ -250,12 +251,14 @@ Capability config will sometimes need secrets (an AWS vm-provider's client secre
 service-account token). These are ordinary secret REFERENCES -- a bare secret name in a config
 field, never a value -- and the existing machinery covers them end to end, in both flavors:
 
-- **Defaulted, overridable** (the `git-token-<name>` / `tailscale-auth-key` precedent): the field
-  defaults to a well-known secret name (`aws-client-secret`), and the operator may point it at any
-  secret instead. Auto-declaration means the default Just Works with zero secret ceremony: the
-  reference materializes a `secret` row at finalize with a synthesized description
-  (`(auto) the client secret for vm-platform/aws-prod`), reachability is validated, doctor predicts
-  resolution per row, and the default chain's prompt makes it resolvable out of the box.
+- **Defaulted, overridable** (the `git-token-<name>` / `tailscale-auth-key` precedent): a field
+  (e.g. `aws_client_secret`) defaults to a well-known secret name (`aws-client-secret`). The
+  operator may explicitly define the field to point it at an alternate secret instead.
+  Auto-declaration means that the referenced secret (whether defaulted or overridden) Just Works
+  with zero secret ceremony: the reference materializes a `secret` row at finalize with a
+  synthesized description (`(auto) the client secret for vm-platform/aws-prod`), reachability is
+  validated, doctor predicts resolution per row, and the default chain's prompt makes it resolvable
+  out of the box.
 - **Required, explicit**: same mechanism minus the default; the loader errors if the field is
   absent.
 
@@ -263,8 +266,8 @@ One extension is needed, because the blob is opaque: the framework cannot know t
 `provider_config.client_secret` holds a secret name. The split of responsibilities matters:
 
 - **The capability contributes schema knowledge only** ("field `client_secret` of my blob is a
-  secret name, defaulting to `aws-client-secret`") -- naturally at the same hook where it already
-  validates the blob. It declares no references: it has no config of its own, and the secret name is
+  secret name, defaulting to `aws-client-secret`") -- formalized as a registered config schema, next
+  section. It declares no references: it has no config of its own, and the secret name is
   per-consumer (two AWS platforms can name different secrets).
 - **The consuming resource declares the reference**, with ITSELF as the source -- exactly how
   `git-credential/ado` emits its `token` reference today while the `azdo` capability declares
@@ -286,6 +289,32 @@ tokens -- secrets needed by machinery rather than by env tables -- join a comman
 pass. Capability-config secrets ride the same path: `vm create` against an AWS platform adds the
 platform's secret decls to its resolve set.
 
+## Registered config schemas
+
+The "capability contributes schema knowledge" hook is worth formalizing: a capability REGISTERS its
+config schema rather than exposing a validate callable. The schema is a flat field list -- one entry
+per blob field carrying name, type, required/default, and a description -- and a field may be typed
+as a **reference to a resource of kind `<abc>`** (kind `secret` covers the secrets story above; the
+generalization covers any kind), with a usage phrase and optional default name.
+
+A validate callable can only validate. A readable schema feeds three consumers, uniformly across
+every blob host (`spec.provider_config`, inline `harness_config`, feature map values):
+
+- **Validation**: types, required fields, unknown-field rejection, `file:line` framing -- all
+  framework-generic. An empty schema yields "accepts no configuration" for free.
+- **Reference emission**: the hosting resource's references for ref-typed fields are derived
+  mechanically (consuming resource as source, per the rule above); a ref field's default IS the
+  defaulted-and-overridable pattern, and its usage phrase feeds the auto-declared description.
+- **Self-description**: `agw resource describe <capability-kind>/<name>` renders the schema (fields,
+  types, defaults, what each references) -- capabilities become self-documenting, which is exactly
+  the usage info a schema must carry anyway to do the first two jobs well.
+
+Two boundaries keep this from growing into a schema language: the schema is a FLAT field list (no
+nesting, no conditionals -- a capability wanting internal structure keeps it opaque within one
+field), and cross-field rules live in an optional validate hook that runs after the schema checks.
+The plugin SDD's namespaced plugin settings (its R5) could plausibly reuse the same field-list
+machinery; noted, not designed.
+
 ## The rules, restated for the plugin SDD
 
 1. One capability, dedicated kind (instance-identity test passes: vm-platform, git-credential):
@@ -303,3 +332,6 @@ platform's secret decls to its resolve set.
    becomes real (see "The map form's limit").
 8. Secret-name fields inside capability config are ordinary secret references (see "Secrets in
    capability config").
+9. Capabilities register a config schema (flat field list; fields may be typed as references to a
+   resource kind): validation, reference emission, and CLI self-description all derive from it --
+   see "Registered config schemas".
