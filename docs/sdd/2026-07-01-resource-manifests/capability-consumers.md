@@ -317,6 +317,23 @@ need to be able to describe fields as resource references to specific kinds (sec
 other resources), and to include usage information to populate on those references. The shipped API
 carries a note that it may be deprecated in favor of this.
 
+## Built-in or plugin: the tiering discriminator
+
+Maintainer ruling (2026-07-08): a capability implementation ships BUILT-IN only when it is both
+necessary for the core to function AND tool/vendor-neutral; anything tool- or vendor-specific ships
+as a plugin, with system plugins as the in-repo, opt-in tier. Agentworks is harness-agnostic by
+identity -- operators with no interest in a given tool must not carry its code or attack surface --
+so encapsulation alone never earns built-in status; neutrality does.
+
+- Built-in: the `shell` harness (the core needs A harness; shell is neutral); the `env-var` and
+  `prompt` secret backends (secrets are useless without A resolution path; both vendor-free); `lima`
+  among VM providers (local VMs, no vendor).
+- Plugin: `claude-code` / `codex` harnesses (system plugins -- and since a built-in that later
+  becomes enablement-gated is a breaking flip, they must be BORN as plugins, which sequences plugin
+  infrastructure before or alongside the first tool-specific harness); `onepassword`; future vendor
+  VM providers (e.g. AWS). `azure` / `proxmox` are grandfathered built-ins (released, always-on
+  today); re-tiering them is a future-major question at most.
+
 ## The rules, restated for the plugin SDD
 
 1. One capability, dedicated kind (instance-identity test passes: vm-platform, git-credential):
