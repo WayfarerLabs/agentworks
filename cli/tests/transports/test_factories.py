@@ -195,11 +195,15 @@ def test_native_transport_invokes_transient_route_then_builder() -> None:
 
 def test_native_transport_none_raises_typed_state_error() -> None:
     """A ``None`` from the platform (proxmox: one-shot guest-agent exec
-    can't host a shell) becomes a ``StateError`` with the console hint."""
+    can't host a shell) becomes a ``StateError`` carrying the platform's
+    own console hint (``no_native_transport_hint``)."""
+    from agentworks.vms.platforms.proxmox import ProxmoxPlatform
+
     vm = _mock_vm(site="proxmox")
     config = _mock_config()
     platform = MagicMock()
     platform.name = "proxmox"
+    platform.no_native_transport_hint = ProxmoxPlatform.no_native_transport_hint
     platform.transient_route.return_value = contextlib.nullcontext()
     platform.native_transport.return_value = None
 

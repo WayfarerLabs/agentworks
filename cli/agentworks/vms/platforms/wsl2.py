@@ -222,13 +222,19 @@ _blob_opener = urllib.request.build_opener(_StripAuthRedirectHandler)
 
 
 def _wsl(args: list[str], *, check: bool = True, timeout: int = 300) -> str:
-    """Run a wsl.exe command and return stdout."""
+    """Run a wsl.exe command and return stdout.
+
+    wsl.exe emits UTF-16LE on redirected output unless WSL_UTF8=1 is
+    set; decoding that as UTF-8 leaves a NUL after every ASCII char,
+    which silently breaks the name-equality parsers (``status``,
+    ``_distro_exists``). Strip the NULs so both encodings parse.
+    """
     result = subprocess.run(
         ["wsl", *args], capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=timeout
     )
     if check and result.returncode != 0:
         raise RuntimeError(f"wsl command failed: {result.stderr.strip()}")
-    return result.stdout
+    return result.stdout.replace("\x00", "")
 
 
 def _powershell(script: str, *, check: bool = True, timeout: int = 120) -> str:
@@ -460,7 +466,9 @@ class WSL2Platform(VMPlatform):
         if not distro:
             raise StateError(
                 f"VM '{vm.name}' has no wsl2 distro_name in its platform "
-                f"metadata; the DB row is incomplete"
+                f"metadata; the DB row is incomplete",
+                entity_kind="vm",
+                entity_name=vm.name,
             )
         return str(distro)
 
@@ -480,6 +488,8 @@ class WSL2Platform(VMPlatform):
         if self._distro_exists(distro_name):
             raise StateError(
                 f"a WSL2 distro named '{distro_name}' is already registered",
+                entity_kind="vm",
+                entity_name=request.vm_name,
                 hint=(
                     "unregister it first (wsl --unregister) or pick a "
                     "different VM name"

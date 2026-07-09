@@ -191,6 +191,8 @@ class AzurePlatform(VMPlatform):
             raise StateError(
                 f"an Azure VM named '{vm_name}' already exists in resource "
                 f"group '{az.resource_group}'",
+                entity_kind="vm",
+                entity_name=request.vm_name,
                 hint="delete it first or pick a different VM name",
             )
 
@@ -676,7 +678,9 @@ def _resource_id(vm: VMRow) -> str:
     if not resource_id:
         raise StateError(
             f"VM '{vm.name}' has no azure resource_id in its platform "
-            f"metadata; the DB row is incomplete"
+            f"metadata; the DB row is incomplete",
+            entity_kind="vm",
+            entity_name=vm.name,
         )
     return str(resource_id)
 

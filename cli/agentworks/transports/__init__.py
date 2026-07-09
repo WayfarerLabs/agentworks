@@ -177,19 +177,12 @@ def native_transport(
     stack.enter_context(platform.transient_route(vm))
     target = platform.native_transport(vm, config=config)
     if target is None:
-        hint = (
-            "This platform has no interactive native transport. For "
-            "Proxmox: the QEMU guest agent exec interface is one-shot "
-            "and non-interactive, so use the Proxmox web UI's serial "
-            "console (VM > Console in the Proxmox VE web UI) as the "
-            "equivalent escape hatch."
-        )
         raise StateError(
             f"No native transport for VM '{vm.name}' "
             f"(platform '{platform.name}').",
             entity_kind="vm",
             entity_name=vm.name,
-            hint=hint,
+            hint=platform.no_native_transport_hint,
         )
 
     # Defensive: any SSH-backed native transport that returns an empty

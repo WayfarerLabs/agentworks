@@ -140,3 +140,45 @@ def test_defaults_vm_host_is_a_hard_error(write_config) -> None:
             warn_issues=False,
             warn_deprecations=False,
         )
+
+
+def test_legacy_toml_and_manifest_decode_agree(write_config, tmp_path: Path) -> None:
+    """Decode parity: a flat [proxmox] section and the equivalent
+    vm-site manifest produce the same resource fields. The Phase 5
+    migrator's flat-to-nested emission leans on this equivalence.
+    """
+    from agentworks.manifests.loader import load_manifests
+    from agentworks.vms.sites import VMSiteDecl
+
+    config = load_config(
+        write_config(PROXMOX_SECTION),
+        warn_issues=False,
+        warn_deprecations=False,
+    )
+    toml_site = config.vm_sites["proxmox"]
+
+    manifest_dir = tmp_path / "resources"
+    manifest_dir.mkdir()
+    (manifest_dir / "site.yaml").write_text(
+        "apiVersion: agentworks/v1\n"
+        "kind: vm-site\n"
+        "metadata:\n"
+        "  name: proxmox\n"
+        "spec:\n"
+        "  platform: proxmox\n"
+        "  platform_config:\n"
+        '    api_url: "https://pve:8006"\n'
+        "    node: pve1\n"
+        '    token_id: "agw@pam!agw"\n'
+        "    template_vmid: 9000\n"
+    )
+    manifests = load_manifests(manifest_dir)
+    assert not manifests.issues, manifests.issues
+    (entry,) = manifests.entries
+    yaml_site = entry.resource
+    assert isinstance(yaml_site, VMSiteDecl)
+
+    assert toml_site.name == yaml_site.name
+    assert toml_site.platform == yaml_site.platform
+    assert toml_site.platform_config == yaml_site.platform_config
+    assert toml_site.description == yaml_site.description

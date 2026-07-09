@@ -244,8 +244,12 @@ def _decode_git_credential(doc: Document, spec: dict[str, object], issues: list[
 
 
 def _decode_vm_site(doc: Document, spec: dict[str, object], issues: list[str]) -> Any:
+    from agentworks.config import validate_name
     from agentworks.vms.sites import VMSiteDecl
 
+    # FRD R2: site names follow the VM-name rules (they appear in
+    # hostnames and SSH host aliases).
+    validate_name(doc.name)
     platform = spec.pop("platform", None)
     if not isinstance(platform, str) or not platform:
         raise ConfigError(
@@ -277,6 +281,14 @@ def _decode_vm_site(doc: Document, spec: dict[str, object], issues: list[str]) -
     # framework's miss policy at finalize.
     from agentworks.vms.platforms import VM_PLATFORM_REGISTRY
 
+    # FRD R2: a site named after a known platform must declare that
+    # platform -- `vm-site/azure` backed by lima would make every
+    # `--site azure` mean something other than it says.
+    if doc.name in VM_PLATFORM_REGISTRY and platform != doc.name:
+        raise ConfigError(
+            f"a vm-site named '{doc.name}' must declare platform "
+            f"'{doc.name}' (it shadows a platform name), not '{platform}'"
+        )
     capability = VM_PLATFORM_REGISTRY.get(platform)
     if capability is not None:
         capability.validate_config("spec.platform_config", raw_config)

@@ -111,26 +111,16 @@ def site_manifest_hint(name: str, *, vm_host: str | None = None) -> str:
     )
 
 
-def site_secret_decls(decl: VMSiteDecl, registry: Registry) -> list[object]:
-    """The site's capability-config secret declarations, for the
-    consuming command's single resolve pass
-    (``compute_needed_secrets(..., extra_decls=...)``).
-
-    The references were derived at finalize (the site emitted them);
-    this projects them back to the declared/auto-declared secret rows.
+def select_site(
+    flag: str | None,
+    template_site: str | None,
+    default_site: str | None,
+) -> str:
+    """SDD R2 selection precedence for `vm create`: the explicit flag,
+    then the resolved template's site, then ``defaults.site``, then the
+    built-in ``lima`` site.
     """
-    from agentworks.vms.platforms import VM_PLATFORM_REGISTRY
-
-    capability = VM_PLATFORM_REGISTRY.get(decl.platform)
-    if capability is None:
-        return []
-    decls: list[object] = []
-    for cref in capability.validate_config(
-        f"vm-site/{decl.name}", decl.platform_config
-    ):
-        if cref.kind == "secret":
-            decls.append(registry.lookup("secret", cref.name))
-    return decls
+    return flag or template_site or default_site or "lima"
 
 
 def resolve_site(

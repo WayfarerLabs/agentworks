@@ -37,6 +37,12 @@ class ProxmoxPlatform(VMPlatform):
 
     name: ClassVar[str] = "proxmox"
     description: ClassVar[str] = "Proxmox VE cluster VMs (clone + cloud-init)"
+    no_native_transport_hint: ClassVar[str] = (
+        "The QEMU guest agent exec interface is one-shot and "
+        "non-interactive, so use the Proxmox web UI's serial console "
+        "(VM > Console in the Proxmox VE web UI) as the equivalent "
+        "escape hatch."
+    )
 
     @classmethod
     def validate_config(
@@ -132,7 +138,9 @@ class ProxmoxPlatform(VMPlatform):
         if not node:
             raise StateError(
                 f"VM '{vm.name}' has no proxmox node in its platform "
-                f"metadata or site configuration"
+                f"metadata or site configuration",
+                entity_kind="vm",
+                entity_name=vm.name,
             )
         return str(node)
 
@@ -141,7 +149,9 @@ class ProxmoxPlatform(VMPlatform):
         if not vmid:
             raise StateError(
                 f"VM '{vm.name}' has no proxmox vmid in its platform "
-                f"metadata; the DB row is incomplete"
+                f"metadata; the DB row is incomplete",
+                entity_kind="vm",
+                entity_name=vm.name,
             )
         return int(vmid)
 
@@ -163,6 +173,8 @@ class ProxmoxPlatform(VMPlatform):
             raise StateError(
                 f"a Proxmox VM named '{backend_name}' already exists on "
                 f"node {node}",
+                entity_kind="vm",
+                entity_name=request.vm_name,
                 hint="delete it first or pick a different VM name",
             )
 

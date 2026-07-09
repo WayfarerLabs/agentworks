@@ -187,8 +187,15 @@ def get_provisioner(platform: str, vm_host_ssh: str | None = None) -> VMPlatform
 
     cls = VM_PLATFORM_REGISTRY.get(platform)
     if cls is None:
-        msg = f"Unknown platform: {platform}"
-        raise ValueError(msg)
+        # Reachable mid-window for a VM created at a custom-named site
+        # (the row's platform column holds the site name); lifecycle ops
+        # on such VMs work once the manager-rewiring phase dispatches
+        # through platform_for.
+        raise StateError(
+            f"operations on VMs at custom-named sites (this VM's site is "
+            f"'{platform}') are not wired up yet in this build",
+            entity_kind="vm",
+        )
     platform_config: dict[str, object] = {}
     if platform == "lima" and vm_host_ssh:
         platform_config["vm_host"] = vm_host_ssh
@@ -224,9 +231,10 @@ def create_vm(
     # Resolve the target site. PHASE-1 BRIDGE (vm-sites SDD): the CLI
     # still spells the flag --platform; its value is a site name (the
     # bundled lima/wsl2 sites, the legacy [azure]/[proxmox] sites, or
-    # any operator-declared site). Selection precedence per SDD R2:
-    # flag, then template, then defaults.site, then the built-in lima.
-    site = platform or vm_tmpl.site or config.defaults.site or "lima"
+    # any operator-declared site).
+    from agentworks.vms.sites import select_site
+
+    site = select_site(platform, vm_tmpl.site, config.defaults.site)
 
     vm_name = name
     validate_name(vm_name)

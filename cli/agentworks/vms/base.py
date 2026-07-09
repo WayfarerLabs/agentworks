@@ -93,6 +93,13 @@ class VMPlatform(ABC):
 
     name: ClassVar[str]
     description: ClassVar[str]
+    # Operator guidance shown when native_transport returns None (the
+    # transports factory embeds it in the StateError hint). Platforms
+    # that opt out of a native transport override with prose naming
+    # their actual escape hatch.
+    no_native_transport_hint: ClassVar[str] = (
+        "This platform has no interactive native transport."
+    )
 
     def __init__(
         self,

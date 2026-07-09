@@ -88,6 +88,7 @@ def test_secret_values_thread_to_the_bound_platform() -> None:
     assert bound._api is not None
 
     unbound = resolve_site("px", registry)
+    assert isinstance(unbound, ProxmoxPlatform)
     with pytest.raises(StateError, match="proxmox-token-secret"):
         _ = unbound._api
 

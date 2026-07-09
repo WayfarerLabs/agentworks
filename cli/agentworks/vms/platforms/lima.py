@@ -103,7 +103,9 @@ class LimaPlatform(VMPlatform):
         if not name:
             raise StateError(
                 f"VM '{vm.name}' has no lima instance_name in its platform "
-                f"metadata; the DB row is incomplete"
+                f"metadata; the DB row is incomplete",
+                entity_kind="vm",
+                entity_name=vm.name,
             )
         return str(name)
 
@@ -165,6 +167,8 @@ class LimaPlatform(VMPlatform):
             raise StateError(
                 f"a Lima instance named '{instance_name}' already exists"
                 + (f" on '{self._vm_host_ssh}'" if self.is_remote else ""),
+                entity_kind="vm",
+                entity_name=request.vm_name,
                 hint=(
                     "delete it first (limactl delete) or pick a different "
                     "VM name"

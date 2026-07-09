@@ -170,6 +170,9 @@ class _VMPlatformKind:
     miss_policy: Literal["auto-declare", "error"] = "error"
     auto_declare_names: frozenset[str] | None = None
     category: Literal["declarable", "capability"] = "capability"
+    # Not load-bearing: manifests of a capability kind are rejected
+    # wholesale by category before the override policy is consulted.
+    # Set to the conservative value for uniformity with vm-site.
     builtin_override: Literal["allow", "reserved"] = "reserved"
 
     def synthesize(self, references: Sequence[ResourceReference]) -> Any:
@@ -215,15 +218,14 @@ class _VMSiteKind:
     ) -> Iterable[InstanceRef]:
         """Every VM whose ``site`` column names this site.
 
-        PHASE-1 BRIDGE (vm-sites SDD): reads the legacy ``platform``
-        column until the DB migration renames it to ``site`` (the
-        stored values are already the right site names for every
-        non-remote-Lima row).
+        ``VMRow.site`` is currently a PHASE-1 BRIDGE property aliasing
+        the legacy ``platform`` column (the stored values are already
+        the right site names for every non-remote-Lima row); this read
+        is unchanged by the DB migration that makes it a real column.
         """
         name = resource.name
         for vm in db.list_vms():
-            site = getattr(vm, "site", None) or getattr(vm, "platform", None)
-            if site == name:
+            if vm.site == name:
                 yield InstanceRef(instance_kind="vm", instance_name=vm.name)
 
 

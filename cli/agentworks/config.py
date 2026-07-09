@@ -105,13 +105,6 @@ def validate_admin_username(admin_username: str) -> None:
         )
 
 
-# Valid values for enum-like fields. Git credential ``type`` validation
-# moved to the framework's ``git-credential-provider`` kind in Phase 2b.1
-# (``agentworks.git_credentials.GIT_CREDENTIAL_PROVIDER_REGISTRY`` is
-# the canonical list).
-VALID_PLATFORMS = ("lima", "azure", "wsl2", "proxmox")
-
-
 # -- Data classes ----------------------------------------------------------
 
 

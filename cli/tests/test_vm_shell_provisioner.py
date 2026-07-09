@@ -252,6 +252,7 @@ def test_provisioner_shell_target_wraps_missing_native_transport(
 
     class _UnsupportedProvisioner:
         name = "stub"
+        no_native_transport_hint = "no interactive transport here"
 
         def native_transport(self, vm: object, *, config: object | None = None) -> object | None:
             return None
@@ -291,8 +292,13 @@ def test_provisioner_shell_target_proxmox_hint_points_at_web_console(
 
     db = _seed_db(tmp_path, platform="proxmox")
 
+    from agentworks.vms.platforms.proxmox import ProxmoxPlatform
+
     class _ProxmoxProvisioner:
         name = "proxmox"
+        # The real platform's hint: this test pins the operator-facing
+        # prose, so read it from the class rather than restating it.
+        no_native_transport_hint = ProxmoxPlatform.no_native_transport_hint
 
         def native_transport(self, vm: object, *, config: object | None = None) -> object | None:
             return None
