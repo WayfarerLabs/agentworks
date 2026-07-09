@@ -39,9 +39,20 @@ class AzDOCredentialProvider(GitCredentialProvider):
             )
         return ()
 
-    def __init__(self, config_name: str, org: str, description: str | None = None) -> None:
-        super().__init__(config_name, description=description)
+    def __init__(
+        self,
+        config_name: str,
+        org: str,
+        description: str | None = None,
+        *,
+        secret_name: str | None = None,
+    ) -> None:
+        super().__init__(config_name, description=description, secret_name=secret_name)
         self._org = org
+
+    @property
+    def store_username(self) -> str:
+        return self._org
 
     def credential_lines(self, token: str) -> list[str]:
         return [f"https://{self._org}:{token}@dev.azure.com/{self._org}"]

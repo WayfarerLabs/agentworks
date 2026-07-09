@@ -1159,7 +1159,7 @@ def _create_agent_on_vm(
             )
         assert git_tokens is not None  # missing-check above narrows it
         from agentworks.git_credentials import (
-            GIT_CRED_WARN_HELPER_PATH,
+            GIT_CRED_HELPER_PATH,
             GIT_SCOPES_INCLUDE_PATH,
             build_credential_materials,
         )
@@ -1180,12 +1180,12 @@ def _create_agent_on_vm(
             mode="0600",
         )
         agent_target.write_file(
-            f"{home}/{GIT_CRED_WARN_HELPER_PATH.removeprefix('~/')}",
-            materials.warn_helper_script,
+            f"{home}/{GIT_CRED_HELPER_PATH.removeprefix('~/')}",
+            materials.helper_script,
             mode="0700",
         )
         agent_target.run(
-            "git config --global credential.helper store && "
+            f"git config --global --replace-all credential.helper '!{GIT_CRED_HELPER_PATH}' && "
             f"(git config --global --get-all include.path | grep -qxF '{GIT_SCOPES_INCLUDE_PATH}' "
             f"|| git config --global --add include.path '{GIT_SCOPES_INCLUDE_PATH}')"
         )

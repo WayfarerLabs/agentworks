@@ -83,9 +83,12 @@ repo under one credential and its org under another is fine -- the more specific
 
 Clone with plain https URLs -- no username needed anywhere; git injects it internally. The
 credential's resource name doubles as that internal username, so it appears in `git config -l`
-output and provider-side logs (remotes are never rewritten). Do not embed usernames in remote URLs:
-an embedded username bypasses scoping, and initialization installs a warn-only credential helper
-that says so on stderr right above the resulting auth failure.
+output and provider-side logs (remotes are never rewritten). Credentials are served by an
+agentworks-owned credential helper (`~/.agentworks-git-cred-helper.sh`, replacing git's
+`credential-store`): when the remote rejects a credential it prints which credential and secret to
+fix instead of silently deleting the provisioned entry (which is what `credential-store` does on
+every failed auth), and an embedded username in a remote URL -- which bypasses scoping -- draws a
+warning right above the resulting failure.
 
 ## TOML resource sections: deprecated but supported
 

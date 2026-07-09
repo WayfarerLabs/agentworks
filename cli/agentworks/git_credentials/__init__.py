@@ -36,20 +36,25 @@ class CredentialMaterials:
 
     store_content: str
     gitconfig_content: str
-    # A warn-only git credential helper (POSIX sh): when a github.com
-    # query carries a username outside the known set (an agent added a
-    # remote with an embedded username, bypassing scoping), it prints a
-    # diagnosis to stderr -- which git surfaces above the auth failure
-    # -- and returns nothing so the chain proceeds. No-op body when no
-    # scoped credentials exist.
-    warn_helper_script: str
+    # THE git credential helper (POSIX sh) -- replaces git's
+    # ``credential-store`` in the chain. ``get`` serves from the
+    # agentworks-managed store file; ``erase`` never deletes (git
+    # invokes it after a rejected auth, which is exactly when the
+    # operator needs a diagnosis, not state destruction -- with
+    # credential-store, every failed auth silently deleted the
+    # provisioned line); a foreign embedded username on github.com
+    # draws a scoping warning when scoped credentials exist.
+    helper_script: str
 
 
-# The warn-only helper's on-VM path, registered as "!<path>": git
-# only shell-executes helper values starting with "!" or an absolute
-# path, and the shell is what expands the tilde -- per-user, which is
-# what makes the same include content work for admin and agents.
-GIT_CRED_WARN_HELPER_PATH = "~/.agentworks-git-cred-warn.sh"
+# The credential helper's on-VM path, registered as "!<path>" in the
+# user's global ``credential.helper`` slot (replacing the old
+# ``store``): git only shell-executes helper values starting with "!"
+# or an absolute path, and the shell is what expands the tilde --
+# per-user, which is what makes the same content work for admin and
+# agents. The old warn-only script (~/.agentworks-git-cred-warn.sh) is
+# orphaned harmlessly on VMs initialized by earlier builds.
+GIT_CRED_HELPER_PATH = "~/.agentworks-git-cred-helper.sh"
 
 # The agentworks-owned gitconfig include carrying the credential-context
 # sections. Referenced from the user's global gitconfig via include.path
@@ -59,10 +64,6 @@ GIT_CRED_WARN_HELPER_PATH = "~/.agentworks-git-cred-warn.sh"
 # -- a pre-existing gap shared with the store itself).
 GIT_SCOPES_INCLUDE_PATH = "~/.agentworks-git-scopes.gitconfig"
 
-_WARN_HELPER_HEADER = """\
-#!/bin/sh
-# Managed by agentworks (git credential scoping); do not edit.
-"""
 
 
 def build_credential_materials(
@@ -109,59 +110,119 @@ def build_credential_materials(
     header = (
         "# Managed by agentworks (git credential scoping); do not edit.\n"
     )
-    if sections:
-        rendered.insert(
-            # The "!" prefix is load-bearing: git shell-executes a
-            # helper value ONLY when it begins with "!" (or an absolute
-            # path); anything else gets "git credential-" prepended and
-            # errors on every credential-needing operation. The shell
-            # is also what expands the tilde, per-user.
-            0, f'[credential]\n\thelper = !{GIT_CRED_WARN_HELPER_PATH}'
-        )
+    diag = [
+        (provider.store_username, name, provider.secret_name)
+        for name, provider in providers.items()
+    ]
     return CredentialMaterials(
         store_content="\n".join(store_unscoped + store_scoped) + "\n",
         gitconfig_content=header + "\n".join(rendered) + ("\n" if rendered else ""),
-        warn_helper_script=_warn_helper_script(sections),
+        helper_script=_helper_script(diag, warn_foreign=bool(sections)),
     )
 
 
 
-def _warn_helper_script(sections: list[tuple[str, str]]) -> str:
-    """Render the warn-only credential helper.
+def _helper_script(
+    diag: list[tuple[str, str, str]], *, warn_foreign: bool
+) -> str:
+    """Render THE git credential helper (POSIX sh).
 
-    The allowlist is every scoped username plus the released unscoped
-    username. Only github.com queries are inspected (azdo's host is
-    dev.azure.com and azdo has no scoping). Without scoped credentials
-    the script is a no-op body -- still written, so re-initialization
-    after removing scopes degrades cleanly.
+    ``get`` serves the first matching line (host + username-if-given)
+    from the agentworks-managed store file -- credential-store's GET
+    semantics, minus its erase. ``erase`` deliberately deletes nothing:
+    git invokes it when the remote REJECTED the credential, so it
+    prints a diagnosis naming the credential and its secret instead of
+    destroying provisioned state. ``diag`` is (store_username,
+    credential_name, secret_name) per credential; ``warn_foreign``
+    gates the embedded-username warning on scoped credentials existing
+    (without scoping there is nothing to bypass).
     """
-    if not sections:
-        return _WARN_HELPER_HEADER + "exit 0\n"
-    allow = " ".join(
-        sorted({username for _url, username in sections} | {"x-access-token"})
-    )
-    return (
-        _WARN_HELPER_HEADER
-        + f'''[ "$1" = "get" ] || exit 0
-host=""; username=""
+    known = " ".join(sorted({u for u, _c, _s in diag}))
+    cases = []
+    seen: set[str] = set()
+    for username, cred, secret in diag:
+        if username in seen:
+            continue  # first credential wins, matching store-line order
+        seen.add(username)
+        cases.append(
+            f"""        {username})
+            echo "agentworks: the remote rejected git credential '{cred}'."
+            echo "The token in secret '{secret}' is likely invalid, expired, or lacks access."
+            echo "Fix the secret, then re-run 'agw agent reinit <agent>' or 'agw vm reinit <vm>'."
+            ;;"""
+        )
+    warn_block = ""
+    if warn_foreign:
+        warn_block = """
+    if [ "$host" = "github.com" ] && [ -n "$username" ]; then
+        case " @KNOWN@ " in
+            *" $username "*) : ;;
+            *)
+                {
+                    echo "agentworks: this remote embeds username '$username', which"
+                    echo "bypasses git credential scoping for github.com; use a plain"
+                    echo "https remote (scoping selects the credential automatically)"
+                } >&2
+                ;;
+        esac
+    fi""".replace("@KNOWN@", known)
+    template = """#!/bin/sh
+# Managed by agentworks (git credential helper); do not edit.
+# Serves the agentworks-owned ~/.git-credentials and never deletes it:
+# git invokes 'erase' after a rejected auth, which is exactly when the
+# operator needs a diagnosis, not state destruction.
+op="$1"
+proto=""; host=""; username=""
 while IFS='=' read -r key value; do
     case "$key" in
+        protocol) proto="$value" ;;
         host) host="$value" ;;
         username) username="$value" ;;
     esac
 done
-[ "$host" = "github.com" ] || exit 0
-[ -n "$username" ] || exit 0
-case " {allow} " in
-    *" $username "*) exit 0 ;;
+
+creds="$HOME/.git-credentials"
+
+case "$op" in
+get)@WARN@
+    [ -r "$creds" ] || exit 0
+    while IFS= read -r line; do
+        case "$line" in *://*@*) : ;; *) continue ;; esac
+        rest="${line#*://}"
+        userinfo="${rest%%@*}"
+        hostpath="${rest#*@}"
+        lhost="${hostpath%%/*}"
+        luser="${userinfo%%:*}"
+        lpass="${userinfo#*:}"
+        [ "$lhost" = "$host" ] || continue
+        if [ -n "$username" ] && [ "$luser" != "$username" ]; then
+            continue
+        fi
+        printf 'protocol=%s\n' "${proto:-https}"
+        printf 'host=%s\n' "$host"
+        printf 'username=%s\n' "$luser"
+        printf 'password=%s\n' "$lpass"
+        exit 0
+    done < "$creds"
+    exit 0
+    ;;
+erase)
+    # git calls erase when the remote rejected the credential.
+    case "$username" in
+@CASES@
+        *) : ;;
+    esac >&2
+    exit 0
+    ;;
+*)
+    exit 0
+    ;;
 esac
-{{
-    echo "agentworks: this remote embeds username '$username', which"
-    echo "bypasses git credential scoping for github.com; use a plain https"
-    echo "remote (scoping selects the credential automatically)"
-}} >&2
-exit 0
-'''
+"""
+    return (
+        template.replace("@WARN@", warn_block).replace(
+            "@CASES@", "\n".join(cases) if cases else "        _none_) : ;;"
+        )
     )
 
 

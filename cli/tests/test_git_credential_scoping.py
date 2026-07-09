@@ -19,7 +19,7 @@ import pytest
 from agentworks.bootstrap import build_registry
 from agentworks.config import load_config
 from agentworks.errors import ConfigError
-from agentworks.git_credentials import build_credential_materials
+from agentworks.git_credentials import CredentialMaterials, build_credential_materials
 from agentworks.git_credentials.github import GitHubCredentialProvider
 from agentworks.manifests import load_manifests
 from agentworks.vms.initializer import resolve_git_credential_providers
@@ -205,13 +205,16 @@ def test_repo_and_owner_scopes_on_same_org_coexist() -> None:
     assert '[credential "https://github.com/acme/"]' in m.gitconfig_content
 
 
-# -- the warn-only helper ------------------------------------------------------
+# -- the credential helper ------------------------------------------------------
 
 
-def _run_helper(script: str, tmp_path: Path, op: str, query: str) -> str:
+def _run_helper(
+    script: str, home: Path, op: str, query: str
+) -> tuple[str, str]:
+    import os
     import subprocess
 
-    path = tmp_path / "helper.sh"
+    path = home / "helper.sh"
     path.write_text(script)
     path.chmod(0o700)
     result = subprocess.run(
@@ -220,67 +223,125 @@ def _run_helper(script: str, tmp_path: Path, op: str, query: str) -> str:
         capture_output=True,
         text=True,
         timeout=10,
+        env={**os.environ, "HOME": str(home)},
     )
     assert result.returncode == 0  # the helper NEVER blocks the chain
-    assert result.stdout == ""  # never answers, only warns
-    return result.stderr
+    return result.stdout, result.stderr
 
 
-def _scoped_script(tmp_path: Path) -> str:
+def _scoped_materials() -> CredentialMaterials:
     providers = {
         "acme-bot": GitHubCredentialProvider(config_name="acme-bot", owner="acme"),
         "gh": GitHubCredentialProvider(config_name="gh"),
     }
-    return build_credential_materials(
-        providers, {"acme-bot": "x", "gh": "y"}
-    ).warn_helper_script
+    return build_credential_materials(providers, {"acme-bot": "tokS", "gh": "tokF"})
+
+
+def _write_home(tmp_path: Path, m: CredentialMaterials) -> Path:
+    home = tmp_path / "home"
+    home.mkdir(exist_ok=True)
+    (home / ".git-credentials").write_text(m.store_content)
+    return home
+
+
+def test_helper_get_serves_scoped_and_fallback(tmp_path: Path) -> None:
+    m = _scoped_materials()
+    home = _write_home(tmp_path, m)
+    out, err = _run_helper(
+        m.helper_script, home, "get",
+        "protocol=https\nhost=github.com\nusername=acme-bot\n",
+    )
+    assert "username=acme-bot" in out
+    assert "password=tokS" in out
+    assert err == ""
+    out, err = _run_helper(
+        m.helper_script, home, "get", "protocol=https\nhost=github.com\n"
+    )
+    # Username-less query takes the FIRST line (unscoped fallback).
+    assert "username=x-access-token" in out
+    assert "password=tokF" in out
+
+
+def test_helper_get_ignores_other_hosts(tmp_path: Path) -> None:
+    m = _scoped_materials()
+    home = _write_home(tmp_path, m)
+    out, err = _run_helper(
+        m.helper_script, home, "get", "protocol=https\nhost=gitlab.com\n"
+    )
+    assert out == ""
+    assert err == ""
 
 
 def test_helper_warns_on_foreign_username(tmp_path: Path) -> None:
-    err = _run_helper(
-        _scoped_script(tmp_path),
-        tmp_path,
-        "get",
+    m = _scoped_materials()
+    home = _write_home(tmp_path, m)
+    _out, err = _run_helper(
+        m.helper_script, home, "get",
         "protocol=https\nhost=github.com\nusername=alice\n",
     )
     assert "embeds username 'alice'" in err
     assert "bypasses git credential scoping" in err
 
 
-@pytest.mark.parametrize(
-    ("op", "query"),
-    [
-        ("get", "protocol=https\nhost=github.com\nusername=acme-bot\n"),
-        ("get", "protocol=https\nhost=github.com\nusername=x-access-token\n"),
-        ("get", "protocol=https\nhost=github.com\n"),
-        ("get", "protocol=https\nhost=dev.azure.com\nusername=alice\n"),
-        ("store", "protocol=https\nhost=github.com\nusername=alice\n"),
-    ],
-)
-def test_helper_silent_when_appropriate(
-    tmp_path: Path, op: str, query: str
-) -> None:
-    assert _run_helper(_scoped_script(tmp_path), tmp_path, op, query) == ""
+def test_helper_erase_deletes_nothing_and_diagnoses(tmp_path: Path) -> None:
+    """The reason the helper exists: git invokes erase after a rejected
+    auth; credential-store DELETED the provisioned line. Ours keeps the
+    file untouched and names the credential and secret to fix."""
+    m = _scoped_materials()
+    home = _write_home(tmp_path, m)
+    before = (home / ".git-credentials").read_text()
+    out, err = _run_helper(
+        m.helper_script, home, "erase",
+        "protocol=https\nhost=github.com\nusername=acme-bot\npassword=tokS\n",
+    )
+    assert (home / ".git-credentials").read_text() == before
+    assert out == ""
+    assert "rejected git credential 'acme-bot'" in err
+    assert "secret 'git-token-acme-bot'" in err
+    assert "agw agent reinit" in err
 
 
-def test_helper_is_noop_without_scopes(tmp_path: Path) -> None:
-    providers = {"gh": GitHubCredentialProvider(config_name="gh")}
-    script = build_credential_materials(providers, {"gh": "y"}).warn_helper_script
-    err = _run_helper(
-        script, tmp_path, "get", "protocol=https\nhost=github.com\nusername=alice\n"
+def test_helper_erase_silent_for_foreign_credentials(tmp_path: Path) -> None:
+    m = _scoped_materials()
+    home = _write_home(tmp_path, m)
+    _out, err = _run_helper(
+        m.helper_script, home, "erase",
+        "protocol=https\nhost=example.com\nusername=alice\npassword=x\n",
     )
     assert err == ""
 
 
-def test_include_registers_helper_only_when_scoped() -> None:
-    scoped = {
-        "acme-bot": GitHubCredentialProvider(config_name="acme-bot", owner="acme")
-    }
-    m = build_credential_materials(scoped, {"acme-bot": "x"})
-    assert "helper = !~/.agentworks-git-cred-warn.sh" in m.gitconfig_content
+def test_helper_without_scopes_serves_but_never_warns(tmp_path: Path) -> None:
+    """With no scoped credentials there is no scoping to bypass: the
+    embedded-username warning is omitted, but get/erase still work."""
+    providers = {"gh": GitHubCredentialProvider(config_name="gh")}
+    m = build_credential_materials(providers, {"gh": "tokF"})
+    home = _write_home(tmp_path, m)
+    _out, err = _run_helper(
+        m.helper_script, home, "get",
+        "protocol=https\nhost=github.com\nusername=alice\n",
+    )
+    assert "bypasses" not in err
+    out, _err = _run_helper(
+        m.helper_script, home, "get", "protocol=https\nhost=github.com\n"
+    )
+    assert "password=tokF" in out
+    _out, err = _run_helper(
+        m.helper_script, home, "erase",
+        "protocol=https\nhost=github.com\nusername=x-access-token\n",
+    )
+    assert "rejected git credential 'gh'" in err
+
+
+def test_include_carries_contexts_only() -> None:
+    """Helper registration lives in the global credential.helper slot
+    (replacing store); the include carries context sections only."""
+    m = _scoped_materials()
+    assert "helper" not in m.gitconfig_content
+    assert '[credential "https://github.com/acme/"]' in m.gitconfig_content
     unscoped = {"gh": GitHubCredentialProvider(config_name="gh")}
     m2 = build_credential_materials(unscoped, {"gh": "y"})
-    assert "helper" not in m2.gitconfig_content
+    assert "[credential" not in m2.gitconfig_content
 
 
 # -- initializer wiring --------------------------------------------------------
@@ -318,11 +379,14 @@ def test_initializer_writes_all_three_files() -> None:
     include, include_mode = by_path["~/.agentworks-git-scopes.gitconfig"]
     assert '[credential "https://github.com/acme/"]' in include
     assert include_mode == "600"
-    helper, helper_mode = by_path["~/.agentworks-git-cred-warn.sh"]
+    helper, helper_mode = by_path["~/.agentworks-git-cred-helper.sh"]
     assert helper.startswith("#!/bin/sh")
     assert helper_mode == "700"
     (cmd,) = runs
-    assert "credential.helper store" in cmd
+    assert (
+        "--replace-all credential.helper '!~/.agentworks-git-cred-helper.sh'" in cmd
+    )
+    assert "credential.helper store" not in cmd
     assert "grep -qxF '~/.agentworks-git-scopes.gitconfig'" in cmd
     assert "--add include.path '~/.agentworks-git-scopes.gitconfig'" in cmd
 
@@ -435,13 +499,14 @@ def _fill(home: Path, url_line: str) -> tuple[int, str, str]:
 
 
 def test_generated_materials_work_with_real_git(tmp_path: Path) -> None:
-    """The invocation contract, pinned against git itself: the include's
-    "!"-prefixed helper line must not produce git's
-    "'credential-~/...' is not a git command" error (a helper value
-    without "!" or an absolute path gets "git credential-" prepended),
-    the org context must select the scoped token for a plain URL, and a
-    foreign embedded username must draw the helper's warning."""
+    """The full invocation contract, pinned against git itself: our
+    helper (registered as "!<path>" in credential.helper) serves get
+    for scoped, fallback, and foreign-username cases, and a rejected
+    auth leaves the store file BYTE-IDENTICAL while printing the
+    diagnosis -- the exact behaviors credential-store got wrong."""
+    import os
     import shutil
+    import subprocess
 
     if shutil.which("git") is None:  # pragma: no cover
         pytest.skip("git not available")
@@ -455,17 +520,35 @@ def test_generated_materials_work_with_real_git(tmp_path: Path) -> None:
     home.mkdir()
     (home / ".git-credentials").write_text(m.store_content)
     (home / ".agentworks-git-scopes.gitconfig").write_text(m.gitconfig_content)
-    helper = home / ".agentworks-git-cred-warn.sh"
-    helper.write_text(m.warn_helper_script)
+    helper = home / ".agentworks-git-cred-helper.sh"
+    helper.write_text(m.helper_script)
     helper.chmod(0o700)
     (home / ".gitconfig").write_text(
-        "[credential]\n\thelper = store\n"
+        "[credential]\n\thelper = !~/.agentworks-git-cred-helper.sh\n"
         "[include]\n\tpath = ~/.agentworks-git-scopes.gitconfig\n"
     )
+    env = {
+        **os.environ,
+        "HOME": str(home),
+        "XDG_CONFIG_HOME": str(home / ".config"),
+        "GIT_CONFIG_SYSTEM": "/dev/null",
+        "GIT_TERMINAL_PROMPT": "0",
+    }
 
-    # Plain URL under the scoped org: context injects the username,
-    # store supplies the scoped token, no warning, no invocation error.
-    rc, out, err = _fill(home, "url=https://github.com/acme/anything.git")
+    def run(op: str, url_line: str) -> tuple[int, str, str]:
+        result = subprocess.run(
+            ["git", "credential", op],
+            input=f"{url_line}\n\n",
+            capture_output=True,
+            text=True,
+            timeout=30,
+            env=env,
+        )
+        return result.returncode, result.stdout, result.stderr
+
+    # Plain URL under the scoped org: context injects the username, our
+    # helper supplies the scoped token, no warning, no invocation error.
+    rc, out, err = run("fill", "url=https://github.com/acme/anything.git")
     assert "is not a git command" not in err, err
     assert rc == 0, err
     assert "username=acme-bot" in out
@@ -473,13 +556,31 @@ def test_generated_materials_work_with_real_git(tmp_path: Path) -> None:
     assert "bypasses git credential scoping" not in err
 
     # Plain URL outside the org: the fallback line wins.
-    rc, out, err = _fill(home, "url=https://github.com/other/repo.git")
+    rc, out, err = run("fill", "url=https://github.com/other/repo.git")
     assert rc == 0, err
     assert "password=tokF" in out
 
-    # Foreign embedded username: the warn helper speaks, right above
-    # the (expected) auth failure.
-    rc, out, err = _fill(home, "url=https://alice@github.com/acme/x.git")
+    # Foreign embedded username: the helper warns; fill fails (no such
+    # credential; prompts disabled).
+    rc, out, err = run("fill", "url=https://alice@github.com/acme/x.git")
     assert "is not a git command" not in err, err
     assert "bypasses git credential scoping" in err
-    assert rc != 0  # store has no alice line; prompts disabled
+    assert rc != 0
+
+    # THE erase contract: a rejected credential leaves the store file
+    # byte-identical and produces the diagnosis (credential-store would
+    # have silently deleted the line here).
+    before = (home / ".git-credentials").read_text()
+    rc, out, err = run(
+        "reject",
+        "url=https://acme-bot:tokS@github.com",
+    )
+    assert rc == 0, err
+    assert (home / ".git-credentials").read_text() == before
+    assert "rejected git credential 'acme-bot'" in err
+    assert "secret 'git-token-acme-bot'" in err
+
+    # And the credential still serves afterward -- no self-destruct.
+    rc, out, err = run("fill", "url=https://github.com/acme/anything.git")
+    assert rc == 0, err
+    assert "password=tokS" in out

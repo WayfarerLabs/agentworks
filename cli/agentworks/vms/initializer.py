@@ -1143,7 +1143,9 @@ def resolve_git_credential_providers(
         if cred_config.provider == "azdo":
             org = cred_config.provider_config.get("org")
             assert isinstance(org, str)  # loader guarantees org for azdo
-            providers[name] = AzDOCredentialProvider(config_name=name, org=org, description=desc)
+            providers[name] = AzDOCredentialProvider(
+                config_name=name, org=org, description=desc, secret_name=cred_config.token
+            )
         elif cred_config.provider == "github":
             from agentworks.git_credentials.github import _validated_scope
 
@@ -1156,6 +1158,7 @@ def resolve_git_credential_providers(
             providers[name] = GitHubCredentialProvider(
                 config_name=name,
                 description=desc,
+                secret_name=cred_config.token,
                 repos=repos,
                 owner=scope_owner,
             )
@@ -2030,7 +2033,7 @@ def _configure_git_credentials(
         )
 
     from agentworks.git_credentials import (
-        GIT_CRED_WARN_HELPER_PATH,
+        GIT_CRED_HELPER_PATH,
         GIT_SCOPES_INCLUDE_PATH,
         build_credential_materials,
     )
@@ -2055,10 +2058,14 @@ def _configure_git_credentials(
             GIT_SCOPES_INCLUDE_PATH, materials.gitconfig_content, mode="600"
         )
         ts_target.write_file(
-            GIT_CRED_WARN_HELPER_PATH, materials.warn_helper_script, mode="700"
+            GIT_CRED_HELPER_PATH, materials.helper_script, mode="700"
         )
+        # Our helper REPLACES credential-store in the same config slot
+        # (single-value replace also migrates released VMs off 'store'
+        # on their next reinit -- store deletes the provisioned line on
+        # every rejected auth).
         ts_target.run(
-            "git config --global credential.helper store && "
+            f"git config --global --replace-all credential.helper '!{GIT_CRED_HELPER_PATH}' && "
             f"(git config --global --get-all include.path | grep -qxF '{GIT_SCOPES_INCLUDE_PATH}' "
             f"|| git config --global --add include.path '{GIT_SCOPES_INCLUDE_PATH}')",
         )

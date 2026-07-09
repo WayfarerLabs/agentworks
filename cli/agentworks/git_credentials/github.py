@@ -111,21 +111,26 @@ class GitHubCredentialProvider(GitCredentialProvider):
         config_name: str,
         description: str | None = None,
         *,
+        secret_name: str | None = None,
         repos: Sequence[str] = (),
         owner: str | None = None,
     ) -> None:
-        super().__init__(config_name, description)
+        super().__init__(config_name, description, secret_name=secret_name)
         self._repos = tuple(repos)
         self._owner = owner
 
-    def credential_lines(self, token: str) -> list[str]:
+    @property
+    def store_username(self) -> str:
+        # Scoped: the credential's resource name doubles as the store
+        # username -- the join key the gitconfig context sections select
+        # by (GitHub accepts any username with a PAT, verified against
+        # fine-grained tokens). Unscoped keeps the released value.
         if self._repos or self._owner:
-            # Scoped: the credential's resource name doubles as the
-            # store username -- the join key the gitconfig context
-            # sections select by. GitHub ignores the username when the
-            # password is a PAT.
-            return [f"https://{self._config_name}:{token}@github.com"]
-        return [f"https://x-access-token:{token}@github.com"]
+            return self._config_name
+        return "x-access-token"
+
+    def credential_lines(self, token: str) -> list[str]:
+        return [f"https://{self.store_username}:{token}@github.com"]
 
     def gitconfig_sections(self) -> list[tuple[str, str]]:
         if self._repos:

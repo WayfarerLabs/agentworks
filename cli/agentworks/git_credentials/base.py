@@ -63,9 +63,29 @@ class GitCredentialProvider(ABC):
             )
         return ()
 
-    def __init__(self, config_name: str, description: str | None = None) -> None:
+    def __init__(
+        self,
+        config_name: str,
+        description: str | None = None,
+        *,
+        secret_name: str | None = None,
+    ) -> None:
         self._config_name = config_name
         self._description = description
+        # The secret holding this credential's token (for diagnostics:
+        # the helper's rejection message names it). None only in legacy
+        # construction paths that never reach the helper generator.
+        self._secret_name = secret_name
+
+    @property
+    def secret_name(self) -> str:
+        return self._secret_name or f"git-token-{self._config_name}"
+
+    @property
+    def store_username(self) -> str:
+        """The username on this credential's store line -- the join key
+        the credential helper and context sections select by."""
+        return self._config_name
 
     @property
     def display_name(self) -> str:
