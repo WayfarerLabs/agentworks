@@ -161,7 +161,7 @@ def test_shell_vm_provisioner_flag_bypasses_tailscale_check(
         return t
 
     monkeypatch.setattr(
-        "agentworks.transports.provisioner_transport",
+        "agentworks.transports.native_transport",
         _stub_provisioner_factory,
     )
 
@@ -183,8 +183,8 @@ def test_shell_vm_provisioner_uses_provisioner_transport(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """When --provisioner is set, shell_vm must route through
-    ``transports.provisioner_transport`` (which calls
-    ``get_provisioner_for_vm().provisioner_transport``), NOT the canonical
+    ``transports.native_transport`` (fed by the bridge-dispatched
+    platform's ``native_transport``), NOT the canonical
     ``transports.transport`` (which would go via Tailscale)."""
     import contextlib
 
@@ -197,7 +197,9 @@ def test_shell_vm_provisioner_uses_provisioner_transport(
     provisioner_calls: list[tuple[str, object]] = []
 
     class _StubProvisioner:
-        def provisioner_transport(self, vm: object, *, config: object | None = None) -> object:
+        name = "stub"
+
+        def native_transport(self, vm: object, *, config: object | None = None) -> object:
             provisioner_calls.append((getattr(vm, "name", "?"), config))
             return _stub_target()
 
@@ -234,25 +236,25 @@ def test_shell_vm_provisioner_uses_provisioner_transport(
 # -- Typed-error wrapping for unavailable provisioner shells ------------------
 
 
-def test_provisioner_shell_target_wraps_notimplementederror(
+def test_provisioner_shell_target_wraps_missing_native_transport(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A NotImplementedError from the provisioner (e.g. Proxmox today) is
-    wrapped into a typed StateError so the CLI renders it as a one-liner
-    rather than leaking a Python traceback.
-
-    Uses a non-proxmox platform so the generic hint path is exercised; the
-    Proxmox-specific hint shape is tested separately below."""
+    """A ``None`` from the platform's ``native_transport`` (proxmox: the
+    one-shot guest-agent exec can't host a shell) is wrapped into a typed
+    StateError so the CLI renders it as a one-liner rather than leaking a
+    Python traceback."""
     import contextlib
 
-    from agentworks.transports import provisioner_transport as _provisioner_transport
+    from agentworks.transports import native_transport as _native_transport
     from agentworks.vms import manager as vm_manager
 
     db = _seed_db(tmp_path, platform="lima")
 
     class _UnsupportedProvisioner:
-        def provisioner_transport(self, vm: object, *, config: object | None = None) -> object:
-            raise NotImplementedError("provisioning transport not yet implemented.")
+        name = "stub"
+
+        def native_transport(self, vm: object, *, config: object | None = None) -> object | None:
+            return None
 
         @contextlib.contextmanager  # type: ignore[arg-type]
         def transient_route(self, vm: object):  # type: ignore[no-untyped-def]
@@ -265,33 +267,35 @@ def test_provisioner_shell_target_wraps_notimplementederror(
 
     vm = vm_manager._require_vm(db, "vm1")
     with contextlib.ExitStack() as stack, pytest.raises(StateError) as exc_info:
-        _provisioner_transport(db, vm, _make_config(), stack=stack)  # type: ignore[arg-type]
+        _native_transport(
+            vm, vm_manager.get_provisioner_for_vm(db, vm), _make_config(), stack=stack,
+        )  # type: ignore[arg-type]
 
     err = exc_info.value
     assert err.entity_kind == "vm"
-    # Generic platforms get the NotImplementedError's text as the hint.
-    assert "not yet implemented" in (err.hint or "")
+    assert "No native transport" in str(err)
     db.close()
 
 
 def test_provisioner_shell_target_proxmox_hint_points_at_web_console(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """On Proxmox specifically, the NotImplementedError wrapper substitutes
-    a Proxmox-specific hint pointing the operator at the web UI's serial
-    console. The guest agent's exec interface can't carry an interactive
-    session, so the web console is the realistic escape hatch and the
-    operator should hear that directly rather than the generic NIE text."""
+    """On Proxmox the ``None`` return carries a hint pointing the operator
+    at the web UI's serial console. The guest agent's exec interface can't
+    carry an interactive session, so the web console is the realistic
+    escape hatch and the operator should hear that directly."""
     import contextlib
 
-    from agentworks.transports import provisioner_transport as _provisioner_transport
+    from agentworks.transports import native_transport as _native_transport
     from agentworks.vms import manager as vm_manager
 
     db = _seed_db(tmp_path, platform="proxmox")
 
     class _ProxmoxProvisioner:
-        def provisioner_transport(self, vm: object, *, config: object | None = None) -> object:
-            raise NotImplementedError("Proxmox provisioning transport not yet implemented.")
+        name = "proxmox"
+
+        def native_transport(self, vm: object, *, config: object | None = None) -> object | None:
+            return None
 
         @contextlib.contextmanager  # type: ignore[arg-type]
         def transient_route(self, vm: object):  # type: ignore[no-untyped-def]
@@ -304,7 +308,9 @@ def test_provisioner_shell_target_proxmox_hint_points_at_web_console(
 
     vm = vm_manager._require_vm(db, "vm1")
     with contextlib.ExitStack() as stack, pytest.raises(StateError) as exc_info:
-        _provisioner_transport(db, vm, _make_config(), stack=stack)  # type: ignore[arg-type]
+        _native_transport(
+            vm, vm_manager.get_provisioner_for_vm(db, vm), _make_config(), stack=stack,
+        )  # type: ignore[arg-type]
 
     err = exc_info.value
     assert err.entity_kind == "vm"
@@ -327,16 +333,16 @@ def test_provisioner_shell_target_attaches_and_registers_detach_for_azure(
     import contextlib
 
     from agentworks.transports import SSHTransport, Transport
-    from agentworks.transports import provisioner_transport as _provisioner_transport
+    from agentworks.transports import native_transport as _native_transport
     from agentworks.vms import manager as vm_manager
-    from agentworks.vms.provisioners.azure import AzureProvisioner
+    from agentworks.vms.platforms.azure import AzurePlatform
 
     db = _seed_db(tmp_path)
 
     attach_calls: list[str] = []
     detach_calls: list[str] = []
 
-    class _FakeAzureProvisioner(AzureProvisioner):
+    class _FakeAzureProvisioner(AzurePlatform):
         # Override the constructor so we don't need a real Azure config.
         def __init__(self) -> None:  # noqa: D401, ANN001
             pass
@@ -348,7 +354,7 @@ def test_provisioner_shell_target_attaches_and_registers_detach_for_azure(
         def detach_public_ip(self, vm: object) -> None:
             detach_calls.append(getattr(vm, "name", "?"))
 
-        def provisioner_transport(self, vm: object, *, config: object | None = None) -> Transport:
+        def native_transport(self, vm: object, *, config: object | None = None) -> Transport:
             # The factory probes ``target.run('echo ok', ...)``; the real
             # SSHTransport.run would invoke a subprocess, so we wrap one
             # whose ``run`` is a stub. Subclass so isinstance(target,
@@ -366,7 +372,9 @@ def test_provisioner_shell_target_attaches_and_registers_detach_for_azure(
 
     vm = vm_manager._require_vm(db, "vm1")
     with contextlib.ExitStack() as stack:
-        target = _provisioner_transport(db, vm, _make_config(), stack=stack)  # type: ignore[arg-type]
+        target = _native_transport(
+            vm, vm_manager.get_provisioner_for_vm(db, vm), _make_config(), stack=stack,
+        )  # type: ignore[arg-type]
         # Attach must have run inside the stack scope.
         assert attach_calls == ["vm1"]
         # Detach must NOT have run yet; it should fire on stack exit.
@@ -394,14 +402,14 @@ def test_provisioner_shell_target_detaches_on_exception_for_azure(
     import contextlib
 
     from agentworks.transports import Transport
-    from agentworks.transports import provisioner_transport as _provisioner_transport
+    from agentworks.transports import native_transport as _native_transport
     from agentworks.vms import manager as vm_manager
-    from agentworks.vms.provisioners.azure import AzureProvisioner
+    from agentworks.vms.platforms.azure import AzurePlatform
 
     db = _seed_db(tmp_path)
     detach_calls: list[str] = []
 
-    class _AzureRaisesAfterAttach(AzureProvisioner):
+    class _AzureRaisesAfterAttach(AzurePlatform):
         def __init__(self) -> None:  # noqa: D401
             pass
 
@@ -411,7 +419,7 @@ def test_provisioner_shell_target_detaches_on_exception_for_azure(
         def detach_public_ip(self, vm: object) -> None:
             detach_calls.append(getattr(vm, "name", "?"))
 
-        def provisioner_transport(self, vm: object, *, config: object | None = None) -> Transport:
+        def native_transport(self, vm: object, *, config: object | None = None) -> Transport:
             raise RuntimeError("simulated post-attach failure")
 
     monkeypatch.setattr(
@@ -422,7 +430,9 @@ def test_provisioner_shell_target_detaches_on_exception_for_azure(
     vm = vm_manager._require_vm(db, "vm1")
     with contextlib.ExitStack() as stack:
         with pytest.raises(RuntimeError, match="simulated post-attach failure"):
-            _provisioner_transport(db, vm, _make_config(), stack=stack)  # type: ignore[arg-type]
+            _native_transport(
+                vm, vm_manager.get_provisioner_for_vm(db, vm), _make_config(), stack=stack,
+            )  # type: ignore[arg-type]
         # ExitStack still open; detach fires on stack exit, not before.
         assert detach_calls == []
 
@@ -444,7 +454,7 @@ def test_provisioner_shell_target_retries_reachability_probe(
 
     from agentworks.ssh import SSHError
     from agentworks.transports import SSHTransport
-    from agentworks.transports import provisioner_transport as _provisioner_transport
+    from agentworks.transports import native_transport as _native_transport
     from agentworks.vms import manager as vm_manager
 
     db = _seed_db(tmp_path)
@@ -466,7 +476,9 @@ def test_provisioner_shell_target_retries_reachability_probe(
         return SimpleNamespace(returncode=0, stdout="ok", stderr="", ok=True)
 
     class _FlakyProvisioner:
-        def provisioner_transport(self, vm: object, *, config: object | None = None) -> object:
+        name = "stub"
+
+        def native_transport(self, vm: object, *, config: object | None = None) -> object:
             t = SSHTransport(host="203.0.113.42")
             t.run = flaky_run  # type: ignore[method-assign, assignment]
             return t
@@ -482,7 +494,9 @@ def test_provisioner_shell_target_retries_reachability_probe(
 
     vm = vm_manager._require_vm(db, "vm1")
     with contextlib.ExitStack() as stack:
-        target = _provisioner_transport(db, vm, _make_config(), stack=stack)  # type: ignore[arg-type]
+        target = _native_transport(
+            vm, vm_manager.get_provisioner_for_vm(db, vm), _make_config(), stack=stack,
+        )  # type: ignore[arg-type]
 
     # The probe retried until the 4th attempt succeeded; the function
     # returned the now-reachable target rather than raising.
@@ -505,13 +519,15 @@ def test_provisioner_shell_target_raises_defensively_on_empty_host(
     import contextlib
 
     from agentworks.transports import SSHTransport
-    from agentworks.transports import provisioner_transport as _provisioner_transport
+    from agentworks.transports import native_transport as _native_transport
     from agentworks.vms import manager as vm_manager
 
     db = _seed_db(tmp_path)
 
     class _BrokenProvisioner:
-        def provisioner_transport(self, vm: object, *, config: object | None = None) -> object:
+        name = "stub"
+
+        def native_transport(self, vm: object, *, config: object | None = None) -> object:
             return SSHTransport(host="")
 
         @contextlib.contextmanager  # type: ignore[arg-type]
@@ -525,7 +541,9 @@ def test_provisioner_shell_target_raises_defensively_on_empty_host(
 
     vm = vm_manager._require_vm(db, "vm1")
     with contextlib.ExitStack() as stack, pytest.raises(StateError) as exc_info:
-        _provisioner_transport(db, vm, _make_config(), stack=stack)  # type: ignore[arg-type]
+        _native_transport(
+            vm, vm_manager.get_provisioner_for_vm(db, vm), _make_config(), stack=stack,
+        )  # type: ignore[arg-type]
 
     err = exc_info.value
     assert err.entity_kind == "vm"

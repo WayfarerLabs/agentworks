@@ -6,7 +6,7 @@ import contextlib
 from typing import TYPE_CHECKING, NamedTuple
 
 from agentworks import output
-from agentworks.config import VALID_PLATFORMS, validate_admin_username, validate_name
+from agentworks.config import validate_admin_username, validate_name
 from agentworks.db import InitStatus, ProvisioningStatus, VMStatus
 from agentworks.errors import (
     AlreadyExistsError,
@@ -14,7 +14,7 @@ from agentworks.errors import (
     ConnectivityError,
     ExternalError,
     NotFoundError,
-    ProvisionerError,
+    ProvisioningError,
     StateError,
     UserAbort,
     ValidationError,
@@ -38,7 +38,7 @@ if TYPE_CHECKING:
     from agentworks.resources import Registry
     from agentworks.secrets import SecretTarget
     from agentworks.secrets.base import SecretDecl
-    from agentworks.vms.base import VMProvisioner
+    from agentworks.vms.base import VMPlatform
     from agentworks.vms.templates import ResolvedVMTemplate
 
 
@@ -177,27 +177,22 @@ def keep_vms_active(
         yield
 
 
-def get_provisioner(platform: str, vm_host_ssh: str | None = None) -> VMProvisioner:
-    """Get the appropriate provisioner for a platform."""
-    if platform == "lima":
-        from agentworks.vms.provisioners.lima import LimaProvisioner
+def get_provisioner(platform: str, vm_host_ssh: str | None = None) -> VMPlatform:
+    """PHASE-1 BRIDGE (vm-sites SDD): construct a new-shape platform
+    from the legacy dispatch inputs so window-phase callers keep working.
+    The manager-rewiring phase replaces every caller with the bound
+    platform from ``agentworks.vms.sites.platform_for`` and deletes this.
+    """
+    from agentworks.vms.platforms import VM_PLATFORM_REGISTRY
 
-        return LimaProvisioner(vm_host_ssh=vm_host_ssh)
-    elif platform == "azure":
-        from agentworks.vms.provisioners.azure import AzureProvisioner
-
-        return AzureProvisioner()
-    elif platform == "wsl2":
-        from agentworks.vms.provisioners.wsl2 import WSL2Provisioner
-
-        return WSL2Provisioner()
-    elif platform == "proxmox":
-
-        # ProxmoxProvisioner requires config; caller must use create_vm flow
-        raise ValueError("Use create_vm for proxmox provisioning")
-    else:
+    cls = VM_PLATFORM_REGISTRY.get(platform)
+    if cls is None:
         msg = f"Unknown platform: {platform}"
         raise ValueError(msg)
+    platform_config: dict[str, object] = {}
+    if platform == "lima" and vm_host_ssh:
+        platform_config["vm_host"] = vm_host_ssh
+    return cls(platform, platform_config)
 
 
 def create_vm(
@@ -226,10 +221,12 @@ def create_vm(
 
     vm_tmpl = resolve_template(registry, template)
 
-    # Resolve defaults
-    platform = platform or config.defaults.platform or "lima"
-    if platform not in VALID_PLATFORMS:
-        raise ValidationError(f"invalid platform '{platform}'", entity_kind="vm")
+    # Resolve the target site. PHASE-1 BRIDGE (vm-sites SDD): the CLI
+    # still spells the flag --platform; its value is a site name (the
+    # bundled lima/wsl2 sites, the legacy [azure]/[proxmox] sites, or
+    # any operator-declared site). Selection precedence per SDD R2:
+    # flag, then template, then defaults.site, then the built-in lima.
+    site = platform or vm_tmpl.site or config.defaults.site or "lima"
 
     vm_name = name
     validate_name(vm_name)
@@ -241,11 +238,13 @@ def create_vm(
             entity_name=vm_name,
         )
 
-    # Resolve VM host for Lima
+    # Resolve VM host for Lima. PHASE-1 BRIDGE: the legacy --vm-host
+    # flag still selects a vm_hosts row; the CLI-surface phase retires
+    # it in favor of remote-Lima sites.
     vm_host_ssh: str | None = None
     vm_host_name: str | None = None
-    if platform == "lima":
-        vm_host_name = vm_host or config.defaults.vm_host
+    if site == "lima":
+        vm_host_name = vm_host
         if vm_host_name:
             host_row = db.get_vm_host(vm_host_name)
             if host_row is None:
@@ -255,14 +254,6 @@ def create_vm(
                     entity_name=vm_host_name,
                 )
             vm_host_ssh = host_row.ssh_host
-
-    # Azure config validation
-    if platform == "azure" and config.azure is None:
-        raise ConfigError("[azure] config section required for azure platform")
-
-    # Proxmox config validation
-    if platform == "proxmox" and config.proxmox is None:
-        raise ConfigError("[proxmox] config section required for proxmox platform")
 
     # Resolve resource settings: CLI flag > template > built-in default
     resolved_cpus = cpus if cpus is not None else vm_tmpl.cpus
@@ -287,10 +278,12 @@ def create_vm(
         config, registry, providers, vm_name, vm_tmpl
     )
 
-    # Create DB record with as-provisioned resource values
+    # Create DB record with as-provisioned resource values (the legacy
+    # platform column holds the site name until the DB migration renames
+    # it).
     db.insert_vm(
         vm_name,
-        platform=platform,
+        platform=site,
         vm_host_name=vm_host_name,
         template=vm_tmpl.name,
         cpus=resolved_cpus,
@@ -314,80 +307,60 @@ def create_vm(
                 f"rollback: failed to delete DB record for vm '{vm_name}': {cleanup_err}"
             )
 
+    # Bind the site's platform and dispatch. PHASE-1 BRIDGE: the legacy
+    # --vm-host input overrides the (local) lima site's config; the R11
+    # hostname scheme and the system slug land in the slug-and-naming
+    # phase (the interim hostname keeps today's {site}--{name} shape);
+    # proxmox config secrets join the resolve pass in the manager-
+    # rewiring phase.
+    from agentworks.vms.base import ProvisionRequest
+    from agentworks.vms.sites import resolve_site
+
+    platform_obj = (
+        get_provisioner(site, vm_host_ssh)
+        if vm_host_ssh
+        else resolve_site(site, registry)
+    )
+
+    request = ProvisionRequest(
+        vm_name=vm_name,
+        hostname=f"{site}--{vm_name}",
+        system_slug=None,
+        admin_username=resolved_admin_username,
+        ssh_public_key=config.operator.ssh_public_key.read_text().strip(),
+        ssh_private_key=config.operator.ssh_private_key,
+        tailscale_auth_key=tailscale_auth_key,
+        cpus=resolved_cpus,
+        memory_gib=resolved_memory,
+        disk_gib=resolved_disk,
+        swap_gib=vm_tmpl.swap,
+        azure_vm_size=resolved_azure_size,
+    )
+
     try:
-        if platform == "lima":
-            from agentworks.vms.provisioners.lima import LimaProvisioner
-
-            lima = LimaProvisioner(vm_host_ssh=vm_host_ssh)
-            result = lima.create(
-                vm_name,
-                config,
-                cpus=resolved_cpus,
-                memory=resolved_memory,
-                disk=resolved_disk,
-                swap=vm_tmpl.swap,
-                admin_username=resolved_admin_username,
-                tailscale_auth_key=tailscale_auth_key,
-            )
-        elif platform == "azure":
-            from agentworks.vms.provisioners.azure import AzureProvisioner
-
-            azure = AzureProvisioner()
-            result = azure.create(
-                vm_name,
-                config,
-                azure_vm_size=resolved_azure_size,
-                disk=resolved_disk,
-                swap=vm_tmpl.swap,
-                admin_username=resolved_admin_username,
-                tailscale_auth_key=tailscale_auth_key,
-            )
-        elif platform == "wsl2":
-            from agentworks.vms.provisioners.wsl2 import WSL2Provisioner
-
-            wsl2 = WSL2Provisioner()
-            result = wsl2.create(
-                vm_name,
-                config,
-                swap=vm_tmpl.swap,
-                admin_username=resolved_admin_username,
-            )
-        elif platform == "proxmox":
-            from agentworks.vms.provisioners.proxmox import ProxmoxProvisioner
-
-            proxmox = ProxmoxProvisioner(config.proxmox)  # type: ignore[arg-type]
-            result = proxmox.create(
-                vm_name,
-                config,
-                cpus=resolved_cpus,
-                memory=resolved_memory,
-                disk=resolved_disk,
-                swap=vm_tmpl.swap,
-                admin_username=resolved_admin_username,
-                tailscale_auth_key=tailscale_auth_key,
-            )
-        else:
-            msg = f"Unknown platform: {platform}"
-            raise ValueError(msg)
+        result = platform_obj.create(request)
     except KeyboardInterrupt:
         output.warn(f"Cancelling vm create '{vm_name}'... rolling back.")
         _safe_delete_vm_row()
         raise
     except Exception as e:
         _safe_delete_vm_row()
-        raise ProvisionerError(
+        raise ProvisioningError(
             f"provisioning failed: {e}",
             entity_kind="vm",
             entity_name=vm_name,
         ) from e
 
-    # Update DB with platform-specific metadata
-    if result.azure_resource_id:
-        db.update_vm_azure_resource_id(vm_name, result.azure_resource_id)
-    if result.wsl_distro_name:
-        db.update_vm_wsl_distro_name(vm_name, result.wsl_distro_name)
-    if result.proxmox_vmid:
-        db.update_vm_proxmox_vmid(vm_name, result.proxmox_vmid)
+    # Persist the platform metadata. PHASE-1 BRIDGE: the known keys map
+    # back onto the legacy columns until the DB migration adds the real
+    # platform_metadata column (whose backfill hooks invert this map).
+    metadata = result.platform_metadata
+    if metadata.get("resource_id"):
+        db.update_vm_azure_resource_id(vm_name, metadata["resource_id"])
+    if metadata.get("distro_name"):
+        db.update_vm_wsl_distro_name(vm_name, metadata["distro_name"])
+    if metadata.get("vmid"):
+        db.update_vm_proxmox_vmid(vm_name, metadata["vmid"])
 
     # -- Initialization --
     # If this fails, the VM exists on the remote host and may be debuggable.
@@ -408,7 +381,7 @@ def create_vm(
             vm_tmpl,
             admin,
             vm_name,
-            exec_target=result.provisioner_transport,
+            exec_target=result.native_transport,
             providers=providers,
             admin_username=resolved_admin_username,
             tailscale_auth_key=tailscale_auth_key,
@@ -434,7 +407,7 @@ def create_vm(
 
         vm = db.get_vm(vm_name)
         if vm is not None and vm.provisioning_status == ProvisioningStatus.FAILED.value:
-            raise ProvisionerError(
+            raise ProvisioningError(
                 f"provisioning failed: {e}{log_hint}",
                 entity_kind="vm",
                 entity_name=vm_name,
@@ -626,7 +599,7 @@ def shell_vm(
 
     from agentworks.env import ResourceContext, compose_env
     from agentworks.secrets import resolve_for_command
-    from agentworks.transports import provisioner_transport, transport
+    from agentworks.transports import native_transport, transport
 
     vm = _require_vm(db, name)
     # Init failure warns instead of blocks: shelling into a partially-
@@ -690,7 +663,9 @@ def shell_vm(
     with contextlib.ExitStack() as stack:
         stack.enter_context(keep_vm_active(db, config, vm))
         target = (
-            provisioner_transport(db, vm, config, stack=stack)
+            native_transport(
+                vm, get_provisioner_for_vm(db, vm, config), config, stack=stack
+            )
             if provisioner
             else transport(vm, config)
         )
@@ -912,7 +887,7 @@ def rekey_vm(
 
     from agentworks.ssh import SSHError
     from agentworks.ssh_config import sync_ssh_config
-    from agentworks.transports import provisioner_transport, transport, wait_for_reconnect
+    from agentworks.transports import native_transport, transport, wait_for_reconnect
 
     vm = _require_vm(db, name)
     _guard_failed_vm(vm)
@@ -959,7 +934,9 @@ def rekey_vm(
         # transport builder and the 6-attempt reachability probe. The
         # caller-supplied ExitStack scopes the transient state to the
         # duration of the rekey.
-        exec_target = provisioner_transport(db, vm, config, stack=_stack)
+        exec_target = native_transport(
+            vm, get_provisioner_for_vm(db, vm, config), config, stack=_stack
+        )
 
         # Restart, logout, login, restart. The initial restart clears any
         # stale daemon state (a previous interrupted rekey can leave the
@@ -1215,17 +1192,19 @@ def reinit_vm(
 def _tailscale_logout(db: Database, vm: VMRow, config: Config) -> None:
     """Best-effort: deregister from Tailscale via the provisioning transport.
 
-    Uses ``provisioner_transport(db, vm, config, stack=...)`` so the
+    Uses ``native_transport(vm, platform, config, stack=...)`` so the
     Azure attach/detach lifecycle and the reachability probe are
     composed polymorphically. Platforms whose factory raises (Proxmox)
     are surfaced as a typed StateError, which we catch and warn.
     """
-    from agentworks.transports import provisioner_transport
+    from agentworks.transports import native_transport
 
     output.info("Deregistering from Tailscale...")
     try:
         with contextlib.ExitStack() as stack:
-            exec_target = provisioner_transport(db, vm, config, stack=stack)
+            exec_target = native_transport(
+                vm, get_provisioner_for_vm(db, vm, config), config, stack=stack
+            )
 
             # Fire and forget: tailscale down + logout can disrupt
             # networking on the VM, killing SSH-based transports before
@@ -1546,15 +1525,12 @@ def _require_vm(db: Database, name: str) -> VMRow:
     return vm
 
 
-def get_provisioner_for_vm(db: Database, vm: VMRow, config: Config | None = None) -> VMProvisioner:
-    if vm.platform == "proxmox":
-        from agentworks.vms.provisioners.proxmox import ProxmoxProvisioner
-
-        if config is None:
-            from agentworks.config import load_config
-            config = load_config()
-        return ProxmoxProvisioner(config.proxmox)  # type: ignore[arg-type]
-
+def get_provisioner_for_vm(db: Database, vm: VMRow, config: Config | None = None) -> VMPlatform:
+    """PHASE-1 BRIDGE (vm-sites SDD): see ``get_provisioner``. Proxmox
+    rows dispatch to a config-less platform whose lifecycle ops fail
+    until the manager-rewiring phase threads the site's config and
+    token secret through the composition root.
+    """
     vm_host_ssh: str | None = None
     if vm.vm_host_name:
         host = db.get_vm_host(vm.vm_host_name)
@@ -1694,7 +1670,7 @@ def _ensure_tailscale(
     vm: VMRow,
 ) -> None:
     """After starting a VM, verify Tailscale connectivity and rejoin if needed."""
-    from agentworks.transports import provisioner_transport, transport, wait_for_reconnect
+    from agentworks.transports import native_transport, transport, wait_for_reconnect
 
     # Refresh VM row in case tailscale_host was cleared on stop
     vm = _require_vm(db, vm.name)
@@ -1731,7 +1707,9 @@ def _ensure_tailscale(
     # native transport.
     with contextlib.ExitStack() as _stack:
         verify_tailscale_available()
-        exec_target = provisioner_transport(db, vm, config, stack=_stack)
+        exec_target = native_transport(
+            vm, get_provisioner_for_vm(db, vm, config), config, stack=_stack
+        )
         rejoin_tailscale(db, vm.name, exec_target, auth_key=auth_key)
 
     # After the stack unwinds (Azure detach has fired), wait for

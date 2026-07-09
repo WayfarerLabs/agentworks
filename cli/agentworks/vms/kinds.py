@@ -1,6 +1,8 @@
-"""Kind registrations for the vms domain: ``vm-template`` and
+"""Kind registrations for the vms domain: ``vm-template``,
 ``admin-template`` (the admin user is a per-VM concept -- provisioned by
-``vms/initializer``, one per VM; its ``instances()`` iterates VMs).
+``vms/initializer``, one per VM; its ``instances()`` iterates VMs),
+``vm-site`` (the declarable "configured place to create VMs"), and
+``vm-platform`` (the capability kind backing sites).
 
 Lives in the ``vms`` domain package next to the code that implements VM
 templates; ``agentworks.resources.kinds.__init__`` imports this module so
@@ -140,3 +142,89 @@ class _AdminTemplateKind:
 
 
 KIND_REGISTRY["admin-template"] = _AdminTemplateKind()
+
+
+@dataclass(frozen=True)
+class VMPlatformEntry:
+    """A name-keyed marker for one VM platform capability (``"lima"``,
+    ``"azure"``, ...).
+
+    The actual platform class (``LimaPlatform``, ``AzurePlatform``)
+    lives in ``agentworks.vms.platforms``; this row is what
+    ``vm-site`` ``spec.platform`` references resolve against in the
+    framework.
+    """
+
+    name: str
+    description: str = ""
+    origin: Origin | None = None
+    references: tuple[Any, ...] = ()
+
+
+@dataclass(frozen=True)
+class _VMPlatformKind:
+    """Implementation of ``ResourceKind`` for ``"vm-platform"``."""
+
+    kind: str = "vm-platform"
+    description: str = "Capability for running VMs on one backend kind (lima, wsl2, azure, proxmox)"
+    miss_policy: Literal["auto-declare", "error"] = "error"
+    auto_declare_names: frozenset[str] | None = None
+    category: Literal["declarable", "capability"] = "capability"
+    builtin_override: Literal["allow", "reserved"] = "reserved"
+
+    def synthesize(self, references: Sequence[ResourceReference]) -> Any:
+        # Unreachable under the error miss policy; honors the
+        # empty-references contract via the typed framework error.
+        from agentworks.resources.kind import NoUnreferencedDefaultError
+
+        raise NoUnreferencedDefaultError(
+            "the vm-platform kind has miss_policy='error'; synthesize "
+            "should never be invoked (the framework raises ConfigError "
+            "first)"
+        )
+
+
+KIND_REGISTRY["vm-platform"] = _VMPlatformKind()
+
+
+@dataclass(frozen=True)
+class _VMSiteKind:
+    """Implementation of ``ResourceKind`` for ``"vm-site"``."""
+
+    kind: str = "vm-site"
+    description: str = "Configured places to create VMs (a platform plus its settings)"
+    # Error, never auto-declare: a typo'd site reference must not
+    # synthesize a site.
+    miss_policy: Literal["auto-declare", "error"] = "error"
+    auto_declare_names: frozenset[str] | None = None
+    category: Literal["declarable", "capability"] = "declarable"
+    # The bundled lima/wsl2 site names are reserved: an operator
+    # manifest redeclaring one errors with the declare-a-sibling hint.
+    builtin_override: Literal["allow", "reserved"] = "reserved"
+
+    def synthesize(self, references: Sequence[ResourceReference]) -> Any:
+        from agentworks.resources.kind import NoUnreferencedDefaultError
+
+        raise NoUnreferencedDefaultError(
+            "the vm-site kind has no reserved default name; synthesize "
+            "is never invoked under the error miss policy"
+        )
+
+    def instances(
+        self, db: Database, registry: Registry, resource: Any
+    ) -> Iterable[InstanceRef]:
+        """Every VM whose ``site`` column names this site.
+
+        PHASE-1 BRIDGE (vm-sites SDD): reads the legacy ``platform``
+        column until the DB migration renames it to ``site`` (the
+        stored values are already the right site names for every
+        non-remote-Lima row).
+        """
+        name = resource.name
+        for vm in db.list_vms():
+            site = getattr(vm, "site", None) or getattr(vm, "platform", None)
+            if site == name:
+                yield InstanceRef(instance_kind="vm", instance_name=vm.name)
+
+
+KIND_REGISTRY["vm-site"] = _VMSiteKind()

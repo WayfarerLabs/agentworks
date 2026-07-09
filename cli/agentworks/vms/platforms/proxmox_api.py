@@ -14,10 +14,10 @@ import urllib.parse
 import urllib.request
 from typing import Any
 
-from agentworks.errors import ProvisionerError
+from agentworks.errors import ProvisioningError
 
 
-class ProxmoxAPIError(ProvisionerError):
+class ProxmoxAPIError(ProvisioningError):
     """A Proxmox API call failed."""
 
 
@@ -94,6 +94,11 @@ class ProxmoxAPI:
         return int(result)
 
     # -- VM operations ---------------------------------------------------------
+
+    def list_vms(self, node: str) -> list[dict[str, Any]]:
+        """List the VMs on a node (GET /nodes/{node}/qemu)."""
+        result = self._request("GET", f"/nodes/{node}/qemu")
+        return result if isinstance(result, list) else []
 
     def clone_vm(
         self,

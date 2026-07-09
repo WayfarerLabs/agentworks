@@ -9,7 +9,7 @@ from __future__ import annotations
 import json
 import sqlite3
 from contextlib import contextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import Enum
 from typing import TYPE_CHECKING, TypedDict
 
@@ -96,6 +96,22 @@ class VMRow:
     admin_username: str
     created_at: str
     last_seen_at: str | None
+    # PHASE-1 BRIDGE (vm-sites SDD): the platform layer reads
+    # platform_metadata; the DB-migration phase adds the backing column
+    # (backfilled per platform), renames vms.platform to vms.site, and
+    # makes this a real loaded field. Until then rows carry an empty
+    # mapping, so metadata-reading ops on real rows fail with the
+    # platform's typed incomplete-row error rather than AttributeError.
+    platform_metadata: dict[str, str] = field(default_factory=dict)
+
+    @property
+    def site(self) -> str:
+        """The VM's site name. PHASE-1 BRIDGE: aliases the legacy
+        ``platform`` column, whose stored values are already the right
+        site names for every non-remote-Lima row; the DB migration
+        renames the column and retires this property.
+        """
+        return self.platform
 
 
 @dataclass
@@ -1460,7 +1476,32 @@ def _to_vm(row: sqlite3.Row) -> VMRow:
         admin_username=row["admin_username"],
         created_at=row["created_at"],
         last_seen_at=row["last_seen_at"],
+        platform_metadata=_legacy_platform_metadata(row),
     )
+
+
+def _legacy_platform_metadata(row: sqlite3.Row) -> dict[str, str]:
+    """PHASE-1 BRIDGE (vm-sites SDD): derive the platform-metadata dict
+    from the legacy columns so the platform layer's read paths work on
+    real rows before the DB migration lands. This mirrors (and is
+    retired by) the migration's per-platform backfill hooks; it lives
+    inline because ``db`` cannot import ``vms.platforms`` (cycle).
+    """
+    site = row["platform"]
+    metadata: dict[str, str] = {}
+    if site == "azure":
+        if row["azure_resource_id"]:
+            metadata["resource_id"] = row["azure_resource_id"]
+    elif site == "wsl2":
+        metadata["distro_name"] = row["wsl_distro_name"] or row["name"]
+    elif site == "proxmox":
+        if row["proxmox_vmid"]:
+            metadata["vmid"] = str(row["proxmox_vmid"])
+    else:
+        # Lima sites (the bundled local one or any vm_hosts-backed
+        # remote): the instance name IS the VM name pre-slug.
+        metadata["instance_name"] = row["name"]
+    return metadata
 
 
 def _to_workspace(row: sqlite3.Row) -> WorkspaceRow:

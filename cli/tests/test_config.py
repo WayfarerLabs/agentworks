@@ -295,7 +295,10 @@ def test_extra_ssh_public_keys_defaults_empty(config_dir: Path) -> None:
     assert cfg.operator.extra_ssh_public_keys == []
 
 
-# -- Proxmox config tests (table-driven) --------------------------------------
+# -- Legacy [proxmox] vm-site tests (table-driven) ----------------------------
+# The section loads as the vm-site/proxmox resource (dual-path, vm-sites
+# SDD R2); the flat keys nest into platform_config at the boundary, and
+# the proxmox platform capability validates the assembled blob.
 
 _PROXMOX_TEST_CASES: list[dict[str, Any]] = [
     {
@@ -312,13 +315,17 @@ _PROXMOX_TEST_CASES: list[dict[str, Any]] = [
         """,
         "expect_error": None,
         "check": lambda cfg: (
-            cfg.proxmox.api_url == "https://pve.example.com:8006"
-            and cfg.proxmox.node == "pve"
-            and cfg.proxmox.token_id == "agentworks@pam!agentworks"
-            and cfg.proxmox.template_vmid == 9000
-            and cfg.proxmox.storage == "zfs-pool"
-            and cfg.proxmox.bridge == "vmbr1"
-            and cfg.proxmox.verify_ssl is False
+            cfg.vm_sites["proxmox"].platform == "proxmox"
+            and cfg.vm_sites["proxmox"].platform_config
+            == {
+                "api_url": "https://pve.example.com:8006",
+                "node": "pve",
+                "token_id": "agentworks@pam!agentworks",
+                "template_vmid": 9000,
+                "storage": "zfs-pool",
+                "bridge": "vmbr1",
+                "verify_ssl": False,
+            }
         ),
     },
     {
@@ -331,10 +338,13 @@ _PROXMOX_TEST_CASES: list[dict[str, Any]] = [
             template_vmid = 100
         """,
         "expect_error": None,
+        # Optional keys are absent from the blob when omitted; the
+        # platform applies its own defaults (storage local-lvm, bridge
+        # vmbr0, verify_ssl True) at use.
         "check": lambda cfg: (
-            cfg.proxmox.storage == "local-lvm"
-            and cfg.proxmox.bridge == "vmbr0"
-            and cfg.proxmox.verify_ssl is True
+            "storage" not in cfg.vm_sites["proxmox"].platform_config
+            and "bridge" not in cfg.vm_sites["proxmox"].platform_config
+            and "verify_ssl" not in cfg.vm_sites["proxmox"].platform_config
         ),
     },
     {
@@ -346,7 +356,7 @@ _PROXMOX_TEST_CASES: list[dict[str, Any]] = [
             template_vmid = 9000
 
         """,
-        "expect_error": "proxmox.api_url is required",
+        "expect_error": r"\[proxmox\].api_url is required",
         "check": None,
     },
     {
@@ -358,7 +368,7 @@ _PROXMOX_TEST_CASES: list[dict[str, Any]] = [
             template_vmid = 9000
 
         """,
-        "expect_error": "proxmox.node is required",
+        "expect_error": r"\[proxmox\].node is required",
         "check": None,
     },
     {
@@ -370,7 +380,7 @@ _PROXMOX_TEST_CASES: list[dict[str, Any]] = [
             template_vmid = 9000
 
         """,
-        "expect_error": "proxmox.token_id is required",
+        "expect_error": r"\[proxmox\].token_id is required",
         "check": None,
     },
     {
@@ -382,7 +392,7 @@ _PROXMOX_TEST_CASES: list[dict[str, Any]] = [
             token_id = "u@p!t"
 
         """,
-        "expect_error": "proxmox.template_vmid is required",
+        "expect_error": r"\[proxmox\].template_vmid is required",
         "check": None,
     },
 ]
@@ -418,7 +428,7 @@ def test_proxmox_config(tmp_path: Path, case: dict) -> None:
 
 def test_proxmox_section_absent(config_dir: Path) -> None:
     cfg = load_config(config_dir)
-    assert cfg.proxmox is None
+    assert "proxmox" not in cfg.vm_sites
 
 
 def test_user_section_deprecated_alias(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:

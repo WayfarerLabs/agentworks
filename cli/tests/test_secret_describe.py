@@ -426,9 +426,13 @@ def test_resolution_preview_not_available_when_no_backend_attempts(
     config = load_config(cfg, warn_issues=False)
 
     from agentworks.manifests import builtin as builtin_manifests
+    from agentworks.vms import platforms as vm_platforms
 
     registry = Registry.empty()
     builtin_manifests.publish_to(registry)
+    # The bundled vm-site rows reference the vm-platform capability
+    # rows, so the manual sequence needs the platform publisher too.
+    vm_platforms.publish_to(registry)
     publish_backends(registry)
     decl = SecretDecl(
         name="api-key",

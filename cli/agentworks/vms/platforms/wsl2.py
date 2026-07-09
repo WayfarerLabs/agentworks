@@ -1,4 +1,4 @@
-"""WSL2 provisioner -- imports Debian distros on Windows."""
+"""The WSL2 VM platform -- imports Debian distros on Windows."""
 
 from __future__ import annotations
 
@@ -10,15 +10,16 @@ import subprocess
 import sys
 import urllib.request
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, ClassVar
 
 from agentworks import output
 from agentworks.db import VMStatus
+from agentworks.errors import StateError
 from agentworks.transports import WSL2Transport, transport, wait_for_reconnect
-from agentworks.vms.base import ProvisionResult, VMProvisioner
+from agentworks.vms.base import ProvisionRequest, ProvisionResult, VMPlatform
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator
+    from collections.abc import Iterator, Mapping
     from contextlib import AbstractContextManager
 
     from agentworks.config import Config
@@ -328,7 +329,7 @@ def _download_debian_rootfs(tarball_path: Path) -> None:
 
 
 @contextlib.contextmanager
-def _keepalive(vm: VMRow, config: Config | None) -> Iterator[None]:
+def _keepalive(distro_name: str, vm: VMRow, config: Config | None) -> Iterator[None]:
     """Anchor a WSL2 distro for the duration of the context.
 
     Spawns ``wsl --distribution NAME -- sleep infinity`` as a background
@@ -355,7 +356,7 @@ def _keepalive(vm: VMRow, config: Config | None) -> Iterator[None]:
     the kernel closes the job handle and kills the orphan for us.
     """
     proc = subprocess.Popen(
-        ["wsl", "--distribution", vm.name, "--", "sleep", "infinity"],
+        ["wsl", "--distribution", distro_name, "--", "sleep", "infinity"],
         stdin=subprocess.DEVNULL,
         stdout=subprocess.DEVNULL,
         stderr=subprocess.PIPE,
@@ -404,10 +405,12 @@ def _keepalive(vm: VMRow, config: Config | None) -> Iterator[None]:
         _close_stderr()
         _close_handle(h_job)
         raise RuntimeError(
-            f"WSL2 keepalive for distro {vm.name!r} exited immediately (rc={rc})"
+            f"WSL2 keepalive for distro {distro_name!r} exited immediately (rc={rc})"
             + (f": {stderr}" if stderr else "")
         )
-    output.detail(f"Preventing idle-shutdown of WSL2 distro {vm.name!r} for the duration of this command...")
+    output.detail(
+        f"Preventing idle-shutdown of WSL2 distro {distro_name!r} for the duration of this command..."
+    )
     try:
         if vm.tailscale_host and config is not None:
             target = transport(vm, config)
@@ -436,22 +439,55 @@ def _keepalive(vm: VMRow, config: Config | None) -> Iterator[None]:
         output.detail("Idle-shutdown prevention stopped.")
 
 
-class WSL2Provisioner(VMProvisioner):
-    """Provisions WSL2 Debian distributions on Windows."""
+class WSL2Platform(VMPlatform):
+    """Runs VMs as WSL2 Debian distributions on Windows."""
+
+    name: ClassVar[str] = "wsl2"
+    description: ClassVar[str] = "WSL2 Debian distributions on Windows"
+
+    @classmethod
+    def legacy_platform_metadata(
+        cls, row: Mapping[str, Any], legacy: Mapping[str, Any]
+    ) -> dict[str, str]:
+        # Pre-SDD rows recorded wsl_distro_name (always equal to the VM
+        # name); read paths keyed off vm.name regardless. Either value
+        # is the distro name for every existing row.
+        distro = row["wsl_distro_name"] or row["name"]
+        return {"distro_name": str(distro)}
+
+    def _distro_name(self, vm: VMRow) -> str:
+        distro = vm.platform_metadata.get("distro_name")
+        if not distro:
+            raise StateError(
+                f"VM '{vm.name}' has no wsl2 distro_name in its platform "
+                f"metadata; the DB row is incomplete"
+            )
+        return str(distro)
 
     def vm_active(
         self, vm: VMRow, *, config: Config | None = None
     ) -> AbstractContextManager[None]:
-        return _keepalive(vm, config)
+        return _keepalive(self._distro_name(vm), vm, config)
 
-    def create(
-        self,
-        vm_name: str,
-        config: Config,
-        *,
-        swap: int = 4,
-        admin_username: str = "agentworks",
-    ) -> ProvisionResult:
+    def create(self, request: ProvisionRequest) -> ProvisionResult:
+        # SDD R5/R9: the platform owns the backend-side name; distro
+        # names are the primary identifier, so a collision is an error.
+        distro_name = (
+            f"{request.system_slug}-{request.vm_name}"
+            if request.system_slug
+            else request.vm_name
+        )
+        if self._distro_exists(distro_name):
+            raise StateError(
+                f"a WSL2 distro named '{distro_name}' is already registered",
+                hint=(
+                    "unregister it first (wsl --unregister) or pick a "
+                    "different VM name"
+                ),
+            )
+        vm_name = distro_name
+        swap = request.swap_gib if request.swap_gib is not None else 0
+        admin_username = request.admin_username
         output.info(f"Provisioning WSL2 VM '{vm_name}'...")
 
         install_path = _wsl_base_path() / vm_name
@@ -578,47 +614,61 @@ class WSL2Provisioner(VMProvisioner):
 
         output.detail(f"WSL2 VM '{vm_name}' provisioned.")
         return ProvisionResult(
-            provisioner_transport=WSL2Transport(distro_name=vm_name, user=admin_username),
-            wsl_distro_name=vm_name,
+            native_transport=WSL2Transport(distro_name=distro_name, user=admin_username),
+            platform_metadata={"distro_name": distro_name},
         )
+
+    @staticmethod
+    def _distro_exists(distro_name: str) -> bool:
+        """R9 pre-flight: is a distro with this name already registered?"""
+        try:
+            listing = _wsl(["--list", "--quiet"], check=False)
+        except (RuntimeError, OSError):
+            return False
+        return any(line.strip() == distro_name for line in listing.splitlines())
 
     def start(self, vm: VMRow) -> None:
         output.info(f"Starting WSL2 distro '{vm.name}'...")
-        _wsl(["--distribution", vm.name, "--", "echo", "started"])
+        _wsl(["--distribution", self._distro_name(vm), "--", "echo", "started"])
         output.info(f"WSL2 distro '{vm.name}' started")
 
     def stop(self, vm: VMRow) -> None:
         output.info(f"Terminating WSL2 distro '{vm.name}'...")
-        _wsl(["--terminate", vm.name])
+        _wsl(["--terminate", self._distro_name(vm)])
         output.info(f"WSL2 distro '{vm.name}' terminated")
 
     def delete(self, vm: VMRow) -> None:
+        distro_name = self._distro_name(vm)
         output.info(f"Unregistering WSL2 distro '{vm.name}'...")
-        _wsl(["--unregister", vm.name], check=False)
+        _wsl(["--unregister", distro_name], check=False)
         # Clean up install directory
-        install_path = _wsl_base_path() / vm.name
+        install_path = _wsl_base_path() / distro_name
         _powershell(
             f"Remove-Item -Recurse -Force -Path {_ps_quote(install_path)} -ErrorAction SilentlyContinue",
             check=False,
         )
         output.info(f"WSL2 distro '{vm.name}' deleted")
 
-    def provisioner_transport(
-        self, vm: VMRow, *, config: object | None = None,
-    ) -> Transport:
-        return WSL2Transport(distro_name=vm.name, user=vm.admin_username)
+    def display_backend_name(self, vm: VMRow) -> str:
+        return str(vm.platform_metadata.get("distro_name", vm.name))
+
+    def native_transport(
+        self, vm: VMRow, *, config: Config | None = None,
+    ) -> Transport | None:
+        return WSL2Transport(distro_name=self._distro_name(vm), user=vm.admin_username)
 
     def status(self, vm: VMRow) -> VMStatus:
+        distro_name = self._distro_name(vm)
         try:
-            output = _wsl(["--list", "--verbose"], check=False)
+            listing = _wsl(["--list", "--verbose"], check=False)
         except RuntimeError:
             return VMStatus.UNKNOWN
 
-        for line in output.strip().splitlines():
+        for line in listing.strip().splitlines():
             parts = line.split()
             # WSL --list --verbose output: [*] NAME STATE VERSION
             # Filter to find our distro
-            name_candidates = [p for p in parts if p == vm.name]
+            name_candidates = [p for p in parts if p == distro_name]
             if not name_candidates:
                 continue
             state_str = parts[-2].lower() if len(parts) >= 3 else ""

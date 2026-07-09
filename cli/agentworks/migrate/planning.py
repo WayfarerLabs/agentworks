@@ -35,8 +35,15 @@ _SINGLETON_KINDS = {"admin-template", "named-console-template"}
 
 # secret-backend is a capability kind (not declarable); its
 # TOML sections are warned no-ops with no manifest successor -- they are
-# dropped, never migrated.
-_MIGRATABLE_KINDS = {k: s for k, s in KIND_SECTIONS.items() if k != "secret-backend"}
+# dropped, never migrated. vm-site's legacy sections ([azure]/[proxmox],
+# flat shape with section-name-becomes-resource-name semantics) join the
+# migrator in the vm-sites SDD's Phase 5; until then the kind is not a
+# valid selector. Every remaining kind maps to exactly one section.
+_MIGRATABLE_KINDS = {
+    k: sections[0]
+    for k, sections in KIND_SECTIONS.items()
+    if k not in ("secret-backend", "vm-site")
+}
 
 _SECRET_BACKENDS_SECTION = "secret_backends"
 

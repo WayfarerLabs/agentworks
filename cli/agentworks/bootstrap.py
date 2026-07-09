@@ -52,6 +52,8 @@ def build_registry(config: Config, manifests: ManifestSet | None = None) -> Regi
     from agentworks.errors import StateError
     from agentworks.manifests import RESOURCES_DIRNAME, load_manifests
     from agentworks.manifests import builtin as builtin_manifests
+    from agentworks.vms import platforms as vm_platforms
+    from agentworks.vms import sites as vm_sites
 
     if not config.resources_loaded:
         raise StateError(
@@ -75,14 +77,16 @@ def build_registry(config: Config, manifests: ManifestSet | None = None) -> Regi
     catalog.publish_to(registry, config)
     git_credentials.publish_to(registry)
     secrets.publish_to(registry)
+    vm_platforms.publish_to(registry)
     config.publish_to(registry)
     manifests.publish_to(registry)
     registry.finalize()
     # Config consistency against the finalized graph: subsystems whose
     # SETTINGS name resources validate them here, at the boundary that
-    # holds both worlds. The chain ([secret_config].backends) is config,
-    # not a resource; this is the secrets subsystem consuming its config
-    # in normal operation, so every resource-touching command fails fast
-    # with config vocabulary.
+    # holds both worlds. The chain ([secret_config].backends) and
+    # defaults.site are config, not resources; this is each subsystem
+    # consuming its config in normal operation, so every
+    # resource-touching command fails fast with config vocabulary.
     secrets.validate_chain(config, registry)
+    vm_sites.validate_sites(config, registry)
     return registry

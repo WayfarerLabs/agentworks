@@ -25,6 +25,9 @@ class ResolvedVMTemplate:
 
     name: str
     # Provisioning
+    # The vm-site to create VMs at (None = fall through to defaults.site
+    # / the built-in lima). Inheritance applies like other scalars.
+    site: str | None = None
     cpus: int = 4
     memory: int = 8
     disk: int = 50
@@ -142,6 +145,7 @@ def _append_dedupe(target: list[str], source: list[str]) -> list[str]:
 
 def _merge(target: ResolvedVMTemplate, source: ResolvedVMTemplate) -> None:
     """Merge source into target. Scalars: source wins. Lists: append with dedupe."""
+    target.site = source.site
     target.cpus = source.cpus
     target.memory = source.memory
     target.disk = source.disk
@@ -159,6 +163,8 @@ def _merge_template(target: ResolvedVMTemplate, tmpl: VMTemplate) -> None:
     """Merge a raw VMTemplate into a ResolvedVMTemplate. None = not set, skip.
     Scalars: child overrides. Lists: append with dedupe.
     """
+    if tmpl.site is not None:
+        target.site = tmpl.site
     if tmpl.cpus is not None:
         target.cpus = tmpl.cpus
     if tmpl.memory is not None:

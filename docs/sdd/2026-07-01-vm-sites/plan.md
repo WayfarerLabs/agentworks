@@ -1,25 +1,49 @@
 # VM sites and platforms -- implementation plan
 
-**Status**: not started. Phases follow the HLA's sequencing sketch, with two refinements recorded
-there-vs-here: `defaults.site` parsing (plus the deprecated `defaults.platform` alias) and the
-`vm-template.site` field land in Phase 1 with the rest of the config/kind surface, so Phase 3's
+**Status**: Phase 1 complete. Phases follow the HLA's sequencing sketch, with two refinements
+recorded there-vs-here: `defaults.site` parsing (plus the deprecated `defaults.platform` alias) and
+the `vm-template.site` field land in Phase 1 with the rest of the config/kind surface, so Phase 3's
 selection precedence has both to read; only the operator-facing flag/completion work stays in
 Phase 5.
 
+**Sequencing notes**:
+
+- **2026-07-09, Phase 1: the non-compiling window was eliminated by bridging.** Instead of leaving
+  old dispatch broken until Phase 3, Phase 1 ships explicit PHASE-1 BRIDGE shims: `get_provisioner`
+  / `get_provisioner_for_vm` construct new-shape platforms from legacy inputs; `create_vm`
+  dispatches through `resolve_site` + `ProvisionRequest` (interim `{site}--{name}` hostname, null
+  slug, legacy `--vm-host` override); the manager's factory call sites use `native_transport` with
+  the bridge-dispatched platform; `VMRow` gains a `platform_metadata` bridge (derived from the
+  legacy columns in the row loader, mirroring the future backfill) and a `site` property aliasing
+  the `platform` column; the vm-site kind's `instances()` reads through the alias. Result: the full
+  suite (1500 tests), ruff, and mypy are green at the end of Phase 1. Remaining true window items:
+  proxmox lifecycle ops need the token on the resolve pass (Phase 3), and the R11 hostname / slug
+  land in Phase 4. Every bridge is marked `PHASE-1 BRIDGE` and is deleted by its owning phase.
+- **2026-07-09, Phase 1: migrator vm-site support moved wholly to Phase 5.** `KIND_SECTIONS` grew
+  the tuple-valued multi-section shape with the `vm-site -> (azure, proxmox)` entry (deprecation
+  warnings and samples key off it), but `_MIGRATABLE_KINDS` excludes vm-site until Phase 5 (where
+  the plan already listed the migrate section mapping): the flat-to-nested emission is migrator
+  surgery that belongs with the rest of the CLI-surface work, and `agw resource migrate vm-site`
+  errors as an unknown kind until then. The Phase 1 test bullet claiming end-to-end
+  `test_resource_migrate` coverage moves with it.
+
 **Compile boundaries**: Phases 1 through 3 are one logical commit boundary, mirroring the
-polymorphic-transports precedent. Phase 1 opens a non-compiling window when the platform classes
-reshape to the new protocol (old dispatch and manager callers break); Phase 2 provides the DB
-columns the new read paths need; Phase 3 rewires the callers and closes the window. If work must
-pause partway, the pause point is the end of Phase 3. Remote-Lima VMs are additionally
-non-functional between the Phase 2 migration and the operator adding their site manifests; that is
-the designed R3 stranded state, and mid-branch it also applies to dev databases.
+polymorphic-transports precedent. As planned, Phase 1 would open a non-compiling window when the
+platform classes reshape to the new protocol; as built, PHASE-1 BRIDGE shims keep everything
+compiling and tested at every phase boundary (see the sequencing note above), with Phase 2 providing
+the DB columns the new read paths need and Phase 3 rewiring the callers and retiring the bridges.
+The end of Phase 3 is still the natural pause point: before it, proxmox lifecycle ops raise a typed
+error (token not yet threaded) and the interim hostname/slug shapes are in effect. Remote-Lima VMs
+are additionally non-functional between the Phase 2 migration and the operator adding their site
+manifests; that is the designed R3 stranded state, and mid-branch it also applies to dev databases.
 
 ## Phase 1: Kinds, protocol, registry, dispatch
 
-New resource machinery plus the platform-class reshape. Additive pieces first; the reshape opens the
-non-compiling window at the end of the phase.
+New resource machinery plus the platform-class reshape. Additive pieces first. As built, the reshape
+did NOT open the non-compiling window: PHASE-1 BRIDGE shims keep the old call paths compiling and
+green (see the sequencing note at the top of this plan).
 
-- [ ] `cli/agentworks/vms/base.py`: add `ProvisionRequest` (vm_name, hostname, system_slug,
+- [x] `cli/agentworks/vms/base.py`: add `ProvisionRequest` (vm_name, hostname, system_slug,
       admin_username, ssh_public_key, tailscale_auth_key nullable,
       cpus/memory_gib/disk_gib/swap_gib, azure_vm_size) and reshape `ProvisionResult`
       (native_transport, platform_metadata, bootstrap_complete, tailscale_ip). Rename the ABC
@@ -30,30 +54,30 @@ non-compiling window at the end of the phase.
       `GitCredentialProvider` shape, including the may-be-deprecated note),
       `shared_backend(platform_config) -> bool` (classmethod), and
       `legacy_platform_metadata(row, legacy)` (pure).
-- [ ] `cli/agentworks/vms/platforms/`: `git mv` from `vms/provisioners/`; class renames
+- [x] `cli/agentworks/vms/platforms/`: `git mv` from `vms/provisioners/`; class renames
       (`LimaProvisioner` to `LimaPlatform`, etc.). Constructors become uniform
       `cls(site_name, platform_config, secret_values)`:
-  - [ ] `lima.py`: `vm_host` optional key in platform_config replaces the `vm_host_ssh` constructor
+  - [x] `lima.py`: `vm_host` optional key in platform_config replaces the `vm_host_ssh` constructor
         arg; `is_remote` derives from it; `shared_backend` computes from it; read paths move to
         `platform_metadata['instance_name']`.
-  - [ ] `azure.py`: platform_config = subscription_id / resource_group / region (replaces
+  - [x] `azure.py`: platform_config = subscription_id / resource_group / region (replaces
         `config.azure` reads); read paths move to `platform_metadata['resource_id']`;
         `display_backend_name` returns the VM-name portion.
-  - [ ] `wsl2.py`: read paths (`_keepalive`, start/stop/delete/status) move from `vm.name` to
+  - [x] `wsl2.py`: read paths (`_keepalive`, start/stop/delete/status) move from `vm.name` to
         `platform_metadata['distro_name']`.
-  - [ ] `proxmox.py`: delete the `PROXMOX_TOKEN_SECRET` env read; the token arrives via
+  - [x] `proxmox.py`: delete the `PROXMOX_TOKEN_SECRET` env read; the token arrives via
         `secret_values` (declared by `validate_config` as `token_secret`, default
         `proxmox-token-secret`); ops read `platform_metadata['vmid']` and `['node']` with the
         platform_config-node fallback plus opportunistic write-back; `native_transport` returns
         `None`; the operator-facing error embedding a `docs/sdd/` path is rewritten.
-  - [ ] `__init__.py`: `VM_PLATFORM_REGISTRY`, `@register`, and the capability publisher
+  - [x] `__init__.py`: `VM_PLATFORM_REGISTRY`, `@register`, and the capability publisher
         (`vm-platform` rows, `Origin.built_in(source="agentworks.vms")`).
-- [ ] `cli/agentworks/vms/base.py` + `cli/agentworks/errors.py` +
+- [x] `cli/agentworks/vms/base.py` + `cli/agentworks/errors.py` +
       `cli/agentworks/transports/__init__.py`: the noun-retirement renames:
       `provisioner_transport()` method to `native_transport()`, the transports factory
       `provisioner_transport` to `native_transport` (None check replaces the proxmox name branch),
       `ProvisionerError` to `ProvisioningError`.
-- [ ] `cli/agentworks/vms/kinds.py`: register both kinds alongside the existing vm-template kind.
+- [x] `cli/agentworks/vms/kinds.py`: register both kinds alongside the existing vm-template kind.
       `vm-platform`: category `capability`, error miss policy, description "VM backend
       implementations (code)". `vm-site`: category `declarable`, `builtin_override = "reserved"`,
       error miss policy; decode takes `spec.platform` (required, `ResourceReference` to
@@ -62,42 +86,46 @@ non-compiling window at the end of the phase.
       (defer-on-unknown-platform to the finalize miss policy). `VMSiteDecl` dataclass with nested
       `platform_config` and `referenced_resources()` emitting the platform edge plus
       `validate_config`'s ConfigReferences with the site as source.
-- [ ] `cli/agentworks/vms/kinds.py` + `cli/agentworks/vms/template.py`: vm-template gains the
+- [x] `cli/agentworks/vms/kinds.py` + `cli/agentworks/vms/template.py`: vm-template gains the
       optional `site` field (bare-name reference, edge to `vm-site`); TOML and YAML decode parity.
-- [ ] `cli/agentworks/manifests/builtin/vm-sites.yaml`: bundled `lima` and `wsl2` sites (platform
+- [x] `cli/agentworks/manifests/builtin/vm-sites.yaml`: bundled `lima` and `wsl2` sites (platform
       matching the name, empty platform_config). First real bundle content; wire through
       `manifests/builtin.py`.
-- [ ] `cli/agentworks/manifests/samples/vm-site.yaml`: sample documents (an azure site with
+- [x] `cli/agentworks/manifests/samples/vm-site.yaml`: sample documents (an azure site with
       platform_config, a remote-lima site); loader-verified via the existing samples test.
-- [ ] `cli/agentworks/config.py`: legacy `[azure]` / `[proxmox]` loader/publisher (per ADR 0016 this
+- [x] `cli/agentworks/config.py`: legacy `[azure]` / `[proxmox]` loader/publisher (per ADR 0016 this
       is their home): parse flat sections, nest into `platform_config` at the boundary, publish
       `vm-site/azure` / `vm-site/proxmox` rows with TOML `file:line`, join the aggregated
       deprecation warning. `defaults.site` parsing with `defaults.platform` as a one-release
       deprecated alias; `defaults.vm_host` becomes the hard `ConfigError` with the site-manifest
       snippet.
-- [ ] `cli/agentworks/vms/sites.py`: `resolve_site(name, registry, *, secret_values=None)` (KeyError
+- [x] `cli/agentworks/vms/sites.py`: `resolve_site(name, registry, *, secret_values=None)` (KeyError
       from `registry.lookup` maps to the `ConfigError` + ready-to-paste manifest hint),
       `platform_for(vm, registry, **kw)`, `_config_secrets`, `vms.validate_sites(config, registry)`
       (wired into `build_registry` beside `secrets.validate_chain`), `_site_manifest_hint`.
-- [ ] `cli/agentworks/manifests/decode.py`: `KIND_SECTIONS` grows the multi-section-per-kind shape;
+- [x] `cli/agentworks/manifests/decode.py`: `KIND_SECTIONS` grows the multi-section-per-kind shape;
       vm-site maps to the `azure` and `proxmox` sections with section-name-becomes-resource-name
-      semantics; `cli/agentworks/migrate/planning.py` follows.
-- [ ] Tests (new): `cli/tests/vms/test_vm_site_kind.py` (decode, shadowing rejection, reserved
+      semantics. `cli/agentworks/migrate/planning.py` does NOT follow yet: `_MIGRATABLE_KINDS`
+      excludes vm-site until the migrator's flat-to-nested emission lands in Phase 5 (see the
+      sequencing note).
+- [x] Tests (new): `cli/tests/vms/test_vm_site_kind.py` (decode, shadowing rejection, reserved
       built-in names, unknown-platform deferral, reference emission),
       `cli/tests/vms/test_vm_platform_kind.py` (capability rows, not declarable),
       `cli/tests/vms/test_sites_dispatch.py` (resolve_site happy path, stranded ConfigError + hint,
       secret threading), `cli/tests/vms/test_platform_validate_config.py` (all four platforms:
       unknown keys, lima vm_host, proxmox token_secret reference + default, azure required keys) --
       joins the pinned `test_capability_config_contract.py` patterns.
-- [ ] Tests (updated): `cli/tests/manifests/test_samples.py` and `test_decode_parity.py` pick up
+- [x] Tests (updated): `cli/tests/manifests/test_samples.py` and `test_decode_parity.py` pick up
       vm-site; `cli/tests/test_resource_kinds.py` counts the two new kinds;
       `cli/tests/test_config_deprecation_warnings.py` covers `[azure]` / `[proxmox]` and the
-      `defaults.platform` alias; `cli/tests/test_resource_migrate.py` covers the vm-site section
-      mapping end to end (migrate `[azure]` to a manifest, registry-equivalence verification).
+      `defaults.platform` alias. The `test_resource_migrate.py` vm-site coverage moves to Phase 5
+      with the migrator mapping (see the sequencing note).
 
 **Definition of done**: kinds, publishers, dispatch, and samples in place with their tests green in
-isolation. The platform-class reshape has landed, so old dispatch (`get_provisioner*`) and manager
-callers DO NOT compile; that is the expected open window (closed end of Phase 3).
+isolation. MET, with a positive deviation: instead of the expected open window (old dispatch not
+compiling until Phase 3), PHASE-1 BRIDGE shims keep `get_provisioner*` and the manager callers
+working against the new platform classes, so the full suite, ruff, and mypy are green at the phase
+boundary. The bridges are marked in-code and retired by Phases 2/3 as originally planned.
 
 ## Phase 2: DB migration
 

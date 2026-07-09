@@ -1,0 +1,21 @@
+# The zero-config built-in sites: one per platform that works with no
+# settings. Bundling these (rather than letting VMs reference the
+# vm-platform capability directly) keeps vms.site one uniform reference
+# space: every VM points at a vm-site, never sometimes at a capability.
+# Their names are reserved (builtin_override = "reserved"): customize by
+# declaring a sibling site, not by redeclaring these.
+apiVersion: agentworks/v1
+kind: vm-site
+metadata:
+  name: lima
+  description: Local Lima VMs on this workstation
+spec:
+  platform: lima
+---
+apiVersion: agentworks/v1
+kind: vm-site
+metadata:
+  name: wsl2
+  description: WSL2 distros on this Windows workstation
+spec:
+  platform: wsl2

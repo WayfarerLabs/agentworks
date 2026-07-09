@@ -253,6 +253,7 @@ def test_build_registry_equivalent_to_manual_steps(example_config: Path) -> None
     from agentworks import secrets
     from agentworks.bootstrap import build_registry
     from agentworks.manifests import builtin as builtin_manifests
+    from agentworks.vms import platforms as vm_platforms
 
     cfg = load_config(example_config, warn_issues=False)
 
@@ -261,6 +262,10 @@ def test_build_registry_equivalent_to_manual_steps(example_config: Path) -> None
     manual = Registry.empty()
     builtin_manifests.publish_to(manual)
     secrets.publish_to(manual)
+    # The bundled vm-site rows (lima, wsl2) reference the vm-platform
+    # capability rows, so the manual sequence needs the platform
+    # publisher for the same graph-completeness reason as the backends.
+    vm_platforms.publish_to(manual)
     cfg.publish_to(manual)
     manual.finalize()
 

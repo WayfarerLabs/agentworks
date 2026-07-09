@@ -45,6 +45,7 @@ if TYPE_CHECKING:
 
     from agentworks.resources.origin import Origin
     from agentworks.resources.registry import Registry
+    from agentworks.vms.sites import VMSiteDecl
 
 CONFIG_DIR = Path.home() / ".config" / "agentworks"
 CONFIG_PATH = CONFIG_DIR / "config.toml"
@@ -138,33 +139,16 @@ class PathsConfig:
 
 @dataclass(frozen=True)
 class DefaultsConfig:
-    platform: str | None = None
-    vm_host: str | None = None
+    # Default vm-site name for `agw vm create` (validated against the
+    # finalized registry by vms.validate_sites at the composition
+    # boundary). The retired `defaults.platform` key is accepted as a
+    # one-release deprecated alias.
+    site: str | None = None
 
 
 @dataclass(frozen=True)
 class SessionConfig:
     history_limit: int = 50_000
-
-
-@dataclass(frozen=True)
-class AzureConfig:
-    subscription_id: str
-    resource_group: str
-    region: str
-    idle_timeout_hours: int = 2
-
-
-@dataclass(frozen=True)
-class ProxmoxConfig:
-    api_url: str
-    node: str
-    token_id: str
-    template_vmid: int
-    storage: str = "local-lvm"
-    bridge: str = "vmbr0"
-    pool: str = "agentworks"
-    verify_ssl: bool = True
 
 
 @dataclass(frozen=True)
@@ -192,8 +176,9 @@ class Config:
     apt_packages: dict[str, object] = field(default_factory=dict)
     system_install_commands: dict[str, object] = field(default_factory=dict)
     user_install_commands: dict[str, object] = field(default_factory=dict)
-    azure: AzureConfig | None = None
-    proxmox: ProxmoxConfig | None = None
+    # Legacy [azure] / [proxmox] TOML declarations of vm-site resources
+    # (dual-path; deprecated). Keyed by site name (the section name).
+    vm_sites: dict[str, VMSiteDecl] = field(default_factory=dict)
     # Env-and-secrets ----------------------------------------------------
     # Declared secrets, keyed by name. Empty when [secrets.*] is absent.
     secrets: dict[str, SecretDecl] = field(default_factory=dict)
@@ -266,6 +251,7 @@ class Config:
             ("workspace-template", self.workspace_templates),
             ("session-template", self.session_templates),
             ("git-credential", self.git_credentials),
+            ("vm-site", self.vm_sites),
         ):
             for name, resource in kind_dict.items():
                 registry.add(kind, name, resource, op_origin(resource.declared_at))
@@ -523,10 +509,14 @@ def _load_paths(data: dict[str, object]) -> PathsConfig:
     return PathsConfig(vm_workspaces=vm_ws, vscode_workspaces=vscode_ws, backups=backups)
 
 
-_DEFAULTS_KEYS = {"platform", "vm_host"}
+_DEFAULTS_KEYS = {"site", "platform"}
 
 
-def _load_defaults(data: dict[str, object], issues: list[str]) -> DefaultsConfig:
+def _load_defaults(
+    data: dict[str, object],
+    issues: list[str],
+    deprecations: list[str],
+) -> DefaultsConfig:
     raw = data.get("defaults", {})
     if not isinstance(raw, dict):
         raise ConfigError("[defaults] must be a table")
@@ -537,16 +527,49 @@ def _load_defaults(data: dict[str, object], issues: list[str]) -> DefaultsConfig
             "[admin.config] and/or [agent.config]."
         )
 
+    if "vm_host" in raw:
+        # No alias is possible: the replacement is a vm-site manifest
+        # only the operator can author (the old vm-host registry is
+        # gone).
+        raise ConfigError(
+            "defaults.vm_host has been removed; remote Lima hosts are "
+            "vm-site resources now",
+            hint=(
+                "declare a vm-site with platform: lima and "
+                "platform_config.vm_host (see `agw resource sample vm-site`), "
+                "then set defaults.site to its name"
+            ),
+        )
+
     _warn_unexpected_keys(raw, _DEFAULTS_KEYS, "defaults", issues)
 
-    platform = raw.get("platform")
-    if platform is not None and platform not in VALID_PLATFORMS:
-        raise ConfigError(f"defaults.platform must be one of {VALID_PLATFORMS}, got: {platform}")
+    # `site` names a vm-site resource; existence is validated at the
+    # composition boundary (vms.validate_sites), where the finalized
+    # registry knows every declared site. `platform` is the retired
+    # spelling, accepted as a one-release deprecated alias -- its old
+    # values (lima/azure/wsl2/proxmox) name exactly the built-in and
+    # legacy-TOML sites, so the value carries over unchanged.
+    site = raw.get("site")
+    if site is not None and (not isinstance(site, str) or not site):
+        raise ConfigError("defaults.site must be a non-empty site name")
+    if "platform" in raw:
+        alias = raw["platform"]
+        if site is not None:
+            if str(alias) != site:
+                issues.append(
+                    f"defaults: both site ({site!r}) and the deprecated "
+                    f"platform alias ({alias!r}) are set and disagree; "
+                    f"site wins"
+                )
+        else:
+            site = str(alias)
+        deprecations.append(
+            "defaults.platform is deprecated; rename the key to "
+            "defaults.site (same value). The alias will be removed in "
+            "the next release."
+        )
 
-    return DefaultsConfig(
-        platform=str(platform) if platform is not None else None,
-        vm_host=str(raw["vm_host"]) if "vm_host" in raw else None,
-    )
+    return DefaultsConfig(site=str(site) if site is not None else None)
 
 
 _NAMED_CONSOLE_KEYS = {"tmux_layout"}
@@ -584,6 +607,7 @@ def _load_named_console(
 
 _VM_TEMPLATE_KEYS = {
     "inherits",
+    "site",
     "cpus",
     "memory",
     "disk",
@@ -649,9 +673,18 @@ def _load_vm_templates(
                 )
             ts_key_raw = tdata["tailscale_auth_key"]
 
+        site_raw: str | None = None
+        if "site" in tdata:
+            if not isinstance(tdata["site"], str) or not tdata["site"]:
+                raise ConfigError(
+                    f"vm_templates.{name}.site must be a non-empty site name"
+                )
+            site_raw = tdata["site"]
+
         templates[name] = VMTemplate(
             name=name,
             inherits=list(tdata.get("inherits", [])),
+            site=site_raw,
             cpus=int(tdata["cpus"]) if "cpus" in tdata else None,
             memory=int(tdata["memory"]) if "memory" in tdata else None,
             disk=int(tdata["disk"]) if "disk" in tdata else None,
@@ -1016,36 +1049,67 @@ def _load_session_templates(
     return templates
 
 
-def _load_azure(data: dict[str, object]) -> AzureConfig | None:
-    raw = data.get("azure")
-    if raw is None:
-        return None
-    if not isinstance(raw, dict):
-        raise ConfigError("[azure] must be a table")
-    return AzureConfig(
-        subscription_id=str(_require(raw, "subscription_id", "azure")),
-        resource_group=str(_require(raw, "resource_group", "azure")),
-        region=str(_require(raw, "region", "azure")),
-        idle_timeout_hours=int(raw.get("idle_timeout_hours", 2)),
-    )
+# The flat legacy [azure] / [proxmox] keys that hoist into the nested
+# platform_config blob. The flat domain stays silently loose on stray
+# keys (the git-credential `org` precedent: promoting historically-
+# ignored keys into validation errors would break released configs);
+# manifests validate the true blob strictly.
+_LEGACY_SITE_SECTIONS: dict[str, tuple[str, tuple[str, ...]]] = {
+    "azure": ("azure", ("subscription_id", "resource_group", "region")),
+    "proxmox": (
+        "proxmox",
+        (
+            "api_url",
+            "node",
+            "token_id",
+            "template_vmid",
+            "storage",
+            "bridge",
+            "pool",
+            "verify_ssl",
+            "token_secret",
+        ),
+    ),
+}
 
 
-def _load_proxmox(data: dict[str, object]) -> ProxmoxConfig | None:
-    raw = data.get("proxmox")
-    if raw is None:
-        return None
-    if not isinstance(raw, dict):
-        raise ConfigError("[proxmox] must be a table")
-    return ProxmoxConfig(
-        api_url=str(_require(raw, "api_url", "proxmox")),
-        node=str(_require(raw, "node", "proxmox")),
-        token_id=str(_require(raw, "token_id", "proxmox")),
-        template_vmid=int(str(_require(raw, "template_vmid", "proxmox"))),
-        storage=str(raw.get("storage", "local-lvm")),
-        bridge=str(raw.get("bridge", "vmbr0")),
-        pool=str(raw.get("pool", "agentworks")),
-        verify_ssl=bool(raw.get("verify_ssl", True)),
-    )
+def _load_vm_sites_legacy(
+    data: dict[str, object],
+    decls: _SectionLineMap,
+) -> dict[str, VMSiteDecl]:
+    """Load the legacy ``[azure]`` / ``[proxmox]`` sections as ``vm-site``
+    resources (dual-path; the sections warn as deprecated via
+    ``_warn_deprecated_resource_sections``).
+
+    Flat TOML is the one place platform-owned fields sit outside the
+    ``platform_config`` blob; this loader nests at the boundary
+    (section name becomes the site name, ``platform`` is synthesized),
+    exactly as the git-credential loader nests ``org``. The platform
+    capability validates the assembled blob so errors carry config
+    vocabulary and the implied secret references derive at finalize.
+    """
+    from agentworks.vms.platforms import VM_PLATFORM_REGISTRY
+    from agentworks.vms.sites import VMSiteDecl
+
+    sites: dict[str, VMSiteDecl] = {}
+    for section, (platform_name, known_keys) in _LEGACY_SITE_SECTIONS.items():
+        raw = data.get(section)
+        if raw is None:
+            continue
+        if not isinstance(raw, dict):
+            raise ConfigError(f"[{section}] must be a table")
+        platform_config: dict[str, object] = {
+            key: raw[key] for key in known_keys if key in raw
+        }
+        capability = VM_PLATFORM_REGISTRY[platform_name]
+        capability.validate_config(f"[{section}]", platform_config)
+        sites[section] = VMSiteDecl(
+            name=section,
+            platform=platform_name,
+            platform_config=platform_config,
+            declared_at=decls.lookup(section),
+        )
+    return sites
 
 
 def _load_secrets(
@@ -1176,18 +1240,20 @@ def _warn_deprecated_resource_sections(
     from agentworks.manifests.decode import KIND_SECTIONS
 
     present: list[str] = []
-    for _kind, section in KIND_SECTIONS.items():
-        if section == "secret_backends" or section not in data:
-            continue
-        # Display the header shape operators can actually grep for:
-        # [admin.config] and [named_console] are the two non-family
-        # sections; everything else nests names ([secrets.<name>]).
-        if section == "admin":
-            present.append("[admin.config]")
-        elif section == "named_console":
-            present.append("[named_console]")
-        else:
-            present.append(f"[{section}.*]")
+    for _kind, sections in KIND_SECTIONS.items():
+        for section in sections:
+            if section == "secret_backends" or section not in data:
+                continue
+            # Display the header shape operators can actually grep for:
+            # [admin.config], [named_console], and the legacy vm-site
+            # sections ([azure] / [proxmox]) are non-family sections;
+            # everything else nests names ([secrets.<name>]).
+            if section == "admin":
+                present.append("[admin.config]")
+            elif section in ("named_console", "azure", "proxmox"):
+                present.append(f"[{section}]")
+            else:
+                present.append(f"[{section}.*]")
     if not present:
         return ()
     noun = "section" if len(present) == 1 else "sections"
@@ -1337,8 +1403,10 @@ def load_config(
 
     # Settings-only mode: resource loaders see an empty document, so they
     # produce their framework defaults with zero issues or deprecations.
-    # Settings loaders (operator, paths, defaults, session, azure,
-    # proxmox, secret_config) always see the real data -- they are config.
+    # Settings loaders (operator, paths, defaults, session, secret_config)
+    # always see the real data -- they are config. The legacy [azure] /
+    # [proxmox] sections are RESOURCE declarations (vm-site rows) and go
+    # through resource_data like every other resource section.
     resource_data = data if resources else {}
 
     git_credentials = _load_git_credentials(resource_data, issues, decls)
@@ -1369,7 +1437,7 @@ def load_config(
     config = Config(
         operator=_load_operator(data, issues),
         paths=_load_paths(data),
-        defaults=_load_defaults(data, issues),
+        defaults=_load_defaults(data, issues, deprecations),
         named_console=_load_named_console(resource_data, issues, decls),
         vm_templates=loaded_vm_templates,
         source_path=config_path,
@@ -1383,8 +1451,7 @@ def load_config(
         apt_packages=apt_packages,
         system_install_commands=system_cmds,
         user_install_commands=user_cmds,
-        azure=_load_azure(data),
-        proxmox=_load_proxmox(data),
+        vm_sites=_load_vm_sites_legacy(resource_data, decls),
         secrets=secrets,
         secret_config_data=secret_config_data,
         config_issues=tuple(issues),

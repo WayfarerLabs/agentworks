@@ -42,7 +42,11 @@ def test_capability_kinds_are_exactly_the_code_backed_ones() -> None:
         for name, handler in KIND_REGISTRY.items()
         if handler.category == "capability"
     }
-    assert capability == {"secret-backend", "git-credential-provider"}
+    assert capability == {
+        "secret-backend",
+        "git-credential-provider",
+        "vm-platform",
+    }
 
 
 def test_names_only_needs_no_config(tmp_path: Path, monkeypatch) -> None:

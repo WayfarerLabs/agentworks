@@ -13,7 +13,7 @@ from pathlib import Path
 
 import pytest
 
-from agentworks.vms.provisioners import wsl2
+from agentworks.vms.platforms import wsl2
 
 
 def test_local_app_data_resolves_from_env(monkeypatch: pytest.MonkeyPatch) -> None:

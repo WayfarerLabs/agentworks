@@ -121,13 +121,16 @@ class SecretMappingError(SecretUnavailableError):
 class ExternalError(AgentworksError):
     """An external system failed in a non-connectivity way.
 
-    Examples: a provisioner API rejected a request, tar exited nonzero, a
+    Examples: a platform API rejected a request, tar exited nonzero, a
     catalog file was malformed, a source ref could not be resolved.
     """
 
 
-class ProvisionerError(ExternalError):
-    """A VM provisioner (Azure, Proxmox, Lima) failed."""
+class ProvisioningError(ExternalError):
+    """VM provisioning against a platform backend (Azure, Proxmox, Lima)
+    failed. Named for the activity; "provisioner" as a noun retired with
+    the vm-sites SDD (the class concept is now the VM platform).
+    """
 
 
 class BackupError(ExternalError):
