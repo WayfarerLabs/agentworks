@@ -305,7 +305,7 @@ def test_manifest_issues_surface_as_doctor_rows(tmp_path: Path, monkeypatch, cap
         """)
     )
     monkeypatch.setattr("agentworks.config.CONFIG_PATH", cfg)
-    g, config, registry = _check_config()
+    g, _, registry = _check_config()
 
     # The suppression half of the fix: doctor passes the pre-loaded set
     # into build_registry, so the ambient "Manifest: ..." print must not
