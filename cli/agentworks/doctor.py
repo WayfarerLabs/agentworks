@@ -235,7 +235,7 @@ def _check_config() -> tuple[HealthGroup, Config | None, Registry | None]:
     # hygiene, ...) surface as doctor rows, exactly like TOML
     # config_issues below. Loading here (and passing the set into
     # build_registry) also keeps build_registry's auto-load from
-    # printing ambient warnings above the report -- doctor rows ARE the
+    # printing ambient warnings above the report. Doctor rows are the
     # surface. A typo'd key on a manifest-declared resource previously
     # warned ambiently while the Config row said ok.
     from agentworks.manifests import RESOURCES_DIRNAME, load_manifests
