@@ -1227,7 +1227,7 @@ def _resolve_vm(db: Database, vm_name: str | None) -> VMRow:
         output.info(f"Using VM '{usable_vms[0].name}'")
         return usable_vms[0]
 
-    options = [f"{v.name}  ({v.platform})" for v in usable_vms]
+    options = [f"{v.name}  ({v.site})" for v in usable_vms]
     idx = output.choose("Select a VM:", options)
     return usable_vms[idx]
 

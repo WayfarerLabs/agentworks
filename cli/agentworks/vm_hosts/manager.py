@@ -1,12 +1,17 @@
-"""VM host management -- add, list, remove, OS detection."""
+"""VM host management -- PHASE-2 BRIDGE (vm-sites SDD).
+
+The ``vm_hosts`` registry table is gone (the DB migration dropped it);
+remote Lima hosts are declared as ``vm-site`` resources with
+``platform_config.vm_host``. The ``agw vm-host`` commands survive until
+the CLI-surface phase removes them, so each service function raises a
+typed error carrying the replacement shape.
+"""
 
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from agentworks import output
-from agentworks.config import validate_name
-from agentworks.errors import AlreadyExistsError, NotFoundError, StateError, UserAbort, ValidationError
+from agentworks.errors import StateError
 from agentworks.ssh import SSHError, SSHTarget, run
 
 if TYPE_CHECKING:
@@ -31,90 +36,34 @@ def detect_os(ssh_host: str) -> str | None:
         return None
 
 
+def _replaced(name: str | None = None) -> StateError:
+    from agentworks.vms.sites import site_manifest_hint
+
+    return StateError(
+        "the vm-host registry has been replaced by vm-site resources",
+        entity_kind="vm-host",
+        entity_name=name,
+        hint=site_manifest_hint(name or "my-host")
+        + "\n\nlist declared sites with `agw resource list --kind vm-site`",
+    )
+
+
 def add_vm_host(db: Database, name: str, ssh_host: str, platform: str = "lima") -> None:
-    """Register a new VM host."""
-    validate_name(name)
-
-    if platform != "lima":
-        raise ValidationError(
-            f"only 'lima' platform is supported for VM hosts, got: {platform}",
-            entity_kind="vm-host",
-            entity_name=name,
-        )
-
-    if db.get_vm_host(name) is not None:
-        raise AlreadyExistsError(
-            f"VM host '{name}' already exists",
-            entity_kind="vm-host",
-            entity_name=name,
-        )
-
-    output.info(f"Detecting OS on {ssh_host}...")
-    detected_os = detect_os(ssh_host)
-    if detected_os:
-        output.info(f"Detected OS: {detected_os}")
-    else:
-        output.warn("could not detect OS (SSH connection may have failed)")
-
-    db.insert_vm_host(name, ssh_host, platform=platform, os=detected_os)
-    output.info(f"VM host '{name}' added ({ssh_host})")
+    """PHASE-2 BRIDGE: always raises; declare a vm-site instead."""
+    raise _replaced(name)
 
 
 def list_vm_hosts(db: Database, *, names_only: bool = False) -> None:
-    """List all registered VM hosts.
+    """PHASE-2 BRIDGE: always raises; list vm-site resources instead.
 
-    With ``names_only=True``, emit one host name per line and skip the
-    table render. Used by shell completion (see issue #147).
+    ``names_only`` completion callers get empty output rather than an
+    error so shell completion degrades quietly.
     """
-    hosts = db.list_vm_hosts()
-
     if names_only:
-        # Empty db prints nothing under names-only; the friendly
-        # "No hosts registered" line below is for human readers only.
-        for h in hosts:
-            output.info(h.name)
         return
-
-    if not hosts:
-        output.info("No VM hosts registered.")
-        return
-
-    output.info(f"{'NAME':<20} {'SSH HOST':<30} {'PLATFORM':<10} {'OS':<10} {'LAST SEEN'}")
-    output.info("-" * 90)
-    for h in hosts:
-        output.info(f"{h.name:<20} {h.ssh_host:<30} {h.platform:<10} {h.os or '-':<10} {h.last_seen_at or 'never'}")
+    raise _replaced()
 
 
 def remove_vm_host(db: Database, name: str, *, force: bool = False, yes: bool = False) -> None:
-    """Remove a VM host. Refuses if VMs reference it unless --force."""
-    if db.get_vm_host(name) is None:
-        raise NotFoundError(
-            f"VM host '{name}' not found",
-            entity_kind="vm-host",
-            entity_name=name,
-        )
-
-    vm_count = db.count_vms_on_host(name)
-    if vm_count > 0 and not force:
-        raise StateError(
-            f"VM host '{name}' has {vm_count} VM(s).",
-            entity_kind="vm-host",
-            entity_name=name,
-            hint="Delete the VMs first, or pass --force to clear the host reference and remove.",
-        )
-
-    # The confirmation prompt only applies to the non-force path; when --force is
-    # set we skip the prompt even if VMs reference the host (they'll be unlinked
-    # below).
-    if not yes and not force and not output.confirm(f"Remove VM host '{name}'?"):
-        raise UserAbort("removal cancelled")
-
-    if vm_count > 0:
-        # Nullify vm_host_name on VMs referencing this host to prevent dangling FK
-        for vm in db.list_vms():
-            if vm.vm_host_name == name:
-                db.update_vm_host_ref(vm.name, None)
-        output.warn(f"cleared VM host reference on {vm_count} VM(s)")
-
-    db.delete_vm_host(name)
-    output.info(f"VM host '{name}' removed")
+    """PHASE-2 BRIDGE: always raises; delete the vm-site manifest instead."""
+    raise _replaced(name)

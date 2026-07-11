@@ -195,8 +195,8 @@ def test_create_session_rolls_back_on_keyboard_interrupt(
     db = Database(db_path)
     # Minimal fixture: VM with tailscale_host + workspace.
     db._conn.execute(
-        "INSERT INTO vms (name, platform, admin_username, tailscale_host) "
-        "VALUES ('vm1', 'lima', 'admin', '100.64.0.5')"
+        "INSERT INTO vms (name, site, hostname, admin_username, tailscale_host) "
+        "VALUES ('vm1', 'lima', 'h', 'admin', '100.64.0.5')"
     )
     db._conn.execute(
         "INSERT INTO workspaces (name, vm_name, workspace_path, linux_group) "
@@ -275,8 +275,8 @@ def test_create_session_releases_group_membership_on_keyboard_interrupt(
 
     db = Database(tmp_path / "test.db")
     db._conn.execute(
-        "INSERT INTO vms (name, platform, admin_username, tailscale_host) "
-        "VALUES ('vm1', 'lima', 'admin', '100.64.0.5')"
+        "INSERT INTO vms (name, site, hostname, admin_username, tailscale_host) "
+        "VALUES ('vm1', 'lima', 'h', 'admin', '100.64.0.5')"
     )
     db._conn.execute(
         "INSERT INTO workspaces (name, vm_name, workspace_path, linux_group) "
@@ -360,8 +360,8 @@ def test_create_session_rollback_failure_does_not_mask_keyboard_interrupt(
 
     db = Database(tmp_path / "test.db")
     db._conn.execute(
-        "INSERT INTO vms (name, platform, admin_username, tailscale_host) "
-        "VALUES ('vm1', 'lima', 'admin', '100.64.0.5')"
+        "INSERT INTO vms (name, site, hostname, admin_username, tailscale_host) "
+        "VALUES ('vm1', 'lima', 'h', 'admin', '100.64.0.5')"
     )
     db._conn.execute(
         "INSERT INTO workspaces (name, vm_name, workspace_path, linux_group) "

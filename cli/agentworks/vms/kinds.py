@@ -218,10 +218,6 @@ class _VMSiteKind:
     ) -> Iterable[InstanceRef]:
         """Every VM whose ``site`` column names this site.
 
-        ``VMRow.site`` is currently a PHASE-1 BRIDGE property aliasing
-        the legacy ``platform`` column (the stored values are already
-        the right site names for every non-remote-Lima row); this read
-        is unchanged by the DB migration that makes it a real column.
         """
         name = resource.name
         for vm in db.list_vms():

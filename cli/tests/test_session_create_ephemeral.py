@@ -55,9 +55,9 @@ def _seed_two_vms(tmp_path: Path) -> Database:
     """
     db = Database(tmp_path / "test.db")
     db._conn.execute(
-        "INSERT INTO vms (name, platform, admin_username, tailscale_host, init_status) VALUES "
-        "('vm-A', 'lima', 'admin', '100.64.0.1', 'complete'),"
-        "('vm-B', 'lima', 'admin', '100.64.0.2', 'complete')"
+        "INSERT INTO vms (name, site, hostname, admin_username, tailscale_host, init_status) VALUES "
+        "('vm-A', 'lima', 'h', 'admin', '100.64.0.1', 'complete'),"
+        "('vm-B', 'lima', 'h', 'admin', '100.64.0.2', 'complete')"
     )
     db._conn.execute(
         "INSERT INTO workspaces (name, vm_name, workspace_path, linux_group) VALUES "
@@ -74,8 +74,8 @@ def _seed_one_vm(tmp_path: Path) -> Database:
     """Single VM with one workspace."""
     db = Database(tmp_path / "test.db")
     db._conn.execute(
-        "INSERT INTO vms (name, platform, admin_username, tailscale_host, init_status) "
-        "VALUES ('vm1', 'lima', 'admin', '100.64.0.5', 'complete')"
+        "INSERT INTO vms (name, site, hostname, admin_username, tailscale_host, init_status) "
+        "VALUES ('vm1', 'lima', 'h', 'admin', '100.64.0.5', 'complete')"
     )
     db._conn.execute(
         "INSERT INTO workspaces (name, vm_name, workspace_path, linux_group) "
@@ -395,8 +395,8 @@ def test_ephemeral_agent_name_defaults_to_session_name(
 
     db = Database(tmp_path / "test.db")
     db._conn.execute(
-        "INSERT INTO vms (name, platform, admin_username, tailscale_host) "
-        "VALUES ('bbvm1', 'azure', 'admin', '100.64.0.5')"
+        "INSERT INTO vms (name, site, hostname, admin_username, tailscale_host) "
+        "VALUES ('bbvm1', 'azure', 'h', 'admin', '100.64.0.5')"
     )
     db._conn.commit()
     config = SimpleNamespace(session=SimpleNamespace(history_limit=50000))
@@ -504,8 +504,8 @@ def test_eager_resolve_fires_exactly_once_for_new_workspace_and_new_agent(
 
     db = Database(tmp_path / "test.db")
     db._conn.execute(
-        "INSERT INTO vms (name, platform, admin_username, tailscale_host) "
-        "VALUES ('vm1', 'lima', 'admin', '100.64.0.5')"
+        "INSERT INTO vms (name, site, hostname, admin_username, tailscale_host) "
+        "VALUES ('vm1', 'lima', 'h', 'admin', '100.64.0.5')"
     )
     db._conn.commit()
     _install_session_prep_stubs(monkeypatch)
@@ -580,8 +580,8 @@ def test_nested_creates_are_their_own_composition_units(
 
     db = Database(tmp_path / "test.db")
     db._conn.execute(
-        "INSERT INTO vms (name, platform, admin_username, tailscale_host) "
-        "VALUES ('vm1', 'lima', 'admin', '100.64.0.5')"
+        "INSERT INTO vms (name, site, hostname, admin_username, tailscale_host) "
+        "VALUES ('vm1', 'lima', 'h', 'admin', '100.64.0.5')"
     )
     db._conn.commit()
     _install_session_prep_stubs(monkeypatch)
@@ -642,8 +642,8 @@ def test_failure_after_ephemeral_create_rolls_back_ephemerals(
 
     db = Database(tmp_path / "test.db")
     db._conn.execute(
-        "INSERT INTO vms (name, platform, admin_username, tailscale_host) "
-        "VALUES ('vm1', 'lima', 'admin', '100.64.0.5')"
+        "INSERT INTO vms (name, site, hostname, admin_username, tailscale_host) "
+        "VALUES ('vm1', 'lima', 'h', 'admin', '100.64.0.5')"
     )
     db._conn.commit()
     _install_session_prep_stubs(monkeypatch)
@@ -1370,8 +1370,8 @@ def _write_parity_config(tmp_path: Path) -> Path:
 def _seed_parity_db(tmp_path: Path) -> Database:
     db = Database(tmp_path / "parity.db")
     db._conn.execute(
-        "INSERT INTO vms (name, platform, admin_username, tailscale_host, template) "
-        "VALUES ('vm1', 'lima', 'admin', '100.64.0.5', 'default')"
+        "INSERT INTO vms (name, site, hostname, admin_username, tailscale_host, template) "
+        "VALUES ('vm1', 'lima', 'h', 'admin', '100.64.0.5', 'default')"
     )
     db._conn.execute(
         "INSERT INTO workspaces (name, vm_name, workspace_path, linux_group, template) "

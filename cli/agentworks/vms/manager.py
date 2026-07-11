@@ -177,29 +177,24 @@ def keep_vms_active(
         yield
 
 
-def get_provisioner(platform: str, vm_host_ssh: str | None = None) -> VMPlatform:
-    """PHASE-1 BRIDGE (vm-sites SDD): construct a new-shape platform
-    from the legacy dispatch inputs so window-phase callers keep working.
-    The manager-rewiring phase replaces every caller with the bound
-    platform from ``agentworks.vms.sites.platform_for`` and deletes this.
+def get_provisioner(site: str) -> VMPlatform:
+    """PHASE-2 BRIDGE (vm-sites SDD): construct a platform from a bare
+    site name, without a registry. Only the built-in same-named sites
+    map; custom-named sites (including migrated remote-Lima rows, whose
+    site is the old host name) fail typed until the manager-rewiring
+    phase dispatches every caller through
+    ``agentworks.vms.sites.platform_for`` and deletes this.
     """
     from agentworks.vms.platforms import VM_PLATFORM_REGISTRY
 
-    cls = VM_PLATFORM_REGISTRY.get(platform)
+    cls = VM_PLATFORM_REGISTRY.get(site)
     if cls is None:
-        # Reachable mid-window for a VM created at a custom-named site
-        # (the row's platform column holds the site name); lifecycle ops
-        # on such VMs work once the manager-rewiring phase dispatches
-        # through platform_for.
         raise StateError(
             f"operations on VMs at custom-named sites (this VM's site is "
-            f"'{platform}') are not wired up yet in this build",
+            f"'{site}') are not wired up yet in this build",
             entity_kind="vm",
         )
-    platform_config: dict[str, object] = {}
-    if platform == "lima" and vm_host_ssh:
-        platform_config["vm_host"] = vm_host_ssh
-    return cls(platform, platform_config)
+    return cls(site, {})
 
 
 def create_vm(
@@ -262,22 +257,19 @@ def create_vm(
             entity_name=vm_name,
         )
 
-    # Resolve VM host for Lima. PHASE-1 BRIDGE: the legacy --vm-host
-    # flag still selects a vm_hosts row; the CLI-surface phase retires
-    # it in favor of remote-Lima sites.
-    vm_host_ssh: str | None = None
-    vm_host_name: str | None = None
-    if site == "lima":
-        vm_host_name = vm_host
-        if vm_host_name:
-            host_row = db.get_vm_host(vm_host_name)
-            if host_row is None:
-                raise NotFoundError(
-                    f"VM host '{vm_host_name}' not found",
-                    entity_kind="vm-host",
-                    entity_name=vm_host_name,
-                )
-            vm_host_ssh = host_row.ssh_host
+    # PHASE-2 BRIDGE (vm-sites SDD): the vm_hosts registry is gone (the
+    # DB migration dropped the table); remote Lima is now a vm-site with
+    # platform_config.vm_host. The --vm-host flag survives on the CLI
+    # until the CLI-surface phase removes it, so give it a typed error
+    # with the replacement shape.
+    if vm_host:
+        from agentworks.vms.sites import site_manifest_hint
+
+        raise ConfigError(
+            "--vm-host has been replaced by remote-Lima vm-sites",
+            hint=site_manifest_hint(vm_host)
+            + "\n\nthen pass the site via --platform",
+        )
 
     # Resolve resource settings: CLI flag > template > built-in default
     resolved_cpus = cpus if cpus is not None else vm_tmpl.cpus
@@ -302,13 +294,16 @@ def create_vm(
         config, registry, providers, vm_name, vm_tmpl
     )
 
-    # Create DB record with as-provisioned resource values (the legacy
-    # platform column holds the site name until the DB migration renames
-    # it).
+    # PHASE-2 BRIDGE (vm-sites SDD): the interim hostname keeps today's
+    # {site}--{name} shape; the R11 scheme (with the system slug) lands
+    # in the slug-and-naming phase.
+    hostname = f"{site}--{vm_name}"
+
+    # Create DB record with as-provisioned resource values.
     db.insert_vm(
         vm_name,
-        platform=site,
-        vm_host_name=vm_host_name,
+        site=site,
+        hostname=hostname,
         template=vm_tmpl.name,
         cpus=resolved_cpus,
         memory_gib=resolved_memory,
@@ -331,24 +326,17 @@ def create_vm(
                 f"rollback: failed to delete DB record for vm '{vm_name}': {cleanup_err}"
             )
 
-    # Bind the site's platform and dispatch. PHASE-1 BRIDGE: the legacy
-    # --vm-host input overrides the (local) lima site's config; the R11
-    # hostname scheme and the system slug land in the slug-and-naming
-    # phase (the interim hostname keeps today's {site}--{name} shape);
-    # proxmox config secrets join the resolve pass in the manager-
-    # rewiring phase.
+    # Bind the site's platform and dispatch. PHASE-2 BRIDGE: proxmox
+    # config secrets join the resolve pass in the manager-rewiring
+    # phase.
     from agentworks.vms.base import ProvisionRequest
     from agentworks.vms.sites import resolve_site
 
-    platform_obj = (
-        get_provisioner(site, vm_host_ssh)
-        if vm_host_ssh
-        else resolve_site(site, registry)
-    )
+    platform_obj = resolve_site(site, registry)
 
     request = ProvisionRequest(
         vm_name=vm_name,
-        hostname=f"{site}--{vm_name}",
+        hostname=hostname,
         system_slug=None,
         admin_username=resolved_admin_username,
         ssh_public_key=config.operator.ssh_public_key.read_text().strip(),
@@ -375,16 +363,9 @@ def create_vm(
             entity_name=vm_name,
         ) from e
 
-    # Persist the platform metadata. PHASE-1 BRIDGE: the known keys map
-    # back onto the legacy columns until the DB migration adds the real
-    # platform_metadata column (whose backfill hooks invert this map).
-    metadata = result.platform_metadata
-    if metadata.get("resource_id"):
-        db.update_vm_azure_resource_id(vm_name, metadata["resource_id"])
-    if metadata.get("distro_name"):
-        db.update_vm_wsl_distro_name(vm_name, metadata["distro_name"])
-    if metadata.get("vmid"):
-        db.update_vm_proxmox_vmid(vm_name, metadata["vmid"])
+    # Persist the platform's opaque identifiers verbatim; the owning
+    # platform is the column's only reader.
+    db.update_vm_platform_metadata(vm_name, result.platform_metadata)
 
     # -- Initialization --
     # If this fails, the VM exists on the remote host and may be debuggable.
@@ -483,8 +464,10 @@ def list_vms(db: Database, *, names_only: bool = False) -> None:
         output.info("No VMs registered.")
         return
 
+    # PHASE-2 BRIDGE (vm-sites SDD): the manager-rewiring phase reshapes
+    # this to SITE + the platform's display_backend_name.
     header = (
-        f"{'NAME':<20} {'PLATFORM':<10} {'TEMPLATE':<12} {'HOST':<15} {'PROV':<12} {'INIT':<12} "
+        f"{'NAME':<20} {'SITE':<12} {'TEMPLATE':<12} {'PROV':<12} {'INIT':<12} "
         f"{'WS/AG/SE':<10} {'TAILSCALE':<20} {'CREATED'}"
     )
     output.info(header)
@@ -495,7 +478,7 @@ def list_vms(db: Database, *, names_only: bool = False) -> None:
         se = db.count_sessions_on_vm(vm.name)
         counts = f"{ws}/{ag}/{se}"
         output.info(
-            f"{vm.name:<20} {vm.platform:<10} {vm.template or '-':<12} {vm.vm_host_name or '-':<15} "
+            f"{vm.name:<20} {vm.site:<12} {vm.template or '-':<12} "
             f"{vm.provisioning_status:<12} {vm.init_status:<12} "
             f"{counts:<10} {vm.tailscale_host or '-':<20} {vm.created_at}"
         )
@@ -508,9 +491,9 @@ def describe_vm(db: Database, config: Config, name: str) -> None:
     # VM details
     output.info(f"Name:           {vm.name}")
     output.info(f"Created:        {vm.created_at}")
-    output.info(f"Platform:       {vm.platform}")
+    output.info(f"Site:           {vm.site}")
+    output.info(f"Hostname:       {vm.hostname}")
     output.info(f"Template:       {vm.template or '-'}")
-    output.info(f"VM Host:        {vm.vm_host_name or '-'}")
     output.info(f"Admin User:     {vm.admin_username}")
     output.info(f"Provisioning:   {vm.provisioning_status}")
     output.info(f"Initialization: {vm.init_status}")
@@ -548,12 +531,11 @@ def describe_vm(db: Database, config: Config, name: str) -> None:
             f"{live['disk_used'] + ' (' + live['disk_pct'] + ')' if live else '-'}"
         )
 
-    if vm.azure_resource_id:
-        output.info(f"Azure ID:       {vm.azure_resource_id}")
-    if vm.wsl_distro_name:
-        output.info(f"WSL Distro:     {vm.wsl_distro_name}")
-    if vm.proxmox_vmid:
-        output.info(f"Proxmox VMID:   {vm.proxmox_vmid}")
+    # PHASE-2 BRIDGE (vm-sites SDD): the manager-rewiring phase replaces
+    # this raw dump with the platform's display_backend_name.
+    if vm.platform_metadata:
+        rendered = ", ".join(f"{k}={v}" for k, v in sorted(vm.platform_metadata.items()))
+        output.info(f"Backend:        {rendered}")
     if vm.last_seen_at:
         output.info(f"Last Seen:      {vm.last_seen_at}")
 
@@ -670,8 +652,7 @@ def shell_vm(
 
     ctx = ResourceContext(
         vm_name=vm.name,
-        vm_host=vm.vm_host_name,
-        platform=vm.platform,
+        platform=vm.site,
         user=vm.admin_username,
         workspace_name=ws.name if ws else None,
         workspace_dir=ws.workspace_path if ws else None,
@@ -761,8 +742,7 @@ def exec_vm(
 
     ctx = ResourceContext(
         vm_name=vm.name,
-        vm_host=vm.vm_host_name,
-        platform=vm.platform,
+        platform=vm.site,
         user=vm.admin_username,
         workspace_name=ws.name if ws else None,
         workspace_dir=ws.workspace_path if ws else None,
@@ -1550,17 +1530,12 @@ def _require_vm(db: Database, name: str) -> VMRow:
 
 
 def get_provisioner_for_vm(db: Database, vm: VMRow, config: Config | None = None) -> VMPlatform:
-    """PHASE-1 BRIDGE (vm-sites SDD): see ``get_provisioner``. Proxmox
+    """PHASE-2 BRIDGE (vm-sites SDD): see ``get_provisioner``. Proxmox
     rows dispatch to a config-less platform whose lifecycle ops fail
     until the manager-rewiring phase threads the site's config and
     token secret through the composition root.
     """
-    vm_host_ssh: str | None = None
-    if vm.vm_host_name:
-        host = db.get_vm_host(vm.vm_host_name)
-        if host:
-            vm_host_ssh = host.ssh_host
-    return get_provisioner(vm.platform, vm_host_ssh)
+    return get_provisioner(vm.site)
 
 
 def _is_tailscale_reachable(tailscale_host: str) -> bool:

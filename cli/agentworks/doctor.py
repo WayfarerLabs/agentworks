@@ -145,24 +145,9 @@ def _check_required_tools() -> HealthGroup:
 def _check_vm_platforms() -> HealthGroup:
     g = HealthGroup("VM platforms")
 
-    # VM hosts (remote Lima)
-    try:
-        from agentworks.db import Database
-
-        db_exists, _, _ = Database.check_schema()
-        if db_exists:
-            _db = Database()
-            hosts = _db.list_vm_hosts()
-            if hosts:
-                for h in hosts:
-                    os_info = f", {h.os}" if h.os else ""
-                    g.ok(f"VM host: {h.name}", f"{h.ssh_host}{os_info}")
-            else:
-                g.info("VM hosts", "none configured")
-        else:
-            g.info("VM hosts", "database not yet created")
-    except Exception:
-        g.warn("VM hosts", "could not check")
+    # PHASE-2 BRIDGE (vm-sites SDD): the vm_hosts registry is gone;
+    # the CLI-surface phase teaches doctor to report declared vm-site
+    # resources here instead.
 
     # Local platform tools
     for tool, label in [

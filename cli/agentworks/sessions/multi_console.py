@@ -1404,8 +1404,7 @@ def _resolve_pane_env(
     # fragment, not in per-context SetEnv.
     ctx = ResourceContext(
         vm_name=vm.name,
-        vm_host=vm.vm_host_name,
-        platform=vm.platform,
+        platform=vm.site,
         user=pane_user,
         workspace_name=workspace.name,
         workspace_dir=workspace.workspace_path,

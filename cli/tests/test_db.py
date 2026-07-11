@@ -10,38 +10,26 @@ import pytest
 from agentworks.db import Database, InitStatus, ProvisioningStatus
 
 
-def test_roundtrip_vm_host(db: Database) -> None:
-    db.insert_vm_host("mac-studio", "192.168.1.10", os="darwin")
-    host = db.get_vm_host("mac-studio")
-    assert host is not None
-    assert host.ssh_host == "192.168.1.10"
-    assert host.os == "darwin"
-
-    hosts = db.list_vm_hosts()
-    assert len(hosts) == 1
-
-    db.delete_vm_host("mac-studio")
-    assert db.get_vm_host("mac-studio") is None
-
-
 def test_roundtrip_vm(db: Database) -> None:
-    db.insert_vm_host("mac-studio", "192.168.1.10")
     db.insert_vm(
         "dev-vm",
-        platform="lima",
-        vm_host_name="mac-studio",
+        site="lima",
+        hostname="lima--dev-vm",
         cpus=4,
         memory_gib=8,
         disk_gib=50,
     )
     vm = db.get_vm("dev-vm")
     assert vm is not None
-    assert vm.platform == "lima"
+    assert vm.site == "lima"
+    assert vm.hostname == "lima--dev-vm"
     assert vm.provisioning_status == "pending"
     assert vm.init_status == "pending"
     assert vm.cpus == 4
     assert vm.memory_gib == 8
     assert vm.disk_gib == 50
+    assert vm.platform_metadata == {}
+    assert vm.operator_stopped is False
 
     db.update_vm_init_status("dev-vm", InitStatus.COMPLETE)
     vm = db.get_vm("dev-vm")
@@ -53,10 +41,24 @@ def test_roundtrip_vm(db: Database) -> None:
     assert vm is not None
     assert vm.tailscale_host == "100.64.0.1"
 
+    db.update_vm_platform_metadata("dev-vm", {"instance_name": "dev-vm"})
+    vm = db.get_vm("dev-vm")
+    assert vm is not None
+    assert vm.platform_metadata == {"instance_name": "dev-vm"}
+
+    db.set_operator_stopped("dev-vm", True)
+    vm = db.get_vm("dev-vm")
+    assert vm is not None
+    assert vm.operator_stopped is True
+    db.set_operator_stopped("dev-vm", False)
+    vm = db.get_vm("dev-vm")
+    assert vm is not None
+    assert vm.operator_stopped is False
+
 
 def test_vm_resources_nullable(db: Database) -> None:
     """Resource columns are nullable for VMs created before v2 migration."""
-    db.insert_vm("wsl-vm", platform="wsl2")
+    db.insert_vm("wsl-vm", site="wsl2", hostname="wsl2--wsl-vm")
     vm = db.get_vm("wsl-vm")
     assert vm is not None
     assert vm.cpus is None
@@ -65,9 +67,8 @@ def test_vm_resources_nullable(db: Database) -> None:
 
 
 def test_roundtrip_workspace(db: Database) -> None:
-    db.insert_vm_host("mac-studio", "192.168.1.10")
-    db.insert_vm("dev-vm", platform="lima", vm_host_name="mac-studio")
-    db.insert_vm("other-vm", platform="lima", vm_host_name="mac-studio")
+    db.insert_vm("dev-vm", site="lima", hostname="lima--dev-vm")
+    db.insert_vm("other-vm", site="lima", hostname="lima--other-vm")
 
     db.insert_workspace(
         "ws-123",
@@ -98,8 +99,7 @@ def test_roundtrip_workspace(db: Database) -> None:
 
 
 def test_vm_delete_cascades(db: Database) -> None:
-    db.insert_vm_host("mac-studio", "192.168.1.10")
-    db.insert_vm("dev-vm", platform="lima", vm_host_name="mac-studio")
+    db.insert_vm("dev-vm", site="lima", hostname="lima--dev-vm")
     db.insert_workspace("ws-1", workspace_path="/tmp/ws-1", vm_name="dev-vm", linux_group="ws-ws-1")
 
     db.delete_vm("dev-vm")
@@ -109,16 +109,14 @@ def test_vm_delete_cascades(db: Database) -> None:
 
 
 def test_count_helpers(db: Database) -> None:
-    db.insert_vm_host("mac-studio", "192.168.1.10")
-    db.insert_vm("vm1", platform="lima", vm_host_name="mac-studio")
+    db.insert_vm("vm1", site="lima", hostname="lima--vm1")
     db.insert_workspace("ws-1", workspace_path="/tmp/ws-1", vm_name="vm1", linux_group="ws-ws-1")
 
-    assert db.count_vms_on_host("mac-studio") == 1
     assert db.count_workspaces_on_vm("vm1") == 1
 
 
 def test_roundtrip_agent(db: Database) -> None:
-    db.insert_vm("dev-vm", platform="lima")
+    db.insert_vm("dev-vm", site="lima", hostname="lima--dev-vm")
 
     agent = db.insert_agent("coder", "dev-vm", "agt--coder")
     assert agent.name == "coder"
@@ -134,8 +132,8 @@ def test_roundtrip_agent(db: Database) -> None:
 
 
 def test_list_agents(db: Database) -> None:
-    db.insert_vm("dev-vm", platform="lima")
-    db.insert_vm("other-vm", platform="lima")
+    db.insert_vm("dev-vm", site="lima", hostname="lima--dev-vm")
+    db.insert_vm("other-vm", site="lima", hostname="lima--other-vm")
 
     db.insert_agent("coder", "dev-vm", "agt--coder")
     db.insert_agent("reviewer", "dev-vm", "agt--reviewer")
@@ -152,7 +150,7 @@ def test_list_agents(db: Database) -> None:
 
 
 def test_delete_agent(db: Database) -> None:
-    db.insert_vm("dev-vm", platform="lima")
+    db.insert_vm("dev-vm", site="lima", hostname="lima--dev-vm")
     db.insert_agent("coder", "dev-vm", "agt--coder")
 
     db.delete_agent("coder")
@@ -161,7 +159,7 @@ def test_delete_agent(db: Database) -> None:
 
 def test_workspace_delete_does_not_cascade_agents(db: Database) -> None:
     """Agents are VM-scoped; deleting a workspace only removes grants."""
-    db.insert_vm("dev-vm", platform="lima")
+    db.insert_vm("dev-vm", site="lima", hostname="lima--dev-vm")
     db.insert_workspace("ws-1", workspace_path="/tmp/ws-1", vm_name="dev-vm", linux_group="ws-ws-1")
     db.insert_agent("coder", "dev-vm", "agt--coder")
     db.insert_agent_grant("coder", "ws-1", "explicit")
@@ -174,7 +172,7 @@ def test_workspace_delete_does_not_cascade_agents(db: Database) -> None:
 
 
 def test_vm_delete_cascades_agents(db: Database) -> None:
-    db.insert_vm("dev-vm", platform="lima")
+    db.insert_vm("dev-vm", site="lima", hostname="lima--dev-vm")
     db.insert_agent("coder", "dev-vm", "agt--coder")
 
     db.delete_vm("dev-vm")
@@ -182,7 +180,7 @@ def test_vm_delete_cascades_agents(db: Database) -> None:
 
 
 def test_agent_name_unique(db: Database) -> None:
-    db.insert_vm("dev-vm", platform="lima")
+    db.insert_vm("dev-vm", site="lima", hostname="lima--dev-vm")
     db.insert_agent("coder", "dev-vm", "agt--coder")
 
     with pytest.raises(sqlite3.IntegrityError):
@@ -190,7 +188,7 @@ def test_agent_name_unique(db: Database) -> None:
 
 
 def test_agent_linux_user_unique(db: Database) -> None:
-    db.insert_vm("dev-vm", platform="lima")
+    db.insert_vm("dev-vm", site="lima", hostname="lima--dev-vm")
     db.insert_agent("coder", "dev-vm", "agt--coder")
 
     with pytest.raises(sqlite3.IntegrityError):
@@ -198,7 +196,7 @@ def test_agent_linux_user_unique(db: Database) -> None:
 
 
 def test_agent_grants(db: Database) -> None:
-    db.insert_vm("dev-vm", platform="lima")
+    db.insert_vm("dev-vm", site="lima", hostname="lima--dev-vm")
     db.insert_workspace("ws-1", workspace_path="/tmp/ws-1", vm_name="dev-vm", linux_group="ws-ws-1")
     db.insert_workspace("ws-2", workspace_path="/tmp/ws-2", vm_name="dev-vm", linux_group="ws-ws-2")
     db.insert_agent("coder", "dev-vm", "agt--coder")
@@ -222,7 +220,7 @@ def test_agent_grants(db: Database) -> None:
 
 
 def test_agent_grant_all(db: Database) -> None:
-    db.insert_vm("dev-vm", platform="lima")
+    db.insert_vm("dev-vm", site="lima", hostname="lima--dev-vm")
     db.insert_agent("coder", "dev-vm", "agt--coder", grant_all=True)
 
     agent = db.get_agent("coder")
@@ -234,7 +232,7 @@ def test_agent_grant_all(db: Database) -> None:
 
 
 def test_provisioning_status(db: Database) -> None:
-    db.insert_vm("dev-vm", platform="lima")
+    db.insert_vm("dev-vm", site="lima", hostname="lima--dev-vm")
     vm = db.get_vm("dev-vm")
     assert vm is not None
     assert vm.provisioning_status == "pending"
@@ -251,7 +249,7 @@ def test_provisioning_status(db: Database) -> None:
 
 
 def test_vm_events(db: Database) -> None:
-    db.insert_vm("dev-vm", platform="lima")
+    db.insert_vm("dev-vm", site="lima", hostname="lima--dev-vm")
 
     db.insert_vm_event("dev-vm", "provisioning_started", "lima:dev-vm")
     db.insert_vm_event("dev-vm", "provisioning_complete", "100.64.0.1")
@@ -264,7 +262,7 @@ def test_vm_events(db: Database) -> None:
 
 
 def test_vm_delete_cascades_events(db: Database) -> None:
-    db.insert_vm("dev-vm", platform="lima")
+    db.insert_vm("dev-vm", site="lima", hostname="lima--dev-vm")
     db.insert_vm_event("dev-vm", "provisioning_started")
 
     db.delete_vm("dev-vm")
@@ -288,7 +286,9 @@ def _create_pre_v19_db(path: str) -> None:
         ")"
     )
     for version in range(1, 19):
-        for stmt in MIGRATIONS[version].split(";"):
+        step = MIGRATIONS[version]
+        assert isinstance(step, str)
+        for stmt in step.split(";"):
             stmt = stmt.strip()
             if stmt:
                 conn.execute(stmt)
@@ -344,7 +344,7 @@ def test_agent_session_requires_socket_path(db: Database) -> None:
     """Agent-mode sessions must have a socket_path (CHECK constraint from migration 19)."""
     from agentworks.db import SessionMode
 
-    db.insert_vm("dev-vm", platform="lima")
+    db.insert_vm("dev-vm", site="lima", hostname="lima--dev-vm")
     db.insert_workspace("ws", workspace_path="/tmp/ws", vm_name="dev-vm", linux_group="ws-ws")
     db.insert_agent("coder", "dev-vm", "agt--coder")
 
@@ -361,7 +361,7 @@ def test_admin_session_allows_null_socket(db: Database) -> None:
     """Admin-mode sessions can have NULL socket_path."""
     from agentworks.db import SessionMode
 
-    db.insert_vm("dev-vm", platform="lima")
+    db.insert_vm("dev-vm", site="lima", hostname="lima--dev-vm")
     db.insert_workspace("ws", workspace_path="/tmp/ws", vm_name="dev-vm", linux_group="ws-ws")
 
     session = db.insert_session("ws-s1", "ws", "default", SessionMode.ADMIN)
@@ -372,8 +372,8 @@ def test_list_sessions_filters(db: Database) -> None:
     """list_sessions supports workspace, VM, and agent filters that compose with AND."""
     from agentworks.db import SessionMode
 
-    db.insert_vm("dev-vm", platform="lima")
-    db.insert_vm("other-vm", platform="lima")
+    db.insert_vm("dev-vm", site="lima", hostname="lima--dev-vm")
+    db.insert_vm("other-vm", site="lima", hostname="lima--other-vm")
     db.insert_workspace("ws-a", workspace_path="/tmp/ws-a", vm_name="dev-vm", linux_group="ws-ws-a")
     db.insert_workspace("ws-b", workspace_path="/tmp/ws-b", vm_name="dev-vm", linux_group="ws-ws-b")
     db.insert_workspace("ws-c", workspace_path="/tmp/ws-c", vm_name="other-vm", linux_group="ws-ws-c")
@@ -453,9 +453,9 @@ def test_list_sessions_filters(db: Database) -> None:
 
 def test_list_workspaces_and_agents_multi_value(db: Database) -> None:
     """list_workspaces and list_agents accept either a string or a list for vm_name."""
-    db.insert_vm("vm-a", platform="lima")
-    db.insert_vm("vm-b", platform="lima")
-    db.insert_vm("vm-c", platform="lima")
+    db.insert_vm("vm-a", site="lima", hostname="lima--vm-a")
+    db.insert_vm("vm-b", site="lima", hostname="lima--vm-b")
+    db.insert_vm("vm-c", site="lima", hostname="lima--vm-c")
     db.insert_workspace("ws-a1", workspace_path="/tmp/a1", vm_name="vm-a", linux_group="g1")
     db.insert_workspace("ws-b1", workspace_path="/tmp/b1", vm_name="vm-b", linux_group="g2")
     db.insert_workspace("ws-c1", workspace_path="/tmp/c1", vm_name="vm-c", linux_group="g3")
@@ -492,7 +492,9 @@ def _create_pre_v20_db(path: str) -> None:
         ")"
     )
     for version in range(1, 20):
-        for stmt in MIGRATIONS[version].split(";"):
+        step = MIGRATIONS[version]
+        assert isinstance(step, str)
+        for stmt in step.split(";"):
             stmt = stmt.strip()
             if stmt:
                 conn.execute(stmt)
@@ -543,7 +545,7 @@ def test_session_pid_default_null(db: Database) -> None:
     """New sessions get pid=NULL by default."""
     from agentworks.db import SessionMode
 
-    db.insert_vm("dev-vm", platform="lima")
+    db.insert_vm("dev-vm", site="lima", hostname="lima--dev-vm")
     db.insert_workspace("ws", workspace_path="/tmp/ws", vm_name="dev-vm", linux_group="ws-ws")
 
     session = db.insert_session("ws-s1", "ws", "default", SessionMode.ADMIN)
@@ -554,7 +556,7 @@ def test_update_session_pid(db: Database) -> None:
     """update_session_pid stores and clears the PID."""
     from agentworks.db import SessionMode
 
-    db.insert_vm("dev-vm", platform="lima")
+    db.insert_vm("dev-vm", site="lima", hostname="lima--dev-vm")
     db.insert_workspace("ws", workspace_path="/tmp/ws", vm_name="dev-vm", linux_group="ws-ws")
 
     db.insert_session("ws-s1", "ws", "default", SessionMode.ADMIN)
@@ -590,7 +592,9 @@ def test_migration_21_adds_boot_id(tmp_path: Path) -> None:
         ")"
     )
     for version in range(1, 21):
-        for stmt in MIGRATIONS[version].split(";"):
+        step = MIGRATIONS[version]
+        assert isinstance(step, str)
+        for stmt in step.split(";"):
             stmt = stmt.strip()
             if stmt:
                 conn.execute(stmt)
@@ -637,7 +641,9 @@ def test_migration_22_adds_and_backfills_linux_group(tmp_path: Path) -> None:
         ")"
     )
     for version in range(1, 22):
-        for stmt in MIGRATIONS[version].split(";"):
+        step = MIGRATIONS[version]
+        assert isinstance(step, str)
+        for stmt in step.split(";"):
             stmt = stmt.strip()
             if stmt:
                 conn.execute(stmt)
@@ -690,7 +696,9 @@ def test_migration_25_adds_created_agent(tmp_path: Path) -> None:
         ")"
     )
     for version in range(1, 25):
-        for stmt in MIGRATIONS[version].split(";"):
+        step = MIGRATIONS[version]
+        assert isinstance(step, str)
+        for stmt in step.split(";"):
             stmt = stmt.strip()
             if stmt:
                 conn.execute(stmt)
@@ -738,7 +746,9 @@ def test_migration_26_drops_local_workspaces(tmp_path: Path) -> None:
         ")"
     )
     for version in range(1, 26):
-        for stmt in MIGRATIONS[version].split(";"):
+        step = MIGRATIONS[version]
+        assert isinstance(step, str)
+        for stmt in step.split(";"):
             stmt = stmt.strip()
             if stmt:
                 conn.execute(stmt)

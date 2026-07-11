@@ -71,7 +71,7 @@ def prompt_vm(db: Database, vm_name: str | None) -> VMRow:
 
     require_interactive("--vm")
 
-    options = [f"{v.name}  ({v.platform})" for v in vms]
+    options = [f"{v.name}  ({v.site})" for v in vms]
     idx = output.choose("Select a VM:", options)
     return vms[idx]
 

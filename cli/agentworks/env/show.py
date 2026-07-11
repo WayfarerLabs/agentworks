@@ -318,9 +318,9 @@ def _build_resource_context(ctx: _ResolvedContext) -> ResourceContext:
 
     return ResourceContext(
         vm_name=ctx.vm.name,
-        platform=ctx.vm.platform,
+        platform=ctx.vm.site,
         user=user,
-        vm_host=ctx.vm.vm_host_name,
+
         workspace_name=ctx.workspace.name if ctx.workspace else None,
         workspace_dir=ctx.workspace.workspace_path if ctx.workspace else None,
         agent_name=ctx.agent.name if ctx.agent else None,

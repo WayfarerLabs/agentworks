@@ -661,8 +661,7 @@ def _resolve_session_env(
 
     ctx = ResourceContext(
         vm_name=vm.name,
-        vm_host=vm.vm_host_name,
-        platform=vm.platform,
+        platform=vm.site,
         user=linux_user,
         workspace_name=ws.name,
         workspace_dir=ws.workspace_path,
@@ -1074,7 +1073,7 @@ def _prompt_vm(db: Database) -> VMRow:
             "--vm is required in non-interactive mode when no workspace or agent pins the VM",
             entity_kind="session",
         )
-    options = [f"{v.name}  ({v.platform})" for v in usable]
+    options = [f"{v.name}  ({v.site})" for v in usable]
     idx = output.choose("Select a VM:", options)
     return usable[idx]
 

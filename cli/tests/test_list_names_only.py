@@ -38,16 +38,14 @@ def _names(stdout: str) -> list[str]:
 
 
 def _seed(tmp_path: Path) -> Database:
-    """Two VMs, two hosts, two workspaces, two agents, two sessions, two consoles.
+    """Two VMs, two workspaces, two agents, two sessions, two consoles.
 
     Two-of-each so the order-matching assertion has something to check
     AND so filters (``--vm vm1``) actually narrow the set.
     """
     db = Database(tmp_path / "test.db")
-    db.insert_vm_host("host-a", "10.0.0.1")
-    db.insert_vm_host("host-b", "10.0.0.2")
-    db.insert_vm("vm-a", platform="lima", vm_host_name="host-a")
-    db.insert_vm("vm-b", platform="lima", vm_host_name="host-b")
+    db.insert_vm("vm-a", site="lima", hostname="lima--vm-a")
+    db.insert_vm("vm-b", site="lima", hostname="lima--vm-b")
     db.insert_workspace("ws-a", workspace_path="/tmp/ws-a", vm_name="vm-a", linux_group="ws-ws-a")
     db.insert_workspace("ws-b", workspace_path="/tmp/ws-b", vm_name="vm-b", linux_group="ws-ws-b")
     db.insert_agent("agent-a", "vm-a", "agt-agent-a")
@@ -101,11 +99,14 @@ def test_vm_list_names_only_emits_one_per_line(tmp_path: Path) -> None:
     assert names == ["vm-a", "vm-b"]
 
 
-def test_vm_host_list_names_only_emits_one_per_line(tmp_path: Path) -> None:
+def test_vm_host_list_names_only_is_quiet(tmp_path: Path) -> None:
+    """PHASE-2 BRIDGE (vm-sites SDD): the vm_hosts registry is gone; the
+    completion path degrades to empty output until the CLI-surface
+    phase removes the command."""
     db = _seed(tmp_path)
     code, names = _invoke(db, ["vm-host", "list", "--names-only"])
     assert code == 0, names
-    assert names == ["host-a", "host-b"]
+    assert names == []
 
 
 def test_workspace_list_names_only_emits_one_per_line(tmp_path: Path) -> None:

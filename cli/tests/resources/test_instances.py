@@ -77,8 +77,8 @@ def _seed_basic(tmp_path: Path) -> tuple[Database, Registry]:
     registry = build_registry(config)
 
     db = Database(tmp_path / "test.db")
-    db.insert_vm("vm-default", platform="lima", template=None)
-    db.insert_vm("vm-custom", platform="lima", template="custom")
+    db.insert_vm("vm-default", site="lima", hostname="lima--vm-default", template=None)
+    db.insert_vm("vm-custom", site="lima", hostname="lima--vm-custom", template="custom")
     db.insert_workspace(
         "ws-a", workspace_path="/tmp/ws-a", vm_name="vm-default", linux_group="ws-ws-a"
     )
@@ -217,7 +217,7 @@ def test_secret_instances_finds_sessions_via_admin_env(tmp_path: Path) -> None:
     registry = build_registry(config)
 
     db = Database(tmp_path / "test.db")
-    db.insert_vm("vm-1", platform="lima")
+    db.insert_vm("vm-1", site="lima", hostname="lima--vm-1")
     db.insert_workspace(
         "ws-1", workspace_path="/tmp/ws-1", vm_name="vm-1", linux_group="ws-ws-1"
     )
@@ -252,8 +252,8 @@ def test_secret_instances_finds_sessions_via_vm_template_env(
     registry = build_registry(config)
 
     db = Database(tmp_path / "test.db")
-    db.insert_vm("vm-prod", platform="lima", template="prod")
-    db.insert_vm("vm-default", platform="lima")
+    db.insert_vm("vm-prod", site="lima", hostname="lima--vm-prod", template="prod")
+    db.insert_vm("vm-default", site="lima", hostname="lima--vm-default")
     db.insert_workspace(
         "ws-prod", workspace_path="/tmp/ws-prod", vm_name="vm-prod", linux_group="ws-ws-prod"
     )
@@ -291,7 +291,7 @@ def test_secret_instances_finds_sessions_via_tailscale_system_secret(
     registry = build_registry(config)
 
     db = Database(tmp_path / "test.db")
-    db.insert_vm("vm-1", platform="lima")
+    db.insert_vm("vm-1", site="lima", hostname="lima--vm-1")
     db.insert_workspace(
         "ws-1", workspace_path="/tmp/ws-1", vm_name="vm-1", linux_group="ws-ws-1"
     )
@@ -328,7 +328,7 @@ def test_secret_instances_empty_when_no_session_reaches_it(
     registry = build_registry(config)
 
     db = Database(tmp_path / "test.db")
-    db.insert_vm("vm-1", platform="lima")
+    db.insert_vm("vm-1", site="lima", hostname="lima--vm-1")
     db.insert_workspace(
         "ws-1", workspace_path="/tmp/ws-1", vm_name="vm-1", linux_group="ws-ws-1"
     )
@@ -366,7 +366,7 @@ def test_secret_instances_finds_sessions_via_agent_template_env(
     registry = build_registry(config)
 
     db = Database(tmp_path / "test.db")
-    db.insert_vm("vm-1", platform="lima")
+    db.insert_vm("vm-1", site="lima", hostname="lima--vm-1")
     db.insert_workspace(
         "ws-1", workspace_path="/tmp/ws-1", vm_name="vm-1", linux_group="ws-ws-1"
     )
@@ -404,7 +404,7 @@ def test_secret_instances_admin_secret_not_attributed_to_agent_session(
     registry = build_registry(config)
 
     db = Database(tmp_path / "test.db")
-    db.insert_vm("vm-1", platform="lima")
+    db.insert_vm("vm-1", site="lima", hostname="lima--vm-1")
     db.insert_workspace(
         "ws-1", workspace_path="/tmp/ws-1", vm_name="vm-1", linux_group="ws-ws-1"
     )
@@ -447,7 +447,7 @@ def test_secret_instances_finds_sessions_via_auto_declared_secret(
     registry = build_registry(config)
 
     db = Database(tmp_path / "test.db")
-    db.insert_vm("vm-1", platform="lima")
+    db.insert_vm("vm-1", site="lima", hostname="lima--vm-1")
     db.insert_workspace(
         "ws-1", workspace_path="/tmp/ws-1", vm_name="vm-1", linux_group="ws-ws-1"
     )

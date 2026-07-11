@@ -45,8 +45,8 @@ def _seed_db(
     override individual fields to exercise other-platform branches or
     the failed-init / failed-provisioning guard paths."""
     db = Database(tmp_path / "test.db")
-    cols = ["name", "platform", "admin_username", "tailscale_host"]
-    vals: list[object] = ["vm1", platform, "admin", tailscale_host]
+    cols = ["name", "site", "hostname", "admin_username", "tailscale_host"]
+    vals: list[object] = ["vm1", platform, f"{platform}--vm1", "admin", tailscale_host]
     if init_status is not None:
         cols.append("init_status")
         vals.append(init_status)

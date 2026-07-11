@@ -1291,7 +1291,7 @@ def initialize_vm(
                 exec_target,
                 home,
                 admin_username,
-                vm_for_keepalive.platform,
+                vm_for_keepalive.site,
                 logger,
                 tailscale_auth_key=tailscale_auth_key,
                 bootstrap_complete=bootstrap_complete,
@@ -1684,9 +1684,8 @@ def _phase_b_setup(
     assert vm_row is not None, f"VM '{vm_name}' missing from DB mid-init"
     identity_ctx = ResourceContext(
         vm_name=vm_row.name,
-        platform=vm_row.platform,
+        platform=vm_row.site,
         user=admin_username,
-        vm_host=vm_row.vm_host_name,
     )
 
     # Provisioning is hermetic: no operator env, no per-context identity,

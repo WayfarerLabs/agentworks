@@ -678,8 +678,7 @@ def shell_agent(
 
     ctx = ResourceContext(
         vm_name=vm.name,
-        vm_host=vm.vm_host_name,
-        platform=vm.platform,
+        platform=vm.site,
         user=agent.linux_user,
         workspace_name=ws.name if ws else None,
         workspace_dir=ws.workspace_path if ws else None,
@@ -777,8 +776,7 @@ def exec_agent(
 
     ctx = ResourceContext(
         vm_name=vm.name,
-        vm_host=vm.vm_host_name,
-        platform=vm.platform,
+        platform=vm.site,
         user=agent.linux_user,
         workspace_name=ws.name if ws else None,
         workspace_dir=ws.workspace_path if ws else None,
@@ -1094,9 +1092,8 @@ def _create_agent_on_vm(
 
     agent_identity_ctx = ResourceContext(
         vm_name=vm.name,
-        platform=vm.platform,
+        platform=vm.site,
         user=linux_user,
-        vm_host=vm.vm_host_name,
         agent_name=agent_name,
     )
     agent_identity = per_user_identity_env(agent_identity_ctx)

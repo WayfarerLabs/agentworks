@@ -1,6 +1,6 @@
 # VM sites and platforms -- implementation plan
 
-**Status**: Phase 1 complete. Phases follow the HLA's sequencing sketch, with two refinements
+**Status**: Phases 1-2 complete. Phases follow the HLA's sequencing sketch, with two refinements
 recorded there-vs-here: `defaults.site` parsing (plus the deprecated `defaults.platform` alias) and
 the `vm-template.site` field land in Phase 1 with the rest of the config/kind surface, so Phase 3's
 selection precedence has both to read; only the operator-facing flag/completion work stays in
@@ -151,44 +151,58 @@ boundary. The bridges are marked in-code and retired by Phases 2/3 as originally
 
 One Python migration version; runner support first.
 
-- [ ] `cli/agentworks/db.py`: `MIGRATIONS` values become `str | Callable`; callables receive
+- [x] `cli/agentworks/db.py`: `MIGRATIONS` values become `str | Callable`; callables receive
       `(conn, context)` where `context.legacy` is the best-effort, unvalidated parse of the config
       file's legacy TOML sections (missing/unreadable config yields an empty mapping; tolerant by
-      construction -- nothing may depend on it succeeding).
-- [ ] The migration step, in order:
-  - [ ] Add `platform_metadata TEXT NOT NULL DEFAULT '{}'`,
+      construction -- nothing may depend on it succeeding). As built, `context.legacy` carries the
+      WHOLE parsed document (so hooks index `legacy["proxmox"]` etc.), built lazily once per run.
+- [x] The migration step (v27, `_migrate_vm_sites`), in order:
+  - [x] Add `platform_metadata TEXT NOT NULL DEFAULT '{}'`,
         `operator_stopped INTEGER NOT NULL     DEFAULT 0`, `hostname TEXT`.
-  - [ ] Backfill `platform_metadata` per row via the owning platform's
+  - [x] Backfill `platform_metadata` per row via the owning platform's
         `legacy_platform_metadata(row, context.legacy)` hook (lima instance_name, wsl2 distro_name,
         azure resource_id, proxmox vmid + node-if-present; absent keys omitted, never empty
         strings). Backfill `hostname = '{platform}--{name}'`. The per-platform map only needs the
         four legacy names: pre-SDD schemas constrain the `platform` column to them, and the Phase 1
         create guard refuses custom-named sites mid-window, so no row can hold anything else (a
         value outside the map would be a genuine corruption -- fail loudly, don't guess).
-  - [ ] Site rename: remote-Lima rows (`vm_host_name` set) get `site = vm_host_name`; collect the
+  - [x] Site rename: remote-Lima rows (`vm_host_name` set) get `site = vm_host_name`; collect the
         referenced `vm_hosts` rows and print ready-to-paste `vm-site` manifest documents once at the
         end (suffix `-host` on reserved-name collision, and say so). All other rows keep their value
         (already the right site name).
-  - [ ] Rebuild the `vms` table (the `vm_host_name` FK blocks `DROP COLUMN`): drop
+  - [x] Rebuild the `vms` table (the `vm_host_name` FK blocks `DROP COLUMN`): drop
         `azure_resource_id` / `wsl_distro_name` / `proxmox_vmid` / `vm_host_name`, rename `platform`
         to `site`, declare `hostname NOT NULL`. Drop `vm_hosts`.
-  - [ ] `CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT)`.
-- [ ] `cli/agentworks/db.py`: `VMRow` becomes `site: str`, `platform_metadata: dict[str, str]`
+  - [x] `CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT)`.
+- [x] `cli/agentworks/db.py`: `VMRow` becomes `site: str`, `platform_metadata: dict[str, str]`
       (JSON-parsed), `operator_stopped: bool`, `hostname: str`; legacy fields removed; `insert_vm` /
-      `update_vm_*` helpers follow (including `set_operator_stopped`); `VMHostRow` and the vm_hosts
-      accessors delete.
-- [ ] Mechanical sweep: `vm.platform` readers become `vm.site` where they name the site
+      `update_vm_*` helpers follow (including `set_operator_stopped` and
+      `update_vm_platform_metadata`, replacing the three per-platform column writers); `VMHostRow`
+      and the vm_hosts accessors delete.
+- [x] Mechanical sweep: `vm.platform` readers become `vm.site` where they name the site
       (`vms/manager.py` list/describe, `sessions/`, `agents/`, `workspaces/`, `cli/_helpers.py`,
-      `env/show.py`); display strings stay correct because the values are unchanged.
-- [ ] Tests: `cli/tests/test_db_migration_vm_sites.py` -- fixture DBs at the prior schema version
-      covering all four platforms plus a remote-Lima row; assert backfilled metadata shapes, the
-      hostname backfill, the site rename, the printed snippet, the NOT NULL rebuild, empty-`legacy`
-      behavior (proxmox node omitted), and settings-table creation. `cli/tests/conftest.py` VM
-      fixtures move to the new row shape.
+      `env/show.py`); display strings stay correct because the values are unchanged. As built, the
+      sweep also had to bridge the surfaces whose DB backing vanished (all marked PHASE-2 BRIDGE,
+      retired in later phases): `vm_hosts/manager.py` service functions raise the typed
+      replaced-by-vm-sites error (commands removed in Phase 5; `--names-only` degrades quietly for
+      completion); `create_vm --vm-host` raises the typed error with the site-manifest hint;
+      doctor's vm-hosts check is stubbed pending the Phase 5 vm-site report;
+      `ResourceContext.platform` now carries the site name and `vm_host` has no producer
+      (`AGENTWORKS_VM_HOST` never emitted) until the Phase 4 identity redesign; describe shows a raw
+      platform_metadata dump pending Phase 3's `display_backend_name`.
+- [x] Tests: `cli/tests/test_db_migration_vm_sites.py` -- fixture DBs at the prior schema version
+      covering all four platforms plus a remote-Lima row (and a platform-name-shadowing host);
+      assert backfilled metadata shapes, the hostname backfill, the site rename, the printed
+      snippets, the NOT NULL rebuild, empty-`legacy` behavior (proxmox node omitted), the
+      unknown-platform loud failure, and settings-table creation. Existing test seeds move to the
+      new row shape (the shared VM seeding lives per-file, not in `conftest.py`).
 
 **Definition of done**: a pre-SDD database opens cleanly and lands on the new schema with correct
-data; row helpers and fixtures compile against the new shape. The Phase 1 window is still open
-(manager callers unmigrated).
+data; row helpers and fixtures compile against the new shape. MET -- and as with Phase 1, the
+suite/ruff/mypy are fully green at the boundary (the plan expected the window to stay open here; the
+bridges keep it closed). Remaining window items are unchanged from the Phase 1 note, plus:
+remote-Lima rows (site = host name) fail typed at the `get_provisioner` bridge until Phase 3
+dispatches through `platform_for`.
 
 ## Phase 3: Manager rewiring
 

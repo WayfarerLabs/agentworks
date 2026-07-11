@@ -554,7 +554,7 @@ def test_describe_secret_used_by_populated_with_db(
     registry = build_registry(config)
 
     db = Database(tmp_path / "used_by_test.db")
-    db.insert_vm("vm-1", platform="lima")
+    db.insert_vm("vm-1", site="lima", hostname="lima--vm-1")
     db.insert_workspace(
         "ws-1", workspace_path="/tmp/ws-1", vm_name="vm-1", linux_group="ws-ws-1"
     )
@@ -595,7 +595,7 @@ def test_render_emits_used_by_section_when_populated(
     registry = build_registry(config)
 
     db = Database(tmp_path / "render_used_by.db")
-    db.insert_vm("vm-1", platform="lima")
+    db.insert_vm("vm-1", site="lima", hostname="lima--vm-1")
     db.insert_workspace(
         "ws-1", workspace_path="/tmp/ws-1", vm_name="vm-1", linux_group="ws-ws-1"
     )

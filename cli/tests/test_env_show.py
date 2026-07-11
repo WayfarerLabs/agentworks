@@ -53,8 +53,8 @@ shell = "zsh"
 def _seed_db(db: Database, *, with_workspace: bool = True, with_agent: bool = False,
              with_session: bool = False) -> None:
     db._conn.execute(
-        "INSERT INTO vms (name, platform, admin_username, tailscale_host) "
-        "VALUES ('vm-1', 'lima', 'agentworks', '100.64.0.5')"
+        "INSERT INTO vms (name, site, hostname, admin_username, tailscale_host) "
+        "VALUES ('vm-1', 'lima', 'h', 'agentworks', '100.64.0.5')"
     )
     if with_workspace:
         db._conn.execute(

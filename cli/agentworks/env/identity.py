@@ -22,11 +22,14 @@ class ResourceContext:
     """The resource chain that scopes a shell.
 
     ``vm_name`` / ``platform`` / ``user`` are always present for an on-VM
-    shell. ``vm_host`` is the name from the ``vm_hosts`` registry (e.g.
-    ``"lima-local"``); only Lima VMs are tied to a registry entry, so the
-    field is ``None`` for VMs without one. The remaining fields are
-    present when the corresponding scope applies (workspace context,
-    agent context, session context).
+    shell. PHASE-2 BRIDGE (vm-sites SDD): ``platform`` now carries the
+    VM's SITE name (identical for the four legacy names; the host-named
+    site for migrated remote-Lima rows), and ``vm_host`` has no producer
+    left (the ``vm_hosts`` registry is gone) so ``AGENTWORKS_VM_HOST``
+    is never emitted -- the identity-env phase redesigns these vars
+    (AGENTWORKS_SITE et al.). The remaining fields are present when the
+    corresponding scope applies (workspace context, agent context,
+    session context).
 
     ``session_kind`` is ``"admin"`` when the session runs as the admin user
     and ``"agent"`` when it runs as an agent user. It is set whenever
