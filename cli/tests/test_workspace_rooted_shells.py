@@ -6,7 +6,7 @@ hoisted into ``agent shell``'s shared resolver as part of the same
 refactor). Issue #125 / PR #140.
 
 The tests stay hermetic by monkeypatching the eager-resolve, transport,
-and ``keep_vm_active`` boundaries. The intent is to catch regressions in:
+and VM-gate boundaries. The intent is to catch regressions in:
 
 - The vm-mismatch ``ValidationError`` raised before any SSH work.
 - The agent-side ``AuthorizationError`` on a missing grant.
@@ -23,7 +23,7 @@ import pytest
 
 from agentworks.db import Database
 from agentworks.errors import AuthorizationError, NotFoundError, ValidationError
-from tests.conftest import stub_build_registry
+from tests.conftest import stub_build_registry, stub_vm_gates
 
 # ---------------------------------------------------------------------------
 # Fixtures / helpers
@@ -74,7 +74,7 @@ def _seed_db(tmp_path: Path) -> Database:
 
 
 def _patch_vm_common(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Stub the env / secret / transport / keep_vm_active boundaries for
+    """Stub the env / secret / transport / VM-gate boundaries for
     ``shell_vm`` and ``exec_vm`` so the tests exercise the manager's
     branching without invoking real SSH or secret resolution."""
     from agentworks.vms import manager as vm_manager
@@ -88,11 +88,11 @@ def _patch_vm_common(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(vm_manager, "_vm_secret_target", lambda *a, **k: object())
     monkeypatch.setattr("agentworks.secrets.resolve_for_command", lambda *a, **k: None)
     monkeypatch.setattr("agentworks.env.compose_env", lambda **k: {})
-    monkeypatch.setattr(vm_manager, "keep_vm_active", lambda *a, **k: _NullCM())
+    stub_vm_gates(monkeypatch)
 
 
 def _patch_agent_common(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Stub the env / secret / transport / keep_vm_active boundaries for
+    """Stub the env / secret / transport / VM-gate boundaries for
     ``exec_agent``."""
     from agentworks.agents import manager as agent_manager
 
@@ -107,7 +107,7 @@ def _patch_agent_common(monkeypatch: pytest.MonkeyPatch) -> None:
     )
     monkeypatch.setattr("agentworks.secrets.resolve_for_command", lambda *a, **k: None)
     monkeypatch.setattr("agentworks.env.compose_env", lambda **k: {})
-    monkeypatch.setattr(agent_manager, "keep_vm_active", lambda *a, **k: _NullCM())
+    stub_vm_gates(monkeypatch)
     monkeypatch.setattr(
         agent_manager, "_assert_agent_ssh_works", lambda *a, **k: None
     )
@@ -566,7 +566,7 @@ def test_shell_vm_passes_workspace_scope_to_secret_target(
     monkeypatch.setattr(vm_manager, "_vm_secret_target", lambda *a, **k: object())
     monkeypatch.setattr("agentworks.secrets.resolve_for_command", lambda *a, **k: None)
     monkeypatch.setattr("agentworks.env.compose_env", lambda **k: {})
-    monkeypatch.setattr(vm_manager, "keep_vm_active", lambda *a, **k: _NullCM())
+    stub_vm_gates(monkeypatch)
 
     def _factory(*_a: object, **_k: object) -> object:
         return SimpleNamespace(interactive=lambda *_a, **_k: 0)

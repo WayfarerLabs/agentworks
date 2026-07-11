@@ -21,7 +21,7 @@ import pytest
 
 from agentworks.db import Database
 from agentworks.errors import StateError
-from tests.conftest import stub_build_registry
+from tests.conftest import stub_build_registry, stub_vm_gates
 
 if TYPE_CHECKING:
     pass
@@ -63,7 +63,7 @@ def _seed_db(
 
 def _stub_target() -> object:
     """Minimal ``Transport``-shaped object that ``interactive`` and the
-    reachability probe in ``provisioner_transport`` both accept.
+    reachability probe in ``native_transport`` both accept.
 
     ``run`` returns an SSHResult-shaped object so ``target.run('echo ok',
     timeout=10)`` succeeds without invoking a real subprocess.
@@ -94,7 +94,7 @@ def _patch_common(
     monkeypatch: pytest.MonkeyPatch, vm_manager: ModuleType, *, interactive_log: list[bool],
 ) -> None:
     """Monkeypatch the boilerplate every shell_vm test needs to stub:
-    env resolution, secrets, interactive, keep_vm_active."""
+    env resolution, secrets, interactive, and the VM gates."""
     monkeypatch.setattr(
         vm_manager, "_resolve_vm_admin_env_scopes",
         lambda *a, **k: vm_manager._VmAdminEnvScopes(vm={}, workspace=None, admin={}),  # type: ignore[attr-defined]
@@ -104,7 +104,7 @@ def _patch_common(
     # compose_env normally calls into the secret resolver; stub out the
     # whole thing for tests that aren't exercising env composition.
     monkeypatch.setattr("agentworks.env.compose_env", lambda **k: {})
-    monkeypatch.setattr(vm_manager, "keep_vm_active", lambda *a, **k: _NullCM())
+    stub_vm_gates(monkeypatch)
 
     def _track_interactive(*_a: object, **_k: object) -> int:
         interactive_log.append(True)
@@ -179,7 +179,7 @@ def test_shell_vm_provisioner_flag_bypasses_tailscale_check(
 # -- Provisioner-target routing ----------------------------------------------
 
 
-def test_shell_vm_provisioner_uses_provisioner_transport(
+def test_shell_vm_provisioner_uses_native_transport(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """When --provisioner is set, shell_vm must route through
@@ -208,7 +208,7 @@ def test_shell_vm_provisioner_uses_provisioner_transport(
             yield
 
     monkeypatch.setattr(
-        vm_manager, "get_provisioner_for_vm",
+        vm_manager, "bind_platform",
         lambda *a, **k: _StubProvisioner(),
     )
 
@@ -262,14 +262,14 @@ def test_provisioner_shell_target_wraps_missing_native_transport(
             yield
 
     monkeypatch.setattr(
-        vm_manager, "get_provisioner_for_vm",
+        vm_manager, "bind_platform",
         lambda *a, **k: _UnsupportedProvisioner(),
     )
 
     vm = vm_manager._require_vm(db, "vm1")
     with contextlib.ExitStack() as stack, pytest.raises(StateError) as exc_info:
         _native_transport(
-            vm, vm_manager.get_provisioner_for_vm(db, vm), _make_config(), stack=stack,
+            vm, vm_manager.bind_platform(_make_config(), vm), _make_config(), stack=stack,
         )  # type: ignore[arg-type]
 
     err = exc_info.value
@@ -308,14 +308,14 @@ def test_provisioner_shell_target_proxmox_hint_points_at_web_console(
             yield
 
     monkeypatch.setattr(
-        vm_manager, "get_provisioner_for_vm",
+        vm_manager, "bind_platform",
         lambda *a, **k: _ProxmoxProvisioner(),
     )
 
     vm = vm_manager._require_vm(db, "vm1")
     with contextlib.ExitStack() as stack, pytest.raises(StateError) as exc_info:
         _native_transport(
-            vm, vm_manager.get_provisioner_for_vm(db, vm), _make_config(), stack=stack,
+            vm, vm_manager.bind_platform(_make_config(), vm), _make_config(), stack=stack,
         )  # type: ignore[arg-type]
 
     err = exc_info.value
@@ -372,14 +372,14 @@ def test_provisioner_shell_target_attaches_and_registers_detach_for_azure(
             return t
 
     monkeypatch.setattr(
-        vm_manager, "get_provisioner_for_vm",
+        vm_manager, "bind_platform",
         lambda *a, **k: _FakeAzureProvisioner(),
     )
 
     vm = vm_manager._require_vm(db, "vm1")
     with contextlib.ExitStack() as stack:
         target = _native_transport(
-            vm, vm_manager.get_provisioner_for_vm(db, vm), _make_config(), stack=stack,
+            vm, vm_manager.bind_platform(_make_config(), vm), _make_config(), stack=stack,
         )  # type: ignore[arg-type]
         # Attach must have run inside the stack scope.
         assert attach_calls == ["vm1"]
@@ -399,10 +399,10 @@ def test_provisioner_shell_target_detaches_on_exception_for_azure(
     """The detach callback must be registered BEFORE any post-attach call
     that could raise, so detach fires regardless of how the function
     unwinds. Without this contract a future refactor that moves
-    ``stack.callback`` after ``provisioner_transport`` would silently leak
+    ``stack.callback`` after ``native_transport`` would silently leak
     a public IP on every error path.
 
-    Test: make ``provisioner_transport`` raise after ``attach_public_ip``
+    Test: make ``native_transport`` raise after ``attach_public_ip``
     ran; assert detach was still called via the registered callback when
     the surrounding ExitStack closes."""
     import contextlib
@@ -429,7 +429,7 @@ def test_provisioner_shell_target_detaches_on_exception_for_azure(
             raise RuntimeError("simulated post-attach failure")
 
     monkeypatch.setattr(
-        vm_manager, "get_provisioner_for_vm",
+        vm_manager, "bind_platform",
         lambda *a, **k: _AzureRaisesAfterAttach(),
     )
 
@@ -437,7 +437,7 @@ def test_provisioner_shell_target_detaches_on_exception_for_azure(
     with contextlib.ExitStack() as stack:
         with pytest.raises(RuntimeError, match="simulated post-attach failure"):
             _native_transport(
-                vm, vm_manager.get_provisioner_for_vm(db, vm), _make_config(), stack=stack,
+                vm, vm_manager.bind_platform(_make_config(), vm), _make_config(), stack=stack,
             )  # type: ignore[arg-type]
         # ExitStack still open; detach fires on stack exit, not before.
         assert detach_calls == []
@@ -494,14 +494,14 @@ def test_provisioner_shell_target_retries_reachability_probe(
             yield
 
     monkeypatch.setattr(
-        vm_manager, "get_provisioner_for_vm",
+        vm_manager, "bind_platform",
         lambda *a, **k: _FlakyProvisioner(),
     )
 
     vm = vm_manager._require_vm(db, "vm1")
     with contextlib.ExitStack() as stack:
         target = _native_transport(
-            vm, vm_manager.get_provisioner_for_vm(db, vm), _make_config(), stack=stack,
+            vm, vm_manager.bind_platform(_make_config(), vm), _make_config(), stack=stack,
         )  # type: ignore[arg-type]
 
     # The probe retried until the 4th attempt succeeded; the function
@@ -541,14 +541,14 @@ def test_provisioner_shell_target_raises_defensively_on_empty_host(
             yield
 
     monkeypatch.setattr(
-        vm_manager, "get_provisioner_for_vm",
+        vm_manager, "bind_platform",
         lambda *a, **k: _BrokenProvisioner(),
     )
 
     vm = vm_manager._require_vm(db, "vm1")
     with contextlib.ExitStack() as stack, pytest.raises(StateError) as exc_info:
         _native_transport(
-            vm, vm_manager.get_provisioner_for_vm(db, vm), _make_config(), stack=stack,
+            vm, vm_manager.bind_platform(_make_config(), vm), _make_config(), stack=stack,
         )  # type: ignore[arg-type]
 
     err = exc_info.value
@@ -628,7 +628,7 @@ def test_exec_vm_warns_but_continues_on_failed_init(
     monkeypatch.setattr(vm_manager, "_vm_secret_target", lambda *a, **k: object())
     monkeypatch.setattr("agentworks.secrets.resolve_for_command", lambda *a, **k: None)
     monkeypatch.setattr("agentworks.env.compose_env", lambda **k: {})
-    monkeypatch.setattr(vm_manager, "keep_vm_active", lambda *a, **k: _NullCM())
+    stub_vm_gates(monkeypatch)
 
     def exec_target_stub(*_a: object, **_k: object) -> object:
         return SimpleNamespace(

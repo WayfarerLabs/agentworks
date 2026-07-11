@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
-from collections.abc import Generator
+import contextlib
+from collections.abc import Generator, Iterator
+from contextlib import AbstractContextManager
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -158,9 +160,81 @@ class _FakeTarget:
         return _FakeResult()
 
 
+class _StubPlatform:
+    """Minimal bound-platform stand-in for the vm-sites gates.
+
+    ``vm_active`` is a no-op hold and ``status`` reports RUNNING so the
+    gate proceeds without shelling out (the real ``ensure_active`` fast
+    path runs ``tailscale ping``).
+    """
+
+    name = "stub"
+
+    def vm_active(self, vm: object, *, config: object | None = None) -> AbstractContextManager[None]:
+        return contextlib.nullcontext()
+
+    def status(self, vm: object) -> object:
+        from agentworks.db import VMStatus
+
+        return VMStatus.RUNNING
+
+    def transient_route(self, vm: object) -> AbstractContextManager[None]:
+        return contextlib.nullcontext()
+
+    def post_tailscale_ready(self, vm: object) -> None:
+        return None
+
+
+# Every module that imports the vm-sites gates by name; patched
+# per-module because ``from ... import bind_platform`` captures the
+# binding at module load.
+_GATE_MODULES = (
+    "agentworks.vms.manager",
+    "agentworks.vms.backup",
+    "agentworks.workspaces.manager",
+    "agentworks.agents.manager",
+    "agentworks.sessions.manager",
+    "agentworks.sessions.multi_console",
+    "agentworks.sessions.console",
+)
+
+
+def stub_vm_gates(monkeypatch: pytest.MonkeyPatch) -> _StubPlatform:
+    """Stub ``bind_platform`` / ``ensure_active`` / ``keep_active`` (and
+    the multi-VM variants) in every gate-consuming module.
+
+    Tests that exercise transport / rollback / env plumbing don't want
+    the gates building registries, resolving site secrets, or probing
+    Tailscale. Returns the stub platform for assertions.
+    """
+    platform = _StubPlatform()
+
+    @contextlib.contextmanager
+    def _null_hold(*args: object, **kwargs: object) -> Iterator[None]:
+        yield
+
+    for mod in _GATE_MODULES:
+        monkeypatch.setattr(
+            f"{mod}.bind_platform",
+            lambda config, vm, *, registry=None: platform,
+            raising=False,
+        )
+        monkeypatch.setattr(
+            f"{mod}.ensure_active", lambda *a, **k: None, raising=False
+        )
+        monkeypatch.setattr(f"{mod}.keep_active", _null_hold, raising=False)
+        monkeypatch.setattr(
+            f"{mod}.bind_platforms",
+            lambda config, vms, *, registry=None: [(vm, platform) for vm in vms],
+            raising=False,
+        )
+        monkeypatch.setattr(f"{mod}.keep_actives", _null_hold, raising=False)
+    return platform
+
+
 @pytest.fixture
 def fake_target(monkeypatch: pytest.MonkeyPatch) -> _FakeTarget:
-    """Install a FakeTarget for the transport layer and stub VM-running checks."""
+    """Install a FakeTarget for the transport layer and stub the VM gates."""
     target = _FakeTarget()
     # ``agentworks.transports.transport`` is the canonical admin-transport
     # factory; ``agentworks.sessions.manager.transport`` covers manager's
@@ -176,10 +250,7 @@ def fake_target(monkeypatch: pytest.MonkeyPatch) -> _FakeTarget:
     monkeypatch.setattr(
         "agentworks.agents.manager.transport", fake_factory
     )
-    monkeypatch.setattr(
-        "agentworks.workspaces.manager._ensure_vm_running",
-        lambda *args, **kwargs: None,
-    )
+    stub_vm_gates(monkeypatch)
     # The interactive code path now lives on the transport itself; the
     # fake target exposes it as a no-op so attach flows return cleanly.
     target.interactive = lambda command, **kwargs: 0  # type: ignore[attr-defined]
@@ -289,6 +360,16 @@ class _StubRegistry:
                 raise KeyError(name)
             console = getattr(self._config, "named_console", None)
             return console if console is not None else NamedConsoleConfig()
+        if kind == "vm-site":
+            # Serve the built-in same-named sites so bind_platform /
+            # lookup_site work against namespace configs (a stubbed
+            # test VM's site is one of the four platform names).
+            from agentworks.vms.platforms import VM_PLATFORM_REGISTRY
+            from agentworks.vms.sites import VMSiteDecl
+
+            if name not in VM_PLATFORM_REGISTRY:
+                raise KeyError(name)
+            return VMSiteDecl(name=name, platform=name)
         if kind not in self._KIND_ATTRS:
             raise KeyError(kind)
         return self._kind_dict(kind)[name]

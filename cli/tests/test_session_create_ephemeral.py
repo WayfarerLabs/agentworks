@@ -37,7 +37,7 @@ from agentworks import output
 from agentworks.db import Database
 from agentworks.errors import ValidationError
 
-from .conftest import stub_build_registry
+from .conftest import stub_build_registry, stub_vm_gates
 
 
 @pytest.fixture(autouse=True)
@@ -149,7 +149,7 @@ def test_explicit_vm_agreeing_with_workspace_passes_anchor_check(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """--vm vm-A + --workspace ws-A agree, so the anchor check passes.
-    The first downstream call (_ensure_vm_running) is what we use as a
+    The first downstream call (ensure_active) is what we use as a
     sentinel that we got past validation."""
     from agentworks.sessions import manager as session_manager
     from agentworks.sessions.manager import create_session
@@ -158,7 +158,7 @@ def test_explicit_vm_agreeing_with_workspace_passes_anchor_check(
     config = SimpleNamespace(session=SimpleNamespace(history_limit=50000))
 
     # Template resolution is downstream of anchor cross-check but upstream
-    # of _ensure_vm_running; stub it so the SimpleNamespace config doesn't
+    # of ensure_active; stub it so the SimpleNamespace config doesn't
     # need session_templates.
     monkeypatch.setattr(session_manager, "_resolve_template", lambda *a, **k: None)
 
@@ -168,7 +168,8 @@ def test_explicit_vm_agreeing_with_workspace_passes_anchor_check(
         called.append("ensure_vm_up")
         raise RuntimeError("stop after anchor check")
 
-    monkeypatch.setattr("agentworks.workspaces.manager._ensure_vm_running", _spy)
+    stub_vm_gates(monkeypatch)
+    monkeypatch.setattr("agentworks.sessions.manager.ensure_active", _spy)
 
     with pytest.raises(RuntimeError, match="stop after anchor check"):
         create_session(
@@ -252,7 +253,8 @@ def test_no_vm_anchor_with_single_vm_auto_selects(
         called.append("ensure_vm_up")
         raise RuntimeError("stop after VM resolution")
 
-    monkeypatch.setattr("agentworks.workspaces.manager._ensure_vm_running", _spy)
+    stub_vm_gates(monkeypatch)
+    monkeypatch.setattr("agentworks.sessions.manager.ensure_active", _spy)
 
     with pytest.raises(RuntimeError, match="stop after VM resolution"):
         create_session(
@@ -356,9 +358,7 @@ def test_new_agent_with_explicit_agent_name(
         session_manager, "_session_secret_target_pre_create", lambda *a, **k: None
     )
     monkeypatch.setattr("agentworks.secrets.resolve_for_command", lambda *a, **k: {})
-    monkeypatch.setattr(
-        "agentworks.workspaces.manager._ensure_vm_running", lambda *a, **k: None
-    )
+    stub_vm_gates(monkeypatch)
 
     create_agent_calls: list[dict[str, object]] = []
 
@@ -406,9 +406,7 @@ def test_ephemeral_agent_name_defaults_to_session_name(
         session_manager, "_session_secret_target_pre_create", lambda *a, **k: None
     )
     monkeypatch.setattr("agentworks.secrets.resolve_for_command", lambda *a, **k: {})
-    monkeypatch.setattr(
-        "agentworks.workspaces.manager._ensure_vm_running", lambda *a, **k: None
-    )
+    stub_vm_gates(monkeypatch)
 
     workspace_calls: list[dict[str, object]] = []
     agent_calls: list[dict[str, object]] = []
@@ -471,10 +469,7 @@ def _install_session_prep_stubs(monkeypatch: pytest.MonkeyPatch) -> None:
     config -- no real VM, no real SSH, no real templates."""
     from tests.conftest import stub_session_resolvers
 
-    monkeypatch.setattr(
-        "agentworks.workspaces.manager._ensure_vm_running",
-        lambda *a, **k: None,
-    )
+    stub_vm_gates(monkeypatch)
 
     class _Result:
         ok = True
@@ -709,9 +704,7 @@ def test_new_agent_inherits_vm_from_existing_workspace(
         session_manager, "_session_secret_target_pre_create", lambda *a, **k: None
     )
     monkeypatch.setattr("agentworks.secrets.resolve_for_command", lambda *a, **k: {})
-    monkeypatch.setattr(
-        "agentworks.workspaces.manager._ensure_vm_running", lambda *a, **k: None
-    )
+    stub_vm_gates(monkeypatch)
 
     create_agent_calls: list[dict[str, object]] = []
 
@@ -790,7 +783,7 @@ def test_admin_non_interactive_on_vm_with_agents_does_not_prompt(
     config = SimpleNamespace(session=SimpleNamespace(history_limit=50000))
 
     # Stub template resolution so the SimpleNamespace doesn't need
-    # session_templates; the call we want to land at is _ensure_vm_running.
+    # session_templates; the call we want to land at is ensure_active.
     monkeypatch.setattr(session_manager, "_resolve_template", lambda *a, **k: None)
 
     called: list[str] = []
@@ -799,9 +792,10 @@ def test_admin_non_interactive_on_vm_with_agents_does_not_prompt(
         called.append("ensure_vm_up")
         raise RuntimeError("stop after mode-prompt gate")
 
-    monkeypatch.setattr("agentworks.workspaces.manager._ensure_vm_running", _spy)
+    stub_vm_gates(monkeypatch)
+    monkeypatch.setattr("agentworks.sessions.manager.ensure_active", _spy)
 
-    # If admin is honored, we reach _ensure_vm_running. If admin is
+    # If admin is honored, we reach ensure_active. If admin is
     # erased and the prompt fires, the autouse non-interactive fixture
     # makes it raise ValidationError first.
     with pytest.raises(RuntimeError, match="stop after mode-prompt gate"):
@@ -877,7 +871,8 @@ def _stub_for_post_prompt_flow(monkeypatch: pytest.MonkeyPatch) -> list[str]:
         called.append("ensure_vm_up")
         raise RuntimeError("stop after prompt")
 
-    monkeypatch.setattr("agentworks.workspaces.manager._ensure_vm_running", _spy)
+    stub_vm_gates(monkeypatch)
+    monkeypatch.setattr("agentworks.sessions.manager.ensure_active", _spy)
     return called
 
 
@@ -930,9 +925,7 @@ def test_workspace_prompt_picks_create_new(
         session_manager, "_session_secret_target_pre_create", lambda *a, **k: None
     )
     monkeypatch.setattr("agentworks.secrets.resolve_for_command", lambda *a, **k: {})
-    monkeypatch.setattr(
-        "agentworks.workspaces.manager._ensure_vm_running", lambda *a, **k: None
-    )
+    stub_vm_gates(monkeypatch)
 
     create_workspace_calls: list[dict[str, object]] = []
 
@@ -1034,9 +1027,7 @@ def test_mode_prompt_picks_create_new(
         session_manager, "_session_secret_target_pre_create", lambda *a, **k: None
     )
     monkeypatch.setattr("agentworks.secrets.resolve_for_command", lambda *a, **k: {})
-    monkeypatch.setattr(
-        "agentworks.workspaces.manager._ensure_vm_running", lambda *a, **k: None
-    )
+    stub_vm_gates(monkeypatch)
 
     create_agent_calls: list[dict[str, object]] = []
 

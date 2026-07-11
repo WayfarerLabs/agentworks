@@ -12,7 +12,7 @@ from agentworks.cli import _record_unhandled_error
 from agentworks.output import AgentworksError
 from agentworks.ssh import SSHError
 
-from .conftest import stub_build_registry, stub_session_resolvers
+from .conftest import stub_build_registry, stub_session_resolvers, stub_vm_gates
 
 
 @pytest.fixture(autouse=True)
@@ -205,10 +205,7 @@ def test_create_session_rolls_back_on_keyboard_interrupt(
     db._conn.commit()
 
     # Skip the VM-running probe entirely.
-    monkeypatch.setattr(
-        "agentworks.workspaces.manager._ensure_vm_running",
-        lambda *args, **kwargs: None,
-    )
+    stub_vm_gates(monkeypatch)
 
     class _Result:
         ok = True
@@ -285,10 +282,7 @@ def test_create_session_releases_group_membership_on_keyboard_interrupt(
     db._conn.commit()
     db.insert_agent("a1", "vm1", "aw-a1")
 
-    monkeypatch.setattr(
-        "agentworks.workspaces.manager._ensure_vm_running",
-        lambda *args, **kwargs: None,
-    )
+    stub_vm_gates(monkeypatch)
 
     class _Result:
         ok = True
@@ -369,10 +363,7 @@ def test_create_session_rollback_failure_does_not_mask_keyboard_interrupt(
     )
     db._conn.commit()
 
-    monkeypatch.setattr(
-        "agentworks.workspaces.manager._ensure_vm_running",
-        lambda *args, **kwargs: None,
-    )
+    stub_vm_gates(monkeypatch)
 
     class _Result:
         ok = True

@@ -25,6 +25,7 @@ if TYPE_CHECKING:
     from agentworks.resources.origin import Origin
     from agentworks.resources.reference import ReferenceEntry, ResourceReference
     from agentworks.resources.registry import Registry
+    from agentworks.secrets.base import SecretDecl
     from agentworks.vms.base import VMPlatform
 
 
@@ -123,6 +124,44 @@ def select_site(
     return flag or template_site or default_site or "lima"
 
 
+def lookup_site(name: str, registry: Registry) -> VMSiteDecl:
+    """The site's declaration, or the R3 stranded ``ConfigError`` with
+    the paste-ready manifest hint (e.g. a migrated remote-Lima row whose
+    site manifest the operator has not added yet).
+    """
+    try:
+        decl = registry.lookup("vm-site", name)
+    except KeyError:
+        raise ConfigError(
+            f"site '{name}' is not declared",
+            hint=site_manifest_hint(name),
+        ) from None
+    assert isinstance(decl, VMSiteDecl)
+    return decl
+
+
+def site_secret_decls(decl: VMSiteDecl, registry: Registry) -> list[SecretDecl]:
+    """The site's capability-config secret declarations, for the
+    consuming command's single resolve pass
+    (``compute_needed_secrets(..., extra_decls=...)``).
+
+    The references were derived at finalize (the site emitted them);
+    this projects them back to the declared/auto-declared secret rows.
+    """
+    from agentworks.vms.platforms import VM_PLATFORM_REGISTRY
+
+    capability = VM_PLATFORM_REGISTRY.get(decl.platform)
+    if capability is None:
+        return []
+    decls: list[SecretDecl] = []
+    for cref in capability.validate_config(
+        f"vm-site/{decl.name}", decl.platform_config
+    ):
+        if cref.kind == "secret":
+            decls.append(registry.lookup("secret", cref.name))
+    return decls
+
+
 def resolve_site(
     name: str,
     registry: Registry,
@@ -138,15 +177,7 @@ def resolve_site(
     """
     from agentworks.vms.platforms import VM_PLATFORM_REGISTRY
 
-    try:
-        decl = registry.lookup("vm-site", name)
-    except KeyError:
-        # The R3 stranded-VM path: e.g. a migrated remote-Lima row whose
-        # site manifest the operator has not added yet.
-        raise ConfigError(
-            f"site '{name}' is not declared",
-            hint=site_manifest_hint(name),
-        ) from None
+    decl = lookup_site(name, registry)
     platform_cls = VM_PLATFORM_REGISTRY[decl.platform]  # edge validated at finalize
     return platform_cls(decl.name, decl.platform_config, secret_values)
 

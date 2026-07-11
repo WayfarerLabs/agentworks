@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING
 
 from agentworks import output
 from agentworks.errors import BackupError, NotFoundError, StateError
-from agentworks.vms.manager import keep_vm_active
+from agentworks.vms.manager import bind_platform, keep_active
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -33,7 +33,6 @@ def backup_vm(
     """
     from agentworks.ssh import SSHError, SSHLogger
     from agentworks.transports import SSHTransport, transport
-    from agentworks.workspaces.manager import _ensure_vm_running
 
     vm = db.get_vm(vm_name)
     if vm is None:
@@ -42,7 +41,7 @@ def backup_vm(
             entity_kind="vm",
             entity_name=vm_name,
         )
-    _ensure_vm_running(db, config, vm)
+    platform = bind_platform(config, vm)
 
     if vm.tailscale_host is None:
         raise StateError(
@@ -51,7 +50,7 @@ def backup_vm(
             entity_name=vm_name,
         )
 
-    with keep_vm_active(db, config, vm):
+    with keep_active(db, config, vm, platform):
         # Create backup directory first so the log goes inside it
         timestamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
         backup_name = f"{vm_name}-{timestamp}"

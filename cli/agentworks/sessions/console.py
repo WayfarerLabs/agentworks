@@ -15,7 +15,7 @@ from typing import TYPE_CHECKING
 from agentworks import output
 from agentworks.errors import NotFoundError, StateError
 from agentworks.sessions.tmux import tmux_cmd
-from agentworks.vms.manager import keep_vm_active
+from agentworks.vms.manager import bind_platform, ensure_active, keep_active
 
 if TYPE_CHECKING:
     from agentworks.config import Config
@@ -161,9 +161,8 @@ def attach_console(
             entity_name=vm_name,
         )
 
-    from agentworks.workspaces.manager import _ensure_vm_running
-
-    _ensure_vm_running(db, config, vm)
+    platform = bind_platform(config, vm)
+    ensure_active(db, config, vm, platform)
 
     if vm.tailscale_host is None:
         raise StateError(
@@ -178,7 +177,7 @@ def attach_console(
     # Get sessions for this VM (console wrapper handles dead sessions)
     vm_sessions = _get_sessions_for_vm(db, vm)
 
-    with keep_vm_active(db, config, vm):
+    with keep_active(db, config, vm, platform):
         if recreate or not console_exists(run_command=target.run):
             create_console(
                 vm_sessions,

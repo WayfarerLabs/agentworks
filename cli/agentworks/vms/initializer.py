@@ -42,6 +42,7 @@ if TYPE_CHECKING:
     from agentworks.git_credentials.base import GitCredentialProvider
     from agentworks.resources.registry import Registry
     from agentworks.vms.admin import AdminConfig
+    from agentworks.vms.base import VMPlatform
     from agentworks.vms.templates import ResolvedVMTemplate
 
 
@@ -1240,6 +1241,7 @@ def initialize_vm(
     vm_name: str,
     exec_target: Transport,
     providers: dict[str, GitCredentialProvider],
+    platform: VMPlatform,
     *,
     admin_username: str = "agentworks",
     tailscale_auth_key: str,
@@ -1256,10 +1258,12 @@ def initialize_vm(
 
     Phase 1c (Tailscale) + Phase 1d (git credentials): both
     ``tailscale_auth_key`` and ``git_tokens`` are required; ``create_vm``
-    resolves them via the framework at manager-entry and threads them in.
+    resolves them via the framework at manager-entry and threads them in,
+    along with the BOUND ``platform`` from its composition root (used
+    for the keepalive hold; the gates never bind).
     """
     from agentworks.ssh import SSHLogger
-    from agentworks.vms.manager import keep_vm_active
+    from agentworks.vms.manager import keep_active
 
     home = f"/home/{admin_username}"
     logger = SSHLogger(vm_name, "vm-create")
@@ -1280,7 +1284,7 @@ def initialize_vm(
     # (Tailscale SSH).
     vm_for_keepalive = db.get_vm(vm_name)
     assert vm_for_keepalive is not None, "create_vm inserts the row before init"
-    with keep_vm_active(db, config, vm_for_keepalive):
+    with keep_active(db, config, vm_for_keepalive, platform):
         try:
             db.insert_vm_event(vm_name, "provisioning_started", transport)
             ts_target = _phase_a_bootstrap(
@@ -1291,9 +1295,12 @@ def initialize_vm(
                 exec_target,
                 home,
                 admin_username,
-                vm_for_keepalive.site,
+                vm_for_keepalive.hostname,
                 logger,
                 tailscale_auth_key=tailscale_auth_key,
+                # WSL2 handles swap natively before bootstrap; every
+                # other platform lets the script create the swapfile.
+                script_swap=0 if platform.name == "wsl2" else vm_template.swap,
                 bootstrap_complete=bootstrap_complete,
                 tailscale_ip=tailscale_ip,
             )
@@ -1409,10 +1416,11 @@ def _phase_a_bootstrap(
     exec_target: Transport,
     home: str,
     admin_username: str,
-    platform: str,
+    hostname: str,
     logger: SSHLogger,
     *,
     tailscale_auth_key: str,
+    script_swap: int,
     bootstrap_complete: bool = False,
     tailscale_ip: str | None = None,
 ) -> Transport:
@@ -1445,9 +1453,10 @@ def _phase_a_bootstrap(
             vm_name,
             exec_target,
             admin_username,
-            platform,
+            hostname,
             logger,
             tailscale_auth_key=tailscale_auth_key,
+            script_swap=script_swap,
         )
 
     # Sync the operator's SSH config now that the VM's Tailscale IP is
@@ -1496,10 +1505,11 @@ def _run_bootstrap_script(
     vm_name: str,
     exec_target: Transport,
     admin_username: str,
-    platform: str,
+    hostname: str,
     logger: SSHLogger,
     *,
     tailscale_auth_key: str,
+    script_swap: int,
 ) -> str:
     """Generate, copy, and run a bootstrap script on the VM. Returns Tailscale IP.
 
@@ -1510,7 +1520,7 @@ def _run_bootstrap_script(
     """
     import tempfile
 
-    from agentworks.vms.bootstrap_script import generate_bootstrap_script, parse_bootstrap_output, vm_hostname
+    from agentworks.vms.bootstrap_script import generate_bootstrap_script, parse_bootstrap_output
 
     output.info("Bootstrapping VM...")
 
@@ -1520,10 +1530,10 @@ def _run_bootstrap_script(
         ssh_public_key=ssh_public_key,
         provisioning_packages=PROVISIONING_PACKAGES,
         tailscale_auth_key=tailscale_auth_key,
-        hostname=vm_hostname(platform, vm_name),
-        # WSL2 provisioner handles swap natively before bootstrap; every other
-        # platform lets the script create the swapfile.
-        swap=0 if platform == "wsl2" else vm_template.swap,
+        # The stored hostname (vms.hostname), never re-derived from
+        # live config.
+        hostname=hostname,
+        swap=script_swap,
     )
 
     # Copy script to VM and execute synchronously over the provisioning transport

@@ -5,15 +5,7 @@ from __future__ import annotations
 from agentworks.vms.bootstrap_script import (
     generate_bootstrap_script,
     parse_bootstrap_output,
-    vm_hostname,
 )
-
-
-def test_vm_hostname() -> None:
-    """Hostname uses <platform>--<vm_name> format."""
-    assert vm_hostname("lima", "my-vm") == "lima--my-vm"
-    assert vm_hostname("azure", "test") == "azure--test"
-    assert vm_hostname("wsl2", "dev-box") == "wsl2--dev-box"
 
 
 def test_generate_bootstrap_script_all_steps() -> None:

@@ -1,6 +1,6 @@
 # VM sites and platforms -- implementation plan
 
-**Status**: Phases 1-2 complete. Phases follow the HLA's sequencing sketch, with two refinements
+**Status**: Phases 1-3 complete. Phases follow the HLA's sequencing sketch, with two refinements
 recorded there-vs-here: `defaults.site` parsing (plus the deprecated `defaults.platform` alias) and
 the `vm-template.site` field land in Phase 1 with the rest of the config/kind surface, so Phase 3's
 selection precedence has both to read; only the operator-facing flag/completion work stays in
@@ -219,43 +219,54 @@ dispatches through `platform_for`.
 
 Close the window: every caller onto the new dispatch, gate, and request shapes.
 
-- [ ] `cli/agentworks/vms/manager.py`: `create_vm` resolves the site (flag, then `template.site`,
+- [x] `cli/agentworks/vms/manager.py`: `create_vm` resolves the site (flag, then `template.site`,
       then `defaults.site`, then `lima`), runs the composition-root ordering from the HLA (registry
       -> site decl -> `extra_decls` for site secrets -> single resolve -> bind), computes the R11
-      hostname, builds `ProvisionRequest`, and calls `platform.create(request)`; writes
-      `platform_metadata` verbatim, `hostname`, and `operator_stopped = False`. Legacy
-      `update_vm_azure_resource_id`-style writes delete.
-- [ ] `cli/agentworks/vms/manager.py`: `ensure_active(db, config, vm, platform)` (fast-path
+      hostname (bare VM name until the slug lands in Phase 4), builds `ProvisionRequest`, and calls
+      `platform.create(request)`; writes `platform_metadata` verbatim, `hostname`, and
+      `operator_stopped = False`. Legacy `update_vm_azure_resource_id`-style writes deleted in
+      Phase 2. As built, the site's secret decls join `_collect_secrets`' existing single resolve
+      pass (a `site_decls` kwarg) rather than a second pass.
+- [x] `cli/agentworks/vms/manager.py`: `ensure_active(db, config, vm, platform)` (fast-path
       tailscale probe; STOPPED/DEALLOCATED honoring `operator_stopped`; UNKNOWN proceeds; post-start
       `_ensure_tailscale` inside `vm_active`) and `keep_active(db, config, vm, platform)` /
       `keep_actives` taking the BOUND platform. `keep_vm_active` / `keep_vms_active` /
-      `get_provisioner` / `get_provisioner_for_vm` delete.
-- [ ] `cli/agentworks/vms/manager.py`: `start_vm` clears `operator_stopped` then starts; `stop_vm`
-      sets it BEFORE the already-stopped short-circuit; `describe_vm` shows Site, Platform, and
-      `display_backend_name()`; `vm list` header PLATFORM becomes SITE; status rendering pairs
-      observed state with the flag (`stopped (operator)` vs `stopped (idle)`).
-- [ ] `cli/agentworks/workspaces/manager.py`: `_ensure_vm_running` deletes; its callers
+      `get_provisioner` / `get_provisioner_for_vm` delete. As built, the composition-root ordering
+      is packaged as `bind_platform(config, vm, *, registry=None)` (and `bind_platforms` for the
+      multi-VM sites, lazy so an empty VM set never builds a registry): each command entry binds
+      once via the helper and threads the platform down; the gates never bind.
+- [x] `cli/agentworks/vms/manager.py`: `start_vm` clears `operator_stopped` then starts; `stop_vm`
+      sets it BEFORE the already-stopped short-circuit; `describe_vm` shows Site, Platform,
+      `display_backend_name()`, and a live Status line pairing observed state with the flag
+      (`stopped (operator)` vs `stopped (idle)`); `vm list` header PLATFORM became SITE in Phase 2.
+- [x] `cli/agentworks/workspaces/manager.py`: `_ensure_vm_running` deletes; its callers
       (`sessions/console.py`, `sessions/multi_console.py`, `agents/manager.py`, and the in-module
       sites) move to the public gate, with their composition roots binding the platform per the HLA
       ordering. The existing `keep_vm_active` call sites across `sessions/`, `agents/`,
       `workspaces/` migrate to `keep_active` with the bound platform threaded.
-- [ ] `cli/agentworks/vms/initializer.py`: Phase A reads `vm.hostname` (stop re-deriving via
-      `vm_hostname`) and `platform_metadata`; `bootstrap_script.vm_hostname()` deletes;
-      `initialize_vm` / `reinit` composition roots bind the platform (a stranded remote-Lima VM
-      fails here with the R3 ConfigError, before any env baking).
-- [ ] `cli/agentworks/transports/__init__.py` + `cli/agentworks/vms/backup.py` + remaining callers:
-      adopt the renamed factory and `platform_for`; `vm shell --provisioner`'s internals go through
-      the bound platform.
-- [ ] Tests: gate semantics (`cli/tests/vms/test_ensure_active.py`: fast path skips `status()`,
-      auto-resume, operator_stopped StateError, UNKNOWN proceeds, stop-sets-flag-before-shortcut);
-      `create_vm` request shape per platform; proxmox token end to end (resolve pass carries
-      `proxmox-token-secret`, platform receives the value, no env read); existing suites
-      (`test_initializer.py`, `test_vm_shell_provisioner.py`, session/agent/workspace suites)
-      updated to the new shapes.
+- [x] `cli/agentworks/vms/initializer.py`: Phase A reads `vm.hostname` (stop re-deriving via
+      `vm_hostname`) and the WSL2-native-swap decision moves to the caller (`script_swap` computed
+      from the bound platform's name); `bootstrap_script.vm_hostname()` deletes; `initialize_vm`
+      takes the bound platform from `create_vm`'s composition root; `reinit` binds via
+      `bind_platform` (a stranded remote-Lima VM fails there with the R3 ConfigError, before any env
+      baking).
+- [x] `cli/agentworks/transports/__init__.py` + `cli/agentworks/vms/backup.py` + remaining callers:
+      adopt the renamed factory and the bound platform; `vm shell --provisioner`'s internals go
+      through the bound platform.
+- [x] Tests: gate semantics (`cli/tests/vms/test_ensure_active.py`: fast path skips `status()`,
+      auto-resume, operator*stopped StateError, UNKNOWN proceeds, stop-sets-flag-before-shortcut,
+      start-clears-flag); `create_vm` request shape + row persistence and the proxmox token end to
+      end (`cli/tests/vms/test_create_vm_dispatch.py`: resolve pass carries `proxmox-token-secret`
+      via the AW_SECRET* env backend, the bound platform receives the value, the old raw
+      `PROXMOX_TOKEN_SECRET` variable is provably unread); existing suites updated to the new shapes
+      via a shared `stub_vm_gates` conftest helper (and `_StubRegistry` now serves the four built-in
+      vm-site rows so namespace-config tests can bind for real).
 
-**Definition of done**: the codebase compiles cleanly; full pytest passes; `git grep` finds no
-`VMProvisioner`, `get_provisioner`, `keep_vm_active`, `ProvisionerError`, or `vm_hosts` references
-outside historical SDDs. Pause point if needed.
+**Definition of done**: the codebase compiles cleanly; full pytest passes (1523); `git grep` finds
+no `VMProvisioner`, `get_provisioner`, `keep_vm_active`, or `ProvisionerError` references outside
+historical SDDs. MET, with one carve-out the plan itself schedules: the `vm_hosts` PHASE-2 BRIDGE
+module (typed replaced-by-vm-sites errors) survives until Phase 5 removes the `agw vm-host`
+commands.
 
 ## Phase 4: Slug, prompts, SSH config, hostname, identity env
 

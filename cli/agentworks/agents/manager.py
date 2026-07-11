@@ -16,7 +16,7 @@ from agentworks.errors import (
     ValidationError,
 )
 from agentworks.transports import transport
-from agentworks.vms.manager import keep_vm_active
+from agentworks.vms.manager import bind_platform, keep_active
 
 if TYPE_CHECKING:
     from agentworks.agents.templates import ResolvedAgentTemplate
@@ -260,7 +260,7 @@ def create_agent(
     output.info(
         f"Creating agent '{name}' on VM '{vm_name}' (template: {agent_tmpl.name})..."
     )
-    with keep_vm_active(db, config, vm):
+    with keep_active(db, config, vm, bind_platform(config, vm)):
 
         def _safe_rollback() -> None:
             # Best-effort: rollback failures must not mask the original KI or
@@ -365,7 +365,7 @@ def delete_agent(
     from agentworks.ssh import SSHLogger
     ssh_logger = SSHLogger(vm.name, "agent-delete")
     output.info(f"Deleting agent '{name}' on VM '{vm.name}'...")
-    with keep_vm_active(db, config, vm):
+    with keep_active(db, config, vm, bind_platform(config, vm)):
 
         # Kill running sessions for this agent (status-aware)
         if agent_sessions:
@@ -473,7 +473,7 @@ def reinit_agent(
 
     from agentworks.ssh import SSHLogger
     ssh_logger = SSHLogger(vm.name, "agent-reinit")
-    with keep_vm_active(db, config, vm):
+    with keep_active(db, config, vm, bind_platform(config, vm)):
         try:
             try:
                 _create_agent_on_vm(
@@ -646,10 +646,6 @@ def shell_agent(
 
     vm = _require_vm(db, agent.vm_name)
 
-    from agentworks.workspaces.manager import _ensure_vm_running
-
-    _ensure_vm_running(db, config, vm)
-
     import sys
 
     from agentworks.env import ResourceContext, compose_env
@@ -696,7 +692,7 @@ def shell_agent(
     # authorized_keys (Phase 3) accepts the operator's key set.
     target = agent_transport(vm, config, agent)
 
-    with keep_vm_active(db, config, vm):
+    with keep_active(db, config, vm, bind_platform(config, vm)):
         # Probe direct agent SSH first so pre-rollout agents (whose
         # authorized_keys was never populated) get an actionable error
         # rather than dropping into a remote shell that immediately exits
@@ -792,7 +788,7 @@ def exec_agent(
 
     target = agent_transport(vm, config, agent)
 
-    with keep_vm_active(db, config, vm):
+    with keep_active(db, config, vm, bind_platform(config, vm)):
         # Probe direct agent SSH first so pre-rollout agents (whose
         # authorized_keys was never populated) get an actionable error.
         _assert_agent_ssh_works(target, agent)
@@ -837,7 +833,7 @@ def grant_workspaces(
         )
 
     vm = _require_vm(db, agent.vm_name)
-    with keep_vm_active(db, config, vm):
+    with keep_active(db, config, vm, bind_platform(config, vm)):
 
         if grant_all:
             db.update_agent_grant_all(agent_name, True)
@@ -884,7 +880,7 @@ def revoke_workspaces(
         )
 
     vm = _require_vm(db, agent.vm_name)
-    with keep_vm_active(db, config, vm):
+    with keep_active(db, config, vm, bind_platform(config, vm)):
 
         if revoke_all:
             db.update_agent_grant_all(agent_name, False)

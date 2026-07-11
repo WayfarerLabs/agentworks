@@ -137,64 +137,129 @@ def _resolve_workspace_for_vm(
     return ws
 
 
-@contextlib.contextmanager
-def keep_vm_active(db: Database, config: Config, vm: VMRow) -> Iterator[None]:
-    """Hold a VM in an active, reachable state for the duration of the context.
+def bind_platform(
+    config: Config,
+    vm: VMRow,
+    *,
+    registry: Registry | None = None,
+) -> VMPlatform:
+    """Composition-root helper: bind a VM's platform through its site.
 
-    Dispatches to the platform provisioner's ``vm_active`` hook. Default is a
-    no-op (Lima/Azure/Proxmox VMs don't disappear on us). WSL2 spawns a
-    ``wsl --distribution NAME -- sleep infinity`` subprocess to anchor the
-    distro against ``vmIdleTimeout``, booting it if stopped, and waits for
-    Tailscale SSH to be reachable before yielding.
-
-    Wrap any manager-layer function that touches the VM (issues SSH, runs
-    tmux ops, transfers files, etc.) in this context. For commands that
-    touch more than one VM, use :func:`keep_vms_active`.
+    Runs the HLA "Dispatch and site secrets" ordering once: registry
+    (built here unless the caller already has one) -> site declaration
+    -> the site's secret declarations join a single resolve pass
+    (``extra_decls``; proxmox's API token is today's only user, the
+    other platforms' empty decl set skips the pass entirely) -> bound
+    platform. Call ONCE at a VM-touching command's entry and thread the
+    bound platform down; the gates (:func:`ensure_active` /
+    :func:`keep_active`) take it as a parameter and never resolve or
+    bind anything themselves.
     """
-    provisioner = get_provisioner_for_vm(db, vm, config)
-    with provisioner.vm_active(vm, config=config):
-        yield
+    from agentworks.bootstrap import build_registry
+    from agentworks.secrets.orchestration import resolve_for_command
+    from agentworks.vms.sites import lookup_site, platform_for, site_secret_decls
+
+    if registry is None:
+        registry = build_registry(config)
+    decl = lookup_site(vm.site, registry)
+    extra = site_secret_decls(decl, registry)
+    values = (
+        resolve_for_command([], config, registry, extra_decls=extra)
+        if extra
+        else {}
+    )
+    return platform_for(vm, registry, secret_values=values)
 
 
-@contextlib.contextmanager
-def keep_vms_active(
-    db: Database, config: Config, vms: Iterable[VMRow]
-) -> Iterator[None]:
-    """Multi-VM variant of :func:`keep_vm_active`.
-
-    Enters one ``vm_active`` per VM via ``ExitStack`` so a command that
-    touches multiple VMs (``session list --status``, ``workspace copy``
-    across hosts) keeps all of them anchored for its duration. Duplicate
-    VMs are deduplicated by name.
+def bind_platforms(
+    config: Config,
+    vms: Iterable[VMRow],
+    *,
+    registry: Registry | None = None,
+) -> list[tuple[VMRow, VMPlatform]]:
+    """Multi-VM :func:`bind_platform`: one registry build (lazy, so an
+    empty VM set stays a no-op), one bound platform per distinct VM
+    (duplicates deduplicated by name), preserving first-encounter
+    order. Feed the result to :func:`keep_actives`.
     """
+    from agentworks.bootstrap import build_registry
+
     seen: set[str] = set()
-    with contextlib.ExitStack() as stack:
-        for vm in vms:
-            if vm.name in seen:
-                continue
-            seen.add(vm.name)
-            stack.enter_context(keep_vm_active(db, config, vm))
+    pairs: list[tuple[VMRow, VMPlatform]] = []
+    for vm in vms:
+        if vm.name in seen:
+            continue
+        seen.add(vm.name)
+        if registry is None:
+            registry = build_registry(config)
+        pairs.append((vm, bind_platform(config, vm, registry=registry)))
+    return pairs
+
+
+def ensure_active(
+    db: Database, config: Config, vm: VMRow, platform: VMPlatform
+) -> None:
+    """Respect an operator stop; otherwise start on demand.
+
+    Fast path: a Tailscale reachability probe (cheap, no cloud API)
+    short-circuits the common case, keeping backend round trips off the
+    per-op hot path. ``platform`` is the BOUND platform from the
+    caller's composition root (:func:`bind_platform`).
+    """
+    if vm.tailscale_host and _is_tailscale_reachable(vm.tailscale_host):
+        return
+    observed = platform.status(vm)
+    if observed in (VMStatus.STOPPED, VMStatus.DEALLOCATED):
+        if vm.operator_stopped:
+            raise StateError(
+                f"VM '{vm.name}' is stopped",
+                entity_kind="vm",
+                entity_name=vm.name,
+                hint=f"start it with: agw vm start {vm.name}",
+            )
+        output.info(f"VM '{vm.name}' is {observed.value}. Starting...")
+        platform.start(vm)
+        # Hold while tailscaled reattaches: a freshly booted WSL2
+        # distro must not idle out during the handshake wait.
+        with platform.vm_active(vm, config=config):
+            _ensure_tailscale(db, config, vm)
+    # RUNNING or UNKNOWN: proceed. A transient status failure must not
+    # trigger a spurious start; the op will surface the real error.
+
+
+@contextlib.contextmanager
+def keep_active(
+    db: Database, config: Config, vm: VMRow, platform: VMPlatform
+) -> Iterator[None]:
+    """Gate (:func:`ensure_active`), then hold (``vm_active``) for the
+    context's duration.
+
+    Takes the BOUND platform from the composition root: binding may
+    need resolved config secrets, which only the composition root's
+    single resolve pass has. WSL2's ``vm_active`` spawns a keepalive
+    subprocess anchoring the distro against ``vmIdleTimeout``; the
+    other platforms' default hold is a no-op.
+    """
+    ensure_active(db, config, vm, platform)
+    with platform.vm_active(vm, config=config):
         yield
 
 
-def get_provisioner(site: str) -> VMPlatform:
-    """PHASE-2 BRIDGE (vm-sites SDD): construct a platform from a bare
-    site name, without a registry. Only the built-in same-named sites
-    map; custom-named sites (including migrated remote-Lima rows, whose
-    site is the old host name) fail typed until the manager-rewiring
-    phase dispatches every caller through
-    ``agentworks.vms.sites.platform_for`` and deletes this.
+@contextlib.contextmanager
+def keep_actives(
+    db: Database,
+    config: Config,
+    pairs: Iterable[tuple[VMRow, VMPlatform]],
+) -> Iterator[None]:
+    """Multi-VM :func:`keep_active` over ``(vm, bound platform)`` pairs
+    (from :func:`bind_platforms`), entered via ``ExitStack`` so a
+    command touching multiple VMs (``session list --status``,
+    ``workspace copy`` across hosts) keeps all of them anchored.
     """
-    from agentworks.vms.platforms import VM_PLATFORM_REGISTRY
-
-    cls = VM_PLATFORM_REGISTRY.get(site)
-    if cls is None:
-        raise StateError(
-            f"operations on VMs at custom-named sites (this VM's site is "
-            f"'{site}') are not wired up yet in this build",
-            entity_kind="vm",
-        )
-    return cls(site, {})
+    with contextlib.ExitStack() as stack:
+        for vm, platform in pairs:
+            stack.enter_context(keep_active(db, config, vm, platform))
+        yield
 
 
 def create_vm(
@@ -223,29 +288,14 @@ def create_vm(
 
     vm_tmpl = resolve_template(registry, template)
 
-    # Resolve the target site. PHASE-1 BRIDGE (vm-sites SDD): the CLI
-    # still spells the flag --platform; its value is a site name (the
-    # bundled lima/wsl2 sites, the legacy [azure]/[proxmox] sites, or
-    # any operator-declared site).
-    from agentworks.vms.sites import select_site
+    # Resolve the target site (SDD R2 precedence) and its declaration.
+    # An undeclared site fails here with the R3 ConfigError + manifest
+    # hint, before any DB or backend work. The CLI still spells the
+    # flag --platform until the CLI-surface phase renames it to --site.
+    from agentworks.vms.sites import lookup_site, select_site, site_secret_decls
 
     site = select_site(platform, vm_tmpl.site, config.defaults.site)
-
-    # PHASE-1 BRIDGE (vm-sites SDD): refuse custom-named sites up front.
-    # resolve_site could provision one, but every subsequent step
-    # (initialize, delete, shells) still dispatches through the legacy
-    # get_provisioner bridge, which only maps the four legacy names --
-    # the create would half-complete and the row would be unmanageable
-    # until the manager-rewiring phase. This guard (and the bridge) go
-    # away when that phase dispatches everything through platform_for.
-    from agentworks.vms.platforms import VM_PLATFORM_REGISTRY
-
-    if site not in VM_PLATFORM_REGISTRY:
-        raise StateError(
-            f"creating VMs at custom-named sites (here: '{site}') is not "
-            f"wired up yet in this build",
-            entity_kind="vm",
-        )
+    site_decl = lookup_site(site, registry)
 
     vm_name = name
     validate_name(vm_name)
@@ -286,18 +336,21 @@ def create_vm(
     providers = resolve_git_credential_providers(registry, admin.git_credentials)
     announce_git_credentials(providers)
 
-    # Collect provisioning-time secrets upfront (tailscale auth, git creds).
-    # Provisioning is hermetic: operator [admin.env] / [vm_templates.*.env]
-    # secrets are NOT prompted here -- they're not used until runtime
-    # shells, which perform their own resolve at their composition root.
-    tailscale_auth_key, git_tokens = _collect_secrets(
-        config, registry, providers, vm_name, vm_tmpl
+    # Collect provisioning-time secrets upfront (tailscale auth, git
+    # creds, and the site's config secrets -- proxmox's API token) in
+    # the command's single resolve pass. Provisioning is hermetic:
+    # operator [admin.env] / [vm_templates.*.env] secrets are NOT
+    # prompted here -- they're not used until runtime shells, which
+    # perform their own resolve at their composition root.
+    tailscale_auth_key, git_tokens, secret_values = _collect_secrets(
+        config, registry, providers, vm_name, vm_tmpl,
+        site_decls=site_secret_decls(site_decl, registry),
     )
 
-    # PHASE-2 BRIDGE (vm-sites SDD): the interim hostname keeps today's
-    # {site}--{name} shape; the R11 scheme (with the system slug) lands
-    # in the slug-and-naming phase.
-    hostname = f"{site}--{vm_name}"
+    # R11 hostname: {slug}-{name} once the slug lands (the
+    # slug-and-naming phase); until then the slug is unset, so the
+    # hostname is the bare VM name.
+    hostname = vm_name
 
     # Create DB record with as-provisioned resource values.
     db.insert_vm(
@@ -326,13 +379,12 @@ def create_vm(
                 f"rollback: failed to delete DB record for vm '{vm_name}': {cleanup_err}"
             )
 
-    # Bind the site's platform and dispatch. PHASE-2 BRIDGE: proxmox
-    # config secrets join the resolve pass in the manager-rewiring
-    # phase.
+    # Bind the site's platform ONCE with the resolved config secrets
+    # and dispatch (the HLA composition-root ordering).
     from agentworks.vms.base import ProvisionRequest
     from agentworks.vms.sites import resolve_site
 
-    platform_obj = resolve_site(site, registry)
+    platform_obj = resolve_site(site, registry, secret_values=secret_values)
 
     request = ProvisionRequest(
         vm_name=vm_name,
@@ -376,7 +428,7 @@ def create_vm(
     def _on_tailscale_ready() -> None:
         refreshed = db.get_vm(vm_name)
         assert refreshed is not None
-        get_provisioner_for_vm(db, refreshed, config).post_tailscale_ready(refreshed)
+        platform_obj.post_tailscale_ready(refreshed)
 
     try:
         initialize_vm(
@@ -388,6 +440,7 @@ def create_vm(
             vm_name,
             exec_target=result.native_transport,
             providers=providers,
+            platform=platform_obj,
             admin_username=resolved_admin_username,
             tailscale_auth_key=tailscale_auth_key,
             git_tokens=git_tokens,
@@ -464,8 +517,6 @@ def list_vms(db: Database, *, names_only: bool = False) -> None:
         output.info("No VMs registered.")
         return
 
-    # PHASE-2 BRIDGE (vm-sites SDD): the manager-rewiring phase reshapes
-    # this to SITE + the platform's display_backend_name.
     header = (
         f"{'NAME':<20} {'SITE':<12} {'TEMPLATE':<12} {'PROV':<12} {'INIT':<12} "
         f"{'WS/AG/SE':<10} {'TAILSCALE':<20} {'CREATED'}"
@@ -488,10 +539,30 @@ def describe_vm(db: Database, config: Config, name: str) -> None:
     """Show detailed information about a VM."""
     vm = _require_vm(db, name)
 
+    # Bind through the site so the platform (the site's capability) and
+    # the backend-side identity render polymorphically. A stranded site
+    # (R3) surfaces here as the ConfigError + manifest hint.
+    from agentworks.bootstrap import build_registry
+    from agentworks.vms.sites import lookup_site
+
+    registry = build_registry(config)
+    site_decl = lookup_site(vm.site, registry)
+    platform = bind_platform(config, vm, registry=registry)
+
+    # Live observed status, paired with operator intent: an operator
+    # stop reads differently from an idle timeout.
+    observed = platform.status(vm)
+    status_label = observed.value
+    if observed in (VMStatus.STOPPED, VMStatus.DEALLOCATED):
+        status_label += " (operator)" if vm.operator_stopped else " (idle)"
+
     # VM details
     output.info(f"Name:           {vm.name}")
     output.info(f"Created:        {vm.created_at}")
     output.info(f"Site:           {vm.site}")
+    output.info(f"Platform:       {site_decl.platform}")
+    output.info(f"Backend:        {platform.display_backend_name(vm)}")
+    output.info(f"Status:         {status_label}")
     output.info(f"Hostname:       {vm.hostname}")
     output.info(f"Template:       {vm.template or '-'}")
     output.info(f"Admin User:     {vm.admin_username}")
@@ -531,11 +602,6 @@ def describe_vm(db: Database, config: Config, name: str) -> None:
             f"{live['disk_used'] + ' (' + live['disk_pct'] + ')' if live else '-'}"
         )
 
-    # PHASE-2 BRIDGE (vm-sites SDD): the manager-rewiring phase replaces
-    # this raw dump with the platform's display_backend_name.
-    if vm.platform_metadata:
-        rendered = ", ".join(f"{k}={v}" for k, v in sorted(vm.platform_metadata.items()))
-        output.info(f"Backend:        {rendered}")
     if vm.last_seen_at:
         output.info(f"Last Seen:      {vm.last_seen_at}")
 
@@ -665,12 +731,11 @@ def shell_vm(
         admin=scopes.admin,
     )
 
+    bound = bind_platform(config, vm, registry=registry)
     with contextlib.ExitStack() as stack:
-        stack.enter_context(keep_vm_active(db, config, vm))
+        stack.enter_context(keep_active(db, config, vm, bound))
         target = (
-            native_transport(
-                vm, get_provisioner_for_vm(db, vm, config), config, stack=stack
-            )
+            native_transport(vm, bound, config, stack=stack)
             if provisioner
             else transport(vm, config)
         )
@@ -759,7 +824,7 @@ def exec_vm(
     remote_cmd = command[0] if len(command) == 1 else shlex.join(command)
     if ws is not None:
         remote_cmd = f"cd {shlex.quote(ws.workspace_path)} && {remote_cmd}"
-    with keep_vm_active(db, config, vm):
+    with keep_active(db, config, vm, bind_platform(config, vm, registry=registry)):
         return target.call_streaming(remote_cmd, env=env)
 
 
@@ -803,7 +868,7 @@ def add_git_credential(db: Database, config: Config, name: str, credential_name:
     token = tokens[credential_name]
     new_lines = provider.credential_lines(token)
 
-    with keep_vm_active(db, config, vm):
+    with keep_active(db, config, vm, bind_platform(config, vm, registry=registry)):
         target = transport(vm, config)
 
         # Read existing credentials, filter out entries for the same host/path
@@ -826,24 +891,29 @@ def add_git_credential(db: Database, config: Config, name: str, credential_name:
 
 
 def start_vm(db: Database, config: Config, name: str) -> None:
-    """Start a stopped VM."""
+    """Start a stopped VM. Clears the operator-stopped flag so the
+    ensure_active gate resumes auto-starting on demand."""
     vm = _require_vm(db, name)
     _guard_failed_vm(vm)
-    provisioner = get_provisioner_for_vm(db, vm)
-    # Probe status and issue the start BEFORE entering keep_vm_active: the
+    platform = bind_platform(config, vm)
+    # An explicit start is operator intent, whatever the observed state:
+    # clear the flag first so a crashed start doesn't leave the gate
+    # refusing to auto-resume a VM the operator asked to run.
+    db.set_operator_stopped(name, False)
+    # Probe status and issue the start BEFORE entering the hold: the
     # WSL2 keepalive subprocess boots a stopped distro as a side effect,
     # which would make status() report RUNNING and mislabel the VM as
     # "already running". The keepalive then anchors the (now running) VM
     # through the Tailscale verification.
-    status = provisioner.status(vm)
+    status = platform.status(vm)
     if status == VMStatus.RUNNING:
         output.info(f"VM '{name}' is already running")
     else:
-        provisioner.start(vm)
+        platform.start(vm)
 
     # Tailscale verification runs inside the keepalive so a freshly booted
     # WSL2 distro doesn't idle-shut while we wait for tailscaled to come up.
-    with keep_vm_active(db, config, vm):
+    with platform.vm_active(vm, config=config):
         _ensure_tailscale(db, config, vm)
     # Only emit "is ready" on the path that actually started the VM. When
     # status was already RUNNING we already said so above, and Tailscale
@@ -855,18 +925,23 @@ def start_vm(db: Database, config: Config, name: str) -> None:
 
 
 def stop_vm(db: Database, config: Config, name: str) -> None:
-    """Stop a running VM."""
+    """Stop a running VM and record the operator's intent."""
     vm = _require_vm(db, name)
     _guard_failed_vm(vm)
-    provisioner = get_provisioner_for_vm(db, vm)
-    status = provisioner.status(vm)
+    platform = bind_platform(config, vm)
+    # Record intent BEFORE the already-stopped short-circuit: an
+    # operator stopping an already-stopped VM still means "keep it
+    # stopped" (e.g. the VM idled out and they don't want the next op
+    # to auto-resume it).
+    db.set_operator_stopped(name, True)
+    status = platform.status(vm)
     if status in (VMStatus.STOPPED, VMStatus.DEALLOCATED):
         output.info(f"VM '{name}' is already stopped")
         return
-    # No keep_vm_active here: stop is the inverse of what the keepalive
-    # is for. The platform stop call doesn't need SSH to the VM, and
-    # holding a wsl.exe sleep subprocess open would fight `wsl --terminate`.
-    provisioner.stop(vm)
+    # No hold here: stop is the inverse of what the keepalive is for.
+    # The platform stop call doesn't need SSH to the VM, and holding a
+    # wsl.exe sleep subprocess open would fight `wsl --terminate`.
+    platform.stop(vm)
     output.info(f"VM '{name}' stopped")
 
 
@@ -881,22 +956,26 @@ def rekey_vm(
     """Assign a new Tailscale auth key to a VM (logout + rejoin).
 
     Useful for rotating keys, switching tailnets, or recovering from
-    expired ephemeral keys. Uses the provisioner's provisioner_transport
-    (out-of-band transport) since Tailscale connectivity drops during
+    expired ephemeral keys. Uses the platform's native transport
+    (out-of-band) since Tailscale connectivity drops during
     the operation.
     """
     import ipaddress
     import shlex
     import time
 
+    from agentworks.bootstrap import build_registry
+    from agentworks.secrets import resolve_for_command
     from agentworks.ssh import SSHError
     from agentworks.ssh_config import sync_ssh_config
     from agentworks.transports import native_transport, transport, wait_for_reconnect
+    from agentworks.vms.templates import resolve_template
 
     vm = _require_vm(db, name)
     _guard_failed_vm(vm)
 
-    provisioner = get_provisioner_for_vm(db, vm, config)
+    registry = build_registry(config)
+    provisioner = bind_platform(config, vm, registry=registry)
     status = provisioner.status(vm)
     if status != VMStatus.RUNNING:
         raise StateError(
@@ -911,11 +990,6 @@ def rekey_vm(
     # masking the env-var (the env-var source reads ``os.environ`` at
     # ``would_attempt`` time, so removing the var skips it cleanly and
     # the next backend in the chain takes over).
-    from agentworks.bootstrap import build_registry
-    from agentworks.secrets import resolve_for_command
-    from agentworks.vms.templates import resolve_template
-
-    registry = build_registry(config)
     rekey_vm_tmpl = resolve_template(registry, vm.template)
     ts_decl = _lookup_or_synthesize_secret(
         registry, rekey_vm_tmpl.tailscale_auth_key
@@ -931,16 +1005,14 @@ def rekey_vm(
         # Holds the VM in an active state for the duration of the rekey.
         # No-op for Lima/Azure/Proxmox; WSL2 anchors the distro against
         # vmIdleTimeout so per-step `time.sleep`s can't let it idle out.
-        _stack.enter_context(keep_vm_active(db, config, vm))
+        _stack.enter_context(keep_active(db, config, vm, provisioner))
 
-        # provisioner_transport() composes transient_route (Azure attach /
+        # native_transport() composes transient_route (Azure attach /
         # detach via the polymorphic hook) with the platform-native
         # transport builder and the 6-attempt reachability probe. The
         # caller-supplied ExitStack scopes the transient state to the
         # duration of the rekey.
-        exec_target = native_transport(
-            vm, get_provisioner_for_vm(db, vm, config), config, stack=_stack
-        )
+        exec_target = native_transport(vm, provisioner, config, stack=_stack)
 
         # Restart, logout, login, restart. The initial restart clears any
         # stale daemon state (a previous interrupted rekey can leave the
@@ -1059,15 +1131,15 @@ def delete_vm(
 
     # Platform-specific cleanup (also handles Tailscale logout)
     try:
-        provisioner = get_provisioner_for_vm(db, vm)
+        provisioner = bind_platform(config, vm)
 
         # Tailscale logout (best-effort, via provisioning transport).
         # Wrap only this step: the logout needs the VM alive, but
         # provisioner.delete is the inverse and would conflict with a
         # WSL2 keepalive subprocess.
         if vm.tailscale_host:
-            with keep_vm_active(db, config, vm):
-                _tailscale_logout(db, vm, config)
+            with keep_active(db, config, vm, provisioner):
+                _tailscale_logout(vm, config, provisioner)
 
         provisioner.delete(vm)
     except Exception as e:
@@ -1156,7 +1228,7 @@ def reinit_vm(
     # any warning output. Matches the pattern used by agent create / reinit
     # and workspace create / rehome.
     try:
-        with keep_vm_active(db, config, vm):
+        with keep_active(db, config, vm, bind_platform(config, vm, registry=registry)):
             try:
                 run_initialization(
                     db,
@@ -1193,7 +1265,7 @@ def reinit_vm(
         output.info(f"VM '{name}' reinitialized successfully!")
 
 
-def _tailscale_logout(db: Database, vm: VMRow, config: Config) -> None:
+def _tailscale_logout(vm: VMRow, config: Config, platform: VMPlatform) -> None:
     """Best-effort: deregister from Tailscale via the provisioning transport.
 
     Uses ``native_transport(vm, platform, config, stack=...)`` so the
@@ -1206,9 +1278,7 @@ def _tailscale_logout(db: Database, vm: VMRow, config: Config) -> None:
     output.info("Deregistering from Tailscale...")
     try:
         with contextlib.ExitStack() as stack:
-            exec_target = native_transport(
-                vm, get_provisioner_for_vm(db, vm, config), config, stack=stack
-            )
+            exec_target = native_transport(vm, platform, config, stack=stack)
 
             # Fire and forget: tailscale down + logout can disrupt
             # networking on the VM, killing SSH-based transports before
@@ -1402,7 +1472,8 @@ def _collect_secrets(
     providers: dict[str, GitCredentialProvider],
     vm_name: str,
     vm_tmpl: ResolvedVMTemplate,
-) -> tuple[str, dict[str, str]]:
+    site_decls: Iterable[SecretDecl] = (),
+) -> tuple[str, dict[str, str], dict[str, str]]:
     """Collect all secrets upfront before provisioning starts.
 
     Phase 1c (Tailscale) + Phase 1d (git credentials) of the Resource
@@ -1427,7 +1498,14 @@ def _collect_secrets(
     into the registry so the registry-walk path becomes uniformly
     available.
 
-    Returns ``(tailscale_auth_key, git_tokens)``.
+    ``site_decls`` carries the target site's capability-config secret
+    declarations (``agentworks.vms.sites.site_secret_decls``; proxmox's
+    API token is today's only user) so they join the same single
+    resolve pass rather than getting their own.
+
+    Returns ``(tailscale_auth_key, git_tokens, secret_values)`` --
+    the last being the full resolved mapping, which the caller threads
+    into the platform binding.
     """
     from agentworks.secrets import resolve_for_command
 
@@ -1440,14 +1518,16 @@ def _collect_secrets(
     ts_decl = _lookup_or_synthesize_secret(
         registry, vm_tmpl.tailscale_auth_key
     )
-    resolved = resolve_for_command([], config, registry, extra_decls=[ts_decl])
+    resolved = resolve_for_command(
+        [], config, registry, extra_decls=[ts_decl, *site_decls]
+    )
     ts_auth_key = resolved[vm_tmpl.tailscale_auth_key]
 
     # Git credentials via the framework (Phase 1d). Pulls token values
     # for every credential the admin or agent templates reference.
     git_tokens = _collect_git_tokens(config, registry, providers.keys())
 
-    return ts_auth_key, git_tokens
+    return ts_auth_key, git_tokens, resolved
 
 
 def _query_live_resources(vm: VMRow, config: Config) -> dict[str, str] | None:
@@ -1527,15 +1607,6 @@ def _require_vm(db: Database, name: str) -> VMRow:
             entity_name=name,
         )
     return vm
-
-
-def get_provisioner_for_vm(db: Database, vm: VMRow, config: Config | None = None) -> VMPlatform:
-    """PHASE-2 BRIDGE (vm-sites SDD): see ``get_provisioner``. Proxmox
-    rows dispatch to a config-less platform whose lifecycle ops fail
-    until the manager-rewiring phase threads the site's config and
-    token secret through the composition root.
-    """
-    return get_provisioner(vm.site)
 
 
 def _is_tailscale_reachable(tailscale_host: str) -> bool:
@@ -1642,7 +1713,7 @@ def port_forward_vm(
         output.info("Use --verbose for detailed SSH output.")
 
     # Run in foreground until interrupted
-    with keep_vm_active(db, config, vm):
+    with keep_active(db, config, vm, bind_platform(config, vm)):
         try:
             proc = subprocess.Popen(ssh_cmd)
 
@@ -1700,14 +1771,14 @@ def _ensure_tailscale(
     resolved = resolve_for_command([], config, registry, extra_decls=[ts_decl])
     auth_key = resolved[rejoin_vm_tmpl.tailscale_auth_key]
 
-    # provisioner_transport() composes Azure's attach/detach via
+    # native_transport() composes Azure's attach/detach via
     # transient_route polymorphism with the reachability probe. Other
     # platforms have a nullcontext transient_route and just build the
     # native transport.
     with contextlib.ExitStack() as _stack:
         verify_tailscale_available()
         exec_target = native_transport(
-            vm, get_provisioner_for_vm(db, vm, config), config, stack=_stack
+            vm, bind_platform(config, vm, registry=registry), config, stack=_stack
         )
         rejoin_tailscale(db, vm.name, exec_target, auth_key=auth_key)
 

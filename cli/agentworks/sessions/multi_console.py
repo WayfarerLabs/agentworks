@@ -40,7 +40,7 @@ from agentworks.sessions.multi_console_layout import (
     _reorder_shell_panes,
 )
 from agentworks.sessions.tmux import tmux_cmd
-from agentworks.vms.manager import keep_vm_active
+from agentworks.vms.manager import bind_platform, ensure_active, keep_active
 
 if TYPE_CHECKING:
     from collections.abc import Iterator, Mapping
@@ -732,10 +732,10 @@ def restore_session(
     vm, target = _prepare_vm_target_for_attach(db, config, console.vm_name)
     # restore_session raises StateError/ExternalError on failure, so it's
     # not a best-effort op (those are exempted from the keepalive sweep by
-    # base.VMProvisioner.vm_active's docstring). Wrap the SSH-heavy body
+    # base.VMPlatform.vm_active's docstring). Wrap the SSH-heavy body
     # so a freshly booted WSL2 distro doesn't idle out between the window
     # probe and the pane reconciliation.
-    with keep_vm_active(db, config, vm):
+    with keep_active(db, config, vm, bind_platform(config, vm)):
         if not _console_tmux_exists(target, console_name):
             raise StateError(
                 f"console '{console_name}' has no live tmux session on VM "
@@ -1764,7 +1764,6 @@ def _prepare_vm_target_for_attach(
     VM is acceptable. Raises on failure.
     """
     from agentworks.transports import transport
-    from agentworks.workspaces.manager import _ensure_vm_running
 
     vm = db.get_vm(vm_name)
     if vm is None:
@@ -1773,7 +1772,7 @@ def _prepare_vm_target_for_attach(
             entity_kind="vm",
             entity_name=vm_name,
         )
-    _ensure_vm_running(db, config, vm)
+    ensure_active(db, config, vm, bind_platform(config, vm))
     if vm.tailscale_host is None:
         raise StateError(
             f"VM '{vm.name}' has no Tailscale address",
@@ -1848,7 +1847,7 @@ def attach_console(
     registry = build_registry(config)
     vm, target = _prepare_vm_target_for_attach(db, config, console.vm_name)
 
-    with keep_vm_active(db, config, vm):
+    with keep_active(db, config, vm, bind_platform(config, vm)):
         exists = _console_tmux_exists(target, name)
         layout = named_console_template(registry).tmux_layout
 

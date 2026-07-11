@@ -149,11 +149,6 @@ echo "##SUCCESS## tailscale-ip=$TS_IP"
 """
 
 
-def vm_hostname(platform: str, vm_name: str) -> str:
-    """Build a consistent VM hostname: <platform>--<vm_name>."""
-    return f"{platform}--{vm_name}"
-
-
 def generate_bootstrap_script(
     *,
     admin_username: str,

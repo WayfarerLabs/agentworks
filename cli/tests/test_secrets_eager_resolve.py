@@ -22,7 +22,7 @@ import pytest
 from agentworks.db import Database
 from agentworks.errors import SecretUnavailableError
 
-from .conftest import stub_build_registry
+from .conftest import stub_build_registry, stub_vm_gates
 
 
 @pytest.fixture(autouse=True)
@@ -37,7 +37,7 @@ if TYPE_CHECKING:
 
 
 class _NullCM:
-    """No-op context manager used to stub ``keep_vm_active``."""
+    """No-op context manager used to stub context-manager seams."""
 
     def __enter__(self) -> None:
         return None
@@ -77,10 +77,7 @@ def _seed_basic_db(tmp_path: Path) -> Database:
 
 def _stub_session_prep(monkeypatch: pytest.MonkeyPatch) -> None:
     """Patch ssh / vm probes that would otherwise need a real VM."""
-    monkeypatch.setattr(
-        "agentworks.workspaces.manager._ensure_vm_running",
-        lambda *args, **kwargs: None,
-    )
+    stub_vm_gates(monkeypatch)
     factory = lambda *a, **k: _stub_target()  # noqa: E731
     monkeypatch.setattr("agentworks.transports.transport", factory)
     monkeypatch.setattr("agentworks.sessions.manager.transport", factory)
@@ -651,9 +648,7 @@ def test_shell_agent_passes_workspace_scope_to_secret_target(
     monkeypatch.setattr(
         agent_manager, "_agent_direct_secret_target", lambda *a, **k: object()
     )
-    monkeypatch.setattr(
-        "agentworks.workspaces.manager._ensure_vm_running", lambda *a, **k: None
-    )
+    stub_vm_gates(monkeypatch)
 
     class _Sentinel(Exception):
         """Raised from resolve_for_command so the test stops before SSH."""
@@ -701,7 +696,7 @@ def test_attach_console_build_path_eager_resolves_before_tmux(
             SimpleNamespace(run=lambda *a, **k: None),
         ),
     )
-    monkeypatch.setattr(multi_console, "keep_vm_active", lambda *a, **k: _NullCM())
+    stub_vm_gates(monkeypatch)
     monkeypatch.setattr(
         multi_console, "_console_tmux_exists", lambda *a, **k: False,
     )
@@ -823,7 +818,7 @@ def test_attach_console_existing_tmux_session_skips_eager_resolve(
             ),
         ),
     )
-    monkeypatch.setattr(multi_console, "keep_vm_active", lambda *a, **k: _NullCM())
+    stub_vm_gates(monkeypatch)
     monkeypatch.setattr(
         multi_console, "_console_tmux_exists", lambda *a, **k: True,
     )
@@ -902,7 +897,7 @@ def test_session_attach_does_not_eager_resolve(
         session_manager, "check_session_status",
         lambda *a, **k: SessionStatus.OK,
     )
-    monkeypatch.setattr(session_manager, "keep_vm_active", lambda *a, **k: _NullCM())
+    stub_vm_gates(monkeypatch)
 
     import contextlib
 
@@ -1314,7 +1309,7 @@ def test_restore_session_window_missing_branch_eager_resolves(
         multi_console, "_prepare_vm_target_for_attach",
         lambda *a, **k: (fake_vm, fake_target),
     )
-    monkeypatch.setattr(multi_console, "keep_vm_active", lambda *a, **k: _NullCM())
+    stub_vm_gates(monkeypatch)
     monkeypatch.setattr(
         multi_console, "_console_tmux_exists", lambda *a, **k: True,
     )

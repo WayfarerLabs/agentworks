@@ -26,7 +26,13 @@ from agentworks.errors import (
 from agentworks.sessions.tmux import AGENT_SOCKET_ROOT
 from agentworks.ssh import SSH_TRANSPORT_ERROR
 from agentworks.transports import transport
-from agentworks.vms.manager import keep_vm_active, keep_vms_active
+from agentworks.vms.manager import (
+    bind_platform,
+    bind_platforms,
+    ensure_active,
+    keep_active,
+    keep_actives,
+)
 
 _ENV_KEY_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
@@ -301,9 +307,7 @@ def _prepare_vm(
     ws = _require_workspace(db, workspace_name)
     vm = _require_vm_for_workspace(db, ws)
 
-    from agentworks.workspaces.manager import _ensure_vm_running
-
-    _ensure_vm_running(db, config, vm)
+    ensure_active(db, config, vm, bind_platform(config, vm))
 
     if vm.tailscale_host is None:
         raise StateError(
@@ -377,7 +381,7 @@ def _distinct_vms_for_sessions(db: Database, sessions: list[SessionRow]) -> list
     """Resolve the distinct set of VMs that host the given sessions.
 
     Used by the batch session operations (stop_all_sessions, restart_all_sessions,
-    list_sessions) to feed `keep_vms_active` with exactly the VMs whose SSH
+    list_sessions) to feed `keep_actives` with exactly the VMs whose SSH
     transports will be touched. Order is insertion order keyed by VM name so
     keepalive entry messages render in a stable order.
     """
@@ -1399,10 +1403,8 @@ def create_session(
 
     # ===== Ensure VM running + Tailscale reachable (SSH, no mutations) ======
 
-    from agentworks.workspaces.manager import _ensure_vm_running as _ensure_vm_up
-
-    _ensure_vm_up(db, config, vm)
-    # Reload the VM row: ``_ensure_vm_running`` may have rejoined Tailscale
+    ensure_active(db, config, vm, bind_platform(config, vm, registry=registry))
+    # Reload the VM row: ``ensure_active`` may have rejoined Tailscale
     # (only when the VM was stopped/deallocated) and updated
     # ``vms.tailscale_host``. The in-memory ``vm`` from our pre-check would
     # otherwise read stale and the check below could spuriously raise.
@@ -1509,7 +1511,7 @@ def create_session(
         ws, vm_check, run_command, run_as_root, target = _prepare_vm(
             db, config, workspace_name, operation="session-create"
         )
-        with keep_vm_active(db, config, vm_check):
+        with keep_active(db, config, vm_check, bind_platform(config, vm_check)):
             # Resolve mode and linux user (no side effects; safe outside the try).
             resolved_agent_name: str | None = None
             agent_target = None
@@ -1869,7 +1871,7 @@ def stop_session(
     _ws, vm, _run_command, _, admin_target = _prepare_vm(
         db, config, session.workspace_name, operation="session-stop"
     )
-    with keep_vm_active(db, config, vm):
+    with keep_active(db, config, vm, bind_platform(config, vm)):
         session = _ensure_pid(session, target=admin_target, db=db)
         status = check_session_status(session, target=admin_target)
 
@@ -1950,7 +1952,7 @@ def restart_session(
     ws, vm, run_command, _run_as_root, admin_target = _prepare_vm(
         db, config, session.workspace_name, operation="session-restart",
     )
-    with keep_vm_active(db, config, vm):
+    with keep_active(db, config, vm, bind_platform(config, vm)):
         session = _ensure_pid(session, target=admin_target, db=db)
 
         # Legacy migration: sessions predating the per-session-socket model
@@ -2185,7 +2187,7 @@ def stop_all_sessions(
     # batch_check_all_sessions) issue per-VM round-trips; on WSL2 they
     # would race the idle timer without the anchor. No-op on non-WSL2.
     distinct_vms = _distinct_vms_for_sessions(db, sessions)
-    with keep_vms_active(db, config, distinct_vms):
+    with keep_actives(db, config, bind_platforms(config, distinct_vms)):
         # Auto-repair NULL-PID sessions, then batch check
         sessions = ensure_pids_batch(sessions, db=db, config=config)
         status_map = batch_check_all_sessions(sessions, db=db, config=config)
@@ -2282,7 +2284,7 @@ def restart_all_sessions(
     distinct_vms = _distinct_vms_for_sessions(db, sessions)
 
     failed: list[tuple[str, str]] = []
-    with keep_vms_active(db, config, distinct_vms):
+    with keep_actives(db, config, bind_platforms(config, distinct_vms)):
         # Auto-repair NULL-PID sessions, then batch check
         sessions = ensure_pids_batch(sessions, db=db, config=config)
         status_map = batch_check_all_sessions(sessions, db=db, config=config)
@@ -2378,7 +2380,7 @@ def delete_session(
     ws, vm, _run_command, _run_as_root, admin_target = _prepare_vm(
         db, config, session.workspace_name, operation="session-delete"
     )
-    with keep_vm_active(db, config, vm):
+    with keep_active(db, config, vm, bind_platform(config, vm)):
         session = _ensure_pid(session, target=admin_target, db=db)
         status = check_session_status(session, target=admin_target)
 
@@ -2680,7 +2682,7 @@ def list_sessions(
     )
 
     status_map: dict[str, SessionStatus] = {}
-    with keep_vms_active(db, config, status_keepalive_vms):
+    with keep_actives(db, config, bind_platforms(config, status_keepalive_vms)):
         if not no_status:
             sessions = ensure_pids_batch(sessions, db=db, config=config)
             status_map = batch_check_all_sessions(sessions, db=db, config=config)
@@ -2767,7 +2769,7 @@ def attach_session(
 
     session = _require_session(db, name)
     _ws, vm, _run_command, _, target = _prepare_vm(db, config, session.workspace_name, operation="session-attach")
-    with keep_vm_active(db, config, vm):
+    with keep_active(db, config, vm, bind_platform(config, vm)):
         session = _ensure_pid(session, target=target, db=db)
         status = check_session_status(session, target=target)
 
@@ -2800,7 +2802,7 @@ def session_logs(
 
     session = _require_session(db, name)
     _ws, vm, run_command, _, target = _prepare_vm(db, config, session.workspace_name, operation="session-logs")
-    with keep_vm_active(db, config, vm):
+    with keep_active(db, config, vm, bind_platform(config, vm)):
         session = _ensure_pid(session, target=target, db=db)
         status = check_session_status(session, target=target)
 
