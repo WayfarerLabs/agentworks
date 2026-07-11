@@ -248,8 +248,9 @@ def _migrate_vm_sites(conn: sqlite3.Connection, context: MigrationContext) -> No
         if clash is not None:
             raise sqlite3.IntegrityError(
                 f"remote-Lima site name collision: hosts '{clash}' and "
-                f"'{host}' both map to site '{site}'; rename one "
-                f"vm_hosts row and retry"
+                f"'{host}' both map to site '{site}'; rename one host in "
+                f"BOTH vm_hosts.name and the referencing vms.vm_host_name "
+                f"rows, then retry"
             )
         host_sites[host] = site
 

@@ -40,6 +40,17 @@ Phase 5.
   also recorded rather than reverted: `ProvisionRequest.ssh_private_key` (azure/proxmox build their
   native SSH transports during `create()` and no longer receive `Config`; now in the HLA sketch) and
   the vm-platform kind description prose.
+- **2026-07-10, Phase 2 review round: the migration validates before any DDL and prints to stderr.**
+  The reviewer caught that the designed unknown-platform loud failure fired AFTER the `ALTER TABLE`s
+  -- sqlite3 auto-commits DDL, so the failure left a half-migrated v26 DB that died on
+  duplicate-column at every retry. Both validation scans (unknown platform, and the newly-loud
+  remote-Lima `-host`-suffix site-name collision, which would otherwise silently merge two hosts)
+  now run pre-DDL, so the anticipated failure modes leave a pristine v26 DB and retry-after-fix
+  works. The site-manifest snippets moved wholly to the warn channel (stderr): migrations run at
+  every `Database()` open, including under the stdout-capturing completion helpers. Deferred with
+  intent: a per-version `commit()` checkpoint in the migration runner (making retry safe for
+  multi-version jumps, not just v26 -> v27) is a pre-existing runner property, scheduled as a Phase
+  6 hardening candidate.
 
 **Compile boundaries**: Phases 1 through 3 are one logical commit boundary, mirroring the
 polymorphic-transports precedent. As planned, Phase 1 would open a non-compiling window when the
@@ -299,6 +310,9 @@ existing VMs keep hostnames and env values.
       vm-site implementation.
 - [ ] Release-notes text: the `!`-flagged breaks (`--platform` to `--site`, `vm shell` flag,
       `PROXMOX_TOKEN_SECRET` sourcing) with their one-line remediations.
+- [ ] Hardening candidate (from the Phase 2 review round): a per-version `commit()` checkpoint in
+      the migration runner so retry is safe for multi-version jumps, not just the v26 -> v27 step
+      (today an earlier version's auto-committed DDL re-runs on retry when a later version fails).
 - [ ] Open the PR; agentworks-reviewer round on the branch.
 
 **Definition of done**: PR open, CI green, reviewer findings addressed. `locked.md` lands after
