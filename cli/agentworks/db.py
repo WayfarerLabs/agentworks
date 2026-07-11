@@ -204,7 +204,7 @@ def _load_legacy_toml() -> dict[str, Any]:
     try:
         with CONFIG_PATH.open("rb") as f:
             return tomllib.load(f)
-    except (OSError, tomllib.TOMLDecodeError):
+    except (OSError, UnicodeDecodeError, tomllib.TOMLDecodeError):
         return {}
 
 
@@ -217,6 +217,42 @@ def _migrate_vm_sites(conn: sqlite3.Connection, context: MigrationContext) -> No
     """
     from agentworks.vms.platforms import VM_PLATFORM_REGISTRY
 
+    # Validate BEFORE the first DDL statement. Pre-SDD schemas only
+    # ever stored the four legacy platform names, and the vm-sites
+    # bridge refuses custom-site creates before this migration exists,
+    # so anything else is genuine corruption: fail loudly, don't guess.
+    # The scan must precede the ALTERs because sqlite3 auto-commits
+    # DDL -- failing after them would leave a half-migrated v26 DB
+    # that dies on duplicate-column at every retry, even once the
+    # operator fixes the corrupt row.
+    for row in conn.execute("SELECT name, platform FROM vms").fetchall():
+        if row["platform"] not in VM_PLATFORM_REGISTRY:
+            raise sqlite3.IntegrityError(
+                f"vms row '{row['name']}' has unknown platform "
+                f"'{row['platform']}'; cannot backfill platform metadata"
+            )
+
+    # Same pre-DDL stance for the remote-Lima site names: a host that
+    # shadows a platform name gets a '-host' suffix (the new site-name
+    # rules reserve platform names for their own platform), and a
+    # suffixed name landing on another real host's site would silently
+    # merge two distinct hosts -- fail loudly while the DB is pristine.
+    host_sites: dict[str, str] = {}  # host -> site
+    for row in conn.execute(
+        "SELECT DISTINCT vm_host_name AS host FROM vms "
+        "WHERE vm_host_name IS NOT NULL"
+    ).fetchall():
+        host = row["host"]
+        site = f"{host}-host" if host in VM_PLATFORM_REGISTRY else host
+        clash = next((h for h, s in host_sites.items() if s == site), None)
+        if clash is not None:
+            raise sqlite3.IntegrityError(
+                f"remote-Lima site name collision: hosts '{clash}' and "
+                f"'{host}' both map to site '{site}'; rename one "
+                f"vm_hosts row and retry"
+            )
+        host_sites[host] = site
+
     conn.execute(
         "ALTER TABLE vms ADD COLUMN platform_metadata TEXT NOT NULL DEFAULT '{}'"
     )
@@ -227,18 +263,10 @@ def _migrate_vm_sites(conn: sqlite3.Connection, context: MigrationContext) -> No
 
     # Backfill platform_metadata (the owning platform's hook) and
     # hostname (the value the create-time bootstrap actually set),
-    # keyed by the pre-rename platform column. Pre-SDD schemas only
-    # ever stored the four legacy platform names, and the vm-sites
-    # bridge refuses custom-site creates before this migration exists,
-    # so anything else is genuine corruption: fail loudly, don't guess.
+    # keyed by the pre-rename platform column.
     for row in conn.execute("SELECT * FROM vms").fetchall():
         platform = row["platform"]
-        cls = VM_PLATFORM_REGISTRY.get(platform)
-        if cls is None:
-            raise sqlite3.IntegrityError(
-                f"vms row '{row['name']}' has unknown platform "
-                f"'{platform}'; cannot backfill platform metadata"
-            )
+        cls = VM_PLATFORM_REGISTRY[platform]  # validated above
         metadata = cls.legacy_platform_metadata(row, context.legacy)
         conn.execute(
             "UPDATE vms SET platform_metadata = ?, hostname = ? WHERE name = ?",
@@ -248,23 +276,17 @@ def _migrate_vm_sites(conn: sqlite3.Connection, context: MigrationContext) -> No
     # Remote-Lima rows: the site IS the host (R3). The operator must
     # declare the matching vm-site manifest; until then those VMs are
     # in the designed stranded state, so collect ready-to-paste
-    # manifest documents and print them once at the end. A host that
-    # shadows a platform name gets a '-host' suffix (the new site-name
-    # rules reserve platform names for their own platform).
+    # manifest documents and print them once at the end (the host ->
+    # site map was validated pre-DDL above).
     site_hosts: dict[str, tuple[str | None, str]] = {}
-    for row in conn.execute(
-        "SELECT * FROM vms WHERE vm_host_name IS NOT NULL"
-    ).fetchall():
-        host = row["vm_host_name"]
-        site = f"{host}-host" if host in VM_PLATFORM_REGISTRY else host
+    for host, site in host_sites.items():
         conn.execute(
-            "UPDATE vms SET platform = ? WHERE name = ?", (site, row["name"])
+            "UPDATE vms SET platform = ? WHERE vm_host_name = ?", (site, host)
         )
-        if site not in site_hosts:
-            host_row = conn.execute(
-                "SELECT ssh_host FROM vm_hosts WHERE name = ?", (host,)
-            ).fetchone()
-            site_hosts[site] = (host_row["ssh_host"] if host_row else None, host)
+        host_row = conn.execute(
+            "SELECT ssh_host FROM vm_hosts WHERE name = ?", (host,)
+        ).fetchone()
+        site_hosts[site] = (host_row["ssh_host"] if host_row else None, host)
 
     # Rebuild vms (the vm_host_name FK blocks DROP COLUMN): drop the
     # legacy per-platform columns and vm_host_name, rename platform to
@@ -314,6 +336,10 @@ def _migrate_vm_sites(conn: sqlite3.Connection, context: MigrationContext) -> No
         from agentworks import output
         from agentworks.vms.sites import site_manifest_hint
 
+        # Everything goes through output.warn: migrations run at every
+        # Database() open, including from the shell-completion helpers
+        # that capture stdout (`agw vm list --names-only`), so stdout
+        # must stay clean for machine consumers.
         output.warn(
             "remote-Lima VMs now live at host-named sites; declare each "
             "site or those VMs stay unreachable:"
@@ -324,7 +350,7 @@ def _migrate_vm_sites(conn: sqlite3.Connection, context: MigrationContext) -> No
                     f"(the host '{host}' shadows a platform name, so its "
                     f"site is named '{site}')"
                 )
-            output.info(f"vm-site '{site}': " + site_manifest_hint(site, vm_host=ssh_host))
+            output.warn(f"vm-site '{site}': " + site_manifest_hint(site, vm_host=ssh_host))
 
 
 MIGRATIONS: dict[int, str | Callable[[sqlite3.Connection, MigrationContext], None]] = {

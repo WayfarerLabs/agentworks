@@ -12,28 +12,9 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from agentworks.errors import StateError
-from agentworks.ssh import SSHError, SSHTarget, run
 
 if TYPE_CHECKING:
     from agentworks.db import Database
-
-
-def detect_os(ssh_host: str) -> str | None:
-    """Detect the OS of a remote host via SSH."""
-    try:
-        result = run(
-            SSHTarget(host=ssh_host, user=None, login_shell=True),
-            "uname -s",
-            timeout=15,
-        )
-        raw = result.stdout.strip().lower()
-        if "darwin" in raw:
-            return "darwin"
-        if "linux" in raw:
-            return "linux"
-        return raw or None
-    except (SSHError, TimeoutError):
-        return None
 
 
 def _replaced(name: str | None = None) -> StateError:

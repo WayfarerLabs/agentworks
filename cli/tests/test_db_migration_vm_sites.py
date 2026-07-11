@@ -56,6 +56,8 @@ def _seed_all_platforms(conn: sqlite3.Connection) -> None:
         INSERT INTO vms (name, platform, admin_username, vm_host_name)
             VALUES ('rvm', 'lima', 'admin', 'gpu-box');
         INSERT INTO vms (name, platform, admin_username, vm_host_name)
+            VALUES ('rvm2', 'lima', 'admin', 'gpu-box');
+        INSERT INTO vms (name, platform, admin_username, vm_host_name)
             VALUES ('svm', 'lima', 'admin', 'wsl2');
         INSERT INTO vms (name, platform, admin_username, wsl_distro_name)
             VALUES ('wvm', 'wsl2', 'admin', 'wvm');
@@ -90,6 +92,7 @@ def test_backfill_and_site_rename(tmp_path: Path, captured_output: CapturedOutpu
         # remote-Lima rows.
         assert by_name["lvm"].site == "lima"
         assert by_name["rvm"].site == "gpu-box"
+        assert by_name["rvm2"].site == "gpu-box"
         assert by_name["svm"].site == "wsl2-host"
         assert by_name["wvm"].site == "wsl2"
         assert by_name["avm"].site == "azure"
@@ -147,16 +150,19 @@ def test_prints_site_manifest_snippets(
 ) -> None:
     db = _migrate(tmp_path)
     try:
-        joined_info = "\n".join(captured_output.info)
-        joined_warn = "\n".join(captured_output.warnings)
-        # One snippet per distinct host-named site, carrying the host's
-        # ssh target as platform_config.vm_host.
-        assert "name: gpu-box" in joined_info
-        assert "vm_host: me@gpu-box" in joined_info
-        assert "name: wsl2-host" in joined_info
-        assert "vm_host: me@wsl2-host" in joined_info
+        # Everything on the warn channel (stderr): migrations run at
+        # every Database() open, including under stdout-capturing
+        # completion helpers, so stdout must stay clean.
+        assert captured_output.info == []
+        joined = "\n".join(captured_output.warnings)
+        # One snippet per distinct host-named site (two gpu-box VMs,
+        # one snippet), carrying the host's ssh target.
+        assert joined.count("name: gpu-box") == 1
+        assert "vm_host: me@gpu-box" in joined
+        assert "name: wsl2-host" in joined
+        assert "vm_host: me@wsl2-host" in joined
         # The shadow-name suffix is called out.
-        assert "'wsl2' shadows a platform name" in joined_warn
+        assert "'wsl2' shadows a platform name" in joined
     finally:
         db.close()
 
@@ -177,7 +183,13 @@ def test_proxmox_node_from_legacy_context(
         db.close()
 
 
-def test_unknown_platform_fails_loudly(tmp_path: Path) -> None:
+def test_unknown_platform_fails_loudly_and_retry_works_after_fix(
+    tmp_path: Path, captured_output: CapturedOutput
+) -> None:
+    """The loud failure fires BEFORE any DDL, so the DB stays at v26
+    and reopening after the operator fixes the corrupt row succeeds
+    (a post-DDL failure would brick every retry on duplicate-column).
+    """
     db_path = tmp_path / "bad.db"
     conn = _create_v26_db(str(db_path))
     conn.execute(
@@ -187,6 +199,40 @@ def test_unknown_platform_fails_loudly(tmp_path: Path) -> None:
     conn.commit()
     conn.close()
     with pytest.raises(sqlite3.IntegrityError, match="unknown platform 'mystery'"):
+        Database(db_path)
+
+    fix = sqlite3.connect(str(db_path))
+    fix.execute("UPDATE vms SET platform = 'lima' WHERE name = 'xvm'")
+    fix.commit()
+    fix.close()
+
+    db = Database(db_path)
+    try:
+        vm = db.get_vm("xvm")
+        assert vm is not None
+        assert vm.site == "lima"
+        assert vm.platform_metadata == {"instance_name": "xvm"}
+    finally:
+        db.close()
+
+
+def test_remote_lima_site_name_collision_fails_loudly(tmp_path: Path) -> None:
+    """A '-host'-suffixed site landing on another real host's name
+    would silently merge two hosts; the pre-DDL scan refuses instead.
+    """
+    db_path = tmp_path / "clash.db"
+    conn = _create_v26_db(str(db_path))
+    conn.executescript("""
+        INSERT INTO vm_hosts (name, ssh_host) VALUES ('wsl2', 'me@a');
+        INSERT INTO vm_hosts (name, ssh_host) VALUES ('wsl2-host', 'me@b');
+        INSERT INTO vms (name, platform, admin_username, vm_host_name)
+            VALUES ('v1', 'lima', 'admin', 'wsl2');
+        INSERT INTO vms (name, platform, admin_username, vm_host_name)
+            VALUES ('v2', 'lima', 'admin', 'wsl2-host');
+    """)
+    conn.commit()
+    conn.close()
+    with pytest.raises(sqlite3.IntegrityError, match="site name collision"):
         Database(db_path)
 
 

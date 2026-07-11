@@ -81,9 +81,9 @@ def vm_stable_identity_env(ctx: ResourceContext) -> dict[str, str]:
     profile fragment so that any shell on the VM (including raw ssh logins)
     sees them.
 
-    ``AGENTWORKS_VM_HOST`` is only emitted when the VM has a registered
-    host (Lima VMs may; Azure / WSL2 / Proxmox VMs do not, per the
-    ``vm_hosts`` registry).
+    ``AGENTWORKS_VM_HOST`` currently has no producer (see the class
+    docstring); the ``ctx.vm_host`` branch survives only until the
+    vm-sites identity-env phase redesigns these vars.
     """
     out = {
         "AGENTWORKS_VM": ctx.vm_name,

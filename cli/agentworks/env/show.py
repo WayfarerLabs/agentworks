@@ -320,7 +320,6 @@ def _build_resource_context(ctx: _ResolvedContext) -> ResourceContext:
         vm_name=ctx.vm.name,
         platform=ctx.vm.site,
         user=user,
-
         workspace_name=ctx.workspace.name if ctx.workspace else None,
         workspace_dir=ctx.workspace.workspace_path if ctx.workspace else None,
         agent_name=ctx.agent.name if ctx.agent else None,
