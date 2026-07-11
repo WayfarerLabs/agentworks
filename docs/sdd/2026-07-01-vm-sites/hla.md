@@ -51,6 +51,9 @@ class ProvisionRequest:
     system_slug: str | None
     admin_username: str
     ssh_public_key: str
+    ssh_private_key: Path | None      # azure/proxmox build their native SSH
+                                      # transports during create() and no
+                                      # longer receive Config
     tailscale_auth_key: str | None    # None: bootstrap deferred to Phase A
     cpus: int | None = None
     memory_gib: int | None = None

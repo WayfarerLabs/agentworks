@@ -233,7 +233,8 @@ def _wsl(args: list[str], *, check: bool = True, timeout: int = 300) -> str:
         ["wsl", *args], capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=timeout
     )
     if check and result.returncode != 0:
-        raise RuntimeError(f"wsl command failed: {result.stderr.strip()}")
+        stderr = result.stderr.replace("\x00", "").strip()
+        raise RuntimeError(f"wsl command failed: {stderr}")
     return result.stdout.replace("\x00", "")
 
 

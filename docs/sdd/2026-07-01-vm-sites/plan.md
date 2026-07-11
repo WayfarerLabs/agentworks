@@ -17,8 +17,14 @@ Phase 5.
   legacy columns in the row loader, mirroring the future backfill) and a `site` property aliasing
   the `platform` column; the vm-site kind's `instances()` reads through the alias. Result: the full
   suite (1500 tests), ruff, and mypy are green at the end of Phase 1. Remaining true window items:
-  proxmox lifecycle ops need the token on the resolve pass (Phase 3), and the R11 hostname / slug
-  land in Phase 4. Every bridge is marked `PHASE-1 BRIDGE` and is deleted by its owning phase.
+  proxmox lifecycle ops need the token on the resolve pass (Phase 3); the R11 hostname / slug land
+  in Phase 4; and CUSTOM-named sites are refused with a typed `StateError` -- `create_vm` guards up
+  front (a custom-site create would otherwise provision and then half-complete, since every
+  subsequent step dispatches through the legacy `get_provisioner` bridge, which only maps the four
+  legacy names), and the bridge itself raises the same typed error for any custom-site row -- until
+  Phase 3 dispatches everything through `platform_for`. A useful corollary: no `vms` row can hold a
+  custom site name before the Phase 2 migration runs. Every bridge is marked `PHASE-1 BRIDGE` and is
+  deleted by its owning phase.
 - **2026-07-09, Phase 1: migrator vm-site support moved wholly to Phase 5.** `KIND_SECTIONS` grew
   the tuple-valued multi-section shape with the `vm-site -> (azure, proxmox)` entry (deprecation
   warnings and samples key off it), but `_MIGRATABLE_KINDS` excludes vm-site until Phase 5 (where
@@ -26,6 +32,14 @@ Phase 5.
   surgery that belongs with the rest of the CLI-surface work, and `agw resource migrate vm-site`
   errors as an unknown kind until then. The Phase 1 test bullet claiming end-to-end
   `test_resource_migrate` coverage moves with it.
+- **2026-07-09, Phase 1 review round: the FRD R2 site-name rules landed in decode.** The plan had
+  not scheduled them anywhere; the Phase 1 reviewer caught the gap. `_decode_vm_site` now applies
+  `validate_name` to site names and enforces the platform-name-shadow rule (a site named after a
+  known platform must declare that platform). The legacy TOML path needs neither check (its section
+  names are exactly `azure` / `proxmox`, each declaring its own platform). Two artifact drifts were
+  also recorded rather than reverted: `ProvisionRequest.ssh_private_key` (azure/proxmox build their
+  native SSH transports during `create()` and no longer receive `Config`; now in the HLA sketch) and
+  the vm-platform kind description prose.
 
 **Compile boundaries**: Phases 1 through 3 are one logical commit boundary, mirroring the
 polymorphic-transports precedent. As planned, Phase 1 would open a non-compiling window when the
@@ -108,18 +122,24 @@ green (see the sequencing note at the top of this plan).
       semantics. `cli/agentworks/migrate/planning.py` does NOT follow yet: `_MIGRATABLE_KINDS`
       excludes vm-site until the migrator's flat-to-nested emission lands in Phase 5 (see the
       sequencing note).
-- [x] Tests (new): `cli/tests/vms/test_vm_site_kind.py` (decode, shadowing rejection, reserved
-      built-in names, unknown-platform deferral, reference emission),
+- [x] Tests (new): `cli/tests/vms/test_vm_site_kind.py` (decode, shadowing rejection, R2 name rules,
+      reserved built-in names, unknown-platform deferral, reference emission),
       `cli/tests/vms/test_vm_platform_kind.py` (capability rows, not declarable),
       `cli/tests/vms/test_sites_dispatch.py` (resolve_site happy path, stranded ConfigError + hint,
       secret threading), `cli/tests/vms/test_platform_validate_config.py` (all four platforms:
       unknown keys, lima vm_host, proxmox token_secret reference + default, azure required keys) --
-      joins the pinned `test_capability_config_contract.py` patterns.
-- [x] Tests (updated): `cli/tests/manifests/test_samples.py` and `test_decode_parity.py` pick up
-      vm-site; `cli/tests/test_resource_kinds.py` counts the two new kinds;
-      `cli/tests/test_config_deprecation_warnings.py` covers `[azure]` / `[proxmox]` and the
-      `defaults.platform` alias. The `test_resource_migrate.py` vm-site coverage moves to Phase 5
-      with the migrator mapping (see the sequencing note).
+      joins the pinned `test_capability_config_contract.py` patterns. Also (unplanned, per review):
+      `cli/tests/vms/test_legacy_site_sections.py` (legacy `[azure]`/`[proxmox]` loading, defaults
+      site/alias/vm_host, TOML-vs-manifest decode parity) and
+      `cli/tests/vms/test_vm_template_site.py` (site field parse/parity/edge/inheritance,
+      `select_site` precedence).
+- [x] Tests (updated): `cli/tests/manifests/test_samples.py` picks up vm-site;
+      `cli/tests/test_resource_kinds.py` counts the two new kinds. As built, the `[azure]` /
+      `[proxmox]` + `defaults.platform` deprecation coverage lives in the NEW
+      `cli/tests/vms/test_legacy_site_sections.py` (not `test_config_deprecation_warnings.py`), and
+      the vm-site decode-parity case lives there too (not `test_decode_parity.py`). The
+      `test_resource_migrate.py` vm-site coverage moves to Phase 5 with the migrator mapping (see
+      the sequencing note).
 
 **Definition of done**: kinds, publishers, dispatch, and samples in place with their tests green in
 isolation. MET, with a positive deviation: instead of the expected open window (old dispatch not
@@ -141,7 +161,10 @@ One Python migration version; runner support first.
   - [ ] Backfill `platform_metadata` per row via the owning platform's
         `legacy_platform_metadata(row, context.legacy)` hook (lima instance_name, wsl2 distro_name,
         azure resource_id, proxmox vmid + node-if-present; absent keys omitted, never empty
-        strings). Backfill `hostname = '{platform}--{name}'`.
+        strings). Backfill `hostname = '{platform}--{name}'`. The per-platform map only needs the
+        four legacy names: pre-SDD schemas constrain the `platform` column to them, and the Phase 1
+        create guard refuses custom-named sites mid-window, so no row can hold anything else (a
+        value outside the map would be a genuine corruption -- fail loudly, don't guess).
   - [ ] Site rename: remote-Lima rows (`vm_host_name` set) get `site = vm_host_name`; collect the
         referenced `vm_hosts` rows and print ready-to-paste `vm-site` manifest documents once at the
         end (suffix `-host` on reserved-name collision, and say so). All other rows keep their value

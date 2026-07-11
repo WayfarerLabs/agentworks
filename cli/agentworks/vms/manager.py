@@ -236,6 +236,22 @@ def create_vm(
 
     site = select_site(platform, vm_tmpl.site, config.defaults.site)
 
+    # PHASE-1 BRIDGE (vm-sites SDD): refuse custom-named sites up front.
+    # resolve_site could provision one, but every subsequent step
+    # (initialize, delete, shells) still dispatches through the legacy
+    # get_provisioner bridge, which only maps the four legacy names --
+    # the create would half-complete and the row would be unmanageable
+    # until the manager-rewiring phase. This guard (and the bridge) go
+    # away when that phase dispatches everything through platform_for.
+    from agentworks.vms.platforms import VM_PLATFORM_REGISTRY
+
+    if site not in VM_PLATFORM_REGISTRY:
+        raise StateError(
+            f"creating VMs at custom-named sites (here: '{site}') is not "
+            f"wired up yet in this build",
+            entity_kind="vm",
+        )
+
     vm_name = name
     validate_name(vm_name)
 
