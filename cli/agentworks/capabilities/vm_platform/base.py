@@ -12,12 +12,12 @@ the capability/declarable split.
 
 from __future__ import annotations
 
-from abc import ABC, abstractmethod
+from abc import abstractmethod
 from contextlib import AbstractContextManager, nullcontext
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, ClassVar
 
-from agentworks.errors import ConfigError
+from agentworks.capabilities.base import Capability, idempotent_op
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -25,7 +25,6 @@ if TYPE_CHECKING:
 
     from agentworks.config import Config
     from agentworks.db import VMRow, VMStatus
-    from agentworks.resources.reference import ConfigReference
     from agentworks.transports import Transport
 
 
@@ -76,23 +75,33 @@ class ProvisionResult:
     tailscale_ip: str | None = None
 
 
-class VMPlatform(ABC):
+class VMPlatform(Capability):
     """Capability: the code that runs VMs on one backend kind.
 
     Registered in ``VM_PLATFORM_REGISTRY`` and published as a read-only
     ``vm-platform`` capability resource; invoked only through site
     resolution (``agentworks.vms.sites``). Instances are constructed by
-    the site layer as ``cls(site_name, platform_config, secret_values)``
-    -- the platform bound to one declared site.
+    the site layer as ``cls(site_name, platform_config, resolver)`` --
+    the platform bound to one declared site plus the operation's
+    resolver (never resolved secret values; see the ``Capability``
+    lifecycle). The declared config secrets register on the resolver at
+    construct and their values arrive via the operation's single
+    resolve pass at the preflight boundary.
 
     Class-level contract (consumed by the vm-site kind decoder, the
     capability publisher, the R4 slug nudge, and the DB migration):
     ``name``, ``description``, ``validate_config``, ``shared_backend``,
     and ``legacy_platform_metadata``.
+
+    Idempotency: ops flagged with ``@idempotent_op`` (``start``,
+    ``stop``, ``delete``) must land in the same place run twice as run
+    once -- ``reinit`` re-applies everything and failed commands are
+    retried. ``create`` is deliberately unflagged: it is one-shot per
+    VM, and its collision check makes a re-run a loud error rather than
+    a silent second resource.
     """
 
-    name: ClassVar[str]
-    description: ClassVar[str]
+    owner_kind: ClassVar[str] = "vm-site"
     # Operator guidance shown when native_transport returns None (the
     # transports factory embeds it in the StateError hint). Platforms
     # that opt out of a native transport override with prose naming
@@ -101,45 +110,17 @@ class VMPlatform(ABC):
         "This platform has no interactive native transport."
     )
 
-    def __init__(
-        self,
-        site_name: str,
-        platform_config: Mapping[str, object],
-        secret_values: Mapping[str, str] | None = None,
-    ) -> None:
-        self.site_name = site_name
-        self.platform_config = platform_config
-        self.secret_values: Mapping[str, str] = secret_values or {}
+    @property
+    def site_name(self) -> str:
+        """The bound site's name (the capability-generic ``owner_name``,
+        under the domain's vocabulary)."""
+        return self.owner_name
 
-    @classmethod
-    def validate_config(
-        cls, owner: str, config: Mapping[str, object]
-    ) -> tuple[ConfigReference, ...]:
-        """Validate ``config`` (the ``platform_config`` blob owned by
-        ``owner``) and return the resource references it implies.
-
-        Invoked at each source's blob boundary (manifest decode with
-        ``file:line`` framing; the legacy TOML loader) and by
-        ``VMSiteDecl.referenced_resources()`` at finalize; MUST be pure.
-        ``owner`` is display context for error messages.
-
-        Base behavior: accepts no configuration. Subclasses with config
-        override wholesale.
-
-        NOTE: this invoked-validation API may be deprecated in favor of
-        capabilities pushing a declarative config schema definition at
-        registration time (fields typed as resource references to
-        specific kinds, with usage information), letting the core
-        engine validate and derive references without invoking the
-        capability.
-        """
-        if config:
-            display = getattr(cls, "name", cls.__name__)
-            raise ConfigError(
-                f"{owner}: the {display} platform accepts no "
-                f"configuration; got {sorted(config)}"
-            )
-        return ()
+    @property
+    def platform_config(self) -> Mapping[str, object]:
+        """The bound site's validated config blob (the
+        capability-generic ``config``, under the domain's vocabulary)."""
+        return self.config
 
     @classmethod
     def shared_backend(cls, platform_config: Mapping[str, object]) -> bool:
@@ -185,18 +166,31 @@ class VMPlatform(ABC):
           alongside the vmid).
         """
 
+    @idempotent_op
     @abstractmethod
     def start(self, vm: VMRow) -> None:
-        """Start a stopped VM. Reads ``vm.platform_metadata``."""
+        """Start a stopped VM. Reads ``vm.platform_metadata``.
 
+        Idempotent by contract: starting an already-running VM must
+        land in the running state, not error."""
+
+    @idempotent_op
     @abstractmethod
     def stop(self, vm: VMRow) -> None:
-        """Stop a running VM. Reads ``vm.platform_metadata``."""
+        """Stop a running VM. Reads ``vm.platform_metadata``.
 
+        Idempotent by contract: stopping an already-stopped VM must
+        land in the stopped state, not error."""
+
+    @idempotent_op
     @abstractmethod
     def delete(self, vm: VMRow) -> None:
         """Delete a VM and clean up backend resources. Reads
-        ``vm.platform_metadata``."""
+        ``vm.platform_metadata``.
+
+        Idempotent by contract: deleting resources that are already
+        gone must succeed (``vm delete`` is retried against
+        half-cleaned backends; a second run finishes the job)."""
 
     @abstractmethod
     def status(self, vm: VMRow) -> VMStatus:

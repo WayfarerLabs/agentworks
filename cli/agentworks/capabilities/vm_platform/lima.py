@@ -130,24 +130,39 @@ class LimaPlatform(VMPlatform):
                 raise SSHError(f"limactl failed: {proc.stderr.strip()}")
             return proc.stdout
 
+    def preflight(self) -> None:
+        """Local sites: ``limactl`` must be on PATH. Remote sites defer
+        to the ops (probing the vm_host over SSH is a real round trip;
+        the first op's error is already clear). No config secrets, so
+        the base's prediction pass is a no-op."""
+        super().preflight()
+        if not self.is_remote:
+            self._ensure_limactl()
+
+    def _ensure_limactl(self) -> None:
+        import shutil
+
+        if not shutil.which("limactl"):
+            from agentworks.errors import ConnectivityError
+
+            # Mirrors the 'tailscale' / 'tailscale status' precedent in
+            # initializer.py: a required local CLI tool is missing or
+            # unreachable, which is a transport-level problem rather
+            # than a state mismatch on a managed entity.
+            raise ConnectivityError(
+                "'limactl' not found. Lima is not installed on this machine.",
+                hint=(
+                    "For remote Lima VMs, declare a vm-site with "
+                    "platform_config.vm_host and pass it via --site."
+                ),
+            )
+
     def create(self, request: ProvisionRequest) -> ProvisionResult:
         if not self.is_remote:
-            import shutil
-
-            if not shutil.which("limactl"):
-                from agentworks.errors import ConnectivityError
-
-                # Mirrors the 'tailscale' / 'tailscale status' precedent in
-                # initializer.py: a required local CLI tool is missing or
-                # unreachable, which is a transport-level problem rather
-                # than a state mismatch on a managed entity.
-                raise ConnectivityError(
-                    "'limactl' not found. Lima is not installed on this machine.",
-                    hint=(
-                        "For remote Lima VMs, declare a vm-site with "
-                        "platform_config.vm_host and pass it via --site."
-                    ),
-                )
+            # Preflight re-runs the same check at the composition root;
+            # keeping it here too costs one PATH scan and keeps the op's
+            # error clear for direct callers.
+            self._ensure_limactl()
 
         cpus = request.cpus if request.cpus is not None else 4
         memory = request.memory_gib if request.memory_gib is not None else 8

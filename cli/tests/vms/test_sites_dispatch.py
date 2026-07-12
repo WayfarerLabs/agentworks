@@ -70,7 +70,16 @@ def test_platform_for_resolves_through_the_vm_site() -> None:
     assert platform.name == "wsl2"
 
 
-def test_secret_values_thread_to_the_bound_platform() -> None:
+def test_resolver_threads_to_the_bound_platform() -> None:
+    """Construction registers the site's declared config secret on the
+    operation's resolver and ops read the value from its cache; a
+    platform constructed WITHOUT a resolver (direct/inspection use)
+    fails ops with a typed error rather than resolving anything."""
+    from typing import cast
+
+    from agentworks.secrets.base import SecretDecl
+    from agentworks.secrets.resolver import Resolver
+
     registry = _registry(
         VMSiteDecl(
             name="px",
@@ -83,8 +92,25 @@ def test_secret_values_thread_to_the_bound_platform() -> None:
             },
         )
     )
-    bound = resolve_site("px", registry, secret_values={"proxmox-token-secret": "s3cret"})
+
+    class _StubResolver:
+        def __init__(self) -> None:
+            self.registered: list[str] = []
+
+        def register_name(self, name: str) -> SecretDecl:
+            self.registered.append(name)
+            return SecretDecl(name=name, description="")
+
+        def get(self, name: str) -> str:
+            assert name == "proxmox-token-secret"
+            return "s3cret"
+
+    stub = _StubResolver()
+    bound = resolve_site("px", registry, resolver=cast(Resolver, stub))
     assert isinstance(bound, ProxmoxPlatform)
+    # Construction registered the declared token secret for the
+    # operation's boundary resolve.
+    assert stub.registered == ["proxmox-token-secret"]
     assert bound._api is not None
 
     unbound = resolve_site("px", registry)

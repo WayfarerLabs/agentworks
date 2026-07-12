@@ -10,3 +10,11 @@ physical: one subdir per capability kind (``vm_platform/`` today; the
 already-merged secret-backend capability moves in under its own change),
 with the shared :class:`Capability` base at the top.
 """
+
+from agentworks.capabilities.base import (
+    Capability,
+    idempotent_op,
+    is_idempotent_op,
+)
+
+__all__ = ["Capability", "idempotent_op", "is_idempotent_op"]

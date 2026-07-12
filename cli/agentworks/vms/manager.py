@@ -42,12 +42,11 @@ if TYPE_CHECKING:
     from agentworks.config import Config
     from agentworks.db import Database, VMRow, WorkspaceRow
     from agentworks.env import EnvEntry
-    from agentworks.git_credentials.base import GitCredentialProvider
     from agentworks.resources import Registry
     from agentworks.secrets import SecretTarget
     from agentworks.secrets.base import SecretDecl
+    from agentworks.secrets.resolver import Resolver
     from agentworks.vms.sites import VMSiteDecl
-    from agentworks.vms.templates import ResolvedVMTemplate
 
 
 class _VmAdminEnvScopes(NamedTuple):
@@ -242,33 +241,41 @@ def bind_platform(
     vm: VMRow,
     *,
     registry: Registry | None = None,
+    resolver: Resolver | None = None,
+    prepare: bool = True,
 ) -> VMPlatform:
     """Composition-root helper: bind a VM's platform through its site.
 
-    Runs the HLA "Dispatch and site secrets" ordering once: registry
-    (built here unless the caller already has one) -> site declaration
-    -> the site's secret declarations join a single resolve pass
-    (``extra_decls``; proxmox's API token is today's only user, the
-    other platforms' empty decl set skips the pass entirely) -> bound
-    platform. Call ONCE at a VM-touching command's entry and thread the
-    bound platform down; the gates (:func:`ensure_active` /
-    :func:`keep_active`) take it as a parameter and never resolve or
-    bind anything themselves.
+    Runs the capability lifecycle's composition-root ordering once:
+    registry (built here unless the caller already has one) -> construct
+    (cheap; the site's declared config secrets register on the
+    operation's resolver, nothing resolves) -> preflight -> the
+    operation's one resolve pass at the preflight boundary (one prompt
+    session; proxmox's API token is today's only content, the other
+    platforms' empty set makes it a no-op). Call ONCE at a VM-touching
+    command's entry and thread the bound platform down; the gates
+    (:func:`ensure_active` / :func:`keep_active`) take it as a
+    parameter and never resolve or bind anything themselves.
+
+    ``prepare=False`` returns the constructed instance without the
+    preflight + resolve boundary, for the roots that interleave other
+    participating resources' preflights first (``create_vm`` and
+    ``rekey_vm`` add the vm-template's Tailscale-key prediction before
+    the one resolve pass). Those callers own running the boundary.
     """
     from agentworks.bootstrap import build_registry
-    from agentworks.secrets.orchestration import resolve_for_command
-    from agentworks.vms.sites import lookup_site, platform_for, site_secret_decls
+    from agentworks.secrets.resolver import Resolver
+    from agentworks.vms.sites import platform_for
 
     if registry is None:
         registry = build_registry(config)
-    decl = lookup_site(vm.site, registry)
-    extra = site_secret_decls(decl, registry)
-    values = (
-        resolve_for_command([], config, registry, extra_decls=extra)
-        if extra
-        else {}
-    )
-    return platform_for(vm, registry, secret_values=values)
+    if resolver is None:
+        resolver = Resolver(config, registry)
+    platform = platform_for(vm, registry, resolver=resolver)
+    if prepare:
+        platform.preflight()
+        resolver.resolve()
+    return platform
 
 
 def bind_platforms(
@@ -279,25 +286,39 @@ def bind_platforms(
 ) -> list[tuple[VMRow, VMPlatform]]:
     """Multi-VM :func:`bind_platform`: one registry build (lazy, so an
     empty VM set stays a no-op), one bound platform per distinct SITE
-    shared across its VMs (a platform instance is site-bound, and one
-    resolve pass per site keeps the prompt-once contract for
-    secret-bearing sites), deduplicated by VM name, preserving
-    first-encounter order. Feed the result to :func:`keep_actives`.
+    shared across its VMs (a platform instance is site-bound),
+    deduplicated by VM name, preserving first-encounter order. ONE
+    resolver spans the whole batch: every site's platform preflights,
+    then a single resolve pass covers the union of their declared
+    secrets -- prompt-once holds across sites, not just within one.
+    Feed the result to :func:`keep_actives`.
     """
     from agentworks.bootstrap import build_registry
+    from agentworks.secrets.resolver import Resolver
 
     seen: set[str] = set()
     by_site: dict[str, VMPlatform] = {}
     pairs: list[tuple[VMRow, VMPlatform]] = []
+    resolver: Resolver | None = None
     for vm in vms:
         if vm.name in seen:
             continue
         seen.add(vm.name)
         if registry is None:
             registry = build_registry(config)
+        if resolver is None:
+            resolver = Resolver(config, registry)
         if vm.site not in by_site:
-            by_site[vm.site] = bind_platform(config, vm, registry=registry)
+            by_site[vm.site] = bind_platform(
+                config, vm, registry=registry, resolver=resolver, prepare=False
+            )
         pairs.append((vm, by_site[vm.site]))
+    # The batch's preflight boundary: every distinct site's platform
+    # preflights, then the one resolve pass for the union.
+    for platform in by_site.values():
+        platform.preflight()
+    if resolver is not None:
+        resolver.resolve()
     return pairs
 
 
@@ -402,7 +423,7 @@ def create_vm(
     # Resolve the target site and its declaration. An undeclared site
     # fails here with the stranded-site ConfigError + manifest
     # hint, before any DB or backend work.
-    from agentworks.vms.sites import lookup_site, select_site, site_secret_decls
+    from agentworks.vms.sites import lookup_site, select_site
 
     site = select_site(site, vm_tmpl.site, config.defaults.site)
     site_decl = lookup_site(site, registry)
@@ -442,16 +463,34 @@ def create_vm(
     if slug is None and not asked_now:
         slug = _nudge_shared_backend_slug(db, site_decl)
 
-    # Collect provisioning-time secrets upfront (tailscale auth, git
-    # creds, and the site's config secrets -- proxmox's API token) in
-    # the command's single resolve pass. Provisioning is hermetic:
-    # operator [admin.env] / [vm_templates.*.env] secrets are NOT
-    # prompted here -- they're not used until runtime shells, which
-    # perform their own resolve at their composition root.
-    tailscale_auth_key, git_tokens, secret_values = _collect_secrets(
-        config, registry, providers, vm_name, vm_tmpl,
-        site_decls=site_secret_decls(site_decl, registry),
-    )
+    # The capability composition root: construct the site's platform
+    # against the operation's resolver (cheap; the site's config secrets
+    # register, nothing resolves yet), preflight every participating
+    # resource -- the vm-template predicts its Tailscale key can resolve
+    # (the key is the template's responsibility, not the site's) and the
+    # platform checks its world -- then run the operation's ONE resolve
+    # pass at the preflight boundary: tailscale auth, git-credential
+    # tokens, and the site's config secrets (proxmox's API token) in a
+    # single prompt session. Provisioning is hermetic: operator
+    # [admin.env] / [vm_templates.*.env] secrets are NOT prompted here --
+    # they're not used until runtime shells, which perform their own
+    # resolve at their composition root.
+    from agentworks.secrets.resolver import Resolver
+    from agentworks.vms.sites import resolve_site
+    from agentworks.vms.templates import preflight_vm_template
+
+    resolver = Resolver(config, registry)
+    platform_obj = resolve_site(site, registry, resolver=resolver)
+    git_token_names = _register_git_token_decls(registry, resolver, providers.keys())
+    preflight_vm_template(vm_tmpl, resolver)
+    platform_obj.preflight()
+    output.info("Collecting credentials...")
+    resolver.resolve()
+    tailscale_auth_key = resolver.get(vm_tmpl.tailscale_auth_key)
+    git_tokens = {
+        cred_name: resolver.get(token_name)
+        for cred_name, token_name in git_token_names.items()
+    }
 
     # The VM's OS hostname, computed once at create time and recorded on the
     # row: {slug}-{name} with a slug, the bare name without. Bounded by
@@ -486,12 +525,9 @@ def create_vm(
                 f"rollback: failed to delete DB record for vm '{vm_name}': {cleanup_err}"
             )
 
-    # Bind the site's platform ONCE with the resolved config secrets
-    # and dispatch (the HLA composition-root ordering).
+    # The platform instance was bound (and preflighted, and its secrets
+    # resolved) at the composition root above; dispatch is just ops now.
     from agentworks.capabilities.vm_platform import ProvisionRequest
-    from agentworks.vms.sites import resolve_site
-
-    platform_obj = resolve_site(site, registry, secret_values=secret_values)
 
     request = ProvisionRequest(
         vm_name=vm_name,
@@ -1104,17 +1140,40 @@ def rekey_vm(
     import time
 
     from agentworks.bootstrap import build_registry
-    from agentworks.secrets import resolve_for_command
+    from agentworks.secrets.resolver import Resolver
     from agentworks.ssh import SSHError
     from agentworks.ssh_config import sync_ssh_config
     from agentworks.transports import native_transport, transport, wait_for_reconnect
-    from agentworks.vms.templates import resolve_template
+    from agentworks.vms.templates import preflight_vm_template, resolve_template
 
     vm = _require_vm(db, name)
     _guard_failed_vm(vm)
 
+    # The composition root: construct (registers the site's config
+    # secrets), preflight both participating resources (the vm-template
+    # predicts the new auth key can resolve; the platform checks its
+    # world), then the operation's one resolve pass -- the new auth key
+    # and any site secret (proxmox's API token) in a single prompt
+    # session. ``ignore_env`` is honored by temporarily masking the
+    # env-var backend for the auth-key secret (the env-var source reads
+    # ``os.environ`` at ``would_attempt`` time, so removing the var
+    # skips it cleanly across BOTH the preflight prediction and the
+    # resolve, and the prompt backend takes over).
     registry = build_registry(config)
-    platform = bind_platform(config, vm, registry=registry)
+    resolver = Resolver(config, registry)
+    platform = bind_platform(
+        config, vm, registry=registry, resolver=resolver, prepare=False
+    )
+    rekey_vm_tmpl = resolve_template(registry, vm.template)
+    ts_decl = resolver.register_name(rekey_vm_tmpl.tailscale_auth_key)
+    with _mask_env_var_backend_for(ts_decl, masked=ignore_env):
+        preflight_vm_template(rekey_vm_tmpl, resolver)
+        platform.preflight()
+        resolver.resolve()
+    ts_auth_key = resolver.get(rekey_vm_tmpl.tailscale_auth_key)
+
+    # The running check is an op (a backend status read), so it sits
+    # past the boundary: on proxmox it needs the API token.
     status = platform.status(vm)
     if status != VMStatus.RUNNING:
         raise StateError(
@@ -1122,21 +1181,6 @@ def rekey_vm(
             entity_kind="vm",
             entity_name=name,
         )
-
-    # Collect the new auth key via the framework (Phase 1c). The
-    # backend chain handles env-var lookup, then falls through to the
-    # prompt backend. ``ignore_env`` is preserved by temporarily
-    # masking the env-var (the env-var source reads ``os.environ`` at
-    # ``would_attempt`` time, so removing the var skips it cleanly and
-    # the next backend in the chain takes over).
-    rekey_vm_tmpl = resolve_template(registry, vm.template)
-    ts_decl = _lookup_or_synthesize_secret(
-        registry, rekey_vm_tmpl.tailscale_auth_key
-    )
-
-    with _mask_env_var_backend_for(ts_decl, masked=ignore_env):
-        resolved = resolve_for_command([], config, registry, extra_decls=[ts_decl])
-    ts_auth_key = resolved[rekey_vm_tmpl.tailscale_auth_key]
 
     output.info(f"Rekeying '{name}'...")
 
@@ -1272,11 +1316,15 @@ def delete_vm(
     try:
         platform = bind_platform(config, vm)
     except UserAbort:
-        # Ctrl-C at a site-secret prompt must keep the SIGINT contract:
-        # abort the whole delete rather than orphaning the backend VM
-        # behind a warn.
+        # Ctrl-C at the boundary's secret prompt must keep the SIGINT
+        # contract: abort the whole delete rather than orphaning the
+        # backend VM behind a warn. (bind_platform runs preflight and
+        # the resolve pass, so the prompt happens inside it.)
         raise
     except Exception as e:
+        # Preflight or bind failure (unreachable API, missing tool,
+        # unresolvable secret): warn and skip backend cleanup -- broken
+        # backends are what delete exists to clean up.
         platform = None
         hint = getattr(e, "hint", None)
         output.warn(
@@ -1292,16 +1340,22 @@ def delete_vm(
         # whole hold+logout span is best-effort: broken states -- e.g. a
         # manually unregistered WSL2 distro whose hold raises -- are
         # exactly what `vm delete` exists to clean up, so nothing here
-        # may skip the delete below.
+        # may skip the delete below. UserAbort is the one exception the
+        # catch-alls must NOT downgrade: a swallowed abort would fall
+        # through and delete the DB row the operator just declined.
         if vm.tailscale_host:
             try:
                 with platform.vm_active(vm, config=config):
                     _tailscale_logout(vm, config, platform)
+            except UserAbort:
+                raise
             except Exception as e:
                 output.warn(f"tailscale logout skipped: {e}")
 
         try:
             platform.delete(vm)
+        except UserAbort:
+            raise
         except Exception as e:
             output.warn(f"platform cleanup failed: {e}")
 
@@ -1341,9 +1395,16 @@ def reinit_vm(
 
     vm = _require_vm(db, name)
 
-    # Bind before any secret collection: a stranded site fails
+    # Construct before any secret collection: a stranded site fails
     # here with the manifest hint instead of after git-token prompts.
-    platform = bind_platform(config, vm, registry=registry)
+    # prepare=False: the boundary (preflight + the one resolve pass)
+    # runs below, once the git-token declarations have joined the set.
+    from agentworks.secrets.resolver import Resolver
+
+    resolver = Resolver(config, registry)
+    platform = bind_platform(
+        config, vm, registry=registry, resolver=resolver, prepare=False
+    )
 
     # Resolve the VM's template so init uses the right values
     from agentworks.resources.access import admin_template
@@ -1371,8 +1432,18 @@ def reinit_vm(
     providers = resolve_git_credential_providers(registry, admin.git_credentials)
     announce_git_credentials(providers)
 
-    # Collect git tokens via the framework (Phase 1d).
-    git_tokens = _collect_git_tokens(config, registry, providers.keys())
+    # The preflight boundary: git tokens and any site config secret
+    # (proxmox's API token) resolve in one prompt session. The
+    # vm-template's Tailscale key is NOT part of reinit's planned ops
+    # (a broken node's rejoin resolves it on its own conditional path),
+    # so the template preflight doesn't run here.
+    git_token_names = _register_git_token_decls(registry, resolver, providers.keys())
+    platform.preflight()
+    resolver.resolve()
+    git_tokens = {
+        cred_name: resolver.get(token_name)
+        for cred_name, token_name in git_token_names.items()
+    }
 
     # Provisioning is hermetic: no operator-env secrets are prompted at
     # reinit. They get prompted at the use site (vm shell, session
@@ -1630,68 +1701,36 @@ def _lookup_or_synthesize_secret(registry: Registry, name: str) -> SecretDecl:
         return SecretDecl(name=name, description="")
 
 
-def _collect_secrets(
-    config: Config,
+def _register_git_token_decls(
     registry: Registry,
-    providers: dict[str, GitCredentialProvider],
-    vm_name: str,
-    vm_tmpl: ResolvedVMTemplate,
-    site_decls: Iterable[SecretDecl] = (),
-) -> tuple[str, dict[str, str], dict[str, str]]:
-    """Collect all secrets upfront before provisioning starts.
+    resolver: Resolver,
+    credential_names: Iterable[str],
+) -> dict[str, str]:
+    """Register each named git credential's token secret on the
+    operation's resolver, so the tokens join the single resolve pass at
+    the preflight boundary instead of getting their own prompt session.
+    Returns ``{credential_name: token_secret_name}`` for reading the
+    values back from the resolver's cache after the pass.
 
-    Phase 1c (Tailscale) + Phase 1d (git credentials) of the Resource
-    Registry SDD: both flow through the framework now. ``build_registry``
-    finalizes the Resource Registry (auto-declaring the auth-key secret
-    and each git-credential's token secret via their
-    ``referenced_resources`` emissions); ``resolve_for_command`` batches
-    them all in one call through the backend chain (or prompts).
-    Provisioning stays hermetic per FRD R4: ``[admin.env]`` /
-    ``[vm_templates.*.env]`` secrets are NOT eager-resolved here --
-    they're resolved at the shell-opening site at runtime, by the
-    existing ``SecretTarget`` path.
-
-    The Tailscale SecretDecl lookup uses ``_lookup_or_synthesize_secret``
-    rather than ``collect_secrets_for`` (registry walk). This matters
-    when the operator omits ``[vm_templates.default]`` entirely: the
-    raw default template isn't published to the registry, so a
-    registry-rooted walk from ``("vm-template", "default")`` would
-    error. The resolved template always exists (built-in defaults
-    apply); a direct secret lookup with fallback is the right shape.
-    Phase 2a's ``VMTemplateKind`` will move the auto-decl plumbing
-    into the registry so the registry-walk path becomes uniformly
-    available.
-
-    ``site_decls`` carries the target site's capability-config secret
-    declarations (``agentworks.vms.sites.site_secret_decls``; proxmox's
-    API token is today's only user) so they join the same single
-    resolve pass rather than getting their own.
-
-    Returns ``(tailscale_auth_key, git_tokens, secret_values)`` --
-    the last being the full resolved mapping, which the caller threads
-    into the platform binding.
+    Same undeclared-credential guard as :func:`_collect_git_tokens`
+    (that helper remains for the roots that resolve git tokens alone,
+    e.g. ``vm add-git-credential``).
     """
-    from agentworks.secrets import resolve_for_command
+    from agentworks.resources.access import git_credential
 
-    output.info("Collecting credentials...")
-
-    # Tailscale via the framework. See _lookup_or_synthesize_secret
-    # for the missing-default-template fallback semantics. The registry
-    # was built upstream so its finalize-pass typo errors fire before
-    # any other precondition check.
-    ts_decl = _lookup_or_synthesize_secret(
-        registry, vm_tmpl.tailscale_auth_key
-    )
-    resolved = resolve_for_command(
-        [], config, registry, extra_decls=[ts_decl, *site_decls]
-    )
-    ts_auth_key = resolved[vm_tmpl.tailscale_auth_key]
-
-    # Git credentials via the framework (Phase 1d). Pulls token values
-    # for every credential the admin or agent templates reference.
-    git_tokens = _collect_git_tokens(config, registry, providers.keys())
-
-    return ts_auth_key, git_tokens, resolved
+    token_name_for: dict[str, str] = {}
+    for cred_name in credential_names:
+        cred = git_credential(registry, cred_name)
+        if cred is None:
+            raise ConfigError(
+                f"git credential {cred_name!r} not declared; "
+                f"declare it under [git_credentials.{cred_name}]",
+                entity_kind="git-credential",
+                entity_name=cred_name,
+            )
+        token_name_for[cred_name] = cred.token
+        resolver.register_name(cred.token)
+    return token_name_for
 
 
 def _query_live_resources(vm: VMRow, config: Config) -> dict[str, str] | None:
@@ -1925,8 +1964,12 @@ def _ensure_tailscale(
 
     # Resolve a fresh Tailscale auth key via the framework before
     # entering the native-transport block; the backend chain handles
-    # env-var lookup with prompt fallback. Phase 1c plumbed this through
-    # the kwarg path so initializer.py has no env-var fallback.
+    # env-var lookup with prompt fallback. This is the documented
+    # conditional-need exception to the resolve-at-the-preflight-boundary
+    # contract: whether a rejoin (and therefore a NEW key) is needed is
+    # only knowable after starting the VM and watching the node fail to
+    # reconnect, so it gets its own late resolve rather than prompting
+    # every start for a key that is almost never used.
     from agentworks.bootstrap import build_registry
     from agentworks.secrets import resolve_for_command
     from agentworks.vms.templates import resolve_template

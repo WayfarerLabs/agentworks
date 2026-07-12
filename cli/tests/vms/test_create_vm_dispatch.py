@@ -34,6 +34,9 @@ def make_config(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     key.write_text("private")
     (tmp_path / "id_ed25519.pub").write_text("public ssh key")
     monkeypatch.setenv("AW_SECRET_TAILSCALE_AUTH_KEY", "tskey-test")
+    # Deterministic platform preflights: lima checks for limactl
+    # locally; pretend the tool exists regardless of the host.
+    monkeypatch.setattr("shutil.which", lambda name: f"/usr/bin/{name}")
 
     def _make(extra: str = ""):
         path = tmp_path / "config.toml"
@@ -143,9 +146,11 @@ def test_slug_resolution_precedes_secrets_and_insert(
     monkeypatch: pytest.MonkeyPatch,
     captured_output: object,
 ) -> None:
-    """Ordering: the slug prompt runs before the secret resolve pass
+    """Ordering: the slug prompt runs before the boundary resolve pass
     and before the DB row exists, so an aborted slug entry leaves
     nothing behind."""
+    from agentworks.secrets.resolver import Resolver
+
     order: list[str] = []
 
     def _slug_spy(db_: object) -> tuple[None, bool]:
@@ -155,12 +160,12 @@ def test_slug_resolution_precedes_secrets_and_insert(
     class _Stop(Exception):
         pass
 
-    def _secrets_spy(*a: object, **k: object) -> tuple[str, dict, dict]:
+    def _resolve_spy(self: Resolver) -> None:
         order.append("secrets")
         raise _Stop
 
     monkeypatch.setattr(vm_manager, "_resolve_system_slug", _slug_spy)
-    monkeypatch.setattr(vm_manager, "_collect_secrets", _secrets_spy)
+    monkeypatch.setattr(Resolver, "resolve", _resolve_spy)
 
     with pytest.raises(_Stop):
         vm_manager.create_vm(db, make_config(), name="ovm")
@@ -177,6 +182,8 @@ def test_nudge_skipped_when_prompt_just_declined(
 ) -> None:
     """First-ever create on a shared-backend site: declining the full
     prompt must not trigger the nudge in the same create."""
+    from agentworks.secrets.resolver import Resolver
+
     monkeypatch.setattr(
         vm_manager, "_resolve_system_slug", lambda db_: (None, True)
     )
@@ -192,8 +199,8 @@ def test_nudge_skipped_when_prompt_just_declined(
         pass
 
     monkeypatch.setattr(
-        vm_manager, "_collect_secrets",
-        lambda *a, **k: (_ for _ in ()).throw(_Stop()),
+        Resolver, "resolve",
+        lambda self: (_ for _ in ()).throw(_Stop()),
     )
 
     with pytest.raises(_Stop):
@@ -220,9 +227,9 @@ def test_proxmox_token_resolves_end_to_end(
     monkeypatch: pytest.MonkeyPatch,
     captured_output: object,
 ) -> None:
-    """The site's token secret joins create_vm's single resolve pass
-    (env-var backend under the AW_SECRET_ convention) and reaches the
-    bound platform via secret_values -- there is no raw
+    """The site's token secret joins create_vm's single boundary resolve
+    pass (env-var backend under the AW_SECRET_ convention) and ops read
+    it from the resolver's cache -- there is no raw
     PROXMOX_TOKEN_SECRET env fallback."""
     from agentworks.capabilities.vm_platform.proxmox import ProxmoxPlatform
 
@@ -235,8 +242,8 @@ def test_proxmox_token_resolves_end_to_end(
     captured: dict[str, object] = {}
 
     def _fake_create(self: ProxmoxPlatform, request: object) -> ProvisionResult:
-        captured["secret_values"] = dict(self.secret_values)
-        captured["token"] = self.secret_values.get("proxmox-token-secret")
+        assert self.resolver is not None
+        captured["token"] = self.resolver.get("proxmox-token-secret")
         raise RuntimeError("halt after binding")
 
     monkeypatch.setattr(ProxmoxPlatform, "create", _fake_create)

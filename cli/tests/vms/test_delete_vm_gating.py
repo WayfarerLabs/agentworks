@@ -132,8 +132,9 @@ def test_bind_failure_warns_with_hint_and_still_deletes_row(
 def test_user_abort_at_bind_aborts_the_delete(
     db: Database, monkeypatch: pytest.MonkeyPatch, captured_output: CapturedOutput
 ) -> None:
-    """Ctrl-C at a site-secret prompt aborts the whole delete rather
-    than orphaning the backend VM behind a warn."""
+    """Ctrl-C at the boundary's secret prompt (inside bind_platform)
+    aborts the whole delete rather than orphaning the backend VM behind
+    a warn."""
     _seed(db)
 
     def _abort(config: object, vm: object, registry: object = None) -> object:
@@ -145,3 +146,43 @@ def test_user_abort_at_bind_aborts_the_delete(
         vm_manager.delete_vm(db, object(), "dvm", yes=True)  # type: ignore[arg-type]
 
     assert db.get_vm("dvm") is not None
+
+
+def test_user_abort_inside_an_op_span_aborts_the_delete(
+    db: Database, monkeypatch: pytest.MonkeyPatch, captured_output: CapturedOutput
+) -> None:
+    """The op-span catch-alls are best-effort ("warn and continue") but
+    must NOT downgrade a UserAbort: a swallowed abort would fall through
+    and delete the DB row the operator just declined. Pinned for both
+    best-effort spans (the logout hold and the backend delete)."""
+    _seed(db)
+
+    class _AbortingPlatform(_DeletePlatform):
+        def delete(self, vm: VMRow) -> None:
+            super().delete(vm)
+            raise UserAbort("cancelled mid-op")
+
+    platform = _AbortingPlatform()
+    monkeypatch.setattr(
+        vm_manager, "bind_platform", lambda config, vm, registry=None: platform
+    )
+    monkeypatch.setattr(vm_manager, "_tailscale_logout", lambda *a, **k: None)
+
+    with pytest.raises(UserAbort):
+        vm_manager.delete_vm(db, object(), "dvm", yes=True)  # type: ignore[arg-type]
+    assert db.get_vm("dvm") is not None
+
+    # Same contract at the hold+logout span.
+    def _abort_logout(*a: object, **k: object) -> None:
+        raise UserAbort("cancelled during logout")
+
+    platform2 = _DeletePlatform()
+    monkeypatch.setattr(
+        vm_manager, "bind_platform", lambda config, vm, registry=None: platform2
+    )
+    monkeypatch.setattr(vm_manager, "_tailscale_logout", _abort_logout)
+
+    with pytest.raises(UserAbort):
+        vm_manager.delete_vm(db, object(), "dvm", yes=True)  # type: ignore[arg-type]
+    assert db.get_vm("dvm") is not None
+    assert platform2.delete_calls == 0  # aborted before the backend delete

@@ -112,15 +112,20 @@ class ProxmoxPlatform(VMPlatform):
         api: ProxmoxAPI | None = getattr(self, "_api_cached", None)
         if api is None:
             token_secret = str(self._cfg("token_secret", DEFAULT_TOKEN_SECRET))
-            token_value = self.secret_values.get(token_secret)
-            if not token_value:
-                # The composition root resolves site secrets before
-                # binding (see agentworks.vms.sites); reaching here
-                # means a caller skipped that step.
+            if self.resolver is None:
+                # The composition root constructs the platform against
+                # the operation's resolver; reaching here means a caller
+                # constructed directly (inspection?) and then invoked an
+                # op that needs the API token.
                 raise StateError(
-                    f"the Proxmox API token secret '{token_secret}' was not "
-                    f"resolved for site '{self.site_name}'"
+                    f"the Proxmox platform for site '{self.site_name}' was "
+                    f"constructed without a resolver; ops need the "
+                    f"'{token_secret}' API token"
                 )
+            # From the operation's boundary resolve pass; the resolver
+            # raises a typed error if the pass hasn't run (an op must
+            # never trigger a prompt).
+            token_value = self.resolver.get(token_secret)
             api = ProxmoxAPI(
                 api_url=str(self._cfg("api_url")),
                 token_id=str(self._cfg("token_id")),

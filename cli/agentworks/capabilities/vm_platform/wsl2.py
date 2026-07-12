@@ -452,6 +452,21 @@ class WSL2Platform(VMPlatform):
     name: ClassVar[str] = "wsl2"
     description: ClassVar[str] = "WSL2 Debian distributions on Windows"
 
+    def preflight(self) -> None:
+        """``wsl.exe`` must be on PATH (which also implies Windows).
+        No config secrets, so the base's prediction pass is a no-op."""
+        super().preflight()
+        import shutil
+
+        if not shutil.which("wsl"):
+            from agentworks.errors import ConnectivityError
+
+            raise ConnectivityError(
+                "'wsl.exe' not found. The wsl2 platform runs VMs as WSL2 "
+                "distributions and requires Windows with WSL installed.",
+                hint="Install WSL (`wsl --install`) or use a different site.",
+            )
+
     @classmethod
     def legacy_platform_metadata(
         cls, row: Mapping[str, Any], legacy: Mapping[str, Any]

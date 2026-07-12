@@ -18,15 +18,13 @@ from agentworks.errors import ConfigError
 from agentworks.source_location import SourceLocation, synthesized
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping
-
     from agentworks.capabilities.vm_platform import VMPlatform
     from agentworks.config import Config
     from agentworks.db import VMRow
     from agentworks.resources.origin import Origin
     from agentworks.resources.reference import ReferenceEntry, ResourceReference
     from agentworks.resources.registry import Registry
-    from agentworks.secrets.base import SecretDecl
+    from agentworks.secrets.resolver import Resolver
 
 
 @dataclass(frozen=True)
@@ -140,31 +138,6 @@ def lookup_site(name: str, registry: Registry) -> VMSiteDecl:
     return decl
 
 
-def site_secret_decls(decl: VMSiteDecl, registry: Registry) -> list[SecretDecl]:
-    """The site's capability-config secret declarations, for the
-    consuming command's single resolve pass
-    (``compute_needed_secrets(..., extra_decls=...)``).
-
-    The references were derived at finalize (the site emitted them);
-    this projects them back to the declared/auto-declared secret rows.
-    Callers hold a FINALIZED registry, so the platform edge and the
-    secret rows are guaranteed present (same stance as
-    ``resolve_site``'s unconditional index).
-    """
-    from agentworks.capabilities.vm_platform import VM_PLATFORM_REGISTRY
-
-    capability = VM_PLATFORM_REGISTRY[decl.platform]  # edge validated at finalize
-    decls: list[SecretDecl] = []
-    for cref in capability.validate_config(
-        f"vm-site/{decl.name}", decl.platform_config
-    ):
-        if cref.kind == "secret":
-            # Auto-declaration at finalize guarantees the row exists;
-            # a KeyError here would be a framework invariant violation.
-            decls.append(registry.lookup("secret", cref.name))
-    return decls
-
-
 def site_platform_name(site: str, registry: Registry) -> str:
     """The capability name backing ``site``, for consumers that surface
     it (``AGENTWORKS_PLATFORM``, ``vm describe``). Same stranded-site
@@ -188,30 +161,32 @@ def resolve_site(
     name: str,
     registry: Registry,
     *,
-    secret_values: Mapping[str, str] | None = None,
+    resolver: Resolver | None = None,
 ) -> VMPlatform:
-    """Resolve a site name to its bound platform.
+    """Resolve a site name to its constructed platform instance.
 
     Returns the platform class instantiated with the site's validated
-    ``platform_config`` (and resolved values for any config secrets).
-    Manager code holds the bound platform and never sees
-    ``VM_PLATFORM_REGISTRY`` or platform classes.
+    ``platform_config`` and the operation's ``resolver`` (construction
+    is cheap and never resolves or prompts; the declared config secrets
+    register on the resolver for the operation's single resolve pass at
+    the preflight boundary). Manager code holds the bound platform and
+    never sees ``VM_PLATFORM_REGISTRY`` or platform classes.
     """
     from agentworks.capabilities.vm_platform import VM_PLATFORM_REGISTRY
 
     decl = lookup_site(name, registry)
     platform_cls = VM_PLATFORM_REGISTRY[decl.platform]  # edge validated at finalize
-    return platform_cls(decl.name, decl.platform_config, secret_values)
+    return platform_cls(decl.name, decl.platform_config, resolver)
 
 
 def platform_for(
     vm: VMRow,
     registry: Registry,
     *,
-    secret_values: Mapping[str, str] | None = None,
+    resolver: Resolver | None = None,
 ) -> VMPlatform:
     """The bound platform for a VM, resolved through its site."""
-    return resolve_site(vm.site, registry, secret_values=secret_values)
+    return resolve_site(vm.site, registry, resolver=resolver)
 
 
 def validate_sites(config: Config, registry: Registry) -> None:

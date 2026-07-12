@@ -402,26 +402,25 @@ def test_console_add_shell_eager_resolve_fires_before_db_update(
 
 def test_vm_create_does_not_eager_resolve_operator_env() -> None:
     """Provisioning is hermetic: operator [admin.env] / [vm_templates.*.env]
-    secrets are NOT prompted at vm create. Phase 1c of the Resource
-    Registry SDD routes Tailscale through ``resolve_for_command`` with
-    ``targets=[]`` and ``extra_decls=[tailscale_decl]`` -- a tight call
-    shape that resolves ONLY the system secret without walking any
-    SecretTarget env scopes. Verify by source inspection that no
-    ``SecretTarget(...)`` constructor appears in the vm-create call path
-    (no env scope handed to the resolver).
-
-    Tailscale auth key / git credentials remain provisioning-time
-    secrets; Phase 1c moved Tailscale to the framework, Phase 1d will
-    move git credentials.
+    secrets are NOT prompted at vm create. The create path registers
+    ONLY the system secrets (tailscale key, git tokens, site config
+    secrets) on the operation's resolver -- a tight declaration set that
+    never walks SecretTarget env scopes. Verify by source inspection
+    that no ``SecretTarget(...)`` constructor appears in the vm-create
+    call path (no env scope handed to the resolver).
     """
     import inspect
 
+    from agentworks.secrets import resolver as secrets_resolver
     from agentworks.vms import manager as vm_manager
+    from agentworks.vms import templates as vm_templates
 
     # Walk the call chain explicitly so the check survives refactors.
     sources = [
         inspect.getsource(vm_manager.create_vm),
-        inspect.getsource(vm_manager._collect_secrets),
+        inspect.getsource(vm_manager._register_git_token_decls),
+        inspect.getsource(vm_templates.preflight_vm_template),
+        inspect.getsource(secrets_resolver.Resolver),
     ]
     joined = "\n".join(sources)
     assert "SecretTarget(" not in joined, (

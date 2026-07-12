@@ -1,6 +1,8 @@
 """``bind_platform`` / ``bind_platforms``: the composition-root helper's
-resolve-pass discipline (one pass per site, none without site secrets,
-prompt-once by construction) and the lazy registry build.
+capability-lifecycle discipline. Construction is cheap and never
+resolves; preflight runs before the operation's single resolve pass
+(one prompt session -- none at all without declared secrets); a batch
+shares one resolver across sites; the registry build stays lazy.
 """
 
 from __future__ import annotations
@@ -27,6 +29,9 @@ def make_config(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     key.write_text("private")
     (tmp_path / "id_ed25519.pub").write_text("public")
     monkeypatch.setenv("AW_SECRET_PROXMOX_TOKEN_SECRET", "pve-token")
+    # Deterministic platform preflights: lima checks for limactl
+    # locally; pretend the tool exists regardless of the host.
+    monkeypatch.setattr("shutil.which", lambda name: f"/usr/bin/{name}")
 
     def _make(extra: str = ""):
         path = tmp_path / "config.toml"
@@ -41,17 +46,17 @@ def make_config(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
 
 @pytest.fixture
 def resolve_counter(monkeypatch: pytest.MonkeyPatch) -> list[object]:
-    """Count resolve passes through the real resolver."""
-    from agentworks.secrets import orchestration
+    """Count boundary resolve passes through the real backend loop."""
+    from agentworks.secrets import resolve as secrets_resolve
 
     calls: list[object] = []
-    real = orchestration.resolve_for_command
+    real = secrets_resolve.resolve_secrets
 
-    def _counting(*args: object, **kwargs: object) -> dict[str, str]:
-        calls.append(kwargs.get("extra_decls"))
-        return real(*args, **kwargs)  # type: ignore[arg-type]
+    def _counting(secrets: list[object], *args: object, **kwargs: object) -> dict[str, str]:
+        calls.append([getattr(s, "name", s) for s in secrets])
+        return real(secrets, *args, **kwargs)  # type: ignore[arg-type]
 
-    monkeypatch.setattr(orchestration, "resolve_for_command", _counting)
+    monkeypatch.setattr(secrets_resolve, "resolve_secrets", _counting)
     return calls
 
 
@@ -64,6 +69,8 @@ def _vm(name: str, site: str) -> object:
 def test_no_site_secrets_skips_the_resolve_pass(
     make_config, resolve_counter: list[object]
 ) -> None:
+    """A secret-free site's boundary resolve is a no-op: the backend
+    loop never runs, so nothing can prompt."""
     config = make_config()
     platform = vm_manager.bind_platform(config, _vm("v1", "lima"))  # type: ignore[arg-type]
     assert platform.name == "lima"
@@ -73,20 +80,42 @@ def test_no_site_secrets_skips_the_resolve_pass(
 def test_secret_bearing_site_resolves_exactly_once(
     make_config, resolve_counter: list[object]
 ) -> None:
+    """The bound platform's declared config secret resolves in the ONE
+    boundary pass and ops read it from the resolver's cache."""
     from agentworks.capabilities.vm_platform.proxmox import ProxmoxPlatform
 
     config = make_config(PROXMOX_SECTION)
     platform = vm_manager.bind_platform(config, _vm("v1", "proxmox"))  # type: ignore[arg-type]
     assert isinstance(platform, ProxmoxPlatform)
-    assert platform.secret_values.get("proxmox-token-secret") == "pve-token"
+    assert platform.resolver is not None
+    assert platform.resolver.get("proxmox-token-secret") == "pve-token"
     assert len(resolve_counter) == 1
+
+
+def test_preflight_failure_prevents_the_resolve_pass(
+    make_config, resolve_counter: list[object], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The lifecycle ordering pin: a failing preflight means the
+    operator is never asked for a secret (no resolve pass runs)."""
+    from agentworks.capabilities.vm_platform.proxmox import ProxmoxPlatform
+    from agentworks.errors import ConnectivityError
+
+    def _boom(self: object) -> None:
+        raise ConnectivityError("world broken")
+
+    monkeypatch.setattr(ProxmoxPlatform, "preflight", _boom)
+    config = make_config(PROXMOX_SECTION)
+    with pytest.raises(ConnectivityError):
+        vm_manager.bind_platform(config, _vm("v1", "proxmox"))  # type: ignore[arg-type]
+    assert resolve_counter == []
 
 
 def test_bind_platforms_one_resolve_and_one_instance_per_site(
     make_config, resolve_counter: list[object]
 ) -> None:
     """Two VMs at the same secret-bearing site share one bound platform
-    and one resolve pass (prompt-once across a batch command)."""
+    and the whole batch shares ONE resolve pass (prompt-once across a
+    batch command, not just within one site)."""
     config = make_config(PROXMOX_SECTION)
     vms = [_vm("v1", "proxmox"), _vm("v2", "proxmox"), _vm("v1", "proxmox")]
     pairs = vm_manager.bind_platforms(config, vms)  # type: ignore[arg-type]
@@ -94,6 +123,20 @@ def test_bind_platforms_one_resolve_and_one_instance_per_site(
     assert [vm.name for vm, _ in pairs] == ["v1", "v2"]  # name dedup
     assert pairs[0][1] is pairs[1][1]  # shared instance per site
     assert len(resolve_counter) == 1
+
+
+def test_bind_platforms_union_spans_sites(
+    make_config, resolve_counter: list[object]
+) -> None:
+    """A mixed-site batch still resolves once: the union of both sites'
+    declared secrets goes through a single pass."""
+    config = make_config(PROXMOX_SECTION)
+    vms = [_vm("v1", "lima"), _vm("v2", "proxmox")]
+    pairs = vm_manager.bind_platforms(config, vms)  # type: ignore[arg-type]
+
+    assert len(pairs) == 2
+    assert len(resolve_counter) == 1
+    assert resolve_counter[0] == ["proxmox-token-secret"]
 
 
 def test_bind_platforms_empty_set_builds_no_registry(

@@ -108,7 +108,7 @@ def run_checks(*, completion_version: str | None = None) -> HealthReport:
 
     if config is not None and registry is not None:
         report.groups.append(_check_secrets(config, registry))
-        report.groups.append(_check_vm_sites(registry))
+        report.groups.append(_check_vm_sites(config, registry))
 
     report.groups.append(_check_database())
 
@@ -158,22 +158,49 @@ def _check_vm_platforms() -> HealthGroup:
     return g
 
 
-def _check_vm_sites(registry: Registry) -> HealthGroup:
-    """VM sites: declared rows, the install slug, and every VM's site
-    resolving to a declaration. A stranded row (e.g. a migrated
-    remote-Lima VM whose site manifest the operator has not added yet)
-    reports its paste-ready manifest snippet.
+def _check_vm_sites(config: Config, registry: Registry) -> HealthGroup:
+    """VM sites: every declared site's platform preflight, the install
+    slug, and every VM's site resolving to a declaration. A stranded
+    row (e.g. a migrated remote-Lima VM whose site manifest the operator
+    has not added yet) reports its paste-ready manifest snippet.
+
+    The per-site row IS the capability's ``preflight`` -- read-only by
+    contract, which is exactly what lets doctor call it: required tools
+    present, secrets predicted resolvable (never prompted), an API
+    reachable. Same check every service-layer operation runs before
+    doing anything real, so a failing row here is the error the next
+    command would hit.
     """
     from agentworks.db import SYSTEM_SLUG_KEY, Database
-    from agentworks.vms.sites import VMSiteDecl, site_manifest_hint
+    from agentworks.secrets.resolver import Resolver
+    from agentworks.vms.sites import VMSiteDecl, resolve_site, site_manifest_hint
 
     g = HealthGroup("VM sites")
 
-    declared: dict[str, str] = {}
+    sites: dict[str, VMSiteDecl] = {}
     for name, decl in registry.iter_kind_items("vm-site"):
         assert isinstance(decl, VMSiteDecl)
-        declared[name] = decl.platform
-    for name in sorted(declared):
+        sites[name] = decl
+    declared = {name: decl.platform for name, decl in sites.items()}
+    for name in sorted(sites):
+        decl = sites[name]
+        try:
+            platform = resolve_site(name, registry, resolver=Resolver(config, registry))
+            platform.preflight()
+        except Exception as e:
+            # A bundled site's tooling being absent is normal for the
+            # host (no WSL on macOS, no Lima on a cloud-only install):
+            # informational. An operator DECLARED the other sites, so a
+            # failing preflight there is the error their next command
+            # hits: warn.
+            built_in = getattr(decl.origin, "variant", None) == "built-in"
+            row = g.info if built_in else g.warn
+            row(
+                f"vm-site: {name}",
+                f"platform {decl.platform}; preflight: {e}",
+                hint=getattr(e, "hint", None),
+            )
+            continue
         g.ok(f"vm-site: {name}", f"platform {declared[name]}")
 
     try:

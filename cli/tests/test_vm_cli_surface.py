@@ -6,7 +6,7 @@ removed `--vm-host` / `vm-host` group, and the doctor VM-sites group.
 from __future__ import annotations
 
 import re
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 import pytest
 from typer.testing import CliRunner
@@ -16,6 +16,7 @@ from agentworks.cli import app
 if TYPE_CHECKING:
     from pathlib import Path
 
+    from agentworks.config import Config
     from agentworks.db import Database
 
 _ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
@@ -126,8 +127,11 @@ def test_doctor_vm_sites_defers_on_pending_migration(
             raise AssertionError("Database() must not open (would auto-migrate)")
 
     monkeypatch.setattr("agentworks.db.Database", _DbFactory)
+    # Deterministic bundled-site preflights: lima/wsl2 check their local
+    # binary; pretend both are present regardless of the host.
+    monkeypatch.setattr("shutil.which", lambda name: f"/usr/bin/{name}")
 
-    group = doctor._check_vm_sites(registry)
+    group = doctor._check_vm_sites(cast("Config", object()), registry)
 
     by_name = {c.name: c for c in group.checks}
     deferred = by_name["VM sites"]
@@ -163,8 +167,11 @@ def test_doctor_vm_sites_group(
             return db
 
     monkeypatch.setattr("agentworks.db.Database", _DbFactory)
+    # Deterministic bundled-site preflights: lima/wsl2 check their local
+    # binary; pretend both are present regardless of the host.
+    monkeypatch.setattr("shutil.which", lambda name: f"/usr/bin/{name}")
 
-    group = doctor._check_vm_sites(registry)
+    group = doctor._check_vm_sites(cast("Config", object()), registry)
 
     by_name = {c.name: c for c in group.checks}
     assert by_name["vm-site: lima"].status is doctor.Status.OK
