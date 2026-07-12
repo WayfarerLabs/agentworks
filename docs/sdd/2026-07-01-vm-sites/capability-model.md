@@ -94,8 +94,8 @@ is a further extension the hosting-shapes doc tracks; it is not needed yet.)
 A capability instance moves through four stages. Each has a sharply different contract; the value of
 the whole model is in keeping them from bleeding into each other. The _order_ is part of the
 contract: invalid config dies at construct, cheap fatal readiness dies at preflight, and secret
-prompting waits for ops, so the operator is never asked for a secret to feed an op that a bad
-mapping or a missing tool was going to sink anyway.
+prompting waits for preflight to pass, so the operator is never asked for a secret to feed an op
+that a bad mapping or a missing tool was going to sink anyway.
 
 ### 1. `validate_config` (declare; pure, classmethod)
 
@@ -120,8 +120,8 @@ The references it returns are sourceless. The consuming resource attaches itself
 it emits them, in its `referenced_resources()` at finalize ("whoever hosts the config that names the
 secret emits the reference"). The framework consumes those references two ways: statically, they
 feed the registry's reference graph and doctor's resolvability prediction; at runtime, their
-_values_ are fetched only through the resolver, on the lazy-trigger / eager-scope contract described
-under ops. References are never value-resolved at command entry.
+_values_ are fetched only through the resolver, in one batched pass as soon as preflight passes
+(described under ops). References are never value-resolved at command entry.
 
 ### 2. construct (bind; cheap, config-valid by construction)
 
@@ -179,26 +179,29 @@ The domain methods: `create` / `destroy` for a platform, credential-materials fo
 `start` / `probe` for a harness. These belong to the subclass, not the base; do not try to unify
 them.
 
-Production of a value that requires a mutation lives here, lazily and cached, not in preflight. This
-is what dissolves the old `acquire_token`-style method entirely: its verify-half became preflight,
-its produce-half became a lazy detail of ops.
+Production of a value that requires a mutation lives here, cached and only after preflight, never in
+preflight. This is what dissolves the old `acquire_token`-style method entirely: its verify-half
+became preflight, its produce-half became a post-preflight detail of ops.
 
-Secret resolution rides the same seam. An op fetches its credential value on first need through the
-resolver, which resolves a mapped secret, or mints a token for a minting provider, and caches it.
-Because this happens in ops, it happens _after_ preflight has cleared the cheap fatal checks, so the
-operator is prompted only once the work is confirmed able to proceed. The resolver batches the
-command's declared secrets on that first resolution, so lazy does not mean scattered prompts; it is
-still one prompt session. In one line: the _trigger_ is lazy (nothing resolves until an op first
-needs a value), the _scope_ is eager (that first need resolves everything the command declared).
-Wait until the last minute, then do it all.
+Secret resolution rides the same seam, and its timing is pinned to the preflight boundary: **resolve
+as soon as preflight passes.** Once the operation's preflight checks clear, the resolver resolves
+everything the command declared in one batched pass, one prompt session, values cached; ops then
+draw from that cache (a minting provider produces its token through the same pass, guarded by
+check-then-mint). Resolution is deliberately neither of the two extremes: not eager at command entry
+(a prompt could precede a fatal check that would have sunk the op), and not deferred to first
+op-need (prompts would land mid-operation, scattered across the run). The operator is prompted
+exactly once, at a predictable moment, after the work is confirmed able to proceed and before it
+starts. In one line: preflight passing is the trigger, the command's declared set is the scope. Wait
+for preflight, then do it all.
 
-Moving prompting into ops moves the operator's abort point into ops, and the error discipline moves
-with it. A Ctrl-C at a secret prompt (`UserAbort`) must be handled cleanly, best-effort, at all
-times: catch-all handling that wraps a best-effort op span (a "warn and continue" cleanup block)
-must re-raise `UserAbort`, never downgrade it to a warning. The cautionary case is deleting a VM:
-its backend cleanup is deliberately best-effort (broken backends are what delete exists to clean
-up), but a swallowed abort at the token prompt would warn, fall through, and delete the DB row
-anyway, orphaning the backend VM the operator just declined to authenticate against.
+Prompting now happens inside the service-layer operation (at the preflight boundary rather than at
+bind), so the operator's abort point moves with it, and the error discipline moves too. A Ctrl-C at
+a secret prompt (`UserAbort`) must be handled cleanly, best-effort, at all times: catch-all handling
+that wraps a best-effort span (a "warn and continue" cleanup block, whether around the resolve pass
+or an op) must re-raise `UserAbort`, never downgrade it to a warning. The cautionary case is
+deleting a VM: its backend cleanup is deliberately best-effort (broken backends are what delete
+exists to clean up), but a swallowed abort at the token prompt would warn, fall through, and delete
+the DB row anyway, orphaning the backend VM the operator just declined to authenticate against.
 
 ### Idempotency
 
@@ -246,11 +249,11 @@ A capability's config may name secrets (a Proxmox API token, a git PAT, an AWS c
 Nothing special happens: the secret is an ordinary `ConfigReference` returned by `validate_config`.
 The framework owns resolution; the instance never implements it. The instance holds a framework
 _resolver_ and uses it two ways: non-prompting _prediction_ in preflight (is this resolvable at
-all?), and lazy _resolution_ in ops (fetch the value on first need, batched across the command,
-cached). The default secret name is the capability's to choose: a per-consumer default
-(`git-token-<name>`, derived from `owner`) where credentials are many, a shared well-known name
-(`proxmox-token-secret`) where one is typical. Either way the capability owns the default; the
-framework only resolves what was declared.
+all?), and _resolution_ at the preflight boundary (everything the command declared, one batched
+prompt session, cached; ops draw from the cache). The default secret name is the capability's to
+choose: a per-consumer default (`git-token-<name>`, derived from `owner`) where credentials are
+many, a shared well-known name (`proxmox-token-secret`) where one is typical. Either way the
+capability owns the default; the framework only resolves what was declared.
 
 ## Where capabilities live
 
