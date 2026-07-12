@@ -427,6 +427,8 @@ class AzurePlatform(VMPlatform):
             return None
 
     def start(self, vm: VMRow) -> None:
+        # Idempotent by construction (the ABC flags start): the Azure
+        # begin_start operation no-ops on an already-running VM.
         output.info(f"Starting Azure VM '{vm.name}'...")
         rg, name, az_cfg = _parse_resource_id(_resource_id(vm))
         try:
@@ -437,6 +439,8 @@ class AzurePlatform(VMPlatform):
         output.info(f"Azure VM '{vm.name}' started")
 
     def stop(self, vm: VMRow) -> None:
+        # Idempotent by construction (the ABC flags stop): the Azure
+        # begin_deallocate operation no-ops on a deallocated VM.
         output.info(f"Deallocating Azure VM '{vm.name}'...")
         rg, name, az_cfg = _parse_resource_id(_resource_id(vm))
         try:

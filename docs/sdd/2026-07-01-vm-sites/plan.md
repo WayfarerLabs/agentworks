@@ -1,11 +1,11 @@
 # VM sites and platforms -- implementation plan
 
-**Status**: phases 1-6 complete; Phase 7 (capability model adoption, added 2026-07-12) implemented,
-reviewer round in progress. Phases follow the HLA's sequencing sketch, with two refinements recorded
-there-vs-here: `defaults.site` parsing (plus the deprecated `defaults.platform` alias) and the
-`vm-template.site` field land in Phase 1 with the rest of the config/kind surface, so Phase 3's
-selection precedence has both to read; only the operator-facing flag/completion work stays in
-Phase 5.
+**Status**: all seven phases complete (Phase 7, the capability model adoption, was added 2026-07-12
+and approved by its reviewer round the same day). Phases follow the HLA's sequencing sketch, with
+two refinements recorded there-vs-here: `defaults.site` parsing (plus the deprecated
+`defaults.platform` alias) and the `vm-template.site` field land in Phase 1 with the rest of the
+config/kind surface, so Phase 3's selection precedence has both to read; only the operator-facing
+flag/completion work stays in Phase 5.
 
 **Sequencing notes**:
 
@@ -510,7 +510,13 @@ vm-platform/vm-site pair; the git-credentials and session-harness PRs adopt for 
       late-registration guard); prompt-order pins (a failing preflight prevents the resolve pass;
       one pass per single- and mixed-site batch; the boundary resolve precedes the DB insert); the
       delete-abort regression covering both best-effort op spans.
-- [ ] agentworks-reviewer round; iterate until clean.
+- [x] agentworks-reviewer rounds: round 1 (no blocking findings; four important ones: the vm roots'
+      prompt-before-preflight ordering, add_git_credential's second prompt session, describe's
+      too-narrow degrade, two missing ruling pins -- all fixed, and the four implementation rulings
+      ratified); round 2 (one important: the AGENT shell/exec roots had the same ordering bug --
+      fixed, plus proxmox/wsl2 op guards and the ordering/guard pins); round 3: **approve, Phase 7
+      passes** (two non-gating minors -- the exec_agent ordering pin and azure's
+      idempotent-by-construction comments -- closed in the final commit).
 
 **Definition of done**: the vm-platform/vm-site pair conforms to `capability-model.md` end to end;
 full gates green; reviewer round clean.

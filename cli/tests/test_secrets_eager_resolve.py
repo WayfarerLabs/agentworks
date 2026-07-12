@@ -670,6 +670,48 @@ def test_agent_exec_eager_resolve_fires_before_ssh(
     db.close()
 
 
+def test_agent_exec_binds_before_the_env_resolve(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The lifecycle ordering pin for the agent roots (the round-2 bug
+    lived here, not in the vm twins): exec_agent binds (preflight +
+    boundary resolve) BEFORE the env-chain eager resolve."""
+    from agentworks.agents import manager as agent_manager
+
+    db = _seed_basic_db(tmp_path)
+    db.insert_agent("a1", "vm1", "agt-a1", template="default")
+    order: list[str] = []
+
+    monkeypatch.setattr(
+        agent_manager, "bind_platform",
+        lambda *a, **k: order.append("bind") or object(),
+    )
+    monkeypatch.setattr(
+        agent_manager, "_resolve_agent_direct_env_scopes",
+        lambda *a, **k: agent_manager._AgentDirectEnvScopes(vm={}, workspace=None, agent={}),
+    )
+    monkeypatch.setattr(
+        agent_manager, "_agent_direct_secret_target", lambda *a, **k: object()
+    )
+
+    class _Stop(Exception):
+        pass
+
+    def _env_resolve(*args: object, **kwargs: object) -> None:
+        order.append("env-resolve")
+        raise _Stop
+
+    monkeypatch.setattr("agentworks.secrets.resolve_for_command", _env_resolve)
+
+    with pytest.raises(_Stop):
+        agent_manager.exec_agent(
+            db, SimpleNamespace(), name="a1", command=["echo", "hi"],  # type: ignore[arg-type]
+        )
+
+    assert order == ["bind", "env-resolve"]
+    db.close()
+
+
 def test_shell_agent_passes_workspace_scope_to_secret_target(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
