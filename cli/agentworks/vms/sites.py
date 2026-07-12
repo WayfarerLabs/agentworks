@@ -165,6 +165,25 @@ def site_secret_decls(decl: VMSiteDecl, registry: Registry) -> list[SecretDecl]:
     return decls
 
 
+def site_platform_name(site: str, registry: Registry) -> str:
+    """The capability name backing ``site``, for consumers that surface
+    it (``AGENTWORKS_PLATFORM``, ``vm describe``). Same R3 stranded
+    ``ConfigError`` as :func:`lookup_site` on an undeclared site.
+    """
+    return lookup_site(site, registry).platform
+
+
+def site_shared_backend(decl: VMSiteDecl) -> bool:
+    """Whether the site's backend is plausibly shared between
+    agentworks installs (drives the R4 deferred slug nudge). Declared
+    by the platform; lima computes it from ``vm_host`` presence.
+    """
+    from agentworks.vms.platforms import VM_PLATFORM_REGISTRY
+
+    capability = VM_PLATFORM_REGISTRY[decl.platform]  # edge validated at finalize
+    return capability.shared_backend(decl.platform_config)
+
+
 def resolve_site(
     name: str,
     registry: Registry,

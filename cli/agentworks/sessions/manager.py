@@ -674,9 +674,12 @@ def _resolve_session_env(
         agent_name=agent_name,
     )
 
+    from agentworks.vms.sites import site_platform_name
+
     ctx = ResourceContext(
         vm_name=vm.name,
-        platform=vm.site,
+        platform=site_platform_name(vm.site, registry),
+        site=vm.site,
         user=linux_user,
         workspace_name=ws.name,
         workspace_dir=ws.workspace_path,

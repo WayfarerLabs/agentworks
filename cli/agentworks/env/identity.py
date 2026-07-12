@@ -21,15 +21,13 @@ SessionKind = Literal["admin", "agent"]
 class ResourceContext:
     """The resource chain that scopes a shell.
 
-    ``vm_name`` / ``platform`` / ``user`` are always present for an on-VM
-    shell. PHASE-2 BRIDGE (vm-sites SDD): ``platform`` now carries the
-    VM's SITE name (identical for the four legacy names; the host-named
-    site for migrated remote-Lima rows), and ``vm_host`` has no producer
-    left (the ``vm_hosts`` registry is gone) so ``AGENTWORKS_VM_HOST``
-    is never emitted -- the identity-env phase redesigns these vars
-    (AGENTWORKS_SITE et al.). The remaining fields are present when the
-    corresponding scope applies (workspace context, agent context,
-    session context).
+    ``vm_name`` / ``platform`` / ``site`` / ``user`` are always present
+    for an on-VM shell. ``platform`` carries the capability name
+    (``lima`` / ``wsl2`` / ``azure`` / ``proxmox``), resolved at the
+    caller's composition root via the site declaration; ``site`` is the
+    vm-site resource name from ``vm.site``. The remaining fields are
+    present when the corresponding scope applies (workspace context,
+    agent context, session context).
 
     ``session_kind`` is ``"admin"`` when the session runs as the admin user
     and ``"agent"`` when it runs as an agent user. It is set whenever
@@ -38,8 +36,8 @@ class ResourceContext:
 
     vm_name: str
     platform: str
+    site: str
     user: str
-    vm_host: str | None = None
     workspace_name: str | None = None
     workspace_dir: str | None = None
     agent_name: str | None = None
@@ -81,17 +79,16 @@ def vm_stable_identity_env(ctx: ResourceContext) -> dict[str, str]:
     profile fragment so that any shell on the VM (including raw ssh logins)
     sees them.
 
-    ``AGENTWORKS_VM_HOST`` currently has no producer (see the class
-    docstring); the ``ctx.vm_host`` branch survives only until the
-    vm-sites identity-env phase redesigns these vars.
+    Per the vm-sites SDD (R12): ``AGENTWORKS_PLATFORM`` keeps its name
+    and values (the capability name it has always carried);
+    ``AGENTWORKS_SITE`` is new; ``AGENTWORKS_VM_HOST`` retired with the
+    ``vm_hosts`` registry (the site name conveys the same information).
     """
-    out = {
+    return {
         "AGENTWORKS_VM": ctx.vm_name,
         "AGENTWORKS_PLATFORM": ctx.platform,
+        "AGENTWORKS_SITE": ctx.site,
     }
-    if ctx.vm_host is not None:
-        out["AGENTWORKS_VM_HOST"] = ctx.vm_host
-    return out
 
 
 def per_user_identity_env(ctx: ResourceContext) -> dict[str, str]:

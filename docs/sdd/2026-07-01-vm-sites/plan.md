@@ -1,6 +1,6 @@
 # VM sites and platforms -- implementation plan
 
-**Status**: Phases 1-3 complete. Phases follow the HLA's sequencing sketch, with two refinements
+**Status**: Phases 1-4 complete. Phases follow the HLA's sequencing sketch, with two refinements
 recorded there-vs-here: `defaults.site` parsing (plus the deprecated `defaults.platform` alias) and
 the `vm-template.site` field land in Phase 1 with the rest of the config/kind surface, so Phase 3's
 selection precedence has both to read; only the operator-facing flag/completion work stays in
@@ -298,27 +298,33 @@ commands.
 
 ## Phase 4: Slug, prompts, SSH config, hostname, identity env
 
-- [ ] `cli/agentworks/vms/manager.py` (create path): first-create slug prompt (settings row absent;
+- [x] `cli/agentworks/vms/manager.py` (create path): first-create slug prompt (settings row absent;
       empty answer writes the empty-value declined row; non-interactive neither prompts nor writes);
-      deferred shared-backend nudge (platform's `shared_backend(platform_config)`, skipped
-      non-interactively, `never-remind-me` suppression key); slug format validation (3-20, lowercase
-      alnum + dash, no leading/trailing dash).
-- [ ] Slug consumption: `ProvisionRequest.system_slug` + R11 hostname (`{slug}-{vm.name}` /
-      `{vm.name}`); per-platform backend-side naming with the R9 collision pre-flight (auto-suffix
-      for soft-name backends later; StateError with guidance for all four in-tree platforms).
-- [ ] `cli/agentworks/ssh_config.py`: managed file `agentworks-{slug}.conf` when slug set (fallback
-      `agentworks.conf`); first sync after the slug is set removes the old file; legacy
-      (non-config.d) mode untouched.
-- [ ] `cli/agentworks/env/identity.py`: `ResourceContext.vm_host` removed, `site` added;
-      `AGENTWORKS_SITE` emitted; `AGENTWORKS_VM_HOST` gone; `AGENTWORKS_PLATFORM` resolved at the
-      init/reinit composition root via the site declaration. Permanent env-var docs (not the locked
-      env-and-secrets SDD) updated in Phase 6.
-- [ ] Tests: settings encoding (absent vs empty vs value), prompt one-shot behavior including
-      non-interactive, nudge suppression, hostname composition + 51-char bound, ssh-config file
-      naming + old-file removal, identity env emission.
+      deferred shared-backend nudge (`sites.site_shared_backend(decl)` wrapping the platform's
+      classmethod so the manager stays registry-blind; skipped non-interactively; `never-remind-me`
+      suppression key; a plain "no" leaves everything unset so the nudge repeats); slug format
+      validation (3-20, lowercase alnum + dash, no leading/trailing dash). An invalid prompt answer
+      aborts the create with the settings row unwritten, so the next create asks again. The slug
+      also surfaces on `vm describe` (R4's allowed surfaces; `vm list` stays name-only).
+- [x] Slug consumption: `ProvisionRequest.system_slug` + R11 hostname (`{slug}-{vm.name}` /
+      `{vm.name}`); per-platform backend-side naming with the R9 collision pre-flight landed in
+      Phase 1 (all four platforms already compose `{slug}-{name}` from `request.system_slug`).
+- [x] `cli/agentworks/ssh_config.py`: managed file `agentworks-{slug}.conf` when slug set (fallback
+      `agentworks.conf`); every config.d sync removes the old slug-less file once a slug exists
+      (idempotent superset of "first sync after the slug is set"); legacy (non-config.d) mode
+      untouched. The declined (empty-value) row behaves like no slug.
+- [x] `cli/agentworks/env/identity.py`: `ResourceContext.vm_host` removed, `site` added;
+      `AGENTWORKS_SITE` emitted; `AGENTWORKS_VM_HOST` gone; `AGENTWORKS_PLATFORM` resolved at every
+      ResourceContext composition root via `sites.site_platform_name(vm.site, registry)`
+      (initializer, vm shell/exec, agent shell/exec, session env, console panes, env show).
+      Permanent env-var docs (not the locked env-and-secrets SDD) updated in Phase 6.
+- [x] Tests: settings encoding (absent vs empty vs value), prompt one-shot behavior including
+      non-interactive, nudge suppression + skipped-for-local-sites + plain-no repeats, hostname
+      composition (`test_create_vm_dispatch`) + 51-char bound, ssh-config file naming + old-file
+      removal + declined-slug fallback, identity env emission (AGENTWORKS_SITE in, VM_HOST out).
 
 **Definition of done**: slug-null behavior identical to Phase 3; slug-set behavior covered by tests;
-existing VMs keep hostnames and env values.
+existing VMs keep hostnames and env values. MET (suite 1550, ruff, mypy green).
 
 ## Phase 5: CLI surface and completions
 

@@ -682,9 +682,12 @@ def shell_agent(
         registry,
     )
 
+    from agentworks.vms.sites import site_platform_name
+
     ctx = ResourceContext(
         vm_name=vm.name,
-        platform=vm.site,
+        platform=site_platform_name(vm.site, registry),
+        site=vm.site,
         user=agent.linux_user,
         workspace_name=ws.name if ws else None,
         workspace_dir=ws.workspace_path if ws else None,
@@ -780,9 +783,12 @@ def exec_agent(
         registry,
     )
 
+    from agentworks.vms.sites import site_platform_name
+
     ctx = ResourceContext(
         vm_name=vm.name,
-        platform=vm.site,
+        platform=site_platform_name(vm.site, registry),
+        site=vm.site,
         user=agent.linux_user,
         workspace_name=ws.name if ws else None,
         workspace_dir=ws.workspace_path if ws else None,
@@ -1095,10 +1101,12 @@ def _create_agent_on_vm(
     # gets rewritten at the end of _run_agent_install_commands with
     # accumulated PATH entries from catalog install commands.
     from agentworks.env import ResourceContext, per_user_identity_env
+    from agentworks.vms.sites import site_platform_name
 
     agent_identity_ctx = ResourceContext(
         vm_name=vm.name,
-        platform=vm.site,
+        platform=site_platform_name(vm.site, registry),
+        site=vm.site,
         user=linux_user,
         agent_name=agent_name,
     )

@@ -345,7 +345,7 @@ backends = ["env-var"]
     env = compose_env(
         values=values,
         ctx=ResourceContext(
-            vm_name="v", vm_host="h", platform="lima", user="u"
+            vm_name="v", platform="lima", site="lima", user="u"
         ),
         vm={"K": EnvEntry(key="K", secret="api-key")},
     )

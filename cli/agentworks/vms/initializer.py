@@ -1692,15 +1692,21 @@ def _phase_b_setup(
     # row up front). A None here is an internal invariant violation, not a
     # recoverable state, so surface it loudly.
     assert vm_row is not None, f"VM '{vm_name}' missing from DB mid-init"
+    # The platform name resolves through the site declaration at this
+    # composition root (a stranded remote-Lima VM already failed reinit
+    # at the earlier bind, before any env baking).
+    from agentworks.vms.sites import site_platform_name
+
     identity_ctx = ResourceContext(
         vm_name=vm_row.name,
-        platform=vm_row.site,
+        platform=site_platform_name(vm_row.site, registry),
+        site=vm_row.site,
         user=admin_username,
     )
 
     # Provisioning is hermetic: no operator env, no per-context identity,
     # no secrets from env tables are injected into install commands. Static
-    # identity (AGENTWORKS_VM / VM_HOST / PLATFORM) reaches install commands
+    # identity (AGENTWORKS_VM / SITE / PLATFORM) reaches install commands
     # via /etc/profile.d/agentworks-identity.sh sourcing. Tailscale auth key
     # and git credentials -- the only provisioning-time secrets -- have
     # their own dedicated config paths outside [admin.env]. Operator env

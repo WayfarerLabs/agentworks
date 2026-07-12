@@ -99,6 +99,58 @@ def test_create_vm_request_shape_and_row(
     assert vm.operator_stopped is False
 
 
+def test_create_vm_composes_r11_hostname_with_slug(
+    db: Database,
+    make_config,
+    monkeypatch: pytest.MonkeyPatch,
+    captured_output: object,
+) -> None:
+    """With a slug set, the hostname is {slug}-{name} and the slug
+    rides the ProvisionRequest (no first-create prompt fires: the
+    settings row exists)."""
+    from agentworks.vms.base import ProvisionRequest
+    from agentworks.vms.platforms.lima import LimaPlatform
+
+    config = make_config()
+    db.set_setting("system_slug", "team-a")
+    captured: list[ProvisionRequest] = []
+
+    def _fake_create(self: LimaPlatform, request: ProvisionRequest) -> ProvisionResult:
+        captured.append(request)
+        return ProvisionResult(
+            native_transport=SimpleNamespace(),  # type: ignore[arg-type]
+            platform_metadata={"instance_name": "team-a-svm"},
+            bootstrap_complete=True,
+            tailscale_ip="100.64.0.8",
+        )
+
+    monkeypatch.setattr(LimaPlatform, "create", _fake_create)
+    monkeypatch.setattr(vm_manager, "initialize_vm", lambda *a, **k: None)
+
+    vm_manager.create_vm(db, config, name="svm")
+
+    (request,) = captured
+    assert request.hostname == "team-a-svm"
+    assert request.system_slug == "team-a"
+    vm = db.get_vm("svm")
+    assert vm is not None
+    assert vm.hostname == "team-a-svm"
+
+
+def test_r11_hostname_bound_by_construction() -> None:
+    """Slug max 20 + dash + name max 30 = 51 chars, inside the 63-char
+    hostname-label and Azure 64-char computer-name limits."""
+    from agentworks.config import MAX_NAME_LENGTH, validate_name
+
+    slug = "a" * 20
+    vm_manager.validate_slug(slug)
+    name = "b" * MAX_NAME_LENGTH
+    validate_name(name)
+    hostname = f"{slug}-{name}"
+    assert len(hostname) == 51
+    assert len(hostname) <= 63
+
+
 def test_proxmox_token_resolves_end_to_end(
     db: Database,
     make_config,

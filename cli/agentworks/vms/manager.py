@@ -39,6 +39,7 @@ if TYPE_CHECKING:
     from agentworks.secrets import SecretTarget
     from agentworks.secrets.base import SecretDecl
     from agentworks.vms.base import VMPlatform
+    from agentworks.vms.sites import VMSiteDecl
     from agentworks.vms.templates import ResolvedVMTemplate
 
 
@@ -135,6 +136,94 @@ def _resolve_workspace_for_vm(
             entity_name=workspace_name,
         )
     return ws
+
+
+# -- System slug (SDD R4) ---------------------------------------------------
+
+SYSTEM_SLUG_KEY = "system_slug"
+NUDGE_SUPPRESSED_KEY = "shared_backend_nudge_suppressed"
+
+_SLUG_PROMPT = (
+    "A system slug uniquely identifies this agentworks installation. It "
+    "is used to namespace VMs and other resources so this install does "
+    "not collide with others that share the same cloud account, Proxmox "
+    "cluster, or Windows/Mac user. Leave blank if this install is the "
+    "only one using its sites' backends. [system slug]"
+)
+
+
+def validate_slug(slug: str) -> None:
+    """R4 slug format: 3-20 chars, lowercase alphanumeric plus dash, no
+    leading/trailing dash. Passes Azure's naming rules (the strictest
+    we target), therefore passes all of them.
+    """
+    import re
+
+    if not re.fullmatch(r"[a-z0-9][a-z0-9-]{1,18}[a-z0-9]", slug):
+        raise ValidationError(
+            f"invalid system slug '{slug}'. Slugs are 3-20 characters, "
+            "lowercase alphanumeric plus dash, with no leading or "
+            "trailing dash."
+        )
+
+
+def _resolve_system_slug(db: Database) -> str | None:
+    """R4: the install's slug, prompting once at first interactive
+    ``vm create``.
+
+    The settings row distinguishes never-asked (absent) from declined
+    (present, empty): an empty answer records the declined row so the
+    prompt fires once regardless of the answer. Non-interactive runs
+    never prompt and never write, so a later interactive create still
+    asks.
+    """
+    stored = db.get_setting(SYSTEM_SLUG_KEY)
+    if stored is not None:
+        return stored or None
+    if not output.is_interactive():
+        return None
+    answer = output.prompt(_SLUG_PROMPT, default="").strip()
+    if not answer:
+        db.set_setting(SYSTEM_SLUG_KEY, "")
+        return None
+    # Invalid input aborts the create before any state mutation; the
+    # settings row stays absent, so the next create asks again.
+    validate_slug(answer)
+    db.set_setting(SYSTEM_SLUG_KEY, answer)
+    return answer
+
+
+def _nudge_shared_backend_slug(db: Database, site_decl: VMSiteDecl) -> str | None:
+    """R4 deferred nudge: creating on a shared-backend site with a null
+    slug offers to set one now. Skipped entirely when non-interactive;
+    ``never-remind-me`` writes a suppression flag in settings.
+    Returns a newly set slug, or None.
+    """
+    from agentworks.vms.sites import site_shared_backend
+
+    if not output.is_interactive():
+        return None
+    if db.get_setting(NUDGE_SUPPRESSED_KEY) is not None:
+        return None
+    if not site_shared_backend(site_decl):
+        return None
+    choice = output.choose(
+        "You are creating a VM on a site whose backend may be shared "
+        "with other agentworks installs; VM names may collide. Set a "
+        "slug now?",
+        ["yes", "no", "never remind me"],
+    )
+    if choice == 2:
+        db.set_setting(NUDGE_SUPPRESSED_KEY, "1")
+        return None
+    if choice == 1:
+        return None
+    answer = output.prompt(_SLUG_PROMPT, default="").strip()
+    if not answer:
+        return None
+    validate_slug(answer)
+    db.set_setting(SYSTEM_SLUG_KEY, answer)
+    return answer
 
 
 def bind_platform(
@@ -348,6 +437,14 @@ def create_vm(
     providers = resolve_git_credential_providers(registry, admin.git_credentials)
     announce_git_credentials(providers)
 
+    # R4 system slug: first interactive create prompts once; a null
+    # slug on a shared-backend site gets the deferred nudge. Both run
+    # before any secret prompting or state mutation so an aborted slug
+    # entry leaves nothing behind.
+    slug = _resolve_system_slug(db)
+    if slug is None:
+        slug = _nudge_shared_backend_slug(db, site_decl)
+
     # Collect provisioning-time secrets upfront (tailscale auth, git
     # creds, and the site's config secrets -- proxmox's API token) in
     # the command's single resolve pass. Provisioning is hermetic:
@@ -359,10 +456,11 @@ def create_vm(
         site_decls=site_secret_decls(site_decl, registry),
     )
 
-    # R11 hostname: {slug}-{name} once the slug lands (the
-    # slug-and-naming phase); until then the slug is unset, so the
-    # hostname is the bare VM name.
-    hostname = vm_name
+    # R11 hostname, computed once at create time and recorded on the
+    # row: {slug}-{name} with a slug, the bare name without. Bounded by
+    # construction: slug max 20 + dash + name max 30 = 51 characters,
+    # inside the 63-char hostname-label and Azure 64-char limits.
+    hostname = f"{slug}-{vm_name}" if slug else vm_name
 
     # Create DB record with as-provisioned resource values.
     db.insert_vm(
@@ -401,7 +499,7 @@ def create_vm(
     request = ProvisionRequest(
         vm_name=vm_name,
         hostname=hostname,
-        system_slug=None,
+        system_slug=slug,
         admin_username=resolved_admin_username,
         ssh_public_key=config.operator.ssh_public_key.read_text().strip(),
         ssh_private_key=config.operator.ssh_private_key,
@@ -589,6 +687,9 @@ def describe_vm(db: Database, config: Config, name: str) -> None:
     output.info(f"Backend:        {backend_label}")
     output.info(f"Status:         {status_label}")
     output.info(f"Hostname:       {vm.hostname}")
+    # R4: the slug never shows in normal CLI output (vm list stays
+    # name-only); describe and doctor are its surfaces.
+    output.info(f"System Slug:    {db.get_setting(SYSTEM_SLUG_KEY) or '-'}")
     output.info(f"Template:       {vm.template or '-'}")
     output.info(f"Admin User:     {vm.admin_username}")
     output.info(f"Provisioning:   {vm.provisioning_status}")
@@ -741,9 +842,12 @@ def shell_vm(
         [_vm_secret_target(scopes, label=f"vm-shell={vm.name}")], config, registry,
     )
 
+    from agentworks.vms.sites import site_platform_name
+
     ctx = ResourceContext(
         vm_name=vm.name,
-        platform=vm.site,
+        platform=site_platform_name(vm.site, registry),
+        site=vm.site,
         user=vm.admin_username,
         workspace_name=ws.name if ws else None,
         workspace_dir=ws.workspace_path if ws else None,
@@ -830,9 +934,12 @@ def exec_vm(
         [_vm_secret_target(scopes, label=f"vm-exec={vm.name}")], config, registry,
     )
 
+    from agentworks.vms.sites import site_platform_name
+
     ctx = ResourceContext(
         vm_name=vm.name,
-        platform=vm.site,
+        platform=site_platform_name(vm.site, registry),
+        site=vm.site,
         user=vm.admin_username,
         workspace_name=ws.name if ws else None,
         workspace_dir=ws.workspace_path if ws else None,

@@ -1405,9 +1405,12 @@ def _resolve_pane_env(
     # the session itself. No agent_name in the ctx either -- the agent
     # identifier is per-user-static and lives in the on-disk profile
     # fragment, not in per-context SetEnv.
+    from agentworks.vms.sites import site_platform_name
+
     ctx = ResourceContext(
         vm_name=vm.name,
-        platform=vm.site,
+        platform=site_platform_name(vm.site, registry),
+        site=vm.site,
         user=pane_user,
         workspace_name=workspace.name,
         workspace_dir=workspace.workspace_path,
