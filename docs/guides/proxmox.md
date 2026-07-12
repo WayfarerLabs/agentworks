@@ -128,6 +128,19 @@ export AW_SECRET_PROXMOX_TOKEN_SECRET="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
 With no env var set, agentworks prompts for it when a command needs it.
 `agw secret describe proxmox-token-secret` shows how it resolves.
 
+Upgrading from the legacy flow and already exporting `PROXMOX_TOKEN_SECRET`? Either rename the
+variable, or keep it by declaring the secret with a mapping:
+
+```yaml
+apiVersion: agentworks/v1
+kind: secret
+metadata:
+  name: proxmox-token-secret
+spec:
+  backend_mappings:
+    env-var: PROXMOX_TOKEN_SECRET
+```
+
 ## Step 3: Create a VM
 
 ```bash

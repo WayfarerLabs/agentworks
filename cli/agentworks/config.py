@@ -522,15 +522,19 @@ def _load_defaults(
 
     if "vm_host" in raw:
         # No alias is possible: the replacement is a vm-site manifest
-        # only the operator can author (the old vm-host registry is
-        # gone).
+        # only the operator can author (the old vm-host registry that
+        # mapped this name to an SSH target is gone). The old value was
+        # the host's NAME, which doubles as the natural site name; the
+        # operator supplies the SSH target in platform_config.vm_host.
+        from agentworks.vms.sites import site_manifest_hint
+
+        old_name = str(raw["vm_host"])
         raise ConfigError(
             "defaults.vm_host has been removed; remote Lima hosts are "
             "vm-site resources now",
             hint=(
-                "declare a vm-site with platform: lima and "
-                "platform_config.vm_host (see `agw resource sample vm-site`), "
-                "then set defaults.site to its name"
+                site_manifest_hint(old_name, vm_host="<user@host>")
+                + "\n\nthen set defaults.site to the site's name"
             ),
         )
 
@@ -1250,12 +1254,20 @@ def _warn_deprecated_resource_sections(
     if not present:
         return ()
     noun = "section" if len(present) == 1 else "sections"
+    # Selectors are KIND names, not section names -- [azure]/[proxmox]
+    # migrate as `vm-site`, which nothing on screen would suggest.
+    site_hint = (
+        " (the [azure]/[proxmox] sections migrate as `vm-site`)"
+        if any(s in ("[azure]", "[proxmox]") for s in present)
+        else ""
+    )
     deprecations.append(
         f"deprecated TOML resource {noun}: {', '.join(present)}. Move "
-        f"these with `agw resource migrate` (per kind, or --all), declare "
-        f"new resources as YAML manifests (`agw resource sample <kind>`), "
-        f"or silence this warning with --no-deprecations. TOML resource "
-        f"support will likely be removed in a future major release."
+        f"these with `agw resource migrate <kind>` or `--all`{site_hint}, "
+        f"declare new resources as YAML manifests "
+        f"(`agw resource sample <kind>`), or silence this warning with "
+        f"--no-deprecations. TOML resource support will likely be removed "
+        f"in a future major release."
     )
     return tuple(present)
 

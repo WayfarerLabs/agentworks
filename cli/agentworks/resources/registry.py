@@ -154,6 +154,11 @@ class Registry:
                 f'duplicate {kind} "{name}": declared at '
                 f"{format_origin_line(existing_origin)} and "
                 f"{format_origin_line(incoming)}",
+                hint=(
+                    "Remove one of the two declarations. If one origin is a "
+                    "legacy config.toml section, delete that section (or the "
+                    "conflicting YAML manifest) to resolve."
+                ),
             )
         raise ConfigError(
             f"publisher ordering conflict: {incoming.variant} row published "

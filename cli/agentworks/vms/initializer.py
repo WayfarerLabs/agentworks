@@ -1426,9 +1426,9 @@ def _phase_a_bootstrap(
 ) -> Transport:
     """Phase A: Bootstrap (over provisioning transport). All steps are fatal.
 
-    Three paths depending on how much the provisioner already handled:
+    Three paths depending on how much the platform already handled:
 
-    1. bootstrap_complete=True (Lima/Azure): The provisioner already ran the
+    1. bootstrap_complete=True (Lima/Azure): The platform already ran the
        full bootstrap. Skip straight to Tailscale SSH verification.
     2. Otherwise (WSL2): Run full bootstrap script over the provisioning
        transport (user, packages, SSH key, swap, Tailscale).
@@ -1438,9 +1438,9 @@ def _phase_a_bootstrap(
     db.update_vm_provisioning_status(vm_name, ProvisioningStatus.IN_PROGRESS)
 
     if bootstrap_complete and tailscale_ip:
-        # Lima/Azure: provisioner already ran the full bootstrap.
+        # Lima/Azure: platform already ran the full bootstrap.
         # Just update DB and move on to SSH verification.
-        logger.step("Bootstrap (provisioner)")
+        logger.step("Bootstrap (platform)")
         logger.output(f"Tailscale IP: {tailscale_ip}")
         db.update_vm_tailscale(vm_name, tailscale_ip)
         db.update_vm_provisioning_status(vm_name, ProvisioningStatus.COMPLETE)
@@ -1513,7 +1513,7 @@ def _run_bootstrap_script(
 ) -> str:
     """Generate, copy, and run a bootstrap script on the VM. Returns Tailscale IP.
 
-    Used for WSL2 where the bootstrap cannot be embedded in a provisioner's
+    Used for WSL2 where the bootstrap cannot be embedded in a platform's
     native mechanism (Lima provision block, Azure cloud-init). Phase 1c:
     ``tailscale_auth_key`` is required; the framework-resolved value
     arrives from ``create_vm`` -> ``initialize_vm`` -> ``_phase_a_bootstrap``.

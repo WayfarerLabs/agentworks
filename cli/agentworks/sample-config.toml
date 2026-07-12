@@ -10,8 +10,7 @@
 # The TOML resource sections below keep working, but they are deprecated --
 # they load with a deprecation warning, and `agw resource migrate` moves them to
 # YAML whenever you're ready. This file remains the permanent home for
-# SETTINGS: operator identity, paths, defaults, platform connections, and
-# the secret backend chain.
+# SETTINGS: operator identity, paths, defaults, and the secret backend chain.
 #
 # Comment convention: examples are written as `#key = "value"` (no space
 # after `#`), so you can uncomment a line in place by deleting one `#`.

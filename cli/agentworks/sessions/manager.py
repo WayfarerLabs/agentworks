@@ -1427,7 +1427,7 @@ def create_session(
     # ``vms.tailscale_host``. The in-memory ``vm`` from our pre-check would
     # otherwise read stale and the check below could spuriously raise.
     refreshed_vm = db.get_vm(target_vm_name)
-    assert refreshed_vm is not None  # existed two lines ago; provisioner.start() can't remove it
+    assert refreshed_vm is not None  # existed two lines ago; ensure_active can't remove it
     vm = refreshed_vm
     if vm.tailscale_host is None:
         raise StateError(

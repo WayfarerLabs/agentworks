@@ -285,9 +285,15 @@ def resolve_secrets(
             per_secret[d.name] = f"{d.name}: tried {tried}"
         if errors is None:
             names = [d.name for d in sorted_missing]
+            describe = names[0] if len(names) == 1 else "<name>"
             raise SecretUnavailableError(
                 f"no active backend could resolve secret(s): {', '.join(names)}",
-                hint="; ".join(per_secret.values()),
+                hint=(
+                    "; ".join(per_secret.values())
+                    + f". `agw secret describe {describe}` shows how each "
+                    "backend looks the secret up (e.g. which environment "
+                    "variable it reads)."
+                ),
             )
         for name, line in per_secret.items():
             errors[name] = f"no active backend could resolve the secret ({line})"

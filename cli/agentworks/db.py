@@ -223,6 +223,11 @@ def _migrate_vm_sites(conn: sqlite3.Connection, context: MigrationContext) -> No
     """
     from agentworks.vms.platforms import VM_PLATFORM_REGISTRY
 
+    # Name the DB file in validation errors so the operator knows which
+    # file to inspect/fix (PRAGMA reports the actual attached file, so
+    # this stays honest for non-default paths, e.g. in tests).
+    db_file = conn.execute("PRAGMA database_list").fetchone()[2]
+
     # Validate BEFORE the first DDL statement. Pre-v27 schemas only
     # ever stored the four legacy platform names, and the vm-sites
     # bridge refuses custom-site creates before this migration exists,
@@ -235,7 +240,8 @@ def _migrate_vm_sites(conn: sqlite3.Connection, context: MigrationContext) -> No
         if row["platform"] not in VM_PLATFORM_REGISTRY:
             raise sqlite3.IntegrityError(
                 f"vms row '{row['name']}' has unknown platform "
-                f"'{row['platform']}'; cannot backfill platform metadata"
+                f"'{row['platform']}'; cannot backfill platform metadata "
+                f"(database: {db_file})"
             )
 
     # Same pre-DDL stance for the remote-Lima site names: a host that
@@ -256,7 +262,7 @@ def _migrate_vm_sites(conn: sqlite3.Connection, context: MigrationContext) -> No
                 f"remote-Lima site name collision: hosts '{clash}' and "
                 f"'{host}' both map to site '{site}'; rename one host in "
                 f"BOTH vm_hosts.name and the referencing vms.vm_host_name "
-                f"rows, then retry"
+                f"rows, then retry (database: {db_file})"
             )
         host_sites[host] = site
 

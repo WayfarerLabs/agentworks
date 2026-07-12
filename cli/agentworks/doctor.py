@@ -185,7 +185,11 @@ def _check_vm_sites(registry: Registry) -> HealthGroup:
             # Opening the DB would auto-migrate mid-report (interleaving
             # the migration's own output into this group and stealing
             # the Database group's deliberate migration row); defer.
-            g.info("VM sites", "pending database migration; see the Database group")
+            g.info(
+                "VM sites",
+                "pending database migration (see the Database group); "
+                "re-run doctor after migrating for the full report",
+            )
             return g
         db = Database()
         try:

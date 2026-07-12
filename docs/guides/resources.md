@@ -6,9 +6,8 @@ How agentworks models the things you declare -- secrets, templates, git credenti
 ## The split: config vs resources
 
 `~/.config/agentworks/config.toml` is for **settings**: your identity (SSH keys), paths, CLI
-defaults, platform connections (Azure, Proxmox), and the secret backend chain
-(`[secret_config].backends`). Settings configure your install; they are not named, referenceable
-entities.
+defaults, and the secret backend chain (`[secret_config].backends`). Settings configure your
+install; they are not named, referenceable entities.
 
 **Resources** are the named things everything else refers to: a `secret` called `npm-token`, a
 `vm-template` called `dev`, a `git-credential` called `github`. Every resource lives in the resource

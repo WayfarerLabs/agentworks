@@ -116,9 +116,9 @@ just a vm-site.
 > ~60s of no `wsl.exe` activity (`vmIdleTimeout` in `.wslconfig`) and do not survive workstation
 > shutdown or sleep. agentworks holds a `wsl.exe` keepalive for the duration of each VM-touching
 > command, so individual `agw` operations work cleanly, but agents and sessions on WSL2 are not
-> suitable for unattended background workflows. Use a different provisioner that provides true
-> long-lived VMs (e.g. Lima, Azure, Proxmox, etc.) if you need a VM that survives independent of
-> your workstation.
+> suitable for unattended background workflows. Use a site on a different platform that provides
+> true long-lived VMs (e.g. Lima, Azure, Proxmox, etc.) if you need a VM that survives independent
+> of your workstation.
 
 | Command                                             | Description                                                   |
 | --------------------------------------------------- | ------------------------------------------------------------- |
@@ -131,21 +131,24 @@ just a vm-site.
 | `agw vm stop <name>`                                | Stop a running VM                                             |
 | `agw vm reinit <name>`                              | Re-run initialization on a provisioned VM                     |
 | `agw vm delete <name>`                              | Delete a VM (with confirmation)                               |
+| `agw vm backup <name>`                              | Back up a VM: metadata, agents, workspaces, and files         |
+| `agw vm rekey <name>`                               | Assign a new Tailscale auth key to a VM (logout + rejoin)     |
+| `agw vm port-forward <name> <ports...>`             | Forward local port(s) to a VM (like kubectl port-forward)     |
 | `agw vm logs <name>`                                | Show SSH logs for a VM                                        |
 | `agw vm console <name>`                             | _Deprecated_: use `agw console`                               |
 | `agw vm add-git-credential <name> <cred>`           | Add or update a git credential                                |
 
-`vm create <name>` takes the VM name as a required positional. Optional flags: `--site` (a declared
-vm-site; defaults to the template's `site`, then `defaults.site`, then the built-in `lima`),
-`--admin-username`, `--cpus`, `--memory`, `--disk`, and `--azure-vm-size`. These are immutable
-provisioning parameters stored in the database. All initialization behavior (packages, install
-commands, etc.) is driven by config.
+`vm create <name>` takes the VM name as a required positional. Optional flags: `--template` (a
+declared vm-template), `--site` (a declared vm-site; defaults to the template's `site`, then
+`defaults.site`, then the built-in `lima`), `--admin-username`, `--cpus`, `--memory`, `--disk`, and
+`--azure-vm-size`. These are immutable provisioning parameters stored in the database. All
+initialization behavior (packages, install commands, etc.) is driven by config.
 
 The first interactive `vm create` asks once for an optional **system slug** (3-20 chars, lowercase
-alphanumeric plus dash): a short identifier for this agentworks installation, used to namespace VM
-hostnames and backend-side names (`{slug}-{vm-name}`) so installs sharing a cloud account, Proxmox
-cluster, or Windows/Mac user don't collide. Leave it blank if this install is the only one using its
-sites' backends; non-interactive runs never prompt.
+alphanumeric plus dash, no leading/trailing dash): a short identifier for this agentworks
+installation, used to namespace VM hostnames and backend-side names (`{slug}-{vm-name}`) so installs
+sharing a cloud account, Proxmox cluster, or Windows/Mac user don't collide. Leave it blank if this
+install is the only one using its sites' backends; non-interactive runs never prompt.
 
 `vm reinit` re-runs the initialization phase using the current config without reprovisioning the VM.
 Changes to config (new packages, different install commands, etc.) are picked up automatically.
@@ -567,11 +570,11 @@ exists). Written samples are inert until you uncomment them (delete one leading 
 
 Configuration splits into two surfaces:
 
-- **Settings** live in `~/.config/agentworks/config.toml` -- your identity, paths, defaults,
-  platform connections, and the secret backend chain. Run `agw config init` to generate a sample;
-  see [sample-config.toml](agentworks/sample-config.toml) for the full reference.
-- **Resources** -- secrets, templates, git credentials, catalog entries -- are declared as YAML
-  manifests under `~/.config/agentworks/resources/`, auto-loaded whenever a command needs them.
+- **Settings** live in `~/.config/agentworks/config.toml` -- your identity, paths, defaults, and the
+  secret backend chain. Run `agw config init` to generate a sample; see
+  [sample-config.toml](agentworks/sample-config.toml) for the full reference.
+- **Resources** -- secrets, templates, git credentials, vm-sites, catalog entries -- are declared as
+  YAML manifests under `~/.config/agentworks/resources/`, auto-loaded whenever a command needs them.
   `agw resource sample <kind>` prints a commented starter (`--all` for every kind). The classic TOML
   resource sections keep working (deprecated, with one aggregated load warning naming the sections
   present; silence it with the global `--no-deprecations` flag); `agw resource migrate` moves them
@@ -794,7 +797,7 @@ VM creation follows a two-phase lifecycle tracked by separate status columns:
    the admin user
 
 Initialization is fully declarative -- driven entirely by config. `vm create` only accepts immutable
-provisioning parameters (name, platform, resources). `vm reinit` takes only the VM name and re-runs
+provisioning parameters (name, site, resources). `vm reinit` takes only the VM name and re-runs
 initialization using the current config.
 
 Non-fatal initialization failures (packages, dotfiles) produce a `partial` status rather than
@@ -820,7 +823,7 @@ config-management flow). To remove completions installed here, use
 dot-source line the installer appended to `$PROFILE`; user-authored lines around it are left
 untouched.
 
-Completions include dynamic VM, workspace, VM host, session, and template name lookups.
+Completions include dynamic VM, vm-site, workspace, session, and template name lookups.
 
 ## State
 

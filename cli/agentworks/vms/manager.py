@@ -1114,8 +1114,8 @@ def rekey_vm(
     _guard_failed_vm(vm)
 
     registry = build_registry(config)
-    provisioner = bind_platform(config, vm, registry=registry)
-    status = provisioner.status(vm)
+    platform = bind_platform(config, vm, registry=registry)
+    status = platform.status(vm)
     if status != VMStatus.RUNNING:
         raise StateError(
             f"VM '{name}' is not running (status: {status.value})",
@@ -1144,14 +1144,14 @@ def rekey_vm(
         # Holds the VM in an active state for the duration of the rekey.
         # No-op for Lima/Azure/Proxmox; WSL2 anchors the distro against
         # vmIdleTimeout so per-step `time.sleep`s can't let it idle out.
-        _stack.enter_context(keep_active(db, config, vm, provisioner))
+        _stack.enter_context(keep_active(db, config, vm, platform))
 
         # native_transport() composes transient_route (Azure attach /
         # detach via the polymorphic hook) with the platform-native
         # transport builder and the 6-attempt reachability probe. The
         # caller-supplied ExitStack scopes the transient state to the
         # duration of the rekey.
-        exec_target = native_transport(vm, provisioner, config, stack=_stack)
+        exec_target = native_transport(vm, platform, config, stack=_stack)
 
         # Restart, logout, login, restart. The initial restart clears any
         # stale daemon state (a previous interrupted rekey can leave the
@@ -1270,21 +1270,21 @@ def delete_vm(
 
     # Platform-specific cleanup (also handles Tailscale logout)
     try:
-        provisioner = bind_platform(config, vm)
+        platform = bind_platform(config, vm)
     except UserAbort:
         # Ctrl-C at a site-secret prompt must keep the SIGINT contract:
         # abort the whole delete rather than orphaning the backend VM
         # behind a warn.
         raise
     except Exception as e:
-        provisioner = None
+        platform = None
         hint = getattr(e, "hint", None)
         output.warn(
             f"platform binding failed, skipping backend cleanup: {e}"
             + (f"\n{hint}" if hint else "")
         )
 
-    if provisioner is not None:
+    if platform is not None:
         # Tailscale logout (best-effort, hold-only): the logout wants
         # the VM alive if it happens to be, but delete must NOT gate --
         # an operator-stopped VM would raise. (The WSL2 hold does boot a
@@ -1295,13 +1295,13 @@ def delete_vm(
         # may skip the delete below.
         if vm.tailscale_host:
             try:
-                with provisioner.vm_active(vm, config=config):
-                    _tailscale_logout(vm, config, provisioner)
+                with platform.vm_active(vm, config=config):
+                    _tailscale_logout(vm, config, platform)
             except Exception as e:
                 output.warn(f"tailscale logout skipped: {e}")
 
         try:
-            provisioner.delete(vm)
+            platform.delete(vm)
         except Exception as e:
             output.warn(f"platform cleanup failed: {e}")
 
@@ -1924,8 +1924,8 @@ def _ensure_tailscale(
         db.clear_vm_tailscale(vm.name)
 
     # Resolve a fresh Tailscale auth key via the framework before
-    # entering the provisioner-transport block; the backend chain handles
-    # backend chain + prompt fallback. Phase 1c plumbed this through
+    # entering the native-transport block; the backend chain handles
+    # env-var lookup with prompt fallback. Phase 1c plumbed this through
     # the kwarg path so initializer.py has no env-var fallback.
     from agentworks.bootstrap import build_registry
     from agentworks.secrets import resolve_for_command

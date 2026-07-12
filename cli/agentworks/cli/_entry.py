@@ -62,7 +62,7 @@ def main() -> None:
     except (ConnectivityError, ExternalError) as e:
         # External-system failures: render the one-liner AND persist the
         # full traceback to the error log so postmortem diagnosis can see
-        # the underlying SSH command, provisioner response, etc. Type-qualify
+        # the underlying SSH command, platform API response, etc. Type-qualify
         # the message (Error: SSHError: ...) since these often have messages
         # that don't carry the failure category in their text.
         typer.echo(f"Error: {type(e).__name__}: {e}", err=True)

@@ -16,7 +16,7 @@ Three named factories plus one low-level helper:
 
 The named factories never fall back. If the canonical transport is
 unavailable, the canonical factory raises -- it does NOT silently switch
-to the native transport (polymorphic-transports SDD R3).
+to the native transport.
 """
 
 from __future__ import annotations
@@ -76,9 +76,9 @@ def transport_for_user(
     refactor needs to know about. No override -- if a future use case
     needs a different key, plumb it through then.
 
-    Raises :class:`StateError` if the VM has no Tailscale IP (today's
-    underlying assert disappears under ``python -O``; the typed error
-    doesn't, per SDD R6).
+    Raises :class:`StateError` if the VM has no Tailscale IP (a typed
+    error rather than an assert, which would disappear under
+    ``python -O``).
     """
     if vm.tailscale_host is None:
         raise StateError(
@@ -108,7 +108,7 @@ def transport(
 
     Used by every normal operator workflow. Raises :class:`StateError`
     if the canonical transport is unavailable (no Tailscale host).
-    Never falls back to the provisioner transport (SDD R3).
+    Never falls back to the platform-native transport.
     """
     return transport_for_user(
         vm, config,
