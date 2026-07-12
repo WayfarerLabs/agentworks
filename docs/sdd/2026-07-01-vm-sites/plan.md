@@ -352,6 +352,11 @@ existing VMs keep hostnames and env values.
 - [ ] Hardening candidate (from the Phase 2 review round): a per-version `commit()` checkpoint in
       the migration runner so retry is safe for multi-version jumps, not just the v26 -> v27 step
       (today an earlier version's auto-committed DDL re-runs on retry when a later version fails).
+- [ ] Hardening candidate (from the Phase 3 review round): `session create`'s ephemeral ROLLBACK
+      path calls `delete_agent` / `delete_workspace`, which self-bind -- a failed create on a
+      secret-bearing site re-runs the resolve pass mid-rollback (possible re-prompt; degrades to the
+      existing recover-with warn non-interactively). Decide whether the delete-side seams get the
+      same `platform` carve-out or the degrade is accepted.
 - [ ] Open the PR; agentworks-reviewer round on the branch.
 
 **Definition of done**: PR open, CI green, reviewer findings addressed. `locked.md` lands after
