@@ -18,7 +18,7 @@ from agentworks.errors import (
     UserAbort,
     ValidationError,
 )
-from agentworks.vms.manager import bind_platform, ensure_active, keep_active
+from agentworks.vms.manager import bind_platform, keep_active
 from agentworks.workspaces.templates import resolve_template
 
 if TYPE_CHECKING:
@@ -1070,8 +1070,9 @@ def copy_workspace(
                     entity_name=src_ws.vm_name,
                 )
             _guard_vm_status(src_vm)
+            src_platform = bind_platform(config, src_vm)
             _keepalive_stack.enter_context(
-                keep_active(db, config, src_vm, bind_platform(config, src_vm))
+                keep_active(db, config, src_vm, src_platform)
             )
             if src_vm.tailscale_host is None:
                 raise StateError(
@@ -1106,13 +1107,13 @@ def copy_workspace(
             # --- Unpack to destination VM ---
             dest_vm = _resolve_vm(db, vm_name)
             _guard_vm_status(dest_vm)
-            dest_platform = bind_platform(config, dest_vm)
             if dest_vm.name != src_vm.name:
+                dest_platform = bind_platform(config, dest_vm)
                 _keepalive_stack.enter_context(
                     keep_active(db, config, dest_vm, dest_platform)
                 )
-            else:
-                ensure_active(db, config, dest_vm, dest_platform)
+            # Same VM: the src bind + keepalive above already gate and
+            # hold it; a second bind would re-run the resolve pass.
             if dest_vm.tailscale_host is None:
                 raise StateError(
                     f"VM '{dest_vm.name}' has no Tailscale address",

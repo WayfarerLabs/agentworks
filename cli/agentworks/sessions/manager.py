@@ -30,7 +30,6 @@ from agentworks.vms.manager import (
     bind_platform,
     bind_platforms,
     ensure_active,
-    keep_active,
     keep_actives,
 )
 
@@ -52,6 +51,7 @@ if TYPE_CHECKING:
     from agentworks.sessions.tmux import RunCommand
     from agentworks.ssh import SSHLogger
     from agentworks.transports import Transport
+    from agentworks.vms.base import VMPlatform
 
 
 # -- Helpers ---------------------------------------------------------------
@@ -294,20 +294,31 @@ def _require_vm_for_workspace(db: Database, ws: WorkspaceRow) -> VMRow:
 
 
 def _prepare_vm(
-    db: Database, config: Config, workspace_name: str, *, operation: str | None = None
-) -> tuple[WorkspaceRow, VMRow, RunCommand, RunCommand, Transport]:
-    """Validate workspace/VM, ensure running, and return (ws, vm, run_command, run_as_root, target).
+    db: Database,
+    config: Config,
+    workspace_name: str,
+    *,
+    operation: str | None = None,
+    platform: VMPlatform | None = None,
+) -> tuple[WorkspaceRow, VMRow, RunCommand, RunCommand, Transport, VMPlatform]:
+    """Validate workspace/VM, ensure running, and return
+    (ws, vm, run_command, run_as_root, target, platform).
 
-    If operation is set, creates an SSHLogger and attaches it to the Transport
-    so all calls log automatically. run_command and run_as_root are bound from
-    the target's methods for callers that consume RunCommand callables.
+    This is the command's composition root for the VM gate: the
+    platform is bound ONCE here (or accepted pre-bound via
+    ``platform``) and returned so callers hold it for subsequent
+    ``keep_active`` spans -- re-binding would re-run the site's secret
+    resolve pass. If operation is set, creates an SSHLogger and
+    attaches it to the Transport so all calls log automatically.
     """
     from agentworks.ssh import SSHLogger
 
     ws = _require_workspace(db, workspace_name)
     vm = _require_vm_for_workspace(db, ws)
 
-    ensure_active(db, config, vm, bind_platform(config, vm))
+    if platform is None:
+        platform = bind_platform(config, vm)
+    ensure_active(db, config, vm, platform)
 
     if vm.tailscale_host is None:
         raise StateError(
@@ -320,7 +331,7 @@ def _prepare_vm(
     target = transport(vm, config, logger=logger)
     run_command: RunCommand = target.run
     run_as_root: RunCommand = partial(target.run, sudo=True)
-    return ws, vm, run_command, run_as_root, target
+    return ws, vm, run_command, run_as_root, target, platform
 
 
 def _require_session(db: Database, name: str) -> SessionRow:
@@ -1403,7 +1414,11 @@ def create_session(
 
     # ===== Ensure VM running + Tailscale reachable (SSH, no mutations) ======
 
-    ensure_active(db, config, vm, bind_platform(config, vm, registry=registry))
+    # The command's ONE platform bind; threaded through _prepare_vm and
+    # the session-internal hold below (re-binding re-runs the site's
+    # secret resolve pass).
+    vm_platform = bind_platform(config, vm, registry=registry)
+    ensure_active(db, config, vm, vm_platform)
     # Reload the VM row: ``ensure_active`` may have rejoined Tailscale
     # (only when the VM was stopped/deallocated) and updated
     # ``vms.tailscale_host``. The in-memory ``vm`` from our pre-check would
@@ -1508,10 +1523,12 @@ def create_session(
             agent_created = True
 
         # ---- Session-internal mutations ---------------------------------------
-        ws, vm_check, run_command, run_as_root, target = _prepare_vm(
-            db, config, workspace_name, operation="session-create"
+        ws, vm_check, run_command, run_as_root, target, _ = _prepare_vm(
+            db, config, workspace_name, operation="session-create",
+            platform=vm_platform,
         )
-        with keep_active(db, config, vm_check, bind_platform(config, vm_check)):
+        # _prepare_vm just gated; hold only (no second gate probe).
+        with vm_platform.vm_active(vm_check, config=config):
             # Resolve mode and linux user (no side effects; safe outside the try).
             resolved_agent_name: str | None = None
             agent_target = None
@@ -1868,10 +1885,11 @@ def stop_session(
     from agentworks.sessions.tmux import force_kill_tmux_server
 
     session = _require_session(db, name)
-    _ws, vm, _run_command, _, admin_target = _prepare_vm(
+    _ws, vm, _run_command, _, admin_target, vm_platform = _prepare_vm(
         db, config, session.workspace_name, operation="session-stop"
     )
-    with keep_active(db, config, vm, bind_platform(config, vm)):
+    # _prepare_vm just gated; hold only (no second gate probe).
+    with vm_platform.vm_active(vm, config=config):
         session = _ensure_pid(session, target=admin_target, db=db)
         status = check_session_status(session, target=admin_target)
 
@@ -1949,10 +1967,11 @@ def restart_session(
     registry = build_registry(config)
 
     session = _require_session(db, name)
-    ws, vm, run_command, _run_as_root, admin_target = _prepare_vm(
+    ws, vm, run_command, _run_as_root, admin_target, vm_platform = _prepare_vm(
         db, config, session.workspace_name, operation="session-restart",
     )
-    with keep_active(db, config, vm, bind_platform(config, vm)):
+    # _prepare_vm just gated; hold only (no second gate probe).
+    with vm_platform.vm_active(vm, config=config):
         session = _ensure_pid(session, target=admin_target, db=db)
 
         # Legacy migration: sessions predating the per-session-socket model
@@ -2377,10 +2396,11 @@ def delete_session(
 ) -> None:
     """Delete a session. Prompts if running/unknown (--yes to skip). --force for BROKEN."""
     session = _require_session(db, name)
-    ws, vm, _run_command, _run_as_root, admin_target = _prepare_vm(
+    ws, vm, _run_command, _run_as_root, admin_target, vm_platform = _prepare_vm(
         db, config, session.workspace_name, operation="session-delete"
     )
-    with keep_active(db, config, vm, bind_platform(config, vm)):
+    # _prepare_vm just gated; hold only (no second gate probe).
+    with vm_platform.vm_active(vm, config=config):
         session = _ensure_pid(session, target=admin_target, db=db)
         status = check_session_status(session, target=admin_target)
 
@@ -2550,7 +2570,7 @@ def describe_session(
 ) -> None:
     """Show session details."""
     session = _require_session(db, name)
-    ws, vm, run_command, _, target = _prepare_vm(db, config, session.workspace_name, operation=None)
+    ws, vm, run_command, _, target, _vm_platform = _prepare_vm(db, config, session.workspace_name, operation=None)
     session = _ensure_pid(session, target=target, db=db)
 
     status = check_session_status(session, target=target)
@@ -2768,8 +2788,11 @@ def attach_session(
     from agentworks.sessions.tmux import tmux_cmd
 
     session = _require_session(db, name)
-    _ws, vm, _run_command, _, target = _prepare_vm(db, config, session.workspace_name, operation="session-attach")
-    with keep_active(db, config, vm, bind_platform(config, vm)):
+    _ws, vm, _run_command, _, target, vm_platform = _prepare_vm(
+        db, config, session.workspace_name, operation="session-attach"
+    )
+    # _prepare_vm just gated; hold only (no second gate probe).
+    with vm_platform.vm_active(vm, config=config):
         session = _ensure_pid(session, target=target, db=db)
         status = check_session_status(session, target=target)
 
@@ -2801,8 +2824,11 @@ def session_logs(
     from agentworks.sessions.tmux import capture_output
 
     session = _require_session(db, name)
-    _ws, vm, run_command, _, target = _prepare_vm(db, config, session.workspace_name, operation="session-logs")
-    with keep_active(db, config, vm, bind_platform(config, vm)):
+    _ws, vm, run_command, _, target, vm_platform = _prepare_vm(
+        db, config, session.workspace_name, operation="session-logs"
+    )
+    # _prepare_vm just gated; hold only (no second gate probe).
+    with vm_platform.vm_active(vm, config=config):
         session = _ensure_pid(session, target=target, db=db)
         status = check_session_status(session, target=target)
 

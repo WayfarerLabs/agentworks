@@ -40,7 +40,7 @@ from agentworks.sessions.multi_console_layout import (
     _reorder_shell_panes,
 )
 from agentworks.sessions.tmux import tmux_cmd
-from agentworks.vms.manager import bind_platform, ensure_active, keep_active
+from agentworks.vms.manager import bind_platform, ensure_active
 
 if TYPE_CHECKING:
     from collections.abc import Iterator, Mapping
@@ -57,6 +57,7 @@ if TYPE_CHECKING:
     from agentworks.resources.registry import Registry
     from agentworks.secrets import SecretTarget
     from agentworks.transports import Transport
+    from agentworks.vms.base import VMPlatform
 
 TMUX_PREFIX = "aw-console-"
 
@@ -729,13 +730,15 @@ def restore_session(
             entity_name=session_name,
         )
 
-    vm, target = _prepare_vm_target_for_attach(db, config, console.vm_name)
+    vm, target, vm_platform = _prepare_vm_target_for_attach(
+        db, config, console.vm_name, registry=registry
+    )
     # restore_session raises StateError/ExternalError on failure, so it's
     # not a best-effort op (those are exempted from the keepalive sweep by
     # base.VMPlatform.vm_active's docstring). Wrap the SSH-heavy body
     # so a freshly booted WSL2 distro doesn't idle out between the window
-    # probe and the pane reconciliation.
-    with keep_active(db, config, vm, bind_platform(config, vm)):
+    # probe and the pane reconciliation. Already gated above; hold only.
+    with vm_platform.vm_active(vm, config=config):
         if not _console_tmux_exists(target, console_name):
             raise StateError(
                 f"console '{console_name}' has no live tmux session on VM "
@@ -1756,12 +1759,15 @@ def _build_console_tmux(
 
 
 def _prepare_vm_target_for_attach(
-    db: Database, config: Config, vm_name: str
-) -> tuple[VMRow, Transport]:
-    """Ensure the VM is running (starting it if needed) and return (vm, target).
+    db: Database, config: Config, vm_name: str, *, registry: Registry | None = None
+) -> tuple[VMRow, Transport, VMPlatform]:
+    """Ensure the VM is running (starting it if needed) and return
+    (vm, target, platform).
 
-    Use this only for explicit user-driven attach flows where booting a stopped
-    VM is acceptable. Raises on failure.
+    Use this only for explicit user-driven attach flows where booting a
+    stopped VM is acceptable. Raises on failure. The bound platform is
+    returned so callers hold it for subsequent ``vm_active`` spans --
+    re-binding would re-run the site's secret resolve pass.
     """
     from agentworks.transports import transport
 
@@ -1772,14 +1778,15 @@ def _prepare_vm_target_for_attach(
             entity_kind="vm",
             entity_name=vm_name,
         )
-    ensure_active(db, config, vm, bind_platform(config, vm))
+    platform = bind_platform(config, vm, registry=registry)
+    ensure_active(db, config, vm, platform)
     if vm.tailscale_host is None:
         raise StateError(
             f"VM '{vm.name}' has no Tailscale address",
             entity_kind="vm",
             entity_name=vm.name,
         )
-    return vm, transport(vm, config)
+    return vm, transport(vm, config), platform
 
 
 def _live_target(
@@ -1845,9 +1852,12 @@ def attach_console(
 
     console = _require_console(db, name)
     registry = build_registry(config)
-    vm, target = _prepare_vm_target_for_attach(db, config, console.vm_name)
+    vm, target, vm_platform = _prepare_vm_target_for_attach(
+        db, config, console.vm_name, registry=registry
+    )
 
-    with keep_active(db, config, vm, bind_platform(config, vm)):
+    # Already gated by _prepare_vm_target_for_attach; hold only.
+    with vm_platform.vm_active(vm, config=config):
         exists = _console_tmux_exists(target, name)
         layout = named_console_template(registry).tmux_layout
 

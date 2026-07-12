@@ -104,6 +104,36 @@ def test_operator_stopped_raises_instead_of_resuming(
     assert platform.start_calls == 0
 
 
+def test_deallocated_auto_resumes_like_stopped(
+    db: Database, monkeypatch: pytest.MonkeyPatch, captured_output: object
+) -> None:
+    """DEALLOCATED (the Azure-relevant observed value) takes the same
+    resume branch as STOPPED."""
+    vm = _seed(db)
+    monkeypatch.setattr(vm_manager, "_is_tailscale_reachable", lambda host: False)
+    monkeypatch.setattr(vm_manager, "_ensure_tailscale", lambda *a, **k: None)
+    platform = _GatePlatform(status=VMStatus.DEALLOCATED)
+
+    vm_manager.ensure_active(db, object(), vm, platform)  # type: ignore[arg-type]
+
+    assert platform.start_calls == 1
+
+
+def test_flag_is_reread_on_the_slow_path(
+    db: Database, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A concurrent `vm stop` between the caller's row load and the
+    gate must not be auto-undone: the slow path re-reads the flag."""
+    vm = _seed(db)  # loaded with operator_stopped=False
+    db.set_operator_stopped("gvm", True)  # another terminal stops it
+    monkeypatch.setattr(vm_manager, "_is_tailscale_reachable", lambda host: False)
+    platform = _GatePlatform(status=VMStatus.STOPPED)
+
+    with pytest.raises(StateError, match="stopped"):
+        vm_manager.ensure_active(db, object(), vm, platform)  # type: ignore[arg-type]
+    assert platform.start_calls == 0
+
+
 def test_unknown_status_proceeds_without_start(
     db: Database, monkeypatch: pytest.MonkeyPatch
 ) -> None:

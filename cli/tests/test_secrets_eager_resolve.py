@@ -688,15 +688,16 @@ def test_attach_console_build_path_eager_resolves_before_tmux(
     db._conn.execute("INSERT INTO consoles (name, vm_name) VALUES ('c1', 'vm1')")
     db._conn.commit()
 
+    gate_platform = stub_vm_gates(monkeypatch)
     monkeypatch.setattr(
         multi_console,
         "_prepare_vm_target_for_attach",
         lambda *a, **k: (
             SimpleNamespace(name="vm1", admin_username="admin"),
             SimpleNamespace(run=lambda *a, **k: None),
+            gate_platform,
         ),
     )
-    stub_vm_gates(monkeypatch)
     monkeypatch.setattr(
         multi_console, "_console_tmux_exists", lambda *a, **k: False,
     )
@@ -807,6 +808,7 @@ def test_attach_console_existing_tmux_session_skips_eager_resolve(
     db._conn.execute("INSERT INTO consoles (name, vm_name) VALUES ('c1', 'vm1')")
     db._conn.commit()
 
+    gate_platform = stub_vm_gates(monkeypatch)
     monkeypatch.setattr(
         multi_console,
         "_prepare_vm_target_for_attach",
@@ -816,9 +818,9 @@ def test_attach_console_existing_tmux_session_skips_eager_resolve(
                 run=lambda *a, **k: None,
                 interactive=lambda *a, **k: 0,
             ),
+            gate_platform,
         ),
     )
-    stub_vm_gates(monkeypatch)
     monkeypatch.setattr(
         multi_console, "_console_tmux_exists", lambda *a, **k: True,
     )
@@ -886,9 +888,10 @@ def test_session_attach_does_not_eager_resolve(
     ws_row = db.get_workspace("ws1")
     vm_row = db.get_vm("vm1")
     assert ws_row is not None and vm_row is not None
+    gate_platform = stub_vm_gates(monkeypatch)
     monkeypatch.setattr(
         session_manager, "_prepare_vm",
-        lambda *a, **k: (ws_row, vm_row, fake_target.run, None, fake_target),
+        lambda *a, **k: (ws_row, vm_row, fake_target.run, None, fake_target, gate_platform),
     )
     monkeypatch.setattr(
         session_manager, "_ensure_pid", lambda session, **kwargs: session,
@@ -897,7 +900,6 @@ def test_session_attach_does_not_eager_resolve(
         session_manager, "check_session_status",
         lambda *a, **k: SessionStatus.OK,
     )
-    stub_vm_gates(monkeypatch)
 
     import contextlib
 
@@ -984,9 +986,10 @@ def test_session_describe_does_not_eager_resolve(
     fake_target = SimpleNamespace(
         run=lambda *a, **k: SimpleNamespace(ok=True, returncode=0, stdout="", stderr=""),
     )
+    gate_platform = stub_vm_gates(monkeypatch)
     monkeypatch.setattr(
         session_manager, "_prepare_vm",
-        lambda *a, **k: (ws_row, vm_row, fake_target.run, None, fake_target),
+        lambda *a, **k: (ws_row, vm_row, fake_target.run, None, fake_target, gate_platform),
     )
     monkeypatch.setattr(
         session_manager, "_ensure_pid", lambda session, **kwargs: session,
@@ -1305,11 +1308,11 @@ def test_restore_session_window_missing_branch_eager_resolves(
     fake_target = SimpleNamespace(
         run=lambda *a, **k: SimpleNamespace(ok=True, returncode=0, stdout="other-window", stderr=""),
     )
+    gate_platform = stub_vm_gates(monkeypatch)
     monkeypatch.setattr(
         multi_console, "_prepare_vm_target_for_attach",
-        lambda *a, **k: (fake_vm, fake_target),
+        lambda *a, **k: (fake_vm, fake_target, gate_platform),
     )
-    stub_vm_gates(monkeypatch)
     monkeypatch.setattr(
         multi_console, "_console_tmux_exists", lambda *a, **k: True,
     )

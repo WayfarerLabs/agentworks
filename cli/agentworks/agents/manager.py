@@ -692,7 +692,7 @@ def shell_agent(
     # authorized_keys (Phase 3) accepts the operator's key set.
     target = agent_transport(vm, config, agent)
 
-    with keep_active(db, config, vm, bind_platform(config, vm)):
+    with keep_active(db, config, vm, bind_platform(config, vm, registry=registry)):
         # Probe direct agent SSH first so pre-rollout agents (whose
         # authorized_keys was never populated) get an actionable error
         # rather than dropping into a remote shell that immediately exits

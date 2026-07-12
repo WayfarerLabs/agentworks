@@ -178,13 +178,16 @@ def bind_platforms(
     registry: Registry | None = None,
 ) -> list[tuple[VMRow, VMPlatform]]:
     """Multi-VM :func:`bind_platform`: one registry build (lazy, so an
-    empty VM set stays a no-op), one bound platform per distinct VM
-    (duplicates deduplicated by name), preserving first-encounter
-    order. Feed the result to :func:`keep_actives`.
+    empty VM set stays a no-op), one bound platform per distinct SITE
+    shared across its VMs (a platform instance is site-bound, and one
+    resolve pass per site keeps the prompt-once contract for
+    secret-bearing sites), deduplicated by VM name, preserving
+    first-encounter order. Feed the result to :func:`keep_actives`.
     """
     from agentworks.bootstrap import build_registry
 
     seen: set[str] = set()
+    by_site: dict[str, VMPlatform] = {}
     pairs: list[tuple[VMRow, VMPlatform]] = []
     for vm in vms:
         if vm.name in seen:
@@ -192,7 +195,9 @@ def bind_platforms(
         seen.add(vm.name)
         if registry is None:
             registry = build_registry(config)
-        pairs.append((vm, bind_platform(config, vm, registry=registry)))
+        if vm.site not in by_site:
+            by_site[vm.site] = bind_platform(config, vm, registry=registry)
+        pairs.append((vm, by_site[vm.site]))
     return pairs
 
 
@@ -210,7 +215,14 @@ def ensure_active(
         return
     observed = platform.status(vm)
     if observed in (VMStatus.STOPPED, VMStatus.DEALLOCATED):
-        if vm.operator_stopped:
+        # Re-read the intent flag: the caller-loaded row may predate a
+        # concurrent `vm stop` in another terminal, and auto-restarting
+        # a VM the operator just stopped is the one mistake this flag
+        # exists to prevent. The slow path already paid a backend
+        # status() round trip; one DB read is cheap next to it.
+        current = db.get_vm(vm.name)
+        operator_stopped = current.operator_stopped if current else vm.operator_stopped
+        if operator_stopped:
             raise StateError(
                 f"VM '{vm.name}' is stopped",
                 entity_kind="vm",
@@ -222,7 +234,7 @@ def ensure_active(
         # Hold while tailscaled reattaches: a freshly booted WSL2
         # distro must not idle out during the handshake wait.
         with platform.vm_active(vm, config=config):
-            _ensure_tailscale(db, config, vm)
+            _ensure_tailscale(db, config, vm, platform)
     # RUNNING or UNKNOWN: proceed. A transient status failure must not
     # trigger a spurious start; the op will surface the real error.
 
@@ -254,7 +266,7 @@ def keep_actives(
     """Multi-VM :func:`keep_active` over ``(vm, bound platform)`` pairs
     (from :func:`bind_platforms`), entered via ``ExitStack`` so a
     command touching multiple VMs (``session list --status``,
-    ``workspace copy`` across hosts) keeps all of them anchored.
+    ``session stop --all``) keeps all of them anchored.
     """
     with contextlib.ExitStack() as stack:
         for vm, platform in pairs:
@@ -540,28 +552,39 @@ def describe_vm(db: Database, config: Config, name: str) -> None:
     vm = _require_vm(db, name)
 
     # Bind through the site so the platform (the site's capability) and
-    # the backend-side identity render polymorphically. A stranded site
-    # (R3) surfaces here as the ConfigError + manifest hint.
+    # the backend-side identity render polymorphically. Describe is an
+    # inspection command and a stranded row (R3) is exactly the one an
+    # operator wants to look at, so a stranded site degrades to a
+    # warning (with the manifest hint) rather than erroring: the row's
+    # own fields still render.
     from agentworks.bootstrap import build_registry
     from agentworks.vms.sites import lookup_site
 
     registry = build_registry(config)
-    site_decl = lookup_site(vm.site, registry)
-    platform = bind_platform(config, vm, registry=registry)
-
-    # Live observed status, paired with operator intent: an operator
-    # stop reads differently from an idle timeout.
-    observed = platform.status(vm)
-    status_label = observed.value
-    if observed in (VMStatus.STOPPED, VMStatus.DEALLOCATED):
-        status_label += " (operator)" if vm.operator_stopped else " (idle)"
+    site_platform = "-"
+    backend_label = "-"
+    status_label = "-"
+    try:
+        site_decl = lookup_site(vm.site, registry)
+        platform = bind_platform(config, vm, registry=registry)
+    except ConfigError as e:
+        output.warn(f"{e}" + (f"\n{e.hint}" if e.hint else ""))
+    else:
+        site_platform = site_decl.platform
+        backend_label = platform.display_backend_name(vm)
+        # Live observed status, paired with operator intent: an
+        # operator stop reads differently from an idle timeout.
+        observed = platform.status(vm)
+        status_label = observed.value
+        if observed in (VMStatus.STOPPED, VMStatus.DEALLOCATED):
+            status_label += " (operator)" if vm.operator_stopped else " (idle)"
 
     # VM details
     output.info(f"Name:           {vm.name}")
     output.info(f"Created:        {vm.created_at}")
     output.info(f"Site:           {vm.site}")
-    output.info(f"Platform:       {site_decl.platform}")
-    output.info(f"Backend:        {platform.display_backend_name(vm)}")
+    output.info(f"Platform:       {site_platform}")
+    output.info(f"Backend:        {backend_label}")
     output.info(f"Status:         {status_label}")
     output.info(f"Hostname:       {vm.hostname}")
     output.info(f"Template:       {vm.template or '-'}")
@@ -914,7 +937,7 @@ def start_vm(db: Database, config: Config, name: str) -> None:
     # Tailscale verification runs inside the keepalive so a freshly booted
     # WSL2 distro doesn't idle-shut while we wait for tailscaled to come up.
     with platform.vm_active(vm, config=config):
-        _ensure_tailscale(db, config, vm)
+        _ensure_tailscale(db, config, vm, platform)
     # Only emit "is ready" on the path that actually started the VM. When
     # status was already RUNNING we already said so above, and Tailscale
     # verification is usually a no-op (handshake already valid), so an
@@ -1132,18 +1155,24 @@ def delete_vm(
     # Platform-specific cleanup (also handles Tailscale logout)
     try:
         provisioner = bind_platform(config, vm)
+    except Exception as e:
+        provisioner = None
+        output.warn(f"platform binding failed, skipping backend cleanup: {e}")
 
-        # Tailscale logout (best-effort, via provisioning transport).
-        # Wrap only this step: the logout needs the VM alive, but
-        # provisioner.delete is the inverse and would conflict with a
-        # WSL2 keepalive subprocess.
+    if provisioner is not None:
+        # Tailscale logout (best-effort, hold-only): the logout wants
+        # the VM alive if it happens to be, but delete must NOT gate --
+        # an operator-stopped VM would raise, and an idle-stopped VM
+        # would be booted just to be deleted. _tailscale_logout is its
+        # own try/warn; a failure here must never skip the delete.
         if vm.tailscale_host:
-            with keep_active(db, config, vm, provisioner):
+            with provisioner.vm_active(vm, config=config):
                 _tailscale_logout(vm, config, provisioner)
 
-        provisioner.delete(vm)
-    except Exception as e:
-        output.warn(f"platform cleanup failed: {e}")
+        try:
+            provisioner.delete(vm)
+        except Exception as e:
+            output.warn(f"platform cleanup failed: {e}")
 
     # Clean up logs
     from agentworks.ssh import LOG_DIR
@@ -1180,6 +1209,10 @@ def reinit_vm(
     registry = build_registry(config)
 
     vm = _require_vm(db, name)
+
+    # Bind before any secret collection: a stranded site (R3) fails
+    # here with the manifest hint instead of after git-token prompts.
+    platform = bind_platform(config, vm, registry=registry)
 
     # Resolve the VM's template so init uses the right values
     from agentworks.resources.access import admin_template
@@ -1228,7 +1261,7 @@ def reinit_vm(
     # any warning output. Matches the pattern used by agent create / reinit
     # and workspace create / rehome.
     try:
-        with keep_active(db, config, vm, bind_platform(config, vm, registry=registry)):
+        with keep_active(db, config, vm, platform):
             try:
                 run_initialization(
                     db,
@@ -1738,8 +1771,12 @@ def _ensure_tailscale(
     db: Database,
     config: Config,
     vm: VMRow,
+    platform: VMPlatform,
 ) -> None:
-    """After starting a VM, verify Tailscale connectivity and rejoin if needed."""
+    """After starting a VM, verify Tailscale connectivity and rejoin if
+    needed. ``platform`` is the caller's bound platform (the gates never
+    bind, and a re-bind here would re-run the resolve pass).
+    """
     from agentworks.transports import native_transport, transport, wait_for_reconnect
 
     # Refresh VM row in case tailscale_host was cleared on stop
@@ -1777,9 +1814,7 @@ def _ensure_tailscale(
     # native transport.
     with contextlib.ExitStack() as _stack:
         verify_tailscale_available()
-        exec_target = native_transport(
-            vm, bind_platform(config, vm, registry=registry), config, stack=_stack
-        )
+        exec_target = native_transport(vm, platform, config, stack=_stack)
         rejoin_tailscale(db, vm.name, exec_target, auth_key=auth_key)
 
     # After the stack unwinds (Azure detach has fired), wait for

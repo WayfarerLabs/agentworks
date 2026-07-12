@@ -15,7 +15,7 @@ from typing import TYPE_CHECKING
 from agentworks import output
 from agentworks.errors import NotFoundError, StateError
 from agentworks.sessions.tmux import tmux_cmd
-from agentworks.vms.manager import bind_platform, ensure_active, keep_active
+from agentworks.vms.manager import bind_platform, ensure_active
 
 if TYPE_CHECKING:
     from agentworks.config import Config
@@ -177,7 +177,8 @@ def attach_console(
     # Get sessions for this VM (console wrapper handles dead sessions)
     vm_sessions = _get_sessions_for_vm(db, vm)
 
-    with keep_active(db, config, vm, platform):
+    # Already gated above; hold only (no second gate probe).
+    with platform.vm_active(vm, config=config):
         if recreate or not console_exists(run_command=target.run):
             create_console(
                 vm_sessions,

@@ -147,17 +147,20 @@ def site_secret_decls(decl: VMSiteDecl, registry: Registry) -> list[SecretDecl]:
 
     The references were derived at finalize (the site emitted them);
     this projects them back to the declared/auto-declared secret rows.
+    Callers hold a FINALIZED registry, so the platform edge and the
+    secret rows are guaranteed present (same stance as
+    ``resolve_site``'s unconditional index).
     """
     from agentworks.vms.platforms import VM_PLATFORM_REGISTRY
 
-    capability = VM_PLATFORM_REGISTRY.get(decl.platform)
-    if capability is None:
-        return []
+    capability = VM_PLATFORM_REGISTRY[decl.platform]  # edge validated at finalize
     decls: list[SecretDecl] = []
     for cref in capability.validate_config(
         f"vm-site/{decl.name}", decl.platform_config
     ):
         if cref.kind == "secret":
+            # Auto-declaration at finalize guarantees the row exists;
+            # a KeyError here would be a framework invariant violation.
             decls.append(registry.lookup("secret", cref.name))
     return decls
 

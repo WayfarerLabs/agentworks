@@ -51,6 +51,26 @@ Phase 5.
   intent: a per-version `commit()` checkpoint in the migration runner (making retry safe for
   multi-version jumps, not just v26 -> v27) is a pre-existing runner property, scheduled as a Phase
   6 hardening candidate.
+- **2026-07-11, Phase 3 review round: bind-once is now structural, not aspirational.** The reviewer
+  caught the as-built shape binding at every gate site (`keep_active(..., bind_platform(...))`
+  inline), which multiplied resolve passes -- on a prompt-backed proxmox token, reachable
+  multi-prompting (up to five binds on `session create --new-workspace --new-agent`). Fixes:
+  `_prepare_vm` / `_prepare_vm_target_for_attach` bind once and RETURN the platform (accepting a
+  pre-bound one); holds that follow a gate use `platform.vm_active` directly instead of re-gating;
+  `bind_platforms` shares one platform instance and one resolve pass per SITE (not per VM);
+  `_ensure_tailscale` takes the caller's bound platform (the gates never bind); `copy_workspace`
+  reuses the source platform on same-VM copies. Two more behavioral catches: `delete_vm` no longer
+  gates the best-effort tailscale logout (an operator-stopped VM would have raised and skipped the
+  backend delete; an idle-stopped VM would have been booted just to be deleted -- it now holds
+  without gating, and a logout failure can no longer skip `platform.delete`); `ensure_active`
+  re-reads `operator_stopped` from the DB on the slow path (a concurrent `vm stop` between the
+  caller's row load and the gate no longer auto-restarts the VM). `vm describe` degrades on a
+  stranded site (warn + manifest hint, row fields still render) instead of erroring -- describe is
+  the inspection command an operator reaches for on exactly that row. `reinit` binds before git
+  token collection so the R3 error fires first. New pinning tests: `test_bind_platform.py` (no
+  resolve pass without site secrets, exactly one for a secret-bearing site, one pass + one shared
+  instance per site across a batch, empty-set builds no registry) and the DEALLOCATED /
+  concurrent-stop gate cases.
 
 **Compile boundaries**: Phases 1 through 3 are one logical commit boundary, mirroring the
 polymorphic-transports precedent. As planned, Phase 1 would open a non-compiling window when the
