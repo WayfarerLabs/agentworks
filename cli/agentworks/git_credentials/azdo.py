@@ -9,7 +9,11 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from agentworks.errors import ConfigError
-from agentworks.git_credentials.base import GitCredentialProvider, TokenInfo
+from agentworks.git_credentials.base import (
+    GitCredentialProvider,
+    HelperEntry,
+    TokenInfo,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -102,6 +106,13 @@ class AzDOCredentialProvider(GitCredentialProvider):
     @property
     def store_username(self) -> str:
         return self._org
+
+    def helper_entry(self) -> HelperEntry:
+        # The org doubles as the owner scope: AzDO remote paths start
+        # with the org segment, so multiple orgs route naturally.
+        return HelperEntry(
+            host="dev.azure.com", username=self._org, owner=self._org
+        )
 
     def credential_lines(self, token: str) -> list[str]:
         return [f"https://{self._org}:{token}@dev.azure.com/{self._org}"]

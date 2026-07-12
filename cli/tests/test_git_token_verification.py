@@ -24,7 +24,11 @@ from agentworks.bootstrap import build_registry
 from agentworks.config import load_config
 from agentworks.errors import TokenRejectedError
 from agentworks.git_credentials.azdo import AzDOCredentialProvider
-from agentworks.git_credentials.base import GitCredentialProvider, TokenInfo
+from agentworks.git_credentials.base import (
+    GitCredentialProvider,
+    HelperEntry,
+    TokenInfo,
+)
 from agentworks.git_credentials.github import GitHubCredentialProvider
 from agentworks.vms.manager import _collect_git_tokens
 
@@ -144,6 +148,9 @@ def test_base_acquire_is_unverified_identity() -> None:
 
         def credential_lines(self, token: str) -> list[str]:
             return []
+
+        def helper_entry(self) -> HelperEntry:
+            return HelperEntry(host="example.com", username=self.store_username)
 
     info = _Bare("b").acquire_token("tok")
     assert info == TokenInfo(token="tok")

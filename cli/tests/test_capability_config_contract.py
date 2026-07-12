@@ -160,6 +160,11 @@ class _SigningCredentialProvider(GitCredentialProvider):
     def credential_lines(self, token: str) -> list[str]:
         return [f"https://signer:{token}@example.test"]
 
+    def helper_entry(self):  # noqa: ANN201
+        from agentworks.git_credentials.base import HelperEntry
+
+        return HelperEntry(host="example.test", username="signer")
+
 
 @pytest.fixture
 def signing_provider(monkeypatch: pytest.MonkeyPatch) -> None:

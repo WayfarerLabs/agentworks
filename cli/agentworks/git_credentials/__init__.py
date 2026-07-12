@@ -19,7 +19,7 @@ from agentworks.git_credentials.azdo import AzDOCredentialProvider
 from agentworks.git_credentials.github import GitHubCredentialProvider
 
 if TYPE_CHECKING:
-    from agentworks.git_credentials.base import GitCredentialProvider
+    from agentworks.git_credentials.base import GitCredentialProvider, HelperEntry
     from agentworks.resources import Registry
 
 
@@ -70,74 +70,127 @@ def build_credential_materials(
     providers: dict[str, GitCredentialProvider],
     tokens: dict[str, str],
 ) -> CredentialMaterials:
-    """Assemble the git credential store and context sections.
+    """Assemble the git credential store, the gitconfig include, and
+    the selecting helper.
 
-    Ordering contract (empirically pinned, git 2.39): UNSCOPED
-    credentials' store lines come first -- a username-less query takes
-    the first matching line, so the host-level fallback must precede
-    username-tagged scoped lines; scoped queries carry the
-    context-injected username, which filters lines, so their relative
-    order is irrelevant.
+    Selection lives entirely in the generated helper: the include sets
+    ``useHttpPath`` (safe -- credential-store left the chain, and only
+    our helper consumes the queries), so every query carries the remote
+    path and the helper picks the most specific credential (exact repo,
+    then owner, then the host's default, then the first store line for
+    the host -- the legacy semantics that keep ``add-git-credential``
+    additions serving).
 
-    Scope collisions (two credentials claiming the same context URL)
-    are a hard error: git would silently let the later section win,
-    which is exactly the dead-config ambiguity we reject loudly.
+    Store ordering: unscoped credentials' lines first, so the legacy
+    first-host-line fallback finds the default. Scope collisions (two
+    credentials claiming the same repo or owner on one host) are a hard
+    error -- silent shadowing is dead-config ambiguity.
     """
     store_scoped: list[str] = []
     store_unscoped: list[str] = []
-    sections: list[tuple[str, str]] = []
-    claimed: dict[str, str] = {}
+    entries: list[tuple[str, HelperEntry]] = []
+    claimed: dict[tuple[str, str, str], str] = {}
     for name, provider in providers.items():
-        provider_sections = provider.gitconfig_sections()
-        for url, _username in provider_sections:
-            if url in claimed:
+        entry = provider.helper_entry()
+        for kind_, value in (
+            *(("repo", repo) for repo in entry.repos),
+            *((("owner", entry.owner),) if entry.owner else ()),
+        ):
+            key = (entry.host, kind_, value)
+            if key in claimed:
                 raise ConfigError(
-                    f"git credentials {claimed[url]!r} and {name!r} both "
-                    f"claim scope {url}; scopes must be unambiguous"
+                    f"git credentials {claimed[key]!r} and {name!r} both "
+                    f"claim scope {kind_} {value!r} on {entry.host}; "
+                    f"scopes must be unambiguous"
                 )
-            claimed[url] = name
+            claimed[key] = name
+        entries.append((name, entry))
         lines = provider.credential_lines(tokens[name])
-        if provider_sections:
-            sections.extend(provider_sections)
+        if entry.repos or entry.owner:
             store_scoped.extend(lines)
         else:
             store_unscoped.extend(lines)
 
-    rendered = [
-        f'[credential "{url}"]\n\tusername = {username}'
-        for url, username in sections
-    ]
-    header = (
-        "# Managed by agentworks (git credential scoping); do not edit.\n"
-    )
+    header = "# Managed by agentworks (git credential selection); do not edit.\n"
     diag = [
         (provider.store_username, name, provider.secret_name)
         for name, provider in providers.items()
     ]
     return CredentialMaterials(
         store_content="\n".join(store_unscoped + store_scoped) + "\n",
-        gitconfig_content=header + "\n".join(rendered) + ("\n" if rendered else ""),
-        helper_script=_helper_script(diag, warn_foreign=bool(sections)),
+        # useHttpPath makes git send the remote path to the helper --
+        # the whole selection mechanism. Harmless globally now that our
+        # helper is the only consumer (the old hazard was
+        # credential-store's path matching, and store is gone).
+        gitconfig_content=header + "[credential]\n\tuseHttpPath = true\n",
+        helper_script=_helper_script(entries, diag),
     )
 
 
+def _selection_block(entries: list[tuple[str, HelperEntry]]) -> str:
+    """The per-host selection: exact repo, then owner, then default."""
+    by_host: dict[str, list[tuple[str, HelperEntry]]] = {}
+    for name, entry in entries:
+        by_host.setdefault(entry.host, []).append((name, entry))
+    host_cases = []
+    for host, host_entries in sorted(by_host.items()):
+        lines = [f"    {host})"]
+        repo_cases = [
+            '        case "$1" in\n'
+            + "\n".join(
+                f'        {"|".join(entry.repos)}) echo {entry.username}; return ;;'
+                for _n, entry in host_entries
+                if entry.repos
+            )
+            + "\n        esac"
+        ] if any(entry.repos for _n, entry in host_entries) else []
+        owner_cases = [
+            '        case "${1%%/*}" in\n'
+            + "\n".join(
+                f"        {entry.owner}) echo {entry.username}; return ;;"
+                for _n, entry in host_entries
+                if entry.owner
+            )
+            + "\n        esac"
+        ] if any(entry.owner for _n, entry in host_entries) else []
+        default = next(
+            (
+                entry.username
+                for _n, entry in host_entries
+                if not entry.repos and not entry.owner
+            ),
+            "x-access-token" if host == "github.com" else None,
+        )
+        lines.extend(repo_cases)
+        lines.extend(owner_cases)
+        if default:
+            lines.append(f"        echo {default}")
+        lines.append("        ;;")
+        host_cases.append("\n".join(lines))
+    return "\n".join(host_cases)
+
 
 def _helper_script(
-    diag: list[tuple[str, str, str]], *, warn_foreign: bool
+    entries: list[tuple[str, HelperEntry]],
+    diag: list[tuple[str, str, str]],
 ) -> str:
     """Render THE git credential helper (POSIX sh).
 
-    ``get`` serves the first matching line (host + username-if-given)
-    from the agentworks-managed store file -- credential-store's GET
-    semantics, minus its erase. ``erase`` deliberately deletes nothing:
-    git invokes it when the remote REJECTED the credential, so it
-    prints a diagnosis naming the credential and its secret instead of
-    destroying provisioned state. ``diag`` is (store_username,
-    credential_name, secret_name) per credential; ``warn_foreign``
-    gates the embedded-username warning on scoped credentials existing
-    (without scoping there is nothing to bypass).
+    ``get``: an explicit query username short-circuits to a direct
+    line match (plus the bypasses-scoping warning when scoped
+    credentials exist); otherwise selection runs on (host, path) --
+    normalized by stripping the leading slash and a ``.git`` suffix --
+    and the chosen username keys back into the store file; if nothing
+    matches, the first store line for the host is served (legacy
+    credential-store semantics). ``erase`` deletes nothing -- it fires
+    when the remote rejected the credential, so it prints a diagnosis
+    naming the credential and its secret. ``store`` is a no-op.
     """
     known = " ".join(sorted({u for u, _c, _s in diag}))
+    scoped = any(e.repos or e.owner for _n, e in entries)
+    scoped_hosts = "|".join(
+        sorted({e.host for _n, e in entries if e.repos or e.owner})
+    )
     cases = []
     seen: set[str] = set()
     for username, cred, secret in diag:
@@ -152,7 +205,7 @@ def _helper_script(
             ;;"""
         )
     warn_block = ""
-    if warn_foreign:
+    if scoped:
         warn_block = """
     if [ "$host" = "github.com" ] && [ -n "$username" ]; then
         case " @KNOWN@ " in
@@ -172,38 +225,61 @@ def _helper_script(
 # git invokes 'erase' after a rejected auth, which is exactly when the
 # operator needs a diagnosis, not state destruction.
 op="$1"
-proto=""; host=""; username=""
+proto=""; host=""; username=""; qpath=""
 while IFS='=' read -r key value; do
     case "$key" in
         protocol) proto="$value" ;;
         host) host="$value" ;;
         username) username="$value" ;;
+        path) qpath="$value" ;;
     esac
 done
 
 creds="$HOME/.git-credentials"
 
-case "$op" in
-get)@WARN@
-    [ -r "$creds" ] || exit 0
+# Most-specific credential for (host, path): exact repo, then owner
+# (first path segment), then the host default.
+select_username() {
+    case "$host" in
+@SELECT@
+    esac
+}
+
+serve() {
+    # $1 = required username ("" = first line for the host)
+    [ -r "$creds" ] || return 1
     while IFS= read -r line; do
         case "$line" in *://*@*) : ;; *) continue ;; esac
         rest="${line#*://}"
         userinfo="${rest%%@*}"
         hostpath="${rest#*@}"
-        lhost="${hostpath%%/*}"
+        [ "${hostpath%%/*}" = "$host" ] || continue
         luser="${userinfo%%:*}"
-        lpass="${userinfo#*:}"
-        [ "$lhost" = "$host" ] || continue
-        if [ -n "$username" ] && [ "$luser" != "$username" ]; then
+        if [ -n "$1" ] && [ "$luser" != "$1" ]; then
             continue
         fi
         printf 'protocol=%s\n' "${proto:-https}"
         printf 'host=%s\n' "$host"
         printf 'username=%s\n' "$luser"
-        printf 'password=%s\n' "$lpass"
-        exit 0
+        printf 'password=%s\n' "${userinfo#*:}"
+        return 0
     done < "$creds"
+    return 1
+}
+
+case "$op" in
+get)@WARN@
+    if [ -n "$username" ]; then
+        serve "$username"
+        exit 0
+    fi@NOPATH@
+    p="${qpath#/}"
+    p="${p%.git}"
+    wanted=$(select_username "$p")
+    if [ -n "$wanted" ] && serve "$wanted"; then
+        exit 0
+    fi
+    serve ""
     exit 0
     ;;
 erase)
@@ -219,10 +295,26 @@ erase)
     ;;
 esac
 """
+    nopath_block = ""
+    if scoped_hosts:
+        nopath_block = """
+    if [ -z "$qpath" ]; then
+        case "$host" in
+        @SCOPED_HOSTS@)
+            {
+                echo "agentworks: git sent no repository path for $host, so"
+                echo "credential scoping cannot select per-repo/per-owner; check that"
+                echo "credential.useHttpPath is still true (agentworks sets it, but a"
+                echo "local git config may override it); serving the host default"
+            } >&2
+            ;;
+        esac
+    fi""".replace("@SCOPED_HOSTS@", scoped_hosts)
     return (
-        template.replace("@WARN@", warn_block).replace(
-            "@CASES@", "\n".join(cases) if cases else "        _none_) : ;;"
-        )
+        template.replace("@WARN@", warn_block)
+        .replace("@NOPATH@", nopath_block)
+        .replace("@SELECT@", _selection_block(entries))
+        .replace("@CASES@", "\n".join(cases) if cases else "        _none_) : ;;")
     )
 
 

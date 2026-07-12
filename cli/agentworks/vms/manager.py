@@ -820,10 +820,11 @@ def add_git_credential(db: Database, config: Config, name: str, credential_name:
     # Phase 1d: resolve the token via the framework (the backend chain
     # handles env-var lookup + prompt fallback uniformly across every
     # site that needs a token).
-    if provider.gitconfig_sections():
-        # Scoped credentials need their gitconfig context sections and
-        # the store-wide ordering contract -- a single-line merge can't
-        # provide either. The full-rebuild path can.
+    entry = provider.helper_entry()
+    if entry.repos or entry.owner:
+        # Scoped credentials need the helper's embedded selection map
+        # rebuilt -- a single-line store merge can't provide that. The
+        # full-rebuild path (reinit) can.
         raise ValidationError(
             f"git credential '{credential_name}' is scoped (fine-grained "
             f"PAT); add it to the admin or agent template and run "

@@ -20,6 +20,7 @@ from agentworks.bootstrap import build_registry
 from agentworks.config import load_config
 from agentworks.errors import ConfigError
 from agentworks.git_credentials import CredentialMaterials, build_credential_materials
+from agentworks.git_credentials.azdo import AzDOCredentialProvider
 from agentworks.git_credentials.github import GitHubCredentialProvider
 from agentworks.manifests import load_manifests
 from agentworks.vms.initializer import resolve_git_credential_providers
@@ -65,32 +66,127 @@ def test_unscoped_store_line_unchanged() -> None:
     line verbatim (x-access-token username)."""
     p = GitHubCredentialProvider(config_name="gh")
     assert p.credential_lines("tok") == ["https://x-access-token:tok@github.com"]
-    assert p.gitconfig_sections() == []
+    entry = p.helper_entry()
+    assert entry.repos == () and entry.owner is None
 
 
-def test_repo_scope_covers_both_remote_spellings() -> None:
-    """Context matching is slash-boundary-exact, so ``repo`` does not
-    prefix-match ``repo.git``; both spellings get a section."""
-    p = GitHubCredentialProvider(config_name="widgets-bot", repos=["acme/widgets"])
-    assert p.credential_lines("tok") == ["https://widgets-bot:tok@github.com"]
-    assert p.gitconfig_sections() == [
-        ("https://github.com/acme/widgets", "widgets-bot"),
-        ("https://github.com/acme/widgets.git", "widgets-bot"),
-    ]
+def test_repo_scope_selected_by_path(tmp_path: Path) -> None:
+    """Selection lives in the helper: an exact repo match (with or
+    without the .git suffix, with or without a leading slash) picks the
+    repo-scoped credential over the owner scope and the fallback."""
+    providers = {
+        "widgets-bot": GitHubCredentialProvider(
+            config_name="widgets-bot", repos=["acme/widgets"]
+        ),
+        "acme-bot": GitHubCredentialProvider(config_name="acme-bot", owner="acme"),
+        "gh": GitHubCredentialProvider(config_name="gh"),
+    }
+    m = build_credential_materials(
+        providers, {"widgets-bot": "tokR", "acme-bot": "tokO", "gh": "tokF"}
+    )
+    home = _write_home(tmp_path, m)
+    for qpath in ("acme/widgets.git", "acme/widgets", "/acme/widgets.git"):
+        out, _err = _run_helper(
+            m.helper_script, home, "get",
+            f"protocol=https\nhost=github.com\npath={qpath}\n",
+        )
+        assert "password=tokR" in out, qpath
+    # Owner scope catches everything else under acme -- including repos
+    # nobody declared anywhere (the ad hoc clone case).
+    out, _err = _run_helper(
+        m.helper_script, home, "get",
+        "protocol=https\nhost=github.com\npath=acme/undeclared.git\n",
+    )
+    assert "password=tokO" in out
+    # Anything else on the host: the unscoped default.
+    out, _err = _run_helper(
+        m.helper_script, home, "get",
+        "protocol=https\nhost=github.com\npath=other/repo.git\n",
+    )
+    assert "password=tokF" in out
+    # No path at all (useHttpPath overridden / other tooling): serve
+    # the default, but WARN -- the operator may have stepped on the
+    # setting scoping depends on.
+    out, err = _run_helper(
+        m.helper_script, home, "get", "protocol=https\nhost=github.com\n"
+    )
+    assert "password=tokF" in out
+    assert "no repository path" in err
+    assert "useHttpPath" in err
+    # With a path present, no such warning.
+    _out, err = _run_helper(
+        m.helper_script, home, "get",
+        "protocol=https\nhost=github.com\npath=other/repo.git\n",
+    )
+    assert err == ""
 
 
-def test_owner_scope_uses_trailing_slash_prefix() -> None:
-    p = GitHubCredentialProvider(config_name="acme-bot", owner="acme")
-    assert p.gitconfig_sections() == [("https://github.com/acme/", "acme-bot")]
+def test_multi_repo_list_selects_each(tmp_path: Path) -> None:
+    providers = {
+        "wf-bot": GitHubCredentialProvider(
+            config_name="wf-bot", repos=["acme/widgets", "acme/gadgets"]
+        ),
+        "gh": GitHubCredentialProvider(config_name="gh"),
+    }
+    m = build_credential_materials(providers, {"wf-bot": "tokR", "gh": "tokF"})
+    home = _write_home(tmp_path, m)
+    for repo in ("acme/widgets", "acme/gadgets"):
+        out, _err = _run_helper(
+            m.helper_script, home, "get",
+            f"protocol=https\nhost=github.com\npath={repo}.git\n",
+        )
+        assert "password=tokR" in out, repo
+
+
+def test_azdo_org_routes_by_first_segment(tmp_path: Path) -> None:
+    providers = {
+        "ado": AzDOCredentialProvider(config_name="ado", org="my-org"),
+    }
+    m = build_credential_materials(providers, {"ado": "tokA"})
+    home = _write_home(tmp_path, m)
+    out, _err = _run_helper(
+        m.helper_script, home, "get",
+        "protocol=https\nhost=dev.azure.com\npath=my-org/proj/_git/repo\n",
+    )
+    assert "username=my-org" in out
+    assert "password=tokA" in out
+
+
+def test_github_default_hardcoded_without_unscoped_cred(tmp_path: Path) -> None:
+    """With only scoped creds, github.com still has the x-access-token
+    default baked in -- a later hand-added (add-git-credential) line
+    keeps serving; absent that line, the helper just misses."""
+    providers = {
+        "acme-bot": GitHubCredentialProvider(config_name="acme-bot", owner="acme"),
+    }
+    m = build_credential_materials(providers, {"acme-bot": "tokO"})
+    home = _write_home(tmp_path, m)
+    out, _err = _run_helper(
+        m.helper_script, home, "get",
+        "protocol=https\nhost=github.com\npath=other/repo.git\n",
+    )
+    # No unscoped line exists: legacy fallback serves the first host
+    # line (better a scoped token than a guaranteed failure -- exactly
+    # what credential-store did).
+    assert "password=tokO" in out
+    (home / ".git-credentials").write_text(
+        (home / ".git-credentials").read_text()
+        + "https://x-access-token:added@github.com\n"
+    )
+    out, _err = _run_helper(
+        m.helper_script, home, "get",
+        "protocol=https\nhost=github.com\npath=other/repo.git\n",
+    )
+    assert "password=added" in out
 
 
 # -- cross-credential materials ----------------------------------------------
 
 
 def test_unscoped_lines_precede_scoped() -> None:
-    """The ordering contract: a username-less query takes the FIRST
-    matching store line, so the host-level fallback must come before
-    username-tagged scoped lines -- regardless of provider dict order."""
+    """Ordering still matters for the legacy first-host-line fallback:
+    the unscoped default precedes scoped lines regardless of provider
+    dict order."""
     providers = {
         "acme-bot": GitHubCredentialProvider(config_name="acme-bot", owner="acme"),
         "gh": GitHubCredentialProvider(config_name="gh"),
@@ -101,8 +197,6 @@ def test_unscoped_lines_precede_scoped() -> None:
         "https://x-access-token:tokB@github.com",
         "https://acme-bot:tokA@github.com",
     ]
-    assert '[credential "https://github.com/acme/"]' in m.gitconfig_content
-    assert "\tusername = acme-bot" in m.gitconfig_content
 
 
 def test_scope_collision_is_loud() -> None:
@@ -114,13 +208,20 @@ def test_scope_collision_is_loud() -> None:
         build_credential_materials(providers, {"bot-a": "x", "bot-b": "y"})
 
 
-def test_no_scopes_yields_header_only_include() -> None:
-    """The include file is written even with no scoped credentials so
-    re-provisioning after REMOVING scopes wipes stale sections."""
-    providers = {"gh": GitHubCredentialProvider(config_name="gh")}
-    m = build_credential_materials(providers, {"gh": "tok"})
-    assert m.gitconfig_content.startswith("# Managed by agentworks")
-    assert "[credential" not in m.gitconfig_content
+def test_include_is_only_usehttppath() -> None:
+    """The include carries exactly the useHttpPath switch -- selection
+    lives in the helper, so no context sections exist, scoped or not."""
+    for providers, tokens in (
+        ({"gh": GitHubCredentialProvider(config_name="gh")}, {"gh": "t"}),
+        (
+            {"a": GitHubCredentialProvider(config_name="a", owner="acme")},
+            {"a": "t"},
+        ),
+    ):
+        m = build_credential_materials(providers, tokens)
+        assert m.gitconfig_content.startswith("# Managed by agentworks")
+        assert "useHttpPath = true" in m.gitconfig_content
+        assert 'credential "' not in m.gitconfig_content
 
 
 # -- registry -> provider threading -------------------------------------------
@@ -162,8 +263,9 @@ def test_resolve_threads_scope_from_manifest(tmp_path: Path) -> None:
     has no github blob columns)."""
     registry = _registry_with_scoped_cred(tmp_path)
     providers = resolve_git_credential_providers(registry, ["widgets-bot"])
-    sections = providers["widgets-bot"].gitconfig_sections()
-    assert ("https://github.com/acme/widgets", "widgets-bot") in sections
+    entry = providers["widgets-bot"].helper_entry()
+    assert entry.repos == ("acme/widgets",)
+    assert entry.username == "widgets-bot"
 
 
 def test_manifest_scope_validation_has_file_line(tmp_path: Path) -> None:
@@ -190,19 +292,16 @@ def test_manifest_scope_validation_has_file_line(tmp_path: Path) -> None:
 
 
 def test_repo_and_owner_scopes_on_same_org_coexist() -> None:
-    """The guide promises: a repo under one credential and its org under
-    another is fine -- git's longest-prefix match resolves it."""
+    """A repo under one credential and its org under another is fine --
+    exact repo beats owner in the helper's selection order (pinned by
+    execution in test_repo_scope_selected_by_path)."""
     providers = {
         "widgets-bot": GitHubCredentialProvider(
             config_name="widgets-bot", repos=["acme/widgets"]
         ),
         "acme-bot": GitHubCredentialProvider(config_name="acme-bot", owner="acme"),
     }
-    m = build_credential_materials(
-        providers, {"widgets-bot": "x", "acme-bot": "y"}
-    )
-    assert '[credential "https://github.com/acme/widgets"]' in m.gitconfig_content
-    assert '[credential "https://github.com/acme/"]' in m.gitconfig_content
+    build_credential_materials(providers, {"widgets-bot": "x", "acme-bot": "y"})
 
 
 # -- the credential helper ------------------------------------------------------
@@ -333,17 +432,6 @@ def test_helper_without_scopes_serves_but_never_warns(tmp_path: Path) -> None:
     assert "rejected git credential 'gh'" in err
 
 
-def test_include_carries_contexts_only() -> None:
-    """Helper registration lives in the global credential.helper slot
-    (replacing store); the include carries context sections only."""
-    m = _scoped_materials()
-    assert "helper" not in m.gitconfig_content
-    assert '[credential "https://github.com/acme/"]' in m.gitconfig_content
-    unscoped = {"gh": GitHubCredentialProvider(config_name="gh")}
-    m2 = build_credential_materials(unscoped, {"gh": "y"})
-    assert "[credential" not in m2.gitconfig_content
-
-
 # -- initializer wiring --------------------------------------------------------
 
 
@@ -377,7 +465,7 @@ def test_initializer_writes_all_three_files() -> None:
     assert store.splitlines()[0] == "https://x-access-token:t1@github.com"
     assert store_mode == "600"
     include, include_mode = by_path["~/.agentworks-git-scopes.gitconfig"]
-    assert '[credential "https://github.com/acme/"]' in include
+    assert "useHttpPath = true" in include
     assert include_mode == "600"
     helper, helper_mode = by_path["~/.agentworks-git-cred-helper.sh"]
     assert helper.startswith("#!/bin/sh")
@@ -455,22 +543,6 @@ def test_workspace_repo_userinfo_warns(tmp_path: Path) -> None:
     )
     config = load_config(cfg, warn_issues=False)
     assert any("embeds a username" in issue for issue in config.config_issues)
-
-
-def test_multi_repo_list_emits_sections_per_repo() -> None:
-    """`repos` is always a list; every entry gets both remote-spelling
-    sections, all sharing one username and one store line."""
-    p = GitHubCredentialProvider(
-        config_name="wf-bot", repos=["acme/widgets", "acme/gadgets"]
-    )
-    assert p.credential_lines("tok") == ["https://wf-bot:tok@github.com"]
-    urls = [url for url, _u in p.gitconfig_sections()]
-    assert urls == [
-        "https://github.com/acme/widgets",
-        "https://github.com/acme/widgets.git",
-        "https://github.com/acme/gadgets",
-        "https://github.com/acme/gadgets.git",
-    ]
 
 
 # -- real git against the generated materials ----------------------------------

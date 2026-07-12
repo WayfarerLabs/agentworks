@@ -50,6 +50,21 @@ def _http_probe(
 
 
 @dataclass(frozen=True)
+class HelperEntry:
+    """What the credential helper needs to select this credential by
+    remote URL: the host it serves, the username on its store line
+    (the key back into the managed store file), and its scopes --
+    ``repos`` match the remote path exactly, ``owner`` matches its
+    first segment. No scopes = the host's default candidate.
+    """
+
+    host: str
+    username: str
+    repos: tuple[str, ...] = ()
+    owner: str | None = None
+
+
+@dataclass(frozen=True)
 class TokenInfo:
     """The provider-acquired token plus what acquisition learned.
 
@@ -160,20 +175,17 @@ class GitCredentialProvider(ABC):
             return f"{self._config_name} ({self._description})"
         return self._config_name
 
-    def gitconfig_sections(self) -> list[tuple[str, str]]:
-        """``(context_url, username)`` pairs for scoped credentials.
+    @abstractmethod
+    def helper_entry(self) -> HelperEntry:
+        """This credential's selection entry for the generated helper.
 
-        Each pair becomes a provisioned
-        ``[credential "<context_url>"]\\nusername = <username>`` section:
-        git injects the username for remotes matching the context
-        (longest-prefix match on slash boundaries), and the
-        username-tagged store line supplies the token. Empty (the
-        default) means the credential is unscoped -- its store line is
-        the host-level fallback and must be emitted BEFORE scoped lines
-        (username-less queries take the first matching line; scoped
-        queries carry an injected username that filters lines).
+        The helper receives (host, path) per query -- ``useHttpPath``
+        is set globally in the managed include -- and picks the most
+        specific credential: exact repo, then owner (first path
+        segment), then the host's default (an entry without scopes),
+        then the first store line for the host (legacy semantics, which
+        also keeps ``vm add-git-credential`` additions serving).
         """
-        return []
 
     @abstractmethod
     def credential_lines(self, token: str) -> list[str]:

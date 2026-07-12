@@ -18,7 +18,11 @@ from datetime import date
 from typing import TYPE_CHECKING
 
 from agentworks.errors import ConfigError
-from agentworks.git_credentials.base import GitCredentialProvider, TokenInfo
+from agentworks.git_credentials.base import (
+    GitCredentialProvider,
+    HelperEntry,
+    TokenInfo,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
@@ -206,18 +210,10 @@ class GitHubCredentialProvider(GitCredentialProvider):
     def credential_lines(self, token: str) -> list[str]:
         return [f"https://{self.store_username}:{token}@github.com"]
 
-    def gitconfig_sections(self) -> list[tuple[str, str]]:
-        if self._repos:
-            # Cover both remote spellings per repo: agents clone with
-            # and without the .git suffix, and context matching is
-            # slash-boundary-exact, so "repo" does not prefix-match
-            # "repo.git". All repos share this credential's username
-            # (and therefore its single store line).
-            return [
-                (f"https://github.com/{repo}{suffix}", self._config_name)
-                for repo in self._repos
-                for suffix in ("", ".git")
-            ]
-        if self._owner:
-            return [(f"https://github.com/{self._owner}/", self._config_name)]
-        return []
+    def helper_entry(self) -> HelperEntry:
+        return HelperEntry(
+            host="github.com",
+            username=self.store_username,
+            repos=self._repos,
+            owner=self._owner,
+        )

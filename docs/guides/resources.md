@@ -73,22 +73,24 @@ under that user or org -- including repos an agent clones ad hoc that no workspa
 The two are mutually exclusive; a credential with neither is the unscoped fallback. Scopes are
 manifest-only (the legacy flat TOML shape has no GitHub fields).
 
-Selection happens inside git itself, not in agentworks: initialization writes credential-context
-sections into an agentworks-owned gitconfig include (`~/.agentworks-git-scopes.gitconfig`), git
-injects a per-credential username for matching remotes (most specific wins: exact repo, then owner,
-then fallback), and the username picks the token out of `~/.git-credentials`. Two credentials
-claiming the same scope is a configuration error at initialization time, evaluated per user (admin
-and each agent get their own store and include, built from their own credential lists). Declaring a
-repo under one credential and its org under another is fine -- the more specific scope wins.
+Selection lives in the agentworks credential helper: initialization sets `credential.useHttpPath`
+(via the managed include `~/.agentworks-git-scopes.gitconfig`), so git hands the helper the remote's
+host and repository path, and the helper picks the most specific credential -- exact repo, then
+owner (first path segment), then the provider's host default (`x-access-token` for GitHub, the org
+for Azure DevOps), then the first stored line for the host. Two credentials claiming the same scope
+is a configuration error at initialization time, evaluated per user (admin and each agent get their
+own store, include, and helper, built from their own credential lists). Declaring a repo under one
+credential and its org under another is fine -- the more specific scope wins, and org scopes cover
+repos cloned ad hoc that nothing declared.
 
-Clone with plain https URLs -- no username needed anywhere; git injects it internally. The
-credential's resource name doubles as that internal username, so it appears in `git config -l`
-output and provider-side logs (remotes are never rewritten). Credentials are served by an
-agentworks-owned credential helper (`~/.agentworks-git-cred-helper.sh`, replacing git's
-`credential-store`): when the remote rejects a credential it prints which credential and secret to
-fix instead of silently deleting the provisioned entry (which is what `credential-store` does on
-every failed auth), and an embedded username in a remote URL -- which bypasses scoping -- draws a
-warning right above the resulting failure.
+Clone with plain https URLs -- no username needed anywhere. Credentials are served by the
+agentworks-owned helper (`~/.agentworks-git-cred-helper.sh`, replacing git's `credential-store`):
+when the remote rejects a credential it prints which credential and secret to fix instead of
+silently deleting the provisioned entry (which is what `credential-store` does on every failed
+auth); an embedded username in a remote URL bypasses scoping and draws a warning; and if git stops
+sending repository paths (a local git config overriding `useHttpPath`), the helper warns and serves
+the host default. The credential's resource name appears as the username on scoped store lines and
+in provider-side logs; remotes are never rewritten.
 
 ## TOML resource sections: deprecated but supported
 
