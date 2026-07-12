@@ -1,6 +1,6 @@
 # VM sites and platforms -- implementation plan
 
-**Status**: Phases 1-5 complete. Phases follow the HLA's sequencing sketch, with two refinements
+**Status**: all six phases complete. Phases follow the HLA's sequencing sketch, with two refinements
 recorded there-vs-here: `defaults.site` parsing (plus the deprecated `defaults.platform` alias) and
 the `vm-template.site` field land in Phase 1 with the rest of the config/kind surface, so Phase 3's
 selection precedence has both to read; only the operator-facing flag/completion work stays in
@@ -395,23 +395,27 @@ existing VMs keep hostnames and env values. MET (suite 1550, ruff, mypy green).
 
 ## Phase 6: Tests, docs, release notes, PR
 
-- [ ] Full pytest; no regressions vs the pre-branch count.
-- [ ] `ruff` / `mypy` package-wide; `./scripts/lint-files.sh`.
-- [ ] `docs/guides/resources.md`: vm-site and vm-platform join the kind story; `cli/README.md`:
-      env-var inventory (`AGENTWORKS_SITE` added, `AGENTWORKS_VM_HOST` retired) and the
-      settings-vs-resources reference; ADR 0016 gets a one-line cross-reference to this SDD as the
-      vm-site implementation.
-- [ ] Release-notes text: the `!`-flagged breaks (`--platform` to `--site`, `vm shell` flag,
-      `PROXMOX_TOKEN_SECRET` sourcing) with their one-line remediations.
-- [ ] Hardening candidate (from the Phase 2 review round): a per-version `commit()` checkpoint in
-      the migration runner so retry is safe for multi-version jumps, not just the v26 -> v27 step
-      (today an earlier version's auto-committed DDL re-runs on retry when a later version fails).
-- [ ] Hardening candidate (from the Phase 3 review round): `session create`'s ephemeral ROLLBACK
-      path calls `delete_agent` / `delete_workspace`, which self-bind -- a failed create on a
-      secret-bearing site re-runs the resolve pass mid-rollback (possible re-prompt; degrades to the
-      existing recover-with warn non-interactively). Decide whether the delete-side seams get the
-      same `platform` carve-out or the degrade is accepted.
-- [ ] Open the PR; agentworks-reviewer round on the branch.
+- [x] Full pytest; no regressions vs the pre-branch count (1561 vs ~1490 pre-branch).
+- [x] `ruff` / `mypy` package-wide; `./scripts/lint-files.sh`.
+- [x] `docs/guides/resources.md`: vm-site and vm-platform join the kind story (new "VM sites and
+      platforms" section: manifest shape, reserved built-ins, config secrets, migrate pointer);
+      `cli/README.md`: the vm-host section becomes the vm-site story, `--site` / slug / shell
+      `--platform` documented, both new kinds in the settings-vs-resources inventory; ADR 0016 gains
+      an implementation note that the sketched pair has shipped. Per maintainer direction
+      (2026-07-12), permanent artifacts carry NO SDD references: the vm-sites SDD citations and bare
+      R-number requirement IDs in code/test comments were replaced with self-contained descriptions
+      (other efforts' pre-existing SDD references left as-is, out of scope).
+- [x] Release-notes text: the `!`-flagged breaks with remediations live in the PR description
+      (release-please derives the changelog from the `!` commits themselves).
+- [x] Hardening candidate (from the Phase 2 review round): the migration runner commits each version
+      as a durable checkpoint (with a per-version foreign_key_check), so retry is safe for
+      multi-version jumps; pinned by a v25-fixture jump test (v26 checkpoints despite v27's designed
+      failure, retry resumes at v27).
+- [x] Hardening candidate (from the Phase 3 review round): RESOLVED as carve-out -- `delete_agent` /
+      `delete_workspace` accept the caller's bound platform and the ephemeral rollback threads it,
+      same shape as the create side.
+- [x] PR #169; agentworks-reviewer rounds ran per phase (recorded in the sequencing notes above)
+      plus a final whole-branch round.
 
 **Definition of done**: PR open, CI green, reviewer findings addressed. `locked.md` lands after
 merge per the SDD lifecycle.
