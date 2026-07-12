@@ -40,11 +40,7 @@ _SINGLETON_KINDS = {"admin-template", "named-console-template"}
 # the resource name, and emission nests the platform-owned keys under
 # spec.platform_config. Every remaining kind maps to exactly one
 # section, with the section's inner tables as the named resources.
-_MIGRATABLE_KINDS = {
-    k: sections[0]
-    for k, sections in KIND_SECTIONS.items()
-    if k != "secret-backend"
-}
+_MIGRATABLE_KINDS = {k for k in KIND_SECTIONS if k != "secret-backend"}
 
 # section -> kind, covering vm-site's two legacy sections.
 _SECTION_KINDS = {
@@ -459,7 +455,17 @@ def _emit_document(doc: tomlkit.TOMLDocument, unit: MigrationUnit) -> str:
     # Description moves to metadata BEFORE any kind-specific rebuild --
     # the git-credential branch below sweeps "everything left" into
     # provider_config, and description is kind-owned, not provider-owned.
-    if unit.kind in _DESCRIPTION_KINDS and "description" in spec:
+    # vm-site is excluded: its flat legacy sections never supported the
+    # key (the TOML loader silently drops it), so popping it here would
+    # smuggle a description past the pre-write stray-key refusal and
+    # into a manifest the pre-rows can't match -- verification would
+    # fail AFTER writing. Left in place, it falls into platform_config
+    # and hits the clean pre-write refusal below.
+    if (
+        unit.kind in _DESCRIPTION_KINDS
+        and unit.kind != "vm-site"
+        and "description" in spec
+    ):
         metadata["description"] = spec.pop("description")
 
     if unit.kind == "vm-site":

@@ -782,17 +782,18 @@ def shell_vm(
     config: Config,
     name: str,
     *,
-    provisioner: bool = False,
+    platform_transport: bool = False,
     workspace_name: str | None = None,
 ) -> None:
     """Open a shell on a VM as the admin user.
 
-    By default uses the Tailscale SSH transport. Pass ``provisioner=True``
-    to use the platform-native transport instead (``limactl shell`` for
-    Lima, ``wsl.exe`` for WSL2, SSH via public IP for Azure). The
-    provisioner shell is the right choice when Tailscale connectivity is
-    the thing you need to fix (e.g. healing the issue #117 latched DNS
-    state, which involves restarting tailscaled itself).
+    By default uses the Tailscale SSH transport. Pass
+    ``platform_transport=True`` (the ``vm shell --platform`` flag) to
+    use the platform-native transport instead (``limactl shell`` for
+    Lima, ``wsl.exe`` for WSL2, SSH via public IP for Azure). That is
+    the right choice when Tailscale connectivity is the thing you need
+    to fix (e.g. healing the issue #117 latched DNS state, which
+    involves restarting tailscaled itself).
 
     When ``workspace_name`` is set, the shell ``cd``s into the workspace
     directory and the workspace template's env joins the env chain. The
@@ -819,7 +820,7 @@ def shell_vm(
     # secret resolution.
     ws = _resolve_workspace_for_vm(db, vm, workspace_name)
 
-    if not provisioner and vm.tailscale_host is None:
+    if not platform_transport and vm.tailscale_host is None:
         raise StateError(
             f"VM '{name}' has no Tailscale IP",
             entity_kind="vm",
@@ -827,7 +828,7 @@ def shell_vm(
             hint=(
                 "VM init may not be complete; check 'vm describe' for status. "
                 "If Tailscale itself is the problem you're trying to reach the "
-                "VM to fix, run with --provisioner to use the platform-native "
+                "VM to fix, run with --platform to use the platform-native "
                 "transport instead."
             ),
         )
@@ -871,7 +872,7 @@ def shell_vm(
         stack.enter_context(keep_active(db, config, vm, bound))
         target = (
             native_transport(vm, bound, config, stack=stack)
-            if provisioner
+            if platform_transport
             else transport(vm, config)
         )
         if ws is not None:

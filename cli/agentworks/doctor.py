@@ -176,9 +176,15 @@ def _check_vm_sites(registry: Registry) -> HealthGroup:
         g.ok(f"vm-site: {name}", f"platform {declared[name]}")
 
     try:
-        db_exists, _, _ = Database.check_schema()
+        db_exists, current, latest = Database.check_schema()
         if not db_exists:
             g.info("System slug", "database not yet created")
+            return g
+        if current != latest:
+            # Opening the DB would auto-migrate mid-report (interleaving
+            # the migration's own output into this group and stealing
+            # the Database group's deliberate migration row); defer.
+            g.info("VM sites", "pending database migration; see the Database group")
             return g
         db = Database()
         try:
@@ -200,8 +206,8 @@ def _check_vm_sites(registry: Registry) -> HealthGroup:
                 )
         finally:
             db.close()
-    except Exception:
-        g.warn("VM sites", "could not check the database")
+    except Exception as e:
+        g.warn("VM sites", f"could not check the database: {e}")
     return g
 
 

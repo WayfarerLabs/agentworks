@@ -94,6 +94,22 @@ Phase 5.
   `(not applied to this VM)` when the VM's hostname predates the slug. Also: the settings keys moved
   next to their accessors in `db.py` (ssh_config was hardcoding the literal), and the suite now pins
   the FRD prompt wording and the slug-before-secrets/insert ordering.
+- **2026-07-11, Phase 5 review round: two verification-after-write hazards and the noun sweep.** The
+  reviewer caught (1) a `description` key in a legacy `[azure]`/`[proxmox]` section escaping the
+  migrator's pre-write guard (vm-site is a `_DESCRIPTION_KINDS` member, so the metadata pop ran
+  before the platform_config sweep) and failing registry-equivalence AFTER files were written --
+  vm-site is now excluded from the pop (its flat sections never supported the key), so the value
+  falls into `platform_config` and hits the clean pre-write refusal; and (2) doctor's new VM-sites
+  group opening the Database BEFORE the Database group, silently auto-migrating mid-report -- it now
+  defers on `current != latest` with a pointer at the Database group. The R13 noun sweep also
+  reached the last operator-facing `--provisioner` spellings (the shell_vm no-Tailscale hint and the
+  issue-#117 heal hint teach `--platform`), and the service-layer kwarg renamed to
+  `platform_transport` (the "provisioner" noun is retired; the CLI's `--provisioner` alias remains
+  the one deliberate survivor, and it also appears in completions for its one-release life -- both
+  facets of the same recorded click-can't-hide-aliases deviation). Minors: `_MIGRATABLE_KINDS`
+  became a set (`_SECTION_KINDS` owns the section mapping), the `sites` completer joined the
+  registry-sourced completion pin, doctor's catch-all warn carries the exception detail, and
+  `ssh.py`'s docstring stopped citing deleted modules.
 
 **Compile boundaries**: Phases 1 through 3 are one logical commit boundary, mirroring the
 polymorphic-transports precedent. As planned, Phase 1 would open a non-compiling window when the

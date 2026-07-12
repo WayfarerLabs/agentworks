@@ -140,7 +140,7 @@ def test_shell_vm_raises_when_no_tailscale_host_and_no_provisioner_flag(
     err = exc_info.value
     assert err.entity_kind == "vm"
     assert "Tailscale" in str(err)
-    assert "--provisioner" in (err.hint or "")
+    assert "--platform" in (err.hint or "")
     db.close()
 
 
@@ -169,7 +169,7 @@ def test_shell_vm_provisioner_flag_bypasses_tailscale_check(
     # shell_vm wraps it in sys.exit().
     with pytest.raises(SystemExit) as exc_info:
         vm_manager.shell_vm(  # type: ignore[arg-type]
-            db, _make_config(), "vm1", provisioner=True,
+            db, _make_config(), "vm1", platform_transport=True,
         )
     assert exc_info.value.code == 0
     assert interactive_log == [True], "the interactive shell should have been opened"
@@ -225,7 +225,7 @@ def test_shell_vm_provisioner_uses_native_transport(
 
     with pytest.raises(SystemExit):
         vm_manager.shell_vm(  # type: ignore[arg-type]
-            db, _make_config(), "vm1", provisioner=True,
+            db, _make_config(), "vm1", platform_transport=True,
         )
 
     assert len(provisioner_calls) == 1

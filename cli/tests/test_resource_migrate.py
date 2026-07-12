@@ -239,6 +239,21 @@ def test_vm_site_selector_by_name(tmp_path: Path) -> None:
     assert "[proxmox]" in after  # unselected sibling untouched
 
 
+def test_vm_site_description_refused_before_write(tmp_path: Path) -> None:
+    """The flat legacy sections never supported description (the TOML
+    loader silently drops it), so it must NOT ride into metadata -- the
+    pre-rows carry no description and verification would fail after
+    writing. It falls into platform_config and refuses pre-write."""
+    resources = MAXIMAL_RESOURCES.replace(
+        'region = "eastus"', 'region = "eastus"\ndescription = "our sub"'
+    )
+    cfg = _write_config(tmp_path, resources)
+    config = load_config(cfg, warn_issues=False)
+    registry = build_registry(config)
+    with pytest.raises(ConfigError, match="cannot migrate vm-site/azure"):
+        plan_migration(config, registry, ["vm-site/azure"])
+
+
 def test_vm_site_stray_key_refused_before_write(tmp_path: Path) -> None:
     """A stray key the TOML loader silently drops would fail manifest
     validation after emission; the migrator refuses pre-write in the

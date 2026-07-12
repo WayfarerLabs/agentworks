@@ -369,7 +369,7 @@ def test_check_raises_state_error_with_heal_hint() -> None:
     # command. The platform-native transport survives stopping
     # tailscaled; a future contributor who drops this reference back to
     # the simple-block form re-introduces the lockout footgun.
-    assert "vm shell --provisioner" in hint
+    assert "vm shell --platform" in hint
 
 
 def test_check_dns_probe_runs_first() -> None:
