@@ -100,6 +100,41 @@ def test_vm_shell_provisioner_alias_still_works(
     assert captured["platform_transport"] is True
 
 
+def test_doctor_vm_sites_defers_on_pending_migration(
+    db: Database, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A pending DB migration must NOT run inside the VM-sites group
+    (opening the Database auto-migrates, interleaving migration output
+    into the report and stealing the Database group's deliberate
+    migration row); the group defers with a pointer instead."""
+    from agentworks import doctor
+    from agentworks.manifests import builtin as builtin_manifests
+    from agentworks.resources import Registry
+    from agentworks.vms import platforms as vm_platforms
+
+    registry = Registry.empty()
+    builtin_manifests.publish_to(registry)
+    vm_platforms.publish_to(registry)
+    registry.finalize()
+
+    class _DbFactory:
+        @staticmethod
+        def check_schema(path: object = None) -> tuple[bool, int, int]:
+            return (True, 26, 27)  # pending migration
+
+        def __new__(cls) -> Database:  # type: ignore[misc]
+            raise AssertionError("Database() must not open (would auto-migrate)")
+
+    monkeypatch.setattr("agentworks.db.Database", _DbFactory)
+
+    group = doctor._check_vm_sites(registry)
+
+    by_name = {c.name: c for c in group.checks}
+    deferred = by_name["VM sites"]
+    assert deferred.status is doctor.Status.INFO
+    assert "pending database migration" in (deferred.message or "")
+
+
 def test_doctor_vm_sites_group(
     db: Database, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
