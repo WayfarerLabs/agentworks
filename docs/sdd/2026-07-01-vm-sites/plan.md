@@ -1,10 +1,11 @@
 # VM sites and platforms -- implementation plan
 
-**Status**: phases 1-6 complete; Phase 7 (capability model adoption, added 2026-07-12) not started.
-Phases follow the HLA's sequencing sketch, with two refinements recorded there-vs-here:
-`defaults.site` parsing (plus the deprecated `defaults.platform` alias) and the `vm-template.site`
-field land in Phase 1 with the rest of the config/kind surface, so Phase 3's selection precedence
-has both to read; only the operator-facing flag/completion work stays in Phase 5.
+**Status**: phases 1-6 complete; Phase 7 (capability model adoption, added 2026-07-12) implemented,
+reviewer round in progress. Phases follow the HLA's sequencing sketch, with two refinements recorded
+there-vs-here: `defaults.site` parsing (plus the deprecated `defaults.platform` alias) and the
+`vm-template.site` field land in Phase 1 with the rest of the config/kind surface, so Phase 3's
+selection precedence has both to read; only the operator-facing flag/completion work stays in
+Phase 5.
 
 **Sequencing notes**:
 
