@@ -166,6 +166,21 @@ def test_nudge_default_yes_on_enter_then_sets_the_slug(
     assert "[Y/n/never-remind-me]" in seen[0]
 
 
+def test_nudge_accepted_then_blank_slug_writes_nothing(
+    db: Database, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Enter at the nudge, then Enter at the full prompt: nothing is
+    written (no slug, no declined row, no suppression), so both the
+    first-create prompt and the nudge fire again next time."""
+    monkeypatch.setattr("agentworks.output.is_interactive", lambda: True)
+    prompt, _seen = _prompt_script(["", ""])
+    monkeypatch.setattr("agentworks.output.prompt", prompt)
+
+    assert vm_manager._nudge_shared_backend_slug(db, _remote_lima_decl()) is None
+    assert db.get_setting("system_slug") is None
+    assert db.get_setting(NUDGE_SUPPRESSED_KEY) is None
+
+
 def test_nudge_no_leaves_everything_unset(
     db: Database, monkeypatch: pytest.MonkeyPatch
 ) -> None:

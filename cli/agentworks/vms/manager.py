@@ -706,7 +706,10 @@ def describe_vm(db: Database, config: Config, name: str) -> None:
     # its hostname and backend names carry no prefix.
     slug = db.get_setting(SYSTEM_SLUG_KEY) or None
     slug_label = slug or "-"
-    if slug and not vm.hostname.startswith(f"{slug}-"):
+    # Exact R11 comparison (the slug is immutable and the hostname is
+    # recorded as {slug}-{name}); a prefix test could false-negative on
+    # a pre-slug VM whose name happens to start with the slug.
+    if slug and vm.hostname != f"{slug}-{vm.name}":
         slug_label += " (not applied to this VM)"
     output.info(f"System Slug:    {slug_label}")
     output.info(f"Template:       {vm.template or '-'}")
