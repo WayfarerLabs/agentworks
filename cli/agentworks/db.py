@@ -62,7 +62,7 @@ class SessionStatus(Enum):
 # Distinct from NULL (never checked / pre-enhancement).
 PID_STOPPED = -1
 
-# Settings-table keys (vm-sites SDD R4). Defined next to the accessors'
+# Settings-table keys (install-level identity). Defined next to the accessors'
 # owner so consumers (vms.manager, ssh_config) share one spelling
 # without a layering inversion.
 SYSTEM_SLUG_KEY = "system_slug"
@@ -215,7 +215,7 @@ def _load_legacy_toml() -> dict[str, Any]:
 
 
 def _migrate_vm_sites(conn: sqlite3.Connection, context: MigrationContext) -> None:
-    """v27 (vm-sites SDD): ``vms`` grows ``platform_metadata`` /
+    """v27 (the vm-site refactor): ``vms`` grows ``platform_metadata`` /
     ``operator_stopped`` / ``hostname``; remote-Lima rows re-point at
     their host-named site (printing ready-to-paste site manifests); the
     legacy per-platform columns and ``vm_hosts`` drop; ``settings``
@@ -223,7 +223,7 @@ def _migrate_vm_sites(conn: sqlite3.Connection, context: MigrationContext) -> No
     """
     from agentworks.vms.platforms import VM_PLATFORM_REGISTRY
 
-    # Validate BEFORE the first DDL statement. Pre-SDD schemas only
+    # Validate BEFORE the first DDL statement. Pre-v27 schemas only
     # ever stored the four legacy platform names, and the vm-sites
     # bridge refuses custom-site creates before this migration exists,
     # so anything else is genuine corruption: fail loudly, don't guess.
@@ -280,7 +280,7 @@ def _migrate_vm_sites(conn: sqlite3.Connection, context: MigrationContext) -> No
             (json.dumps(metadata), f"{platform}--{row['name']}", row["name"]),
         )
 
-    # Remote-Lima rows: the site IS the host (R3). The operator must
+    # Remote-Lima rows: the site IS the host. The operator must
     # declare the matching vm-site manifest; until then those VMs are
     # in the designed stranded state, so collect ready-to-paste
     # manifest documents and print them once at the end (the host ->
@@ -687,7 +687,7 @@ MIGRATIONS: dict[int, str | Callable[[sqlite3.Connection, MigrationContext], Non
         DROP TABLE workspaces;
         ALTER TABLE workspaces_new RENAME TO workspaces;
     """,
-    # -- vm-sites SDD: platform_metadata / operator_stopped / hostname, ----
+    # -- vm-sites: platform_metadata / operator_stopped / hostname, --------
     # -- the platform -> site rename, legacy column + vm_hosts drops, ------
     # -- and the settings table. Python step: the backfill dispatches ------
     # -- through the platform classes' legacy_platform_metadata hooks. -----
@@ -780,9 +780,17 @@ class Database:
         # momentarily invalidate FK references that hold by name -- the
         # SQLite-recommended pattern is to disable FKs around the rebuild
         # and run a foreign_key_check at the end to confirm consistency.
-        # Note: sqlite3 auto-commits DDL, so a mid-loop failure can leave
-        # the DB partially migrated. The foreign_key_check is best-effort
-        # consistency verification, not a full transactional guard.
+        #
+        # Each version commits as a durable checkpoint (schema_version
+        # row included): sqlite3 auto-commits DDL anyway, so a
+        # transactional whole-run guard was never real -- but WITHOUT
+        # the per-version commit, a failure in version N+1 rolled back
+        # version N's schema_version INSERT while N's DDL survived, and
+        # the retry re-ran N's DDL into duplicate-column errors. With
+        # the checkpoint, retry resumes at the failed version. A
+        # failure INSIDE one version can still leave that version
+        # partially applied (the documented residual; per-version
+        # pre-DDL validation in Python steps minimizes it).
         self._conn.commit()
         self._conn.execute("PRAGMA foreign_keys = OFF")
         try:
@@ -800,13 +808,14 @@ class Database:
                         stmt = stmt.strip()
                         if stmt:
                             self._conn.execute(stmt)
+                violations = self._conn.execute("PRAGMA foreign_key_check").fetchall()
+                if violations:
+                    raise sqlite3.IntegrityError(
+                        f"foreign key violations after migration {version}: "
+                        f"{violations}"
+                    )
                 self._conn.execute("INSERT INTO schema_version (version) VALUES (?)", (version,))
-            violations = self._conn.execute("PRAGMA foreign_key_check").fetchall()
-            if violations:
-                raise sqlite3.IntegrityError(
-                    f"foreign key violations after migration: {violations}"
-                )
-            self._conn.commit()
+                self._conn.commit()
         finally:
             self._conn.execute("PRAGMA foreign_keys = ON")
 

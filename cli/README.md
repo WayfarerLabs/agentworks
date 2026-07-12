@@ -101,24 +101,16 @@ exits with the conventional SIGINT exit code (130).
 | `agw completion install`   | Install the completion script in-place   |
 | `agw completion uninstall` | Remove installed completions for a shell |
 
-### VM Hosts
-
-Manage machines that host VMs (for remote Lima mode).
-
-| Command                             | Description              |
-| ----------------------------------- | ------------------------ |
-| `agw vm-host add <name> <ssh-host>` | Register a VM host       |
-| `agw vm-host list`                  | List registered VM hosts |
-| `agw vm-host remove <name>`         | Remove a VM host         |
-
-`vm-host remove` refuses if the host has VMs registered against it; pass `--force` to clear those
-VMs' `vm_host_name` reference and remove the host anyway. When the host has no VMs and you run
-without `--force` or `--yes`, the command prompts for confirmation. Both `--yes` and `--force` also
-bypass the confirmation prompt.
-
 ### VMs
 
-Manage virtual machines across Lima (local or remote), Azure, and WSL2.
+Manage virtual machines across declared vm-sites (Lima local or remote, Azure, WSL2, Proxmox).
+
+Where VMs are created is declared as `vm-site` resources: YAML manifests under
+`~/.config/agentworks/resources/` that pair a platform (the code that runs VMs on one backend kind)
+with its configuration. The `lima` and `wsl2` sites ship built in; run `agw resource sample vm-site`
+for commented, ready-to-edit examples (an Azure site, a remote-Lima site with
+`platform_config.vm_host`). The former `agw vm-host` registry is gone -- a remote Lima host is now
+just a vm-site.
 
 > **Note on WSL2:** WSL2 distros share the Windows workstation's lifecycle. They idle-shut after
 > ~60s of no `wsl.exe` activity (`vmIdleTimeout` in `.wslconfig`) and do not survive workstation
@@ -143,10 +135,17 @@ Manage virtual machines across Lima (local or remote), Azure, and WSL2.
 | `agw vm console <name>`                             | _Deprecated_: use `agw console`                               |
 | `agw vm add-git-credential <name> <cred>`           | Add or update a git credential                                |
 
-`vm create <name>` takes the VM name as a required positional. Optional flags: `--platform`,
-`--vm-host`, `--admin-username`, `--cpus`, `--memory`, `--disk`, and `--azure-vm-size`. These are
-immutable provisioning parameters stored in the database. All initialization behavior (packages,
-install commands, etc.) is driven by config.
+`vm create <name>` takes the VM name as a required positional. Optional flags: `--site` (a declared
+vm-site; defaults to the template's `site`, then `defaults.site`, then the built-in `lima`),
+`--admin-username`, `--cpus`, `--memory`, `--disk`, and `--azure-vm-size`. These are immutable
+provisioning parameters stored in the database. All initialization behavior (packages, install
+commands, etc.) is driven by config.
+
+The first interactive `vm create` asks once for an optional **system slug** (3-20 chars, lowercase
+alphanumeric plus dash): a short identifier for this agentworks installation, used to namespace VM
+hostnames and backend-side names (`{slug}-{vm-name}`) so installs sharing a cloud account, Proxmox
+cluster, or Windows/Mac user don't collide. Leave it blank if this install is the only one using its
+sites' backends; non-interactive runs never prompt.
 
 `vm reinit` re-runs the initialization phase using the current config without reprovisioning the VM.
 Changes to config (new packages, different install commands, etc.) are picked up automatically.
@@ -163,19 +162,20 @@ directory on this VM. The workspace's template env joins the env chain (between 
 into the workspace; the exec variant runs the command from the workspace directory. A workspace that
 lives on a different VM is rejected with a `ValidationError` before any SSH work.
 
-Combining `--workspace` with `--provisioner` works (the shell still `cd`s into the workspace) but
-the workspace's template env and the `AGENTWORKS_WORKSPACE` identity vars are not delivered: the
+Combining `--workspace` with `--platform` works (the shell still `cd`s into the workspace) but the
+workspace's template env and the `AGENTWORKS_WORKSPACE` identity vars are not delivered: the
 platform-native transports (`limactl shell`, `wsl.exe`) drop the `env=` kwarg by design. Treat
-`--provisioner` as a transport-repair escape hatch, not a routine combination.
+`--platform` as a transport-repair escape hatch, not a routine combination.
 
-`agw vm shell --provisioner` opens the same shell over the platform-native transport
-(`limactl shell` for Lima, `wsl.exe` for WSL2, SSH via a temporarily-attached public IP for Azure)
-instead of Tailscale. Useful when Tailscale itself is the thing you need to reach the VM to fix (the
-issue #117 latched DNS state is the canonical case: its heal involves restarting tailscaled, which
-would terminate a Tailscale-SSH session mid-sequence). On Azure, a public IP is attached for the
-duration of the session and detached on exit. Proxmox isn't supported by this flag because the QEMU
-guest agent's exec interface is one-shot and non-interactive; use the Proxmox web UI's serial
-console (`VM > Console` in the Proxmox VE web UI) as the equivalent escape hatch.
+`agw vm shell --platform` (legacy alias `--provisioner`, one release) opens the same shell over the
+platform-native transport (`limactl shell` for Lima, `wsl.exe` for WSL2, SSH via a
+temporarily-attached public IP for Azure) instead of Tailscale. Useful when Tailscale itself is the
+thing you need to reach the VM to fix (the issue #117 latched DNS state is the canonical case: its
+heal involves restarting tailscaled, which would terminate a Tailscale-SSH session mid-sequence). On
+Azure, a public IP is attached for the duration of the session and detached on exit. Proxmox isn't
+supported by this flag because the QEMU guest agent's exec interface is one-shot and
+non-interactive; use the Proxmox web UI's serial console (`VM > Console` in the Proxmox VE web UI)
+as the equivalent escape hatch.
 
 ### Workspaces
 
@@ -581,16 +581,21 @@ Settings sections (`config.toml`, permanent):
 
 - `[operator]` -- SSH keys (required), additional authorized keys, SSH config management
 - `[paths]` -- VM workspace, VS Code workspace file, and backup directories
-- `[defaults]` -- default platform, VM host
+- `[defaults]` -- `site`, the default vm-site for `vm create` (`platform` is the deprecated alias)
 - `[session.config]` -- session defaults (history limit)
 - `[secret_config]` -- active secret backend chain (`[secret_backends.*]` sections are deprecated
   no-ops; see Secret Backends below)
-- `[azure]` -- Azure-specific settings
-- `[proxmox]` -- Proxmox VE API settings
 
 Resource kinds (YAML manifests; the deprecated TOML section is noted for each):
 
-- `vm-template` (`[vm_templates.*]`) -- VM resources, apt packages, system install commands, mise
+- `vm-site` (`[azure]` / `[proxmox]`, flat legacy shape) -- a configured place to create VMs:
+  `spec.platform` names the backing platform, `spec.platform_config` carries its settings (Azure
+  subscription/resource-group/region, Proxmox API endpoint + token secret, remote-Lima `vm_host`).
+  The `lima` and `wsl2` sites ship built in and their names are reserved
+- `vm-platform` -- read-only capability rows for the in-tree platforms (lima, wsl2, azure, proxmox);
+  listed by `agw resource kinds`, never declared
+- `vm-template` (`[vm_templates.*]`) -- VM resources, apt packages, system install commands, mise,
+  and the target `site`
 - `admin-template` (`[admin.config]`) -- admin user shell, dotfiles, git credentials, user install
   commands, mise
 - `agent-template` (`[agent_templates.*]`) -- agent user shell, dotfiles, git credentials, user

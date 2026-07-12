@@ -575,7 +575,7 @@ def test_nested_creates_are_their_own_composition_units(
     ``values=`` or ``registry=`` through this seam to "save" a resolve,
     this test trips.
 
-    One deliberate carve-out (vm-sites SDD, Phase 3): the BOUND
+    One deliberate carve-out (the vm-sites bind-once design): the BOUND
     ``platform`` threads through. It is the command's one platform bind
     (prompt-once for site config secrets like the proxmox token) --
     a typed, site-scoped object, not the open-ended values/registry

@@ -79,7 +79,7 @@ def vm_stable_identity_env(ctx: ResourceContext) -> dict[str, str]:
     profile fragment so that any shell on the VM (including raw ssh logins)
     sees them.
 
-    Per the vm-sites SDD (R12): ``AGENTWORKS_PLATFORM`` keeps its name
+    ``AGENTWORKS_PLATFORM`` keeps its name
     and values (the capability name it has always carried);
     ``AGENTWORKS_SITE`` is new; ``AGENTWORKS_VM_HOST`` retired with the
     ``vm_hosts`` registry (the site name conveys the same information).

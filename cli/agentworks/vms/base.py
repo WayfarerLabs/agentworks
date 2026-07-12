@@ -6,8 +6,8 @@ wsl2, azure, proxmox). Platforms register in ``VM_PLATFORM_REGISTRY``
 (``agentworks.vms.platforms``) and publish as read-only ``vm-platform``
 capability resources; the declarable ``vm-site`` kind exposes a
 configured platform ("a place to create VMs"), and all invocation goes
-through site resolution (``agentworks.vms.sites``). See ADR 0016 and
-``docs/sdd/2026-07-01-vm-sites/``.
+through site resolution (``agentworks.vms.sites``). See ADR 0016 for
+the capability/declarable split.
 """
 
 from __future__ import annotations
@@ -155,7 +155,7 @@ class VMPlatform(ABC):
     def legacy_platform_metadata(
         cls, row: Mapping[str, Any], legacy: Mapping[str, Any]
     ) -> dict[str, str]:
-        """Map a pre-SDD ``vms`` row's legacy column values to this
+        """Map a pre-v27 ``vms`` row's legacy column values to this
         platform's ``platform_metadata`` conventions.
 
         Pure over its two inputs: ``row`` is the sqlite row mapping;
@@ -174,7 +174,7 @@ class VMPlatform(ABC):
 
         - Construct a backend-side name, using ``request.system_slug``
           as the namespacing token when set (else ``request.vm_name``).
-        - Pre-flight collision check (SDD R9): raise ``StateError`` with
+        - Pre-flight collision check: raise ``StateError`` with
           clear guidance when a resource with the intended name already
           exists (all four in-tree platforms; soft-name backends may
           auto-suffix instead).

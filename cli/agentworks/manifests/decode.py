@@ -35,7 +35,7 @@ if TYPE_CHECKING:
 # Kind identifier -> legacy TOML section name(s) (the migrator's table).
 # Every kind maps to exactly one section except vm-site, whose legacy
 # declarations are the two flat sections [azure] / [proxmox] with
-# section-name-becomes-resource-name semantics (vm-sites SDD R2).
+# section-name-becomes-resource-name semantics.
 KIND_SECTIONS: dict[str, tuple[str, ...]] = {
     "secret": ("secrets",),
     "vm-template": ("vm_templates",),

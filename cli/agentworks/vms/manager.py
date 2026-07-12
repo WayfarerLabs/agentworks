@@ -145,7 +145,7 @@ def _resolve_workspace_for_vm(
     return ws
 
 
-# -- System slug (SDD R4) ---------------------------------------------------
+# -- System slug --------------------------------------------------------
 
 _SLUG_PROMPT = (
     "A system slug uniquely identifies this agentworks installation. It "
@@ -157,7 +157,7 @@ _SLUG_PROMPT = (
 
 
 def validate_slug(slug: str) -> None:
-    """R4 slug format: 3-20 chars, lowercase alphanumeric plus dash, no
+    """Slug format: 3-20 chars, lowercase alphanumeric plus dash, no
     leading/trailing dash. Passes Azure's naming rules (the strictest
     we target), therefore passes all of them.
     """
@@ -170,7 +170,7 @@ def validate_slug(slug: str) -> None:
 
 
 def _resolve_system_slug(db: Database) -> tuple[str | None, bool]:
-    """R4: the install's slug, prompting once at first interactive
+    """The install's slug, prompting once at first interactive
     ``vm create``. Returns ``(slug, asked_now)``.
 
     The settings row distinguishes never-asked (absent) from declined
@@ -198,7 +198,7 @@ def _resolve_system_slug(db: Database) -> tuple[str | None, bool]:
 
 
 def _nudge_shared_backend_slug(db: Database, site_decl: VMSiteDecl) -> str | None:
-    """R4 deferred nudge: creating on a shared-backend site with a null
+    """Deferred nudge: creating on a shared-backend site with a null
     slug offers to set one now. Skipped entirely when non-interactive;
     ``never-remind-me`` writes a suppression flag in settings.
     Returns a newly set slug, or None.
@@ -211,7 +211,7 @@ def _nudge_shared_backend_slug(db: Database, site_decl: VMSiteDecl) -> str | Non
         return None
     if not site_shared_backend(site_decl):
         return None
-    # Single-line, default-yes prompt per FRD R4's quoted shape (Enter
+    # Single-line, default-yes prompt (Enter
     # accepts). Unrecognized input reads as "no": the nudge is
     # non-blocking and repeats on the next shared-backend create.
     answer = (
@@ -399,8 +399,8 @@ def create_vm(
 
     vm_tmpl = resolve_template(registry, template)
 
-    # Resolve the target site (SDD R2 precedence) and its declaration.
-    # An undeclared site fails here with the R3 ConfigError + manifest
+    # Resolve the target site and its declaration. An undeclared site
+    # fails here with the stranded-site ConfigError + manifest
     # hint, before any DB or backend work.
     from agentworks.vms.sites import lookup_site, select_site, site_secret_decls
 
@@ -432,7 +432,7 @@ def create_vm(
     providers = resolve_git_credential_providers(registry, admin.git_credentials)
     announce_git_credentials(providers)
 
-    # R4 system slug: first interactive create prompts once; a null
+    # System slug: first interactive create prompts once; a null
     # slug on a shared-backend site gets the deferred nudge. Both run
     # before any secret prompting or state mutation so an aborted slug
     # entry leaves nothing behind. When the full prompt just ran in
@@ -453,7 +453,7 @@ def create_vm(
         site_decls=site_secret_decls(site_decl, registry),
     )
 
-    # R11 hostname, computed once at create time and recorded on the
+    # The VM's OS hostname, computed once at create time and recorded on the
     # row: {slug}-{name} with a slug, the bare name without. Bounded by
     # construction: slug max 20 + dash + name max 30 = 51 characters,
     # inside the 63-char hostname-label and Azure 64-char limits.
@@ -648,7 +648,7 @@ def describe_vm(db: Database, config: Config, name: str) -> None:
 
     # Bind through the site so the platform (the site's capability) and
     # the backend-side identity render polymorphically. Describe is an
-    # inspection command and a stranded row (R3) is exactly the one an
+    # inspection command and a stranded row is exactly the one an
     # operator wants to look at, so a stranded site degrades to a
     # warning (with the manifest hint) rather than erroring: the row's
     # own fields still render.
@@ -684,13 +684,13 @@ def describe_vm(db: Database, config: Config, name: str) -> None:
     output.info(f"Backend:        {backend_label}")
     output.info(f"Status:         {status_label}")
     output.info(f"Hostname:       {vm.hostname}")
-    # R4: the slug never shows in normal CLI output (vm list stays
+    # The slug never shows in normal CLI output (vm list stays
     # name-only); describe and doctor are its surfaces. The slug is
     # install-level, so a VM created before it was set gets a marker --
     # its hostname and backend names carry no prefix.
     slug = db.get_setting(SYSTEM_SLUG_KEY) or None
     slug_label = slug or "-"
-    # Exact R11 comparison (the slug is immutable and the hostname is
+    # Exact hostname comparison (the slug is immutable and the hostname is
     # recorded as {slug}-{name}); a prefix test could false-negative on
     # a pre-slug VM whose name happens to start with the slug.
     if slug and vm.hostname != f"{slug}-{vm.name}":
@@ -1341,7 +1341,7 @@ def reinit_vm(
 
     vm = _require_vm(db, name)
 
-    # Bind before any secret collection: a stranded site (R3) fails
+    # Bind before any secret collection: a stranded site fails
     # here with the manifest hint instead of after git-token prompts.
     platform = bind_platform(config, vm, registry=registry)
 

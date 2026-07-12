@@ -340,8 +340,15 @@ def delete_agent(
     name: str,
     force: bool = False,
     yes: bool = False,
+    platform: VMPlatform | None = None,
 ) -> None:
-    """Delete an agent from a VM."""
+    """Delete an agent from a VM.
+
+    ``platform`` accepts the caller's already-bound platform (session
+    create's ephemeral ROLLBACK path) so a failed create on a
+    secret-bearing site doesn't re-run the resolve pass mid-rollback;
+    when None this function is its own composition root and binds once.
+    """
     agent = db.get_agent(name)
     if agent is None:
         raise NotFoundError(
@@ -375,7 +382,9 @@ def delete_agent(
     from agentworks.ssh import SSHLogger
     ssh_logger = SSHLogger(vm.name, "agent-delete")
     output.info(f"Deleting agent '{name}' on VM '{vm.name}'...")
-    with keep_active(db, config, vm, bind_platform(config, vm)):
+    if platform is None:
+        platform = bind_platform(config, vm)
+    with keep_active(db, config, vm, platform):
 
         # Kill running sessions for this agent (status-aware)
         if agent_sessions:

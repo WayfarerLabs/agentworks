@@ -910,8 +910,15 @@ def delete_workspace(
     *,
     force: bool = False,
     yes: bool = False,
+    platform: VMPlatform | None = None,
 ) -> None:
-    """Delete a workspace."""
+    """Delete a workspace.
+
+    ``platform`` accepts the caller's already-bound platform (session
+    create's ephemeral ROLLBACK path) so a failed create on a
+    secret-bearing site doesn't re-run the resolve pass mid-rollback;
+    when None this function is its own composition root and binds once.
+    """
 
     ws = db.get_workspace(name)
     if ws is None:
@@ -953,8 +960,10 @@ def delete_workspace(
     console_pairs: list[tuple[str, str]] = []
     with contextlib.ExitStack() as _keepalive_stack:
         if vm is not None:
+            if platform is None:
+                platform = bind_platform(config, vm)
             _keepalive_stack.enter_context(
-                keep_active(db, config, vm, bind_platform(config, vm))
+                keep_active(db, config, vm, platform)
             )
 
         if vm is not None and vm.tailscale_host is not None:

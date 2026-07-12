@@ -174,7 +174,7 @@ class AzurePlatform(VMPlatform):
         tailscale_auth_key = request.tailscale_auth_key
         ssh_pub_key = request.ssh_public_key
 
-        # SDD R5/R9: platform-owned naming with the slug as the
+        # Platform-owned naming with the slug as the
         # namespacing token; azure resource names are the primary
         # identifier, so a collision is an error.
         vm_name = (
@@ -383,7 +383,7 @@ class AzurePlatform(VMPlatform):
     def _vm_exists(
         compute: ComputeManagementClient, resource_group: str, vm_name: str
     ) -> bool:
-        """R9 pre-flight: does a VM with this name exist in the group?"""
+        """Pre-flight: does a VM with this name exist in the group?"""
         try:
             compute.virtual_machines.get(resource_group, vm_name)
         except Exception:

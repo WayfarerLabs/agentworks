@@ -456,7 +456,7 @@ class WSL2Platform(VMPlatform):
     def legacy_platform_metadata(
         cls, row: Mapping[str, Any], legacy: Mapping[str, Any]
     ) -> dict[str, str]:
-        # Pre-SDD rows recorded wsl_distro_name (always equal to the VM
+        # Pre-v27 rows recorded wsl_distro_name (always equal to the VM
         # name); read paths keyed off vm.name regardless. Either value
         # is the distro name for every existing row.
         distro = row["wsl_distro_name"] or row["name"]
@@ -479,7 +479,7 @@ class WSL2Platform(VMPlatform):
         return _keepalive(self._distro_name(vm), vm, config)
 
     def create(self, request: ProvisionRequest) -> ProvisionResult:
-        # SDD R5/R9: the platform owns the backend-side name; distro
+        # The platform owns the backend-side name; distro
         # names are the primary identifier, so a collision is an error.
         distro_name = (
             f"{request.system_slug}-{request.vm_name}"
@@ -631,7 +631,7 @@ class WSL2Platform(VMPlatform):
 
     @staticmethod
     def _distro_exists(distro_name: str) -> bool:
-        """R9 pre-flight: is a distro with this name already registered?"""
+        """Pre-flight: is a distro with this name already registered?"""
         try:
             listing = _wsl(["--list", "--quiet"], check=False)
         except (RuntimeError, OSError):

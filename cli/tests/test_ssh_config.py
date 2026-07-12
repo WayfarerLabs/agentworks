@@ -354,7 +354,7 @@ def test_legacy_rebuild_no_agents_no_per_agent_blocks(tmp_path: Path) -> None:
     assert "Host awagent--" not in content
 
 
-# -- R10: slug-named managed file --------------------------------------------
+# -- Slug-named managed file --------------------------------------------------
 
 
 def test_rebuild_config_dir_uses_slug_named_file(tmp_path: Path) -> None:

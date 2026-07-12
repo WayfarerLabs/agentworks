@@ -1482,7 +1482,10 @@ def create_session(
             try:
                 from agentworks.agents.manager import delete_agent
 
-                delete_agent(db, config, name=agent_name, force=True, yes=True)
+                delete_agent(
+                    db, config, name=agent_name, force=True, yes=True,
+                    platform=vm_platform,
+                )
             except Exception as e:
                 output.warn(
                     f"rollback: failed to delete ephemeral agent '{agent_name}': {e}. "
@@ -1492,7 +1495,10 @@ def create_session(
             try:
                 from agentworks.workspaces.manager import delete_workspace
 
-                delete_workspace(db, config, name=workspace_name, force=True, yes=True)
+                delete_workspace(
+                    db, config, name=workspace_name, force=True, yes=True,
+                    platform=vm_platform,
+                )
             except Exception as e:
                 output.warn(
                     f"rollback: failed to delete ephemeral workspace '{workspace_name}': {e}. "

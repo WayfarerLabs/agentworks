@@ -21,6 +21,7 @@
     "classmethods",
     "cmdline",
     "conftest",
+    "hostnames",
     "cpus",
     "creds",
     "cutover",

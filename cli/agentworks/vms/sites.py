@@ -117,7 +117,7 @@ def select_site(
     template_site: str | None,
     default_site: str | None,
 ) -> str:
-    """SDD R2 selection precedence for `vm create`: the explicit flag,
+    """Site selection precedence for `vm create`: the explicit flag,
     then the resolved template's site, then ``defaults.site``, then the
     built-in ``lima`` site.
     """
@@ -125,7 +125,7 @@ def select_site(
 
 
 def lookup_site(name: str, registry: Registry) -> VMSiteDecl:
-    """The site's declaration, or the R3 stranded ``ConfigError`` with
+    """The site's declaration, or the stranded-site ``ConfigError`` with
     the paste-ready manifest hint (e.g. a migrated remote-Lima row whose
     site manifest the operator has not added yet).
     """
@@ -167,7 +167,7 @@ def site_secret_decls(decl: VMSiteDecl, registry: Registry) -> list[SecretDecl]:
 
 def site_platform_name(site: str, registry: Registry) -> str:
     """The capability name backing ``site``, for consumers that surface
-    it (``AGENTWORKS_PLATFORM``, ``vm describe``). Same R3 stranded
+    it (``AGENTWORKS_PLATFORM``, ``vm describe``). Same stranded-site
     ``ConfigError`` as :func:`lookup_site` on an undeclared site.
     """
     return lookup_site(site, registry).platform
@@ -175,7 +175,7 @@ def site_platform_name(site: str, registry: Registry) -> str:
 
 def site_shared_backend(decl: VMSiteDecl) -> bool:
     """Whether the site's backend is plausibly shared between
-    agentworks installs (drives the R4 deferred slug nudge). Declared
+    agentworks installs (drives the deferred slug nudge). Declared
     by the platform; lima computes it from ``vm_host`` presence.
     """
     from agentworks.vms.platforms import VM_PLATFORM_REGISTRY

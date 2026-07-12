@@ -161,9 +161,9 @@ class ProxmoxPlatform(VMPlatform):
         pool = str(self._cfg("pool", "agentworks"))
         storage = str(self._cfg("storage", "local-lvm"))
 
-        # SDD R5: the platform owns the backend-side name. PVE names are
+        # The platform owns the backend-side name. PVE names are
         # soft (the vmid identifies), but a duplicate name is operator
-        # confusion worth surfacing (R9).
+        # confusion worth surfacing.
         backend_name = (
             f"{request.system_slug}-{request.vm_name}"
             if request.system_slug
@@ -267,7 +267,7 @@ class ProxmoxPlatform(VMPlatform):
         )
 
     def _name_exists(self, node: str, backend_name: str) -> bool:
-        """R9 pre-flight: does a VM with this name exist on the node?"""
+        """Pre-flight: does a VM with this name exist on the node?"""
         try:
             existing = self._api.list_vms(node)
         except ProxmoxAPIError:

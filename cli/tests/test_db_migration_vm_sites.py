@@ -1,4 +1,4 @@
-"""Migration v27 (vm-sites SDD): fixture databases at the prior schema
+"""Migration v27 (the vm-site refactor): fixture databases at the prior schema
 covering all four platforms plus remote-Lima rows, asserting the
 platform_metadata / hostname backfills, the platform -> site rename,
 the printed site-manifest snippets, the NOT NULL table rebuild, the
@@ -234,6 +234,61 @@ def test_remote_lima_site_name_collision_fails_loudly(tmp_path: Path) -> None:
     conn.close()
     with pytest.raises(sqlite3.IntegrityError, match="site name collision"):
         Database(db_path)
+
+
+def test_earlier_versions_checkpoint_when_a_later_one_fails(
+    tmp_path: Path,
+) -> None:
+    """Per-version commit checkpoints (Phase 6 hardening): when v27's
+    pre-DDL scan raises on a multi-version jump, the versions that
+    already ran stay recorded, so retry resumes at v27 instead of
+    re-running earlier DDL into duplicate-column errors."""
+    db_path = tmp_path / "jump.db"
+    # A v25 fixture: two migrations (26, 27) must run on open.
+    conn = sqlite3.connect(str(db_path))
+    conn.row_factory = sqlite3.Row
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS schema_version ("
+        "    version    INTEGER NOT NULL,"
+        "    applied_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))"
+        ")"
+    )
+    for version in range(1, 26):
+        step = MIGRATIONS[version]
+        assert isinstance(step, str)
+        for stmt in step.split(";"):
+            stmt = stmt.strip()
+            if stmt:
+                conn.execute(stmt)
+        conn.execute("INSERT INTO schema_version (version) VALUES (?)", (version,))
+    conn.execute(
+        "INSERT INTO vms (name, platform, admin_username) "
+        "VALUES ('xvm', 'mystery', 'admin')"
+    )
+    conn.commit()
+    conn.close()
+
+    with pytest.raises(sqlite3.IntegrityError, match="unknown platform 'mystery'"):
+        Database(db_path)
+
+    # v26 checkpointed despite v27's failure.
+    check = sqlite3.connect(str(db_path))
+    (recorded,) = check.execute("SELECT MAX(version) FROM schema_version").fetchone()
+    check.close()
+    assert recorded == 26
+
+    # Fix the row; retry resumes at v27 and completes.
+    fix = sqlite3.connect(str(db_path))
+    fix.execute("UPDATE vms SET platform = 'lima' WHERE name = 'xvm'")
+    fix.commit()
+    fix.close()
+    db = Database(db_path)
+    try:
+        vm = db.get_vm("xvm")
+        assert vm is not None
+        assert vm.site == "lima"
+    finally:
+        db.close()
 
 
 def test_fresh_database_lands_on_the_new_schema(tmp_path: Path) -> None:

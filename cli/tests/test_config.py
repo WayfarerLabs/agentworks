@@ -297,7 +297,7 @@ def test_extra_ssh_public_keys_defaults_empty(config_dir: Path) -> None:
 
 # -- Legacy [proxmox] vm-site tests (table-driven) ----------------------------
 # The section loads as the vm-site/proxmox resource (dual-path, vm-sites
-# SDD R2); the flat keys nest into platform_config at the boundary, and
+# semantics); the flat keys nest into platform_config at the boundary, and
 # the proxmox platform capability validates the assembled blob.
 
 _PROXMOX_TEST_CASES: list[dict[str, Any]] = [

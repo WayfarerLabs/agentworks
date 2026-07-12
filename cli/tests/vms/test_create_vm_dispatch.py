@@ -57,7 +57,7 @@ def test_create_vm_request_shape_and_row(
     monkeypatch: pytest.MonkeyPatch,
     captured_output: object,
 ) -> None:
-    """The bound lima platform receives the R11 request (bare-name
+    """The bound lima platform receives the provision request (bare-name
     hostname, null slug pre-Phase-4) and the returned platform_metadata
     persists verbatim."""
     from agentworks.vms.base import ProvisionRequest
@@ -84,7 +84,7 @@ def test_create_vm_request_shape_and_row(
 
     (request,) = captured_request
     assert request.vm_name == "dvm"
-    assert request.hostname == "dvm"  # R11 with no slug: the bare name
+    assert request.hostname == "dvm"  # no slug: the bare name
     assert request.system_slug is None
     assert request.cpus == 2
     assert request.ssh_public_key == "public ssh key"
@@ -143,7 +143,7 @@ def test_slug_resolution_precedes_secrets_and_insert(
     monkeypatch: pytest.MonkeyPatch,
     captured_output: object,
 ) -> None:
-    """R4 ordering: the slug prompt runs before the secret resolve pass
+    """Ordering: the slug prompt runs before the secret resolve pass
     and before the DB row exists, so an aborted slug entry leaves
     nothing behind."""
     order: list[str] = []

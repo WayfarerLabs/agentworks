@@ -116,7 +116,7 @@ def _legacy_rebuild(config: Config, db: Database) -> None:
 
 
 def _managed_conf_name(db: Database) -> str:
-    """R10 managed-file name: ``agentworks-{system_slug}.conf`` when the
+    """Managed-file name: ``agentworks-{system_slug}.conf`` when the
     install has a slug, the legacy ``agentworks.conf`` otherwise. The
     existing ``Include ~/.ssh/config.d/*`` directive matches both.
     """

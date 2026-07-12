@@ -87,6 +87,38 @@ sections are commented out in place with a `# migrated to ...` marker (or remove
 `--toml delete`), and every real run finishes by rebuilding the registry and verifying it is
 identical to the pre-migration one -- rolling back if not.
 
+## VM sites and platforms
+
+Where VMs are created is declared as `vm-site` resources -- "a configured place to create VMs". A
+site pairs a **platform** (the capability: the code that runs VMs on one backend kind) with that
+backend's configuration:
+
+```yaml
+apiVersion: agentworks/v1
+kind: vm-site
+metadata:
+  name: azure-dev
+spec:
+  platform: azure
+  platform_config:
+    subscription_id: "..."
+    resource_group: agentworks-vms
+    region: eastus2
+```
+
+- `spec.platform` names a `vm-platform` capability row (`lima`, `wsl2`, `azure`, `proxmox`);
+  `spec.platform_config` is validated by that platform (unknown keys are errors). Remote Lima is
+  just a lima site with `platform_config.vm_host: user@host`.
+- The `lima` and `wsl2` sites ship built in with empty config; their names are reserved. A site
+  named after a platform must declare that platform.
+- Consumers name sites everywhere: `agw vm create --site`, `vm-template.spec.site`, `defaults.site`
+  in config.toml, and each VM row's `site`.
+- Site config secrets ride the standard secret machinery: a Proxmox site references its API token as
+  the `proxmox-token-secret` secret (override with `token_secret`), auto-declared and resolved
+  through the backend chain like any other.
+- The legacy flat `[azure]` / `[proxmox]` TOML sections keep loading as deprecated vm-site
+  declarations; `agw resource migrate vm-site` moves them to manifests.
+
 ## Built-ins and overrides
 
 Built-in resources ship with the app and appear in `agw resource list --origin builtin`. Override
@@ -95,8 +127,12 @@ policy is per kind:
 - **Catalog kinds** (`apt-source`, `apt-package`, `system-install-command`, `user-install-command`):
   declaring the same name overrides the built-in -- the name is the interface, and same-name
   override is how you customize what `gh` installs.
-- **Secret backends** (`env-var`, `prompt`): registered capabilities, shown as read-only rows (see
-  Secrets below). You cannot override them by name; customize per secret via `backend_mappings`.
+- **Bundled vm-sites** (`lima`, `wsl2`): reserved names -- redeclaring one is an error; declare a
+  sibling site instead.
+- **Secret backends** (`env-var`, `prompt`) and **VM platforms** (`lima`, `wsl2`, `azure`,
+  `proxmox`): registered capabilities, shown as read-only rows. You cannot declare or override them;
+  secrets customize per secret via `backend_mappings`, platforms configure per site via
+  `platform_config`.
 
 ## Secrets: backends and the chain
 
@@ -125,5 +161,5 @@ agw resource describe secret/npm-token  # where it's referenced, what uses it
 agw doctor                              # health: would every secret resolve?
 ```
 
-The design rationale (the config/resource split, capability kinds, the vocabulary rules, and why
-dual sources are permanent) is recorded in ADR 0016.
+The design rationale (the config/resource split, capability kinds, the vocabulary rules, why dual
+sources are permanent, and the vm-site / vm-platform pair) is recorded in ADR 0016.

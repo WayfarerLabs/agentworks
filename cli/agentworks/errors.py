@@ -128,8 +128,8 @@ class ExternalError(AgentworksError):
 
 class ProvisioningError(ExternalError):
     """VM provisioning against a platform backend (Azure, Proxmox, Lima)
-    failed. Named for the activity; "provisioner" as a noun retired with
-    the vm-sites SDD (the class concept is now the VM platform).
+    failed. Named for the activity: "provisioner" as a noun is retired
+    (the class concept is the VM platform).
     """
 
 

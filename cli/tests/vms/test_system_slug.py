@@ -1,4 +1,4 @@
-"""R4 system slug: settings encoding, the one-shot first-create prompt
+"""System slug: settings encoding, the one-shot first-create prompt
 (including non-interactive), the deferred shared-backend nudge with its
 suppression flag, and the slug format bounds.
 """
@@ -37,7 +37,7 @@ def test_validate_slug_bounds() -> None:
 
 
 def test_slug_prompt_matches_the_frd_text() -> None:
-    """Pin the operator-facing wording against FRD R4's quoted prompt."""
+    """Pin the operator-facing prompt wording (drift is user-visible)."""
     assert vm_manager._SLUG_PROMPT == (
         "A system slug uniquely identifies this agentworks installation. "
         "It is used to namespace VMs and other resources so this install "
@@ -155,7 +155,7 @@ def test_nudge_never_remind_me_suppresses(
 def test_nudge_default_yes_on_enter_then_sets_the_slug(
     db: Database, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """FRD R4's [Y/n/never-remind-me] shape: Enter accepts, then the
+    """The [Y/n/never-remind-me] shape: Enter accepts, then the
     full slug prompt runs."""
     monkeypatch.setattr("agentworks.output.is_interactive", lambda: True)
     prompt, seen = _prompt_script(["", "team-a"])

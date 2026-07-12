@@ -85,7 +85,7 @@ class LimaPlatform(VMPlatform):
     def legacy_platform_metadata(
         cls, row: Mapping[str, Any], legacy: Mapping[str, Any]
     ) -> dict[str, str]:
-        # Pre-SDD Lima ops keyed off vm.name directly; the instance name
+        # Legacy Lima ops keyed off vm.name directly; the instance name
         # IS the VM name for every existing row.
         return {"instance_name": str(row["name"])}
 
@@ -154,8 +154,8 @@ class LimaPlatform(VMPlatform):
         disk = request.disk_gib if request.disk_gib is not None else 50
         swap = request.swap_gib if request.swap_gib is not None else 0
 
-        # SDD R5: the platform owns the backend-side name; the slug is
-        # the namespacing token. R9: pre-flight collision check (lima
+        # The platform owns the backend-side name; the slug is
+        # the namespacing token. Pre-flight collision check (lima
         # instance names are the primary identifier -- error, never
         # suffix).
         instance_name = (
@@ -240,7 +240,7 @@ class LimaPlatform(VMPlatform):
         )
 
     def _instance_exists(self, instance_name: str) -> bool:
-        """R9 pre-flight: does a Lima instance with this name exist?"""
+        """Pre-flight: does a Lima instance with this name exist?"""
         try:
             listing = self._run_lima(
                 f"limactl list --json {instance_name}", check=False

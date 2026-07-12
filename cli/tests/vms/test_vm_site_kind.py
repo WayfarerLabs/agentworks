@@ -53,7 +53,7 @@ def test_decode_nests_platform_config(tmp_path: Path) -> None:
 
 
 def test_site_names_follow_the_vm_name_rules(tmp_path: Path) -> None:
-    """FRD R2: site names appear in hostnames and SSH aliases, so they
+    """Site names appear in hostnames and SSH aliases, so they
     obey validate_name (lowercase, length cap, no double hyphen)."""
     doc = SITE_DOC.replace("name: azure-dev", "name: MY_Site_With_A_Very_Long_Name_Indeed")
     (tmp_path / "site.yaml").write_text(doc)
@@ -67,7 +67,7 @@ def test_site_names_follow_the_vm_name_rules(tmp_path: Path) -> None:
 
 
 def test_platform_named_site_must_declare_that_platform(tmp_path: Path) -> None:
-    """FRD R2: `vm-site/azure` backed by lima would make `--site azure`
+    """A site `vm-site/azure` backed by lima would make `--site azure`
     mean something other than it says."""
     doc = (
         "apiVersion: agentworks/v1\n"

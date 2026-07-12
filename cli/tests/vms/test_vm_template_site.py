@@ -114,7 +114,7 @@ def test_inheritance_later_parent_clobbers_scalar() -> None:
 
 
 def test_select_site_precedence() -> None:
-    """SDD R2: flag, then template, then defaults.site, then lima."""
+    """Selection precedence: flag, then template, then defaults.site, then lima."""
     assert select_site("flagged", "templated", "defaulted") == "flagged"
     assert select_site(None, "templated", "defaulted") == "templated"
     assert select_site(None, None, "defaulted") == "defaulted"

@@ -160,8 +160,9 @@ def _check_vm_platforms() -> HealthGroup:
 
 def _check_vm_sites(registry: Registry) -> HealthGroup:
     """VM sites: declared rows, the install slug, and every VM's site
-    resolving to a declaration (a stranded remote-Lima row reports its
-    paste-ready manifest snippet per SDD R3).
+    resolving to a declaration. A stranded row (e.g. a migrated
+    remote-Lima VM whose site manifest the operator has not added yet)
+    reports its paste-ready manifest snippet.
     """
     from agentworks.db import SYSTEM_SLUG_KEY, Database
     from agentworks.vms.sites import VMSiteDecl, site_manifest_hint

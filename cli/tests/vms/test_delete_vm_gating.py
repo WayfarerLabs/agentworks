@@ -112,7 +112,7 @@ def test_logout_failure_does_not_skip_delete(
 def test_bind_failure_warns_with_hint_and_still_deletes_row(
     db: Database, monkeypatch: pytest.MonkeyPatch, captured_output: CapturedOutput
 ) -> None:
-    """A stranded site (R3) degrades: backend cleanup is skipped with
+    """A stranded site degrades: backend cleanup is skipped with
     the manifest hint rendered, the DB row still goes."""
     _seed(db)
 
