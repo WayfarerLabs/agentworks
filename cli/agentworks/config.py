@@ -143,6 +143,11 @@ class PathsConfig:
 class DefaultsConfig:
     platform: str | None = None
     vm_host: str | None = None
+    # Verify git credential tokens against the provider API at
+    # provisioning entry (before anything is created). Definitive
+    # rejection (401) aborts; network indeterminacy only warns. Off for
+    # airgapped setups.
+    verify_git_tokens: bool = True
 
 
 @dataclass(frozen=True)
@@ -526,7 +531,7 @@ def _load_paths(data: dict[str, object]) -> PathsConfig:
     return PathsConfig(vm_workspaces=vm_ws, vscode_workspaces=vscode_ws, backups=backups)
 
 
-_DEFAULTS_KEYS = {"platform", "vm_host"}
+_DEFAULTS_KEYS = {"platform", "vm_host", "verify_git_tokens"}
 
 
 def _load_defaults(data: dict[str, object], issues: list[str]) -> DefaultsConfig:
@@ -549,6 +554,7 @@ def _load_defaults(data: dict[str, object], issues: list[str]) -> DefaultsConfig
     return DefaultsConfig(
         platform=str(platform) if platform is not None else None,
         vm_host=str(raw["vm_host"]) if "vm_host" in raw else None,
+        verify_git_tokens=bool(raw.get("verify_git_tokens", True)),
     )
 
 

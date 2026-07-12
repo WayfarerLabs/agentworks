@@ -13,14 +13,57 @@ any other secret.
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, ClassVar
 
 from agentworks.errors import ConfigError
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
+    from datetime import date
 
     from agentworks.resources.reference import ConfigReference
+
+
+def _http_probe(
+    url: str, headers: dict[str, str], *, timeout: float = 5.0
+) -> tuple[int, bytes, dict[str, str]]:
+    """GET ``url``; returns (status, body, lowercased-headers).
+
+    HTTP error statuses are returned, not raised; network-level
+    failures raise ``OSError`` (URLError subclasses it) for the caller
+    to treat as indeterminate.
+    """
+    from urllib import error, request
+
+    req = request.Request(url, headers=headers)
+    try:
+        with request.urlopen(req, timeout=timeout) as resp:  # noqa: S310
+            return (
+                resp.status,
+                resp.read(),
+                {k.lower(): v for k, v in resp.headers.items()},
+            )
+    except error.HTTPError as exc:
+        body = exc.read() if hasattr(exc, "read") else b""
+        return (exc.code, body, {k.lower(): v for k, v in exc.headers.items()})
+
+
+@dataclass(frozen=True)
+class TokenInfo:
+    """The provider-acquired token plus what acquisition learned.
+
+    ``verified`` means the provider confirmed the token against its
+    service; ``login`` and ``expires_at`` are best-effort extras the
+    verification response exposed (displayed by provisioning output and
+    doctor -- deliberately NOT wired to the advisory
+    ``metadata.expires``, which is general resource metadata).
+    """
+
+    token: str
+    login: str | None = None
+    expires_at: date | None = None
+    verified: bool = False
 
 
 class GitCredentialProvider(ABC):
@@ -80,6 +123,29 @@ class GitCredentialProvider(ABC):
     @property
     def secret_name(self) -> str:
         return self._secret_name or f"git-token-{self._config_name}"
+
+    def acquire_token(self, resolved_secret: str) -> TokenInfo:
+        """Turn the resolved token secret into THE token to provision.
+
+        The transformation seam: today the implementations verify the
+        mapped secret's value against the provider's API and return it
+        enriched (login, expiry); tomorrow a minting provider can
+        override to EXCHANGE a bootstrap secret for a fresh token --
+        "today validates, tomorrow fetches" -- without touching the
+        framework's secret resolution, which stays upstream (eager
+        resolve at manager entry, prompt fallback, doctor prediction).
+
+        Error policy (maintainer ruling): a DEFINITIVE rejection by the
+        service raises ``TokenRejectedError`` -- callers invoke this at
+        provisioning ENTRY, before anything is created, so failing is
+        safe; if acquisition ever moves mid-flow, the caller must
+        downgrade to warn. Network indeterminacy (timeouts, DNS, 5xx)
+        never raises: warn and return unverified.
+
+        Base behavior: identity, unverified (providers without a
+        verification endpoint).
+        """
+        return TokenInfo(token=resolved_secret)
 
     @property
     def store_username(self) -> str:

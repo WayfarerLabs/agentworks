@@ -338,3 +338,39 @@ def stub_build_registry(monkeypatch: pytest.MonkeyPatch) -> None:
         "agentworks.secrets.resolve_for_command",
     ):
         monkeypatch.setattr(site, _stub_resolve_for_command)
+
+
+@pytest.fixture(autouse=True)
+def _no_network_token_verification(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The suite must never reach the real network. Token verification
+    probes (git credential acquire_token) hit provider APIs in
+    production; here any unmocked probe raises OSError, which the
+    providers treat as network indeterminacy (warn + continue
+    unverified) -- so unrelated tests keep passing while never leaving
+    the process. Verification tests monkeypatch ``_http_probe`` (or
+    ``acquire_token``) with their own fakes, overriding this guard.
+    """
+
+    def _refuse(*_a: object, **_k: object) -> object:
+        raise OSError("network disabled in tests")
+
+    monkeypatch.setattr(
+        "agentworks.git_credentials.base._http_probe", _refuse
+    )
+
+
+@pytest.fixture(autouse=True)
+def _isolated_database(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """The suite must never touch the operator's real database. Several
+    CLI tests isolate CONFIG_PATH but the module-level DB_PATH default
+    still pointed at the live DB -- used-by counts in `resource list`
+    were silently querying it (and started crashing the moment the
+    operator's DB schema moved ahead of this branch). Every test gets a
+    fresh empty DB path; fixtures that build explicit DB state pass
+    their own path and are unaffected.
+    """
+    monkeypatch.setattr(
+        "agentworks.db.DB_PATH", tmp_path / "isolated-test.db"
+    )

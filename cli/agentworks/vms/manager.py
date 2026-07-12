@@ -1405,10 +1405,34 @@ def _collect_git_tokens(
         decls.append(_lookup_or_synthesize_secret(registry, cred.token))
 
     resolved = resolve_for_command([], config, registry, extra_decls=decls)
-    return {
+    tokens = {
         cred_name: resolved[token_name]
         for cred_name, token_name in token_name_for.items()
     }
+
+    # Verification at ENTRY (maintainer ruling): this collector runs at
+    # manager entry, before any user/VM mutation, so a definitive
+    # rejection (TokenRejectedError) is safe to let abort -- nothing to
+    # recover. If collection ever moves mid-flow, downgrade to warn.
+    # Network indeterminacy never raises (acquire_token warns).
+    if config.defaults.verify_git_tokens:
+        from agentworks.vms.initializer import resolve_git_credential_providers
+
+        providers = resolve_git_credential_providers(registry, names)
+        for cred_name, provider in providers.items():
+            info = provider.acquire_token(tokens[cred_name])
+            tokens[cred_name] = info.token
+            if info.verified:
+                extras = []
+                if info.login:
+                    extras.append(f"login {info.login}")
+                if info.expires_at is not None:
+                    extras.append(f"expires {info.expires_at.isoformat()}")
+                suffix = f" ({', '.join(extras)})" if extras else ""
+                output.detail(
+                    f"  Verified git token for '{cred_name}'{suffix}"
+                )
+    return tokens
 
 
 def _lookup_or_synthesize_secret(registry: Registry, name: str) -> SecretDecl:

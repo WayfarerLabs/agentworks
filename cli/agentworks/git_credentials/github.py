@@ -14,10 +14,11 @@ which would break every unscoped credential.
 from __future__ import annotations
 
 import re
+from datetime import date
 from typing import TYPE_CHECKING
 
 from agentworks.errors import ConfigError
-from agentworks.git_credentials.base import GitCredentialProvider
+from agentworks.git_credentials.base import GitCredentialProvider, TokenInfo
 
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
@@ -87,6 +88,17 @@ def _validated_scope(
     return (repos, org if isinstance(org, str) else None)
 
 
+def _parse_expiration(raw: str | None) -> date | None:
+    """The header value looks like ``2026-10-01 17:24:32 UTC``; take the
+    date prefix, tolerating absence and format drift."""
+    if not raw or len(raw) < 10:
+        return None
+    try:
+        return date.fromisoformat(raw[:10])
+    except ValueError:
+        return None
+
+
 class GitHubCredentialProvider(GitCredentialProvider):
     """Configures git credentials for GitHub via a personal access token.
 
@@ -118,6 +130,68 @@ class GitHubCredentialProvider(GitCredentialProvider):
         super().__init__(config_name, description, secret_name=secret_name)
         self._repos = tuple(repos)
         self._owner = owner
+
+    def acquire_token(self, resolved_secret: str) -> TokenInfo:
+        """Verify the PAT against ``GET /user``.
+
+        200 -> verified TokenInfo enriched with the login and (for
+        fine-grained PATs) the ``github-authentication-token-expiration``
+        header. 401 -> definitive rejection. Anything else (rate
+        limits, 5xx, network failure) -> indeterminate: warn, return
+        unverified.
+        """
+        import json
+
+        from agentworks import output
+        from agentworks.errors import TokenRejectedError
+        from agentworks.git_credentials.base import _http_probe
+
+        try:
+            status, body, headers = _http_probe(
+                "https://api.github.com/user",
+                {
+                    "Authorization": f"Bearer {resolved_secret}",
+                    "Accept": "application/vnd.github+json",
+                    "User-Agent": "agentworks",
+                },
+            )
+        except OSError as exc:
+            output.warn(
+                f"could not verify git credential {self._config_name!r} "
+                f"(network: {exc}); continuing unverified"
+            )
+            return TokenInfo(token=resolved_secret)
+        if status == 401:
+            raise TokenRejectedError(
+                f"GitHub rejected the token for git credential "
+                f"{self._config_name!r} (secret {self.secret_name!r})",
+                entity_kind="git-credential",
+                entity_name=self._config_name,
+                hint=(
+                    "Check the secret's value: expired, revoked, or "
+                    "mistyped? Set [defaults] verify_git_tokens = false "
+                    "to skip verification."
+                ),
+            )
+        if status != 200:
+            output.warn(
+                f"could not verify git credential {self._config_name!r} "
+                f"(GitHub answered {status}); continuing unverified"
+            )
+            return TokenInfo(token=resolved_secret)
+        login: str | None = None
+        try:
+            parsed = json.loads(body.decode("utf-8"))
+            if isinstance(parsed, dict) and isinstance(parsed.get("login"), str):
+                login = parsed["login"]
+        except (ValueError, UnicodeDecodeError):
+            pass
+        expires = _parse_expiration(
+            headers.get("github-authentication-token-expiration")
+        )
+        return TokenInfo(
+            token=resolved_secret, login=login, expires_at=expires, verified=True
+        )
 
     @property
     def store_username(self) -> str:

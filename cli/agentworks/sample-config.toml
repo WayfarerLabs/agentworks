@@ -56,6 +56,9 @@ ssh_private_key = "~/.ssh/id_ed25519"        # required: used for SSH connection
 [defaults]
 #platform = "lima"                          # lima, azure, or wsl2
 #vm_host = "mac-studio"                     # default VM host for remote Lima
+#verify_git_tokens = true                   # verify git tokens against the provider API at
+                                            # provisioning entry and in doctor; rejection aborts
+                                            # before anything is created (false for airgapped)
 
 # --- Named-console settings ---
 # Scope: this section applies only to named multi-session consoles created

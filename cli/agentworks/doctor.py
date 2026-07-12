@@ -281,7 +281,78 @@ def _check_config() -> tuple[HealthGroup, Config | None, Registry | None]:
         else:
             g.warn("Admin dotfiles", f"source missing: {admin.dotfiles_source}")
 
+    _check_git_tokens(g, config, registry)
+
     return g, config, registry
+
+
+def _check_git_tokens(g: HealthGroup, config: Config, registry: Registry) -> None:
+    """Verify git credential tokens against their provider APIs.
+
+    Doctor never prompts, so only tokens resolvable non-interactively
+    (an env var, set right now) are verified; the rest get a skipped
+    row. A definitive rejection is a fail row (the token IS broken);
+    network indeterminacy surfaces as the provider's warning plus an
+    unverified note. Gated on [defaults] verify_git_tokens, like the
+    provisioning-entry check.
+    """
+    if not config.defaults.verify_git_tokens:
+        return
+    creds = list(registry.iter_kind("git-credential"))
+    if not creds:
+        return
+
+    import os
+
+    from agentworks.errors import TokenRejectedError
+    from agentworks.secrets.env_var import env_var_name_for
+    from agentworks.vms.initializer import resolve_git_credential_providers
+
+    providers = resolve_git_credential_providers(
+        registry, [cred.name for cred in creds]
+    )
+    for cred in creds:
+        provider = providers.get(cred.name)
+        if provider is None:
+            continue
+        var = env_var_name_for(cred.token)
+        try:
+            decl = registry.lookup("secret", cred.token)
+            mapping = decl.backend_mappings.get("env-var")
+        except KeyError:
+            mapping = None
+        if mapping is False:
+            g.info(
+                f"Git token '{cred.name}'",
+                "verification skipped (env-var backend opted out)",
+            )
+            continue
+        if isinstance(mapping, str):
+            var = mapping
+        value = os.environ.get(var)
+        if value is None:
+            g.info(
+                f"Git token '{cred.name}'",
+                f"verification skipped (token not in ${var}; doctor never prompts)",
+            )
+            continue
+        try:
+            info = provider.acquire_token(value)
+        except TokenRejectedError as e:
+            g.fail(f"Git token '{cred.name}'", str(e), hint=e.hint)
+            continue
+        if info.verified:
+            extras = []
+            if info.login:
+                extras.append(f"login {info.login}")
+            if info.expires_at is not None:
+                extras.append(f"expires {info.expires_at.isoformat()}")
+            g.ok(
+                f"Git token '{cred.name}'",
+                ", ".join(extras) or "verified",
+            )
+        else:
+            g.info(f"Git token '{cred.name}'", "unverified (network)")
 
 
 def _check_ssh_key(g: HealthGroup, path: object, label: str) -> None:
