@@ -425,8 +425,8 @@ def test_resolution_preview_not_available_when_no_backend_attempts(
     )
     config = load_config(cfg, warn_issues=False)
 
+    from agentworks.capabilities import vm_platform as vm_platforms
     from agentworks.manifests import builtin as builtin_manifests
-    from agentworks.vms import platforms as vm_platforms
 
     registry = Registry.empty()
     builtin_manifests.publish_to(registry)

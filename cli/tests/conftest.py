@@ -364,7 +364,7 @@ class _StubRegistry:
             # Serve the built-in same-named sites so bind_platform /
             # lookup_site work against namespace configs (a stubbed
             # test VM's site is one of the four platform names).
-            from agentworks.vms.platforms import VM_PLATFORM_REGISTRY
+            from agentworks.capabilities.vm_platform import VM_PLATFORM_REGISTRY
             from agentworks.vms.sites import VMSiteDecl
 
             if name not in VM_PLATFORM_REGISTRY:

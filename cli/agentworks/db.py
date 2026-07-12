@@ -221,7 +221,7 @@ def _migrate_vm_sites(conn: sqlite3.Connection, context: MigrationContext) -> No
     legacy per-platform columns and ``vm_hosts`` drop; ``settings``
     lands.
     """
-    from agentworks.vms.platforms import VM_PLATFORM_REGISTRY
+    from agentworks.capabilities.vm_platform import VM_PLATFORM_REGISTRY
 
     # Name the DB file in validation errors so the operator knows which
     # file to inspect/fix (PRAGMA reports the actual attached file, so

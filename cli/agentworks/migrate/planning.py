@@ -476,7 +476,7 @@ def _emit_document(doc: tomlkit.TOMLDocument, unit: MigrationUnit) -> str:
         # blob pre-write in the operator's TOML vocabulary, mirroring
         # the git-credential branch: an unvalidated emission would only
         # fail the post-run verification after files were written.
-        from agentworks.vms.platforms import VM_PLATFORM_REGISTRY
+        from agentworks.capabilities.vm_platform import VM_PLATFORM_REGISTRY
 
         platform = unit.section
         rebuilt_site: dict[str, Any] = {"platform": platform}

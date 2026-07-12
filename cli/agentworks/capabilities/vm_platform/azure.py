@@ -7,13 +7,13 @@ import contextlib
 from typing import TYPE_CHECKING, Any, ClassVar, Protocol
 
 from agentworks import output
+from agentworks.capabilities.vm_platform.base import ProvisionRequest, ProvisionResult, VMPlatform
+from agentworks.capabilities.vm_platform.bootstrap_script import generate_bootstrap_script
+from agentworks.capabilities.vm_platform.cloud_init import PROVISIONING_PACKAGES, generate_cloud_init
 from agentworks.db import VMStatus
 from agentworks.errors import ConfigError, ProvisioningError, StateError
 from agentworks.ssh import SSHError
 from agentworks.transports import SSHTransport
-from agentworks.vms.base import ProvisionRequest, ProvisionResult, VMPlatform
-from agentworks.vms.bootstrap_script import generate_bootstrap_script
-from agentworks.vms.cloud_init import PROVISIONING_PACKAGES, generate_cloud_init
 
 if TYPE_CHECKING:
     from collections.abc import Iterator, Mapping

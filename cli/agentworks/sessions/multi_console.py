@@ -45,6 +45,7 @@ from agentworks.vms.manager import bind_platform, ensure_active
 if TYPE_CHECKING:
     from collections.abc import Iterator, Mapping
 
+    from agentworks.capabilities.vm_platform import VMPlatform
     from agentworks.config import Config
     from agentworks.db import (
         ConsoleRow,
@@ -57,7 +58,6 @@ if TYPE_CHECKING:
     from agentworks.resources.registry import Registry
     from agentworks.secrets import SecretTarget
     from agentworks.transports import Transport
-    from agentworks.vms.base import VMPlatform
 
 TMUX_PREFIX = "aw-console-"
 

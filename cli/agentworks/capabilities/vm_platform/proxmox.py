@@ -8,13 +8,13 @@ import urllib.parse
 from typing import TYPE_CHECKING, Any, ClassVar
 
 from agentworks import output
+from agentworks.capabilities.vm_platform.base import ProvisionRequest, ProvisionResult, VMPlatform
+from agentworks.capabilities.vm_platform.bootstrap_script import generate_bootstrap_script
+from agentworks.capabilities.vm_platform.cloud_init import PROVISIONING_PACKAGES
+from agentworks.capabilities.vm_platform.proxmox_api import ProxmoxAPI, ProxmoxAPIError
 from agentworks.db import VMStatus
 from agentworks.errors import ConfigError, StateError
 from agentworks.transports import SSHTransport
-from agentworks.vms.base import ProvisionRequest, ProvisionResult, VMPlatform
-from agentworks.vms.bootstrap_script import generate_bootstrap_script
-from agentworks.vms.cloud_init import PROVISIONING_PACKAGES
-from agentworks.vms.platforms.proxmox_api import ProxmoxAPI, ProxmoxAPIError
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -375,7 +375,7 @@ class ProxmoxPlatform(VMPlatform):
 
         Returns the Tailscale IP if bootstrap succeeds, None otherwise.
         """
-        from agentworks.vms.bootstrap_script import parse_bootstrap_output
+        from agentworks.capabilities.vm_platform.bootstrap_script import parse_bootstrap_output
 
         # Write script to VM via guest agent file-write
         self._api.guest_agent_file_write(

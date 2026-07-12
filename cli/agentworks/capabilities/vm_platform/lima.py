@@ -11,14 +11,14 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, ClassVar
 
 from agentworks import output
+from agentworks.capabilities.vm_platform.base import ProvisionRequest, ProvisionResult, VMPlatform
+from agentworks.capabilities.vm_platform.bootstrap_script import generate_bootstrap_script, parse_bootstrap_output
+from agentworks.capabilities.vm_platform.cloud_init import PROVISIONING_PACKAGES
 from agentworks.db import VMStatus
 from agentworks.errors import ConfigError, StateError
 from agentworks.ssh import SSHError, SSHTarget, copy_to
 from agentworks.ssh import run as ssh_run
 from agentworks.transports import LimaTransport, RemoteLimaTransport, SSHTransport
-from agentworks.vms.base import ProvisionRequest, ProvisionResult, VMPlatform
-from agentworks.vms.bootstrap_script import generate_bootstrap_script, parse_bootstrap_output
-from agentworks.vms.cloud_init import PROVISIONING_PACKAGES
 
 if TYPE_CHECKING:
     from collections.abc import Mapping

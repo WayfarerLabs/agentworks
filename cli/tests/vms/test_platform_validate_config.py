@@ -7,15 +7,15 @@ from __future__ import annotations
 
 import pytest
 
-from agentworks.errors import ConfigError
-from agentworks.vms.platforms import VM_PLATFORM_REGISTRY
-from agentworks.vms.platforms.azure import AzurePlatform
-from agentworks.vms.platforms.lima import LimaPlatform
-from agentworks.vms.platforms.proxmox import (
+from agentworks.capabilities.vm_platform import VM_PLATFORM_REGISTRY
+from agentworks.capabilities.vm_platform.azure import AzurePlatform
+from agentworks.capabilities.vm_platform.lima import LimaPlatform
+from agentworks.capabilities.vm_platform.proxmox import (
     DEFAULT_TOKEN_SECRET,
     ProxmoxPlatform,
 )
-from agentworks.vms.platforms.wsl2 import WSL2Platform
+from agentworks.capabilities.vm_platform.wsl2 import WSL2Platform
+from agentworks.errors import ConfigError
 
 AZURE_CONFIG = {
     "subscription_id": "0000",

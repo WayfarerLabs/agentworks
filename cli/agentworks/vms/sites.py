@@ -20,13 +20,13 @@ from agentworks.source_location import SourceLocation, synthesized
 if TYPE_CHECKING:
     from collections.abc import Mapping
 
+    from agentworks.capabilities.vm_platform import VMPlatform
     from agentworks.config import Config
     from agentworks.db import VMRow
     from agentworks.resources.origin import Origin
     from agentworks.resources.reference import ReferenceEntry, ResourceReference
     from agentworks.resources.registry import Registry
     from agentworks.secrets.base import SecretDecl
-    from agentworks.vms.base import VMPlatform
 
 
 @dataclass(frozen=True)
@@ -68,7 +68,7 @@ class VMSiteDecl:
         # Capability-implied references: the platform validates its
         # config block and returns the references it implies; this
         # resource (the config block's owner) attributes them to itself.
-        from agentworks.vms.platforms import VM_PLATFORM_REGISTRY
+        from agentworks.capabilities.vm_platform import VM_PLATFORM_REGISTRY
 
         capability = VM_PLATFORM_REGISTRY.get(self.platform)
         if capability is not None:
@@ -151,7 +151,7 @@ def site_secret_decls(decl: VMSiteDecl, registry: Registry) -> list[SecretDecl]:
     secret rows are guaranteed present (same stance as
     ``resolve_site``'s unconditional index).
     """
-    from agentworks.vms.platforms import VM_PLATFORM_REGISTRY
+    from agentworks.capabilities.vm_platform import VM_PLATFORM_REGISTRY
 
     capability = VM_PLATFORM_REGISTRY[decl.platform]  # edge validated at finalize
     decls: list[SecretDecl] = []
@@ -178,7 +178,7 @@ def site_shared_backend(decl: VMSiteDecl) -> bool:
     agentworks installs (drives the deferred slug nudge). Declared
     by the platform; lima computes it from ``vm_host`` presence.
     """
-    from agentworks.vms.platforms import VM_PLATFORM_REGISTRY
+    from agentworks.capabilities.vm_platform import VM_PLATFORM_REGISTRY
 
     capability = VM_PLATFORM_REGISTRY[decl.platform]  # edge validated at finalize
     return capability.shared_backend(decl.platform_config)
@@ -197,7 +197,7 @@ def resolve_site(
     Manager code holds the bound platform and never sees
     ``VM_PLATFORM_REGISTRY`` or platform classes.
     """
-    from agentworks.vms.platforms import VM_PLATFORM_REGISTRY
+    from agentworks.capabilities.vm_platform import VM_PLATFORM_REGISTRY
 
     decl = lookup_site(name, registry)
     platform_cls = VM_PLATFORM_REGISTRY[decl.platform]  # edge validated at finalize

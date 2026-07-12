@@ -35,10 +35,10 @@ from agentworks.transports.wsl2 import WSL2Transport
 if TYPE_CHECKING:
     import contextlib
 
+    from agentworks.capabilities.vm_platform import VMPlatform
     from agentworks.config import Config
     from agentworks.db import AgentRow, VMRow
     from agentworks.ssh import SSHLogger
-    from agentworks.vms.base import VMPlatform
 
 
 __all__ = [

@@ -145,23 +145,6 @@ KIND_REGISTRY["admin-template"] = _AdminTemplateKind()
 
 
 @dataclass(frozen=True)
-class VMPlatformEntry:
-    """A name-keyed marker for one VM platform capability (``"lima"``,
-    ``"azure"``, ...).
-
-    The actual platform class (``LimaPlatform``, ``AzurePlatform``)
-    lives in ``agentworks.vms.platforms``; this row is what
-    ``vm-site`` ``spec.platform`` references resolve against in the
-    framework.
-    """
-
-    name: str
-    description: str = ""
-    origin: Origin | None = None
-    references: tuple[Any, ...] = ()
-
-
-@dataclass(frozen=True)
 class _VMPlatformKind:
     """Implementation of ``ResourceKind`` for ``"vm-platform"``."""
 

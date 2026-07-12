@@ -1,4 +1,4 @@
-"""The vm-platform capability registry.
+"""The vm-platform capability: code that runs VMs on one backend kind.
 
 ``VM_PLATFORM_REGISTRY`` holds the code behind the read-only
 ``vm-platform`` capability resources: one :class:`VMPlatform` subclass
@@ -11,16 +11,35 @@ imports this registry or the concrete classes.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from dataclasses import dataclass
+from typing import TYPE_CHECKING, Any
 
-from agentworks.vms.platforms.azure import AzurePlatform
-from agentworks.vms.platforms.lima import LimaPlatform
-from agentworks.vms.platforms.proxmox import ProxmoxPlatform
-from agentworks.vms.platforms.wsl2 import WSL2Platform
+from agentworks.capabilities.vm_platform.azure import AzurePlatform
+from agentworks.capabilities.vm_platform.base import (
+    ProvisionRequest,
+    ProvisionResult,
+    VMPlatform,
+)
+from agentworks.capabilities.vm_platform.lima import LimaPlatform
+from agentworks.capabilities.vm_platform.proxmox import ProxmoxPlatform
+from agentworks.capabilities.vm_platform.wsl2 import WSL2Platform
 
 if TYPE_CHECKING:
+    from agentworks.resources.origin import Origin
     from agentworks.resources.registry import Registry
-    from agentworks.vms.base import VMPlatform
+
+__all__ = [
+    "VM_PLATFORM_REGISTRY",
+    "AzurePlatform",
+    "LimaPlatform",
+    "ProvisionRequest",
+    "ProvisionResult",
+    "ProxmoxPlatform",
+    "VMPlatform",
+    "VMPlatformEntry",
+    "WSL2Platform",
+    "publish_to",
+]
 
 VM_PLATFORM_REGISTRY: dict[str, type[VMPlatform]] = {
     LimaPlatform.name: LimaPlatform,
@@ -32,6 +51,24 @@ VM_PLATFORM_REGISTRY: dict[str, type[VMPlatform]] = {
 their own capability resources with plugin origins)."""
 
 
+@dataclass(frozen=True)
+class VMPlatformEntry:
+    """A name-keyed marker for one VM platform capability (``"lima"``,
+    ``"azure"``, ...).
+
+    The actual platform class (``LimaPlatform``, ``AzurePlatform``)
+    lives beside this in ``agentworks.capabilities.vm_platform``; this
+    row is what ``vm-site`` ``spec.platform`` references resolve against
+    in the framework. Lives with the capability (not ``vms/kinds.py``)
+    so publishing never imports the consuming domain.
+    """
+
+    name: str
+    description: str = ""
+    origin: Origin | None = None
+    references: tuple[Any, ...] = ()
+
+
 def publish_to(registry: Registry) -> None:
     """Publish one ``vm-platform`` capability resource per registered
     platform, ``built-in`` origin. Read-only rows: ``vm-site``
@@ -39,9 +76,8 @@ def publish_to(registry: Registry) -> None:
     the platforms list/describe like every other resource.
     """
     from agentworks.resources import Origin
-    from agentworks.vms.kinds import VMPlatformEntry
 
-    origin = Origin.built_in(source="agentworks.vms")
+    origin = Origin.built_in(source="agentworks.capabilities.vm_platform")
     for name, platform_cls in VM_PLATFORM_REGISTRY.items():
         registry.add(
             "vm-platform",

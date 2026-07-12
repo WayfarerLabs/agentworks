@@ -22,10 +22,10 @@ from agentworks.vms.manager import bind_platform, keep_active
 from agentworks.workspaces.templates import resolve_template
 
 if TYPE_CHECKING:
+    from agentworks.capabilities.vm_platform import VMPlatform
     from agentworks.config import Config
     from agentworks.db import Database, VMRow, WorkspaceRow
     from agentworks.transports import Transport
-    from agentworks.vms.base import VMPlatform
 
 
 def create_workspace(

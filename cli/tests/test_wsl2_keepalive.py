@@ -15,8 +15,8 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from agentworks.vms.base import VMPlatform
-from agentworks.vms.platforms.wsl2 import WSL2Platform
+from agentworks.capabilities.vm_platform import VMPlatform
+from agentworks.capabilities.vm_platform.wsl2 import WSL2Platform
 
 
 def _fake_vm(name: str = "wsltest", tailscale_host: str | None = None) -> Any:
@@ -54,14 +54,14 @@ def _job_object_mocks(*, create_returns: int | None = 0xABCD, assign_returns: bo
     """
     with (
         patch(
-            "agentworks.vms.platforms.wsl2._create_kill_on_close_job",
+            "agentworks.capabilities.vm_platform.wsl2._create_kill_on_close_job",
             return_value=create_returns,
         ) as create,
         patch(
-            "agentworks.vms.platforms.wsl2._assign_process_to_job",
+            "agentworks.capabilities.vm_platform.wsl2._assign_process_to_job",
             return_value=assign_returns,
         ) as assign,
-        patch("agentworks.vms.platforms.wsl2._close_handle") as close,
+        patch("agentworks.capabilities.vm_platform.wsl2._close_handle") as close,
     ):
         yield create, assign, close
 
@@ -70,7 +70,7 @@ def test_vm_active_spawns_keepalive_subprocess() -> None:
     """Entering vm_active spawns `wsl --distribution NAME -- sleep infinity`."""
     proc = _running_proc()
     with (
-        patch("agentworks.vms.platforms.wsl2.subprocess.Popen", return_value=proc) as popen,
+        patch("agentworks.capabilities.vm_platform.wsl2.subprocess.Popen", return_value=proc) as popen,
         _job_object_mocks(),
         WSL2Platform("wsl2", {}).vm_active(_fake_vm("mydistro"))
     ):
@@ -94,7 +94,7 @@ def test_vm_active_terminates_on_exception() -> None:
     """If the wrapped block raises, the keepalive is still cleaned up."""
     proc = _running_proc()
     with (
-        patch("agentworks.vms.platforms.wsl2.subprocess.Popen", return_value=proc),
+        patch("agentworks.capabilities.vm_platform.wsl2.subprocess.Popen", return_value=proc),
         _job_object_mocks(),
         pytest.raises(RuntimeError, match="boom"),
         WSL2Platform("wsl2", {}).vm_active(_fake_vm())
@@ -117,7 +117,7 @@ def test_vm_active_kills_if_terminate_doesnt_take() -> None:
         None,
     ]
     with (
-        patch("agentworks.vms.platforms.wsl2.subprocess.Popen", return_value=proc),
+        patch("agentworks.capabilities.vm_platform.wsl2.subprocess.Popen", return_value=proc),
         _job_object_mocks(),
         WSL2Platform("wsl2", {}).vm_active(_fake_vm())
     ):
@@ -139,7 +139,7 @@ def test_vm_active_fast_fails_if_keepalive_subprocess_dies_immediately() -> None
     proc.stderr = MagicMock()
     proc.stderr.read.return_value = b"wsl: distro not found\n"
     with (
-        patch("agentworks.vms.platforms.wsl2.subprocess.Popen", return_value=proc),
+        patch("agentworks.capabilities.vm_platform.wsl2.subprocess.Popen", return_value=proc),
         _job_object_mocks(),
         pytest.raises(RuntimeError, match="exited immediately"),
         WSL2Platform("wsl2", {}).vm_active(_fake_vm("missing-distro")),
@@ -156,7 +156,7 @@ def test_vm_active_closes_stderr_on_normal_exit() -> None:
     subprocess's fd doesn't outlive the keepalive context."""
     proc = _running_proc()
     with (
-        patch("agentworks.vms.platforms.wsl2.subprocess.Popen", return_value=proc),
+        patch("agentworks.capabilities.vm_platform.wsl2.subprocess.Popen", return_value=proc),
         _job_object_mocks(),
         WSL2Platform("wsl2", {}).vm_active(_fake_vm()),
     ):
@@ -181,7 +181,7 @@ def test_vm_active_cleanup_tolerates_already_dead_subprocess() -> None:
     proc.wait.side_effect = [subprocess.TimeoutExpired(cmd="wsl", timeout=0.5), None]
     proc.terminate.side_effect = ProcessLookupError("no such process")
     with (
-        patch("agentworks.vms.platforms.wsl2.subprocess.Popen", return_value=proc),
+        patch("agentworks.capabilities.vm_platform.wsl2.subprocess.Popen", return_value=proc),
         _job_object_mocks(),
         WSL2Platform("wsl2", {}).vm_active(_fake_vm()),
     ):
@@ -197,9 +197,9 @@ def test_vm_active_waits_for_tailscale_when_host_known() -> None:
     fake_target = MagicMock()
     fake_config = MagicMock()
     with (
-        patch("agentworks.vms.platforms.wsl2.subprocess.Popen", return_value=proc),
-        patch("agentworks.vms.platforms.wsl2.transport", return_value=fake_target) as build,
-        patch("agentworks.vms.platforms.wsl2.wait_for_reconnect") as wait,
+        patch("agentworks.capabilities.vm_platform.wsl2.subprocess.Popen", return_value=proc),
+        patch("agentworks.capabilities.vm_platform.wsl2.transport", return_value=fake_target) as build,
+        patch("agentworks.capabilities.vm_platform.wsl2.wait_for_reconnect") as wait,
         _job_object_mocks(),
     ):
         vm = _fake_vm(tailscale_host="100.64.0.5")
@@ -213,9 +213,9 @@ def test_vm_active_skips_tailscale_wait_when_host_unknown() -> None:
     """Pre-bootstrap: no tailscale_host, no wait, no SSH config build."""
     proc = _running_proc()
     with (
-        patch("agentworks.vms.platforms.wsl2.subprocess.Popen", return_value=proc),
-        patch("agentworks.vms.platforms.wsl2.transport") as build,
-        patch("agentworks.vms.platforms.wsl2.wait_for_reconnect") as wait,
+        patch("agentworks.capabilities.vm_platform.wsl2.subprocess.Popen", return_value=proc),
+        patch("agentworks.capabilities.vm_platform.wsl2.transport") as build,
+        patch("agentworks.capabilities.vm_platform.wsl2.wait_for_reconnect") as wait,
         _job_object_mocks(),
     ):
         with WSL2Platform("wsl2", {}).vm_active(_fake_vm(tailscale_host=None), config=MagicMock()):
@@ -228,9 +228,9 @@ def test_vm_active_skips_tailscale_wait_when_config_missing() -> None:
     """Even with a known host, no config means we can't build an SSH target."""
     proc = _running_proc()
     with (
-        patch("agentworks.vms.platforms.wsl2.subprocess.Popen", return_value=proc),
-        patch("agentworks.vms.platforms.wsl2.transport") as build,
-        patch("agentworks.vms.platforms.wsl2.wait_for_reconnect") as wait,
+        patch("agentworks.capabilities.vm_platform.wsl2.subprocess.Popen", return_value=proc),
+        patch("agentworks.capabilities.vm_platform.wsl2.transport") as build,
+        patch("agentworks.capabilities.vm_platform.wsl2.wait_for_reconnect") as wait,
         _job_object_mocks(),
     ):
         with WSL2Platform("wsl2", {}).vm_active(_fake_vm(tailscale_host="100.64.0.5"), config=None):
@@ -246,7 +246,7 @@ def test_vm_active_assigns_subprocess_to_kill_on_close_job() -> None:
     proc = _running_proc()
     proc._handle = 0xDEAD
     with (
-        patch("agentworks.vms.platforms.wsl2.subprocess.Popen", return_value=proc),
+        patch("agentworks.capabilities.vm_platform.wsl2.subprocess.Popen", return_value=proc),
         _job_object_mocks(create_returns=0xBEEF) as (create, assign, close),
         WSL2Platform("wsl2", {}).vm_active(_fake_vm())
     ):
@@ -265,7 +265,7 @@ def test_vm_active_closes_job_handle_on_fast_fail() -> None:
     proc.stderr = MagicMock()
     proc.stderr.read.return_value = b""
     with (
-        patch("agentworks.vms.platforms.wsl2.subprocess.Popen", return_value=proc),
+        patch("agentworks.capabilities.vm_platform.wsl2.subprocess.Popen", return_value=proc),
         _job_object_mocks(create_returns=0xBEEF) as (_create, _assign, close),
         pytest.raises(RuntimeError, match="exited immediately"),
         WSL2Platform("wsl2", {}).vm_active(_fake_vm()),
@@ -283,7 +283,7 @@ def test_vm_active_falls_back_when_job_object_unavailable() -> None:
     """
     proc = _running_proc()
     with (
-        patch("agentworks.vms.platforms.wsl2.subprocess.Popen", return_value=proc),
+        patch("agentworks.capabilities.vm_platform.wsl2.subprocess.Popen", return_value=proc),
         _job_object_mocks(create_returns=None) as (create, assign, close),
         WSL2Platform("wsl2", {}).vm_active(_fake_vm())
     ):
@@ -302,7 +302,7 @@ def test_vm_active_releases_job_when_assignment_fails() -> None:
     proc = _running_proc()
     proc._handle = 0xDEAD
     with (
-        patch("agentworks.vms.platforms.wsl2.subprocess.Popen", return_value=proc),
+        patch("agentworks.capabilities.vm_platform.wsl2.subprocess.Popen", return_value=proc),
         _job_object_mocks(create_returns=0xBEEF, assign_returns=False) as (create, assign, close),
         WSL2Platform("wsl2", {}).vm_active(_fake_vm()),
     ):
@@ -341,7 +341,7 @@ def test_base_platform_vm_active_is_nullcontext() -> None:
             raise NotImplementedError
 
     # Patch Popen at the wsl2 module level; the base default must NOT touch it.
-    with patch("agentworks.vms.platforms.wsl2.subprocess.Popen") as popen:
+    with patch("agentworks.capabilities.vm_platform.wsl2.subprocess.Popen") as popen:
         with _Stub("stub", {}).vm_active(_fake_vm()):
             pass
         popen.assert_not_called()

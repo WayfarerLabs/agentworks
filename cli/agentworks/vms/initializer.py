@@ -19,6 +19,8 @@ from collections.abc import Callable
 from typing import TYPE_CHECKING
 
 from agentworks import output
+from agentworks.capabilities.vm_platform.cloud_init import INIT_SYSTEM_PACKAGES, PROVISIONING_PACKAGES
+from agentworks.capabilities.vm_platform.skel import BASHRC, ZSHRC
 from agentworks.db import InitStatus, ProvisioningStatus
 from agentworks.env import (
     ResourceContext,
@@ -30,19 +32,17 @@ from agentworks.transports import (
     SSHTransport,
     Transport,
 )
-from agentworks.vms.cloud_init import INIT_SYSTEM_PACKAGES, PROVISIONING_PACKAGES
-from agentworks.vms.skel import BASHRC, ZSHRC
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
 
+    from agentworks.capabilities.vm_platform import VMPlatform
     from agentworks.catalog import AptSourceEntry, SystemInstallCommandEntry, UserInstallCommandEntry
     from agentworks.config import Config
     from agentworks.db import Database
     from agentworks.git_credentials.base import GitCredentialProvider
     from agentworks.resources.registry import Registry
     from agentworks.vms.admin import AdminConfig
-    from agentworks.vms.base import VMPlatform
     from agentworks.vms.templates import ResolvedVMTemplate
 
 
@@ -806,7 +806,7 @@ def _preserve_ssh_host_keys(
     """
     from pathlib import PurePosixPath
 
-    from agentworks.vms.bootstrap_script import SSH_PRESERVE_KEYS_LINES, SSH_PRESERVE_KEYS_PATH
+    from agentworks.capabilities.vm_platform.bootstrap_script import SSH_PRESERVE_KEYS_LINES, SSH_PRESERVE_KEYS_PATH
 
     logger.step("Preserve SSH host keys")
     output.detail("Ensuring SSH host key preservation...")
@@ -1520,7 +1520,7 @@ def _run_bootstrap_script(
     """
     import tempfile
 
-    from agentworks.vms.bootstrap_script import generate_bootstrap_script, parse_bootstrap_output
+    from agentworks.capabilities.vm_platform.bootstrap_script import generate_bootstrap_script, parse_bootstrap_output
 
     output.info("Bootstrapping VM...")
 

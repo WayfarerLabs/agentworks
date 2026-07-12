@@ -6,10 +6,10 @@ from pathlib import Path
 
 import pytest
 
+from agentworks.capabilities import vm_platform as vm_platforms
 from agentworks.errors import ConfigError
 from agentworks.manifests.loader import load_manifests
 from agentworks.resources import KIND_REGISTRY, Registry
-from agentworks.vms import platforms as vm_platforms
 
 
 def test_kind_flags() -> None:

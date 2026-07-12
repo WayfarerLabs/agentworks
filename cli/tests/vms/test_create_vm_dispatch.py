@@ -11,10 +11,10 @@ from typing import TYPE_CHECKING
 
 import pytest
 
+from agentworks.capabilities.vm_platform import ProvisionResult
 from agentworks.config import load_config
 from agentworks.errors import ProvisioningError
 from agentworks.vms import manager as vm_manager
-from agentworks.vms.base import ProvisionResult
 
 if TYPE_CHECKING:
     from agentworks.db import Database
@@ -60,8 +60,8 @@ def test_create_vm_request_shape_and_row(
     """The bound lima platform receives the provision request (bare-name
     hostname, null slug pre-Phase-4) and the returned platform_metadata
     persists verbatim."""
-    from agentworks.vms.base import ProvisionRequest
-    from agentworks.vms.platforms.lima import LimaPlatform
+    from agentworks.capabilities.vm_platform import ProvisionRequest
+    from agentworks.capabilities.vm_platform.lima import LimaPlatform
 
     config = make_config()
     captured_request: list[ProvisionRequest] = []
@@ -108,8 +108,8 @@ def test_create_vm_composes_r11_hostname_with_slug(
     """With a slug set, the hostname is {slug}-{name} and the slug
     rides the ProvisionRequest (no first-create prompt fires: the
     settings row exists)."""
-    from agentworks.vms.base import ProvisionRequest
-    from agentworks.vms.platforms.lima import LimaPlatform
+    from agentworks.capabilities.vm_platform import ProvisionRequest
+    from agentworks.capabilities.vm_platform.lima import LimaPlatform
 
     config = make_config()
     db.set_setting("system_slug", "team-a")
@@ -224,7 +224,7 @@ def test_proxmox_token_resolves_end_to_end(
     (env-var backend under the AW_SECRET_ convention) and reaches the
     bound platform via secret_values -- there is no raw
     PROXMOX_TOKEN_SECRET env fallback."""
-    from agentworks.vms.platforms.proxmox import ProxmoxPlatform
+    from agentworks.capabilities.vm_platform.proxmox import ProxmoxPlatform
 
     config = make_config(PROXMOX_SECTION)
     monkeypatch.setenv("AW_SECRET_PROXMOX_TOKEN_SECRET", "pve-token-value")

@@ -16,7 +16,7 @@ from __future__ import annotations
 import shlex
 from dataclasses import dataclass, field
 
-from agentworks.vms.skel import BASHRC, ZSHRC
+from agentworks.capabilities.vm_platform.skel import BASHRC, ZSHRC
 
 # Canonical cloud-init drop-in that stops host-key regeneration on stop/start.
 # By default cloud-init may delete and regenerate /etc/ssh/ssh_host_* on some

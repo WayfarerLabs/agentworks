@@ -13,10 +13,10 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, ClassVar
 
 from agentworks import output
+from agentworks.capabilities.vm_platform.base import ProvisionRequest, ProvisionResult, VMPlatform
 from agentworks.db import VMStatus
 from agentworks.errors import StateError
 from agentworks.transports import WSL2Transport, transport, wait_for_reconnect
-from agentworks.vms.base import ProvisionRequest, ProvisionResult, VMPlatform
 
 if TYPE_CHECKING:
     from collections.abc import Iterator, Mapping

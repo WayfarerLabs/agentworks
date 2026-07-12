@@ -1085,7 +1085,7 @@ def _load_vm_sites_legacy(
     capability validates the assembled blob so errors carry config
     vocabulary and the implied secret references derive at finalize.
     """
-    from agentworks.vms.platforms import VM_PLATFORM_REGISTRY
+    from agentworks.capabilities.vm_platform import VM_PLATFORM_REGISTRY
     from agentworks.vms.sites import VMSiteDecl
 
     sites: dict[str, VMSiteDecl] = {}

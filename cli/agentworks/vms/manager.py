@@ -38,6 +38,7 @@ from agentworks.vms.initializer import (
 if TYPE_CHECKING:
     from collections.abc import Iterable, Iterator
 
+    from agentworks.capabilities.vm_platform import VMPlatform
     from agentworks.config import Config
     from agentworks.db import Database, VMRow, WorkspaceRow
     from agentworks.env import EnvEntry
@@ -45,7 +46,6 @@ if TYPE_CHECKING:
     from agentworks.resources import Registry
     from agentworks.secrets import SecretTarget
     from agentworks.secrets.base import SecretDecl
-    from agentworks.vms.base import VMPlatform
     from agentworks.vms.sites import VMSiteDecl
     from agentworks.vms.templates import ResolvedVMTemplate
 
@@ -488,7 +488,7 @@ def create_vm(
 
     # Bind the site's platform ONCE with the resolved config secrets
     # and dispatch (the HLA composition-root ordering).
-    from agentworks.vms.base import ProvisionRequest
+    from agentworks.capabilities.vm_platform import ProvisionRequest
     from agentworks.vms.sites import resolve_site
 
     platform_obj = resolve_site(site, registry, secret_values=secret_values)

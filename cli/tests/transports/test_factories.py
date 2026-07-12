@@ -197,7 +197,7 @@ def test_native_transport_none_raises_typed_state_error() -> None:
     """A ``None`` from the platform (proxmox: one-shot guest-agent exec
     can't host a shell) becomes a ``StateError`` carrying the platform's
     own console hint (``no_native_transport_hint``)."""
-    from agentworks.vms.platforms.proxmox import ProxmoxPlatform
+    from agentworks.capabilities.vm_platform.proxmox import ProxmoxPlatform
 
     vm = _mock_vm(site="proxmox")
     config = _mock_config()

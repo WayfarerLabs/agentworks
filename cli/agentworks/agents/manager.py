@@ -20,6 +20,7 @@ from agentworks.vms.manager import bind_platform, keep_active
 
 if TYPE_CHECKING:
     from agentworks.agents.templates import ResolvedAgentTemplate
+    from agentworks.capabilities.vm_platform import VMPlatform
     from agentworks.catalog import UserInstallCommandEntry
     from agentworks.config import Config
     from agentworks.db import AgentRow, Database, VMRow, WorkspaceRow
@@ -28,7 +29,6 @@ if TYPE_CHECKING:
     from agentworks.secrets import SecretTarget
     from agentworks.ssh import SSHLogger
     from agentworks.transports import Transport
-    from agentworks.vms.base import VMPlatform
 
 AGENT_PREFIX = "agt-"
 WS_GROUP_PREFIX = "ws-"

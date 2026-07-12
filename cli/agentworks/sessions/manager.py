@@ -42,6 +42,7 @@ _KNOWN_TEMPLATE_VARS = {"session_name", "workspace_name"}
 if TYPE_CHECKING:
     from collections.abc import Mapping
 
+    from agentworks.capabilities.vm_platform import VMPlatform
     from agentworks.config import Config
     from agentworks.db import AgentRow, Database, SessionRow, VMRow, WorkspaceRow
     from agentworks.env import EnvEntry
@@ -51,7 +52,6 @@ if TYPE_CHECKING:
     from agentworks.sessions.tmux import RunCommand
     from agentworks.ssh import SSHLogger
     from agentworks.transports import Transport
-    from agentworks.vms.base import VMPlatform
 
 
 # -- Helpers ---------------------------------------------------------------

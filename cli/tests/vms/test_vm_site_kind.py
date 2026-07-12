@@ -181,8 +181,8 @@ def test_bundled_sites_are_reserved(tmp_path: Path) -> None:
 
 
 def test_bundled_sites_finalize_against_the_platform_rows() -> None:
+    from agentworks.capabilities import vm_platform as vm_platforms
     from agentworks.manifests import builtin as builtin_manifests
-    from agentworks.vms import platforms as vm_platforms
 
     registry = Registry.empty()
     builtin_manifests.publish_to(registry)

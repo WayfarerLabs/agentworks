@@ -108,9 +108,9 @@ def test_doctor_vm_sites_defers_on_pending_migration(
     into the report and stealing the Database group's deliberate
     migration row); the group defers with a pointer instead."""
     from agentworks import doctor
+    from agentworks.capabilities import vm_platform as vm_platforms
     from agentworks.manifests import builtin as builtin_manifests
     from agentworks.resources import Registry
-    from agentworks.vms import platforms as vm_platforms
 
     registry = Registry.empty()
     builtin_manifests.publish_to(registry)
@@ -141,9 +141,9 @@ def test_doctor_vm_sites_group(
     """Declared sites report ok; the slug row shows; a stranded VM row
     fails with the paste-ready manifest hint."""
     from agentworks import doctor
+    from agentworks.capabilities import vm_platform as vm_platforms
     from agentworks.manifests import builtin as builtin_manifests
     from agentworks.resources import Registry
-    from agentworks.vms import platforms as vm_platforms
 
     registry = Registry.empty()
     builtin_manifests.publish_to(registry)

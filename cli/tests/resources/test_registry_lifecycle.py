@@ -252,8 +252,8 @@ def test_build_registry_equivalent_to_manual_steps(example_config: Path) -> None
     """
     from agentworks import secrets
     from agentworks.bootstrap import build_registry
+    from agentworks.capabilities import vm_platform as vm_platforms
     from agentworks.manifests import builtin as builtin_manifests
-    from agentworks.vms import platforms as vm_platforms
 
     cfg = load_config(example_config, warn_issues=False)
 

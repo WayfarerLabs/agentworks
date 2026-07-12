@@ -73,7 +73,7 @@ def test_no_site_secrets_skips_the_resolve_pass(
 def test_secret_bearing_site_resolves_exactly_once(
     make_config, resolve_counter: list[object]
 ) -> None:
-    from agentworks.vms.platforms.proxmox import ProxmoxPlatform
+    from agentworks.capabilities.vm_platform.proxmox import ProxmoxPlatform
 
     config = make_config(PROXMOX_SECTION)
     platform = vm_manager.bind_platform(config, _vm("v1", "proxmox"))  # type: ignore[arg-type]

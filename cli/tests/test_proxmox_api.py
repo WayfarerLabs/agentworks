@@ -10,7 +10,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from agentworks.vms.platforms.proxmox_api import ProxmoxAPI, ProxmoxAPIError
+from agentworks.capabilities.vm_platform.proxmox_api import ProxmoxAPI, ProxmoxAPIError
 
 
 @pytest.fixture()

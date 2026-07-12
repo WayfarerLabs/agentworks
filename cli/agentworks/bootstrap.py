@@ -49,10 +49,10 @@ def build_registry(config: Config, manifests: ManifestSet | None = None) -> Regi
     ``ManifestSet`` (e.g. ``ManifestSet.empty()``) to skip the auto-load.
     """
     from agentworks import catalog, git_credentials, output, secrets
+    from agentworks.capabilities import vm_platform as vm_platforms
     from agentworks.errors import StateError
     from agentworks.manifests import RESOURCES_DIRNAME, load_manifests
     from agentworks.manifests import builtin as builtin_manifests
-    from agentworks.vms import platforms as vm_platforms
     from agentworks.vms import sites as vm_sites
 
     if not config.resources_loaded:

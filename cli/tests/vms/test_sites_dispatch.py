@@ -8,12 +8,12 @@ from types import SimpleNamespace
 
 import pytest
 
+from agentworks.capabilities import vm_platform as vm_platforms
+from agentworks.capabilities.vm_platform.lima import LimaPlatform
+from agentworks.capabilities.vm_platform.proxmox import ProxmoxPlatform
 from agentworks.errors import ConfigError, StateError
 from agentworks.manifests import builtin as builtin_manifests
 from agentworks.resources import Origin, Registry
-from agentworks.vms import platforms as vm_platforms
-from agentworks.vms.platforms.lima import LimaPlatform
-from agentworks.vms.platforms.proxmox import ProxmoxPlatform
 from agentworks.vms.sites import (
     VMSiteDecl,
     platform_for,

@@ -279,7 +279,7 @@ def _decode_vm_site(doc: Document, spec: dict[str, object], issues: list[str]) -
     # Capability validation on the TRUE blob, with this document's
     # file:line in the error. Unknown platform names defer to the
     # framework's miss policy at finalize.
-    from agentworks.vms.platforms import VM_PLATFORM_REGISTRY
+    from agentworks.capabilities.vm_platform import VM_PLATFORM_REGISTRY
 
     # FRD R2: a site named after a known platform must declare that
     # platform -- `vm-site/azure` backed by lima would make every
