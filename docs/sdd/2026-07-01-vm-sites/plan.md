@@ -79,6 +79,21 @@ Phase 5.
   delete cleans up -- can no longer abort before the backend delete), `UserAbort` at a bind prompt
   aborts the whole delete, and the bind-failure warn carries the R3 manifest hint; all pinned by a
   new `test_delete_vm_gating.py` suite.
+- **2026-07-11, Phase 4 review round: prompt fidelity and three recorded rulings.** The reviewer
+  caught that `TyperHandler.prompt` neither translated Ctrl-C to the typed `UserAbort` (every other
+  interactive method does) nor suppressed the noisy `[]` empty-default suffix -- both fixed at the
+  handler -- and that the nudge's `choose` menu lost FRD R4's default-yes affordance; the nudge is
+  now the FRD's single-line `[Y/n/never-remind-me]` prompt (Enter accepts, unrecognized input reads
+  as "no" since the nudge is non-blocking and repeats). Rulings on the three review questions: (1)
+  declining the first-create prompt no longer triggers the nudge in the SAME create --
+  `_resolve_system_slug` returns `(slug, asked_now)` and the nudge is skipped when the operator was
+  just asked (twice back-to-back is noise, not a reminder); (2) the every-sync removal of the
+  slug-less ssh-config file is accepted -- same-workstation multi-install is out of scope per the
+  FRD (DB-path separation prerequisite), and `agentworks.conf` is an agentworks-owned name inside
+  our own config.d; (3) `vm describe` keeps the install-level slug row but annotates it
+  `(not applied to this VM)` when the VM's hostname predates the slug. Also: the settings keys moved
+  next to their accessors in `db.py` (ssh_config was hardcoding the literal), and the suite now pins
+  the FRD prompt wording and the slug-before-secrets/insert ordering.
 
 **Compile boundaries**: Phases 1 through 3 are one logical commit boundary, mirroring the
 polymorphic-transports precedent. As planned, Phase 1 would open a non-compiling window when the

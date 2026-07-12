@@ -62,6 +62,12 @@ class SessionStatus(Enum):
 # Distinct from NULL (never checked / pre-enhancement).
 PID_STOPPED = -1
 
+# Settings-table keys (vm-sites SDD R4). Defined next to the accessors'
+# owner so consumers (vms.manager, ssh_config) share one spelling
+# without a layering inversion.
+SYSTEM_SLUG_KEY = "system_slug"
+NUDGE_SUPPRESSED_KEY = "shared_backend_nudge_suppressed"
+
 
 # -- Row types -------------------------------------------------------------
 
@@ -881,27 +887,6 @@ class Database:
         )
         self._conn.commit()
 
-    # -- Settings ------------------------------------------------------------
-
-    def get_setting(self, key: str) -> str | None:
-        """Install-level state (per ADR 0016 config-side state, not a
-        resource). ``None`` means the key was never written; an empty
-        string is a written-but-empty value (e.g. the declined system
-        slug), so callers can distinguish never-asked from declined.
-        """
-        row = self._conn.execute(
-            "SELECT value FROM settings WHERE key = ?", (key,)
-        ).fetchone()
-        return row["value"] if row else None
-
-    def set_setting(self, key: str, value: str) -> None:
-        self._conn.execute(
-            "INSERT INTO settings (key, value) VALUES (?, ?) "
-            "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
-            (key, value),
-        )
-        self._conn.commit()
-
     def update_vm_last_seen(self, name: str) -> None:
         self._conn.execute(
             "UPDATE vms SET last_seen_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now') WHERE name = ?",
@@ -926,6 +911,28 @@ class Database:
         self._conn.execute("DELETE FROM workspaces WHERE vm_name = ?", (name,))
         self._conn.execute("DELETE FROM vm_events WHERE vm_name = ?", (name,))
         self._conn.execute("DELETE FROM vms WHERE name = ?", (name,))
+        self._conn.commit()
+
+    # -- Settings ------------------------------------------------------------
+
+    def get_setting(self, key: str) -> str | None:
+        """Install-level state (per ADR 0016 config-side state, not a
+        resource). ``None`` means the key was never written; an empty
+        string is a written-but-empty value (e.g. the declined system
+        slug), so callers can distinguish never-asked from declined.
+        """
+        row = self._conn.execute(
+            "SELECT value FROM settings WHERE key = ?", (key,)
+        ).fetchone()
+        return row["value"] if row else None
+
+    def set_setting(self, key: str, value: str) -> None:
+        """Write (or overwrite) one install-level settings row."""
+        self._conn.execute(
+            "INSERT INTO settings (key, value) VALUES (?, ?) "
+            "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+            (key, value),
+        )
         self._conn.commit()
 
     # -- Workspaces --------------------------------------------------------

@@ -172,7 +172,7 @@ def _write_agentworks_profile(
 #
 #   /etc/profile.d/agentworks-identity.sh
 #     System-wide login-shell fragment with the VM-stable identity vars
-#     (AGENTWORKS_VM / AGENTWORKS_VM_HOST / AGENTWORKS_PLATFORM). Sourced by
+#     (AGENTWORKS_VM / AGENTWORKS_PLATFORM / AGENTWORKS_SITE). Sourced by
 #     every login shell on the VM (including raw `ssh awvm--<name>` from
 #     outside agentworks), so identity vars don't require agentworks to be
 #     the one opening the shell. Also writes to /etc/zsh/zprofile because
@@ -256,8 +256,8 @@ def _write_agentworks_identity_profile(
     """Write the VM-stable identity profile fragment.
 
     System-wide; sourced by every login shell on the VM. ``identity_env``
-    is the VM-stable subset (typically AGENTWORKS_VM, AGENTWORKS_VM_HOST,
-    AGENTWORKS_PLATFORM) produced by ``agentworks.env.vm_stable_identity_env``.
+    is the VM-stable subset (AGENTWORKS_VM, AGENTWORKS_PLATFORM,
+    AGENTWORKS_SITE) produced by ``agentworks.env.vm_stable_identity_env``.
 
     The ``/etc/profile.d/agentworks-identity.sh`` file is fully owned by
     agentworks: each reinit overwrites it. The block in ``/etc/zsh/zprofile``

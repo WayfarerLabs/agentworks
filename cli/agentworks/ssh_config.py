@@ -120,7 +120,9 @@ def _managed_conf_name(db: Database) -> str:
     install has a slug, the legacy ``agentworks.conf`` otherwise. The
     existing ``Include ~/.ssh/config.d/*`` directive matches both.
     """
-    slug = db.get_setting("system_slug") or None
+    from agentworks.db import SYSTEM_SLUG_KEY
+
+    slug = db.get_setting(SYSTEM_SLUG_KEY) or None
     return f"agentworks-{slug}.conf" if slug else _MANAGED_CONF
 
 

@@ -137,6 +137,69 @@ def test_create_vm_composes_r11_hostname_with_slug(
     assert vm.hostname == "team-a-svm"
 
 
+def test_slug_resolution_precedes_secrets_and_insert(
+    db: Database,
+    make_config,
+    monkeypatch: pytest.MonkeyPatch,
+    captured_output: object,
+) -> None:
+    """R4 ordering: the slug prompt runs before the secret resolve pass
+    and before the DB row exists, so an aborted slug entry leaves
+    nothing behind."""
+    order: list[str] = []
+
+    def _slug_spy(db_: object) -> tuple[None, bool]:
+        order.append("slug")
+        return None, False
+
+    class _Stop(Exception):
+        pass
+
+    def _secrets_spy(*a: object, **k: object) -> tuple[str, dict, dict]:
+        order.append("secrets")
+        raise _Stop
+
+    monkeypatch.setattr(vm_manager, "_resolve_system_slug", _slug_spy)
+    monkeypatch.setattr(vm_manager, "_collect_secrets", _secrets_spy)
+
+    with pytest.raises(_Stop):
+        vm_manager.create_vm(db, make_config(), name="ovm")
+
+    assert order == ["slug", "secrets"]
+    assert db.get_vm("ovm") is None  # insert happens after the resolve
+
+
+def test_nudge_skipped_when_prompt_just_declined(
+    db: Database,
+    make_config,
+    monkeypatch: pytest.MonkeyPatch,
+    captured_output: object,
+) -> None:
+    """First-ever create on a shared-backend site: declining the full
+    prompt must not trigger the nudge in the same create."""
+    monkeypatch.setattr(
+        vm_manager, "_resolve_system_slug", lambda db_: (None, True)
+    )
+    monkeypatch.setattr(
+        vm_manager,
+        "_nudge_shared_backend_slug",
+        lambda *a, **k: (_ for _ in ()).throw(
+            AssertionError("nudge must not fire in the same create")
+        ),
+    )
+
+    class _Stop(Exception):
+        pass
+
+    monkeypatch.setattr(
+        vm_manager, "_collect_secrets",
+        lambda *a, **k: (_ for _ in ()).throw(_Stop()),
+    )
+
+    with pytest.raises(_Stop):
+        vm_manager.create_vm(db, make_config(), name="nvm")
+
+
 def test_r11_hostname_bound_by_construction() -> None:
     """Slug max 20 + dash + name max 30 = 51 chars, inside the 63-char
     hostname-label and Azure 64-char computer-name limits."""

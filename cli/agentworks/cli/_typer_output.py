@@ -73,7 +73,19 @@ class TyperHandler:
             raise UserAbort("interrupted") from None
 
     def prompt(self, label: str, default: str | None = None) -> str:
-        return str(typer.prompt(label, default=default or ""))
+        try:
+            # An empty default is a valid answer (e.g. declining the
+            # system slug) but "[]" as a rendered default suffix is
+            # noise, so suppress it.
+            return str(
+                typer.prompt(
+                    label,
+                    default=default or "",
+                    show_default=bool(default),
+                )
+            )
+        except click.exceptions.Abort:
+            raise UserAbort("interrupted") from None
 
     def prompt_secret(self, label: str, hint: str | None = None) -> str:
         try:
