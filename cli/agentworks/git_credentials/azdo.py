@@ -6,6 +6,7 @@ formats the URL line.
 
 from __future__ import annotations
 
+import re
 from typing import TYPE_CHECKING
 
 from agentworks.errors import ConfigError
@@ -21,6 +22,9 @@ if TYPE_CHECKING:
     from agentworks.resources.reference import ConfigReference
 
 
+_ORG_RE = re.compile(r"^[A-Za-z0-9._-]+$")
+
+
 class AzDOCredentialProvider(GitCredentialProvider):
     """Configures git credentials for Azure DevOps via a personal access token."""
 
@@ -31,10 +35,15 @@ class AzDOCredentialProvider(GitCredentialProvider):
         cls, owner: str, config: Mapping[str, object]
     ) -> tuple[ConfigReference, ...]:
         org = config.get("org")
-        if not isinstance(org, str) or not org:
+        if (
+            not isinstance(org, str)
+            or not _ORG_RE.match(org)
+        ):
             raise ConfigError(
                 f"{owner}.org is required for the azdo provider and must "
-                f"be a non-empty string"
+                f"be an organization name (letters, digits, dot, dash, "
+                f"underscore) -- it is interpolated into the generated "
+                f"credential helper"
             )
         unknown = sorted(set(config) - {"org"})
         if unknown:

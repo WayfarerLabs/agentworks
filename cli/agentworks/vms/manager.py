@@ -854,7 +854,18 @@ def add_git_credential(db: Database, config: Config, name: str, credential_name:
         all_lines = new_lines + filtered
         cred_content = "\n".join(all_lines) + "\n"
         target.write_file("~/.git-credentials", cred_content, mode="600")
-        target.run("git config --global credential.helper store")
+        # Never downgrade the helper slot: on a helper-provisioned VM
+        # the agentworks helper stays registered (reverting to store
+        # would reintroduce its erase-on-rejection self-destruct for
+        # EVERY credential); on an old VM without the helper script,
+        # keep store working until the next reinit installs the helper.
+        from agentworks.git_credentials import GIT_CRED_HELPER_PATH
+
+        target.run(
+            f"if [ -x {GIT_CRED_HELPER_PATH} ]; then "
+            f"git config --global --replace-all credential.helper '!{GIT_CRED_HELPER_PATH}'; "
+            f"else git config --global credential.helper store; fi"
+        )
 
     output.info(f"Git credential '{credential_name}' configured on VM '{name}'")
 

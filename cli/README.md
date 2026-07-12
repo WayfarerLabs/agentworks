@@ -728,10 +728,12 @@ carry an `(auto)` marker; they are exactly the secrets most likely to prompt at 
 Backend-applicability detail (per-backend soft-skip reasons, inactive mappings, per-secret
 references) lives in `agw secret list` and `agw secret describe`. `AGENTWORKS_*` identity overrides
 surface in the Configuration group (they're a config-load warning). Broken `{ secret = "..." }`
-references are caught earlier as a hard config-load error before doctor runs. Git-credential token
-health reports here as ordinary `git-token-*` secrets (doctor has no separate git-credentials
-group), and the Tailscale group checks only workstation connectivity -- the auth key is the
-`tailscale-auth-key` secret row.
+references are caught earlier as a hard config-load error before doctor runs. Git-credential tokens
+additionally get their own `Git token '<name>'` rows in the Configuration group: verified tokens
+show the login and (for fine-grained PATs) the expiry, a definitively rejected token is a failure
+naming the secret to fix, and tokens that only resolve interactively are skipped with a note (doctor
+never prompts; gated by `[defaults] verify_git_tokens`). The Tailscale group checks only workstation
+connectivity -- the auth key is the `tailscale-auth-key` secret row.
 
 ### Secret Backends
 

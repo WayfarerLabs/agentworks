@@ -11,6 +11,7 @@ operator's ``provider`` field surfaces as a clean miss-policy error at
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
@@ -28,10 +29,9 @@ class CredentialMaterials:
     """Everything the initialization flow writes for git auth.
 
     ``store_content`` is the full ``~/.git-credentials`` body.
-    ``gitconfig_content`` is the body of the agentworks-owned gitconfig
-    include file (credential-context sections selecting per-credential
-    usernames); present even when empty so re-initialization after
-    removing scopes is idempotent (while at least one credential remains).
+    ``gitconfig_content`` is the agentworks-owned include: exactly the
+    ``useHttpPath`` switch (selection lives in the helper; no context
+    sections exist). Both overwritten wholesale each init.
     """
 
     store_content: str
@@ -84,27 +84,31 @@ def build_credential_materials(
     Store ordering: unscoped credentials' lines first, so the legacy
     first-host-line fallback finds the default. Scope collisions (two
     credentials claiming the same repo or owner on one host) are a hard
-    error -- silent shadowing is dead-config ambiguity.
+    error -- silent shadowing is dead-config ambiguity. Two UNSCOPED
+    credentials on one host are tolerated first-wins (matching store
+    order), not errored: released configs may carry them.
     """
     store_scoped: list[str] = []
     store_unscoped: list[str] = []
-    entries: list[tuple[str, HelperEntry]] = []
+    records: list[_CredRecord] = []
     claimed: dict[tuple[str, str, str], str] = {}
     for name, provider in providers.items():
         entry = provider.helper_entry()
-        for kind_, value in (
+        _assert_sh_safe("store username", entry.username)
+        for scope_kind, value in (
             *(("repo", repo) for repo in entry.repos),
             *((("owner", entry.owner),) if entry.owner else ()),
         ):
-            key = (entry.host, kind_, value)
+            _assert_sh_safe(f"{scope_kind} scope", value)
+            key = (entry.host, scope_kind, value)
             if key in claimed:
                 raise ConfigError(
                     f"git credentials {claimed[key]!r} and {name!r} both "
-                    f"claim scope {kind_} {value!r} on {entry.host}; "
+                    f"claim scope {scope_kind} {value!r} on {entry.host}; "
                     f"scopes must be unambiguous"
                 )
             claimed[key] = name
-        entries.append((name, entry))
+        records.append(_CredRecord(name, provider.secret_name, entry))
         lines = provider.credential_lines(tokens[name])
         if entry.repos or entry.owner:
             store_scoped.extend(lines)
@@ -112,10 +116,6 @@ def build_credential_materials(
             store_unscoped.extend(lines)
 
     header = "# Managed by agentworks (git credential selection); do not edit.\n"
-    diag = [
-        (provider.store_username, name, provider.secret_name)
-        for name, provider in providers.items()
-    ]
     return CredentialMaterials(
         store_content="\n".join(store_unscoped + store_scoped) + "\n",
         # useHttpPath makes git send the remote path to the helper --
@@ -123,57 +123,79 @@ def build_credential_materials(
         # helper is the only consumer (the old hazard was
         # credential-store's path matching, and store is gone).
         gitconfig_content=header + "[credential]\n\tuseHttpPath = true\n",
-        helper_script=_helper_script(entries, diag),
+        helper_script=_helper_script(records),
     )
 
 
-def _selection_block(entries: list[tuple[str, HelperEntry]]) -> str:
+@dataclass(frozen=True)
+class _CredRecord:
+    """One credential, as the helper generator needs it."""
+
+    name: str
+    secret_name: str
+    entry: HelperEntry
+
+
+# Values interpolated into sh case labels / word lists must be glob- and
+# quote-inert. Everything reaching this is already charset-validated at
+# its source (github scopes via _NAME_RE, azdo org at validate_config,
+# store usernames = resource names); this guard makes the generator
+# safe by construction rather than by distant invariant.
+_SH_SAFE_RE = re.compile(r"^[A-Za-z0-9._/-]+$")
+
+
+def _assert_sh_safe(what: str, value: str) -> None:
+    if not _SH_SAFE_RE.match(value):
+        raise ConfigError(
+            f"git credential {what} {value!r} contains characters unsafe "
+            f"for the generated credential helper"
+        )
+
+
+def _sh_squote(value: str) -> str:
+    """Single-quote ``value`` for sh, escaping embedded single quotes.
+    Used for free-text (credential and secret names in diagnosis
+    messages), which is NOT charset-restricted."""
+    return "'" + value.replace("'", "'\\''") + "'"
+
+
+def _selection_block(records: list[_CredRecord]) -> str:
     """The per-host selection: exact repo, then owner, then default."""
-    by_host: dict[str, list[tuple[str, HelperEntry]]] = {}
-    for name, entry in entries:
-        by_host.setdefault(entry.host, []).append((name, entry))
-    host_cases = []
+    by_host: dict[str, list[HelperEntry]] = {}
+    for record in records:
+        by_host.setdefault(record.entry.host, []).append(record.entry)
+    out: list[str] = []
     for host, host_entries in sorted(by_host.items()):
-        lines = [f"    {host})"]
-        repo_cases = [
-            '        case "$1" in\n'
-            + "\n".join(
-                f'        {"|".join(entry.repos)}) echo {entry.username}; return ;;'
-                for _n, entry in host_entries
-                if entry.repos
-            )
-            + "\n        esac"
-        ] if any(entry.repos for _n, entry in host_entries) else []
-        owner_cases = [
-            '        case "${1%%/*}" in\n'
-            + "\n".join(
-                f"        {entry.owner}) echo {entry.username}; return ;;"
-                for _n, entry in host_entries
-                if entry.owner
-            )
-            + "\n        esac"
-        ] if any(entry.owner for _n, entry in host_entries) else []
+        out.append(f"    {host})")
+        repo_lines = [
+            f'        {"|".join(e.repos)}) echo {e.username}; return ;;'
+            for e in host_entries
+            if e.repos
+        ]
+        if repo_lines:
+            out.append('        case "$1" in')
+            out.extend(repo_lines)
+            out.append("        esac")
+        owner_lines = [
+            f"        {e.owner}) echo {e.username}; return ;;"
+            for e in host_entries
+            if e.owner
+        ]
+        if owner_lines:
+            out.append('        case "${1%%/*}" in')
+            out.extend(owner_lines)
+            out.append("        esac")
         default = next(
-            (
-                entry.username
-                for _n, entry in host_entries
-                if not entry.repos and not entry.owner
-            ),
+            (e.username for e in host_entries if not e.repos and not e.owner),
             "x-access-token" if host == "github.com" else None,
         )
-        lines.extend(repo_cases)
-        lines.extend(owner_cases)
         if default:
-            lines.append(f"        echo {default}")
-        lines.append("        ;;")
-        host_cases.append("\n".join(lines))
-    return "\n".join(host_cases)
+            out.append(f"        echo {default}")
+        out.append("        ;;")
+    return "\n".join(out)
 
 
-def _helper_script(
-    entries: list[tuple[str, HelperEntry]],
-    diag: list[tuple[str, str, str]],
-) -> str:
+def _helper_script(records: list[_CredRecord]) -> str:
     """Render THE git credential helper (POSIX sh).
 
     ``get``: an explicit query username short-circuits to a direct
@@ -182,30 +204,39 @@ def _helper_script(
     normalized by stripping the leading slash and a ``.git`` suffix --
     and the chosen username keys back into the store file; if nothing
     matches, the first store line for the host is served (legacy
-    credential-store semantics). ``erase`` deletes nothing -- it fires
+    credential-store semantics). A pathless query on a host with
+    scoped credentials warns: useHttpPath was set at init, but a local
+    git config can override it. ``erase`` deletes nothing -- it fires
     when the remote rejected the credential, so it prints a diagnosis
     naming the credential and its secret. ``store`` is a no-op.
+    Queries are read per git's LF protocol; CRLF tolerance is
+    deliberately out of scope.
     """
-    known = " ".join(sorted({u for u, _c, _s in diag}))
-    scoped = any(e.repos or e.owner for _n, e in entries)
+    known = " ".join(sorted({r.entry.username for r in records}))
     scoped_hosts = "|".join(
-        sorted({e.host for _n, e in entries if e.repos or e.owner})
+        sorted({r.entry.host for r in records if r.entry.repos or r.entry.owner})
     )
-    cases = []
+    cases: list[str] = []
     seen: set[str] = set()
-    for username, cred, secret in diag:
+    for record in records:
+        username = record.entry.username
         if username in seen:
             continue  # first credential wins, matching store-line order
         seen.add(username)
+        cred_q = _sh_squote(f"agentworks: the remote rejected git credential '{record.name}'.")
+        secret_q = _sh_squote(
+            f"The token in secret '{record.secret_name}' is likely invalid, "
+            f"expired, or lacks access."
+        )
         cases.append(
             f"""        {username})
-            echo "agentworks: the remote rejected git credential '{cred}'."
-            echo "The token in secret '{secret}' is likely invalid, expired, or lacks access."
-            echo "Fix the secret, then re-run 'agw agent reinit <agent>' or 'agw vm reinit <vm>'."
+            printf '%s\\n' {cred_q}
+            printf '%s\\n' {secret_q}
+            printf '%s\\n' "Fix the secret, then re-run 'agw agent reinit <agent>' or 'agw vm reinit <vm>'."
             ;;"""
         )
     warn_block = ""
-    if scoped:
+    if scoped_hosts:
         warn_block = """
     if [ "$host" = "github.com" ] && [ -n "$username" ]; then
         case " @KNOWN@ " in
@@ -219,6 +250,21 @@ def _helper_script(
                 ;;
         esac
     fi""".replace("@KNOWN@", known)
+    nopath_block = ""
+    if scoped_hosts:
+        nopath_block = """
+    if [ -z "$qpath" ]; then
+        case "$host" in
+        @SCOPED_HOSTS@)
+            {
+                echo "agentworks: git sent no repository path for $host, so"
+                echo "credential scoping cannot select per-repo/per-owner; check that"
+                echo "credential.useHttpPath is still true (agentworks sets it, but a"
+                echo "local git config may override it); serving the host default"
+            } >&2
+            ;;
+        esac
+    fi""".replace("@SCOPED_HOSTS@", scoped_hosts)
     template = """#!/bin/sh
 # Managed by agentworks (git credential helper); do not edit.
 # Serves the agentworks-owned ~/.git-credentials and never deletes it:
@@ -258,10 +304,10 @@ serve() {
         if [ -n "$1" ] && [ "$luser" != "$1" ]; then
             continue
         fi
-        printf 'protocol=%s\n' "${proto:-https}"
-        printf 'host=%s\n' "$host"
-        printf 'username=%s\n' "$luser"
-        printf 'password=%s\n' "${userinfo#*:}"
+        printf 'protocol=%s\\n' "${proto:-https}"
+        printf 'host=%s\\n' "$host"
+        printf 'username=%s\\n' "$luser"
+        printf 'password=%s\\n' "${userinfo#*:}"
         return 0
     done < "$creds"
     return 1
@@ -295,25 +341,10 @@ erase)
     ;;
 esac
 """
-    nopath_block = ""
-    if scoped_hosts:
-        nopath_block = """
-    if [ -z "$qpath" ]; then
-        case "$host" in
-        @SCOPED_HOSTS@)
-            {
-                echo "agentworks: git sent no repository path for $host, so"
-                echo "credential scoping cannot select per-repo/per-owner; check that"
-                echo "credential.useHttpPath is still true (agentworks sets it, but a"
-                echo "local git config may override it); serving the host default"
-            } >&2
-            ;;
-        esac
-    fi""".replace("@SCOPED_HOSTS@", scoped_hosts)
     return (
         template.replace("@WARN@", warn_block)
         .replace("@NOPATH@", nopath_block)
-        .replace("@SELECT@", _selection_block(entries))
+        .replace("@SELECT@", _selection_block(records))
         .replace("@CASES@", "\n".join(cases) if cases else "        _none_) : ;;")
     )
 

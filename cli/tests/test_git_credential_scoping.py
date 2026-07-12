@@ -656,3 +656,80 @@ def test_generated_materials_work_with_real_git(tmp_path: Path) -> None:
     rc, out, err = run("fill", "url=https://github.com/acme/anything.git")
     assert rc == 0, err
     assert "password=tokS" in out
+
+
+# -- shell-safety of the generated helper --------------------------------------
+
+
+def test_hostile_secret_name_cannot_inject(tmp_path: Path) -> None:
+    """The reviewer's canary: a token secret name carrying a command
+    substitution must come out as inert text in the erase diagnosis --
+    values are single-quote-escaped, never expanded."""
+    hostile = "x$(touch " + str(tmp_path / "pwned") + ")"
+    providers = {
+        "gh": GitHubCredentialProvider(config_name="gh", secret_name=hostile),
+    }
+    m = build_credential_materials(providers, {"gh": "tok"})
+    home = _write_home(tmp_path, m)
+    _out, err = _run_helper(
+        m.helper_script, home, "erase",
+        "protocol=https\nhost=github.com\nusername=x-access-token\n",
+    )
+    assert not (tmp_path / "pwned").exists()
+    assert hostile in err  # printed literally, not executed
+
+
+def test_unsafe_scope_values_rejected_at_build() -> None:
+    """Case labels and word lists must be glob- and quote-inert; the
+    generator refuses anything else loudly (defense in depth behind the
+    per-provider charset validation)."""
+    from agentworks.git_credentials.base import HelperEntry
+
+    class _Sneaky(GitHubCredentialProvider):
+        def helper_entry(self) -> HelperEntry:
+            return HelperEntry(host="github.com", username="a b")
+
+    with pytest.raises(ConfigError, match="unsafe"):
+        build_credential_materials(
+            {"s": _Sneaky(config_name="s")}, {"s": "t"}
+        )
+
+
+def test_azdo_org_charset_validated() -> None:
+    with pytest.raises(ConfigError, match="organization name"):
+        from agentworks.git_credentials.azdo import AzDOCredentialProvider as A
+
+        A.validate_config("t", {"org": "my org"})
+
+
+def test_two_unscoped_creds_first_wins(tmp_path: Path) -> None:
+    """Two unscoped credentials on one host are NOT a scope collision
+    (released configs may carry them): first-wins by store order, and
+    the second is effectively shadowed -- pinned as intended behavior."""
+    providers = {
+        "gh1": GitHubCredentialProvider(config_name="gh1"),
+        "gh2": GitHubCredentialProvider(config_name="gh2"),
+    }
+    m = build_credential_materials(providers, {"gh1": "tok1", "gh2": "tok2"})
+    home = _write_home(tmp_path, m)
+    out, _err = _run_helper(
+        m.helper_script, home, "get",
+        "protocol=https\nhost=github.com\npath=any/repo.git\n",
+    )
+    assert "password=tok1" in out
+
+
+def test_add_git_credential_never_downgrades_helper() -> None:
+    """The add-git-credential path must not revert credential.helper to
+    store on a helper-provisioned VM (that would reintroduce the
+    erase-on-rejection self-destruct for every credential); on an old
+    VM without the helper script, store keeps working until reinit."""
+    import inspect as _inspect
+
+    from agentworks.vms import manager
+
+    src = _inspect.getsource(manager.add_git_credential)
+    assert "if [ -x {GIT_CRED_HELPER_PATH} ]" in src
+    assert "--replace-all credential.helper '!{GIT_CRED_HELPER_PATH}'" in src
+    # And no unconditional downgrade remains.
+    assert 'run("git config --global credential.helper store")' not in src
