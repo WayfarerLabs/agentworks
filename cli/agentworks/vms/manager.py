@@ -1401,9 +1401,17 @@ def _collect_git_tokens(
     from agentworks.secrets import resolve_for_command
 
     decls: list[SecretDecl] = []
-    token_name_for: dict[str, str] = {}
     from agentworks.resources.access import git_credential
+    from agentworks.vms.initializer import resolve_git_credential_providers
 
+    # The provider owns sourcing: it declares the secret(s) its config
+    # references (validate_config, surfaced through the credential's
+    # referenced_resources), the framework resolves them all in one
+    # batch (single prompt), and the provider produces the token from
+    # them -- a PAT read today, an API mint tomorrow, same seam.
+    providers = resolve_git_credential_providers(registry, names)
+    per_cred_secrets: dict[str, list[str]] = {}
+    seen: set[str] = set()
     for cred_name in names:
         cred = git_credential(registry, cred_name)
         if cred is None:
@@ -1413,36 +1421,42 @@ def _collect_git_tokens(
                 entity_kind="git-credential",
                 entity_name=cred_name,
             )
-        token_name_for[cred_name] = cred.token
-        decls.append(_lookup_or_synthesize_secret(registry, cred.token))
+        secret_names = [
+            ref.name
+            for ref in cred.referenced_resources()
+            if ref.kind == "secret"
+        ]
+        per_cred_secrets[cred_name] = secret_names
+        for secret_name in secret_names:
+            if secret_name not in seen:
+                seen.add(secret_name)
+                decls.append(_lookup_or_synthesize_secret(registry, secret_name))
 
     resolved = resolve_for_command([], config, registry, extra_decls=decls)
-    tokens = {
-        cred_name: resolved[token_name]
-        for cred_name, token_name in token_name_for.items()
-    }
 
-    # Verification at ENTRY (maintainer ruling): this collector runs at
-    # manager entry, before any user/VM mutation, so a definitive
+    # Production + verification at ENTRY (maintainer ruling): this runs
+    # at manager entry, before any user/VM mutation, so a definitive
     # rejection (TokenRejectedError) is safe to let abort -- nothing to
     # recover. If collection ever moves mid-flow, downgrade to warn.
     # Network indeterminacy never raises (acquire_token warns).
-    if config.defaults.verify_git_tokens:
-        from agentworks.vms.initializer import resolve_git_credential_providers
-
-        providers = resolve_git_credential_providers(registry, names)
-        for cred_name, provider in providers.items():
-            info = provider.acquire_token(tokens[cred_name])
-            tokens[cred_name] = info.token
-            if info.verified:
-                extras = []
-                if info.login:
-                    extras.append(f"login {info.login}")
-                if info.expires_at is not None:
-                    extras.append(f"expires {info.expires_at.isoformat()}")
-                suffix = f" ({', '.join(extras)})" if extras else ""
-                output.detail(
-                    f"  Verified git token for '{cred_name}'{suffix}"
+    verify = config.defaults.verify_git_tokens
+    tokens: dict[str, str] = {}
+    for cred_name, provider in providers.items():
+        secret_map = {
+            secret_name: resolved[secret_name]
+            for secret_name in per_cred_secrets[cred_name]
+        }
+        info = provider.acquire_token(secret_map, verify=verify)
+        tokens[cred_name] = info.token
+        if info.verified:
+            extras = []
+            if info.login:
+                extras.append(f"login {info.login}")
+            if info.expires_at is not None:
+                extras.append(f"expires {info.expires_at.isoformat()}")
+            suffix = f" ({', '.join(extras)})" if extras else ""
+            output.detail(
+                f"  Verified git token for '{cred_name}'{suffix}"
                 )
     return tokens
 

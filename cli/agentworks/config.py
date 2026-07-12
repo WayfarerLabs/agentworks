@@ -924,12 +924,14 @@ def _load_git_credentials(
         # capability validates the assembled blob. Unknown provider
         # names defer to the framework's miss policy at finalize.)
 
-        # ``token`` is a bare secret name; same rules as
-        # ``tailscale_auth_key``. Omission triggers GitCredentialConfig's
-        # ``__post_init__`` default (``git-token-<name>``). Empty-string
-        # is rejected so an operator who types ``token = ""`` doesn't
-        # silently get a default-named secret behind their back.
-        token_raw: str = ""
+        provider_config: dict[str, object] = {}
+        # ``token`` is a bare secret name the provider sources its PAT
+        # from. Flat in TOML, hoisted into provider_config so the
+        # internal rep matches the YAML manifest shape (the provider's
+        # validate_config owns the ``git-token-<name>`` default when it
+        # is omitted). Empty-string is rejected so an operator who types
+        # ``token = ""`` doesn't silently get the default behind their
+        # back.
         if "token" in cdata:
             if not isinstance(cdata["token"], str):
                 raise ConfigError(
@@ -942,9 +944,7 @@ def _load_git_credentials(
                     f"omit the key to inherit the default secret name "
                     f"\"git-token-{name}\""
                 )
-            token_raw = cdata["token"]
-
-        provider_config: dict[str, object] = {}
+            provider_config["token"] = cdata["token"]
         # The flat TOML shape only ever read ``org``, and only for azdo;
         # hoisting it into the blob for other providers would promote a
         # historically-ignored stray key into a validation error and
@@ -968,13 +968,12 @@ def _load_git_credentials(
 
         capability = GIT_CREDENTIAL_PROVIDER_REGISTRY.get(cred_type)
         if capability is not None:
-            capability.validate_config(f"git_credentials.{name}", provider_config)
+            capability.validate_config(f"git-credential/{name}", provider_config)
         creds[name] = GitCredentialConfig(
             name=name,
             provider=cred_type,
             provider_config=provider_config,
             description=str(cdata["description"]) if "description" in cdata else None,
-            token=token_raw,
             declared_at=decls.lookup("git_credentials", name),
         )
     return creds

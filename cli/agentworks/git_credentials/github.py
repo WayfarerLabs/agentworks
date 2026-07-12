@@ -22,6 +22,7 @@ from agentworks.git_credentials.base import (
     GitCredentialProvider,
     HelperEntry,
     TokenInfo,
+    token_config_reference,
 )
 
 if TYPE_CHECKING:
@@ -29,7 +30,7 @@ if TYPE_CHECKING:
 
     from agentworks.resources.reference import ConfigReference
 
-_SCOPE_FIELDS = {"repos", "owner"}
+_SCOPE_FIELDS = {"repos", "owner", "token"}
 
 # GitHub owner/repo name charset. Interpolated verbatim into gitconfig
 # section headers and store URLs, so anything outside this set (quotes,
@@ -120,7 +121,7 @@ class GitHubCredentialProvider(GitCredentialProvider):
         cls, owner: str, config: Mapping[str, object]
     ) -> tuple[ConfigReference, ...]:
         _validated_scope(owner, config)
-        return ()
+        return (token_config_reference(owner, config),)
 
     def __init__(
         self,
@@ -135,14 +136,18 @@ class GitHubCredentialProvider(GitCredentialProvider):
         self._repos = tuple(repos)
         self._owner = owner
 
-    def acquire_token(self, resolved_secret: str) -> TokenInfo:
-        """Verify the PAT against ``GET /user``.
+    def acquire_token(
+        self, secrets: Mapping[str, str], *, verify: bool = True
+    ) -> TokenInfo:
+        """Read the PAT from ``secrets`` and (when ``verify``) check it
+        against ``GET /user``.
 
         200 -> verified TokenInfo enriched with the login and (for
         fine-grained PATs) the ``github-authentication-token-expiration``
         header. 401 -> definitive rejection. Anything else (rate
         limits, 5xx, network failure) -> indeterminate: warn, return
-        unverified.
+        unverified. ``verify=False`` returns the token unverified with
+        no network call.
         """
         import json
 
@@ -150,6 +155,9 @@ class GitHubCredentialProvider(GitCredentialProvider):
         from agentworks.errors import TokenRejectedError
         from agentworks.git_credentials.base import _http_probe
 
+        resolved_secret = secrets[self.secret_name]
+        if not verify:
+            return TokenInfo(token=resolved_secret)
         try:
             status, body, headers = _http_probe(
                 "https://api.github.com/user",

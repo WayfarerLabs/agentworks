@@ -49,6 +49,41 @@ def _http_probe(
         return (exc.code, body, {k.lower(): v for k, v in exc.headers.items()})
 
 
+def credential_name_from_owner(owner: str) -> str:
+    """The credential name from a standardized ``git-credential/<name>``
+    owner. Resource names cannot contain ``/`` (FRD R13), so the split
+    is exact."""
+    return owner.split("/", 1)[1] if "/" in owner else owner
+
+
+def default_token_secret(credential_name: str) -> str:
+    """The per-credential default token secret name."""
+    return f"git-token-{credential_name}"
+
+
+def token_config_reference(
+    owner: str, config: Mapping[str, object]
+) -> ConfigReference:
+    """The token-secret reference a token-sourcing provider implies from
+    its ``provider_config``: the ``token`` field names the secret
+    (default ``git-token-<name>``). Shared by github and azdo -- both
+    source a PAT from a mapped secret today. A minting provider would
+    instead declare its bootstrap secret(s) here (or none).
+    """
+    from agentworks.errors import ConfigError
+    from agentworks.resources.reference import ConfigReference
+
+    raw = config.get("token")
+    if raw is not None and (not isinstance(raw, str) or not raw):
+        raise ConfigError(
+            f"{owner}.token must be a non-empty secret name (a string)"
+        )
+    name = raw if isinstance(raw, str) and raw else default_token_secret(
+        credential_name_from_owner(owner)
+    )
+    return ConfigReference(kind="secret", name=name, usage="the auth token")
+
+
 @dataclass(frozen=True)
 class HelperEntry:
     """What the credential helper needs to select this credential by
@@ -139,28 +174,37 @@ class GitCredentialProvider(ABC):
     def secret_name(self) -> str:
         return self._secret_name or f"git-token-{self._config_name}"
 
-    def acquire_token(self, resolved_secret: str) -> TokenInfo:
-        """Turn the resolved token secret into THE token to provision.
+    def acquire_token(
+        self, secrets: Mapping[str, str], *, verify: bool = True
+    ) -> TokenInfo:
+        """Produce THE token to provision, given the resolved values of
+        the secrets this provider's config declared (keyed by secret
+        name -- see ``validate_config``).
 
-        The transformation seam: today the implementations verify the
-        mapped secret's value against the provider's API and return it
-        enriched (login, expiry); tomorrow a minting provider can
-        override to EXCHANGE a bootstrap secret for a fresh token --
-        "today validates, tomorrow fetches" -- without touching the
-        framework's secret resolution, which stays upstream (eager
-        resolve at manager entry, prompt fallback, doctor prediction).
+        The transformation seam that completes the sourcing loop: a PAT
+        provider reads its token secret from ``secrets`` and, when
+        ``verify``, checks it against the provider API (enriching the
+        result with login/expiry); a future MINTING provider reads a
+        bootstrap secret (or none) and EXCHANGES it for a fresh token
+        via the API -- same signature, no framework change. The
+        framework resolves every declared secret upstream (eager
+        resolve at manager entry, prompt fallback, doctor prediction)
+        and hands them here; the provider never resolves secrets
+        itself.
 
-        Error policy (maintainer ruling): a DEFINITIVE rejection by the
-        service raises ``TokenRejectedError`` -- callers invoke this at
-        provisioning ENTRY, before anything is created, so failing is
-        safe; if acquisition ever moves mid-flow, the caller must
-        downgrade to warn. Network indeterminacy (timeouts, DNS, 5xx)
-        never raises: warn and return unverified.
+        ``verify`` gates the verification network call (the operator's
+        ``[defaults] verify_git_tokens``); a minting provider whose
+        network call IS the acquisition ignores it. Error policy: a
+        DEFINITIVE rejection raises ``TokenRejectedError`` -- callers
+        invoke this at provisioning ENTRY, before anything is created,
+        so failing is safe (if acquisition ever moves mid-flow, the
+        caller must downgrade to warn). Network indeterminacy never
+        raises: warn and return unverified.
 
-        Base behavior: identity, unverified (providers without a
-        verification endpoint).
+        Base behavior: identity from the credential's own token secret,
+        unverified (providers without a verification endpoint).
         """
-        return TokenInfo(token=resolved_secret)
+        return TokenInfo(token=secrets.get(self.secret_name, ""))
 
     @property
     def store_username(self) -> str:

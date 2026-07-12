@@ -191,20 +191,25 @@ def _decode_git_credential(doc: Document, spec: dict[str, object], issues: list[
     if not isinstance(raw_config, dict):
         raise ConfigError("spec.provider_config must be a mapping")
     # The flatten-into-the-loader trick must not let the blob shadow
-    # kind-owned surface: without this check, provider_config.token
-    # would silently override spec.token, and provider_config.type/
-    # provider would silently re-pick the provider.
-    reserved = {"type", "provider", "token", "description"} & set(raw_config)
+    # kind-owned surface: without this check, provider_config.type/
+    # provider would silently re-pick the provider. ``token`` is NOT
+    # reserved -- it is provider-owned config now (the secret the
+    # provider sources its PAT from), and lives under provider_config.
+    reserved = {"type", "provider", "description"} & set(raw_config)
     if reserved:
         names = ", ".join(sorted(reserved))
         raise ConfigError(
             f"spec.provider_config may not contain kind-owned field(s): "
             f"{names}; they belong at the spec top level"
         )
+    if "token" in spec:
+        raise ConfigError(
+            "git-credential 'token' is provider config now: move it under "
+            "spec.provider_config (agw resource migrate rewrites it)"
+        )
     loader_spec: dict[str, object] = {"type": provider, **raw_config}
-    for kind_owned in ("token", "description"):
-        if kind_owned in spec:
-            loader_spec[kind_owned] = spec.pop(kind_owned)
+    if "description" in spec:
+        loader_spec["description"] = spec.pop("description")
     if spec:
         extras = ", ".join(sorted(spec))
         raise ConfigError(
@@ -222,7 +227,7 @@ def _decode_git_credential(doc: Document, spec: dict[str, object], issues: list[
 
     capability = GIT_CREDENTIAL_PROVIDER_REGISTRY.get(provider)
     if capability is not None:
-        capability.validate_config("spec.provider_config", raw_config)
+        capability.validate_config(f"git-credential/{doc.name}", raw_config)
     result = _load_git_credentials(
         {"git_credentials": {doc.name: loader_spec}},
         issues,

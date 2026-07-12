@@ -14,6 +14,7 @@ from agentworks.git_credentials.base import (
     GitCredentialProvider,
     HelperEntry,
     TokenInfo,
+    token_config_reference,
 )
 
 if TYPE_CHECKING:
@@ -45,12 +46,12 @@ class AzDOCredentialProvider(GitCredentialProvider):
                 f"underscore) -- it is interpolated into the generated "
                 f"credential helper"
             )
-        unknown = sorted(set(config) - {"org"})
+        unknown = sorted(set(config) - {"org", "token"})
         if unknown:
             raise ConfigError(
                 f"{owner}: unknown azdo provider field(s): {', '.join(unknown)}"
             )
-        return ()
+        return (token_config_reference(owner, config),)
 
     def __init__(
         self,
@@ -63,12 +64,16 @@ class AzDOCredentialProvider(GitCredentialProvider):
         super().__init__(config_name, description=description, secret_name=secret_name)
         self._org = org
 
-    def acquire_token(self, resolved_secret: str) -> TokenInfo:
-        """Verify the PAT against the org's connectionData endpoint.
+    def acquire_token(
+        self, secrets: Mapping[str, str], *, verify: bool = True
+    ) -> TokenInfo:
+        """Read the PAT from ``secrets`` and (when ``verify``) check it
+        against the org's connectionData endpoint.
 
         200 -> verified. 401 (and 203, AzDO's sign-in-page answer for
         bad PATs on some routes) -> definitive rejection. Anything else
-        -> indeterminate: warn, return unverified.
+        -> indeterminate: warn, return unverified. ``verify=False``
+        returns the token unverified with no network call.
         """
         import base64
 
@@ -76,6 +81,9 @@ class AzDOCredentialProvider(GitCredentialProvider):
         from agentworks.errors import TokenRejectedError
         from agentworks.git_credentials.base import _http_probe
 
+        resolved_secret = secrets[self.secret_name]
+        if not verify:
+            return TokenInfo(token=resolved_secret)
         basic = base64.b64encode(f":{resolved_secret}".encode()).decode()
         try:
             status, _body, _headers = _http_probe(

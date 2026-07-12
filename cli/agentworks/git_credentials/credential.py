@@ -61,27 +61,19 @@ class GitCredentialConfig:
     # ONLY place org lives at the top level; this loader nests it at
     # the boundary, so the internal representation matches the YAML
     # manifest shape.
+    # Provider-owned configuration (azdo's org; github's repos/owner;
+    # and the ``token`` secret name that every current provider sources
+    # its PAT from -- default ``git-token-<name>``, owned by the
+    # provider's ``validate_config`` since sourcing is provider-specific
+    # (a future minting provider declares a bootstrap secret, or none).
+    # The flat TOML section is the ONLY place these live at the top
+    # level; the loader nests them here so the internal representation
+    # matches the YAML manifest shape.
     provider_config: dict[str, object] = field(default_factory=dict)
     description: str | None = None
-    # Secret name for the auth token. Default ``"git-token-<name>"`` is
-    # computed in ``__post_init__`` (the per-credential default depends
-    # on the credential's own name, which a class-level literal can't
-    # express). Operators may override with a custom secret name; the
-    # framework's ``"secret"`` kind then resolves the value. Bare-string
-    # only per Phase 1c's pattern; no ``{ secret = "..." }``
-    # polymorphism.
-    token: str = ""
     declared_at: SourceLocation = field(default_factory=synthesized)
     origin: Origin | None = None
     references: tuple[ReferenceEntry, ...] = ()
-
-    def __post_init__(self) -> None:
-        # Frozen dataclasses can still ``object.__setattr__`` during
-        # construction. The default ``""`` sentinel triggers the
-        # name-interpolated default; an operator-typed string survives
-        # unchanged.
-        if not self.token:
-            object.__setattr__(self, "token", f"git-token-{self.name}")
 
     def referenced_resources(self) -> list[ResourceReference]:
         from agentworks.resources.reference import (
@@ -90,15 +82,9 @@ class GitCredentialConfig:
         from agentworks.resources.reference import SecretReference
 
         source = ("git-credential", self.name)
+        # Phase 2b.1: the ``provider`` field references a known provider
+        # kind; framework miss policy catches typos.
         refs: list[ResourceReference] = [
-            SecretReference(
-                name=self.token,
-                kind="secret",
-                usage="the auth token",
-                source=source,
-            ),
-            # Phase 2b.1: the ``provider`` field references a known
-            # provider kind; framework miss policy catches typos.
             _ResourceReq(
                 name=self.provider,
                 kind="git-credential-provider",
@@ -106,9 +92,11 @@ class GitCredentialConfig:
                 source=source,
             ),
         ]
-        # Capability-implied references: the provider validates its
-        # config block and returns the references it implies; this
-        # resource (the config block's owner) attributes them to itself.
+        # Everything the credential references -- its token secret and
+        # any other provider-declared resources -- comes from the
+        # provider validating its config block and returning the
+        # references it implies; this resource (the config block's
+        # owner) attributes them to itself.
         from agentworks.git_credentials import GIT_CREDENTIAL_PROVIDER_REGISTRY
 
         capability = GIT_CREDENTIAL_PROVIDER_REGISTRY.get(self.provider)

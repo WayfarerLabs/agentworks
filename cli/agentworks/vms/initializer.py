@@ -40,6 +40,7 @@ if TYPE_CHECKING:
     from agentworks.config import Config
     from agentworks.db import Database
     from agentworks.git_credentials.base import GitCredentialProvider
+    from agentworks.git_credentials.credential import GitCredentialConfig
     from agentworks.resources.registry import Registry
     from agentworks.vms.admin import AdminConfig
     from agentworks.vms.templates import ResolvedVMTemplate
@@ -1114,6 +1115,18 @@ def verify_tailscale_available() -> None:
         )
 
 
+def _token_secret(cred_config: GitCredentialConfig) -> str:
+    """The token secret name for a credential: provider_config's
+    ``token`` if set, else the ``git-token-<name>`` default the
+    provider's validate_config also derives."""
+    from agentworks.git_credentials.base import default_token_secret
+
+    raw = cred_config.provider_config.get("token")
+    return raw if isinstance(raw, str) and raw else default_token_secret(
+        cred_config.name
+    )
+
+
 def resolve_git_credential_providers(
     registry: Registry,
     names: list[str],
@@ -1144,7 +1157,8 @@ def resolve_git_credential_providers(
             org = cred_config.provider_config.get("org")
             assert isinstance(org, str)  # loader guarantees org for azdo
             providers[name] = AzDOCredentialProvider(
-                config_name=name, org=org, description=desc, secret_name=cred_config.token
+                config_name=name, org=org, description=desc,
+                secret_name=_token_secret(cred_config),
             )
         elif cred_config.provider == "github":
             from agentworks.git_credentials.github import _validated_scope
@@ -1158,7 +1172,7 @@ def resolve_git_credential_providers(
             providers[name] = GitHubCredentialProvider(
                 config_name=name,
                 description=desc,
-                secret_name=cred_config.token,
+                secret_name=_token_secret(cred_config),
                 repos=repos,
                 owner=scope_owner,
             )

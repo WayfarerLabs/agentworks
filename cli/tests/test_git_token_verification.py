@@ -59,7 +59,7 @@ def test_github_200_verifies_with_login_and_expiry(
     )
     monkeypatch.setattr("agentworks.git_credentials.base._http_probe", fake)
     p = GitHubCredentialProvider(config_name="gh")
-    info = p.acquire_token("tok")
+    info = p.acquire_token({p.secret_name: "tok"})
     assert info == TokenInfo(
         token="tok", login="wfscot", expires_at=date(2026, 10, 1), verified=True
     )
@@ -76,7 +76,7 @@ def test_github_401_is_definitive_rejection(
     )
     p = GitHubCredentialProvider(config_name="gh", secret_name="my-secret")
     with pytest.raises(TokenRejectedError, match="rejected the token") as exc:
-        p.acquire_token("bogus")
+        p.acquire_token({p.secret_name: "bogus"})
     assert "'gh'" in str(exc.value)
     assert "'my-secret'" in str(exc.value)
     assert "verify_git_tokens = false" in (exc.value.hint or "")
@@ -89,7 +89,7 @@ def test_github_other_status_warns_and_continues(
         "agentworks.git_credentials.base._http_probe", _probe(503)
     )
     p = GitHubCredentialProvider(config_name="gh")
-    info = p.acquire_token("tok")
+    info = p.acquire_token({p.secret_name: "tok"})
     assert info.token == "tok"
     assert not info.verified
     assert "could not verify" in capsys.readouterr().err
@@ -101,7 +101,7 @@ def test_network_failure_warns_and_continues(
     """No probe monkeypatch here: the conftest guard IS the network
     failure, proving both the guard and the indeterminacy path."""
     p = GitHubCredentialProvider(config_name="gh")
-    info = p.acquire_token("tok")
+    info = p.acquire_token({p.secret_name: "tok"})
     assert info.token == "tok"
     assert not info.verified
     assert "could not verify" in capsys.readouterr().err
@@ -112,7 +112,7 @@ def test_expiry_header_format_drift_tolerated(
 ) -> None:
     fake = _probe(200, b'{"login": "x"}', {_EXPIRY_HEADER: "soonish"})
     monkeypatch.setattr("agentworks.git_credentials.base._http_probe", fake)
-    info = GitHubCredentialProvider(config_name="gh").acquire_token("t")
+    info = GitHubCredentialProvider(config_name="gh").acquire_token({"git-token-gh": "t"})
     assert info.verified
     assert info.expires_at is None
 
@@ -129,14 +129,14 @@ def test_azdo_rejection_statuses(
     )
     p = AzDOCredentialProvider(config_name="ado", org="my-org")
     with pytest.raises(TokenRejectedError, match="Azure DevOps rejected"):
-        p.acquire_token("bogus")
+        p.acquire_token({p.secret_name: "bogus"})
 
 
 def test_azdo_200_verifies(monkeypatch: pytest.MonkeyPatch) -> None:
     fake = _probe(200)
     monkeypatch.setattr("agentworks.git_credentials.base._http_probe", fake)
     p = AzDOCredentialProvider(config_name="ado", org="my-org")
-    assert p.acquire_token("tok").verified
+    assert p.acquire_token({p.secret_name: "tok"}).verified
     (url, headers), = fake.calls  # type: ignore[attr-defined]
     assert url == "https://dev.azure.com/my-org/_apis/connectionData"
     assert headers["Authorization"].startswith("Basic ")
@@ -152,7 +152,7 @@ def test_base_acquire_is_unverified_identity() -> None:
         def helper_entry(self) -> HelperEntry:
             return HelperEntry(host="example.com", username=self.store_username)
 
-    info = _Bare("b").acquire_token("tok")
+    info = _Bare("b").acquire_token({"git-token-b": "tok"})
     assert info == TokenInfo(token="tok")
 
 

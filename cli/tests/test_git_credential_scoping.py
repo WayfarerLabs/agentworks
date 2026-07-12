@@ -33,7 +33,23 @@ from agentworks.vms.initializer import resolve_git_credential_providers
     [{}, {"repos": ["acme/widgets"]}, {"repos": ["acme/widgets", "acme/gadgets"]}, {"owner": "acme"}],
 )
 def test_valid_scopes_accepted(blob: dict[str, object]) -> None:
-    assert GitHubCredentialProvider.validate_config("t", blob) == ()
+    # validate_config returns the token-secret reference the provider
+    # sources its PAT from (default git-token-<name>); scope validation
+    # passing means no error.
+    refs = GitHubCredentialProvider.validate_config("git-credential/t", blob)
+    assert [(r.kind, r.name) for r in refs] == [("secret", "git-token-t")]
+
+
+def test_token_override_in_provider_config() -> None:
+    refs = GitHubCredentialProvider.validate_config(
+        "git-credential/gh", {"token": "my-secret"}
+    )
+    assert [(r.kind, r.name) for r in refs] == [("secret", "my-secret")]
+
+
+def test_empty_token_rejected() -> None:
+    with pytest.raises(ConfigError, match="non-empty secret name"):
+        GitHubCredentialProvider.validate_config("git-credential/gh", {"token": ""})
 
 
 @pytest.mark.parametrize(

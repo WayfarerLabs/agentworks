@@ -58,7 +58,8 @@ def test_default_token_secret_auto_declares(
         ssh_keys,
     )
     config = load_config(cfg, warn_issues=False)
-    assert config.git_credentials["github"].token == "git-token-github"
+    # No token in provider_config -> the provider defaults the secret.
+    assert "token" not in config.git_credentials["github"].provider_config
 
     registry = build_registry(config)
     decl = registry.lookup("secret", "git-token-github")
@@ -83,7 +84,7 @@ def test_custom_token_secret_auto_declares(
         ssh_keys,
     )
     config = load_config(cfg, warn_issues=False)
-    assert config.git_credentials["github"].token == "custom-tok"
+    assert config.git_credentials["github"].provider_config["token"] == "custom-tok"
 
     registry = build_registry(config)
     decl = registry.lookup("secret", "custom-tok")

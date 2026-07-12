@@ -315,9 +315,10 @@ def _check_git_tokens(g: HealthGroup, config: Config, registry: Registry) -> Non
         provider = providers.get(cred.name)
         if provider is None:
             continue
-        var = env_var_name_for(cred.token)
+        secret_name = provider.secret_name
+        var = env_var_name_for(secret_name)
         try:
-            decl = registry.lookup("secret", cred.token)
+            decl = registry.lookup("secret", secret_name)
             mapping = decl.backend_mappings.get("env-var")
         except KeyError:
             mapping = None
@@ -337,7 +338,7 @@ def _check_git_tokens(g: HealthGroup, config: Config, registry: Registry) -> Non
             )
             continue
         try:
-            info = provider.acquire_token(value)
+            info = provider.acquire_token({secret_name: value}, verify=True)
         except TokenRejectedError as e:
             g.fail(f"Git token '{cred.name}'", str(e), hint=e.hint)
             continue
