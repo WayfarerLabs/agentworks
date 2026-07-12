@@ -28,6 +28,7 @@ if TYPE_CHECKING:
     from agentworks.secrets import SecretTarget
     from agentworks.ssh import SSHLogger
     from agentworks.transports import Transport
+    from agentworks.vms.base import VMPlatform
 
 AGENT_PREFIX = "agt-"
 WS_GROUP_PREFIX = "ws-"
@@ -222,8 +223,15 @@ def create_agent(
     vm_name: str,
     template: str | None = None,
     grant_all_workspaces: bool = False,
+    platform: VMPlatform | None = None,
 ) -> None:
-    """Create an agent on a VM."""
+    """Create an agent on a VM.
+
+    ``platform`` accepts the caller's already-bound platform (session
+    create's ephemeral-agent path) so the nested create doesn't re-run
+    the site's secret resolve pass; when None this function is its own
+    composition root and binds once.
+    """
 
     from agentworks.agents.templates import resolve_template
     from agentworks.bootstrap import build_registry
@@ -260,7 +268,9 @@ def create_agent(
     output.info(
         f"Creating agent '{name}' on VM '{vm_name}' (template: {agent_tmpl.name})..."
     )
-    with keep_active(db, config, vm, bind_platform(config, vm)):
+    if platform is None:
+        platform = bind_platform(config, vm, registry=registry)
+    with keep_active(db, config, vm, platform):
 
         def _safe_rollback() -> None:
             # Best-effort: rollback failures must not mask the original KI or

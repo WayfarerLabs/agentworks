@@ -25,6 +25,7 @@ if TYPE_CHECKING:
     from agentworks.config import Config
     from agentworks.db import Database, VMRow, WorkspaceRow
     from agentworks.transports import Transport
+    from agentworks.vms.base import VMPlatform
 
 
 def create_workspace(
@@ -35,8 +36,15 @@ def create_workspace(
     vm_name: str | None = None,
     template_name: str | None = None,
     open_vscode: bool = False,
+    platform: VMPlatform | None = None,
 ) -> None:
-    """Create a workspace on a VM."""
+    """Create a workspace on a VM.
+
+    ``platform`` accepts the caller's already-bound platform (session
+    create's ephemeral-workspace path) so the nested create doesn't
+    re-run the site's secret resolve pass; when None this function is
+    its own composition root and binds once.
+    """
     from agentworks.agents.manager import workspace_group
     from agentworks.bootstrap import build_registry
     from agentworks.ssh import SSHLogger
@@ -65,7 +73,9 @@ def create_workspace(
 
     vm = _resolve_vm(db, vm_name)
     _guard_vm_status(vm)
-    with keep_active(db, config, vm, bind_platform(config, vm)):
+    if platform is None:
+        platform = bind_platform(config, vm, registry=registry)
+    with keep_active(db, config, vm, platform):
 
         workspace_path: str | None = None
         vscode_path: str | None = None

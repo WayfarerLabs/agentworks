@@ -70,7 +70,15 @@ Phase 5.
   token collection so the R3 error fires first. New pinning tests: `test_bind_platform.py` (no
   resolve pass without site secrets, exactly one for a secret-bearing site, one pass + one shared
   instance per site across a batch, empty-set builds no registry) and the DEALLOCATED /
-  concurrent-stop gate cases.
+  concurrent-stop gate cases. Round 2 closed the residuals: the nested `create_workspace` /
+  `create_agent` calls accept the parent's bound platform (a DELIBERATE carve-out to the
+  resource-manifests SDD's CLI-shaped-args-only seam pin -- the bound platform is the command's one
+  typed platform bind, not the open-ended values/registry smuggling that pin blocks; the pinned test
+  documents the carve-out), so `session create --new-workspace --new-agent` is one resolve pass end
+  to end; `delete_vm`'s hold+logout span is its own try/warn (a broken WSL2 hold -- the exact state
+  delete cleans up -- can no longer abort before the backend delete), `UserAbort` at a bind prompt
+  aborts the whole delete, and the bind-failure warn carries the R3 manifest hint; all pinned by a
+  new `test_delete_vm_gating.py` suite.
 
 **Compile boundaries**: Phases 1 through 3 are one logical commit boundary, mirroring the
 polymorphic-transports precedent. As planned, Phase 1 would open a non-compiling window when the

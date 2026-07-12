@@ -566,11 +566,13 @@ def describe_vm(db: Database, config: Config, name: str) -> None:
     status_label = "-"
     try:
         site_decl = lookup_site(vm.site, registry)
+        # Known as soon as the declaration resolves: keep it alive even
+        # if the bind below degrades.
+        site_platform = site_decl.platform
         platform = bind_platform(config, vm, registry=registry)
     except ConfigError as e:
         output.warn(f"{e}" + (f"\n{e.hint}" if e.hint else ""))
     else:
-        site_platform = site_decl.platform
         backend_label = platform.display_backend_name(vm)
         # Live observed status, paired with operator intent: an
         # operator stop reads differently from an idle timeout.
@@ -1155,19 +1157,34 @@ def delete_vm(
     # Platform-specific cleanup (also handles Tailscale logout)
     try:
         provisioner = bind_platform(config, vm)
+    except UserAbort:
+        # Ctrl-C at a site-secret prompt must keep the SIGINT contract:
+        # abort the whole delete rather than orphaning the backend VM
+        # behind a warn.
+        raise
     except Exception as e:
         provisioner = None
-        output.warn(f"platform binding failed, skipping backend cleanup: {e}")
+        hint = getattr(e, "hint", None)
+        output.warn(
+            f"platform binding failed, skipping backend cleanup: {e}"
+            + (f"\n{hint}" if hint else "")
+        )
 
     if provisioner is not None:
         # Tailscale logout (best-effort, hold-only): the logout wants
         # the VM alive if it happens to be, but delete must NOT gate --
-        # an operator-stopped VM would raise, and an idle-stopped VM
-        # would be booted just to be deleted. _tailscale_logout is its
-        # own try/warn; a failure here must never skip the delete.
+        # an operator-stopped VM would raise. (The WSL2 hold does boot a
+        # stopped distro; the logout genuinely needs the VM up.) The
+        # whole hold+logout span is best-effort: broken states -- e.g. a
+        # manually unregistered WSL2 distro whose hold raises -- are
+        # exactly what `vm delete` exists to clean up, so nothing here
+        # may skip the delete below.
         if vm.tailscale_host:
-            with provisioner.vm_active(vm, config=config):
-                _tailscale_logout(vm, config, provisioner)
+            try:
+                with provisioner.vm_active(vm, config=config):
+                    _tailscale_logout(vm, config, provisioner)
+            except Exception as e:
+                output.warn(f"tailscale logout skipped: {e}")
 
         try:
             provisioner.delete(vm)

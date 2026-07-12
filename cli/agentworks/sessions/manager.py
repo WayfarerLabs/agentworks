@@ -1507,6 +1507,7 @@ def create_session(
                 name=workspace_name,
                 vm_name=vm.name,
                 template_name=workspace_template,
+                platform=vm_platform,
             )
             workspace_created = True
         if new_agent:
@@ -1519,6 +1520,7 @@ def create_session(
                 name=agent_name,
                 vm_name=vm.name,
                 template=agent_template,
+                platform=vm_platform,
             )
             agent_created = True
 

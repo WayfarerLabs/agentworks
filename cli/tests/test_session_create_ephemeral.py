@@ -377,7 +377,10 @@ def test_new_agent_with_explicit_agent_name(
             new_agent=True,
             agent_name="my-named-agent",
         )
-    assert create_agent_calls == [
+    cli_shaped = [
+        {k: v for k, v in c.items() if k != "platform"} for c in create_agent_calls
+    ]
+    assert cli_shaped == [
         {"name": "my-named-agent", "vm_name": "vm1", "template": None}
     ]
     db.close()
@@ -570,7 +573,13 @@ def test_nested_creates_are_their_own_composition_units(
     single eager resolve covers the session's needs (union prompt), and
     the secret sets are disjoint in practice. If someone threads
     ``values=`` or ``registry=`` through this seam to "save" a resolve,
-    this test trips."""
+    this test trips.
+
+    One deliberate carve-out (vm-sites SDD, Phase 3): the BOUND
+    ``platform`` threads through. It is the command's one platform bind
+    (prompt-once for site config secrets like the proxmox token) --
+    a typed, site-scoped object, not the open-ended values/registry
+    smuggling this pin exists to block."""
     from agentworks.sessions.manager import create_session
 
     db = Database(tmp_path / "test.db")
@@ -622,8 +631,8 @@ def test_nested_creates_are_their_own_composition_units(
     # Allowlist, not denylist: the seam contract is CLI-shaped args and
     # NOTHING else, so any smuggled kwarg (values, registry, resolved,
     # parent_registry, ...) trips this regardless of its name.
-    assert seam_kwargs["create_workspace"] == {"name", "vm_name", "template_name"}
-    assert seam_kwargs["create_agent"] == {"name", "vm_name", "template"}
+    assert seam_kwargs["create_workspace"] == {"name", "vm_name", "template_name", "platform"}
+    assert seam_kwargs["create_agent"] == {"name", "vm_name", "template", "platform"}
     db.close()
 
 
@@ -944,7 +953,11 @@ def test_workspace_prompt_picks_create_new(
         )
     # The flow reached create_workspace, which means new_workspace=True was set
     # by the prompt-driven path.
-    assert create_workspace_calls == [{"name": "s1", "vm_name": "vm1", "template_name": None}]
+    cli_shaped = [
+        {k: v for k, v in c.items() if k != "platform"}
+        for c in create_workspace_calls
+    ]
+    assert cli_shaped == [{"name": "s1", "vm_name": "vm1", "template_name": None}]
     db.close()
 
 
@@ -1045,7 +1058,10 @@ def test_mode_prompt_picks_create_new(
             workspace="ws1",
         )
     # The flow reached create_agent with the session name defaulted in.
-    assert create_agent_calls == [{"name": "s1", "vm_name": "vm1", "template": None}]
+    cli_shaped = [
+        {k: v for k, v in c.items() if k != "platform"} for c in create_agent_calls
+    ]
+    assert cli_shaped == [{"name": "s1", "vm_name": "vm1", "template": None}]
     db.close()
 
 
