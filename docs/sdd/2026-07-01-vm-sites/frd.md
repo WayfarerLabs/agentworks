@@ -135,6 +135,27 @@ Two coordination notes:
 
 ## Requirements
 
+> **Design revision (2026-07-12): capability model adoption.** `capability-model.md` (in this SDD)
+> now owns the capability lifecycle contract; Phase 7 of the plan adopts it for the
+> vm-platform/vm-site pair. It amends the requirements below at the requirement level:
+>
+> - Platforms construct bound to `(config, resolver)`, never to resolved secret values; binding
+>   neither resolves nor prompts. Where R2 places value resolution "at the consuming command's
+>   composition root", the timing within that root is revised: resolution happens after every
+>   participating resource's `preflight` passes, never at command entry and never deferred to an
+>   op's first need.
+> - Everything preflights: every service-layer operation runs `preflight` on all the resources it
+>   will use (the vm-template predicts its Tailscale key can resolve -- the template's
+>   responsibility, not the site's; the platform instance checks tools, reachability, and secret
+>   mappings) before any mutation and before any secret prompt. Preflight is read-only; doctor
+>   reuses it.
+> - The one resolve pass covers the union of secrets needed across all planned ops across all
+>   participating resources: one prompt session per command, values cached.
+> - Catch-all handling around best-effort spans (the resolve pass included) re-raises `UserAbort`; a
+>   Ctrl-C at a prompt aborts the operation cleanly, always.
+> - Mutating ops carry per-op idempotency flags on the kind ABC.
+> - The base `Capability` class and the platform implementations live in a `capabilities/` subtree.
+
 ### R1: Platform capability, site resource
 
 - One platform class per backend, registered in `VM_PLATFORM_REGISTRY` (domain-scoped symbol per ADR

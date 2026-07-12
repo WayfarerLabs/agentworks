@@ -1,5 +1,28 @@
 # VM sites and platforms: high-level architecture
 
+> **Design revision (2026-07-12): capability model adoption.** `capability-model.md` (in this SDD)
+> now owns the capability lifecycle contract, and Phase 7 of the plan adopts it. Where this document
+> disagrees with it, the capability model wins. The concrete supersessions:
+>
+> - **"The VMPlatform protocol"**: instances are constructed as
+>   `cls(site_name, validated_platform_config, resolver)`, not with resolved `secret_values`.
+>   Construction re-runs `validate_config` and stays cheap (no network, no resolution, no prompt).
+>   `VMPlatform` extends the instance-scoped `Capability` base and gains `preflight` (read-only,
+>   best-effort); its mutating ops carry per-op idempotency flags.
+> - **"Dispatch and site secrets"**: `resolve_site` / `platform_for` lose the `secret_values`
+>   parameter, and the canonical composition-root ordering becomes: (1) config + registry; (2) VM
+>   row + site declaration; (3) bind (construct with the resolver -- no resolution); (4) preflight
+>   every participating resource, the vm-template (predicts its Tailscale key resolves; the key is
+>   the template's responsibility, not the site's) and the platform instance, in either order; (5)
+>   the one resolve pass, covering the union of secrets needed across all planned ops across all
+>   participating resources; (6) ops, drawing values from the resolver's cache. Resolution never
+>   happens at command entry and is never deferred to an op's first need. Gates still take the bound
+>   platform and never bind or resolve.
+> - **"File layout"**: the platform implementations move from `agentworks/vms/platforms/` to
+>   `agentworks/capabilities/vm_platform/`, under the `Capability` base at the top of
+>   `agentworks/capabilities/`.
+> - Doctor's per-site health rows call the instance's `preflight` (read-only by contract).
+
 ## Model overview
 
 ADR 0016's two-layer model (config / resources, with capabilities as read-only resources),

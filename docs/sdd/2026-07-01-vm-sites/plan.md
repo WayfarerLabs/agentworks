@@ -1,10 +1,10 @@
 # VM sites and platforms -- implementation plan
 
-**Status**: all six phases complete. Phases follow the HLA's sequencing sketch, with two refinements
-recorded there-vs-here: `defaults.site` parsing (plus the deprecated `defaults.platform` alias) and
-the `vm-template.site` field land in Phase 1 with the rest of the config/kind surface, so Phase 3's
-selection precedence has both to read; only the operator-facing flag/completion work stays in
-Phase 5.
+**Status**: phases 1-6 complete; Phase 7 (capability model adoption, added 2026-07-12) not started.
+Phases follow the HLA's sequencing sketch, with two refinements recorded there-vs-here:
+`defaults.site` parsing (plus the deprecated `defaults.platform` alias) and the `vm-template.site`
+field land in Phase 1 with the rest of the config/kind surface, so Phase 3's selection precedence
+has both to read; only the operator-facing flag/completion work stays in Phase 5.
 
 **Sequencing notes**:
 
@@ -110,6 +110,22 @@ Phase 5.
   became a set (`_SECTION_KINDS` owns the section mapping), the `sites` completer joined the
   registry-sourced completion pin, doctor's catch-all warn carries the exception detail, and
   `ssh.py`'s docstring stopped citing deleted modules.
+- **2026-07-12, capability model adoption added as Phase 7.** After the six phases closed
+  merge-ready, the maintainer landed `capability-model.md` (drafted with another dev; the contract
+  vm-platform/vm-site, git credentials, and the session harness converge on) and directed adopting
+  it in this PR, since vm-platform/vm-site is the first pair to implement the full shape and the PR
+  is already breaking. The load-bearing inversions vs the phases above: platforms construct bound to
+  `(config, resolver)` instead of receiving resolved `secret_values` (binding no longer resolves or
+  prompts); everything preflights (the vm-template predicts its Tailscale key can resolve -- the
+  template's responsibility, not the site's -- and the platform instance checks tools/reachability,
+  all before any mutation or prompt); secret resolution happens once, at the preflight boundary,
+  over the union of what all planned ops across all participating resources need (timing refined
+  from "first op-need" to "as soon as preflight passes" by maintainer ruling the same day); the base
+  `Capability` class and the platform implementations move to a `capabilities/` subtree; ops carry
+  per-op idempotency flags. The doc also pins the abort discipline the move implies: catch-alls
+  around best-effort spans (the resolve pass included) re-raise `UserAbort`. The doc promotes to a
+  permanent `capabilities/README.md` once git credentials validates it; that promotion belongs to
+  the other workstream, not this PR.
 
 **Compile boundaries**: Phases 1 through 3 are one logical commit boundary, mirroring the
 polymorphic-transports precedent. As planned, Phase 1 would open a non-compiling window when the
@@ -419,6 +435,44 @@ existing VMs keep hostnames and env values. MET (suite 1550, ruff, mypy green).
 
 **Definition of done**: PR open, CI green, reviewer findings addressed. `locked.md` lands after
 merge per the SDD lifecycle.
+
+## Phase 7: Capability model adoption
+
+Added 2026-07-12 (see the sequencing note). Adopts the `capability-model.md` contract for the
+vm-platform/vm-site pair; the git-credentials and session-harness PRs adopt for theirs.
+
+- [ ] `capabilities/` subtree: the instance-scoped `Capability` base (identity, `validate_config`
+      default, the construct/preflight contract, the per-op idempotency marker) at the top;
+      `vms/platforms/` relocates to `capabilities/vm_platform/`. The already-merged `secret-backend`
+      capability moves in under its own change, not this PR.
+- [ ] `Resolver`: thin adapter over the existing machinery (`compute_needed_secrets` for the union,
+      `resolve_secrets` for the one pass, the `would_attempt` chain for prediction). Accumulates
+      participating resources' decls; `predict()` non-prompting for preflights; `resolve()` once at
+      the preflight boundary, cached; `get()` for ops.
+- [ ] Constructor flip: `cls(site_name, platform_config, resolver)`; `resolve_site` / `platform_for`
+      / `bind_platform` lose `secret_values`; binding no longer resolves or prompts. `VMPlatform`
+      extends the base.
+- [ ] `preflight` implementations: lima/wsl2 (required binary present), azure (CLI present, logged
+      in -- a read), proxmox (API reachable, token mapping predicted / non-interactively verified);
+      plus the vm-template preflight predicting its Tailscale key resolves (keeping the
+      `_lookup_or_synthesize_secret` fallback for an unpublished default template).
+- [ ] Service-layer reorder (create, reinit, rekey, delete, and the gate-using paths): bind, then
+      preflight all participating resources (either order), then the one union resolve pass, then
+      ops. `_collect_secrets` reshapes into the resolver flow. `delete_vm` keeps never-gates and
+      gains the op-level `UserAbort` re-raise carve-outs now that prompting happens inside the
+      operation.
+- [ ] Idempotency flags on the `VMPlatform` ABC's ops (marker plus docstring note; most platform ops
+      are wholesale writes, so this is largely a documentation exercise).
+- [ ] Doctor: the VM-sites group calls each declared site's instance `preflight` for its health rows
+      (read-only by contract, so doctor-safe).
+- [ ] Tests: constructor/bind reshapes across the vms suites; per-platform preflight tests;
+      prompt-order pins (no prompt before preflight passes; one prompt session per command; no
+      prompt at bind); the delete-abort regression (Ctrl-C at a mid-operation prompt aborts the
+      whole delete, DB row intact).
+- [ ] agentworks-reviewer round; iterate until clean.
+
+**Definition of done**: the vm-platform/vm-site pair conforms to `capability-model.md` end to end;
+full gates green; reviewer round clean.
 
 ## Risk and mitigations
 
