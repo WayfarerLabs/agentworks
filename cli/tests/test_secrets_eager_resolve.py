@@ -476,6 +476,47 @@ def test_agent_reinit_does_not_eager_resolve_operator_env() -> None:
     )
 
 
+def test_vm_shell_binds_before_the_env_resolve(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The lifecycle ordering pin for the runtime roots: shell_vm binds
+    (preflight + boundary resolve) BEFORE the env-chain eager resolve,
+    so no prompt can precede a failing platform preflight."""
+    from agentworks.vms import manager as vm_manager
+
+    db = _seed_basic_db(tmp_path)
+    order: list[str] = []
+
+    monkeypatch.setattr(
+        vm_manager, "bind_platform",
+        lambda *a, **k: order.append("bind") or object(),
+    )
+    monkeypatch.setattr(
+        vm_manager, "_resolve_vm_admin_env_scopes",
+        lambda *a, **k: vm_manager._VmAdminEnvScopes(vm={}, workspace=None, admin={}),
+    )
+    monkeypatch.setattr(vm_manager, "_vm_secret_target", lambda *a, **k: object())
+
+    class _Stop(Exception):
+        pass
+
+    def _env_resolve(*args: object, **kwargs: object) -> None:
+        order.append("env-resolve")
+        raise _Stop
+
+    monkeypatch.setattr("agentworks.secrets.resolve_for_command", _env_resolve)
+
+    config = SimpleNamespace(
+        vm=SimpleNamespace(env={}),
+        admin=SimpleNamespace(env={}),
+    )
+    with pytest.raises(_Stop):
+        vm_manager.shell_vm(db, config, "vm1")  # type: ignore[arg-type]
+
+    assert order == ["bind", "env-resolve"]
+    db.close()
+
+
 def test_vm_shell_eager_resolve_fires_before_ssh(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -585,6 +626,10 @@ def test_agent_exec_eager_resolve_fires_before_ssh(
     from agentworks.agents import manager as agent_manager
 
     db = _seed_basic_db(tmp_path)
+
+    # The root now binds (and preflights) the platform before the env
+    # resolve; make the lima tool check deterministic on any host.
+    monkeypatch.setattr("shutil.which", lambda name: f"/usr/bin/{name}")
     db.insert_agent("a1", "vm1", "agt-a1", template="default")
 
     monkeypatch.setattr(

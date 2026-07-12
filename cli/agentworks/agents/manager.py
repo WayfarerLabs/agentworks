@@ -680,14 +680,19 @@ def shell_agent(
     # errors and the eager-resolve below sees the right scope chain.
     ws = _resolve_workspace_for_agent(db, vm, agent, workspace_name)
 
+    # Bind FIRST: the platform's preflight must fail before the env
+    # chain prompts the operator for anything (the lifecycle's
+    # no-prompt-before-preflight ordering).
+    from agentworks.bootstrap import build_registry
+
+    registry = build_registry(config)
+    bound = bind_platform(config, vm, registry=registry)
+
     # Eager-prompting orchestration (FRD R4 / Phase 6): resolve every
     # secret referenced by the agent shell's env chain BEFORE opening
     # the interactive SSH session. The same scope dicts feed both the
     # SecretTarget (for resolve_for_command) and compose_env below so
     # the two consumers can't drift.
-    from agentworks.bootstrap import build_registry
-
-    registry = build_registry(config)
     scopes = _resolve_agent_direct_env_scopes(registry, vm, agent, ws=ws)
     values = resolve_for_command(
         [_agent_direct_secret_target(scopes, label=f"agent-shell={agent.name}")],
@@ -718,7 +723,7 @@ def shell_agent(
     # authorized_keys (Phase 3) accepts the operator's key set.
     target = agent_transport(vm, config, agent)
 
-    with keep_active(db, config, vm, bind_platform(config, vm, registry=registry)):
+    with keep_active(db, config, vm, bound):
         # Probe direct agent SSH first so pre-rollout agents (whose
         # authorized_keys was never populated) get an actionable error
         # rather than dropping into a remote shell that immediately exits
@@ -782,13 +787,18 @@ def exec_agent(
     # sees the right scope chain.
     ws = _resolve_workspace_for_agent(db, vm, agent, workspace_name)
 
+    # Bind FIRST: the platform's preflight must fail before the env
+    # chain prompts the operator for anything (the lifecycle's
+    # no-prompt-before-preflight ordering).
+    from agentworks.bootstrap import build_registry
+
+    registry = build_registry(config)
+    bound = bind_platform(config, vm, registry=registry)
+
     # Eager-prompting orchestration (FRD R4 / Phase 6): resolve every
     # secret referenced by the agent exec env chain BEFORE running the
     # remote command. The same scope dicts feed both the SecretTarget
     # and compose_env below so the two consumers can't drift.
-    from agentworks.bootstrap import build_registry
-
-    registry = build_registry(config)
     scopes = _resolve_agent_direct_env_scopes(registry, vm, agent, ws=ws)
     values = resolve_for_command(
         [_agent_direct_secret_target(scopes, label=f"agent-exec={agent.name}")],
@@ -817,7 +827,7 @@ def exec_agent(
 
     target = agent_transport(vm, config, agent)
 
-    with keep_active(db, config, vm, bind_platform(config, vm)):
+    with keep_active(db, config, vm, bound):
         # Probe direct agent SSH first so pre-rollout agents (whose
         # authorized_keys was never populated) get an actionable error.
         _assert_agent_ssh_works(target, agent)

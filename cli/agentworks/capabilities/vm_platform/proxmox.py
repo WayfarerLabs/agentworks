@@ -280,11 +280,21 @@ class ProxmoxPlatform(VMPlatform):
         return any(entry.get("name") == backend_name for entry in existing)
 
     def start(self, vm: VMRow) -> None:
+        # Idempotency guard (the ABC flags start): the Proxmox
+        # status/start endpoint errors on an already-running VM.
+        if self.status(vm) == VMStatus.RUNNING:
+            output.detail(f"Proxmox VM '{vm.name}' is already running")
+            return
         node = self._vm_node(vm)
         upid = self._api.start_vm(node, self._vmid(vm))
         self._api.wait_for_task(node, upid)
 
     def stop(self, vm: VMRow) -> None:
+        # Idempotency guard (the ABC flags stop): stopping an
+        # already-stopped VM must land in the stopped state, not error.
+        if self.status(vm) == VMStatus.STOPPED:
+            output.detail(f"Proxmox VM '{vm.name}' is already stopped")
+            return
         node = self._vm_node(vm)
         upid = self._api.stop_vm(node, self._vmid(vm))
         self._api.wait_for_task(node, upid)

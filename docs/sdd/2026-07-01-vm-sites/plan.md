@@ -144,10 +144,11 @@ Phase 5.
   batch when ANY distinct site's preflight fails -- contract-consistent (preflight everything before
   anything real) and confirmed intended; a partial-batch degrade would act on some VMs while
   reporting failure, which is worse than failing clean. (6) The runtime env-chain resolve
-  (`shell_vm` / `exec_vm` / the session paths) remains its OWN prompt session after the bind's
-  boundary resolve; the round's fixes reordered every such root to bind (preflight + boundary
-  resolve) FIRST, so no prompt precedes a preflight anywhere, but folding the env chain into the
-  resolver is deliberately deferred (that seam belongs to the session-harness capability adoption).
+  (`shell_vm` / `exec_vm` / `shell_agent` / `exec_agent` / the session paths) remains its OWN prompt
+  session after the bind's boundary resolve; the round's fixes reordered every such root to bind
+  (preflight + boundary resolve) FIRST, so no prompt precedes a preflight anywhere, but folding the
+  env chain into the resolver is deliberately deferred (that seam belongs to the session-harness
+  capability adoption).
 
 **Compile boundaries**: Phases 1 through 3 are one logical commit boundary, mirroring the
 polymorphic-transports precedent. As planned, Phase 1 would open a non-compiling window when the

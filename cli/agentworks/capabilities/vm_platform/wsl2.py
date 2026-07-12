@@ -654,11 +654,19 @@ class WSL2Platform(VMPlatform):
         return any(line.strip() == distro_name for line in listing.splitlines())
 
     def start(self, vm: VMRow) -> None:
+        # Idempotent by construction (the ABC flags start): running a
+        # command boots a stopped distro and is a plain exec on a
+        # running one -- no guard needed.
         output.info(f"Starting WSL2 distro '{vm.name}'...")
         _wsl(["--distribution", self._distro_name(vm), "--", "echo", "started"])
         output.info(f"WSL2 distro '{vm.name}' started")
 
     def stop(self, vm: VMRow) -> None:
+        # Idempotency guard (the ABC flags stop): `wsl --terminate` on
+        # a stopped distro is not reliably a no-op across WSL versions.
+        if self.status(vm) == VMStatus.STOPPED:
+            output.detail(f"WSL2 distro '{vm.name}' is already stopped")
+            return
         output.info(f"Terminating WSL2 distro '{vm.name}'...")
         _wsl(["--terminate", self._distro_name(vm)])
         output.info(f"WSL2 distro '{vm.name}' terminated")
