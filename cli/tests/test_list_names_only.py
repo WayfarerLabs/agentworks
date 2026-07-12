@@ -66,7 +66,6 @@ def _seed(tmp_path: Path) -> Database:
 # module instead.
 _GET_DB_TARGETS = (
     "agentworks.cli.commands.vm.get_db",
-    "agentworks.cli.commands.vm_host.get_db",
     "agentworks.cli.commands.workspace.get_db",
     "agentworks.cli.commands.agent.get_db",
     "agentworks.cli.commands.session.get_db",
@@ -97,16 +96,6 @@ def test_vm_list_names_only_emits_one_per_line(tmp_path: Path) -> None:
     code, names = _invoke(db, ["vm", "list", "--names-only"])
     assert code == 0, names
     assert names == ["vm-a", "vm-b"]
-
-
-def test_vm_host_list_names_only_is_quiet(tmp_path: Path) -> None:
-    """PHASE-2 BRIDGE (vm-sites SDD): the vm_hosts registry is gone; the
-    completion path degrades to empty output until the CLI-surface
-    phase removes the command."""
-    db = _seed(tmp_path)
-    code, names = _invoke(db, ["vm-host", "list", "--names-only"])
-    assert code == 0, names
-    assert names == []
 
 
 def test_workspace_list_names_only_emits_one_per_line(tmp_path: Path) -> None:
@@ -181,7 +170,6 @@ def test_console_list_names_only_respects_vm_filter(tmp_path: Path) -> None:
     "subcommand",
     [
         ["vm", "list", "--names-only"],
-        ["vm-host", "list", "--names-only"],
         ["workspace", "list", "--names-only"],
         ["agent", "list", "--names-only"],
         ["session", "list", "--names-only"],

@@ -108,6 +108,7 @@ def run_checks(*, completion_version: str | None = None) -> HealthReport:
 
     if config is not None and registry is not None:
         report.groups.append(_check_secrets(config, registry))
+        report.groups.append(_check_vm_sites(registry))
 
     report.groups.append(_check_database())
 
@@ -145,10 +146,6 @@ def _check_required_tools() -> HealthGroup:
 def _check_vm_platforms() -> HealthGroup:
     g = HealthGroup("VM platforms")
 
-    # PHASE-2 BRIDGE (vm-sites SDD): the vm_hosts registry is gone;
-    # the CLI-surface phase teaches doctor to report declared vm-site
-    # resources here instead.
-
     # Local platform tools
     for tool, label in [
         ("limactl", "Local Lima (limactl)"),
@@ -158,6 +155,53 @@ def _check_vm_platforms() -> HealthGroup:
             g.ok(label)
         else:
             g.info(label, "not available")
+    return g
+
+
+def _check_vm_sites(registry: Registry) -> HealthGroup:
+    """VM sites: declared rows, the install slug, and every VM's site
+    resolving to a declaration (a stranded remote-Lima row reports its
+    paste-ready manifest snippet per SDD R3).
+    """
+    from agentworks.db import SYSTEM_SLUG_KEY, Database
+    from agentworks.vms.sites import VMSiteDecl, site_manifest_hint
+
+    g = HealthGroup("VM sites")
+
+    declared: dict[str, str] = {}
+    for name, decl in registry.iter_kind_items("vm-site"):
+        assert isinstance(decl, VMSiteDecl)
+        declared[name] = decl.platform
+    for name in sorted(declared):
+        g.ok(f"vm-site: {name}", f"platform {declared[name]}")
+
+    try:
+        db_exists, _, _ = Database.check_schema()
+        if not db_exists:
+            g.info("System slug", "database not yet created")
+            return g
+        db = Database()
+        try:
+            slug = db.get_setting(SYSTEM_SLUG_KEY)
+            if slug:
+                g.ok("System slug", slug)
+            elif slug == "":
+                g.info("System slug", "declined (asked at first vm create)")
+            else:
+                g.info("System slug", "unset (asked at first vm create)")
+
+            for vm in db.list_vms():
+                if vm.site in declared:
+                    continue
+                g.fail(
+                    f"VM '{vm.name}' site '{vm.site}'",
+                    "not declared",
+                    hint=site_manifest_hint(vm.site),
+                )
+        finally:
+            db.close()
+    except Exception:
+        g.warn("VM sites", "could not check the database")
     return g
 
 

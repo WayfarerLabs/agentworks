@@ -1,11 +1,10 @@
-"""`agentworks vm` -- manage virtual machines across Lima, Azure, WSL2, Proxmox."""
+"""`agentworks vm` -- manage virtual machines across declared vm-sites."""
 
 from __future__ import annotations
 
 from pathlib import Path
 from typing import Annotated
 
-import click
 import typer
 
 from agentworks.cli._app import app
@@ -23,11 +22,17 @@ app.add_typer(vm_app)
 def vm_create(
     name: Annotated[str, typer.Argument(help="VM name")],
     template: Annotated[str | None, typer.Option("--template", help="VM template")] = None,
-    platform: Annotated[
+    site: Annotated[
         str | None,
-        typer.Option("--platform", help="Platform", click_type=click.Choice(["lima", "azure", "wsl2", "proxmox"])),
+        typer.Option(
+            "--site",
+            help=(
+                "vm-site to create the VM at (a declared vm-site resource; "
+                "defaults to the template's site, then defaults.site, then "
+                "the built-in lima)"
+            ),
+        ),
     ] = None,
-    vm_host: Annotated[str | None, typer.Option("--vm-host", help="VM host for Lima")] = None,
     cpus: Annotated[int | None, typer.Option("--cpus", help="Number of CPUs")] = None,
     memory: Annotated[int | None, typer.Option("--memory", help="Memory in GiB")] = None,
     disk: Annotated[int | None, typer.Option("--disk", help="Disk size in GiB")] = None,
@@ -44,8 +49,7 @@ def vm_create(
         config,
         name=name,
         template=template,
-        platform=platform,
-        vm_host=vm_host,
+        site=site,
         cpus=cpus,
         memory=memory,
         disk=disk,
@@ -189,10 +193,11 @@ def vm_exec(
 @vm_app.command("shell")
 def vm_shell(
     name: Annotated[str, typer.Argument(help="VM name")],
-    provisioner: Annotated[
+    platform: Annotated[
         bool,
         typer.Option(
-            "--provisioner",
+            "--platform",
+            "--provisioner",  # hidden-in-help legacy alias for one release
             help=(
                 "Use the platform-native transport (limactl shell, wsl.exe, "
                 "Azure public-IP SSH) instead of Tailscale SSH. Useful when "
@@ -214,7 +219,7 @@ def vm_shell(
         get_db(),
         load_config(),
         name,
-        provisioner=provisioner,
+        provisioner=platform,
         workspace_name=workspace,
     )
 

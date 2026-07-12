@@ -380,8 +380,7 @@ def create_vm(
     *,
     name: str,
     template: str | None = None,
-    platform: str | None = None,
-    vm_host: str | None = None,
+    site: str | None = None,
     cpus: int | None = None,
     memory: int | None = None,
     disk: int | None = None,
@@ -402,11 +401,10 @@ def create_vm(
 
     # Resolve the target site (SDD R2 precedence) and its declaration.
     # An undeclared site fails here with the R3 ConfigError + manifest
-    # hint, before any DB or backend work. The CLI still spells the
-    # flag --platform until the CLI-surface phase renames it to --site.
+    # hint, before any DB or backend work.
     from agentworks.vms.sites import lookup_site, select_site, site_secret_decls
 
-    site = select_site(platform, vm_tmpl.site, config.defaults.site)
+    site = select_site(site, vm_tmpl.site, config.defaults.site)
     site_decl = lookup_site(site, registry)
 
     vm_name = name
@@ -417,20 +415,6 @@ def create_vm(
             f"VM '{vm_name}' already exists",
             entity_kind="vm",
             entity_name=vm_name,
-        )
-
-    # PHASE-2 BRIDGE (vm-sites SDD): the vm_hosts registry is gone (the
-    # DB migration dropped the table); remote Lima is now a vm-site with
-    # platform_config.vm_host. The --vm-host flag survives on the CLI
-    # until the CLI-surface phase removes it, so give it a typed error
-    # with the replacement shape.
-    if vm_host:
-        from agentworks.vms.sites import site_manifest_hint
-
-        raise ConfigError(
-            "--vm-host has been replaced by remote-Lima vm-sites",
-            hint=site_manifest_hint(vm_host)
-            + "\n\nthen pass the site via --platform",
         )
 
     # Resolve resource settings: CLI flag > template > built-in default

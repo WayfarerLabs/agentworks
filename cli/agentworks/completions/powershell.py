@@ -13,9 +13,10 @@ DYNAMIC_SNIPPETS: dict[str, str] = {
         "(agw vm list --names-only 2>$null |"
         ' Where-Object { $_ -like "$wordToComplete*" })'
     ),
-    "vm_hosts": (
-        "(agw vm-host list --names-only 2>$null |"
-        ' Where-Object { $_ -like "$wordToComplete*" })'
+    "sites": (
+        "(agw resource list --kind vm-site --names-only 2>$null"
+        " | ForEach-Object { ($_ -split '/', 2)[1] }"
+        ' | Where-Object { $_ -like "$wordToComplete*" })'
     ),
     "workspaces": (
         "(agw workspace list --names-only 2>$null |"

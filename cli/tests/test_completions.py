@@ -47,7 +47,6 @@ class TestTopLevelGroups:
             "secret",
             "session",
             "vm",
-            "vm-host",
             "workspace",
         }
     )

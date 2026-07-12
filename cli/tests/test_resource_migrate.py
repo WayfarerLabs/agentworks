@@ -46,6 +46,17 @@ CLAUDE_LOG_LEVEL = "info"
 type = "github"
 description = "gh access"
 
+[azure]
+subscription_id = "0000"
+resource_group = "agw"
+region = "eastus"
+
+[proxmox]
+api_url = "https://pve:8006"
+node = "pve1"
+token_id = "agw@pam!agw"
+template_vmid = 9000
+
 [secret_backends.env-var]
 
 [admin.config]
@@ -138,6 +149,8 @@ def test_full_migration_golden(tmp_path: Path) -> None:
         ("agent-template", "default"),
         ("session-template", "claude"),
         ("git-credential", "github"),
+        ("vm-site", "azure"),
+        ("vm-site", "proxmox"),
         ("admin-template", "default"),
         ("named-console-template", "default"),
         ("apt-source", "my-repo"),
@@ -174,6 +187,70 @@ def test_full_migration_golden(tmp_path: Path) -> None:
     assert [d["metadata"]["name"] for d in docs] == ["default", "dev"]
     # Non-contiguous env section folded into the one document.
     assert docs[1]["spec"]["env"] == {"HTTP_PROXY": "http://proxy:3128"}
+
+
+def test_vm_site_sections_migrate_flat_to_nested(tmp_path: Path) -> None:
+    """The legacy flat [azure] / [proxmox] sections emit as vm-site
+    manifests with the platform-owned keys nested under
+    spec.platform_config, the whole section comments out, and the
+    post-run registry-equivalence verification passes."""
+    cfg = _write_config(tmp_path)
+    config, plan = _plan(cfg, ["vm-site"])
+
+    assert {(u.kind, u.name) for u in plan.units} == {
+        ("vm-site", "azure"),
+        ("vm-site", "proxmox"),
+    }
+    result = execute_plan(plan, config)
+    assert result.verified_rows > 0
+
+    docs = _loaded_docs(tmp_path / "resources" / "vm-sites.yaml")
+    assert [d["metadata"]["name"] for d in docs] == ["azure", "proxmox"]
+    azure, proxmox = docs
+    assert azure["spec"] == {
+        "platform": "azure",
+        "platform_config": {
+            "subscription_id": "0000",
+            "resource_group": "agw",
+            "region": "eastus",
+        },
+    }
+    assert proxmox["spec"]["platform"] == "proxmox"
+    assert proxmox["spec"]["platform_config"]["template_vmid"] == 9000
+
+    after = cfg.read_text()
+    assert "# migrated to resources/vm-sites.yaml" in after
+    assert "# [azure]" in after
+    assert "\n[azure]" not in after
+
+    # The rewritten config reloads and the sites resolve as manifests.
+    reloaded = load_config(cfg, warn_issues=False, warn_deprecations=False)
+    registry = build_registry(reloaded)
+    assert registry.lookup("vm-site", "azure").platform == "azure"
+
+
+def test_vm_site_selector_by_name(tmp_path: Path) -> None:
+    cfg = _write_config(tmp_path)
+    config, plan = _plan(cfg, ["vm-site/azure"])
+    assert [(u.kind, u.name) for u in plan.units] == [("vm-site", "azure")]
+    execute_plan(plan, config)
+    after = cfg.read_text()
+    assert "# [azure]" in after
+    assert "[proxmox]" in after  # unselected sibling untouched
+
+
+def test_vm_site_stray_key_refused_before_write(tmp_path: Path) -> None:
+    """A stray key the TOML loader silently drops would fail manifest
+    validation after emission; the migrator refuses pre-write in the
+    operator's TOML vocabulary instead."""
+    resources = MAXIMAL_RESOURCES.replace(
+        'region = "eastus"', 'region = "eastus"\nstray_key = "x"'
+    )
+    cfg = _write_config(tmp_path, resources)
+    config = load_config(cfg, warn_issues=False)
+    registry = build_registry(config)
+    with pytest.raises(ConfigError, match="cannot migrate vm-site/azure"):
+        plan_migration(config, registry, ["vm-site/azure"])
 
 
 def test_git_credential_type_becomes_provider(tmp_path: Path) -> None:

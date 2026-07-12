@@ -1,6 +1,6 @@
 # VM sites and platforms -- implementation plan
 
-**Status**: Phases 1-4 complete. Phases follow the HLA's sequencing sketch, with two refinements
+**Status**: Phases 1-5 complete. Phases follow the HLA's sequencing sketch, with two refinements
 recorded there-vs-here: `defaults.site` parsing (plus the deprecated `defaults.platform` alias) and
 the `vm-template.site` field land in Phase 1 with the rest of the config/kind surface, so Phase 3's
 selection precedence has both to read; only the operator-facing flag/completion work stays in
@@ -343,22 +343,39 @@ existing VMs keep hostnames and env values. MET (suite 1550, ruff, mypy green).
 
 ## Phase 5: CLI surface and completions
 
-- [ ] `cli/agentworks/cli/commands/vm.py`: `--platform` becomes `--site` (static Choice removed;
-      validation at dispatch); `vm shell --provisioner` becomes boolean `--platform` with
-      `--provisioner` as a hidden alias for one release; help text sweep.
-- [ ] `cli/agentworks/cli/commands/vm_host.py` + `cli/agentworks/vm_hosts/`: removed.
-- [ ] `cli/agentworks/completions/spec.py`: `("vm.create", "site")` maps to a `sites` completer
+- [x] `cli/agentworks/cli/commands/vm.py`: `--platform` becomes `--site` (static Choice removed;
+      validation at dispatch via `lookup_site`); `vm shell --provisioner` becomes boolean
+      `--platform` with `--provisioner` as an alias for one release (deviation: click renders both
+      names in help -- it has no per-alias hiding -- so the alias is visible rather than hidden);
+      help text sweep. `create_vm`'s service-layer kwargs follow (`platform` -> `site`; the Phase-2
+      `--vm-host` bridge error deletes with the flag).
+- [x] `cli/agentworks/cli/commands/vm_host.py` + `cli/agentworks/vm_hosts/`: removed (the last
+      PHASE-2 BRIDGE retires; `git grep vm_hosts` is now clean outside SDDs and the migration).
+- [x] `cli/agentworks/completions/spec.py`: `("vm.create", "site")` maps to a `sites` completer
       (sourced from `agw resource list --kind vm-site --names-only`, splitting `vm-site/<name>` like
-      `resource_names`); `vm_host` entries removed; shell generators + `agw completion` regenerated.
-- [ ] `agw doctor`: every `vm.site` resolves (stranded rows report the paste-ready snippet); slug
-      row.
-- [ ] `cli/agentworks/sample-config.toml`: `[azure]` / `[proxmox]` examples replaced by a pointer at
-      `agw resource sample vm-site`; `defaults.site` documented with the deprecated
-      `defaults.platform` alias noted.
-- [ ] Tests: `test_completions.py` (new completer, removed entries), CLI smoke tests for the renamed
-      flags, doctor rows, `test_sample_config.py`.
+      the template completers); `vm_host` entries removed; all three shell generators (bash, zsh,
+      powershell) gain the `sites` renderer and drop `vm_hosts`. `resource migrate` selector
+      completion picks up vm-site automatically through `_MIGRATABLE_KINDS`.
+- [x] `agw doctor`: new "VM sites" group -- declared vm-site rows, the system slug (set / declined /
+      unset), and every `vm.site` resolving to a declaration (stranded rows fail with the
+      paste-ready manifest snippet as the hint).
+- [x] `cli/agentworks/sample-config.toml`: `[azure]` / `[proxmox]` examples replaced by a pointer at
+      `agw resource sample vm-site` (with the migrate command and the token secret's AW*SECRET* env
+      var named); `defaults.site` documented with the deprecated `defaults.platform` alias noted;
+      `vm_templates.*.site` documented.
+- [x] Migrator: `_MIGRATABLE_KINDS` includes vm-site (the deferred Phase 1 item) -- the one
+      multi-section kind: flat `[azure]` / `[proxmox]` sections discover as whole-section units
+      (section name = resource name), emission nests platform-owned keys under
+      `spec.platform_config` with pre-write capability validation (git-credential precedent), and
+      the whole section comments out with the migrated-to marker.
+- [x] Tests: `test_completions.py` (vm-host group removed from the pinned set), new
+      `test_vm_cli_surface.py` (renamed flags, removed flags/group, `--provisioner` alias, doctor
+      VM-sites rows incl. the stranded hint), `test_sample_config.py` (azure/proxmox gone),
+      `test_resource_migrate.py` (vm-site in the golden --all run; flat-to-nested emission; by-name
+      selector; stray-key refused pre-write with registry-equivalence verification).
 
-**Definition of done**: full CLI surface matches FRD R13; completions regenerate cleanly.
+**Definition of done**: full CLI surface matches FRD R13; completions regenerate cleanly. MET (suite
+1558, ruff, mypy green).
 
 ## Phase 6: Tests, docs, release notes, PR
 

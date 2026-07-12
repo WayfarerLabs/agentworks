@@ -79,7 +79,10 @@ class CommandSpec:
 #
 # The completer identifiers and their corresponding CLI commands:
 #   "vms"             -> agw vm list --names-only
-#   "vm_hosts"        -> agw vm-host list --names-only
+#   "sites"           -> agw resource list --kind vm-site --names-only
+#                        (kind/name per line; the completer slices the
+#                        vm-site/ prefix off shell-side like
+#                        resource_names does)
 #   "workspaces"      -> agw workspace list --names-only
 #   "ws_templates"    -> agw resource list --kind workspace-template --names-only
 #   "git_credentials" -> agw resource list --kind git-credential --names-only
@@ -153,8 +156,7 @@ DYNAMIC_COMPLETIONS: dict[tuple[str, str], str] = {
     ("vm.add-git-credential", "name"): "vms",
     ("vm.port-forward", "name"): "vms",
     ("vm.create", "template"): "vm_templates",
-    ("vm.create", "vm_host"): "vm_hosts",
-    ("vm-host.remove", "name"): "vm_hosts",
+    ("vm.create", "site"): "sites",
     ("workspace.shell", "name"): "workspaces",
     ("workspace.console", "name"): "workspaces",
     ("workspace.copy", "source"): "workspaces",

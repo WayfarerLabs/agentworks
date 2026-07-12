@@ -35,15 +35,28 @@ _SINGLETON_KINDS = {"admin-template", "named-console-template"}
 
 # secret-backend is a capability kind (not declarable); its
 # TOML sections are warned no-ops with no manifest successor -- they are
-# dropped, never migrated. vm-site's legacy sections ([azure]/[proxmox],
-# flat shape with section-name-becomes-resource-name semantics) join the
-# migrator in the vm-sites SDD's Phase 5; until then the kind is not a
-# valid selector. Every remaining kind maps to exactly one section.
+# dropped, never migrated. vm-site is the one multi-section kind: its
+# legacy sections ([azure] / [proxmox]) are FLAT, the section name IS
+# the resource name, and emission nests the platform-owned keys under
+# spec.platform_config. Every remaining kind maps to exactly one
+# section, with the section's inner tables as the named resources.
 _MIGRATABLE_KINDS = {
     k: sections[0]
     for k, sections in KIND_SECTIONS.items()
-    if k not in ("secret-backend", "vm-site")
+    if k != "secret-backend"
 }
+
+# section -> kind, covering vm-site's two legacy sections.
+_SECTION_KINDS = {
+    section: kind
+    for kind, sections in KIND_SECTIONS.items()
+    if kind != "secret-backend"
+    for section in sections
+}
+
+# Kinds whose whole top-level section is the unit (rather than a family
+# of inner tables): the true singletons plus vm-site's flat sections.
+_WHOLE_SECTION_KINDS = _SINGLETON_KINDS | {"vm-site"}
 
 _SECRET_BACKENDS_SECTION = "secret_backends"
 
@@ -159,11 +172,18 @@ def plan_migration(
         for key, _item in doc.body
     )
     markers = {(u.section, u.name): targets[(u.kind, u.name)] for u in selected}
+    # vm-site sections rewrite whole (like singletons); the editor's
+    # singleton path looks markers up under the "default" name.
+    for u in selected:
+        if u.kind == "vm-site":
+            markers[(u.section, "default")] = targets[(u.kind, u.name)]
     if selected or drops:
         new_text = apply_toml_edits(
             old_text,
             units={(u.section, u.name) for u in selected},
-            singleton_sections={u.section for u in selected if u.kind in _SINGLETON_KINDS},
+            singleton_sections={
+                u.section for u in selected if u.kind in _WHOLE_SECTION_KINDS
+            },
             mode=toml_mode,
             markers=markers,
             drop_sections={_SECRET_BACKENDS_SECTION} if drops else set(),
@@ -189,7 +209,7 @@ def _discover_units(doc: tomlkit.TOMLDocument) -> list[MigrationUnit]:
     """Every TOML-declared resource, in declaration order."""
     units: list[MigrationUnit] = []
     seen: set[tuple[str, str]] = set()
-    section_kinds = {s: k for k, s in _MIGRATABLE_KINDS.items()}
+    section_kinds = _SECTION_KINDS
     for key, item in doc.body:
         if key is None:
             continue
@@ -202,6 +222,12 @@ def _discover_units(doc: tomlkit.TOMLDocument) -> list[MigrationUnit]:
             if (section, "default") not in seen:
                 seen.add((section, "default"))
                 units.append(unit)
+            continue
+        if kind == "vm-site":
+            # Flat legacy sections: the section name IS the resource name.
+            if (section, section) not in seen:
+                seen.add((section, section))
+                units.append(MigrationUnit(kind=kind, name=section, section=section))
             continue
         if not isinstance(item, toml_items.Table):
             # A top-level assignment shape (`secrets = { npm-token = ... }`).
@@ -310,7 +336,9 @@ def _check_declaration_shapes(
     wanted: dict[str, set[str]] = {}
     singleton_sections: dict[str, MigrationUnit] = {}
     for unit in selected:
-        if unit.kind in _SINGLETON_KINDS:
+        if unit.kind in _WHOLE_SECTION_KINDS:
+            # Whole-section units (true singletons and vm-site's flat
+            # sections): the shape requirement is section-is-a-table.
             singleton_sections[unit.section] = unit
         else:
             wanted.setdefault(unit.section, set()).add(unit.name)
@@ -434,6 +462,37 @@ def _emit_document(doc: tomlkit.TOMLDocument, unit: MigrationUnit) -> str:
     if unit.kind in _DESCRIPTION_KINDS and "description" in spec:
         metadata["description"] = spec.pop("description")
 
+    if unit.kind == "vm-site":
+        # Flat legacy [azure] / [proxmox] sections nest under
+        # spec.platform_config; the section name doubles as the
+        # resource name AND the platform (the legacy loader's
+        # section-name-becomes-resource-name semantics). Validate the
+        # blob pre-write in the operator's TOML vocabulary, mirroring
+        # the git-credential branch: an unvalidated emission would only
+        # fail the post-run verification after files were written.
+        from agentworks.vms.platforms import VM_PLATFORM_REGISTRY
+
+        platform = unit.section
+        rebuilt_site: dict[str, Any] = {"platform": platform}
+        if spec:
+            rebuilt_site["platform_config"] = dict(spec)
+        platform_cls = VM_PLATFORM_REGISTRY.get(platform)
+        if platform_cls is not None and "platform_config" in rebuilt_site:
+            try:
+                platform_cls.validate_config(
+                    f"[{unit.section}]", rebuilt_site["platform_config"]
+                )
+            except ConfigError as exc:
+                raise ConfigError(
+                    f"cannot migrate vm-site/{unit.name}: {exc}",
+                    hint=(
+                        "The flat TOML section carries key(s) its platform "
+                        "does not accept (silently ignored by the TOML "
+                        "loader). Remove them from config.toml, then re-run."
+                    ),
+                ) from exc
+        spec = rebuilt_site
+
     if unit.kind == "git-credential":
         # TOML accepts type (legacy) or provider (alias); the manifest
         # surface only ever has spec.provider. Pop BOTH before
@@ -508,5 +567,8 @@ def _spec_data(doc: tomlkit.TOMLDocument, unit: MigrationUnit) -> dict[str, Any]
             spec["env"] = env
         return spec
     if unit.kind == "named-console-template":
+        return dict(section.unwrap())
+    if unit.kind == "vm-site":
+        # Flat section: the section body IS the resource data.
         return dict(section.unwrap())
     return dict(section[unit.name].unwrap())

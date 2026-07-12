@@ -242,7 +242,7 @@ def test_proxmox_token_resolves_end_to_end(
     monkeypatch.setattr(ProxmoxPlatform, "create", _fake_create)
 
     with pytest.raises(ProvisioningError, match="halt after binding"):
-        vm_manager.create_vm(db, config, name="pvm", platform="proxmox")
+        vm_manager.create_vm(db, config, name="pvm", site="proxmox")
 
     assert captured["token"] == "pve-token-value"
     # Rollback removed the row after the failed provisioning.
