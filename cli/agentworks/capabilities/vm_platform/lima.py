@@ -377,11 +377,22 @@ class LimaPlatform(VMPlatform):
             pass
 
     def start(self, vm: VMRow) -> None:
+        # Idempotency guard (the ABC flags start): `limactl start` on a
+        # running instance is not reliably a no-op, so land in the
+        # running state ourselves.
+        if self.status(vm) == VMStatus.RUNNING:
+            output.detail(f"Lima VM '{vm.name}' is already running")
+            return
         output.info(f"Starting Lima VM '{vm.name}'...")
         self._run_lima(f"limactl start {self._instance_name(vm)}")
         output.info(f"Lima VM '{vm.name}' started")
 
     def stop(self, vm: VMRow) -> None:
+        # Idempotency guard (the ABC flags stop): `limactl stop` on a
+        # stopped instance errors rather than no-ops.
+        if self.status(vm) == VMStatus.STOPPED:
+            output.detail(f"Lima VM '{vm.name}' is already stopped")
+            return
         output.info(f"Stopping Lima VM '{vm.name}'...")
         self._run_lima(f"limactl stop {self._instance_name(vm)}")
         output.info(f"Lima VM '{vm.name}' stopped")

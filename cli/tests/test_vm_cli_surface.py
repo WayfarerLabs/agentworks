@@ -181,3 +181,50 @@ def test_doctor_vm_sites_group(
     assert stranded.status is doctor.Status.FAIL
     assert "name: gone-box" in (stranded.hint or "")
     assert "VM 'good' site 'lima'" not in by_name
+
+
+def test_doctor_vm_sites_preflight_severity_split(
+    db: Database, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A failing preflight is `info` on a bundled site (absent local
+    tooling is normal for the host) but `warn` on an operator-declared
+    site (that failure is the error the operator's next command hits)."""
+    from pathlib import Path as _Path
+
+    from agentworks import doctor
+    from agentworks.capabilities import vm_platform as vm_platforms
+    from agentworks.manifests import builtin as builtin_manifests
+    from agentworks.resources import Origin, Registry
+    from agentworks.vms.sites import VMSiteDecl
+
+    registry = Registry.empty()
+    builtin_manifests.publish_to(registry)
+    vm_platforms.publish_to(registry)
+    registry.add(
+        "vm-site",
+        "mybox",
+        VMSiteDecl(name="mybox", platform="lima"),
+        Origin.operator_declared(file=_Path("sites.yaml"), line=1),
+    )
+    registry.finalize()
+
+    class _DbFactory:
+        @staticmethod
+        def check_schema(path: object = None) -> tuple[bool, int, int]:
+            return (True, 27, 27)
+
+        def __new__(cls) -> Database:  # type: ignore[misc]
+            return db
+
+    monkeypatch.setattr("agentworks.db.Database", _DbFactory)
+    # No tooling anywhere: every local-lima/wsl2 preflight fails.
+    monkeypatch.setattr("shutil.which", lambda name: None)
+
+    group = doctor._check_vm_sites(cast("Config", object()), registry)
+
+    by_name = {c.name: c for c in group.checks}
+    assert by_name["vm-site: lima"].status is doctor.Status.INFO
+    assert by_name["vm-site: wsl2"].status is doctor.Status.INFO
+    operator_row = by_name["vm-site: mybox"]
+    assert operator_row.status is doctor.Status.WARN
+    assert "preflight" in (operator_row.message or "")

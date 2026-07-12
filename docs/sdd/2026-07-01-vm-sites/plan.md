@@ -127,19 +127,27 @@ Phase 5.
   around best-effort spans (the resolve pass included) re-raise `UserAbort`. The doc promotes to a
   permanent `capabilities/README.md` once git credentials validates it; that promotion belongs to
   the other workstream, not this PR.
-- **2026-07-12, Phase 7 implementation rulings (recorded, not yet reviewer-ratified).** (1) rekey's
-  is-it-running check moved PAST the boundary: it is a backend status read (an op; on proxmox it
-  needs the token), so a stopped-VM failure now lands after the one prompt session instead of before
-  it -- the alternative was two prompt sessions, which the contract forbids. (2) Proxmox's preflight
-  is the base's token prediction only; the API-reachability read was deferred (the version endpoint
-  needs auth, so a useful read needs the token value, which preflight may only fetch
-  non-interactively -- worth doing, but as a follow-up with its own tests rather than a half-check
-  now). (3) reinit does NOT run the template preflight: the Tailscale key is not among reinit's
-  planned ops (the broken-node rejoin has its own documented conditional-need late resolve), and
-  preflighting a secret no op needs would fail installs that legitimately run reinit without a key
-  configured. (4) Doctor's per-site preflight rows are severity-split: bundled sites report `info`
-  when their local tooling is absent (normal for the host), while operator-declared sites report
-  `warn`.
+- **2026-07-12, Phase 7 implementation rulings (all ratified by the Phase 7 review round).** (1)
+  rekey's is-it-running check moved PAST the boundary: it is a backend status read (an op; on
+  proxmox it needs the token), so a stopped-VM failure now lands after the one prompt session
+  instead of before it -- the alternative was two prompt sessions, which the contract forbids. (2)
+  Proxmox's preflight is the base's token prediction only; the API-reachability read was deferred
+  (the version endpoint needs auth, so a useful read needs the token value, which preflight may only
+  fetch non-interactively -- worth doing, but as a follow-up with its own tests rather than a
+  half-check now). (3) reinit does NOT run the template preflight: the Tailscale key is not among
+  reinit's planned ops (the broken-node rejoin has its own documented conditional-need late
+  resolve), and preflighting a secret no op needs would fail installs that legitimately run reinit
+  without a key configured. (4) Doctor's per-site preflight rows are severity-split: bundled sites
+  report `info` when their local tooling is absent (normal for the host), while operator-declared
+  sites report `warn`. The review round ratified all four (test pins added for 1 and 4) and two more
+  decisions were recorded from its findings: (5) `bind_platforms` wholesale-fails a mixed-health
+  batch when ANY distinct site's preflight fails -- contract-consistent (preflight everything before
+  anything real) and confirmed intended; a partial-batch degrade would act on some VMs while
+  reporting failure, which is worse than failing clean. (6) The runtime env-chain resolve
+  (`shell_vm` / `exec_vm` / the session paths) remains its OWN prompt session after the bind's
+  boundary resolve; the round's fixes reordered every such root to bind (preflight + boundary
+  resolve) FIRST, so no prompt precedes a preflight anywhere, but folding the env chain into the
+  resolver is deliberately deferred (that seam belongs to the session-harness capability adoption).
 
 **Compile boundaries**: Phases 1 through 3 are one logical commit boundary, mirroring the
 polymorphic-transports precedent. As planned, Phase 1 would open a non-compiling window when the

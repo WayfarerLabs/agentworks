@@ -485,6 +485,10 @@ def test_vm_shell_eager_resolve_fires_before_ssh(
 
     db = _seed_basic_db(tmp_path)
 
+    # The root now binds (and preflights) the platform before the env
+    # resolve; make the lima tool check deterministic on any host.
+    monkeypatch.setattr("shutil.which", lambda name: f"/usr/bin/{name}")
+
     monkeypatch.setattr(
         vm_manager, "_resolve_vm_admin_env_scopes",
         lambda *a, **k: vm_manager._VmAdminEnvScopes(vm={}, workspace=None, admin={}),
@@ -531,6 +535,10 @@ def test_vm_exec_eager_resolve_fires_before_ssh(
     from agentworks.vms import manager as vm_manager
 
     db = _seed_basic_db(tmp_path)
+
+    # The root now binds (and preflights) the platform before the env
+    # resolve; make the lima tool check deterministic on any host.
+    monkeypatch.setattr("shutil.which", lambda name: f"/usr/bin/{name}")
 
     monkeypatch.setattr(
         vm_manager, "_resolve_vm_admin_env_scopes",

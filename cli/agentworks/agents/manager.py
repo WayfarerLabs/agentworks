@@ -257,6 +257,12 @@ def create_agent(
     vm = _require_vm(db, vm_name)
     linux_user = derive_linux_user(name)
 
+    # Bind FIRST (unless the caller already did at its own root): the
+    # platform's preflight must fail before the git-token collection
+    # prompts the operator for anything.
+    if platform is None:
+        platform = bind_platform(config, vm, registry=registry)
+
     # Collect agent-provisioning credentials (git tokens live outside
     # the env-block system). Operator env secrets are NOT prompted at
     # agent create -- provisioning is hermetic. They get prompted at
@@ -268,8 +274,6 @@ def create_agent(
     output.info(
         f"Creating agent '{name}' on VM '{vm_name}' (template: {agent_tmpl.name})..."
     )
-    if platform is None:
-        platform = bind_platform(config, vm, registry=registry)
     with keep_active(db, config, vm, platform):
 
         def _safe_rollback() -> None:

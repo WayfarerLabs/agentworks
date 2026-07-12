@@ -6,7 +6,7 @@ login-shell wrapping for the canonical Tailscale SSH path.
 ``agentworks/ssh.py`` retains a small surface of SSH primitives
 (``SSHTarget`` / ``SSHResult`` / ``SSHError`` / ``SSHLogger`` /
 ``LOG_DIR`` / module-level ``run`` / ``copy_to``) used by
-``vms/platforms/lima.py`` against bare ``SSHTarget``s; everything
+``capabilities/vm_platform/lima.py`` against bare ``SSHTarget``s; everything
 polymorphic-transport-shaped lives here.
 """
 

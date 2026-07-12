@@ -16,6 +16,7 @@ from agentworks.db import (
     VMStatus,
 )
 from agentworks.errors import (
+    AgentworksError,
     AlreadyExistsError,
     ConfigError,
     ConnectivityError,
@@ -701,7 +702,16 @@ def describe_vm(db: Database, config: Config, name: str) -> None:
         # if the bind below degrades.
         site_platform = site_decl.platform
         platform = bind_platform(config, vm, registry=registry)
-    except ConfigError as e:
+    except UserAbort:
+        # Ctrl-C at the boundary's secret prompt aborts describe too;
+        # a half-report would read as the command having succeeded.
+        raise
+    except AgentworksError as e:
+        # Inspection degrades on ANY typed bind/preflight failure (a
+        # stranded site's ConfigError, a missing tool's
+        # ConnectivityError, an unresolvable secret): describe is the
+        # command an operator reaches for on exactly such a row, so the
+        # row's own fields must still render.
         output.warn(f"{e}" + (f"\n{e.hint}" if e.hint else ""))
     else:
         backend_label = platform.display_backend_name(vm)
@@ -869,6 +879,15 @@ def shell_vm(
             ),
         )
 
+    # Bind FIRST: the platform's preflight (missing tool, stranded
+    # site, unresolvable site secret) must fail before the env chain
+    # prompts the operator for anything (the lifecycle's
+    # no-prompt-before-preflight ordering).
+    from agentworks.bootstrap import build_registry
+
+    registry = build_registry(config)
+    bound = bind_platform(config, vm, registry=registry)
+
     # Eager-prompting orchestration (FRD R4 / Phase 6): resolve every
     # secret referenced by the admin shell's env chain BEFORE opening
     # the interactive session. The same scope dicts feed both the
@@ -876,10 +895,10 @@ def shell_vm(
     # consumers can't drift. Crucially the vm scope comes from
     # vm.template (DB row), not the config-default template, which may
     # not match and would silently route the wrong env into a shell on
-    # a non-default-template VM.
-    from agentworks.bootstrap import build_registry
-
-    registry = build_registry(config)
+    # a non-default-template VM. (On a secret-bearing site this is a
+    # second prompt session after the bind's boundary resolve; folding
+    # the env chain into the resolver is the recorded follow-up, beside
+    # the rejoin carve-out.)
     scopes = _resolve_vm_admin_env_scopes(registry, vm, ws=ws)
     values = resolve_for_command(
         [_vm_secret_target(scopes, label=f"vm-shell={vm.name}")], config, registry,
@@ -903,7 +922,6 @@ def shell_vm(
         admin=scopes.admin,
     )
 
-    bound = bind_platform(config, vm, registry=registry)
     with contextlib.ExitStack() as stack:
         stack.enter_context(keep_active(db, config, vm, bound))
         target = (
@@ -964,14 +982,19 @@ def exec_vm(
             hint="VM init may not be complete. Check 'vm describe' for status.",
         )
 
+    # Bind FIRST: the platform's preflight must fail before the env
+    # chain prompts the operator for anything (the lifecycle's
+    # no-prompt-before-preflight ordering).
+    from agentworks.bootstrap import build_registry
+
+    registry = build_registry(config)
+    bound = bind_platform(config, vm, registry=registry)
+
     # Eager-prompting orchestration (FRD R4 / Phase 6): resolve every
     # secret referenced by the admin exec env chain BEFORE running the
     # remote command. The same scope dicts feed both the SecretTarget
     # and compose_env so the two consumers can't drift. The vm scope
     # comes from vm.template (DB row), not the config-default template.
-    from agentworks.bootstrap import build_registry
-
-    registry = build_registry(config)
     scopes = _resolve_vm_admin_env_scopes(registry, vm, ws=ws)
     values = resolve_for_command(
         [_vm_secret_target(scopes, label=f"vm-exec={vm.name}")], config, registry,
@@ -999,7 +1022,7 @@ def exec_vm(
     remote_cmd = command[0] if len(command) == 1 else shlex.join(command)
     if ws is not None:
         remote_cmd = f"cd {shlex.quote(ws.workspace_path)} && {remote_cmd}"
-    with keep_active(db, config, vm, bind_platform(config, vm, registry=registry)):
+    with keep_active(db, config, vm, bound):
         return target.call_streaming(remote_cmd, env=env)
 
 
@@ -1036,14 +1059,23 @@ def add_git_credential(db: Database, config: Config, name: str, credential_name:
     providers = resolve_git_credential_providers(registry, [credential_name])
     provider = providers[credential_name]
 
-    # Phase 1d: resolve the token via the framework (the backend chain
-    # handles env-var lookup + prompt fallback uniformly across every
-    # site that needs a token).
-    tokens = _collect_git_tokens(config, registry, [credential_name])
-    token = tokens[credential_name]
+    # The composition root: the credential's token secret joins the
+    # bind's boundary resolve, so the platform preflight runs before
+    # any prompt and the operation stays one prompt session (same
+    # shape as create/reinit's _register_git_token_decls path).
+    from agentworks.secrets.resolver import Resolver
+
+    resolver = Resolver(config, registry)
+    bound = bind_platform(
+        config, vm, registry=registry, resolver=resolver, prepare=False
+    )
+    token_names = _register_git_token_decls(registry, resolver, [credential_name])
+    bound.preflight()
+    resolver.resolve()
+    token = resolver.get(token_names[credential_name])
     new_lines = provider.credential_lines(token)
 
-    with keep_active(db, config, vm, bind_platform(config, vm, registry=registry)):
+    with keep_active(db, config, vm, bound):
         target = transport(vm, config)
 
         # Read existing credentials, filter out entries for the same host/path
@@ -1713,8 +1745,9 @@ def _register_git_token_decls(
     values back from the resolver's cache after the pass.
 
     Same undeclared-credential guard as :func:`_collect_git_tokens`
-    (that helper remains for the roots that resolve git tokens alone,
-    e.g. ``vm add-git-credential``).
+    (that helper remains for agent create, whose token pass runs after
+    its root's bind/preflight; folding it into the resolver rides the
+    git-credentials capability adoption, not this change).
     """
     from agentworks.resources.access import git_credential
 

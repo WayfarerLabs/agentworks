@@ -2,8 +2,8 @@
 capability implementation extends.
 
 A capability instance moves through four stages with sharply different
-contracts (see ``docs/guides`` once the model promotes; drafted with the
-vm-sites work):
+contracts (the full capability model is documented in
+``capabilities/README.md`` once a second capability validates it):
 
 1. ``validate_config`` -- pure classmethod; validates a config blob's
    shape and returns the resource references it implies.

@@ -12,7 +12,7 @@ module retains the small set of bare-``SSHTarget`` helpers that aren't
   ``SSHTransport`` itself).
 - ``SSHLogger`` / ``LOG_DIR``: the unified command logger.
 - Module-level ``run`` / ``copy_to``: called from
-  ``vms/platforms/lima.py`` (the remote-Lima vm_host control plane)
+  ``capabilities/vm_platform/lima.py`` (the remote-Lima vm_host control plane)
   where the caller has a bare ``SSHTarget`` and doesn't want to
   construct a full ``SSHTransport``.
 """
