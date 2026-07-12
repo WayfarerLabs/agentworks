@@ -118,8 +118,10 @@ names, other resources it points at). It is:
 
 The references it returns are sourceless. The consuming resource attaches itself as the source when
 it emits them, in its `referenced_resources()` at finalize ("whoever hosts the config that names the
-secret emits the reference"). The framework then resolves those references through the normal
-machinery (eager resolve at command entry, prompt fallback, doctor prediction).
+secret emits the reference"). The framework consumes those references two ways: statically, they
+feed the registry's reference graph and doctor's resolvability prediction; at runtime, their
+_values_ are fetched only through the resolver, on the lazy-trigger / eager-scope contract described
+under ops. References are never value-resolved at command entry.
 
 ### 2. construct (bind; cheap, config-valid by construction)
 
@@ -163,6 +165,14 @@ resources or starting expiry clocks. It is also what lets preflight run _before_
 the cheap fatal checks (a missing mapping, a missing tool, an unreachable API) are caught without
 spending the operator's time on a prompt for an op that was never going to run.
 
+When does it run? The starting policy: **every service-layer operation runs preflight on all the
+capability instances it will use, before doing anything real** (before any mutation, and before any
+secret prompt). Within one service-layer operation, multiple ops on the same instance incur
+preflight once, not once per op. This is a real latency tax on routine commands, and it is accepted:
+failing clearly before work starts is worth more than the round-trip it costs, and there is room to
+refine (caching, per-op opt-outs) once real usage shows where it hurts. Doctor calls the same
+preflight for its per-resource health rows.
+
 ### 4. ops (do the work; the mutation phase)
 
 The domain methods: `create` / `destroy` for a platform, credential-materials for a provider,
@@ -178,7 +188,17 @@ resolver, which resolves a mapped secret, or mints a token for a minting provide
 Because this happens in ops, it happens _after_ preflight has cleared the cheap fatal checks, so the
 operator is prompted only once the work is confirmed able to proceed. The resolver batches the
 command's declared secrets on that first resolution, so lazy does not mean scattered prompts; it is
-still one prompt session.
+still one prompt session. In one line: the _trigger_ is lazy (nothing resolves until an op first
+needs a value), the _scope_ is eager (that first need resolves everything the command declared).
+Wait until the last minute, then do it all.
+
+Moving prompting into ops moves the operator's abort point into ops, and the error discipline moves
+with it. A Ctrl-C at a secret prompt (`UserAbort`) must be handled cleanly, best-effort, at all
+times: catch-all handling that wraps a best-effort op span (a "warn and continue" cleanup block)
+must re-raise `UserAbort`, never downgrade it to a warning. The cautionary case is deleting a VM:
+its backend cleanup is deliberately best-effort (broken backends are what delete exists to clean
+up), but a swallowed abort at the token prompt would warn, fall through, and delete the DB row
+anyway, orphaning the backend VM the operator just declined to authenticate against.
 
 ### Idempotency
 
@@ -217,6 +237,9 @@ The base owns the contract above and nothing domain-specific:
 Subclasses add their ops. `GitHubCredentialProvider`, `VMPlatform`, `Harness` extend it. Consuming
 resources do not.
 
+The base lives at the top of the `capabilities/` subtree (see below), not in `resources/`: it is
+capability machinery, not framework machinery.
+
 ## Secrets are just declared references
 
 A capability's config may name secrets (a Proxmox API token, a git PAT, an AWS client secret).
@@ -236,9 +259,9 @@ capability depends only on the framework (it returns framework references, const
 and secrets); it never imports a consuming domain. Consuming domains depend on capabilities. Making
 that layer physical is the argument for a `capabilities/` subtree, one subdir per capability kind,
 rather than folding each capability into its consuming domain, where the layering is obscured and a
-capability-imports-domain violation would go unseen. It is also the natural home for this guide
-(`capabilities/README.md`) and, in a plugin world, the canonical answer to "what does the system
-support."
+capability-imports-domain violation would go unseen. It is also the natural home for the base class
+and this guide (`capabilities/README.md`) and, in a plugin world, the canonical answer to "what does
+the system support."
 
 The tree fills in incrementally, as each capability adopts the base, not in one sweep, and is not
 complete until the already-merged `secret-backend` capability moves in under its own change. That is
