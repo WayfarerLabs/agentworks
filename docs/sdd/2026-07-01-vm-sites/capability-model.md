@@ -166,12 +166,16 @@ the cheap fatal checks (a missing mapping, a missing tool, an unreachable API) a
 spending the operator's time on a prompt for an op that was never going to run.
 
 When does it run? The starting policy: **every service-layer operation runs preflight on all the
-capability instances it will use, before doing anything real** (before any mutation, and before any
-secret prompt). Within one service-layer operation, multiple ops on the same instance incur
-preflight once, not once per op. This is a real latency tax on routine commands, and it is accepted:
-failing clearly before work starts is worth more than the round-trip it costs, and there is room to
-refine (caching, per-op opt-outs) once real usage shows where it hurts. Doctor calls the same
-preflight for its per-resource health rows.
+resources it will use, before doing anything real** (before any mutation, and before any secret
+prompt). That means the capability instances, and also the declarable resources with readiness
+concerns of their own: basically everything has a preflight. `vm create` preflights both the
+vm-template (which predicts that its Tailscale auth key can resolve; that key is the template's
+responsibility, not the site's) and the site's platform instance, in either order, before the
+resolve pass. Within one service-layer operation, multiple ops on the same instance incur preflight
+once, not once per op. This is a real latency tax on routine commands, and it is accepted: failing
+clearly before work starts is worth more than the round-trip it costs, and there is room to refine
+(caching, per-op opt-outs) once real usage shows where it hurts. Doctor calls the same preflights
+for its per-resource health rows.
 
 ### 4. ops (do the work; the mutation phase)
 
@@ -185,14 +189,15 @@ became preflight, its produce-half became a post-preflight detail of ops.
 
 Secret resolution rides the same seam, and its timing is pinned to the preflight boundary: **resolve
 as soon as preflight passes.** Once the operation's preflight checks clear, the resolver resolves
-everything the command declared in one batched pass, one prompt session, values cached; ops then
-draw from that cache (a minting provider produces its token through the same pass, guarded by
-check-then-mint). Resolution is deliberately neither of the two extremes: not eager at command entry
-(a prompt could precede a fatal check that would have sunk the op), and not deferred to first
-op-need (prompts would land mid-operation, scattered across the run). The operator is prompted
-exactly once, at a predictable moment, after the work is confirmed able to proceed and before it
-starts. In one line: preflight passing is the trigger, the command's declared set is the scope. Wait
-for preflight, then do it all.
+the union of secrets needed across all planned ops across all participating resources (the
+template's Tailscale key and the site's API token join the same pass) in one batch, one prompt
+session, values cached; ops then draw from that cache (a minting provider produces its token through
+the same pass, guarded by check-then-mint). Resolution is deliberately neither of the two extremes:
+not eager at command entry (a prompt could precede a fatal check that would have sunk the op), and
+not deferred to first op-need (prompts would land mid-operation, scattered across the run). The
+operator is prompted exactly once, at a predictable moment, after the work is confirmed able to
+proceed and before it starts. In one line: preflight passing is the trigger, the command's declared
+set is the scope. Wait for preflight, then do it all.
 
 Prompting now happens inside the service-layer operation (at the preflight boundary rather than at
 bind), so the operator's abort point moves with it, and the error discipline moves too. A Ctrl-C at
