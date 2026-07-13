@@ -462,7 +462,7 @@ class WSL2Platform(VMPlatform):
         disables off Windows (vs lima, whose remote mode keeps the
         platform supported everywhere)."""
         if sys.platform != "win32":
-            return "requires Windows (runs VMs as WSL2 distributions)"
+            return "Windows only"
         return None
 
     @classmethod
@@ -474,7 +474,7 @@ class WSL2Platform(VMPlatform):
         import shutil
 
         if not shutil.which("wsl"):
-            return "wsl.exe is not installed (`wsl --install`)"
+            return "wsl.exe not installed; run `wsl --install`"
         return None
 
     def preflight(self) -> None:

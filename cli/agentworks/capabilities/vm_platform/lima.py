@@ -74,7 +74,7 @@ class LimaPlatform(VMPlatform):
         import shutil
 
         if not shutil.which("limactl"):
-            return "limactl is not installed on this machine"
+            return "limactl not installed"
         return None
 
     @classmethod

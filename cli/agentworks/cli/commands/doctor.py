@@ -30,9 +30,11 @@ def doctor() -> None:
                 Status.WARN: "[warn]",
                 Status.FAIL: "[FAIL]",
             }[check.status].ljust(6)
+            # `name: message` rather than `name (message)`: parens stay
+            # available inside messages for asides without nesting.
             msg = check.name
             if check.message is not None:
-                msg += f" ({check.message})"
+                msg += f": {check.message}"
             typer.echo(f"  {label} {msg}")
             if check.hint:
                 typer.echo(f"         hint: {check.hint}")

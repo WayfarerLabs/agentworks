@@ -77,7 +77,7 @@ def test_unsupported_platform_publishes_nothing(
 ) -> None:
     """wsl2 off Windows: no capability row, no bundled site -- invisible
     to the resource graph (doctor lists it from the code registry)."""
-    _support(monkeypatch, wsl2="requires Windows", lima_bundled=None)
+    _support(monkeypatch, wsl2="Windows only", lima_bundled=None)
     registry = build_registry(make_config())
     sites = {name for name, _ in registry.iter_kind_items("vm-site")}
     assert "wsl2" not in sites
@@ -95,7 +95,7 @@ def test_bundled_site_gates_independently_of_the_platform(
     """No local limactl: lima-local is absent but lima stays registered,
     so an operator-declared remote site still resolves."""
     _support(
-        monkeypatch, wsl2="requires Windows", lima_bundled="limactl is not installed"
+        monkeypatch, wsl2="Windows only", lima_bundled="limactl not installed"
     )
     config = make_config(
         resources=(
@@ -120,7 +120,7 @@ def test_declared_site_on_unsupported_platform_fails_helpfully(
 ) -> None:
     """The pre-finalize guard: the error names the platform's stated
     requirement, not the framework's generic reference miss."""
-    _support(monkeypatch, wsl2="requires Windows (runs VMs as WSL2 distributions)", lima_bundled=None)
+    _support(monkeypatch, wsl2="Windows only", lima_bundled=None)
     config = make_config(
         resources=(
             "apiVersion: agentworks/v1\n"
@@ -133,7 +133,7 @@ def test_declared_site_on_unsupported_platform_fails_helpfully(
     )
     with pytest.raises(ConfigError, match="disabled on this host") as exc:
         build_registry(config)
-    assert "requires Windows" in str(exc.value)
+    assert "Windows only" in str(exc.value)
     assert "my-wsl" in str(exc.value)
 
 
@@ -142,16 +142,16 @@ def test_doctor_lists_installed_platforms_with_reasons(
 ) -> None:
     from agentworks import doctor
 
-    _support(monkeypatch, wsl2="requires Windows", lima_bundled="limactl is not installed")
+    _support(monkeypatch, wsl2="Windows only", lima_bundled="limactl not installed")
 
     group = doctor._check_vm_platforms()
     by_name = {c.name: c for c in group.checks}
-    assert by_name["platform: wsl2"].status is doctor.Status.INFO
-    assert "requires Windows" in (by_name["platform: wsl2"].message or "")
-    lima_row = by_name["platform: lima"]
+    assert by_name["wsl2"].status is doctor.Status.INFO
+    assert "Windows only" in (by_name["wsl2"].message or "")
+    lima_row = by_name["lima"]
     assert lima_row.status is doctor.Status.OK
     assert "lima-local" in (lima_row.message or "")
-    assert by_name["platform: azure"].status is doctor.Status.OK
+    assert by_name["azure"].status is doctor.Status.OK
 
 
 # -- The real classmethods (both branches, deterministically) ----------------
@@ -211,7 +211,7 @@ def test_defaults_site_on_unavailable_bundled_site_names_the_requirement(
     must say "install limactl", never "declare a site named lima-local"
     (a reserved name)."""
     _support(
-        monkeypatch, wsl2="requires Windows", lima_bundled="limactl is not installed"
+        monkeypatch, wsl2="Windows only", lima_bundled="limactl not installed"
     )
     config = make_config('[defaults]\nsite = "lima-local"\n')
     with pytest.raises(ConfigError, match="unavailable on this host") as exc:
@@ -227,7 +227,7 @@ def test_bundled_site_names_are_reserved_even_when_unavailable(
     name is reserved unconditionally, or installing the tool later
     would collide with VMs pointing at a name whose meaning changed."""
     _support(
-        monkeypatch, wsl2="requires Windows", lima_bundled="limactl is not installed"
+        monkeypatch, wsl2="Windows only", lima_bundled="limactl not installed"
     )
     config = make_config(
         resources=(

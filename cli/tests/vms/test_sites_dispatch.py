@@ -238,7 +238,7 @@ def test_lookup_bundled_site_miss_names_the_requirement(
     monkeypatch.setattr(
         LimaPlatform,
         "bundled_site_unsupported_reason",
-        classmethod(lambda cls: "limactl is not installed on this machine"),
+        classmethod(lambda cls: "limactl not installed"),
     )
     registry = Registry.empty()
     publish_all_platforms(registry)

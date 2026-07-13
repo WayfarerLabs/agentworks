@@ -140,12 +140,56 @@ def test_doctor_vm_sites_defers_on_pending_migration(
     assert deferred.status is doctor.Status.INFO
     assert "pending database migration" in (deferred.message or "")
 
+    # The System group reads the slug from the same database; it must
+    # defer under the same guard.
+    system = {c.name: c for c in doctor._check_system().checks}["System slug"]
+    assert system.status is doctor.Status.INFO
+    assert "pending database migration" in (system.message or "")
+
+
+def test_doctor_system_group(
+    db: Database, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """The install slug leads the report under its own System header
+    (it namespaces install-wide, not per-site): a set slug is ok,
+    unset and declined are informational."""
+    from agentworks import doctor
+    from agentworks.db import Database as _Database
+
+    path = tmp_path / "test.db"
+
+    class _DbFactory:
+        @staticmethod
+        def check_schema(p: object = None) -> tuple[bool, int, int]:
+            return (True, 27, 27)
+
+        # _check_system opens and closes its own handle; hand it a
+        # fresh one each call so the fixture's connection stays open.
+        def __new__(cls) -> Database:  # type: ignore[misc]
+            return _Database(path)
+
+    monkeypatch.setattr("agentworks.db.Database", _DbFactory)
+
+    unset = {c.name: c for c in doctor._check_system().checks}["System slug"]
+    assert unset.status is doctor.Status.INFO
+    assert "will ask" in (unset.message or "")
+
+    db.set_setting("system_slug", "")
+    declined = {c.name: c for c in doctor._check_system().checks}["System slug"]
+    assert declined.status is doctor.Status.INFO
+    assert "declined" in (declined.message or "")
+
+    db.set_setting("system_slug", "team-a")
+    row = {c.name: c for c in doctor._check_system().checks}["System slug"]
+    assert row.status is doctor.Status.OK
+    assert row.message == "team-a"
+
 
 def test_doctor_vm_sites_group(
     db: Database, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    """Declared sites report ok; the slug row shows; a stranded VM row
-    fails with the paste-ready manifest hint."""
+    """Declared sites report ok; a stranded VM row fails with the
+    paste-ready manifest hint."""
     from agentworks import doctor
     from agentworks.capabilities import vm_platform as vm_platforms
     from agentworks.manifests import builtin as builtin_manifests
@@ -160,7 +204,6 @@ def test_doctor_vm_sites_group(
 
     db.insert_vm("good", site="lima-local", hostname="good")
     db.insert_vm("lost", site="gone-box", hostname="lost")
-    db.set_setting("system_slug", "team-a")
 
     class _DbFactory:
         @staticmethod
@@ -178,9 +221,8 @@ def test_doctor_vm_sites_group(
     group = doctor._check_vm_sites(cast("Config", object()), registry)
 
     by_name = {c.name: c for c in group.checks}
-    assert by_name["vm-site: lima-local"].status is doctor.Status.OK
-    assert by_name["vm-site: wsl2"].status is doctor.Status.OK
-    assert by_name["System slug"].message == "team-a"
+    assert by_name["lima-local"].status is doctor.Status.OK
+    assert by_name["wsl2"].status is doctor.Status.OK
     stranded = by_name["VM 'lost' site 'gone-box'"]
     assert stranded.status is doctor.Status.FAIL
     assert "name: gone-box" in (stranded.hint or "")
@@ -229,8 +271,8 @@ def test_doctor_vm_sites_preflight_severity_split(
     group = doctor._check_vm_sites(cast("Config", object()), registry)
 
     by_name = {c.name: c for c in group.checks}
-    assert by_name["vm-site: lima-local"].status is doctor.Status.INFO
-    assert by_name["vm-site: wsl2"].status is doctor.Status.INFO
-    operator_row = by_name["vm-site: mybox"]
+    assert by_name["lima-local"].status is doctor.Status.INFO
+    assert by_name["wsl2"].status is doctor.Status.INFO
+    operator_row = by_name["mybox"]
     assert operator_row.status is doctor.Status.WARN
     assert "preflight" in (operator_row.message or "")

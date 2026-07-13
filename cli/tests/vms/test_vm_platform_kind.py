@@ -49,7 +49,7 @@ def test_publisher_skips_unsupported_platforms(
     monkeypatch.setattr(
         WSL2Platform,
         "unsupported_reason",
-        classmethod(lambda cls: "requires Windows (runs VMs as WSL2 distributions)"),
+        classmethod(lambda cls: "Windows only"),
     )
     registry = Registry.empty()
     vm_platforms.publish_to(registry)

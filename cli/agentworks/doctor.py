@@ -98,18 +98,32 @@ def run_checks(*, completion_version: str | None = None) -> HealthReport:
     """
     report = HealthReport()
 
+    # Group order is a presentation choice, decoupled from which checks
+    # need config: the config/registry pair loads up front and each
+    # dependent group renders wherever it reads best. Identity first,
+    # then the environment, then the VM stack, then everything the
+    # config graph drives.
+    config_group, config, registry = _check_config()
+
+    report.groups.append(_check_system())
     report.groups.append(_check_python())
     report.groups.append(_check_required_tools())
     report.groups.append(_check_vm_platforms())
+    if config is not None and registry is not None:
+        report.groups.append(_check_vm_sites(config, registry))
+    else:
+        # The group renders before Configuration explains the failure;
+        # an empty slot would read as "no sites", which isn't known.
+        sites = HealthGroup("VM sites")
+        sites.info(
+            "Declared sites",
+            "skipped (config failed to load; see the Configuration group)",
+        )
+        report.groups.append(sites)
     report.groups.append(_check_tailscale())
-
-    config_group, config, registry = _check_config()
     report.groups.append(config_group)
-
     if config is not None and registry is not None:
         report.groups.append(_check_secrets(config, registry))
-        report.groups.append(_check_vm_sites(config, registry))
-
     report.groups.append(_check_database())
 
     if completion_version is not None:
@@ -121,6 +135,45 @@ def run_checks(*, completion_version: str | None = None) -> HealthReport:
 # ---------------------------------------------------------------------------
 # Individual check groups
 # ---------------------------------------------------------------------------
+
+
+def _check_system() -> HealthGroup:
+    """Install-level identity: the system slug. Not a VM-site concern
+    (it namespaces hostnames, backend-side names, and the managed SSH
+    config file install-wide), so it leads the report under its own
+    header rather than hiding in the VM groups.
+    """
+    from agentworks.db import SYSTEM_SLUG_KEY, Database
+
+    g = HealthGroup("System")
+    try:
+        db_exists, current, latest = Database.check_schema()
+        if not db_exists:
+            # No database means nothing has ever set the slug.
+            g.info("System slug", "unset (will ask at first vm create)")
+            return g
+        if current != latest:
+            # Opening the DB would auto-migrate mid-report; defer to the
+            # Database group's deliberate migration row.
+            g.info(
+                "System slug",
+                "pending database migration (see the Database group)",
+            )
+            return g
+        db = Database()
+        try:
+            slug = db.get_setting(SYSTEM_SLUG_KEY)
+        finally:
+            db.close()
+        if slug:
+            g.ok("System slug", slug)
+        elif slug == "":
+            g.info("System slug", "declined (asked at first vm create)")
+        else:
+            g.info("System slug", "unset (will ask at first vm create)")
+    except Exception as e:
+        g.warn("System slug", f"could not check the database: {e}")
+    return g
 
 
 def _check_python() -> HealthGroup:
@@ -157,7 +210,7 @@ def _check_vm_platforms() -> HealthGroup:
     for name, cls in VM_PLATFORM_REGISTRY.items():
         reason = cls.unsupported_reason()
         if reason is not None:
-            g.info(f"platform: {name}", f"disabled ({reason})")
+            g.info(name, f"disabled ({reason})")
             continue
         bundled_reason = (
             cls.bundled_site_unsupported_reason()
@@ -165,21 +218,23 @@ def _check_vm_platforms() -> HealthGroup:
             else None
         )
         if bundled_reason is not None:
+            # ok, not info: the platform itself works here (declared
+            # sites bind fine); only the zero-config site is absent.
             g.ok(
-                f"platform: {name}",
-                f"enabled (bundled site {cls.bundled_site} unavailable: "
-                f"{bundled_reason})",
+                name,
+                f"bundled site {cls.bundled_site} unavailable "
+                f"({bundled_reason})",
             )
         else:
-            g.ok(f"platform: {name}")
+            g.ok(name)
     return g
 
 
 def _check_vm_sites(config: Config, registry: Registry) -> HealthGroup:
-    """VM sites: every declared site's platform preflight, the install
-    slug, and every VM's site resolving to a declaration. A stranded
-    row (e.g. a migrated remote-Lima VM whose site manifest the operator
-    has not added yet) reports its paste-ready manifest snippet.
+    """VM sites: every declared site's platform preflight, and every
+    VM's site resolving to a declaration. A stranded row (e.g. a
+    migrated remote-Lima VM whose site manifest the operator has not
+    added yet) reports its paste-ready manifest snippet.
 
     The per-site row IS the capability's ``preflight`` -- read-only by
     contract, which is exactly what lets doctor call it: required tools
@@ -188,7 +243,7 @@ def _check_vm_sites(config: Config, registry: Registry) -> HealthGroup:
     doing anything real, so a failing row here is the error the next
     command would hit.
     """
-    from agentworks.db import SYSTEM_SLUG_KEY, Database
+    from agentworks.db import Database
     from agentworks.secrets.resolver import Resolver
     from agentworks.vms.sites import VMSiteDecl, resolve_site, site_manifest_hint
 
@@ -213,17 +268,17 @@ def _check_vm_sites(config: Config, registry: Registry) -> HealthGroup:
             built_in = getattr(decl.origin, "variant", None) == "built-in"
             row = g.info if built_in else g.warn
             row(
-                f"vm-site: {name}",
+                name,
                 f"platform {decl.platform}; preflight: {e}",
                 hint=getattr(e, "hint", None),
             )
             continue
-        g.ok(f"vm-site: {name}", f"platform {declared[name]}")
+        g.ok(name, f"platform {declared[name]}")
 
     try:
         db_exists, current, latest = Database.check_schema()
         if not db_exists:
-            g.info("System slug", "database not yet created")
+            # No VMs recorded yet; nothing to cross-check.
             return g
         if current != latest:
             # Opening the DB would auto-migrate mid-report (interleaving
@@ -237,14 +292,6 @@ def _check_vm_sites(config: Config, registry: Registry) -> HealthGroup:
             return g
         db = Database()
         try:
-            slug = db.get_setting(SYSTEM_SLUG_KEY)
-            if slug:
-                g.ok("System slug", slug)
-            elif slug == "":
-                g.info("System slug", "declined (asked at first vm create)")
-            else:
-                g.info("System slug", "unset (asked at first vm create)")
-
             for vm in db.list_vms():
                 if vm.site in declared:
                     continue

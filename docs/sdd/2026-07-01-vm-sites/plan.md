@@ -227,6 +227,24 @@ flag/completion work stays in Phase 5.
   maintainer's original hard-failure ruling -- a resources dir shared across hosts must diverge per
   host rather than half-work; the error's hint says so).
 
+- **2026-07-13, doctor report polish (maintainer-directed).** Four presentation changes, no check
+  semantics touched. (1) Row rendering switches from `name (message)` to `name: message` -- the
+  paren wrap fought messages that naturally want parens for asides, nesting them
+  (`Schema (up to date (version 27))`); parens now appear at most one level, inside messages.
+  Platform reason strings stay paren-free as policy so every composed surface (doctor rows, the
+  bootstrap hard-failure, the bundled-miss hints) stays single-depth: wsl2's reason is now "Windows
+  only", lima's "limactl not installed". (2) Group order decouples from which checks need config:
+  the config/registry pair loads up front and each group renders in presentation order (System,
+  Python, Required tools, VM platforms, VM sites, Tailscale, Configuration, Secrets, Database,
+  completions), putting the adjacent VM pair early per the maintainer's "VM stuff is fundamental".
+  When config fails to load, VM sites renders a skipped-pointer row (the group now precedes the
+  Configuration group that explains the failure; silent absence would read as "no sites"). (3) The
+  system slug moves out of "VM sites" into a new leading "System" group -- it namespaces
+  install-wide (hostnames, backend-side names, the managed SSH config), not per-site; same
+  pending-migration-defers guard. (4) Row names drop the `platform:` / `vm-site:` prefixes (the
+  group header already says it) and the lima row drops the `enabled (...)` wrapper (`[ok]` is the
+  enabled signal; the bundled-site note is the whole message).
+
 **Compile boundaries**: Phases 1 through 3 are one logical commit boundary, mirroring the
 polymorphic-transports precedent. As planned, Phase 1 would open a non-compiling window when the
 platform classes reshape to the new protocol; as built, PHASE-1 BRIDGE shims keep everything
