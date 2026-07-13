@@ -52,7 +52,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 from agentworks.env.merge import effective_env
-from agentworks.errors import ConfigError
+from agentworks.errors import StateError
 
 if TYPE_CHECKING:
     from collections.abc import Iterable, Sequence
@@ -139,7 +139,11 @@ def compute_needed_secrets(
                 continue
             decl = decls.get(name)
             if decl is None:
-                raise ConfigError(
+                # StateError, not ConfigError: the message is right that
+                # this is never an operator's config mistake (referenced
+                # secrets auto-declare at finalize), so it must not wear
+                # the operator-config error kind.
+                raise StateError(
                     f"env var {key!r} ({target.label}) references secret "
                     f"{name!r}, which has no declaration in the registry. "
                     f"Referenced secrets auto-declare at finalize, so this "

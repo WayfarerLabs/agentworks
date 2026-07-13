@@ -620,6 +620,13 @@ def create_vm(
         # at the composition root above), but the catch-all below must
         # never downgrade an operator abort to a Provisioning/External
         # error -- same discipline as delete_vm's best-effort spans.
+        # Same recovery guidance as the KeyboardInterrupt twin: the VM
+        # exists and must not be stranded silently.
+        output.warn(
+            f"Cancelling vm create '{vm_name}' during initialization. "
+            f"The VM exists but is partially initialized. "
+            f"Use 'vm reinit {vm_name}' to retry, or 'vm delete {vm_name} --force' to remove it."
+        )
         raise
     except Exception as e:
         from agentworks.ssh import LOG_DIR

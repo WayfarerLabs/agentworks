@@ -6,9 +6,11 @@ resolution fails (e.g. non-interactive + no AW_SECRET_<NAME> in env),
 the failure surfaces as ``SecretUnavailableError`` with no DB or VM
 side-effects.
 
-The tests work by patching ``resolve_for_command`` to raise; if the
-manager calls it AFTER mutating state, the DB inspection at the end of
-the test catches the leak.
+The tests work by patching the boundary -- ``resolve_for_command`` for
+the paths that still call it directly, ``bind_platform`` or
+``Resolver.resolve`` for the roots whose env chain rides the bind's one
+resolve pass -- to raise; if the manager reaches it AFTER mutating
+state, the DB inspection at the end of the test catches the leak.
 """
 
 from __future__ import annotations

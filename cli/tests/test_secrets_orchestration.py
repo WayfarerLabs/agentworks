@@ -95,14 +95,15 @@ def test_unknown_reference_raises_instead_of_dropping(tmp_path: Path) -> None:
     registry-construction bug (referenced secrets auto-declare at
     finalize, so a legitimate reference always has a row); silently
     dropping it used to surface as a mysterious downstream "secret
-    didn't resolve" far from the cause."""
-    from agentworks.errors import ConfigError
+    didn't resolve" far from the cause. StateError, not ConfigError:
+    it is never an operator's config mistake."""
+    from agentworks.errors import StateError
 
     cfg = _write_config(tmp_path)
     config = load_config(cfg, warn_issues=False)
     vm_env = {"API_KEY": EnvEntry(key="API_KEY", secret="ghost-secret")}
 
-    with pytest.raises(ConfigError, match="ghost-secret"):
+    with pytest.raises(StateError, match="ghost-secret"):
         compute_needed_secrets(
             [SecretTarget(vm=vm_env, label="test-target")],
             build_registry(config),
