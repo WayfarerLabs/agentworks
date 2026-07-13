@@ -112,7 +112,9 @@ def test_doctor_vm_sites_defers_on_pending_migration(
     from agentworks.capabilities import vm_platform as vm_platforms
     from agentworks.manifests import builtin as builtin_manifests
     from agentworks.resources import Registry
+    from tests.conftest import stub_platform_support
 
+    stub_platform_support(monkeypatch)
     registry = Registry.empty()
     builtin_manifests.publish_to(registry)
     vm_platforms.publish_to(registry)
@@ -148,13 +150,15 @@ def test_doctor_vm_sites_group(
     from agentworks.capabilities import vm_platform as vm_platforms
     from agentworks.manifests import builtin as builtin_manifests
     from agentworks.resources import Registry
+    from tests.conftest import stub_platform_support
 
+    stub_platform_support(monkeypatch)
     registry = Registry.empty()
     builtin_manifests.publish_to(registry)
     vm_platforms.publish_to(registry)
     registry.finalize()
 
-    db.insert_vm("good", site="lima", hostname="good")
+    db.insert_vm("good", site="lima-local", hostname="good")
     db.insert_vm("lost", site="gone-box", hostname="lost")
     db.set_setting("system_slug", "team-a")
 
@@ -174,13 +178,13 @@ def test_doctor_vm_sites_group(
     group = doctor._check_vm_sites(cast("Config", object()), registry)
 
     by_name = {c.name: c for c in group.checks}
-    assert by_name["vm-site: lima"].status is doctor.Status.OK
+    assert by_name["vm-site: lima-local"].status is doctor.Status.OK
     assert by_name["vm-site: wsl2"].status is doctor.Status.OK
     assert by_name["System slug"].message == "team-a"
     stranded = by_name["VM 'lost' site 'gone-box'"]
     assert stranded.status is doctor.Status.FAIL
     assert "name: gone-box" in (stranded.hint or "")
-    assert "VM 'good' site 'lima'" not in by_name
+    assert "VM 'good' site 'lima-local'" not in by_name
 
 
 def test_doctor_vm_sites_preflight_severity_split(
@@ -196,7 +200,9 @@ def test_doctor_vm_sites_preflight_severity_split(
     from agentworks.manifests import builtin as builtin_manifests
     from agentworks.resources import Origin, Registry
     from agentworks.vms.sites import VMSiteDecl
+    from tests.conftest import stub_platform_support
 
+    stub_platform_support(monkeypatch)
     registry = Registry.empty()
     builtin_manifests.publish_to(registry)
     vm_platforms.publish_to(registry)
@@ -223,7 +229,7 @@ def test_doctor_vm_sites_preflight_severity_split(
     group = doctor._check_vm_sites(cast("Config", object()), registry)
 
     by_name = {c.name: c for c in group.checks}
-    assert by_name["vm-site: lima"].status is doctor.Status.INFO
+    assert by_name["vm-site: lima-local"].status is doctor.Status.INFO
     assert by_name["vm-site: wsl2"].status is doctor.Status.INFO
     operator_row = by_name["vm-site: mybox"]
     assert operator_row.status is doctor.Status.WARN

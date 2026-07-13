@@ -544,26 +544,31 @@ def _load_defaults(
     # composition boundary (vms.validate_sites), where the finalized
     # registry knows every declared site. `platform` is the retired
     # spelling, accepted as a one-release deprecated alias -- its old
-    # values (lima/azure/wsl2/proxmox) name exactly the built-in and
-    # legacy-TOML sites, so the value carries over unchanged.
+    # values name the built-in and legacy-TOML sites, so the value
+    # carries over, with one translation: the old `lima` meant local
+    # Lima, whose bundled site is now named `lima-local`.
     site = raw.get("site")
     if site is not None and (not isinstance(site, str) or not site):
         raise ConfigError("defaults.site must be a non-empty site name")
     if "platform" in raw:
-        alias = raw["platform"]
+        alias = str(raw["platform"])
+        if alias == "lima":
+            alias = "lima-local"
         if site is not None:
-            if str(alias) != site:
+            if alias != site:
                 issues.append(
                     f"defaults: both site ({site!r}) and the deprecated "
-                    f"platform alias ({alias!r}) are set and disagree; "
-                    f"site wins"
+                    f"platform alias ({raw['platform']!r}) are set and "
+                    f"disagree; site wins"
                 )
         else:
-            site = str(alias)
+            site = alias
         deprecations.append(
             "defaults.platform is deprecated; rename the key to "
-            "defaults.site (same value). The alias will be removed in "
-            "the next release."
+            "defaults.site (old value `lima` becomes `lima-local`, the "
+            "bundled local-Lima site's new name; other values carry "
+            "over unchanged). The alias will be removed in the next "
+            "release."
         )
 
     return DefaultsConfig(site=str(site) if site is not None else None)
@@ -604,7 +609,6 @@ def _load_named_console(
 
 _VM_TEMPLATE_KEYS = {
     "inherits",
-    "site",
     "cpus",
     "memory",
     "disk",
@@ -670,18 +674,9 @@ def _load_vm_templates(
                 )
             ts_key_raw = tdata["tailscale_auth_key"]
 
-        site_raw: str | None = None
-        if "site" in tdata:
-            if not isinstance(tdata["site"], str) or not tdata["site"]:
-                raise ConfigError(
-                    f"vm_templates.{name}.site must be a non-empty site name"
-                )
-            site_raw = tdata["site"]
-
         templates[name] = VMTemplate(
             name=name,
             inherits=list(tdata.get("inherits", [])),
-            site=site_raw,
             cpus=int(tdata["cpus"]) if "cpus" in tdata else None,
             memory=int(tdata["memory"]) if "memory" in tdata else None,
             disk=int(tdata["disk"]) if "disk" in tdata else None,

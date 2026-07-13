@@ -57,12 +57,11 @@ class VMTemplate:
 
     name: str
     inherits: list[str] = field(default_factory=list)
-    # Provisioning
-    # Where this template's VMs are created, by site name (a bare
-    # resource-to-resource reference; ``None = inherit``). Selection
-    # precedence: --site flag, then template, then defaults.site, then
-    # the built-in "lima".
-    site: str | None = None
+    # Provisioning. Deliberately NO site field: a template describes
+    # WHAT a VM is; placement (--site, defaults.site, or the
+    # infer/prompt model) is host/operator-scoped, and a shared
+    # template must not smuggle a per-host placement decision --
+    # especially with bundled sites publishing per-host.
     cpus: int | None = None
     memory: int | None = None
     disk: int | None = None
@@ -98,17 +97,6 @@ class VMTemplate:
 
         source = ("vm-template", self.name)
         refs: list[ResourceReference] = list(env_references(self.env, source))
-        # Site: a bare-name reference to the vm-site kind; the framework's
-        # error miss policy catches typos at finalize.
-        if self.site is not None:
-            refs.append(
-                _ResourceReq(
-                    name=self.site,
-                    kind="vm-site",
-                    usage="the site VMs are created at",
-                    source=source,
-                )
-            )
         # Inherits: each parent template name in ``inherits = [...]`` is a
         # TemplateReference targeting the same kind. The framework's
         # VMTemplateKind miss policy auto-declares "default" when missing

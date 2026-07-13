@@ -92,11 +92,11 @@ def test_create_vm_request_shape_and_row(
     assert request.cpus == 2
     assert request.ssh_public_key == "public ssh key"
     (bound,) = captured_platform
-    assert bound.site_name == "lima"
+    assert bound.site_name == "lima-local"
 
     vm = db.get_vm("dvm")
     assert vm is not None
-    assert vm.site == "lima"
+    assert vm.site == "lima-local"
     assert vm.hostname == "dvm"
     assert vm.platform_metadata == {"instance_name": "dvm"}
     assert vm.operator_stopped is False

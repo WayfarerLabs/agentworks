@@ -241,20 +241,26 @@ def test_iter_kind_empty_when_kind_absent() -> None:
     assert list(r.iter_kind("nonexistent")) == []
 
 
-def test_build_registry_equivalent_to_manual_steps(example_config: Path) -> None:
+def test_build_registry_equivalent_to_manual_steps(
+    example_config: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """``build_registry(config)`` matches the manual publisher sequence.
 
     The manual side needs the bundled built-in manifests (backend rows)
     and the provider descriptors alongside ``Config.publish_to``: the
     published ``secret-config`` row's chain references the built-in
     backends, so finalize errors without them -- exactly the graph
-    completeness the framework is supposed to enforce.
+    completeness the framework is supposed to enforce. Platform support
+    is stubbed so both sides see the full four-platform graph regardless
+    of the test host's OS/tooling (host gating has its own tests).
     """
     from agentworks import secrets
     from agentworks.bootstrap import build_registry
     from agentworks.capabilities import vm_platform as vm_platforms
     from agentworks.manifests import builtin as builtin_manifests
+    from tests.conftest import stub_platform_support
 
+    stub_platform_support(monkeypatch)
     cfg = load_config(example_config, warn_issues=False)
 
     auto = build_registry(cfg)

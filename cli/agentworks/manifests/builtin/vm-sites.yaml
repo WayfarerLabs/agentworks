@@ -4,10 +4,17 @@
 # space: every VM points at a vm-site, never sometimes at a capability.
 # Their names are reserved (builtin_override = "reserved"): customize by
 # declaring a sibling site, not by redeclaring these.
+#
+# A bundled site publishes ONLY when its platform is enabled on this
+# host ([system].enabled_platforms; host default is wsl2 on Windows,
+# lima elsewhere) -- the skip predicate lives in bootstrap.build_registry.
+# The lima site is named lima-local, not lima: the bundled site is one
+# CONFIGURATION of the platform (this workstation), and remote-Lima
+# sites are ordinary operator declarations.
 apiVersion: agentworks/v1
 kind: vm-site
 metadata:
-  name: lima
+  name: lima-local
   description: Local Lima VMs on this workstation
 spec:
   platform: lima

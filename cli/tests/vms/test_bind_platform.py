@@ -72,7 +72,7 @@ def test_no_site_secrets_skips_the_resolve_pass(
     """A secret-free site's boundary resolve is a no-op: the backend
     loop never runs, so nothing can prompt."""
     config = make_config()
-    platform = vm_manager.bind_platform(config, _vm("v1", "lima"))  # type: ignore[arg-type]
+    platform = vm_manager.bind_platform(config, _vm("v1", "lima-local"))  # type: ignore[arg-type]
     assert platform.name == "lima"
     assert resolve_counter == []
 
@@ -131,7 +131,7 @@ def test_bind_platforms_union_spans_sites(
     """A mixed-site batch still resolves once: the union of both sites'
     declared secrets goes through a single pass."""
     config = make_config(PROXMOX_SECTION)
-    vms = [_vm("v1", "lima"), _vm("v2", "proxmox")]
+    vms = [_vm("v1", "lima-local"), _vm("v2", "proxmox")]
     pairs = vm_manager.bind_platforms(config, vms)  # type: ignore[arg-type]
 
     assert len(pairs) == 2

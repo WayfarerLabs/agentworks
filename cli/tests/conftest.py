@@ -226,6 +226,45 @@ def _gate_stub_leak_sentinel() -> Generator[None, None, None]:
         )
 
 
+def publish_all_platforms(registry: object) -> None:
+    """Publish every installed platform's capability row, bypassing the
+    host-support gate. For registry-shape tests that need the full
+    four-platform graph regardless of the test host's OS."""
+    from agentworks.capabilities.vm_platform import (
+        VM_PLATFORM_REGISTRY,
+        VMPlatformEntry,
+    )
+    from agentworks.resources import Origin
+
+    origin = Origin.built_in(source="tests.conftest")
+    for name, cls in VM_PLATFORM_REGISTRY.items():
+        registry.add(  # type: ignore[attr-defined]
+            "vm-platform",
+            name,
+            VMPlatformEntry(name=name, description=cls.description),
+            origin,
+        )
+
+
+def stub_platform_support(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Make every platform (and bundled site) report supported,
+    regardless of the test host's OS and tooling.
+
+    Registration is host-gated for real (wsl2 publishes nothing off
+    Windows; lima-local needs a local limactl), so tests that want the
+    full four-platform registry must opt out of the host's actual
+    state. Tests OF the gating itself patch the individual classmethods
+    instead.
+    """
+    from agentworks.capabilities.vm_platform import VM_PLATFORM_REGISTRY
+
+    for cls in VM_PLATFORM_REGISTRY.values():
+        monkeypatch.setattr(cls, "unsupported_reason", classmethod(lambda c: None))
+        monkeypatch.setattr(
+            cls, "bundled_site_unsupported_reason", classmethod(lambda c: None)
+        )
+
+
 def stub_vm_gates(monkeypatch: pytest.MonkeyPatch) -> _StubPlatform:
     """Stub ``bind_platform`` / ``ensure_active`` / ``keep_active`` (and
     the multi-VM variants) in every gate-consuming module.

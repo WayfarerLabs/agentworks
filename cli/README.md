@@ -107,10 +107,12 @@ Manage virtual machines across declared vm-sites (Lima local or remote, Azure, W
 
 Where VMs are created is declared as `vm-site` resources: YAML manifests under
 `~/.config/agentworks/resources/` that pair a platform (the code that runs VMs on one backend kind)
-with its configuration. The `lima` and `wsl2` sites ship built in; run `agw resource sample vm-site`
-for commented, ready-to-edit examples (an Azure site, a remote-Lima site with
-`platform_config.vm_host`). The former `agw vm-host` registry is gone -- a remote Lima host is now
-just a vm-site.
+with its configuration. The `lima-local` and `wsl2` sites ship built in, appearing only on hosts
+where their platform can actually run (each platform self-reports its host requirements: wsl2 needs
+Windows; lima-local needs a local `limactl`; `agw doctor` lists installed platforms that are
+disabled and why). Run `agw resource sample vm-site` for commented, ready-to-edit examples (an Azure
+site, a remote-Lima site with `platform_config.vm_host`). The former `agw vm-host` registry is gone
+-- a remote Lima host is now just a vm-site.
 
 > **Note on WSL2:** WSL2 distros share the Windows workstation's lifecycle. They idle-shut after
 > ~60s of no `wsl.exe` activity (`vmIdleTimeout` in `.wslconfig`) and do not survive workstation
@@ -139,10 +141,12 @@ just a vm-site.
 | `agw vm add-git-credential <name> <cred>`           | Add or update a git credential                                |
 
 `vm create <name>` takes the VM name as a required positional. Optional flags: `--template` (a
-declared vm-template), `--site` (a declared vm-site; defaults to the template's `site`, then
-`defaults.site`, then the built-in `lima`), `--admin-username`, `--cpus`, `--memory`, `--disk`, and
-`--azure-vm-size`. These are immutable provisioning parameters stored in the database. All
-initialization behavior (packages, install commands, etc.) is driven by config.
+declared vm-template), `--site` (a declared vm-site; falls back to `defaults.site`, else the one
+declared site is inferred when there is exactly one, several prompt interactively, and
+non-interactive runs error naming the options), `--admin-username`, `--cpus`, `--memory`, `--disk`,
+and `--azure-vm-size`. These are immutable provisioning parameters stored in the database. All
+initialization behavior (packages, install commands, etc.) is driven by config. Templates carry no
+`site` -- placement is per-host, so it never travels inside a shared template.
 
 The first interactive `vm create` asks once for an optional **system slug** (3-20 chars, lowercase
 alphanumeric plus dash, no leading/trailing dash): a short identifier for this agentworks
@@ -594,7 +598,8 @@ Resource kinds (YAML manifests; the deprecated TOML section is noted for each):
 - `vm-site` (`[azure]` / `[proxmox]`, flat legacy shape) -- a configured place to create VMs:
   `spec.platform` names the backing platform, `spec.platform_config` carries its settings (Azure
   subscription/resource-group/region, Proxmox API endpoint + token secret, remote-Lima `vm_host`).
-  The `lima` and `wsl2` sites ship built in and their names are reserved
+  The `lima-local` and `wsl2` sites ship built in (on hosts where their platform can run) and their
+  names are reserved
 - `vm-platform` -- read-only capability rows for the in-tree platforms (lima, wsl2, azure, proxmox);
   listed by `agw resource kinds`, never declared
 - `vm-template` (`[vm_templates.*]`) -- VM resources, apt packages, system install commands, mise,

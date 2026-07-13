@@ -169,25 +169,29 @@ def test_bundled_sites_are_reserved(tmp_path: Path) -> None:
         "apiVersion: agentworks/v1\n"
         "kind: vm-site\n"
         "metadata:\n"
-        "  name: lima\n"
+        "  name: lima-local\n"
         "spec:\n"
         "  platform: lima\n"
     )
     manifests = load_manifests(tmp_path)
     registry = Registry.empty()
     builtin_manifests.publish_to(registry)
-    with pytest.raises(ConfigError, match="lima"):
+    with pytest.raises(ConfigError, match="lima-local"):
         manifests.publish_to(registry)
 
 
-def test_bundled_sites_finalize_against_the_platform_rows() -> None:
+def test_bundled_sites_finalize_against_the_platform_rows(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     from agentworks.capabilities import vm_platform as vm_platforms
     from agentworks.manifests import builtin as builtin_manifests
+    from tests.conftest import stub_platform_support
 
+    stub_platform_support(monkeypatch)
     registry = Registry.empty()
     builtin_manifests.publish_to(registry)
     vm_platforms.publish_to(registry)
     registry.finalize()
-    assert registry.lookup("vm-site", "lima").platform == "lima"
+    assert registry.lookup("vm-site", "lima-local").platform == "lima"
     assert registry.lookup("vm-site", "wsl2").platform == "wsl2"
     assert registry.lookup("vm-platform", "azure").name == "azure"

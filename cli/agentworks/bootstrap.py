@@ -68,12 +68,56 @@ def build_registry(config: Config, manifests: ManifestSet | None = None) -> Regi
         for issue in manifests.issues:
             output.warn(f"Manifest: {issue}")
 
+    # Host-support gating (the platform's own call, not a config knob):
+    # an unsupported platform publishes no capability row, and a
+    # declared site referencing one must fail HERE with the platform's
+    # stated requirement -- pre-finalize, because finalize would
+    # otherwise beat us to it with the framework's generic
+    # reference-miss error, which can't say "requires Windows".
+    unsupported = vm_platforms.unsupported_platforms()
+    if unsupported:
+        declared_sites = [
+            (entry.name, getattr(entry.resource, "platform", None))
+            for entry in manifests.entries
+            if entry.kind == "vm-site"
+        ] + [(name, decl.platform) for name, decl in config.vm_sites.items()]
+        for site_name, platform_name in declared_sites:
+            if platform_name in unsupported:
+                from agentworks.errors import ConfigError
+
+                raise ConfigError(
+                    f"vm-site '{site_name}' references platform "
+                    f"'{platform_name}', which is disabled on this host: "
+                    f"{unsupported[platform_name]}",
+                    hint=(
+                        "The platform is installed but its host requirements "
+                        "are not met; remove the site declaration on this "
+                        "machine or run it on a host that meets them."
+                    ),
+                )
+
+    def _skip_unsupported_bundled_site(entry: object) -> bool:
+        # A bundled vm-site publishes only when its platform says the
+        # zero-config site is viable here (lima-local needs a local
+        # limactl; wsl2 needs Windows + wsl.exe). Operator-declared
+        # sites never pass through this predicate.
+        if getattr(entry, "kind", None) != "vm-site":
+            return False
+        platform_name = getattr(entry.resource, "platform", None)  # type: ignore[attr-defined]
+        if not isinstance(platform_name, str):
+            return True
+        platform_cls = vm_platforms.VM_PLATFORM_REGISTRY.get(platform_name)
+        return (
+            platform_cls is None
+            or platform_cls.bundled_site_unsupported_reason() is not None
+        )
+
     registry = Registry.empty()
     # Built-in publishers first. The bundled manifests precede the
     # catalog publisher because catalog.publish_to also publishes the
     # operator's TOML catalog extensions (operator-declared rows), and
     # built-in rows must never land on top of operator rows.
-    builtin_manifests.publish_to(registry)
+    builtin_manifests.publish_to(registry, skip=_skip_unsupported_bundled_site)
     catalog.publish_to(registry, config)
     git_credentials.publish_to(registry)
     secrets.publish_to(registry)

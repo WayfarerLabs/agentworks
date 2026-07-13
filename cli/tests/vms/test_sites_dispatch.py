@@ -8,7 +8,6 @@ from types import SimpleNamespace
 
 import pytest
 
-from agentworks.capabilities import vm_platform as vm_platforms
 from agentworks.capabilities.vm_platform.lima import LimaPlatform
 from agentworks.capabilities.vm_platform.proxmox import ProxmoxPlatform
 from agentworks.errors import ConfigError, StateError
@@ -24,9 +23,13 @@ from agentworks.vms.sites import (
 
 
 def _registry(*sites: VMSiteDecl) -> Registry:
+    from tests.conftest import publish_all_platforms
+
     registry = Registry.empty()
     builtin_manifests.publish_to(registry)
-    vm_platforms.publish_to(registry)
+    # Bypass the host-support gate: dispatch tests exercise resolution
+    # shape, not this host's OS/tooling.
+    publish_all_platforms(registry)
     for site in sites:
         registry.add("vm-site", site.name, site, Origin.built_in(source="test"))
     registry.finalize()
@@ -50,7 +53,7 @@ def test_resolve_site_binds_the_platform_config() -> None:
 
 def test_resolve_site_bundled_lima_is_local() -> None:
     registry = _registry()
-    platform = resolve_site("lima", registry)
+    platform = resolve_site("lima-local", registry)
     assert isinstance(platform, LimaPlatform)
     assert not platform.is_remote
 
@@ -123,7 +126,7 @@ def test_validate_sites_accepts_declared_and_absent() -> None:
     registry = _registry()
     config = SimpleNamespace(defaults=SimpleNamespace(site=None))
     validate_sites(config, registry)  # type: ignore[arg-type]
-    config = SimpleNamespace(defaults=SimpleNamespace(site="lima"))
+    config = SimpleNamespace(defaults=SimpleNamespace(site="lima-local"))
     validate_sites(config, registry)  # type: ignore[arg-type]
 
 
@@ -138,3 +141,110 @@ def test_site_manifest_hint_carries_the_vm_host() -> None:
     hint = site_manifest_hint("gpu-box", vm_host="me@box")
     assert "name: gpu-box" in hint
     assert "vm_host: me@box" in hint
+
+
+# -- select_site: the house selection model ---------------------------------
+
+
+def test_select_site_flag_then_default_win() -> None:
+    from agentworks.vms.sites import select_site
+
+    registry = _registry()
+    assert select_site("flagged", "defaulted", registry) == "flagged"
+    assert select_site(None, "defaulted", registry) == "defaulted"
+
+
+def test_select_site_infers_the_single_declared_site(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Exactly one declared site: use it silently (the zero-config case
+    -- a default install has only its host's bundled site)."""
+    from agentworks.resources import Registry
+    from agentworks.vms.sites import select_site
+    from tests.conftest import publish_all_platforms
+
+    registry = Registry.empty()
+    publish_all_platforms(registry)
+    registry.add(
+        "vm-site",
+        "only-one",
+        VMSiteDecl(name="only-one", platform="lima"),
+        Origin.built_in(source="test"),
+    )
+    registry.finalize()
+    assert select_site(None, None, registry) == "only-one"
+
+
+def test_select_site_prompts_between_several_when_interactive(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agentworks import output
+    from agentworks.vms.sites import select_site
+
+    registry = _registry()  # bundled lima-local + wsl2
+    monkeypatch.setattr(output, "is_interactive", lambda: True)
+    captured: dict[str, object] = {}
+
+    def _choose(msg: str, options: list[str]) -> int:
+        captured["options"] = options
+        return 1
+
+    monkeypatch.setattr(output, "choose", _choose)
+    assert select_site(None, None, registry) == "wsl2"
+    assert captured["options"] == ["lima-local", "wsl2"]
+
+
+def test_select_site_errors_between_several_when_non_interactive(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agentworks import output
+    from agentworks.errors import ValidationError
+    from agentworks.vms.sites import select_site
+
+    registry = _registry()
+    monkeypatch.setattr(output, "is_interactive", lambda: False)
+    with pytest.raises(ValidationError, match="multiple sites") as exc:
+        select_site(None, None, registry)
+    assert "--site" in (exc.value.hint or "")
+
+
+def test_select_site_errors_when_none_declared() -> None:
+    from agentworks.errors import ValidationError
+    from agentworks.resources import Registry
+    from agentworks.vms.sites import select_site
+    from tests.conftest import publish_all_platforms
+
+    registry = Registry.empty()
+    publish_all_platforms(registry)
+    registry.finalize()
+    with pytest.raises(ValidationError, match="no vm-sites are declared"):
+        select_site(None, None, registry)
+
+
+# -- lookup_site: bundled-miss hints ----------------------------------------
+
+
+def test_lookup_bundled_site_miss_names_the_requirement(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A VM on a bundled site whose platform requirements went away
+    (limactl uninstalled) gets the platform's stated reason, never the
+    misleading paste-a-manifest hint."""
+    from agentworks.capabilities.vm_platform.lima import LimaPlatform
+    from agentworks.resources import Registry
+    from agentworks.vms.sites import lookup_site
+    from tests.conftest import publish_all_platforms
+
+    monkeypatch.setattr(
+        LimaPlatform,
+        "bundled_site_unsupported_reason",
+        classmethod(lambda cls: "limactl is not installed on this machine"),
+    )
+    registry = Registry.empty()
+    publish_all_platforms(registry)
+    registry.finalize()
+
+    with pytest.raises(ConfigError, match="bundled site 'lima-local' is unavailable") as exc:
+        lookup_site("lima-local", registry)
+    assert "limactl" in str(exc.value)
+    assert "kind: vm-site" not in (exc.value.hint or "")

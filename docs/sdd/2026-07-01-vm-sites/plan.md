@@ -183,6 +183,37 @@ flag/completion work stays in Phase 5.
   `_collect_git_tokens`) -- the fold rides the git-credentials capability adoption (#167), not this
   PR. Also ratified: the idempotency marker stays test-enforced (semantic property; the behavioral
   guard suite is the enforcement).
+- **2026-07-13, host-support gating: platforms self-report; bundled sites and the site fallback
+  reshape; templates lose `site`.** Trigger: the maintainer's doctor on a lima-less Linux host
+  showed preflight-noise rows for the unconditionally-bundled `lima`/`wsl2` sites -- sites the host
+  would never use (also the impetus for the reviewer rubric's new environment-diversity check). Two
+  design iterations (a `[system].enabled_platforms` config knob was designed, partially built, and
+  DISCARDED mid-build) landed on the cleaner model: the knowledge lives on the platform class. Two
+  registration-time classmethods, both pure/fast/config-free and deliberately NOT preflight:
+  `unsupported_reason()` (can any configuration of this platform ever run here; a non-None reason
+  disables the platform wholesale -- no capability row, nothing may reference it, doctor lists it as
+  installed-but-disabled) and `bundled_site_unsupported_reason()` (should the zero-config bundled
+  site publish; operator-declared sites are never gated by it). The split is load-bearing: lima the
+  platform is supported everywhere (remote-Lima runs limactl on the vm_host over SSH), but
+  `lima-local` -- the bundled site's NEW name; "lima" conflated the platform with one configuration
+  of it -- needs a local limactl. wsl2 is categorically Windows-only, so the whole platform gates.
+  Consequences: `build_registry` gains a pre-finalize guard so a declared site on an unsupported
+  platform fails with the platform's stated requirement (the framework's generic reference-miss
+  can't say "requires Windows"); `lookup_site` gives a bundled-site miss the requirement hint
+  instead of the misleading paste-a-manifest hint (covers limactl uninstalled after VMs existed);
+  the v27 migration writes `lima-local` for local-lima rows (unreleased, so no compat shim ever
+  exists) and the remote-host `-host` suffix rule reserves bundled-site names too; the deprecated
+  `defaults.platform` alias translates old `lima` to `lima-local`. Site selection drops BOTH the
+  hardcoded lima fallback AND the vm-template `site` field (a template describes WHAT a VM is;
+  placement is host/operator-scoped, and a shared template must not smuggle a per-host placement
+  decision -- reversing the Phase 1 design): `--site`, then `defaults.site`, then the house model
+  over declared sites (infer exactly-one silently; several prompt interactively; non-interactive
+  errors naming the options). Doctor's "VM platforms" group now derives from the same two
+  classmethods (ok / installed-but-disabled-with-reason / enabled-with- bundled-site-note) replacing
+  the raw tool-presence rows. Pinned by `test_platform_support.py` (gating end to end incl. the
+  friendly error and the remote-site-survives-missing-limactl split), the select_site model tests,
+  and the bundled-miss hint test; test scaffolding gains `stub_platform_support` /
+  `publish_all_platforms` so shape tests are host-independent by construction.
 
 **Compile boundaries**: Phases 1 through 3 are one logical commit boundary, mirroring the
 polymorphic-transports precedent. As planned, Phase 1 would open a non-compiling window when the

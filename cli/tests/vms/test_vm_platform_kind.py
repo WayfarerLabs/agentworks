@@ -22,7 +22,12 @@ def test_kind_flags() -> None:
     assert site_kind.builtin_override == "reserved"
 
 
-def test_publisher_adds_one_row_per_platform() -> None:
+def test_publisher_adds_one_row_per_supported_platform(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from tests.conftest import stub_platform_support
+
+    stub_platform_support(monkeypatch)
     registry = Registry.empty()
     vm_platforms.publish_to(registry)
     names = {entry.name for entry in registry.iter_kind("vm-platform")}
@@ -31,6 +36,26 @@ def test_publisher_adds_one_row_per_platform() -> None:
     assert row.origin is not None
     assert row.origin.variant == "built-in"
     assert row.description
+
+
+def test_publisher_skips_unsupported_platforms(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An installed platform whose host requirements aren't met (the
+    platform's own unsupported_reason) publishes no capability row: it
+    is invisible to the resource graph and listed only by doctor."""
+    from agentworks.capabilities.vm_platform.wsl2 import WSL2Platform
+
+    monkeypatch.setattr(
+        WSL2Platform,
+        "unsupported_reason",
+        classmethod(lambda cls: "requires Windows (runs VMs as WSL2 distributions)"),
+    )
+    registry = Registry.empty()
+    vm_platforms.publish_to(registry)
+    names = {entry.name for entry in registry.iter_kind("vm-platform")}
+    assert "wsl2" not in names
+    assert {"lima", "azure", "proxmox"} <= names
 
 
 def test_vm_platform_is_not_manifest_declarable(tmp_path: Path) -> None:

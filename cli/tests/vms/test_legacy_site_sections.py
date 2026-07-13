@@ -111,16 +111,26 @@ def test_defaults_site_parses(write_config) -> None:
 
 
 def test_defaults_platform_alias_maps_to_site(write_config) -> None:
+    """The alias carries over unchanged for the non-lima values; the
+    old ``lima`` (which meant local Lima) translates to the bundled
+    site's new name, ``lima-local``."""
     config = load_config(
         write_config('[defaults]\nplatform = "lima"\n'),
         warn_issues=False,
         warn_deprecations=False,
     )
-    assert config.defaults.site == "lima"
+    assert config.defaults.site == "lima-local"
     assert any(
         "defaults.platform is deprecated" in issue
         for issue in config.deprecation_issues
     )
+
+    config = load_config(
+        write_config('[defaults]\nplatform = "azure"\n'),
+        warn_issues=False,
+        warn_deprecations=False,
+    )
+    assert config.defaults.site == "azure"
 
 
 def test_defaults_alias_disagreement_prefers_site(write_config) -> None:

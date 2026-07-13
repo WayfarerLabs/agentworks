@@ -1,8 +1,9 @@
 ## kind: vm-site -- a configured place to create VMs: a platform (the
 ## capability: lima, wsl2, azure, proxmox) plus its settings. Referenced
-## by name from `agw vm create --site`, vm-template `site`, and
-## defaults.site. The `lima` and `wsl2` sites ship built-in (zero
-## config); declare sites for remote or cloud backends.
+## by name from `agw vm create --site` and defaults.site. The
+## `lima-local` and `wsl2` sites ship built-in (zero config) on hosts
+## where their platform can run; declare sites for remote or cloud
+## backends.
 ##
 ## Remote Lima over SSH:
 ##

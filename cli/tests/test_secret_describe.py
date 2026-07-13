@@ -425,14 +425,17 @@ def test_resolution_preview_not_available_when_no_backend_attempts(
     )
     config = load_config(cfg, warn_issues=False)
 
-    from agentworks.capabilities import vm_platform as vm_platforms
     from agentworks.manifests import builtin as builtin_manifests
 
     registry = Registry.empty()
     builtin_manifests.publish_to(registry)
     # The bundled vm-site rows reference the vm-platform capability
-    # rows, so the manual sequence needs the platform publisher too.
-    vm_platforms.publish_to(registry)
+    # rows; publish every platform row directly, bypassing the
+    # host-support gate (this test is about secret previews, not this
+    # host's OS/tooling).
+    from tests.conftest import publish_all_platforms
+
+    publish_all_platforms(registry)
     publish_backends(registry)
     decl = SecretDecl(
         name="api-key",

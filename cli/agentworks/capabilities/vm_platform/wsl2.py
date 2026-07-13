@@ -451,6 +451,31 @@ class WSL2Platform(VMPlatform):
 
     name: ClassVar[str] = "wsl2"
     description: ClassVar[str] = "WSL2 Debian distributions on Windows"
+    # One distro host per Windows workstation, so platform and bundled
+    # site share the name.
+    bundled_site: ClassVar[str | None] = "wsl2"
+
+    @classmethod
+    def unsupported_reason(cls) -> str | None:
+        """WSL2 is categorically Windows-only -- no configuration of
+        this platform can ever work elsewhere, so the whole platform
+        disables off Windows (vs lima, whose remote mode keeps the
+        platform supported everywhere)."""
+        if sys.platform != "win32":
+            return "requires Windows (runs VMs as WSL2 distributions)"
+        return None
+
+    @classmethod
+    def bundled_site_unsupported_reason(cls) -> str | None:
+        """On Windows the bundled site additionally needs ``wsl.exe``
+        itself (WSL is an optional Windows feature)."""
+        if (reason := cls.unsupported_reason()) is not None:
+            return reason
+        import shutil
+
+        if not shutil.which("wsl"):
+            return "wsl.exe is not installed (`wsl --install`)"
+        return None
 
     def preflight(self) -> None:
         """``wsl.exe`` must be on PATH (which also implies Windows).

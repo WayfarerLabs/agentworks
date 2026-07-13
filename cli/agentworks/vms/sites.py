@@ -112,24 +112,80 @@ def site_manifest_hint(name: str, *, vm_host: str | None = None) -> str:
 
 def select_site(
     flag: str | None,
-    template_site: str | None,
     default_site: str | None,
+    registry: Registry,
 ) -> str:
-    """Site selection precedence for `vm create`: the explicit flag,
-    then the resolved template's site, then ``defaults.site``, then the
-    built-in ``lima`` site.
+    """Site selection for ``vm create``: the explicit flag, then
+    ``defaults.site``, then the house model over the declared sites --
+    infer when exactly one exists, prompt interactively when several
+    do, error otherwise.
+
+    Placement is deliberately host/operator-scoped only: templates
+    describe WHAT a VM is and carry no site (a shared template must not
+    smuggle a per-host placement decision), and there is no hardcoded
+    fallback site (the bundled sites publish only where viable, so
+    "exactly one declared" IS the zero-config case).
     """
-    return flag or template_site or default_site or "lima"
+    from agentworks import output
+    from agentworks.errors import ValidationError
+
+    if flag:
+        return flag
+    if default_site:
+        return default_site
+    names = sorted(name for name, _ in registry.iter_kind_items("vm-site"))
+    if len(names) == 1:
+        return names[0]
+    if not names:
+        raise ValidationError(
+            "no vm-sites are declared on this host",
+            hint=(
+                "declare one under ~/.config/agentworks/resources/ "
+                "(`agw resource sample vm-site`), or install the tooling "
+                "for a bundled site (limactl for lima-local; WSL on "
+                "Windows for wsl2)"
+            ),
+        )
+    if output.is_interactive():
+        choice = output.choose("Select a site for this VM", names)
+        return names[choice]
+    raise ValidationError(
+        f"multiple sites are declared ({', '.join(names)})",
+        hint="pass --site <name> or set defaults.site in config.toml",
+    )
 
 
 def lookup_site(name: str, registry: Registry) -> VMSiteDecl:
-    """The site's declaration, or the stranded-site ``ConfigError`` with
-    the paste-ready manifest hint (e.g. a migrated remote-Lima row whose
-    site manifest the operator has not added yet).
+    """The site's declaration, or a ``ConfigError`` whose hint matches
+    the miss: a bundled site missing because its platform's host
+    requirements aren't met gets the platform's stated reason (the
+    paste-a-manifest hint would be actively misleading there); any
+    other miss is the stranded-site case (e.g. a migrated remote-Lima
+    row whose site manifest the operator has not added yet) and gets
+    the ready-to-paste manifest.
     """
     try:
         decl = registry.lookup("vm-site", name)
     except KeyError:
+        from agentworks.capabilities.vm_platform import (
+            VM_PLATFORM_REGISTRY,
+            bundled_site_platform,
+        )
+
+        platform_name = bundled_site_platform(name)
+        if platform_name is not None:
+            reason = VM_PLATFORM_REGISTRY[
+                platform_name
+            ].bundled_site_unsupported_reason()
+            if reason is not None:
+                raise ConfigError(
+                    f"the bundled site '{name}' is unavailable on this "
+                    f"host: {reason}",
+                    hint=(
+                        f"meet the requirement to get the site back, or "
+                        f"use a different site (platform: {platform_name})"
+                    ),
+                ) from None
         raise ConfigError(
             f"site '{name}' is not declared",
             hint=site_manifest_hint(name),

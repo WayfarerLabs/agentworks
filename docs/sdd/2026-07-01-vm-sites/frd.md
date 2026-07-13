@@ -158,6 +158,17 @@ Two coordination notes:
 >   Ctrl-C at a prompt aborts the operation cleanly, always.
 > - Mutating ops carry per-op idempotency flags on the kind ABC.
 > - The base `Capability` class and the platform implementations live in a `capabilities/` subtree.
+>
+> **Host-support revision (2026-07-13):** platforms self-report host support via two
+> registration-time classmethods (not preflight): `unsupported_reason()` disables a platform
+> wholesale on hosts that can never run it (wsl2 off Windows: no capability row, sites referencing
+> it fail with the stated requirement), and `bundled_site_unsupported_reason()` gates only the
+> zero-config bundled site (lima-local without a local limactl; lima the platform stays supported
+> everywhere for remote sites). This supersedes R2's bundled-sites-always story: the bundled lima
+> site is renamed **`lima-local`**, bundled sites publish only where viable, vm-templates carry NO
+> `site` field (placement is host/operator-scoped: `--site`, then `defaults.site`, then infer-one /
+> prompt / error over declared sites -- the hardcoded lima fallback is gone), and doctor lists
+> installed-but-disabled platforms with their reasons. See the plan's 2026-07-13 sequencing note.
 
 ### R1: Platform capability, site resource
 

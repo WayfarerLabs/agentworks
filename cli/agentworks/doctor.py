@@ -144,17 +144,34 @@ def _check_required_tools() -> HealthGroup:
 
 
 def _check_vm_platforms() -> HealthGroup:
-    g = HealthGroup("VM platforms")
+    """Installed platforms and their host support, from the platforms'
+    own checks (the same gates that decide registration): a supported
+    platform is ``ok``; installed-but-disabled shows the platform's
+    stated reason; a supported platform whose BUNDLED site is
+    unavailable notes why (its operator-declared sites still work --
+    lima's remote sites need no local limactl).
+    """
+    from agentworks.capabilities.vm_platform import VM_PLATFORM_REGISTRY
 
-    # Local platform tools
-    for tool, label in [
-        ("limactl", "Local Lima (limactl)"),
-        ("wsl", "WSL2 (wsl)"),
-    ]:
-        if shutil.which(tool):
-            g.ok(label)
+    g = HealthGroup("VM platforms")
+    for name, cls in VM_PLATFORM_REGISTRY.items():
+        reason = cls.unsupported_reason()
+        if reason is not None:
+            g.info(f"platform: {name}", f"disabled ({reason})")
+            continue
+        bundled_reason = (
+            cls.bundled_site_unsupported_reason()
+            if cls.bundled_site is not None
+            else None
+        )
+        if bundled_reason is not None:
+            g.ok(
+                f"platform: {name}",
+                f"enabled (bundled site {cls.bundled_site} unavailable: "
+                f"{bundled_reason})",
+            )
         else:
-            g.info(label, "not available")
+            g.ok(f"platform: {name}")
     return g
 
 

@@ -245,17 +245,23 @@ def _migrate_vm_sites(conn: sqlite3.Connection, context: MigrationContext) -> No
             )
 
     # Same pre-DDL stance for the remote-Lima site names: a host that
-    # shadows a platform name gets a '-host' suffix (the new site-name
-    # rules reserve platform names for their own platform), and a
+    # shadows a platform name or a bundled-site name (lima-local, wsl2)
+    # gets a '-host' suffix (platform names are reserved for the
+    # shadow rule; bundled names are reserved built-ins), and a
     # suffixed name landing on another real host's site would silently
     # merge two distinct hosts -- fail loudly while the DB is pristine.
+    reserved_site_names = set(VM_PLATFORM_REGISTRY) | {
+        cls.bundled_site
+        for cls in VM_PLATFORM_REGISTRY.values()
+        if cls.bundled_site is not None
+    }
     host_sites: dict[str, str] = {}  # host -> site
     for row in conn.execute(
         "SELECT DISTINCT vm_host_name AS host FROM vms "
         "WHERE vm_host_name IS NOT NULL"
     ).fetchall():
         host = row["host"]
-        site = f"{host}-host" if host in VM_PLATFORM_REGISTRY else host
+        site = f"{host}-host" if host in reserved_site_names else host
         clash = next((h for h, s in host_sites.items() if s == site), None)
         if clash is not None:
             raise sqlite3.IntegrityError(
@@ -285,6 +291,15 @@ def _migrate_vm_sites(conn: sqlite3.Connection, context: MigrationContext) -> No
             "UPDATE vms SET platform_metadata = ?, hostname = ? WHERE name = ?",
             (json.dumps(metadata), f"{platform}--{row['name']}", row["name"]),
         )
+
+    # Local-Lima rows: the bundled site is named lima-local, not lima
+    # (the platform keeps the bare name; the site is one CONFIGURATION
+    # of it). Remote rows are excluded here -- they re-point at their
+    # host-named sites below.
+    conn.execute(
+        "UPDATE vms SET platform = 'lima-local' "
+        "WHERE platform = 'lima' AND vm_host_name IS NULL"
+    )
 
     # Remote-Lima rows: the site IS the host. The operator must
     # declare the matching vm-site manifest; until then those VMs are

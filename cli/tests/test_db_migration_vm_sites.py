@@ -87,10 +87,11 @@ def test_backfill_and_site_rename(tmp_path: Path, captured_output: CapturedOutpu
     try:
         by_name = {vm.name: vm for vm in db.list_vms()}
 
-        # Site: unchanged for the four legacy names; the host name (or
-        # its '-host'-suffixed form on platform-name shadowing) for
+        # Site: local lima rows land on the renamed lima-local bundled
+        # site; the other legacy names are unchanged; the host name (or
+        # its '-host'-suffixed form on reserved-name shadowing) for
         # remote-Lima rows.
-        assert by_name["lvm"].site == "lima"
+        assert by_name["lvm"].site == "lima-local"
         assert by_name["rvm"].site == "gpu-box"
         assert by_name["rvm2"].site == "gpu-box"
         assert by_name["svm"].site == "wsl2-host"
@@ -210,7 +211,7 @@ def test_unknown_platform_fails_loudly_and_retry_works_after_fix(
     try:
         vm = db.get_vm("xvm")
         assert vm is not None
-        assert vm.site == "lima"
+        assert vm.site == "lima-local"
         assert vm.platform_metadata == {"instance_name": "xvm"}
     finally:
         db.close()
@@ -286,7 +287,7 @@ def test_earlier_versions_checkpoint_when_a_later_one_fails(
     try:
         vm = db.get_vm("xvm")
         assert vm is not None
-        assert vm.site == "lima"
+        assert vm.site == "lima-local"
     finally:
         db.close()
 
@@ -295,9 +296,9 @@ def test_fresh_database_lands_on_the_new_schema(tmp_path: Path) -> None:
     """A brand-new DB (no fixture) runs 1..27 cleanly end to end."""
     db = Database(tmp_path / "fresh.db")
     try:
-        db.insert_vm("v", site="lima", hostname="lima--v")
+        db.insert_vm("v", site="lima-local", hostname="lima--v")
         vm = db.get_vm("v")
         assert vm is not None
-        assert vm.site == "lima"
+        assert vm.site == "lima-local"
     finally:
         db.close()

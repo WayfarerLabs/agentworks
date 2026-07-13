@@ -435,7 +435,7 @@ def create_vm(
     # hint, before any DB or backend work.
     from agentworks.vms.sites import lookup_site, select_site
 
-    site = select_site(site, vm_tmpl.site, config.defaults.site)
+    site = select_site(site, config.defaults.site, registry)
     site_decl = lookup_site(site, registry)
 
     vm_name = name

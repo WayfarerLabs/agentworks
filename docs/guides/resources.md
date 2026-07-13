@@ -108,10 +108,12 @@ spec:
 - `spec.platform` names a `vm-platform` capability row (`lima`, `wsl2`, `azure`, `proxmox`);
   `spec.platform_config` is validated by that platform (unknown keys are errors). Remote Lima is
   just a lima site with `platform_config.vm_host: user@host`.
-- The `lima` and `wsl2` sites ship built in with empty config; their names are reserved. A site
-  named after a platform must declare that platform.
-- Consumers name sites everywhere: `agw vm create --site`, `vm-template.spec.site`, `defaults.site`
-  in config.toml, and each VM row's `site`.
+- The `lima-local` and `wsl2` sites ship built in with empty config, on hosts where their platform
+  can run (each platform self-reports its host requirements: wsl2 needs Windows; lima-local needs a
+  local `limactl`). Their names are reserved. A site named after a platform must declare that
+  platform.
+- Consumers name sites: `agw vm create --site`, `defaults.site` in config.toml, and each VM row's
+  `site`. Templates deliberately carry no site -- placement is per-host, never template state.
 - Site config secrets ride the standard secret machinery: a Proxmox site references its API token as
   the `proxmox-token-secret` secret (override with `token_secret`), auto-declared and resolved
   through the backend chain like any other.
@@ -126,12 +128,13 @@ policy is per kind:
 - **Catalog kinds** (`apt-source`, `apt-package`, `system-install-command`, `user-install-command`):
   declaring the same name overrides the built-in -- the name is the interface, and same-name
   override is how you customize what `gh` installs.
-- **Bundled vm-sites** (`lima`, `wsl2`): reserved names -- redeclaring one is an error; declare a
-  sibling site instead.
+- **Bundled vm-sites** (`lima-local`, `wsl2`): reserved names -- redeclaring one is an error;
+  declare a sibling site instead.
 - **Secret backends** (`env-var`, `prompt`) and **VM platforms** (`lima`, `wsl2`, `azure`,
   `proxmox`): registered capabilities, shown as read-only rows. You cannot declare or override them;
   secrets customize per secret via `backend_mappings`, platforms configure per site via
-  `platform_config`.
+  `platform_config`. A platform whose host requirements are not met publishes no row at all --
+  `agw doctor` lists installed-but-disabled platforms with the reason.
 
 ## Secrets: backends and the chain
 

@@ -57,6 +57,25 @@ class LimaPlatform(VMPlatform):
 
     name: ClassVar[str] = "lima"
     description: ClassVar[str] = "Lima VMs (local, or on a remote host via SSH)"
+    # "lima-local", not "lima": the bundled site is one CONFIGURATION of
+    # the platform (this workstation), and naming it after the platform
+    # conflated the two. Remote-Lima sites are ordinary operator sites.
+    bundled_site: ClassVar[str | None] = "lima-local"
+
+    # No unsupported_reason override: the platform is supported on
+    # every host, because remote-Lima sites run limactl on the vm_host
+    # over SSH and need nothing locally.
+
+    @classmethod
+    def bundled_site_unsupported_reason(cls) -> str | None:
+        """The zero-config lima-local site is pointless without a local
+        ``limactl``; a host that later installs Lima gets the site on
+        the next registry build."""
+        import shutil
+
+        if not shutil.which("limactl"):
+            return "limactl is not installed on this machine"
+        return None
 
     @classmethod
     def validate_config(
