@@ -230,10 +230,10 @@ echo ""
 if [ -n "$TOKEN_SECRET" ]; then
     echo "Set this environment variable (save it -- it cannot be retrieved again):"
     echo ""
-    echo "  export AW_SECRET_PROXMOX_TOKEN_SECRET=\"${TOKEN_SECRET}\""
+    echo "  export AW_SECRET_PROXMOX_TOKEN=\"${TOKEN_SECRET}\""
 else
-    echo "The API token is the 'proxmox-token-secret' agentworks secret:"
-    echo "set AW_SECRET_PROXMOX_TOKEN_SECRET to your existing token value"
+    echo "The API token is the 'proxmox-token' agentworks secret:"
+    echo "set AW_SECRET_PROXMOX_TOKEN to your existing token value"
     echo "(or let agentworks prompt for it when needed)."
 fi
 
