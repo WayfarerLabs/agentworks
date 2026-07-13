@@ -386,8 +386,8 @@ Agentworks runs on Windows, macOS, and Linux, on hosts with wildly different too
 (limactl, wsl.exe, cloud CLIs and credentials, shells, tmux versions), under configurations ranging
 from an empty config.toml to a dense one with many templates, sites, and secrets, and in both
 interactive terminals and non-interactive automation. Most installs will never use most features.
-Every change must be evaluated against that matrix -- not just against the machine and config it
-was written on. For any surface a change touches, ask: what does this look like on an OS the author
+Every change must be evaluated against that matrix -- not just against the machine and config it was
+written on. For any surface a change touches, ask: what does this look like on an OS the author
 isn't running, on a host missing the relevant tooling, with a config that never exercises this
 feature, and in a non-interactive run?
 
@@ -396,8 +396,8 @@ Look for:
 - Blanket enablement of environment-specific behavior: anything registered, bundled, defaulted, or
   probed unconditionally that only makes sense in some environments (a WSL2 site on macOS, a
   local-Lima site with no limactl, a check that assumes a cloud credential exists). Ask what every
-  surface (doctor, completions, errors, prompts, docs examples) shows an operator who will NEVER
-  use it.
+  surface (doctor, completions, errors, prompts, docs examples) shows an operator who will NEVER use
+  it.
 - Requirements knowledge living outside the component that has it. "Can this work here?" belongs to
   the component itself (a check that travels with the platform/capability/feature and scales to
   plugins), not to config sniffing, doctor special cases, or OS checks scattered across call sites.
@@ -407,15 +407,15 @@ Look for:
   and silent, respectively -- an error or warning about a state the operator cannot or need not act
   on is noise.
 - Environment mutability: tool presence, credentials, and reachable hosts change between runs, and
-  entities created under one environment outlive it. Verify the degraded path: what does an
-  existing entity get when the environment that created it goes away, and does the error name the
-  actual requirement rather than a generic miss?
+  entities created under one environment outlive it. Verify the degraded path: what does an existing
+  entity get when the environment that created it goes away, and does the error name the actual
+  requirement rather than a generic miss?
 - Interactive assumptions: prompts, choosers, and browser-login fallbacks on paths that automation
   hits; conversely, non-interactive errors that don't say which flag or setting substitutes for the
   prompt.
 - Tests pinned to the author's environment: suites that only pass where a tool exists (or doesn't),
-  on one OS, or with one config shape. Environment-dependent branches need the other branches
-  tested too, via deterministic stubbing.
+  on one OS, or with one config shape. Environment-dependent branches need the other branches tested
+  too, via deterministic stubbing.
 
 ## Output format
 
