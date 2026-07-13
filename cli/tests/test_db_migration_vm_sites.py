@@ -50,11 +50,16 @@ def _seed_all_platforms(conn: sqlite3.Connection) -> None:
     conn.execute(
         "INSERT INTO vm_hosts (name, ssh_host) VALUES ('wsl2', 'me@wsl2-host')"
     )
+    conn.execute(
+        "INSERT INTO vm_hosts (name, ssh_host) VALUES ('azure-vm', 'me@az-box')"
+    )
     conn.executescript("""
         INSERT INTO vms (name, platform, admin_username)
             VALUES ('lvm', 'lima', 'admin');
         INSERT INTO vms (name, platform, admin_username, vm_host_name)
             VALUES ('rvm', 'lima', 'admin', 'gpu-box');
+        INSERT INTO vms (name, platform, admin_username, vm_host_name)
+            VALUES ('zvm', 'lima', 'admin', 'azure-vm');
         INSERT INTO vms (name, platform, admin_username, vm_host_name)
             VALUES ('rvm2', 'lima', 'admin', 'gpu-box');
         INSERT INTO vms (name, platform, admin_username, vm_host_name)
@@ -95,6 +100,9 @@ def test_backfill_and_site_rename(tmp_path: Path, captured_output: CapturedOutpu
         assert by_name["rvm"].site == "gpu-box"
         assert by_name["rvm2"].site == "gpu-box"
         assert by_name["svm"].site == "wsl2-host"
+        # A host literally named after the renamed platform shadows the
+        # NEW reserved name and gets the suffix.
+        assert by_name["zvm"].site == "azure-vm-host"
         assert by_name["wvm"].site == "wsl2"
         assert by_name["avm"].site == "azure"
         assert by_name["pvm"].site == "proxmox"
@@ -110,9 +118,13 @@ def test_backfill_and_site_rename(tmp_path: Path, captured_output: CapturedOutpu
         assert by_name["pvm"].platform_metadata == {"vmid": "104"}
 
         # Hostname backfill uses the PRE-rename platform value (the
-        # hostname the create-time bootstrap actually set).
+        # hostname the create-time bootstrap actually set). The azure
+        # row is the load-bearing case: the platform is azure-vm NOW,
+        # but the VM's real hostname was set under the legacy name --
+        # a "cleanup" to registry keys would break exactly this.
         assert by_name["lvm"].hostname == "lima--lvm"
         assert by_name["rvm"].hostname == "lima--rvm"
+        assert by_name["avm"].hostname == "azure--avm"
         assert by_name["pvm"].hostname == "proxmox--pvm"
 
         assert all(not vm.operator_stopped for vm in by_name.values())

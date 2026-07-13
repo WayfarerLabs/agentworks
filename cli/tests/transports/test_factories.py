@@ -222,7 +222,7 @@ def test_native_transport_empty_ssh_host_raises_typed_state_error() -> None:
     vm = _mock_vm(site="azure")
     config = _mock_config()
     platform = MagicMock()
-    platform.name = "azure"
+    platform.name = "azure-vm"
     platform.transient_route.return_value = contextlib.nullcontext()
     platform.native_transport.return_value = SSHTransport(host="", user="agentworks")
 
@@ -289,7 +289,7 @@ def test_native_transport_azure_transient_route_attaches_and_detaches() -> None:
     events: list[str] = []
 
     platform = MagicMock()
-    platform.name = "azure"
+    platform.name = "azure-vm"
 
     @contextlib.contextmanager
     def fake_route(_vm):  # type: ignore[no-untyped-def] # noqa: ANN001, ANN202
@@ -324,7 +324,7 @@ def test_native_transport_azure_detach_fires_on_downstream_exception() -> None:
     events: list[str] = []
 
     platform = MagicMock()
-    platform.name = "azure"
+    platform.name = "azure-vm"
 
     @contextlib.contextmanager
     def fake_route(_vm):  # type: ignore[no-untyped-def] # noqa: ANN001, ANN202

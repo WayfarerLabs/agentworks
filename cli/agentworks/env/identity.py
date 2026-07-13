@@ -23,7 +23,7 @@ class ResourceContext:
 
     ``vm_name`` / ``platform`` / ``site`` / ``user`` are always present
     for an on-VM shell. ``platform`` carries the capability name
-    (``lima`` / ``wsl2`` / ``azure`` / ``proxmox``), resolved at the
+    (``lima`` / ``wsl2`` / ``azure-vm`` / ``proxmox``), resolved at the
     caller's composition root via the site declaration; ``site`` is the
     vm-site resource name from ``vm.site``. The remaining fields are
     present when the corresponding scope applies (workspace context,
@@ -79,10 +79,11 @@ def vm_stable_identity_env(ctx: ResourceContext) -> dict[str, str]:
     profile fragment so that any shell on the VM (including raw ssh logins)
     sees them.
 
-    ``AGENTWORKS_PLATFORM`` keeps its name
-    and values (the capability name it has always carried);
-    ``AGENTWORKS_SITE`` is new; ``AGENTWORKS_VM_HOST`` retired with the
-    ``vm_hosts`` registry (the site name conveys the same information).
+    ``AGENTWORKS_PLATFORM`` keeps its name and meaning (the capability
+    name it has always carried; the azure value reads ``azure-vm``
+    post-rename); ``AGENTWORKS_SITE`` is new; ``AGENTWORKS_VM_HOST``
+    retired with the ``vm_hosts`` registry (the site name conveys the
+    same information).
     """
     return {
         "AGENTWORKS_VM": ctx.vm_name,

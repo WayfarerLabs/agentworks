@@ -283,8 +283,8 @@ def _decode_vm_site(doc: Document, spec: dict[str, object], issues: list[str]) -
     from agentworks.capabilities.vm_platform import VM_PLATFORM_REGISTRY
 
     # FRD R2: a site named after a known platform must declare that
-    # platform -- `vm-site/azure` backed by lima would make every
-    # `--site azure` mean something other than it says.
+    # platform -- `vm-site/azure-vm` backed by lima would make every
+    # `--site azure-vm` mean something other than it says.
     if doc.name in VM_PLATFORM_REGISTRY and platform != doc.name:
         raise ConfigError(
             f"a vm-site named '{doc.name}' must declare platform "

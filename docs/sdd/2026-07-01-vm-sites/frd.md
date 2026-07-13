@@ -551,9 +551,10 @@ hostname, which tailscaled picks up as the node name. Changes:
 
 ### R12: Identity env vars
 
-- `AGENTWORKS_PLATFORM` keeps its name AND its values: it has always carried the capability name
-  (`lima`, `azure`, `wsl2`, `proxmox`), which is exactly what "platform" means post-rename. No
-  existing VM's value changes, remote-Lima included.
+- `AGENTWORKS_PLATFORM` keeps its name and meaning: it has always carried the capability name, which
+  is exactly what "platform" means post-rename. (The 2026-07-13 azure-vm rename is the one value
+  change: azure VMs read `azure-vm` at their next reinit; `lima`/`wsl2`/`proxmox` values are
+  untouched.)
 - New `AGENTWORKS_SITE` carries the site name.
 - `AGENTWORKS_VM_HOST` retires with the `vm_hosts` registry (its only source). It was emitted only
   for remote-Lima VMs; the site name now conveys the same information.
