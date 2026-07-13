@@ -115,8 +115,19 @@ def _legacy_rebuild(config: Config, db: Database) -> None:
 # -- config.d approach -----------------------------------------------------
 
 
+def _managed_conf_name(db: Database) -> str:
+    """Managed-file name: ``agentworks-{system_slug}.conf`` when the
+    install has a slug, the legacy ``agentworks.conf`` otherwise. The
+    existing ``Include ~/.ssh/config.d/*`` directive matches both.
+    """
+    from agentworks.db import SYSTEM_SLUG_KEY
+
+    slug = db.get_setting(SYSTEM_SLUG_KEY) or None
+    return f"agentworks-{slug}.conf" if slug else _MANAGED_CONF
+
+
 def _rebuild_config_dir(config: Config, db: Database) -> None:
-    """Declaratively rebuild ~/.ssh/config.d/agentworks.conf from DB state.
+    """Declaratively rebuild the managed config.d file from DB state.
 
     Writes a single file containing Host blocks for all VMs with Tailscale
     hosts. Ensures the Include directive is present in ~/.ssh/config.
@@ -165,7 +176,14 @@ def _rebuild_config_dir(config: Config, db: Database) -> None:
                 )
             )
 
-    conf_path = config_d / _MANAGED_CONF
+    conf_name = _managed_conf_name(db)
+    conf_path = config_d / conf_name
+    # First sync after the slug is set (the slug arrives at first
+    # vm create, not at DB migration): remove the old slug-less file so
+    # stale aliases cannot shadow fresh ones. Idempotent on later syncs.
+    if conf_name != _MANAGED_CONF:
+        (config_d / _MANAGED_CONF).unlink(missing_ok=True)
+
     if not host_entries:
         conf_path.unlink(missing_ok=True)
         return

@@ -2,13 +2,16 @@
 
 from __future__ import annotations
 
-from collections.abc import Generator
+import contextlib
+from collections.abc import Generator, Iterator, Sequence
+from contextlib import AbstractContextManager
 from dataclasses import dataclass, field
 from pathlib import Path
 
 import pytest
 
 from agentworks.db import Database
+from agentworks.secrets.resolver import Resolver
 
 
 @pytest.fixture
@@ -158,9 +161,172 @@ class _FakeTarget:
         return _FakeResult()
 
 
+class _StubPlatform:
+    """Minimal bound-platform stand-in for the vm-sites gates.
+
+    ``vm_active`` is a no-op hold and ``status`` reports RUNNING so the
+    gate proceeds without shelling out (the real ``ensure_active`` fast
+    path runs ``tailscale ping``).
+    """
+
+    name = "stub"
+
+    def vm_active(self, vm: object, *, config: object | None = None) -> AbstractContextManager[None]:
+        return contextlib.nullcontext()
+
+    def status(self, vm: object) -> object:
+        from agentworks.db import VMStatus
+
+        return VMStatus.RUNNING
+
+    def transient_route(self, vm: object) -> AbstractContextManager[None]:
+        return contextlib.nullcontext()
+
+    def post_tailscale_ready(self, vm: object) -> None:
+        return None
+
+
+# Every module that imports the vm-sites gates by name; patched
+# per-module because ``from ... import bind_platform`` captures the
+# binding at module load.
+_GATE_MODULES = (
+    "agentworks.vms.manager",
+    "agentworks.vms.backup",
+    "agentworks.workspaces.manager",
+    "agentworks.agents.manager",
+    "agentworks.sessions.manager",
+    "agentworks.sessions.multi_console",
+    "agentworks.sessions.console",
+)
+
+
+@pytest.fixture(autouse=True, scope="session")
+def _gate_stub_leak_sentinel() -> Generator[None, None, None]:
+    """Fail the run loudly if a gate stub ever leaks past teardown.
+
+    ``stub_vm_gates`` once poisoned later tests when a gate module was
+    first-imported MID-PATCH-LOOP: its module-level ``from vms.manager
+    import bind_platform`` captured the already-patched stub, which
+    monkeypatch then saved as the "original" and re-installed forever
+    at teardown. The pre-import in ``stub_vm_gates`` fixes that class;
+    this sentinel makes any regression of it a loud session-end failure
+    instead of a seed-dependent mystery in unrelated tests.
+    """
+    yield
+    import importlib
+
+    from agentworks.vms import manager as vms_manager
+
+    for mod_name in _GATE_MODULES:
+        mod = importlib.import_module(mod_name)
+        captured = getattr(mod, "bind_platform", vms_manager.bind_platform)
+        assert captured is vms_manager.bind_platform, (
+            f"{mod_name}.bind_platform is a leaked test stub ({captured!r}); "
+            "a gate-stubbing helper failed to restore the real function"
+        )
+
+
+def publish_all_platforms(registry: object) -> None:
+    """Publish every installed platform's capability row, bypassing the
+    host-support gate. For registry-shape tests that need the full
+    four-platform graph regardless of the test host's OS."""
+    from agentworks.capabilities.vm_platform import (
+        VM_PLATFORM_REGISTRY,
+        VMPlatformEntry,
+    )
+    from agentworks.resources import Origin
+
+    origin = Origin.built_in(source="tests.conftest")
+    for name, cls in VM_PLATFORM_REGISTRY.items():
+        registry.add(  # type: ignore[attr-defined]
+            "vm-platform",
+            name,
+            VMPlatformEntry(name=name, description=cls.description),
+            origin,
+        )
+
+
+def stub_platform_support(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Make every platform (and every site bound to one) report
+    supported and enabled, regardless of the test host's OS and
+    tooling.
+
+    Platform capability rows are host-gated for real (wsl2 publishes
+    nothing off Windows) and sites self-disable for real (lima-local
+    needs a local limactl), so tests that want the full four-platform
+    graph enabled must opt out of the host's actual state. Tests OF
+    the disabled model itself patch the individual methods instead.
+    """
+    from agentworks.capabilities.vm_platform import VM_PLATFORM_REGISTRY
+
+    for cls in VM_PLATFORM_REGISTRY.values():
+        monkeypatch.setattr(cls, "unsupported_reason", classmethod(lambda c: None))
+        monkeypatch.setattr(cls, "disabled_reason", lambda self: None)
+
+
+def stub_vm_gates(monkeypatch: pytest.MonkeyPatch) -> _StubPlatform:
+    """Stub ``bind_platform`` / ``ensure_active`` / ``keep_active`` (and
+    the multi-VM variants) in every gate-consuming module.
+
+    Tests that exercise transport / rollback / env plumbing don't want
+    the gates building registries, resolving site secrets, or probing
+    Tailscale. Returns the stub platform for assertions.
+    """
+    import importlib
+
+    # Pre-import every gate module BEFORE patching: a string-form
+    # setattr that first-imports a module mid-loop would let its
+    # module-level ``from vms.manager import bind_platform`` capture an
+    # ALREADY-PATCHED stub, which monkeypatch then saves as the
+    # "original": teardown would install the stub permanently and
+    # poison every later test in the session (import-order dependent,
+    # invisible in full-suite runs).
+    for mod in _GATE_MODULES:
+        importlib.import_module(mod)
+
+    platform = _StubPlatform()
+
+    @contextlib.contextmanager
+    def _null_hold(*args: object, **kwargs: object) -> Iterator[None]:
+        yield
+
+    def _fake_bind(
+        config: object,
+        vm: object,
+        *,
+        registry: object = None,
+        resolver: Resolver | None = None,
+        prepare: bool = True,
+        targets: Sequence[object] = (),
+    ) -> _StubPlatform:
+        # Mirror the real boundary just enough for the roots: record
+        # the env targets for assertions and run the resolver's public
+        # boundary verb (the stub registered no declarations, so the
+        # empty-set short-circuit never touches real backends) so
+        # ``resolver.values`` serves the compose_env plumbing.
+        platform.bound_targets = list(targets)  # type: ignore[attr-defined]
+        if resolver is not None and prepare and not resolver.resolved:
+            resolver.resolve()
+        return platform
+
+    for mod in _GATE_MODULES:
+        monkeypatch.setattr(f"{mod}.bind_platform", _fake_bind, raising=False)
+        monkeypatch.setattr(
+            f"{mod}.ensure_active", lambda *a, **k: None, raising=False
+        )
+        monkeypatch.setattr(f"{mod}.keep_active", _null_hold, raising=False)
+        monkeypatch.setattr(
+            f"{mod}.bind_platforms",
+            lambda config, vms, *, registry=None: [(vm, platform) for vm in vms],
+            raising=False,
+        )
+        monkeypatch.setattr(f"{mod}.keep_actives", _null_hold, raising=False)
+    return platform
+
+
 @pytest.fixture
 def fake_target(monkeypatch: pytest.MonkeyPatch) -> _FakeTarget:
-    """Install a FakeTarget for the transport layer and stub VM-running checks."""
+    """Install a FakeTarget for the transport layer and stub the VM gates."""
     target = _FakeTarget()
     # ``agentworks.transports.transport`` is the canonical admin-transport
     # factory; ``agentworks.sessions.manager.transport`` covers manager's
@@ -176,10 +342,7 @@ def fake_target(monkeypatch: pytest.MonkeyPatch) -> _FakeTarget:
     monkeypatch.setattr(
         "agentworks.agents.manager.transport", fake_factory
     )
-    monkeypatch.setattr(
-        "agentworks.workspaces.manager._ensure_vm_running",
-        lambda *args, **kwargs: None,
-    )
+    stub_vm_gates(monkeypatch)
     # The interactive code path now lives on the transport itself; the
     # fake target exposes it as a no-op so attach flows return cleanly.
     target.interactive = lambda command, **kwargs: 0  # type: ignore[attr-defined]
@@ -289,6 +452,16 @@ class _StubRegistry:
                 raise KeyError(name)
             console = getattr(self._config, "named_console", None)
             return console if console is not None else NamedConsoleConfig()
+        if kind == "vm-site":
+            # Serve the built-in same-named sites so bind_platform /
+            # lookup_site work against namespace configs (a stubbed
+            # test VM's site is one of the four platform names).
+            from agentworks.capabilities.vm_platform import VM_PLATFORM_REGISTRY
+            from agentworks.vms.sites import VMSiteDecl
+
+            if name not in VM_PLATFORM_REGISTRY:
+                raise KeyError(name)
+            return VMSiteDecl(name=name, platform=name)
         if kind not in self._KIND_ATTRS:
             raise KeyError(kind)
         return self._kind_dict(kind)[name]

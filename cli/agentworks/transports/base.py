@@ -5,7 +5,7 @@ delivery mechanism (SSH, ``limactl shell``, ``wsl.exe``, etc.). Callers
 obtain a ``Transport`` via the factory functions in this package's
 ``__init__.py``: ``transport(vm, config)`` for the canonical admin
 path, ``agent_transport(vm, config, agent)`` for the canonical agent
-path, ``provisioner_transport(vm, config, *, stack)`` for the
+path, ``native_transport(vm, platform, config, *, stack)`` for the
 platform-native opt-in.
 
 The ABC surface covers both command exec and file movement because

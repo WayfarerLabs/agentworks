@@ -2,7 +2,11 @@
 
 from __future__ import annotations
 
-from agentworks.vms.cloud_init import INIT_SYSTEM_PACKAGES, PROVISIONING_PACKAGES, generate_cloud_init
+from agentworks.capabilities.vm_platform.cloud_init import (
+    INIT_SYSTEM_PACKAGES,
+    PROVISIONING_PACKAGES,
+    generate_cloud_init,
+)
 
 
 def test_generate_cloud_init_wraps_script() -> None:

@@ -52,6 +52,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 from agentworks.env.merge import effective_env
+from agentworks.errors import StateError
 
 if TYPE_CHECKING:
     from collections.abc import Iterable, Sequence
@@ -114,6 +115,10 @@ def compute_needed_secrets(
     looked up against the registry's ``secret`` rows -- which, after
     finalize, cover operator-declared AND auto-declared secrets, so
     every name a published template's env references has a decl here.
+    A miss therefore means a reference that failed to auto-declare (a
+    publisher/finalize bug, or a hand-built registry that skipped it)
+    and raises loudly: silently dropping the name would surface later
+    as a mysterious "secret didn't resolve" far from the cause.
     """
     from agentworks.resources.access import secret_decls
 
@@ -128,11 +133,24 @@ def compute_needed_secrets(
             agent=target.agent,
             session=target.session,
         )
-        for entry in merged.values():
+        for key, entry in merged.items():
             name = entry.secret
-            if name is not None and name in decls and name not in seen:
-                seen.add(name)
-                out.append(decls[name])
+            if name is None or name in seen:
+                continue
+            decl = decls.get(name)
+            if decl is None:
+                # StateError, not ConfigError: the message is right that
+                # this is never an operator's config mistake (referenced
+                # secrets auto-declare at finalize), so it must not wear
+                # the operator-config error kind.
+                raise StateError(
+                    f"env var {key!r} ({target.label}) references secret "
+                    f"{name!r}, which has no declaration in the registry. "
+                    f"Referenced secrets auto-declare at finalize, so this "
+                    f"is a registry-construction bug, not an operator error.",
+                )
+            seen.add(name)
+            out.append(decl)
     for decl in extra_decls:
         if decl.name not in seen:
             seen.add(decl.name)

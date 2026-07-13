@@ -12,12 +12,13 @@ straightforward to have it all.
 
 ## Architecture at a glance
 
-The operator runs the `agw` CLI on their workstation. Platform-specific **provisioners** create and
-manage VMs on Lima, WSL2, Azure, and Proxmox. Regardless of the platform, every VM runs the same
-base operating system (Debian Bookworm), is joined to the same Tailscale tailnet, and is accessible
-over SSH at its Tailscale IP address using the operator's keys.
+The operator runs the `agw` CLI on their workstation. VMs are created at declared **vm-sites**:
+configured places to create VMs, each backed by a **platform** (Lima, WSL2, Azure, or Proxmox).
+Regardless of the platform, every VM runs the same base operating system (Debian Bookworm), is
+joined to the same Tailscale tailnet, and is accessible over SSH at its Tailscale IP address using
+the operator's keys.
 
-![Agentworks topology: the operator's workstation runs the agw CLI, which provisions VMs across local platforms (Lima or WSL2), a remote Lima host, Azure, and Proxmox. Every VM and the workstation itself join a shared Tailnet overlay, which is how the CLI reaches them all.](docs/images/agw-topology.png)
+![Agentworks topology: the operator's workstation runs the agw CLI, which creates VMs at declared sites across local platforms (Lima or WSL2), a remote Lima host, Azure, and Proxmox. Every VM and the workstation itself join a shared Tailnet overlay, which is how the CLI reaches them all.](docs/images/agw-topology.png)
 
 Beyond the VMs themselves, Agentworks provides several layered primitives for organizing agentic
 workloads:

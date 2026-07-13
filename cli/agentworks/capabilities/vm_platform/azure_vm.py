@@ -1,28 +1,29 @@
-"""Azure VM provisioner -- creates and manages VMs via the Azure SDK."""
+"""The Azure VM platform: creates and manages VMs via the Azure SDK."""
 
 from __future__ import annotations
 
 import base64
 import contextlib
-from typing import TYPE_CHECKING, Protocol
+from typing import TYPE_CHECKING, Any, ClassVar, Protocol
 
 from agentworks import output
+from agentworks.capabilities.vm_platform.base import ProvisionRequest, ProvisionResult, VMPlatform
+from agentworks.capabilities.vm_platform.bootstrap_script import generate_bootstrap_script
+from agentworks.capabilities.vm_platform.cloud_init import PROVISIONING_PACKAGES, generate_cloud_init
 from agentworks.db import VMStatus
-from agentworks.errors import ProvisionerError
+from agentworks.errors import ConfigError, ProvisioningError, StateError
 from agentworks.ssh import SSHError
 from agentworks.transports import SSHTransport
-from agentworks.vms.base import ProvisionResult, VMProvisioner
-from agentworks.vms.bootstrap_script import generate_bootstrap_script, vm_hostname
-from agentworks.vms.cloud_init import PROVISIONING_PACKAGES, generate_cloud_init
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator
+    from collections.abc import Iterator, Mapping
 
     from azure.mgmt.compute import ComputeManagementClient
     from azure.mgmt.network import NetworkManagementClient
 
     from agentworks.config import Config
     from agentworks.db import VMRow
+    from agentworks.resources.reference import ConfigReference
     from agentworks.transports import Transport
 
 
@@ -33,7 +34,7 @@ class _HasSubscriptionId(Protocol):
     def subscription_id(self) -> str: ...
 
 
-class AzureError(ProvisionerError):
+class AzureError(ProvisioningError):
     """An Azure API operation failed.
 
     Attributes:
@@ -116,29 +117,98 @@ def _network_client(az: _HasSubscriptionId) -> NetworkManagementClient:
     return NetworkManagementClient(_get_credential(), az.subscription_id)  # type: ignore[arg-type]
 
 
-class AzureProvisioner(VMProvisioner):
-    """Provisions Azure VMs via the Azure Python SDK."""
+_AZURE_REQUIRED_KEYS = ("subscription_id", "resource_group", "region")
 
-    def create(
-        self,
-        vm_name: str,
-        config: Config,
-        *,
-        azure_vm_size: str = "Standard_B2s",
-        disk: int = 50,
-        swap: int = 4,
-        admin_username: str = "agentworks",
-        tailscale_auth_key: str | None = None,
-    ) -> ProvisionResult:
-        assert config.azure is not None, "Azure config is required"
-        az = config.azure
+
+class AzureVMPlatform(VMPlatform):
+    """Runs VMs on the Azure Virtual Machines service via the Azure
+    Python SDK. Named ``azure-vm``, not ``azure``: the capability is
+    one specific Azure service, and other Azure services could plausibly
+    back platforms of their own someday."""
+
+    name: ClassVar[str] = "azure-vm"
+    description: ClassVar[str] = "Azure Virtual Machines (subscription + resource group)"
+
+    # No preflight override: azure has no config secrets (the base's
+    # prediction pass is a no-op) and no unauthenticated readiness
+    # check worth making. A credential probe is deliberately NOT one:
+    # verifying credentials before the resolve/credential stage forks
+    # behavior on where they happen to come from (a non-interactive
+    # chain passes, the browser-login fallback can't be probed without
+    # BEING the interaction). Credential and reachability failures
+    # surface at the op with typed errors (``_wrap_azure_error``),
+    # which is the contract: preflight is capped at what it can check
+    # without resolved credentials.
+
+    @classmethod
+    def validate_config(
+        cls, owner: str, config: Mapping[str, object]
+    ) -> tuple[ConfigReference, ...]:
+        for key in _AZURE_REQUIRED_KEYS:
+            value = config.get(key)
+            if not isinstance(value, str) or not value:
+                raise ConfigError(
+                    f"{owner}.{key} is required for the azure-vm platform and "
+                    f"must be a non-empty string"
+                )
+        unknown = sorted(set(config) - set(_AZURE_REQUIRED_KEYS))
+        if unknown:
+            raise ConfigError(
+                f"{owner}: unknown azure-vm platform field(s): {', '.join(unknown)}"
+            )
+        return ()
+
+    @classmethod
+    def legacy_platform_metadata(
+        cls, row: Mapping[str, Any], legacy: Mapping[str, Any]
+    ) -> dict[str, str]:
+        if row["azure_resource_id"]:
+            return {"resource_id": str(row["azure_resource_id"])}
+        return {}
+
+    def create(self, request: ProvisionRequest) -> ProvisionResult:
+        from types import SimpleNamespace
+
+        # The site's platform_config, shaped like the old AzureConfig so
+        # the SDK-call body below stays byte-identical.
+        az = SimpleNamespace(
+            subscription_id=str(self.platform_config["subscription_id"]),
+            resource_group=str(self.platform_config["resource_group"]),
+            region=str(self.platform_config["region"]),
+        )
+
+        azure_vm_size = request.azure_vm_size or "Standard_B2s"
+        disk = request.disk_gib if request.disk_gib is not None else 50
+        swap = request.swap_gib if request.swap_gib is not None else 0
+        admin_username = request.admin_username
+        tailscale_auth_key = request.tailscale_auth_key
+        ssh_pub_key = request.ssh_public_key
+
+        # Platform-owned naming with the slug as the
+        # namespacing token; azure resource names are the primary
+        # identifier, so a collision is an error.
+        vm_name = (
+            f"{request.system_slug}-{request.vm_name}"
+            if request.system_slug
+            else request.vm_name
+        )
 
         output.info("Connecting to Azure...")
+        compute = _compute_client(az)
+        network = _network_client(az)
+
+        if self._vm_exists(compute, az.resource_group, vm_name):
+            raise StateError(
+                f"an Azure VM named '{vm_name}' already exists in resource "
+                f"group '{az.resource_group}'",
+                entity_kind="vm",
+                entity_name=request.vm_name,
+                hint="delete it first or pick a different VM name",
+            )
+
         output.info(f"Provisioning Azure VM '{vm_name}' in {az.region} (size: {azure_vm_size})...")
         if swap > 0:
             output.detail(f"Swap: {swap} GiB")
-
-        ssh_pub_key = config.operator.ssh_public_key.read_text().strip()
 
         # Generate the same bootstrap script used by Lima, wrapped in
         # cloud-init write_files + runcmd for delivery via Azure custom_data.
@@ -148,17 +218,14 @@ class AzureProvisioner(VMProvisioner):
                 ssh_public_key=ssh_pub_key,
                 provisioning_packages=PROVISIONING_PACKAGES,
                 tailscale_auth_key=tailscale_auth_key,
-                hostname=vm_hostname("azure", vm_name),
+                hostname=request.hostname,
                 swap=swap,
             )
             cloud_init = generate_cloud_init(bootstrap)
         else:
-            # No Tailscale key -- minimal cloud-init, bootstrap deferred to Phase A
+            # No Tailscale key: minimal cloud-init, bootstrap deferred to Phase A
             cloud_init = "#cloud-config\npackage_update: true\npackages:\n  - openssh-server\n"
         cloud_init_b64 = base64.b64encode(cloud_init.encode()).decode()
-
-        compute = _compute_client(az)
-        network = _network_client(az)
 
         try:
             # Create public IP
@@ -204,7 +271,7 @@ class AzureProvisioner(VMProvisioner):
             # Create NIC
             output.detail("Creating network interface...")
 
-            # Need a subnet -- use default VNet or create one
+            # Need a subnet: use default VNet or create one
             vnet_name = f"{vm_name}-vnet"
             subnet_name = "default"
             vnet_poller = network.virtual_networks.begin_create_or_update(  # type: ignore[call-overload]
@@ -301,7 +368,7 @@ class AzureProvisioner(VMProvisioner):
         prov_transport = SSHTransport(
             host=public_ip,
             user=admin_username,
-            identity_file=config.operator.ssh_private_key,
+            identity_file=request.ssh_private_key,
             force_tty=sys.platform == "win32",
         )
 
@@ -314,12 +381,24 @@ class AzureProvisioner(VMProvisioner):
             if tailscale_ip:
                 bootstrap_complete = True
 
+        metadata = {"resource_id": resource_id} if resource_id else {}
         return ProvisionResult(
-            provisioner_transport=prov_transport,
-            azure_resource_id=resource_id or None,
+            native_transport=prov_transport,
+            platform_metadata=metadata,
             bootstrap_complete=bootstrap_complete,
             tailscale_ip=tailscale_ip,
         )
+
+    @staticmethod
+    def _vm_exists(
+        compute: ComputeManagementClient, resource_group: str, vm_name: str
+    ) -> bool:
+        """Pre-flight: does a VM with this name exist in the group?"""
+        try:
+            compute.virtual_machines.get(resource_group, vm_name)
+        except Exception:
+            return False
+        return True
 
     def _wait_for_bootstrap(self, target: Transport, vm_name: str) -> str | None:
         """Wait for cloud-init to finish and return the Tailscale IP.
@@ -358,9 +437,10 @@ class AzureProvisioner(VMProvisioner):
             return None
 
     def start(self, vm: VMRow) -> None:
+        # Idempotent by construction (the ABC flags start): the Azure
+        # begin_start operation no-ops on an already-running VM.
         output.info(f"Starting Azure VM '{vm.name}'...")
-        assert vm.azure_resource_id is not None
-        rg, name, az_cfg = _parse_resource_id(vm.azure_resource_id)
+        rg, name, az_cfg = _parse_resource_id(_resource_id(vm))
         try:
             compute = _compute_client(az_cfg)
             compute.virtual_machines.begin_start(rg, name).result()
@@ -369,9 +449,10 @@ class AzureProvisioner(VMProvisioner):
         output.info(f"Azure VM '{vm.name}' started")
 
     def stop(self, vm: VMRow) -> None:
+        # Idempotent by construction (the ABC flags stop): the Azure
+        # begin_deallocate operation no-ops on a deallocated VM.
         output.info(f"Deallocating Azure VM '{vm.name}'...")
-        assert vm.azure_resource_id is not None
-        rg, name, az_cfg = _parse_resource_id(vm.azure_resource_id)
+        rg, name, az_cfg = _parse_resource_id(_resource_id(vm))
         try:
             compute = _compute_client(az_cfg)
             compute.virtual_machines.begin_deallocate(rg, name).result()
@@ -381,11 +462,11 @@ class AzureProvisioner(VMProvisioner):
 
     def delete(self, vm: VMRow) -> None:
         output.info(f"Deleting Azure VM '{vm.name}'...")
-        if vm.azure_resource_id is None:
+        if not vm.platform_metadata.get("resource_id"):
             output.warn("no Azure resource ID, skipping Azure cleanup")
             return
 
-        rg, name, az_cfg = _parse_resource_id(vm.azure_resource_id)
+        rg, name, az_cfg = _parse_resource_id(_resource_id(vm))
         compute = _compute_client(az_cfg)
         network = _network_client(az_cfg)
 
@@ -399,8 +480,7 @@ class AzureProvisioner(VMProvisioner):
 
     def attach_public_ip(self, vm: VMRow) -> str:
         """Attach a temporary public IP to the VM's NIC. Returns the IP address."""
-        assert vm.azure_resource_id is not None
-        rg, name, az_cfg = _parse_resource_id(vm.azure_resource_id)
+        rg, name, az_cfg = _parse_resource_id(_resource_id(vm))
         network = _network_client(az_cfg)
 
         try:
@@ -436,8 +516,7 @@ class AzureProvisioner(VMProvisioner):
 
     def detach_public_ip(self, vm: VMRow) -> None:
         """Detach and delete the public IP from the VM's NIC."""
-        assert vm.azure_resource_id is not None
-        rg, name, az_cfg = _parse_resource_id(vm.azure_resource_id)
+        rg, name, az_cfg = _parse_resource_id(_resource_id(vm))
         network = _network_client(az_cfg)
 
         output.detail("Removing public IP...")
@@ -456,11 +535,17 @@ class AzureProvisioner(VMProvisioner):
         with contextlib.suppress(Exception):
             network.public_ip_addresses.begin_delete(rg, f"{name}-ip").result()
 
-    def provisioner_transport(
-        self, vm: VMRow, *, config: object | None = None,
-    ) -> Transport:
-        assert vm.azure_resource_id is not None
-        rg, name, az_cfg = _parse_resource_id(vm.azure_resource_id)
+    def display_backend_name(self, vm: VMRow) -> str:
+        resource_id = vm.platform_metadata.get("resource_id")
+        if not resource_id:
+            return vm.name
+        _rg, name, _cfg = _parse_resource_id(resource_id)
+        return name
+
+    def native_transport(
+        self, vm: VMRow, *, config: Config | None = None,
+    ) -> Transport | None:
+        rg, name, az_cfg = _parse_resource_id(_resource_id(vm))
         try:
             compute = _compute_client(az_cfg)
             vm_info = compute.virtual_machines.get(
@@ -473,10 +558,10 @@ class AzureProvisioner(VMProvisioner):
 
         # Walk NICs to find the public IP (may not exist if detached). An
         # empty string here propagates to ``SSHTransport(host="")`` which
-        # the transports.provisioner_transport factory catches with a
-        # typed StateError; on the canonical path this method is reached
-        # only inside the transient_route context manager which guarantees
-        # a public IP is attached, so the empty case is a defensive guard.
+        # the transports.native_transport factory catches with a typed
+        # StateError; on the canonical path this method is reached only
+        # inside the transient_route context manager which guarantees a
+        # public IP is attached, so the empty case is a defensive guard.
         public_ip = _get_vm_public_ip(vm_info, az_cfg)
         import sys
 
@@ -507,14 +592,12 @@ class AzureProvisioner(VMProvisioner):
     def transient_route(self, vm: VMRow) -> Iterator[None]:
         """Attach a transient public IP for the duration of the context.
 
-        The provisioner transport for Azure reaches the VM via a
-        temporary public IP. Attach on enter, detach on exit (regardless
-        of how the caller unwinds). The
-        :func:`agentworks.transports.provisioner_transport` factory
-        wraps this around the per-platform
-        :meth:`provisioner_transport` call so the lifecycle replaces
-        what used to be an ``isinstance(prov, AzureProvisioner)`` branch
-        in the caller.
+        The native transport for Azure reaches the VM via a temporary
+        public IP. Attach on enter, detach on exit (regardless of how
+        the caller unwinds). The
+        :func:`agentworks.transports.native_transport` factory wraps
+        this around the per-platform :meth:`native_transport` call so
+        the lifecycle stays polymorphic.
         """
         self.attach_public_ip(vm)
         try:
@@ -523,9 +606,9 @@ class AzureProvisioner(VMProvisioner):
             self.detach_public_ip(vm)
 
     def status(self, vm: VMRow) -> VMStatus:
-        if vm.azure_resource_id is None:
+        if not vm.platform_metadata.get("resource_id"):
             return VMStatus.UNKNOWN
-        rg, name, az_cfg = _parse_resource_id(vm.azure_resource_id)
+        rg, name, az_cfg = _parse_resource_id(_resource_id(vm))
         try:
             compute = _compute_client(az_cfg)
             instance = compute.virtual_machines.instance_view(rg, name)
@@ -603,10 +686,22 @@ def _cleanup_vm_resources(
                 compute.disks.begin_delete(rg, disk_name).result()
 
 
+def _resource_id(vm: VMRow) -> str:
+    """The VM's Azure resource ID from platform metadata, or a typed error."""
+    resource_id = vm.platform_metadata.get("resource_id")
+    if not resource_id:
+        raise StateError(
+            f"VM '{vm.name}' has no azure resource_id in its platform "
+            f"metadata; the DB row is incomplete",
+            entity_kind="vm",
+            entity_name=vm.name,
+        )
+    return str(resource_id)
+
+
 def _get_vm_location(vm: VMRow) -> str:
     """Get the Azure region for a VM by querying the compute API."""
-    assert vm.azure_resource_id is not None
-    rg, name, az_cfg = _parse_resource_id(vm.azure_resource_id)
+    rg, name, az_cfg = _parse_resource_id(_resource_id(vm))
     compute = _compute_client(az_cfg)
     vm_info = compute.virtual_machines.get(rg, name)
     return vm_info.location or "eastus"

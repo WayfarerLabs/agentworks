@@ -20,13 +20,13 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock
 
+from agentworks.capabilities.vm_platform.skel import BASHRC, SKEL_HEADER, ZSHRC
 from agentworks.vms.initializer import (
     AGENTWORKS_RC,
     SKEL_BASHRC_PATH,
     SKEL_ZSHRC_PATH,
     _write_skel_seeds,
 )
-from agentworks.vms.skel import BASHRC, SKEL_HEADER, ZSHRC
 
 # ---------------------------------------------------------------------------
 # Seed content shape

@@ -98,17 +98,33 @@ def run_checks(*, completion_version: str | None = None) -> HealthReport:
     """
     report = HealthReport()
 
+    # Group order is a presentation choice, decoupled from which checks
+    # need config: the config/registry pair loads up front and each
+    # dependent group renders wherever it reads best. Identity first,
+    # then the environment, then the VM stack, then everything the
+    # config graph drives.
+    config_group, config, registry = _check_config()
+
+    report.groups.append(_check_system())
     report.groups.append(_check_python())
     report.groups.append(_check_required_tools())
-    report.groups.append(_check_vm_platforms())
     report.groups.append(_check_tailscale())
-
-    config_group, config, registry = _check_config()
+    report.groups.append(_check_vm_platforms())
+    if config is not None and registry is not None:
+        report.groups.append(_check_vm_sites(config, registry))
+    else:
+        # The group renders before Configuration explains the failure;
+        # an empty slot would read as "no sites", which isn't known.
+        sites = HealthGroup("VM sites")
+        sites.info(
+            "Declared sites",
+            "skipped (config or manifests unavailable; see the "
+            "Configuration group)",
+        )
+        report.groups.append(sites)
     report.groups.append(config_group)
-
     if config is not None and registry is not None:
         report.groups.append(_check_secrets(config, registry))
-
     report.groups.append(_check_database())
 
     if completion_version is not None:
@@ -120,6 +136,45 @@ def run_checks(*, completion_version: str | None = None) -> HealthReport:
 # ---------------------------------------------------------------------------
 # Individual check groups
 # ---------------------------------------------------------------------------
+
+
+def _check_system() -> HealthGroup:
+    """Install-level identity: the system slug. Not a VM-site concern
+    (it namespaces hostnames, backend-side names, and the managed SSH
+    config file install-wide), so it leads the report under its own
+    header rather than hiding in the VM groups.
+    """
+    from agentworks.db import SYSTEM_SLUG_KEY, Database
+
+    g = HealthGroup("System")
+    try:
+        db_exists, current, latest = Database.check_schema()
+        if not db_exists:
+            # No database means nothing has ever set the slug.
+            g.info("System slug", "unset (will ask at first vm create)")
+            return g
+        if current != latest:
+            # Opening the DB would auto-migrate mid-report; defer to the
+            # Database group's deliberate migration row.
+            g.info(
+                "System slug",
+                "pending database migration (see the Database group)",
+            )
+            return g
+        db = Database()
+        try:
+            slug = db.get_setting(SYSTEM_SLUG_KEY)
+        finally:
+            db.close()
+        if slug:
+            g.ok("System slug", slug)
+        elif slug == "":
+            g.info("System slug", "declined (asked at first vm create)")
+        else:
+            g.info("System slug", "unset (will ask at first vm create)")
+    except Exception as e:
+        g.warn("System slug", f"could not check the database: {e}")
+    return g
 
 
 def _check_python() -> HealthGroup:
@@ -143,36 +198,122 @@ def _check_required_tools() -> HealthGroup:
 
 
 def _check_vm_platforms() -> HealthGroup:
+    """Installed platforms and their host support, from the platform's
+    own check (the same gate that decides capability-row publication):
+    a supported platform is ``ok``; installed-but-disabled shows the
+    platform's stated reason. Per-site availability (a local-Lima site
+    without ``limactl``) is the SITE's state and reports in the VM
+    sites group.
+    """
+    from agentworks.capabilities.vm_platform import VM_PLATFORM_REGISTRY
+
     g = HealthGroup("VM platforms")
+    for name, cls in VM_PLATFORM_REGISTRY.items():
+        reason = cls.unsupported_reason()
+        if reason is not None:
+            g.info(name, f"disabled ({reason})")
+        else:
+            g.ok(name)
+    return g
 
-    # VM hosts (remote Lima)
+
+def _check_vm_sites(config: Config, registry: Registry) -> HealthGroup:
+    """VM sites: every registered site's state, and every VM's site
+    resolving to a usable declaration.
+
+    A DISABLED site (its own generic ``disabled_reason``: platform
+    missing/host-disabled, or a missing local requirement) is
+    informational (normal for the host, the site still exists) and
+    skips preflight (pointless without its requirements). References
+    to a disabled site are the operator's problem-in-waiting and warn:
+    ``defaults.site`` and each VM row pointing at one. A VM whose site
+    is not declared at all still FAILS with the paste-ready manifest
+    snippet (the stranded remote-Lima case).
+
+    An enabled site's row IS the capability's ``preflight``: read-only
+    by contract, which is exactly what lets doctor call it.
+    Same check every service-layer operation runs before doing
+    anything real, so a failing row here is the error the next command
+    would hit.
+    """
+    from agentworks.db import Database
+    from agentworks.secrets.resolver import Resolver
+    from agentworks.vms.sites import (
+        VMSiteDecl,
+        resolve_site,
+        site_disabled_reason,
+        site_manifest_hint,
+    )
+
+    g = HealthGroup("VM sites")
+
+    sites: dict[str, VMSiteDecl] = {}
+    for name, decl in registry.iter_kind_items("vm-site"):
+        assert isinstance(decl, VMSiteDecl)
+        sites[name] = decl
+    disabled: dict[str, str] = {}
+    for name in sorted(sites):
+        decl = sites[name]
+        reason = site_disabled_reason(decl)
+        if reason is not None:
+            disabled[name] = reason
+            g.info(name, f"disabled ({reason})")
+            continue
+        try:
+            platform = resolve_site(name, registry, resolver=Resolver(config, registry))
+            platform.preflight()
+        except Exception as e:
+            # A failing preflight on an enabled site is the error the
+            # operator's next command hits: warn.
+            g.warn(
+                name,
+                f"platform {decl.platform}; preflight: {e}",
+                hint=getattr(e, "hint", None),
+            )
+            continue
+        g.ok(name, f"platform {decl.platform}")
+
+    default_site = config.defaults.site
+    if default_site is not None and default_site in disabled:
+        g.warn(
+            "defaults.site",
+            f"names '{default_site}', which is disabled: "
+            f"{disabled[default_site]}",
+        )
+
     try:
-        from agentworks.db import Database
-
-        db_exists, _, _ = Database.check_schema()
-        if db_exists:
-            _db = Database()
-            hosts = _db.list_vm_hosts()
-            if hosts:
-                for h in hosts:
-                    os_info = f", {h.os}" if h.os else ""
-                    g.ok(f"VM host: {h.name}", f"{h.ssh_host}{os_info}")
-            else:
-                g.info("VM hosts", "none configured")
-        else:
-            g.info("VM hosts", "database not yet created")
-    except Exception:
-        g.warn("VM hosts", "could not check")
-
-    # Local platform tools
-    for tool, label in [
-        ("limactl", "Local Lima (limactl)"),
-        ("wsl", "WSL2 (wsl)"),
-    ]:
-        if shutil.which(tool):
-            g.ok(label)
-        else:
-            g.info(label, "not available")
+        db_exists, current, latest = Database.check_schema()
+        if not db_exists:
+            # No VMs recorded yet; nothing to cross-check.
+            return g
+        if current != latest:
+            # Opening the DB would auto-migrate mid-report (interleaving
+            # the migration's own output into this group and stealing
+            # the Database group's deliberate migration row); defer.
+            g.info(
+                "VM sites",
+                "pending database migration (see the Database group); "
+                "re-run doctor after migrating for the full report",
+            )
+            return g
+        db = Database()
+        try:
+            for vm in db.list_vms():
+                if vm.site in disabled:
+                    g.warn(
+                        f"VM '{vm.name}'",
+                        f"site '{vm.site}' is disabled: {disabled[vm.site]}",
+                    )
+                elif vm.site not in sites:
+                    g.fail(
+                        f"VM '{vm.name}'",
+                        f"site '{vm.site}' is not declared",
+                        hint=site_manifest_hint(vm.site),
+                    )
+        finally:
+            db.close()
+    except Exception as e:
+        g.warn("VM sites", f"could not check the database: {e}")
     return g
 
 

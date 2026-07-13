@@ -104,7 +104,7 @@ def show_env(
     )
 
     # Build the resource context for identity vars.
-    resource_ctx = _build_resource_context(ctx)
+    resource_ctx = _build_resource_context(ctx, registry)
     identity_env = per_context_identity_env(resource_ctx)
 
     # Compute the merged user env (without identity overlay yet) so we can
@@ -304,8 +304,10 @@ def _resolve_scope_envs(
     return vm_env, workspace_env, admin_env, agent_env, session_env
 
 
-def _build_resource_context(ctx: _ResolvedContext) -> ResourceContext:
+def _build_resource_context(ctx: _ResolvedContext, registry: Registry) -> ResourceContext:
     """Build the ResourceContext that ``per_context_identity_env`` consumes."""
+    from agentworks.vms.sites import site_platform_name
+
     session_kind: Literal["admin", "agent"] | None = None
     if ctx.session is not None:
         from agentworks.db import SessionMode
@@ -318,9 +320,9 @@ def _build_resource_context(ctx: _ResolvedContext) -> ResourceContext:
 
     return ResourceContext(
         vm_name=ctx.vm.name,
-        platform=ctx.vm.platform,
+        platform=site_platform_name(ctx.vm.site, registry),
+        site=ctx.vm.site,
         user=user,
-        vm_host=ctx.vm.vm_host_name,
         workspace_name=ctx.workspace.name if ctx.workspace else None,
         workspace_dir=ctx.workspace.workspace_path if ctx.workspace else None,
         agent_name=ctx.agent.name if ctx.agent else None,

@@ -1,7 +1,7 @@
 """WSL2 transport implementation.
 
 Reaches a WSL2 distro via ``wsl.exe --distribution <distro> --user
-<user>``. Used as the provisioner transport for the WSL2 platform.
+<user>``. Used as the native transport for the WSL2 platform.
 """
 
 from __future__ import annotations

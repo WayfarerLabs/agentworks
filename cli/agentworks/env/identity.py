@@ -21,10 +21,11 @@ SessionKind = Literal["admin", "agent"]
 class ResourceContext:
     """The resource chain that scopes a shell.
 
-    ``vm_name`` / ``platform`` / ``user`` are always present for an on-VM
-    shell. ``vm_host`` is the name from the ``vm_hosts`` registry (e.g.
-    ``"lima-local"``); only Lima VMs are tied to a registry entry, so the
-    field is ``None`` for VMs without one. The remaining fields are
+    ``vm_name`` / ``platform`` / ``site`` / ``user`` are always present
+    for an on-VM shell. ``platform`` carries the capability name
+    (``lima`` / ``wsl2`` / ``azure-vm`` / ``proxmox``), resolved at the
+    caller's composition root via the site declaration; ``site`` is the
+    vm-site resource name from ``vm.site``. The remaining fields are
     present when the corresponding scope applies (workspace context,
     agent context, session context).
 
@@ -35,8 +36,8 @@ class ResourceContext:
 
     vm_name: str
     platform: str
+    site: str
     user: str
-    vm_host: str | None = None
     workspace_name: str | None = None
     workspace_dir: str | None = None
     agent_name: str | None = None
@@ -78,17 +79,17 @@ def vm_stable_identity_env(ctx: ResourceContext) -> dict[str, str]:
     profile fragment so that any shell on the VM (including raw ssh logins)
     sees them.
 
-    ``AGENTWORKS_VM_HOST`` is only emitted when the VM has a registered
-    host (Lima VMs may; Azure / WSL2 / Proxmox VMs do not, per the
-    ``vm_hosts`` registry).
+    ``AGENTWORKS_PLATFORM`` keeps its name and meaning (the capability
+    name it has always carried; the azure value reads ``azure-vm``
+    post-rename); ``AGENTWORKS_SITE`` is new; ``AGENTWORKS_VM_HOST``
+    retired with the ``vm_hosts`` registry (the site name conveys the
+    same information).
     """
-    out = {
+    return {
         "AGENTWORKS_VM": ctx.vm_name,
         "AGENTWORKS_PLATFORM": ctx.platform,
+        "AGENTWORKS_SITE": ctx.site,
     }
-    if ctx.vm_host is not None:
-        out["AGENTWORKS_VM_HOST"] = ctx.vm_host
-    return out
 
 
 def per_user_identity_env(ctx: ResourceContext) -> dict[str, str]:

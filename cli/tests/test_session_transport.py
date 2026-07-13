@@ -21,7 +21,7 @@ import pytest
 
 from agentworks.db import Database
 
-from .conftest import stub_build_registry, stub_session_resolvers
+from .conftest import stub_build_registry, stub_session_resolvers, stub_vm_gates
 
 
 @pytest.fixture(autouse=True)
@@ -57,8 +57,8 @@ class _Target:
 def _seed_db(tmp_path: Path) -> Database:
     db = Database(tmp_path / "test.db")
     db._conn.execute(
-        "INSERT INTO vms (name, platform, admin_username, tailscale_host) "
-        "VALUES ('vm1', 'lima', 'admin', '100.64.0.5')"
+        "INSERT INTO vms (name, site, hostname, admin_username, tailscale_host) "
+        "VALUES ('vm1', 'lima', 'h', 'admin', '100.64.0.5')"
     )
     db._conn.execute(
         "INSERT INTO workspaces (name, vm_name, workspace_path, linux_group) "
@@ -85,10 +85,7 @@ def _patch_common(
     monkeypatch.setattr("agentworks.transports.transport", admin_factory)
     monkeypatch.setattr("agentworks.transports.agent_transport", agent_factory)
     monkeypatch.setattr("agentworks.sessions.manager.transport", admin_factory)
-    monkeypatch.setattr(
-        "agentworks.workspaces.manager._ensure_vm_running",
-        lambda *args, **kwargs: None,
-    )
+    stub_vm_gates(monkeypatch)
     return targets
 
 
@@ -248,10 +245,8 @@ def test_create_session_aborts_on_missing_required_command(
     monkeypatch.setattr(
         "agentworks.transports.agent_transport", lambda *a, **k: _MissingCmdTarget()
     )
-    monkeypatch.setattr(
-        "agentworks.workspaces.manager._ensure_vm_running", lambda *a, **k: None
-    )
     monkeypatch.setattr(agent_mgr, "_assert_agent_ssh_works", lambda *a, **k: None)
+    stub_vm_gates(monkeypatch)
 
     add_calls: list[tuple[str, str]] = []
     monkeypatch.setattr(
@@ -388,10 +383,7 @@ def test_exec_agent_uses_direct_agent_ssh(
         lambda vm, config, agent, **kwargs: target,
     )
     monkeypatch.setattr(agent_mgr, "_assert_agent_ssh_works", lambda *a, **k: None)
-    # exec_agent imports keep_vm_active at module load (see top of
-    # agents/manager.py), so the patch must land on that binding -- not
-    # on agentworks.vms.manager.keep_vm_active, which would be a no-op.
-    monkeypatch.setattr(agent_mgr, "keep_vm_active", lambda *a, **k: _NullCM())
+    stub_vm_gates(monkeypatch)
 
     # Phase 6.5 added eager-resolve + env composition; stub both out so the
     # SimpleNamespace config below doesn't need vm_templates / agent_templates

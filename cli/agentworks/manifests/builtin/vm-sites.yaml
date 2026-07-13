@@ -1,0 +1,31 @@
+# The zero-config built-in sites: one per platform that works with no
+# settings. Bundling these (rather than letting VMs reference the
+# vm-platform capability directly) keeps vms.site one uniform reference
+# space: every VM points at a vm-site, never sometimes at a capability.
+# Their names are reserved (builtin_override = "reserved"; these rows
+# publish on every host, so the registry check always fires): customize
+# by declaring a sibling site, not by redeclaring these.
+#
+# Like every vm-site, a bundled site registers UNCONDITIONALLY and
+# self-disables where it lacks what it needs (the site's generic
+# disabled_reason: lima-local needs a local limactl; wsl2 needs Windows
+# with WSL). Disabled sites list and describe like any resource; using
+# one is a typed error, and `agw doctor` shows each site's state and
+# reason. The lima site is named lima-local, not lima: the bundled site
+# is one CONFIGURATION of the platform (this workstation), and
+# remote-Lima sites are ordinary operator declarations.
+apiVersion: agentworks/v1
+kind: vm-site
+metadata:
+  name: lima-local
+  description: Local Lima VMs on this workstation
+spec:
+  platform: lima
+---
+apiVersion: agentworks/v1
+kind: vm-site
+metadata:
+  name: wsl2
+  description: WSL2 distros on this Windows workstation
+spec:
+  platform: wsl2

@@ -51,7 +51,7 @@ def _stub_build_registry(monkeypatch: pytest.MonkeyPatch) -> None:
 def _seed_vm(db: Database, vm_name: str = "vm1", *, with_tailscale: bool = False) -> None:
     """Insert a VM and a workspace. No tailscale host -> live-sync skips."""
     db._conn.execute(
-        "INSERT INTO vms (name, platform, admin_username) VALUES (?, 'lima', 'admin')",
+        "INSERT INTO vms (name, site, hostname, admin_username) VALUES (?, 'lima', 'h', 'admin')",
         (vm_name,),
     )
     if with_tailscale:
@@ -328,7 +328,7 @@ def test_list_consoles_with_counts_workspace_and_agent_filters(db: Database) -> 
         "VALUES ('ws-2', 'vm1', '/home/me/ws-2', 'ws-ws-2')"
     )
     db._conn.execute(
-        "INSERT INTO vms (name, platform, admin_username) VALUES ('vm2', 'wsl', 'admin')"
+        "INSERT INTO vms (name, site, hostname, admin_username) VALUES ('vm2', 'wsl', 'h', 'admin')"
     )
     db._conn.execute(
         "INSERT INTO workspaces (name, vm_name, workspace_path, linux_group) "

@@ -11,7 +11,6 @@ for this file in pyproject.toml so isort does not reflow it.
 
 from __future__ import annotations
 
-from . import vm_host  # noqa: F401
 from . import vm  # noqa: F401
 from . import workspace  # noqa: F401
 from . import agent  # noqa: F401

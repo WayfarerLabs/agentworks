@@ -16,11 +16,11 @@ _agentworks_vms() {
     vms=(${(f)"$(agw vm list --names-only 2>/dev/null)"})
     _describe 'vm' vms
 }""",
-    "vm_hosts": """\
-_agentworks_vm_hosts() {
-    local -a hosts
-    hosts=(${(f)"$(agw vm-host list --names-only 2>/dev/null)"})
-    _describe 'vm-host' hosts
+    "sites": """\
+_agentworks_sites() {
+    local -a sites
+    sites=(${(f)"$(agw resource list --kind vm-site --names-only 2>/dev/null | awk -F/ '{print $2}')"})
+    _describe 'vm-site' sites
 }""",
     "workspaces": """\
 _agentworks_workspaces() {
@@ -106,7 +106,7 @@ _agentworks_migrate_selectors() {
 # Maps completer identifiers to their zsh function names.
 COMPLETER_FUNC_NAMES: dict[str, str] = {
     "vms": "_agentworks_vms",
-    "vm_hosts": "_agentworks_vm_hosts",
+    "sites": "_agentworks_sites",
     "workspaces": "_agentworks_workspaces",
     "ws_templates": "_agentworks_templates",
     "git_credentials": "_agentworks_git_credentials",

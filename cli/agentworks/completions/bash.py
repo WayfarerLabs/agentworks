@@ -10,7 +10,10 @@ if TYPE_CHECKING:
 # Shell snippets that provide dynamic completions.
 DYNAMIC_SNIPPETS: dict[str, str] = {
     "vms": ("$(agw vm list --names-only 2>/dev/null)"),
-    "vm_hosts": ("$(agw vm-host list --names-only 2>/dev/null)"),
+    "sites": (
+        "$(agw resource list --kind vm-site --names-only 2>/dev/null"
+        " | awk -F/ '{print $2}')"
+    ),
     "workspaces": ("$(agw workspace list --names-only 2>/dev/null)"),
     "ws_templates": (
         "$(agw resource list --kind workspace-template --names-only 2>/dev/null"

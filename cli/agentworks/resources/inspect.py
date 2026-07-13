@@ -61,6 +61,9 @@ class ResourceSummary:
       ``instances(db, registry, resource)`` hook. ``None`` for kinds
       with no instance concept (catalog, providers, backends); the
       list view renders ``None`` as ``-`` in the USED BY column.
+    - ``disabled_reason`` is the kind's generic disabled hook's answer
+      (``None`` = enabled, or the kind has no disabled concept). The
+      list view marks disabled rows; describe shows the reason.
     """
 
     kind: str
@@ -69,6 +72,7 @@ class ResourceSummary:
     reference_count: int
     used_by_count: int | None
     description: str
+    disabled_reason: str | None = None
 
 
 @dataclass(frozen=True)
@@ -101,6 +105,7 @@ class ResourceDescription:
     description: str
     references: tuple[ReferenceEntry, ...]
     used_by: tuple[InstanceRef, ...] | None
+    disabled_reason: str | None = None
 
 
 # -- Filter parsing ---------------------------------------------------------
@@ -190,6 +195,7 @@ def list_resources(
                     reference_count=len(references),
                     used_by_count=used_by_count,
                     description=description,
+                    disabled_reason=disabled_reason_for(registry, kind, resource),
                 )
             )
             variant = origin.variant if origin is not None else None
@@ -206,6 +212,32 @@ def list_resources(
         auto_count=auto_count,
         code_count=code_count,
     )
+
+
+def disabled_reason_for(
+    registry: Registry, kind: str, resource: object
+) -> str | None:
+    """Project the kind's generic disabled hook: why ``resource``
+    cannot run on this host, or ``None`` when it can (or the kind has
+    no disabled concept). Same structural-duck-typing gate as
+    ``used_by_for``: absent-on-class IS the "never disabled" signal.
+    """
+    from agentworks.resources import KIND_REGISTRY
+
+    handler = KIND_REGISTRY.get(kind)
+    if handler is None:
+        return None
+    method = getattr(handler, "disabled_reason", None)
+    if method is None:
+        return None
+    reason = method(registry, resource)
+    if reason is not None and not isinstance(reason, str):
+        from agentworks.errors import StateError
+
+        raise StateError(
+            f"{kind}.disabled_reason returned {type(reason).__name__}, expected str | None"
+        )
+    return reason
 
 
 def used_by_for(
@@ -302,6 +334,7 @@ def describe_resource(
         description=getattr(resource, "description", "") or "",
         references=tuple(getattr(resource, "references", ())),
         used_by=used_by_for(db, registry, kind, resource),
+        disabled_reason=disabled_reason_for(registry, kind, resource),
     )
 
 
@@ -443,6 +476,15 @@ def render_resource_table(listing: ResourceListing) -> None:
         # (catalog, providers, backends); render as ``-`` to distinguish
         # "no instance concept" from "zero instances right now."
         used_by_cell = "-" if row.used_by_count is None else str(row.used_by_count)
+        # Disabled rows are marked in the DESCRIPTION cell, never the
+        # NAME cell: the rendered name must stay the exact selector an
+        # operator copies into `agw resource describe KIND/NAME`.
+        # `describe` carries the full reason.
+        description_cell = (
+            row.description
+            if row.disabled_reason is None
+            else f"(disabled) {row.description}".rstrip()
+        )
         rendered.append(
             (
                 row.kind,
@@ -450,7 +492,7 @@ def render_resource_table(listing: ResourceListing) -> None:
                 format_origin_line(row.origin),
                 str(row.reference_count),
                 used_by_cell,
-                row.description,
+                description_cell,
             )
         )
     widths = [
@@ -479,6 +521,8 @@ def render_resource_description(desc: ResourceDescription) -> None:
     else:
         output.detail("Description: (none)")
     output.detail(f"Origin: {format_origin_line(desc.origin)}")
+    if desc.disabled_reason is not None:
+        output.detail(f"Disabled: {desc.disabled_reason}")
 
     output.info("")
     output.info("Referenced by:")

@@ -47,7 +47,6 @@ class TestTopLevelGroups:
             "secret",
             "session",
             "vm",
-            "vm-host",
             "workspace",
         }
     )
@@ -175,6 +174,7 @@ class TestRegistrySourcedCompleters:
         ("session_templates", "session-template"),
         ("vm_templates", "vm-template"),
         ("agent_templates", "agent-template"),
+        ("sites", "vm-site"),
     )
 
     def test_bash_snippets_source_from_registry(self) -> None:

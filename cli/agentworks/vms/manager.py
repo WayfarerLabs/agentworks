@@ -3,18 +3,25 @@
 from __future__ import annotations
 
 import contextlib
+import re
 from typing import TYPE_CHECKING, NamedTuple
 
 from agentworks import output
-from agentworks.config import VALID_PLATFORMS, validate_admin_username, validate_name
-from agentworks.db import InitStatus, ProvisioningStatus, VMStatus
+from agentworks.config import validate_admin_username, validate_name
+from agentworks.db import (
+    SYSTEM_SLUG_KEY,
+    InitStatus,
+    ProvisioningStatus,
+    VMStatus,
+)
 from agentworks.errors import (
+    AgentworksError,
     AlreadyExistsError,
     ConfigError,
     ConnectivityError,
     ExternalError,
     NotFoundError,
-    ProvisionerError,
+    ProvisioningError,
     StateError,
     UserAbort,
     ValidationError,
@@ -29,17 +36,16 @@ from agentworks.vms.initializer import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable, Iterator
+    from collections.abc import Iterable, Iterator, Sequence
 
+    from agentworks.capabilities.vm_platform import VMPlatform
     from agentworks.config import Config
     from agentworks.db import Database, VMRow, WorkspaceRow
     from agentworks.env import EnvEntry
-    from agentworks.git_credentials.base import GitCredentialProvider
     from agentworks.resources import Registry
     from agentworks.secrets import SecretTarget
     from agentworks.secrets.base import SecretDecl
-    from agentworks.vms.base import VMProvisioner
-    from agentworks.vms.templates import ResolvedVMTemplate
+    from agentworks.secrets.resolver import Resolver
 
 
 class _VmAdminEnvScopes(NamedTuple):
@@ -137,67 +143,237 @@ def _resolve_workspace_for_vm(
     return ws
 
 
-@contextlib.contextmanager
-def keep_vm_active(db: Database, config: Config, vm: VMRow) -> Iterator[None]:
-    """Hold a VM in an active, reachable state for the duration of the context.
+# -- System slug --------------------------------------------------------
 
-    Dispatches to the platform provisioner's ``vm_active`` hook. Default is a
-    no-op (Lima/Azure/Proxmox VMs don't disappear on us). WSL2 spawns a
-    ``wsl --distribution NAME -- sleep infinity`` subprocess to anchor the
-    distro against ``vmIdleTimeout``, booting it if stopped, and waits for
-    Tailscale SSH to be reachable before yielding.
+_SLUG_PROMPT = (
+    "A system slug uniquely identifies this agentworks installation. It "
+    "is used to namespace VMs and other resources so this install does "
+    "not collide with others that share the same cloud account, Proxmox "
+    "cluster, or Windows/Mac user. Leave blank if this install is the "
+    "only one using its sites' backends. [system slug]"
+)
 
-    Wrap any manager-layer function that touches the VM (issues SSH, runs
-    tmux ops, transfers files, etc.) in this context. For commands that
-    touch more than one VM, use :func:`keep_vms_active`.
+
+def validate_slug(slug: str) -> None:
+    """Slug format: 3-20 chars, lowercase alphanumeric plus dash, no
+    leading/trailing dash. Passes Azure's naming rules (the strictest
+    we target), therefore passes all of them.
     """
-    provisioner = get_provisioner_for_vm(db, vm, config)
-    with provisioner.vm_active(vm, config=config):
-        yield
+    if not re.fullmatch(r"[a-z0-9][a-z0-9-]{1,18}[a-z0-9]", slug):
+        raise ValidationError(
+            f"invalid system slug '{slug}'. Slugs are 3-20 characters, "
+            "lowercase alphanumeric plus dash, with no leading or "
+            "trailing dash."
+        )
 
 
-@contextlib.contextmanager
-def keep_vms_active(
-    db: Database, config: Config, vms: Iterable[VMRow]
-) -> Iterator[None]:
-    """Multi-VM variant of :func:`keep_vm_active`.
+def _resolve_system_slug(db: Database) -> str | None:
+    """The install's slug, prompting once at first interactive
+    ``vm create``.
 
-    Enters one ``vm_active`` per VM via ``ExitStack`` so a command that
-    touches multiple VMs (``session list --status``, ``workspace copy``
-    across hosts) keeps all of them anchored for its duration. Duplicate
-    VMs are deduplicated by name.
+    The settings row distinguishes never-asked (absent) from declined
+    (present, empty): a BLANK answer is a perfectly valid one ("no
+    slug") and records the declined row, so the prompt fires once
+    regardless of the answer and never again: no nudges, no
+    reminders (an earlier shared-backend nudge that re-asked decliners
+    was removed by maintainer ruling: the blank answer is final).
+    Non-interactive runs never prompt and never write, so a later
+    interactive create still asks.
     """
+    stored = db.get_setting(SYSTEM_SLUG_KEY)
+    if stored is not None:
+        return stored or None
+    if not output.is_interactive():
+        return None
+    answer = output.prompt(_SLUG_PROMPT, default="").strip()
+    if not answer:
+        db.set_setting(SYSTEM_SLUG_KEY, "")
+        return None
+    # Invalid input aborts the create before any state mutation; the
+    # settings row stays absent, so the next create asks again.
+    validate_slug(answer)
+    db.set_setting(SYSTEM_SLUG_KEY, answer)
+    return answer
+
+
+def bind_platform(
+    config: Config,
+    vm: VMRow,
+    *,
+    registry: Registry | None = None,
+    resolver: Resolver | None = None,
+    prepare: bool = True,
+    targets: Sequence[SecretTarget] = (),
+) -> VMPlatform:
+    """Composition-root helper: bind a VM's platform through its site.
+
+    Runs the capability lifecycle's composition-root ordering once:
+    registry (built here unless the caller already has one) -> construct
+    (cheap; the site's declared config secrets register on the
+    operation's resolver, nothing resolves) -> preflight -> the
+    operation's one resolve pass at the preflight boundary (one prompt
+    session covering the union of everything registered). Call ONCE at
+    a VM-touching command's entry and thread the bound platform down;
+    the gates (:func:`ensure_active` / :func:`keep_active`) take it as
+    a parameter and never resolve or bind anything themselves.
+
+    ``targets`` folds the command's runtime env chain into the same
+    pass: every secret the targets' merged env references (the shell /
+    exec / session-create roots) registers before the boundary, so the
+    workload's env secrets and the site's config secrets are ONE prompt
+    session. Callers read the mapping back via the resolver they passed
+    in (``resolver.values`` feeds ``compose_env``).
+
+    ``prepare=False`` returns the constructed instance without the
+    preflight + resolve boundary, for the roots that interleave other
+    participating resources' preflights first (``create_vm`` and
+    ``rekey_vm`` add the vm-template's Tailscale-key prediction before
+    the one resolve pass). Those callers own running the boundary.
+    """
+    from agentworks.bootstrap import build_registry
+    from agentworks.secrets.resolver import Resolver
+    from agentworks.vms.sites import platform_for
+
+    if registry is None:
+        registry = build_registry(config)
+    if resolver is None:
+        resolver = Resolver(config, registry)
+    platform = platform_for(vm, registry, resolver=resolver)
+    if targets:
+        resolver.register_targets(targets)
+    if prepare:
+        platform.preflight()
+        resolver.resolve()
+    return platform
+
+
+def bind_platforms(
+    config: Config,
+    vms: Iterable[VMRow],
+    *,
+    registry: Registry | None = None,
+) -> list[tuple[VMRow, VMPlatform]]:
+    """Multi-VM :func:`bind_platform`: one registry build (lazy, so an
+    empty VM set stays a no-op), one bound platform per distinct SITE
+    shared across its VMs (a platform instance is site-bound),
+    deduplicated by VM name, preserving first-encounter order. ONE
+    resolver spans the whole batch: every site's platform preflights,
+    then a single resolve pass covers the union of their declared
+    secrets; prompt-once holds across sites, not just within one.
+    Feed the result to :func:`keep_actives`.
+    """
+    from agentworks.bootstrap import build_registry
+    from agentworks.secrets.resolver import Resolver
+
     seen: set[str] = set()
-    with contextlib.ExitStack() as stack:
-        for vm in vms:
-            if vm.name in seen:
-                continue
-            seen.add(vm.name)
-            stack.enter_context(keep_vm_active(db, config, vm))
+    by_site: dict[str, VMPlatform] = {}
+    pairs: list[tuple[VMRow, VMPlatform]] = []
+    resolver: Resolver | None = None
+    for vm in vms:
+        if vm.name in seen:
+            continue
+        seen.add(vm.name)
+        if registry is None:
+            registry = build_registry(config)
+        if resolver is None:
+            resolver = Resolver(config, registry)
+        if vm.site not in by_site:
+            by_site[vm.site] = bind_platform(
+                config, vm, registry=registry, resolver=resolver, prepare=False
+            )
+        pairs.append((vm, by_site[vm.site]))
+    # The batch's preflight boundary: every distinct site's platform
+    # preflights, then the one resolve pass for the union.
+    for platform in by_site.values():
+        platform.preflight()
+    if resolver is not None:
+        resolver.resolve()
+    return pairs
+
+
+def ensure_active(
+    db: Database, config: Config, vm: VMRow, platform: VMPlatform
+) -> None:
+    """Respect a manual stop; otherwise start on demand.
+
+    Fast path: a Tailscale reachability probe (cheap, no cloud API)
+    short-circuits the common case, keeping backend round trips off the
+    per-op hot path, EXCEPT when the row already says manually
+    stopped: pinging a stopped VM burns the probe's full timeout just
+    to reach the refusal, so the likely-stopped case asks the backend
+    directly (an out-of-band start still proceeds via the observed
+    RUNNING). ``platform`` is the BOUND platform from the caller's
+    composition root (:func:`bind_platform`).
+    """
+    if (
+        not vm.operator_stopped
+        and vm.tailscale_host
+        and _is_tailscale_reachable(vm.tailscale_host)
+    ):
+        return
+    observed = platform.status(vm)
+    if observed in (VMStatus.STOPPED, VMStatus.DEALLOCATED):
+        # Re-read the intent flag: the caller-loaded row may predate a
+        # concurrent `vm stop`/`vm start` in another terminal, and
+        # auto-restarting a VM the operator just stopped is the one
+        # mistake this flag exists to prevent. The slow path already
+        # paid a backend status() round trip; one DB read is cheap
+        # next to it.
+        current = db.get_vm(vm.name)
+        manually_stopped = (
+            current.operator_stopped if current else vm.operator_stopped
+        )
+        if manually_stopped:
+            raise StateError(
+                f"VM '{vm.name}' was manually stopped so it will not be "
+                f"auto-started",
+                entity_kind="vm",
+                entity_name=vm.name,
+                hint=f"start it with: agw vm start {vm.name}",
+            )
+        output.info(f"VM '{vm.name}' is {observed.value}. Starting...")
+        platform.start(vm)
+        # Hold while tailscaled reattaches: a freshly booted WSL2
+        # distro must not idle out during the handshake wait.
+        with platform.vm_active(vm, config=config):
+            _ensure_tailscale(db, config, vm, platform)
+    # RUNNING or UNKNOWN: proceed. A transient status failure must not
+    # trigger a spurious start; the op will surface the real error.
+
+
+@contextlib.contextmanager
+def keep_active(
+    db: Database, config: Config, vm: VMRow, platform: VMPlatform
+) -> Iterator[None]:
+    """Gate (:func:`ensure_active`), then hold (``vm_active``) for the
+    context's duration.
+
+    Takes the BOUND platform from the composition root: binding may
+    need resolved config secrets, which only the composition root's
+    single resolve pass has. WSL2's ``vm_active`` spawns a keepalive
+    subprocess anchoring the distro against ``vmIdleTimeout``; the
+    other platforms' default hold is a no-op.
+    """
+    ensure_active(db, config, vm, platform)
+    with platform.vm_active(vm, config=config):
         yield
 
 
-def get_provisioner(platform: str, vm_host_ssh: str | None = None) -> VMProvisioner:
-    """Get the appropriate provisioner for a platform."""
-    if platform == "lima":
-        from agentworks.vms.provisioners.lima import LimaProvisioner
-
-        return LimaProvisioner(vm_host_ssh=vm_host_ssh)
-    elif platform == "azure":
-        from agentworks.vms.provisioners.azure import AzureProvisioner
-
-        return AzureProvisioner()
-    elif platform == "wsl2":
-        from agentworks.vms.provisioners.wsl2 import WSL2Provisioner
-
-        return WSL2Provisioner()
-    elif platform == "proxmox":
-
-        # ProxmoxProvisioner requires config; caller must use create_vm flow
-        raise ValueError("Use create_vm for proxmox provisioning")
-    else:
-        msg = f"Unknown platform: {platform}"
-        raise ValueError(msg)
+@contextlib.contextmanager
+def keep_actives(
+    db: Database,
+    config: Config,
+    pairs: Iterable[tuple[VMRow, VMPlatform]],
+) -> Iterator[None]:
+    """Multi-VM :func:`keep_active` over ``(vm, bound platform)`` pairs
+    (from :func:`bind_platforms`), entered via ``ExitStack`` so a
+    command touching multiple VMs (``session list --status``,
+    ``session stop --all``) keeps all of them anchored.
+    """
+    with contextlib.ExitStack() as stack:
+        for vm, platform in pairs:
+            stack.enter_context(keep_active(db, config, vm, platform))
+        yield
 
 
 def create_vm(
@@ -206,8 +382,7 @@ def create_vm(
     *,
     name: str,
     template: str | None = None,
-    platform: str | None = None,
-    vm_host: str | None = None,
+    site: str | None = None,
     cpus: int | None = None,
     memory: int | None = None,
     disk: int | None = None,
@@ -226,10 +401,17 @@ def create_vm(
 
     vm_tmpl = resolve_template(registry, template)
 
-    # Resolve defaults
-    platform = platform or config.defaults.platform or "lima"
-    if platform not in VALID_PLATFORMS:
-        raise ValidationError(f"invalid platform '{platform}'", entity_kind="vm")
+    # Resolve the target site and its declaration. An undeclared site
+    # fails here with the stranded-site ConfigError + manifest hint,
+    # and a DISABLED one with its reason chain, both before any DB or
+    # backend work, and critically before the Tailscale check and the
+    # interactive system-slug prompt below: the operator must never
+    # answer a prompt for an op the site already sank.
+    from agentworks.vms.sites import ensure_site_enabled, lookup_site, select_site
+
+    site = select_site(site, config.defaults.site, registry)
+    site_decl = lookup_site(site, registry)
+    ensure_site_enabled(site_decl)
 
     vm_name = name
     validate_name(vm_name)
@@ -240,29 +422,6 @@ def create_vm(
             entity_kind="vm",
             entity_name=vm_name,
         )
-
-    # Resolve VM host for Lima
-    vm_host_ssh: str | None = None
-    vm_host_name: str | None = None
-    if platform == "lima":
-        vm_host_name = vm_host or config.defaults.vm_host
-        if vm_host_name:
-            host_row = db.get_vm_host(vm_host_name)
-            if host_row is None:
-                raise NotFoundError(
-                    f"VM host '{vm_host_name}' not found",
-                    entity_kind="vm-host",
-                    entity_name=vm_host_name,
-                )
-            vm_host_ssh = host_row.ssh_host
-
-    # Azure config validation
-    if platform == "azure" and config.azure is None:
-        raise ConfigError("[azure] config section required for azure platform")
-
-    # Proxmox config validation
-    if platform == "proxmox" and config.proxmox is None:
-        raise ConfigError("[proxmox] config section required for proxmox platform")
 
     # Resolve resource settings: CLI flag > template > built-in default
     resolved_cpus = cpus if cpus is not None else vm_tmpl.cpus
@@ -279,19 +438,52 @@ def create_vm(
     providers = resolve_git_credential_providers(registry, admin.git_credentials)
     announce_git_credentials(providers)
 
-    # Collect provisioning-time secrets upfront (tailscale auth, git creds).
-    # Provisioning is hermetic: operator [admin.env] / [vm_templates.*.env]
-    # secrets are NOT prompted here -- they're not used until runtime
-    # shells, which perform their own resolve at their composition root.
-    tailscale_auth_key, git_tokens = _collect_secrets(
-        config, registry, providers, vm_name, vm_tmpl
-    )
+    # System slug: first interactive create prompts once (a blank
+    # answer is final; see _resolve_system_slug). Runs before any
+    # secret prompting or state mutation so an aborted slug entry
+    # leaves nothing behind.
+    slug = _resolve_system_slug(db)
 
-    # Create DB record with as-provisioned resource values
+    # The capability composition root: construct the site's platform
+    # against the operation's resolver (cheap; the site's config secrets
+    # register, nothing resolves yet), preflight every participating
+    # resource: the vm-template predicts its Tailscale key can resolve
+    # (the key is the template's responsibility, not the site's) and the
+    # platform checks its world; then run the operation's ONE resolve
+    # pass at the preflight boundary: tailscale auth, git-credential
+    # tokens, and the site's config secrets (proxmox's API token) in a
+    # single prompt session. Provisioning is hermetic: operator
+    # [admin.env] / [vm_templates.*.env] secrets are NOT prompted here:
+    # they're not used until runtime shells, which perform their own
+    # resolve at their composition root.
+    from agentworks.secrets.resolver import Resolver
+    from agentworks.vms.sites import resolve_site
+    from agentworks.vms.templates import preflight_vm_template
+
+    resolver = Resolver(config, registry)
+    platform_obj = resolve_site(site, registry, resolver=resolver)
+    git_token_names = _register_git_token_decls(registry, resolver, providers.keys())
+    preflight_vm_template(vm_tmpl, resolver)
+    platform_obj.preflight()
+    output.info("Collecting credentials...")
+    resolver.resolve()
+    tailscale_auth_key = resolver.get(vm_tmpl.tailscale_auth_key)
+    git_tokens = {
+        cred_name: resolver.get(token_name)
+        for cred_name, token_name in git_token_names.items()
+    }
+
+    # The VM's OS hostname, computed once at create time and recorded on the
+    # row: {slug}-{name} with a slug, the bare name without. Bounded by
+    # construction: slug max 20 + dash + name max 30 = 51 characters,
+    # inside the 63-char hostname-label and Azure 64-char limits.
+    hostname = f"{slug}-{vm_name}" if slug else vm_name
+
+    # Create DB record with as-provisioned resource values.
     db.insert_vm(
         vm_name,
-        platform=platform,
-        vm_host_name=vm_host_name,
+        site=site,
+        hostname=hostname,
         template=vm_tmpl.name,
         cpus=resolved_cpus,
         memory_gib=resolved_memory,
@@ -314,80 +506,49 @@ def create_vm(
                 f"rollback: failed to delete DB record for vm '{vm_name}': {cleanup_err}"
             )
 
+    # The platform instance was bound (and preflighted, and its secrets
+    # resolved) at the composition root above; dispatch is just ops now.
+    from agentworks.capabilities.vm_platform import ProvisionRequest
+
+    request = ProvisionRequest(
+        vm_name=vm_name,
+        hostname=hostname,
+        system_slug=slug,
+        admin_username=resolved_admin_username,
+        ssh_public_key=config.operator.ssh_public_key.read_text().strip(),
+        ssh_private_key=config.operator.ssh_private_key,
+        tailscale_auth_key=tailscale_auth_key,
+        cpus=resolved_cpus,
+        memory_gib=resolved_memory,
+        disk_gib=resolved_disk,
+        swap_gib=vm_tmpl.swap,
+        azure_vm_size=resolved_azure_size,
+    )
+
     try:
-        if platform == "lima":
-            from agentworks.vms.provisioners.lima import LimaProvisioner
-
-            lima = LimaProvisioner(vm_host_ssh=vm_host_ssh)
-            result = lima.create(
-                vm_name,
-                config,
-                cpus=resolved_cpus,
-                memory=resolved_memory,
-                disk=resolved_disk,
-                swap=vm_tmpl.swap,
-                admin_username=resolved_admin_username,
-                tailscale_auth_key=tailscale_auth_key,
-            )
-        elif platform == "azure":
-            from agentworks.vms.provisioners.azure import AzureProvisioner
-
-            azure = AzureProvisioner()
-            result = azure.create(
-                vm_name,
-                config,
-                azure_vm_size=resolved_azure_size,
-                disk=resolved_disk,
-                swap=vm_tmpl.swap,
-                admin_username=resolved_admin_username,
-                tailscale_auth_key=tailscale_auth_key,
-            )
-        elif platform == "wsl2":
-            from agentworks.vms.provisioners.wsl2 import WSL2Provisioner
-
-            wsl2 = WSL2Provisioner()
-            result = wsl2.create(
-                vm_name,
-                config,
-                swap=vm_tmpl.swap,
-                admin_username=resolved_admin_username,
-            )
-        elif platform == "proxmox":
-            from agentworks.vms.provisioners.proxmox import ProxmoxProvisioner
-
-            proxmox = ProxmoxProvisioner(config.proxmox)  # type: ignore[arg-type]
-            result = proxmox.create(
-                vm_name,
-                config,
-                cpus=resolved_cpus,
-                memory=resolved_memory,
-                disk=resolved_disk,
-                swap=vm_tmpl.swap,
-                admin_username=resolved_admin_username,
-                tailscale_auth_key=tailscale_auth_key,
-            )
-        else:
-            msg = f"Unknown platform: {platform}"
-            raise ValueError(msg)
+        result = platform_obj.create(request)
     except KeyboardInterrupt:
         output.warn(f"Cancelling vm create '{vm_name}'... rolling back.")
         _safe_delete_vm_row()
         raise
+    except UserAbort:
+        # No prompt lives in this span today (the boundary resolve ran
+        # at the composition root above), but an operator abort must
+        # never downgrade to a ProvisioningError; roll back like the
+        # KeyboardInterrupt twin above.
+        _safe_delete_vm_row()
+        raise
     except Exception as e:
         _safe_delete_vm_row()
-        raise ProvisionerError(
+        raise ProvisioningError(
             f"provisioning failed: {e}",
             entity_kind="vm",
             entity_name=vm_name,
         ) from e
 
-    # Update DB with platform-specific metadata
-    if result.azure_resource_id:
-        db.update_vm_azure_resource_id(vm_name, result.azure_resource_id)
-    if result.wsl_distro_name:
-        db.update_vm_wsl_distro_name(vm_name, result.wsl_distro_name)
-    if result.proxmox_vmid:
-        db.update_vm_proxmox_vmid(vm_name, result.proxmox_vmid)
+    # Persist the platform's opaque identifiers verbatim; the owning
+    # platform is the column's only reader.
+    db.update_vm_platform_metadata(vm_name, result.platform_metadata)
 
     # -- Initialization --
     # If this fails, the VM exists on the remote host and may be debuggable.
@@ -398,7 +559,7 @@ def create_vm(
     def _on_tailscale_ready() -> None:
         refreshed = db.get_vm(vm_name)
         assert refreshed is not None
-        get_provisioner_for_vm(db, refreshed, config).post_tailscale_ready(refreshed)
+        platform_obj.post_tailscale_ready(refreshed)
 
     try:
         initialize_vm(
@@ -408,8 +569,9 @@ def create_vm(
             vm_tmpl,
             admin,
             vm_name,
-            exec_target=result.provisioner_transport,
+            exec_target=result.native_transport,
             providers=providers,
+            platform=platform_obj,
             admin_username=resolved_admin_username,
             tailscale_auth_key=tailscale_auth_key,
             git_tokens=git_tokens,
@@ -418,6 +580,19 @@ def create_vm(
             on_tailscale_ready=_on_tailscale_ready,
         )
     except KeyboardInterrupt:
+        output.warn(
+            f"Cancelling vm create '{vm_name}' during initialization. "
+            f"The VM exists but is partially initialized. "
+            f"Use 'vm reinit {vm_name}' to retry, or 'vm delete {vm_name} --force' to remove it."
+        )
+        raise
+    except UserAbort:
+        # No prompt lives in this span today (the boundary resolve ran
+        # at the composition root above), but the catch-all below must
+        # never downgrade an operator abort to a Provisioning/External
+        # error (same discipline as delete_vm's best-effort spans).
+        # Same recovery guidance as the KeyboardInterrupt twin: the VM
+        # exists and must not be stranded silently.
         output.warn(
             f"Cancelling vm create '{vm_name}' during initialization. "
             f"The VM exists but is partially initialized. "
@@ -434,7 +609,7 @@ def create_vm(
 
         vm = db.get_vm(vm_name)
         if vm is not None and vm.provisioning_status == ProvisioningStatus.FAILED.value:
-            raise ProvisionerError(
+            raise ProvisioningError(
                 f"provisioning failed: {e}{log_hint}",
                 entity_kind="vm",
                 entity_name=vm_name,
@@ -487,7 +662,7 @@ def list_vms(db: Database, *, names_only: bool = False) -> None:
         return
 
     header = (
-        f"{'NAME':<20} {'PLATFORM':<10} {'TEMPLATE':<12} {'HOST':<15} {'PROV':<12} {'INIT':<12} "
+        f"{'NAME':<20} {'SITE':<12} {'TEMPLATE':<12} {'PROV':<12} {'INIT':<12} "
         f"{'WS/AG/SE':<10} {'TAILSCALE':<20} {'CREATED'}"
     )
     output.info(header)
@@ -498,7 +673,7 @@ def list_vms(db: Database, *, names_only: bool = False) -> None:
         se = db.count_sessions_on_vm(vm.name)
         counts = f"{ws}/{ag}/{se}"
         output.info(
-            f"{vm.name:<20} {vm.platform:<10} {vm.template or '-':<12} {vm.vm_host_name or '-':<15} "
+            f"{vm.name:<20} {vm.site:<12} {vm.template or '-':<12} "
             f"{vm.provisioning_status:<12} {vm.init_status:<12} "
             f"{counts:<10} {vm.tailscale_host or '-':<20} {vm.created_at}"
         )
@@ -508,20 +683,96 @@ def describe_vm(db: Database, config: Config, name: str) -> None:
     """Show detailed information about a VM."""
     vm = _require_vm(db, name)
 
+    # Bind through the site so the platform (the site's capability) and
+    # the backend-side identity render polymorphically. Describe is an
+    # inspection command and a stranded row is exactly the one an
+    # operator wants to look at, so a stranded site degrades to a
+    # warning (with the manifest hint) rather than erroring: the row's
+    # own fields still render.
+    from agentworks.bootstrap import build_registry
+    from agentworks.vms.sites import lookup_site
+
+    registry = build_registry(config)
+    site_platform = "-"
+    backend_label = "-"
+    status_label = "-"
+    observed: VMStatus | None = None
+    try:
+        site_decl = lookup_site(vm.site, registry)
+        # Known as soon as the declaration resolves: keep it alive even
+        # if the bind below degrades.
+        site_platform = site_decl.platform
+        platform = bind_platform(config, vm, registry=registry)
+    except UserAbort:
+        # Ctrl-C at the boundary's secret prompt aborts describe too;
+        # a half-report would read as the command having succeeded.
+        raise
+    except AgentworksError as e:
+        # Inspection degrades on ANY typed bind/preflight failure (a
+        # stranded site's ConfigError, a missing tool's
+        # ConnectivityError, an unresolvable secret): describe is the
+        # command an operator reaches for on exactly such a row, so the
+        # row's own fields must still render.
+        output.warn(f"{e}" + (f"\n{e.hint}" if e.hint else ""))
+    else:
+        # The backend reads degrade under the same discipline as the
+        # bind above: a live backend flake (API hiccup, SSH timeout)
+        # must not crash the report: a flaky backend is exactly when
+        # an operator reaches for describe, and the row's static fields
+        # still render with '-' placeholders.
+        try:
+            backend_label = platform.display_backend_name(vm)
+            # Live observed status, paired with operator intent: a
+            # manual stop reads differently from an idle timeout.
+            observed = platform.status(vm)
+            status_label = observed.value
+            if observed in (VMStatus.STOPPED, VMStatus.DEALLOCATED):
+                status_label += " (manual)" if vm.operator_stopped else " (idle)"
+        except UserAbort:
+            raise
+        except AgentworksError as e:
+            output.warn(f"{e}" + (f"\n{e.hint}" if e.hint else ""))
+
     # VM details
     output.info(f"Name:           {vm.name}")
     output.info(f"Created:        {vm.created_at}")
-    output.info(f"Platform:       {vm.platform}")
+    output.info(f"Site:           {vm.site}")
+    output.info(f"Platform:       {site_platform}")
+    output.info(f"Backend:        {backend_label}")
+    output.info(f"Status:         {status_label}")
+    output.info(f"Hostname:       {vm.hostname}")
+    # The slug never shows in normal CLI output (vm list stays
+    # name-only); describe and doctor are its surfaces. The slug is
+    # install-level, so a VM created before it was set gets a marker:
+    # its hostname and backend names carry no prefix. A blank answer is
+    # a VALID one: declined ("(none)") renders distinctly from
+    # never-asked ("-").
+    stored_slug = db.get_setting(SYSTEM_SLUG_KEY)
+    slug = stored_slug or None
+    slug_label = slug or ("(none)" if stored_slug == "" else "-")
+    # Exact hostname comparison (the slug is immutable and the hostname is
+    # recorded as {slug}-{name}); a prefix test could false-negative on
+    # a pre-slug VM whose name happens to start with the slug.
+    if slug and vm.hostname != f"{slug}-{vm.name}":
+        slug_label += " (not applied to this VM)"
+    output.info(f"System Slug:    {slug_label}")
     output.info(f"Template:       {vm.template or '-'}")
-    output.info(f"VM Host:        {vm.vm_host_name or '-'}")
     output.info(f"Admin User:     {vm.admin_username}")
     output.info(f"Provisioning:   {vm.provisioning_status}")
     output.info(f"Initialization: {vm.init_status}")
     output.info(f"Tailscale IP:   {vm.tailscale_host or '-'}")
 
-    # Resources table: Initial / Current / Used (Used%)
+    # Resources table: Initial / Current / Used (Used%). The live read
+    # SSHes to the VM, so skip it when the status probe above OBSERVED
+    # the VM stopped: connecting to a dead host would burn the
+    # transport's connect timeout (times its retries) just to print the
+    # '-' placeholders. A degraded/UNKNOWN status still tries: the VM
+    # may well be up, and the read has its own error handling.
     live = None
-    if vm.tailscale_host is not None:
+    if vm.tailscale_host is not None and observed not in (
+        VMStatus.STOPPED,
+        VMStatus.DEALLOCATED,
+    ):
         live = _query_live_resources(vm, config)
 
     if vm.cpus is not None or live is not None:
@@ -551,12 +802,6 @@ def describe_vm(db: Database, config: Config, name: str) -> None:
             f"{live['disk_used'] + ' (' + live['disk_pct'] + ')' if live else '-'}"
         )
 
-    if vm.azure_resource_id:
-        output.info(f"Azure ID:       {vm.azure_resource_id}")
-    if vm.wsl_distro_name:
-        output.info(f"WSL Distro:     {vm.wsl_distro_name}")
-    if vm.proxmox_vmid:
-        output.info(f"Proxmox VMID:   {vm.proxmox_vmid}")
     if vm.last_seen_at:
         output.info(f"Last Seen:      {vm.last_seen_at}")
 
@@ -605,17 +850,18 @@ def shell_vm(
     config: Config,
     name: str,
     *,
-    provisioner: bool = False,
+    platform_transport: bool = False,
     workspace_name: str | None = None,
 ) -> None:
     """Open a shell on a VM as the admin user.
 
-    By default uses the Tailscale SSH transport. Pass ``provisioner=True``
-    to use the platform-native transport instead (``limactl shell`` for
-    Lima, ``wsl.exe`` for WSL2, SSH via public IP for Azure). The
-    provisioner shell is the right choice when Tailscale connectivity is
-    the thing you need to fix (e.g. healing the issue #117 latched DNS
-    state, which involves restarting tailscaled itself).
+    By default uses the Tailscale SSH transport. Pass
+    ``platform_transport=True`` (the ``vm shell --platform`` flag) to
+    use the platform-native transport instead (``limactl shell`` for
+    Lima, ``wsl.exe`` for WSL2, SSH via public IP for Azure). That is
+    the right choice when Tailscale connectivity is the thing you need
+    to fix (e.g. healing the issue #117 latched DNS state, which
+    involves restarting tailscaled itself).
 
     When ``workspace_name`` is set, the shell ``cd``s into the workspace
     directory and the workspace template's env joins the env chain. The
@@ -625,8 +871,7 @@ def shell_vm(
     import sys
 
     from agentworks.env import ResourceContext, compose_env
-    from agentworks.secrets import resolve_for_command
-    from agentworks.transports import provisioner_transport, transport
+    from agentworks.transports import native_transport, transport
 
     vm = _require_vm(db, name)
     # Init failure warns instead of blocks: shelling into a partially-
@@ -642,7 +887,7 @@ def shell_vm(
     # secret resolution.
     ws = _resolve_workspace_for_vm(db, vm, workspace_name)
 
-    if not provisioner and vm.tailscale_host is None:
+    if not platform_transport and vm.tailscale_host is None:
         raise StateError(
             f"VM '{name}' has no Tailscale IP",
             entity_kind="vm",
@@ -650,31 +895,39 @@ def shell_vm(
             hint=(
                 "VM init may not be complete; check 'vm describe' for status. "
                 "If Tailscale itself is the problem you're trying to reach the "
-                "VM to fix, run with --provisioner to use the platform-native "
+                "VM to fix, run with --platform to use the platform-native "
                 "transport instead."
             ),
         )
 
-    # Eager-prompting orchestration (FRD R4 / Phase 6): resolve every
-    # secret referenced by the admin shell's env chain BEFORE opening
-    # the interactive session. The same scope dicts feed both the
-    # SecretTarget (via _vm_secret_target) and compose_env so the two
-    # consumers can't drift. Crucially the vm scope comes from
-    # vm.template (DB row), not the config-default template, which may
-    # not match and would silently route the wrong env into a shell on
-    # a non-default-template VM.
+    # The composition root: the admin shell's env-chain secrets join
+    # the bind's ONE boundary resolve (site secrets + env secrets, one
+    # prompt session), and the platform's preflight (missing tool,
+    # stranded site, unresolvable secret) fails before any prompt. The
+    # same scope dicts feed both the SecretTarget (via
+    # _vm_secret_target) and compose_env so the two consumers can't
+    # drift. Crucially the vm scope comes from vm.template (DB row),
+    # not the config-default template, which may not match and would
+    # silently route the wrong env into a shell on a
+    # non-default-template VM.
     from agentworks.bootstrap import build_registry
+    from agentworks.secrets.resolver import Resolver
 
     registry = build_registry(config)
     scopes = _resolve_vm_admin_env_scopes(registry, vm, ws=ws)
-    values = resolve_for_command(
-        [_vm_secret_target(scopes, label=f"vm-shell={vm.name}")], config, registry,
+    resolver = Resolver(config, registry)
+    bound = bind_platform(
+        config, vm, registry=registry, resolver=resolver,
+        targets=[_vm_secret_target(scopes, label=f"vm-shell={vm.name}")],
     )
+    values = resolver.values
+
+    from agentworks.vms.sites import site_platform_name
 
     ctx = ResourceContext(
         vm_name=vm.name,
-        vm_host=vm.vm_host_name,
-        platform=vm.platform,
+        platform=site_platform_name(vm.site, registry),
+        site=vm.site,
         user=vm.admin_username,
         workspace_name=ws.name if ws else None,
         workspace_dir=ws.workspace_path if ws else None,
@@ -688,10 +941,10 @@ def shell_vm(
     )
 
     with contextlib.ExitStack() as stack:
-        stack.enter_context(keep_vm_active(db, config, vm))
+        stack.enter_context(keep_active(db, config, vm, bound))
         target = (
-            provisioner_transport(db, vm, config, stack=stack)
-            if provisioner
+            native_transport(vm, bound, config, stack=stack)
+            if platform_transport
             else transport(vm, config)
         )
         if ws is not None:
@@ -722,7 +975,6 @@ def exec_vm(
 
     from agentworks.env import ResourceContext, compose_env
     from agentworks.exec_validation import reject_dash_prefixed_command
-    from agentworks.secrets import resolve_for_command
     from agentworks.transports import transport
 
     reject_dash_prefixed_command(command, kind="vm", name=name)
@@ -747,23 +999,30 @@ def exec_vm(
             hint="VM init may not be complete. Check 'vm describe' for status.",
         )
 
-    # Eager-prompting orchestration (FRD R4 / Phase 6): resolve every
-    # secret referenced by the admin exec env chain BEFORE running the
-    # remote command. The same scope dicts feed both the SecretTarget
-    # and compose_env so the two consumers can't drift. The vm scope
-    # comes from vm.template (DB row), not the config-default template.
+    # The composition root: the exec env-chain secrets join the bind's
+    # ONE boundary resolve (site secrets + env secrets, one prompt
+    # session), after the platform's preflight. The same scope dicts
+    # feed both the SecretTarget and compose_env so the two consumers
+    # can't drift. The vm scope comes from vm.template (DB row), not
+    # the config-default template.
     from agentworks.bootstrap import build_registry
+    from agentworks.secrets.resolver import Resolver
 
     registry = build_registry(config)
     scopes = _resolve_vm_admin_env_scopes(registry, vm, ws=ws)
-    values = resolve_for_command(
-        [_vm_secret_target(scopes, label=f"vm-exec={vm.name}")], config, registry,
+    resolver = Resolver(config, registry)
+    bound = bind_platform(
+        config, vm, registry=registry, resolver=resolver,
+        targets=[_vm_secret_target(scopes, label=f"vm-exec={vm.name}")],
     )
+    values = resolver.values
+
+    from agentworks.vms.sites import site_platform_name
 
     ctx = ResourceContext(
         vm_name=vm.name,
-        vm_host=vm.vm_host_name,
-        platform=vm.platform,
+        platform=site_platform_name(vm.site, registry),
+        site=vm.site,
         user=vm.admin_username,
         workspace_name=ws.name if ws else None,
         workspace_dir=ws.workspace_path if ws else None,
@@ -780,7 +1039,7 @@ def exec_vm(
     remote_cmd = command[0] if len(command) == 1 else shlex.join(command)
     if ws is not None:
         remote_cmd = f"cd {shlex.quote(ws.workspace_path)} && {remote_cmd}"
-    with keep_vm_active(db, config, vm):
+    with keep_active(db, config, vm, bound):
         return target.call_streaming(remote_cmd, env=env)
 
 
@@ -817,14 +1076,23 @@ def add_git_credential(db: Database, config: Config, name: str, credential_name:
     providers = resolve_git_credential_providers(registry, [credential_name])
     provider = providers[credential_name]
 
-    # Phase 1d: resolve the token via the framework (the backend chain
-    # handles env-var lookup + prompt fallback uniformly across every
-    # site that needs a token).
-    tokens = _collect_git_tokens(config, registry, [credential_name])
-    token = tokens[credential_name]
+    # The composition root: the credential's token secret joins the
+    # bind's boundary resolve, so the platform preflight runs before
+    # any prompt and the operation stays one prompt session (same
+    # shape as create/reinit's _register_git_token_decls path).
+    from agentworks.secrets.resolver import Resolver
+
+    resolver = Resolver(config, registry)
+    bound = bind_platform(
+        config, vm, registry=registry, resolver=resolver, prepare=False
+    )
+    token_names = _register_git_token_decls(registry, resolver, [credential_name])
+    bound.preflight()
+    resolver.resolve()
+    token = resolver.get(token_names[credential_name])
     new_lines = provider.credential_lines(token)
 
-    with keep_vm_active(db, config, vm):
+    with keep_active(db, config, vm, bound):
         target = transport(vm, config)
 
         # Read existing credentials, filter out entries for the same host/path
@@ -847,25 +1115,30 @@ def add_git_credential(db: Database, config: Config, name: str, credential_name:
 
 
 def start_vm(db: Database, config: Config, name: str) -> None:
-    """Start a stopped VM."""
+    """Start a stopped VM. Clears the operator-stopped flag so the
+    ensure_active gate resumes auto-starting on demand."""
     vm = _require_vm(db, name)
     _guard_failed_vm(vm)
-    provisioner = get_provisioner_for_vm(db, vm)
-    # Probe status and issue the start BEFORE entering keep_vm_active: the
+    platform = bind_platform(config, vm)
+    # An explicit start is operator intent, whatever the observed state:
+    # clear the flag first so a crashed start doesn't leave the gate
+    # refusing to auto-resume a VM the operator asked to run.
+    db.set_operator_stopped(name, False)
+    # Probe status and issue the start BEFORE entering the hold: the
     # WSL2 keepalive subprocess boots a stopped distro as a side effect,
     # which would make status() report RUNNING and mislabel the VM as
     # "already running". The keepalive then anchors the (now running) VM
     # through the Tailscale verification.
-    status = provisioner.status(vm)
+    status = platform.status(vm)
     if status == VMStatus.RUNNING:
         output.info(f"VM '{name}' is already running")
     else:
-        provisioner.start(vm)
+        platform.start(vm)
 
     # Tailscale verification runs inside the keepalive so a freshly booted
     # WSL2 distro doesn't idle-shut while we wait for tailscaled to come up.
-    with keep_vm_active(db, config, vm):
-        _ensure_tailscale(db, config, vm)
+    with platform.vm_active(vm, config=config):
+        _ensure_tailscale(db, config, vm, platform)
     # Only emit "is ready" on the path that actually started the VM. When
     # status was already RUNNING we already said so above, and Tailscale
     # verification is usually a no-op (handshake already valid), so an
@@ -876,18 +1149,32 @@ def start_vm(db: Database, config: Config, name: str) -> None:
 
 
 def stop_vm(db: Database, config: Config, name: str) -> None:
-    """Stop a running VM."""
+    """Stop a running VM and record the operator's intent."""
     vm = _require_vm(db, name)
     _guard_failed_vm(vm)
-    provisioner = get_provisioner_for_vm(db, vm)
-    status = provisioner.status(vm)
+    platform = bind_platform(config, vm)
+    # Record intent BEFORE the already-stopped short-circuit: an
+    # operator stopping an already-stopped VM still means "keep it
+    # stopped" (e.g. the VM idled out and they don't want the next op
+    # to auto-resume it).
+    db.set_operator_stopped(name, True)
+    status = platform.status(vm)
     if status in (VMStatus.STOPPED, VMStatus.DEALLOCATED):
-        output.info(f"VM '{name}' is already stopped")
+        # Never conflate an auto-stop with an explicit one: when the VM
+        # stopped on its own, this command still CHANGED something (the
+        # intent flag above) and the message says what.
+        if vm.operator_stopped:
+            output.info(f"VM '{name}' is already manually stopped")
+        else:
+            output.info(
+                f"VM '{name}' had already stopped on its own; it is now "
+                f"marked manually stopped and will not be auto-started"
+            )
         return
-    # No keep_vm_active here: stop is the inverse of what the keepalive
-    # is for. The platform stop call doesn't need SSH to the VM, and
-    # holding a wsl.exe sleep subprocess open would fight `wsl --terminate`.
-    provisioner.stop(vm)
+    # No hold here: stop is the inverse of what the keepalive is for.
+    # The platform stop call doesn't need SSH to the VM, and holding a
+    # wsl.exe sleep subprocess open would fight `wsl --terminate`.
+    platform.stop(vm)
     output.info(f"VM '{name}' stopped")
 
 
@@ -902,23 +1189,50 @@ def rekey_vm(
     """Assign a new Tailscale auth key to a VM (logout + rejoin).
 
     Useful for rotating keys, switching tailnets, or recovering from
-    expired ephemeral keys. Uses the provisioner's provisioner_transport
-    (out-of-band transport) since Tailscale connectivity drops during
+    expired ephemeral keys. Uses the platform's native transport
+    (out-of-band) since Tailscale connectivity drops during
     the operation.
     """
     import ipaddress
     import shlex
     import time
 
+    from agentworks.bootstrap import build_registry
+    from agentworks.secrets.resolver import Resolver
     from agentworks.ssh import SSHError
     from agentworks.ssh_config import sync_ssh_config
-    from agentworks.transports import provisioner_transport, transport, wait_for_reconnect
+    from agentworks.transports import native_transport, transport, wait_for_reconnect
+    from agentworks.vms.templates import preflight_vm_template, resolve_template
 
     vm = _require_vm(db, name)
     _guard_failed_vm(vm)
 
-    provisioner = get_provisioner_for_vm(db, vm, config)
-    status = provisioner.status(vm)
+    # The composition root: construct (registers the site's config
+    # secrets), preflight both participating resources (the vm-template
+    # predicts the new auth key can resolve; the platform checks its
+    # world), then the operation's one resolve pass: the new auth key
+    # and any site secret (proxmox's API token) in a single prompt
+    # session. ``ignore_env`` is honored by temporarily masking the
+    # env-var backend for the auth-key secret (the env-var source reads
+    # ``os.environ`` at ``would_attempt`` time, so removing the var
+    # skips it cleanly across BOTH the preflight prediction and the
+    # resolve, and the prompt backend takes over).
+    registry = build_registry(config)
+    resolver = Resolver(config, registry)
+    platform = bind_platform(
+        config, vm, registry=registry, resolver=resolver, prepare=False
+    )
+    rekey_vm_tmpl = resolve_template(registry, vm.template)
+    ts_decl = resolver.register_name(rekey_vm_tmpl.tailscale_auth_key)
+    with _mask_env_var_backend_for(ts_decl, masked=ignore_env):
+        preflight_vm_template(rekey_vm_tmpl, resolver)
+        platform.preflight()
+        resolver.resolve()
+    ts_auth_key = resolver.get(rekey_vm_tmpl.tailscale_auth_key)
+
+    # The running check is an op (a backend status read), so it sits
+    # past the boundary: on proxmox it needs the API token.
+    status = platform.status(vm)
     if status != VMStatus.RUNNING:
         raise StateError(
             f"VM '{name}' is not running (status: {status.value})",
@@ -926,40 +1240,20 @@ def rekey_vm(
             entity_name=name,
         )
 
-    # Collect the new auth key via the framework (Phase 1c). The
-    # backend chain handles env-var lookup, then falls through to the
-    # prompt backend. ``ignore_env`` is preserved by temporarily
-    # masking the env-var (the env-var source reads ``os.environ`` at
-    # ``would_attempt`` time, so removing the var skips it cleanly and
-    # the next backend in the chain takes over).
-    from agentworks.bootstrap import build_registry
-    from agentworks.secrets import resolve_for_command
-    from agentworks.vms.templates import resolve_template
-
-    registry = build_registry(config)
-    rekey_vm_tmpl = resolve_template(registry, vm.template)
-    ts_decl = _lookup_or_synthesize_secret(
-        registry, rekey_vm_tmpl.tailscale_auth_key
-    )
-
-    with _mask_env_var_backend_for(ts_decl, masked=ignore_env):
-        resolved = resolve_for_command([], config, registry, extra_decls=[ts_decl])
-    ts_auth_key = resolved[rekey_vm_tmpl.tailscale_auth_key]
-
     output.info(f"Rekeying '{name}'...")
 
     with contextlib.ExitStack() as _stack:
         # Holds the VM in an active state for the duration of the rekey.
         # No-op for Lima/Azure/Proxmox; WSL2 anchors the distro against
         # vmIdleTimeout so per-step `time.sleep`s can't let it idle out.
-        _stack.enter_context(keep_vm_active(db, config, vm))
+        _stack.enter_context(keep_active(db, config, vm, platform))
 
-        # provisioner_transport() composes transient_route (Azure attach /
+        # native_transport() composes transient_route (Azure attach /
         # detach via the polymorphic hook) with the platform-native
         # transport builder and the 6-attempt reachability probe. The
         # caller-supplied ExitStack scopes the transient state to the
         # duration of the rekey.
-        exec_target = provisioner_transport(db, vm, config, stack=_stack)
+        exec_target = native_transport(vm, platform, config, stack=_stack)
 
         # Restart, logout, login, restart. The initial restart clears any
         # stale daemon state (a previous interrupted rekey can leave the
@@ -1078,19 +1372,50 @@ def delete_vm(
 
     # Platform-specific cleanup (also handles Tailscale logout)
     try:
-        provisioner = get_provisioner_for_vm(db, vm)
-
-        # Tailscale logout (best-effort, via provisioning transport).
-        # Wrap only this step: the logout needs the VM alive, but
-        # provisioner.delete is the inverse and would conflict with a
-        # WSL2 keepalive subprocess.
-        if vm.tailscale_host:
-            with keep_vm_active(db, config, vm):
-                _tailscale_logout(db, vm, config)
-
-        provisioner.delete(vm)
+        platform = bind_platform(config, vm)
+    except UserAbort:
+        # Ctrl-C at the boundary's secret prompt must keep the SIGINT
+        # contract: abort the whole delete rather than orphaning the
+        # backend VM behind a warn. (bind_platform runs preflight and
+        # the resolve pass, so the prompt happens inside it.)
+        raise
     except Exception as e:
-        output.warn(f"platform cleanup failed: {e}")
+        # Preflight or bind failure (unreachable API, missing tool,
+        # unresolvable secret): warn and skip backend cleanup; broken
+        # backends are what delete exists to clean up.
+        platform = None
+        hint = getattr(e, "hint", None)
+        output.warn(
+            f"platform binding failed, skipping backend cleanup: {e}"
+            + (f"\n{hint}" if hint else "")
+        )
+
+    if platform is not None:
+        # Tailscale logout (best-effort, hold-only): the logout wants
+        # the VM alive if it happens to be, but delete must NOT gate:
+        # an operator-stopped VM would raise. (The WSL2 hold does boot a
+        # stopped distro; the logout genuinely needs the VM up.) The
+        # whole hold+logout span is best-effort: broken states (e.g. a
+        # manually unregistered WSL2 distro whose hold raises) are
+        # exactly what `vm delete` exists to clean up, so nothing here
+        # may skip the delete below. UserAbort is the one exception the
+        # catch-alls must NOT downgrade: a swallowed abort would fall
+        # through and delete the DB row the operator just declined.
+        if vm.tailscale_host:
+            try:
+                with platform.vm_active(vm, config=config):
+                    _tailscale_logout(vm, config, platform)
+            except UserAbort:
+                raise
+            except Exception as e:
+                output.warn(f"tailscale logout skipped: {e}")
+
+        try:
+            platform.delete(vm)
+        except UserAbort:
+            raise
+        except Exception as e:
+            output.warn(f"platform cleanup failed: {e}")
 
     # Clean up logs
     from agentworks.ssh import LOG_DIR
@@ -1128,6 +1453,17 @@ def reinit_vm(
 
     vm = _require_vm(db, name)
 
+    # Construct before any secret collection: a stranded site fails
+    # here with the manifest hint instead of after git-token prompts.
+    # prepare=False: the boundary (preflight + the one resolve pass)
+    # runs below, once the git-token declarations have joined the set.
+    from agentworks.secrets.resolver import Resolver
+
+    resolver = Resolver(config, registry)
+    platform = bind_platform(
+        config, vm, registry=registry, resolver=resolver, prepare=False
+    )
+
     # Resolve the VM's template so init uses the right values
     from agentworks.resources.access import admin_template
     from agentworks.vms.templates import resolve_template
@@ -1154,8 +1490,18 @@ def reinit_vm(
     providers = resolve_git_credential_providers(registry, admin.git_credentials)
     announce_git_credentials(providers)
 
-    # Collect git tokens via the framework (Phase 1d).
-    git_tokens = _collect_git_tokens(config, registry, providers.keys())
+    # The preflight boundary: git tokens and any site config secret
+    # (proxmox's API token) resolve in one prompt session. The
+    # vm-template's Tailscale key is NOT part of reinit's planned ops
+    # (a broken node's rejoin resolves it on its own conditional path),
+    # so the template preflight doesn't run here.
+    git_token_names = _register_git_token_decls(registry, resolver, providers.keys())
+    platform.preflight()
+    resolver.resolve()
+    git_tokens = {
+        cred_name: resolver.get(token_name)
+        for cred_name, token_name in git_token_names.items()
+    }
 
     # Provisioning is hermetic: no operator-env secrets are prompted at
     # reinit. They get prompted at the use site (vm shell, session
@@ -1175,7 +1521,7 @@ def reinit_vm(
     # any warning output. Matches the pattern used by agent create / reinit
     # and workspace create / rehome.
     try:
-        with keep_vm_active(db, config, vm):
+        with keep_active(db, config, vm, platform):
             try:
                 run_initialization(
                     db,
@@ -1212,20 +1558,20 @@ def reinit_vm(
         output.info(f"VM '{name}' reinitialized successfully!")
 
 
-def _tailscale_logout(db: Database, vm: VMRow, config: Config) -> None:
+def _tailscale_logout(vm: VMRow, config: Config, platform: VMPlatform) -> None:
     """Best-effort: deregister from Tailscale via the provisioning transport.
 
-    Uses ``provisioner_transport(db, vm, config, stack=...)`` so the
+    Uses ``native_transport(vm, platform, config, stack=...)`` so the
     Azure attach/detach lifecycle and the reachability probe are
     composed polymorphically. Platforms whose factory raises (Proxmox)
     are surfaced as a typed StateError, which we catch and warn.
     """
-    from agentworks.transports import provisioner_transport
+    from agentworks.transports import native_transport
 
     output.info("Deregistering from Tailscale...")
     try:
         with contextlib.ExitStack() as stack:
-            exec_target = provisioner_transport(db, vm, config, stack=stack)
+            exec_target = native_transport(vm, platform, config, stack=stack)
 
             # Fire and forget: tailscale down + logout can disrupt
             # networking on the VM, killing SSH-based transports before
@@ -1413,58 +1759,37 @@ def _lookup_or_synthesize_secret(registry: Registry, name: str) -> SecretDecl:
         return SecretDecl(name=name, description="")
 
 
-def _collect_secrets(
-    config: Config,
+def _register_git_token_decls(
     registry: Registry,
-    providers: dict[str, GitCredentialProvider],
-    vm_name: str,
-    vm_tmpl: ResolvedVMTemplate,
-) -> tuple[str, dict[str, str]]:
-    """Collect all secrets upfront before provisioning starts.
+    resolver: Resolver,
+    credential_names: Iterable[str],
+) -> dict[str, str]:
+    """Register each named git credential's token secret on the
+    operation's resolver, so the tokens join the single resolve pass at
+    the preflight boundary instead of getting their own prompt session.
+    Returns ``{credential_name: token_secret_name}`` for reading the
+    values back from the resolver's cache after the pass.
 
-    Phase 1c (Tailscale) + Phase 1d (git credentials) of the Resource
-    Registry SDD: both flow through the framework now. ``build_registry``
-    finalizes the Resource Registry (auto-declaring the auth-key secret
-    and each git-credential's token secret via their
-    ``referenced_resources`` emissions); ``resolve_for_command`` batches
-    them all in one call through the backend chain (or prompts).
-    Provisioning stays hermetic per FRD R4: ``[admin.env]`` /
-    ``[vm_templates.*.env]`` secrets are NOT eager-resolved here --
-    they're resolved at the shell-opening site at runtime, by the
-    existing ``SecretTarget`` path.
-
-    The Tailscale SecretDecl lookup uses ``_lookup_or_synthesize_secret``
-    rather than ``collect_secrets_for`` (registry walk). This matters
-    when the operator omits ``[vm_templates.default]`` entirely: the
-    raw default template isn't published to the registry, so a
-    registry-rooted walk from ``("vm-template", "default")`` would
-    error. The resolved template always exists (built-in defaults
-    apply); a direct secret lookup with fallback is the right shape.
-    Phase 2a's ``VMTemplateKind`` will move the auto-decl plumbing
-    into the registry so the registry-walk path becomes uniformly
-    available.
-
-    Returns ``(tailscale_auth_key, git_tokens)``.
+    Same undeclared-credential guard as :func:`_collect_git_tokens`
+    (that helper remains for agent create, whose token pass runs after
+    its root's bind/preflight; folding it into the resolver rides the
+    git-credentials capability adoption, not this change).
     """
-    from agentworks.secrets import resolve_for_command
+    from agentworks.resources.access import git_credential
 
-    output.info("Collecting credentials...")
-
-    # Tailscale via the framework. See _lookup_or_synthesize_secret
-    # for the missing-default-template fallback semantics. The registry
-    # was built upstream so its finalize-pass typo errors fire before
-    # any other precondition check.
-    ts_decl = _lookup_or_synthesize_secret(
-        registry, vm_tmpl.tailscale_auth_key
-    )
-    resolved = resolve_for_command([], config, registry, extra_decls=[ts_decl])
-    ts_auth_key = resolved[vm_tmpl.tailscale_auth_key]
-
-    # Git credentials via the framework (Phase 1d). Pulls token values
-    # for every credential the admin or agent templates reference.
-    git_tokens = _collect_git_tokens(config, registry, providers.keys())
-
-    return ts_auth_key, git_tokens
+    token_name_for: dict[str, str] = {}
+    for cred_name in credential_names:
+        cred = git_credential(registry, cred_name)
+        if cred is None:
+            raise ConfigError(
+                f"git credential {cred_name!r} not declared; "
+                f"declare it under [git_credentials.{cred_name}]",
+                entity_kind="git-credential",
+                entity_name=cred_name,
+            )
+        token_name_for[cred_name] = cred.token
+        resolver.register_name(cred.token)
+    return token_name_for
 
 
 def _query_live_resources(vm: VMRow, config: Config) -> dict[str, str] | None:
@@ -1544,23 +1869,6 @@ def _require_vm(db: Database, name: str) -> VMRow:
             entity_name=name,
         )
     return vm
-
-
-def get_provisioner_for_vm(db: Database, vm: VMRow, config: Config | None = None) -> VMProvisioner:
-    if vm.platform == "proxmox":
-        from agentworks.vms.provisioners.proxmox import ProxmoxProvisioner
-
-        if config is None:
-            from agentworks.config import load_config
-            config = load_config()
-        return ProxmoxProvisioner(config.proxmox)  # type: ignore[arg-type]
-
-    vm_host_ssh: str | None = None
-    if vm.vm_host_name:
-        host = db.get_vm_host(vm.vm_host_name)
-        if host:
-            vm_host_ssh = host.ssh_host
-    return get_provisioner(vm.platform, vm_host_ssh)
 
 
 def _is_tailscale_reachable(tailscale_host: str) -> bool:
@@ -1667,7 +1975,7 @@ def port_forward_vm(
         output.info("Use --verbose for detailed SSH output.")
 
     # Run in foreground until interrupted
-    with keep_vm_active(db, config, vm):
+    with keep_active(db, config, vm, bind_platform(config, vm)):
         try:
             proc = subprocess.Popen(ssh_cmd)
 
@@ -1692,9 +2000,13 @@ def _ensure_tailscale(
     db: Database,
     config: Config,
     vm: VMRow,
+    platform: VMPlatform,
 ) -> None:
-    """After starting a VM, verify Tailscale connectivity and rejoin if needed."""
-    from agentworks.transports import provisioner_transport, transport, wait_for_reconnect
+    """After starting a VM, verify Tailscale connectivity and rejoin if
+    needed. ``platform`` is the caller's bound platform (the gates never
+    bind, and a re-bind here would re-run the resolve pass).
+    """
+    from agentworks.transports import native_transport, transport, wait_for_reconnect
 
     # Refresh VM row in case tailscale_host was cleared on stop
     vm = _require_vm(db, vm.name)
@@ -1710,9 +2022,13 @@ def _ensure_tailscale(
         db.clear_vm_tailscale(vm.name)
 
     # Resolve a fresh Tailscale auth key via the framework before
-    # entering the provisioner-transport block; the backend chain handles
-    # backend chain + prompt fallback. Phase 1c plumbed this through
-    # the kwarg path so initializer.py has no env-var fallback.
+    # entering the native-transport block; the backend chain handles
+    # env-var lookup with prompt fallback. This is the documented
+    # conditional-need exception to the resolve-at-the-preflight-boundary
+    # contract: whether a rejoin (and therefore a NEW key) is needed is
+    # only knowable after starting the VM and watching the node fail to
+    # reconnect, so it gets its own late resolve rather than prompting
+    # every start for a key that is almost never used.
     from agentworks.bootstrap import build_registry
     from agentworks.secrets import resolve_for_command
     from agentworks.vms.templates import resolve_template
@@ -1725,13 +2041,13 @@ def _ensure_tailscale(
     resolved = resolve_for_command([], config, registry, extra_decls=[ts_decl])
     auth_key = resolved[rejoin_vm_tmpl.tailscale_auth_key]
 
-    # provisioner_transport() composes Azure's attach/detach via
+    # native_transport() composes Azure's attach/detach via
     # transient_route polymorphism with the reachability probe. Other
     # platforms have a nullcontext transient_route and just build the
     # native transport.
     with contextlib.ExitStack() as _stack:
         verify_tailscale_available()
-        exec_target = provisioner_transport(db, vm, config, stack=_stack)
+        exec_target = native_transport(vm, platform, config, stack=_stack)
         rejoin_tailscale(db, vm.name, exec_target, auth_key=auth_key)
 
     # After the stack unwinds (Azure detach has fired), wait for

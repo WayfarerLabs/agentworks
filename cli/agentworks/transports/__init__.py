@@ -6,9 +6,9 @@ Three named factories plus one low-level helper:
   (Tailscale SSH). Used by every normal operator workflow.
 - :func:`agent_transport` -- the canonical transport as a named agent's
   Linux user. Same mechanism as :func:`transport`, different SSH user.
-- :func:`provisioner_transport` -- the platform-native transport
+- :func:`native_transport` -- the platform-native transport
   (``limactl shell``, ``wsl.exe``, Azure-via-public-IP, ...). Used only
-  at bootstrap and via the explicit ``vm shell --provisioner`` opt-in.
+  at bootstrap and via the explicit ``vm shell --platform`` opt-in.
 - :func:`transport_for_user` -- low-level helper used by the named
   factories. Direct use is reserved for the mid-create case where the
   agent row doesn't exist yet (today's only direct caller is
@@ -16,7 +16,7 @@ Three named factories plus one low-level helper:
 
 The named factories never fall back. If the canonical transport is
 unavailable, the canonical factory raises -- it does NOT silently switch
-to the provisioner transport (SDD R3).
+to the native transport.
 """
 
 from __future__ import annotations
@@ -35,8 +35,9 @@ from agentworks.transports.wsl2 import WSL2Transport
 if TYPE_CHECKING:
     import contextlib
 
+    from agentworks.capabilities.vm_platform import VMPlatform
     from agentworks.config import Config
-    from agentworks.db import AgentRow, Database, VMRow
+    from agentworks.db import AgentRow, VMRow
     from agentworks.ssh import SSHLogger
 
 
@@ -47,7 +48,7 @@ __all__ = [
     "Transport",
     "WSL2Transport",
     "agent_transport",
-    "provisioner_transport",
+    "native_transport",
     "transport",
     "transport_for_user",
     "wait_for_reconnect",
@@ -75,9 +76,9 @@ def transport_for_user(
     refactor needs to know about. No override -- if a future use case
     needs a different key, plumb it through then.
 
-    Raises :class:`StateError` if the VM has no Tailscale IP (today's
-    underlying assert disappears under ``python -O``; the typed error
-    doesn't, per SDD R6).
+    Raises :class:`StateError` if the VM has no Tailscale IP (a typed
+    error rather than an assert, which would disappear under
+    ``python -O``).
     """
     if vm.tailscale_host is None:
         raise StateError(
@@ -107,7 +108,7 @@ def transport(
 
     Used by every normal operator workflow. Raises :class:`StateError`
     if the canonical transport is unavailable (no Tailscale host).
-    Never falls back to the provisioner transport (SDD R3).
+    Never falls back to the platform-native transport.
     """
     return transport_for_user(
         vm, config,
@@ -140,26 +141,28 @@ def agent_transport(
     )
 
 
-def provisioner_transport(
-    db: Database,
+def native_transport(
     vm: VMRow,
+    platform: VMPlatform,
     config: Config,
     *,
     stack: contextlib.ExitStack,
 ) -> Transport:
     """Platform-native transport for a VM. Used only at bootstrap and
-    via the explicit ``vm shell --provisioner`` opt-in.
+    via the explicit ``vm shell --platform`` opt-in.
 
-    ``stack`` bounds the lifetime of any transient network state the
-    provisioner needs (Azure attaches a public IP on enter and detaches
-    on exit). The provisioner's :meth:`VMProvisioner.transient_route`
-    runs first; once that context is held, the per-platform transport
-    builder runs.
+    ``platform`` is the VM's bound platform, resolved at the caller's
+    composition root (``agentworks.vms.sites.platform_for``). ``stack``
+    bounds the lifetime of any transient network state the platform
+    needs (Azure attaches a public IP on enter and detaches on exit):
+    the platform's :meth:`VMPlatform.transient_route` runs first; once
+    that context is held, the per-platform transport builder runs.
 
-    Catches the Proxmox :class:`NotImplementedError` and re-raises as a
-    typed :class:`StateError` with the web-console hint. Surfaces a
-    typed error if the transport resolves to an SSH target with an
-    empty host (Azure's defensive guard from PR #118).
+    A ``None`` from :meth:`VMPlatform.native_transport` (proxmox: the
+    one-shot QEMU guest-agent exec can't host an interactive shell)
+    re-raises as a typed :class:`StateError` with the console hint.
+    Surfaces a typed error if the transport resolves to an SSH target
+    with an empty host (Azure's defensive guard from PR #118).
 
     Probes the resulting transport with ``echo ok`` and retries up to
     six times with a 3-second sleep between attempts (total budget ~15s
@@ -170,40 +173,29 @@ def provisioner_transport(
     """
     from agentworks import output
     from agentworks.ssh import SSHError
-    from agentworks.vms.manager import get_provisioner_for_vm
 
-    prov = get_provisioner_for_vm(db, vm, config)
-    stack.enter_context(prov.transient_route(vm))
-    try:
-        target = prov.provisioner_transport(vm, config=config)
-    except NotImplementedError as exc:
-        hint = str(exc)
-        if vm.platform == "proxmox":
-            hint = (
-                "Proxmox's QEMU guest agent exec interface is one-shot "
-                "and non-interactive, so an interactive shell can't be "
-                "exposed through it. Use the Proxmox web UI's serial "
-                "console (VM > Console in the Proxmox VE web UI) as the "
-                "equivalent escape hatch."
-            )
+    stack.enter_context(platform.transient_route(vm))
+    target = platform.native_transport(vm, config=config)
+    if target is None:
         raise StateError(
-            f"Provisioner transport is not implemented for platform '{vm.platform}'.",
+            f"No native transport for VM '{vm.name}' "
+            f"(platform '{platform.name}').",
             entity_kind="vm",
             entity_name=vm.name,
-            hint=hint,
-        ) from exc
+            hint=platform.no_native_transport_hint,
+        )
 
-    # Defensive: any SSH-backed provisioner_transport that returns an
-    # empty host gets the same typed-error treatment. Azure is today's
-    # only such case (host="" when the public IP attach silently
-    # failed); a future SSH-backed Proxmox would inherit the guard.
-    # After transient_route this shouldn't happen on Azure (the context
+    # Defensive: any SSH-backed native transport that returns an empty
+    # host gets the same typed-error treatment. Azure is today's only
+    # such case (host="" when the public IP attach silently failed); a
+    # future SSH-backed platform would inherit the guard. After
+    # transient_route this shouldn't happen on Azure (the context
     # manager attaches before yielding). If it does, surface clearly
     # rather than letting downstream calls hang on an empty hostname.
     if isinstance(target, SSHTransport) and not target.host:
         raise StateError(
-            f"Provisioner transport on platform '{vm.platform}' resolved to an SSH "
-            f"target with no host. VM '{vm.name}' may not be reachable.",
+            f"Native transport on platform '{platform.name}' resolved to an "
+            f"SSH target with no host. VM '{vm.name}' may not be reachable.",
             entity_kind="vm",
             entity_name=vm.name,
             hint=(

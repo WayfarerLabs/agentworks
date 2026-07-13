@@ -38,16 +38,14 @@ def _names(stdout: str) -> list[str]:
 
 
 def _seed(tmp_path: Path) -> Database:
-    """Two VMs, two hosts, two workspaces, two agents, two sessions, two consoles.
+    """Two VMs, two workspaces, two agents, two sessions, two consoles.
 
     Two-of-each so the order-matching assertion has something to check
     AND so filters (``--vm vm1``) actually narrow the set.
     """
     db = Database(tmp_path / "test.db")
-    db.insert_vm_host("host-a", "10.0.0.1")
-    db.insert_vm_host("host-b", "10.0.0.2")
-    db.insert_vm("vm-a", platform="lima", vm_host_name="host-a")
-    db.insert_vm("vm-b", platform="lima", vm_host_name="host-b")
+    db.insert_vm("vm-a", site="lima", hostname="lima--vm-a")
+    db.insert_vm("vm-b", site="lima", hostname="lima--vm-b")
     db.insert_workspace("ws-a", workspace_path="/tmp/ws-a", vm_name="vm-a", linux_group="ws-ws-a")
     db.insert_workspace("ws-b", workspace_path="/tmp/ws-b", vm_name="vm-b", linux_group="ws-ws-b")
     db.insert_agent("agent-a", "vm-a", "agt-agent-a")
@@ -68,7 +66,6 @@ def _seed(tmp_path: Path) -> Database:
 # module instead.
 _GET_DB_TARGETS = (
     "agentworks.cli.commands.vm.get_db",
-    "agentworks.cli.commands.vm_host.get_db",
     "agentworks.cli.commands.workspace.get_db",
     "agentworks.cli.commands.agent.get_db",
     "agentworks.cli.commands.session.get_db",
@@ -99,13 +96,6 @@ def test_vm_list_names_only_emits_one_per_line(tmp_path: Path) -> None:
     code, names = _invoke(db, ["vm", "list", "--names-only"])
     assert code == 0, names
     assert names == ["vm-a", "vm-b"]
-
-
-def test_vm_host_list_names_only_emits_one_per_line(tmp_path: Path) -> None:
-    db = _seed(tmp_path)
-    code, names = _invoke(db, ["vm-host", "list", "--names-only"])
-    assert code == 0, names
-    assert names == ["host-a", "host-b"]
 
 
 def test_workspace_list_names_only_emits_one_per_line(tmp_path: Path) -> None:
@@ -180,7 +170,6 @@ def test_console_list_names_only_respects_vm_filter(tmp_path: Path) -> None:
     "subcommand",
     [
         ["vm", "list", "--names-only"],
-        ["vm-host", "list", "--names-only"],
         ["workspace", "list", "--names-only"],
         ["agent", "list", "--names-only"],
         ["session", "list", "--names-only"],
