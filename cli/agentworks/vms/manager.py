@@ -741,6 +741,7 @@ def describe_vm(db: Database, config: Config, name: str) -> None:
     site_platform = "-"
     backend_label = "-"
     status_label = "-"
+    observed: VMStatus | None = None
     try:
         site_decl = lookup_site(vm.site, registry)
         # Known as soon as the declaration resolves: keep it alive even
@@ -803,9 +804,17 @@ def describe_vm(db: Database, config: Config, name: str) -> None:
     output.info(f"Initialization: {vm.init_status}")
     output.info(f"Tailscale IP:   {vm.tailscale_host or '-'}")
 
-    # Resources table: Initial / Current / Used (Used%)
+    # Resources table: Initial / Current / Used (Used%). The live read
+    # SSHes to the VM, so skip it when the status probe above OBSERVED
+    # the VM stopped -- connecting to a dead host would burn the
+    # transport's connect timeout (times its retries) just to print the
+    # '-' placeholders. A degraded/UNKNOWN status still tries: the VM
+    # may well be up, and the read has its own error handling.
     live = None
-    if vm.tailscale_host is not None:
+    if vm.tailscale_host is not None and observed not in (
+        VMStatus.STOPPED,
+        VMStatus.DEALLOCATED,
+    ):
         live = _query_live_resources(vm, config)
 
     if vm.cpus is not None or live is not None:
