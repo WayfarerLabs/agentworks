@@ -208,6 +208,18 @@ def stub_vm_gates(monkeypatch: pytest.MonkeyPatch) -> _StubPlatform:
     the gates building registries, resolving site secrets, or probing
     Tailscale. Returns the stub platform for assertions.
     """
+    import importlib
+
+    # Pre-import every gate module BEFORE patching: a string-form
+    # setattr that first-imports a module mid-loop would let its
+    # module-level ``from vms.manager import bind_platform`` capture an
+    # ALREADY-PATCHED stub, which monkeypatch then saves as the
+    # "original" -- teardown would install the stub permanently and
+    # poison every later test in the session (import-order dependent,
+    # invisible in full-suite runs).
+    for mod in _GATE_MODULES:
+        importlib.import_module(mod)
+
     platform = _StubPlatform()
 
     @contextlib.contextmanager
@@ -224,13 +236,13 @@ def stub_vm_gates(monkeypatch: pytest.MonkeyPatch) -> _StubPlatform:
         targets: Sequence[object] = (),
     ) -> _StubPlatform:
         # Mirror the real boundary just enough for the roots: record
-        # the env targets for assertions and mark the caller's resolver
-        # resolved (empty values, via the private field -- the stub
-        # must not touch real backends) so ``resolver.values`` serves
-        # the compose_env plumbing.
+        # the env targets for assertions and run the resolver's public
+        # boundary verb (the stub registered no declarations, so the
+        # empty-set short-circuit never touches real backends) so
+        # ``resolver.values`` serves the compose_env plumbing.
         platform.bound_targets = list(targets)  # type: ignore[attr-defined]
-        if resolver is not None and prepare and getattr(resolver, "_values", None) is None:
-            resolver._values = {}
+        if resolver is not None and prepare and not resolver.resolved:
+            resolver.resolve()
         return platform
 
     for mod in _GATE_MODULES:

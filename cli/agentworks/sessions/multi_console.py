@@ -1888,7 +1888,10 @@ def attach_console(
         # Conditional-need exception to the one-boundary-resolve
         # contract: whether a build is needed is only knowable from live
         # tmux state, post-bind (the bind + its boundary already ran in
-        # _prepare_vm_target_for_attach above).
+        # _prepare_vm_target_for_attach above). The --recreate half of
+        # the guard IS knowable pre-bind; it deliberately shares this
+        # late resolve so both build paths stay one code shape rather
+        # than forking the target computation across the boundary.
         if recreate or not exists:
             from agentworks.secrets import resolve_for_command
 

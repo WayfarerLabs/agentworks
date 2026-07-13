@@ -92,17 +92,18 @@ def _make_config() -> object:
 
 
 def _marking_bind(platform_factory: Callable[[], object]) -> Callable[..., object]:
-    """``bind_platform`` stand-in: mark the root's resolver resolved
-    (empty values, via the private field -- same shape as conftest's
-    ``stub_vm_gates``) so ``resolver.values`` serves the compose_env
-    plumbing, and return the test's stub platform."""
+    """``bind_platform`` stand-in: run the resolver's public boundary
+    verb (the stub registered no declarations, so the empty-set
+    short-circuit never touches real backends -- same shape as
+    conftest's ``stub_vm_gates``) so ``resolver.values`` serves the
+    compose_env plumbing, and return the test's stub platform."""
     from agentworks.secrets.resolver import Resolver
 
     def _bind(
         config: object, vm: object, *, resolver: Resolver | None = None, **k: object
     ) -> object:
-        if resolver is not None and getattr(resolver, "_values", None) is None:
-            resolver._values = {}
+        if resolver is not None and not resolver.resolved:
+            resolver.resolve()  # empty set: never touches real backends
         return platform_factory()
 
     return _bind

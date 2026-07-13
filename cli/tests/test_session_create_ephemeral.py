@@ -368,9 +368,6 @@ def test_new_agent_with_explicit_agent_name(
     # The pre-create SecretTarget is built before the bind boundary and
     # reads template env; the None template above has none to read.
     monkeypatch.setattr(
-        session_manager, "_session_secret_target_pre_create", lambda *a, **k: object()
-    )
-    monkeypatch.setattr(
         session_manager, "_session_secret_target_pre_create", lambda *a, **k: None
     )
     monkeypatch.setattr("agentworks.secrets.resolve_for_command", lambda *a, **k: {})
@@ -423,9 +420,6 @@ def test_ephemeral_agent_name_defaults_to_session_name(
     monkeypatch.setattr(session_manager, "_resolve_template", lambda *a, **k: None)
     # The pre-create SecretTarget is built before the bind boundary and
     # reads template env; the None template above has none to read.
-    monkeypatch.setattr(
-        session_manager, "_session_secret_target_pre_create", lambda *a, **k: object()
-    )
     monkeypatch.setattr(
         session_manager, "_session_secret_target_pre_create", lambda *a, **k: None
     )
@@ -536,8 +530,8 @@ def test_eager_resolve_fires_exactly_once_for_new_workspace_and_new_agent(
         config: object, vm: object, *, resolver: Resolver | None = None, **k: object
     ) -> object:
         sequence.append("boundary_bind")
-        if resolver is not None and getattr(resolver, "_values", None) is None:
-            resolver._values = {}
+        if resolver is not None and not resolver.resolved:
+            resolver.resolve()  # empty set: never touches real backends
         return object()
 
     def _ws_spy(db: object, config: object, **kwargs: object) -> None:
@@ -737,9 +731,6 @@ def test_new_agent_inherits_vm_from_existing_workspace(
     monkeypatch.setattr(session_manager, "_resolve_template", lambda *a, **k: None)
     # The pre-create SecretTarget is built before the bind boundary and
     # reads template env; the None template above has none to read.
-    monkeypatch.setattr(
-        session_manager, "_session_secret_target_pre_create", lambda *a, **k: object()
-    )
     monkeypatch.setattr(
         session_manager, "_session_secret_target_pre_create", lambda *a, **k: None
     )
@@ -974,9 +965,6 @@ def test_workspace_prompt_picks_create_new(
     # The pre-create SecretTarget is built before the bind boundary and
     # reads template env; the None template above has none to read.
     monkeypatch.setattr(
-        session_manager, "_session_secret_target_pre_create", lambda *a, **k: object()
-    )
-    monkeypatch.setattr(
         session_manager, "_session_secret_target_pre_create", lambda *a, **k: None
     )
     monkeypatch.setattr("agentworks.secrets.resolve_for_command", lambda *a, **k: {})
@@ -1084,9 +1072,6 @@ def test_mode_prompt_picks_create_new(
     monkeypatch.setattr(session_manager, "_resolve_template", lambda *a, **k: None)
     # The pre-create SecretTarget is built before the bind boundary and
     # reads template env; the None template above has none to read.
-    monkeypatch.setattr(
-        session_manager, "_session_secret_target_pre_create", lambda *a, **k: object()
-    )
     monkeypatch.setattr(
         session_manager, "_session_secret_target_pre_create", lambda *a, **k: None
     )
