@@ -174,13 +174,13 @@ def test_run_checks_group_order_and_config_failure_placeholder(
         "System",
         "Python",
         "Required tools",
+        "Tailscale",
         "VM platforms",
         "VM sites",
-        "Tailscale",
         "Configuration",
         "Database",
     ]
-    placeholder = report.groups[4].checks
+    placeholder = next(g for g in report.groups if g.name == "VM sites").checks
     assert len(placeholder) == 1
     assert placeholder[0].status is doctor.Status.INFO
     assert "Configuration" in (placeholder[0].message or "")

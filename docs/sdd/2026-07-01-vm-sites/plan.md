@@ -235,15 +235,16 @@ flag/completion work stays in Phase 5.
   bootstrap hard-failure, the bundled-miss hints) stays single-depth: wsl2's reason is now "Windows
   only", lima's "limactl not installed". (2) Group order decouples from which checks need config:
   the config/registry pair loads up front and each group renders in presentation order (System,
-  Python, Required tools, VM platforms, VM sites, Tailscale, Configuration, Secrets, Database,
-  completions), putting the adjacent VM pair early per the maintainer's "VM stuff is fundamental".
-  When config fails to load, VM sites renders a skipped-pointer row (the group now precedes the
-  Configuration group that explains the failure; silent absence would read as "no sites"). (3) The
-  system slug moves out of "VM sites" into a new leading "System" group -- it namespaces
-  install-wide (hostnames, backend-side names, the managed SSH config), not per-site; same
-  pending-migration-defers guard. (4) Row names drop the `platform:` / `vm-site:` prefixes (the
-  group header already says it) and the lima row drops the `enabled (...)` wrapper (`[ok]` is the
-  enabled signal; the bundled-site note is the whole message).
+  Python, Required tools, Tailscale, VM platforms, VM sites, Configuration, Secrets, Database,
+  completions -- Tailscale moved above the VM pair by a later same-day tweak), putting the adjacent
+  VM pair early per the maintainer's "VM stuff is fundamental". When config fails to load, VM sites
+  renders a skipped-pointer row (the group now precedes the Configuration group that explains the
+  failure; silent absence would read as "no sites"). (3) The system slug moves out of "VM sites"
+  into a new leading "System" group -- it namespaces install-wide (hostnames, backend-side names,
+  the managed SSH config), not per-site; same pending-migration-defers guard. (4) Row names drop the
+  `platform:` / `vm-site:` prefixes (the group header already says it) and the lima row drops the
+  `enabled (...)` wrapper (`[ok]` is the enabled signal; the bundled-site note is the whole
+  message).
 
 - **2026-07-13, the disabled-resource model: sites register unconditionally and self-disable.**
   Maintainer-designed refinement superseding the same-day host-support gating (existence and

@@ -108,6 +108,7 @@ def run_checks(*, completion_version: str | None = None) -> HealthReport:
     report.groups.append(_check_system())
     report.groups.append(_check_python())
     report.groups.append(_check_required_tools())
+    report.groups.append(_check_tailscale())
     report.groups.append(_check_vm_platforms())
     if config is not None and registry is not None:
         report.groups.append(_check_vm_sites(config, registry))
@@ -120,7 +121,6 @@ def run_checks(*, completion_version: str | None = None) -> HealthReport:
             "skipped (configuration unavailable; see the Configuration group)",
         )
         report.groups.append(sites)
-    report.groups.append(_check_tailscale())
     report.groups.append(config_group)
     if config is not None and registry is not None:
         report.groups.append(_check_secrets(config, registry))
