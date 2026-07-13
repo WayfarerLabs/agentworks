@@ -371,9 +371,31 @@ def _check_config() -> tuple[HealthGroup, Config | None, Registry | None]:
         g.fail("Config", "failed to load")
         return g, None, None
 
+    # Manifest spec-level warnings (unknown keys with file:line, env
+    # hygiene, ...) surface as doctor rows, exactly like TOML
+    # config_issues below. Loading here (and passing the set into
+    # build_registry) also keeps build_registry's auto-load from
+    # printing ambient warnings above the report. Doctor rows are the
+    # surface. A typo'd key on a manifest-declared resource previously
+    # warned ambiently while the Config row said ok.
+    from agentworks.manifests import RESOURCES_DIRNAME, load_manifests
+
+    # A manifest load failure gets its fail row but does NOT short-circuit
+    # the report: the TOML issue rows, deprecation rows, and SSH checks
+    # below still render (doctor's job is maximal visibility in one run);
+    # only the registry-dependent tail is skipped.
+    manifests = None
+    try:
+        manifests = load_manifests(config.source_path.parent / RESOURCES_DIRNAME)
+    except ConfigError as e:
+        g.fail("Manifest", str(e), hint=e.hint)
+
     for issue in config.config_issues:
         g.warn("Config", issue)
-    if not config.config_issues:
+    if manifests is not None:
+        for issue in manifests.issues:
+            g.warn("Manifest", issue)
+    if not config.config_issues and manifests is not None and not manifests.issues:
         g.ok("Config is valid")
     # Deprecation nudges ride their own channel (so --no-deprecations
     # can silence the ambient per-command warning), but doctor is the
@@ -402,8 +424,11 @@ def _check_config() -> tuple[HealthGroup, Config | None, Registry | None]:
     # like any other; the resource-dependent checks below are skipped.
     from agentworks.bootstrap import build_registry
 
+    if manifests is None:
+        return g, config, None
+
     try:
-        registry = build_registry(config)
+        registry = build_registry(config, manifests=manifests)
     except ConfigError as e:
         g.fail("Resource registry", str(e), hint=e.hint)
         return g, config, None
