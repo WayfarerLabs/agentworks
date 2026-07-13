@@ -162,6 +162,32 @@ def test_proxmox_site_emits_the_token_secret_reference() -> None:
     assert all(r.source == ("vm-site", "px") for r in refs)
 
 
+def test_host_disabled_site_emits_no_edges(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A host-disabled site claims NO edges: the platform edge would
+    dangle (no capability row), and the config-implied secret edges
+    would auto-declare and predict-resolve a secret for a site that can
+    never run here. Pinned against the first plugin that ships a
+    host-gated platform WITH a config secret."""
+    from agentworks.capabilities.vm_platform.proxmox import ProxmoxPlatform
+
+    monkeypatch.setattr(
+        ProxmoxPlatform, "unsupported_reason", classmethod(lambda cls: "no cluster os")
+    )
+    site = VMSiteDecl(
+        name="px",
+        platform="proxmox",
+        platform_config={
+            "api_url": "https://pve:8006",
+            "node": "pve1",
+            "token_id": "t",
+            "template_vmid": 9000,
+        },
+    )
+    assert site.referenced_resources() == []
+
+
 def test_bundled_sites_are_reserved(tmp_path: Path) -> None:
     """An operator manifest redeclaring a bundled site name errors with
     the declare-a-sibling shape (builtin_override = reserved)."""

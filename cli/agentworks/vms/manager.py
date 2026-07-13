@@ -431,12 +431,16 @@ def create_vm(
     vm_tmpl = resolve_template(registry, template)
 
     # Resolve the target site and its declaration. An undeclared site
-    # fails here with the stranded-site ConfigError + manifest
-    # hint, before any DB or backend work.
-    from agentworks.vms.sites import lookup_site, select_site
+    # fails here with the stranded-site ConfigError + manifest hint,
+    # and a DISABLED one with its reason chain -- both before any DB or
+    # backend work, and critically before the Tailscale check and the
+    # interactive system-slug prompt below: the operator must never
+    # answer a prompt for an op the site already sank.
+    from agentworks.vms.sites import ensure_site_enabled, lookup_site, select_site
 
     site = select_site(site, config.defaults.site, registry)
     site_decl = lookup_site(site, registry)
+    ensure_site_enabled(site_decl)
 
     vm_name = name
     validate_name(vm_name)

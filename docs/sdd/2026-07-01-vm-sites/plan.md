@@ -276,7 +276,15 @@ flag/completion work stays in Phase 5.
   reason chains, unknown-platform plugin case, reserved-on-every-host,
   valid-config-with-disabled-default, select-over-enabled, resource list/describe surfacing, real
   instance-method branches) plus the doctor reference-warning tests; `stub_platform_support` now
-  pins `unsupported_reason` + instance `disabled_reason`.
+  pins `unsupported_reason` + instance `disabled_reason`. The other dev's PR review round
+  (merge-ready, no blocking) landed four fixes: `create_vm` now applies the extracted
+  `ensure_site_enabled` guard right after `lookup_site` -- BEFORE the Tailscale check and the
+  interactive system-slug prompt (the operator must never answer a prompt for an op the site already
+  sank; pinned by an ordering test); the `--site` help text says ENABLED (matching `select_site` and
+  the README); a host-disabled site now claims NO edges at all -- the config-implied secret edges
+  are gated with the platform edge, so doctor never predict-resolves a secret for a site that can
+  never run here (pinned against the first plugin shipping a host-gated platform with a config
+  secret); stale lima-vs-lima-local comments swept.
 
 - **2026-07-13, the azure platform is named `azure-vm`.** Maintainer ruling: the capability is the
   Azure Virtual Machines service specifically, and Azure could plausibly offer other services worth

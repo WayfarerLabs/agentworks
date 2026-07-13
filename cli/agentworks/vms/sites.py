@@ -65,39 +65,41 @@ class VMSiteDecl:
 
         source = ("vm-site", self.name)
         refs: list[ResourceReference] = []
-        # The platform edge is claimed only when the capability row
-        # actually publishes (installed AND supported on this host).
-        # A site whose platform is missing or host-disabled registers
-        # anyway and self-disables (site_disabled_reason) -- it must
-        # not hand finalize an edge the graph can't hold.
+        # A host-disabled site claims NO edges: the platform edge would
+        # dangle (the capability row publishes only when installed AND
+        # supported here), and the config-implied secret edges would
+        # auto-declare and predict-resolve secrets for a site that can
+        # never run on this host. A site whose platform merely lacks an
+        # INSTANCE requirement (limactl) keeps its edges -- installing
+        # the tool enables it, and its secrets should already predict.
         from agentworks.capabilities.vm_platform import VM_PLATFORM_REGISTRY
 
         capability = VM_PLATFORM_REGISTRY.get(self.platform)
-        if capability is not None and capability.unsupported_reason() is None:
-            refs.append(
-                _ResourceRef(
-                    name=self.platform,
-                    kind="vm-platform",
-                    usage="the VM platform",
-                    source=source,
-                )
+        if capability is None or capability.unsupported_reason() is not None:
+            return refs
+        refs.append(
+            _ResourceRef(
+                name=self.platform,
+                kind="vm-platform",
+                usage="the VM platform",
+                source=source,
             )
+        )
         # Capability-implied references: the platform validates its
         # config block and returns the references it implies; this
         # resource (the config block's owner) attributes them to itself.
-        if capability is not None:
-            for cref in capability.validate_config(
-                f"vm-site/{self.name}", self.platform_config
-            ):
-                ref_cls = SecretReference if cref.kind == "secret" else _ResourceRef
-                refs.append(
-                    ref_cls(
-                        name=cref.name,
-                        kind=cref.kind,
-                        usage=cref.usage,
-                        source=source,
-                    )
+        for cref in capability.validate_config(
+            f"vm-site/{self.name}", self.platform_config
+        ):
+            ref_cls = SecretReference if cref.kind == "secret" else _ResourceRef
+            refs.append(
+                ref_cls(
+                    name=cref.name,
+                    kind=cref.kind,
+                    usage=cref.usage,
+                    source=source,
                 )
+            )
         return refs
 
 
@@ -266,21 +268,32 @@ def resolve_site(
     naming the reason chain.
     """
     from agentworks.capabilities.vm_platform import VM_PLATFORM_REGISTRY
-    from agentworks.errors import StateError
 
     decl = lookup_site(name, registry)
+    ensure_site_enabled(decl)
+    # Enabled implies the platform is installed and supported here.
+    platform_cls = VM_PLATFORM_REGISTRY[decl.platform]
+    return platform_cls(decl.name, decl.platform_config, resolver)
+
+
+def ensure_site_enabled(decl: VMSiteDecl) -> None:
+    """The typed using-a-disabled-site error. ``resolve_site`` (the
+    chokepoint every op passes through) always applies it; roots with
+    operator interaction BEFORE their resolve (``create_vm``'s system
+    slug prompt) call it up front too, so a disabled explicit choice
+    errors before the operator answers anything.
+    """
+    from agentworks.errors import StateError
+
     reason = site_disabled_reason(decl)
     if reason is not None:
         raise StateError(
-            f"vm-site '{name}' is disabled on this host: {reason}",
+            f"vm-site '{decl.name}' is disabled on this host: {reason}",
             hint=(
                 "`agw doctor` lists each site's state; meet the "
                 "requirement or use an enabled site"
             ),
         )
-    # Enabled implies the platform is installed and supported here.
-    platform_cls = VM_PLATFORM_REGISTRY[decl.platform]
-    return platform_cls(decl.name, decl.platform_config, resolver)
 
 
 def platform_for(

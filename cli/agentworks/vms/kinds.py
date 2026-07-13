@@ -184,7 +184,7 @@ class _VMSiteKind:
     miss_policy: Literal["auto-declare", "error"] = "error"
     auto_declare_names: frozenset[str] | None = None
     category: Literal["declarable", "capability"] = "declarable"
-    # The bundled lima/wsl2 site names are reserved: an operator
+    # The bundled lima-local/wsl2 site names are reserved: an operator
     # manifest redeclaring one errors with the declare-a-sibling hint.
     builtin_override: Literal["allow", "reserved"] = "reserved"
 
