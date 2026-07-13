@@ -403,8 +403,8 @@ Look for:
 - Conflating "installed" with "usable" with "intended". A feature can be shipped but categorically
   unsupported here (WSL2 off Windows), supported but not ready (a tool not installed yet), or ready
   but simply unused. Each state needs the right surface: disabled-with-reason, absent-until-ready,
-  and silent, respectively; an error or warning about a state the operator cannot or need not act
-  on is noise.
+  and silent, respectively; an error or warning about a state the operator cannot or need not act on
+  is noise.
 - Environment mutability: tool presence, credentials, and reachable hosts change between runs, and
   entities created under one environment outlive it. Verify the degraded path: what does an existing
   entity get when the environment that created it goes away, and does the error name the actual
