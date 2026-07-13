@@ -335,27 +335,39 @@ def bind_platforms(
 def ensure_active(
     db: Database, config: Config, vm: VMRow, platform: VMPlatform
 ) -> None:
-    """Respect an operator stop; otherwise start on demand.
+    """Respect a manual stop; otherwise start on demand.
 
     Fast path: a Tailscale reachability probe (cheap, no cloud API)
     short-circuits the common case, keeping backend round trips off the
-    per-op hot path. ``platform`` is the BOUND platform from the
-    caller's composition root (:func:`bind_platform`).
+    per-op hot path -- EXCEPT when the row already says manually
+    stopped: pinging a stopped VM burns the probe's full timeout just
+    to reach the refusal, so the likely-stopped case asks the backend
+    directly (an out-of-band start still proceeds via the observed
+    RUNNING). ``platform`` is the BOUND platform from the caller's
+    composition root (:func:`bind_platform`).
     """
-    if vm.tailscale_host and _is_tailscale_reachable(vm.tailscale_host):
+    if (
+        not vm.operator_stopped
+        and vm.tailscale_host
+        and _is_tailscale_reachable(vm.tailscale_host)
+    ):
         return
     observed = platform.status(vm)
     if observed in (VMStatus.STOPPED, VMStatus.DEALLOCATED):
         # Re-read the intent flag: the caller-loaded row may predate a
-        # concurrent `vm stop` in another terminal, and auto-restarting
-        # a VM the operator just stopped is the one mistake this flag
-        # exists to prevent. The slow path already paid a backend
-        # status() round trip; one DB read is cheap next to it.
+        # concurrent `vm stop`/`vm start` in another terminal, and
+        # auto-restarting a VM the operator just stopped is the one
+        # mistake this flag exists to prevent. The slow path already
+        # paid a backend status() round trip; one DB read is cheap
+        # next to it.
         current = db.get_vm(vm.name)
-        operator_stopped = current.operator_stopped if current else vm.operator_stopped
-        if operator_stopped:
+        manually_stopped = (
+            current.operator_stopped if current else vm.operator_stopped
+        )
+        if manually_stopped:
             raise StateError(
-                f"VM '{vm.name}' is stopped",
+                f"VM '{vm.name}' was manually stopped so it will not be "
+                f"auto-started",
                 entity_kind="vm",
                 entity_name=vm.name,
                 hint=f"start it with: agw vm start {vm.name}",
@@ -754,12 +766,12 @@ def describe_vm(db: Database, config: Config, name: str) -> None:
         # still render with '-' placeholders.
         try:
             backend_label = platform.display_backend_name(vm)
-            # Live observed status, paired with operator intent: an
-            # operator stop reads differently from an idle timeout.
+            # Live observed status, paired with operator intent: a
+            # manual stop reads differently from an idle timeout.
             observed = platform.status(vm)
             status_label = observed.value
             if observed in (VMStatus.STOPPED, VMStatus.DEALLOCATED):
-                status_label += " (operator)" if vm.operator_stopped else " (idle)"
+                status_label += " (manual)" if vm.operator_stopped else " (idle)"
         except UserAbort:
             raise
         except AgentworksError as e:
@@ -1181,7 +1193,16 @@ def stop_vm(db: Database, config: Config, name: str) -> None:
     db.set_operator_stopped(name, True)
     status = platform.status(vm)
     if status in (VMStatus.STOPPED, VMStatus.DEALLOCATED):
-        output.info(f"VM '{name}' is already stopped")
+        # Never conflate an auto-stop with an explicit one: when the VM
+        # stopped on its own, this command still CHANGED something (the
+        # intent flag above) and the message says what.
+        if vm.operator_stopped:
+            output.info(f"VM '{name}' is already manually stopped")
+        else:
+            output.info(
+                f"VM '{name}' had already stopped on its own; it is now "
+                f"marked manually stopped and will not be auto-started"
+            )
         return
     # No hold here: stop is the inverse of what the keepalive is for.
     # The platform stop call doesn't need SSH to the VM, and holding a

@@ -301,6 +301,19 @@ flag/completion work stays in Phase 5.
   `azure_vm.py`, `AzurePlatform` -> `AzureVMPlatform`. `AGENTWORKS_PLATFORM` now reads `azure-vm` on
   those VMs. `proxmox` is deliberately untouched (already the service name).
 
+- **2026-07-13, manual-stop UX (from the maintainer's live install test).** Three fixes. (1)
+  Latency: `ensure_active`'s Tailscale fast-path probe burned its full 5s timeout against a stopped
+  VM just to reach the refusal; when the caller's row already says manually stopped, the gate now
+  asks the backend directly and skips the probe (an out-of-band start still proceeds via the
+  observed RUNNING -- the flag is intent, not observed state, and both directions of the
+  concurrent-start/stop race are re-read-guarded and pinned). (2) Vocabulary: "manually stopped"
+  everywhere the OPERATOR reads it (the internal `operator_stopped` column keeps its name): the gate
+  error is "VM 'x' was manually stopped so it will not be auto-started", describe's status
+  annotation is `stopped (manual)` vs `(idle)`. (3) `vm stop` on an already-stopped VM no longer
+  conflates auto-stop with explicit stop: an idle-stopped VM reports "had already stopped on its
+  own; it is now marked manually stopped and will not be auto-started" (the command DID change
+  something), and only an already-manually-stopped VM gets "is already manually stopped".
+
 **Compile boundaries**: Phases 1 through 3 are one logical commit boundary, mirroring the
 polymorphic-transports precedent. As planned, Phase 1 would open a non-compiling window when the
 platform classes reshape to the new protocol; as built, PHASE-1 BRIDGE shims keep everything
