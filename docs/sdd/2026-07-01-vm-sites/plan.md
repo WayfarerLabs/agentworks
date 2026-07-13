@@ -306,13 +306,18 @@ flag/completion work stays in Phase 5.
   VM just to reach the refusal; when the caller's row already says manually stopped, the gate now
   asks the backend directly and skips the probe (an out-of-band start still proceeds via the
   observed RUNNING -- the flag is intent, not observed state, and both directions of the
-  concurrent-start/stop race are re-read-guarded and pinned). (2) Vocabulary: "manually stopped"
-  everywhere the OPERATOR reads it (the internal `operator_stopped` column keeps its name): the gate
-  error is "VM 'x' was manually stopped so it will not be auto-started", describe's status
-  annotation is `stopped (manual)` vs `(idle)`. (3) `vm stop` on an already-stopped VM no longer
-  conflates auto-stop with explicit stop: an idle-stopped VM reports "had already stopped on its
-  own; it is now marked manually stopped and will not be auto-started" (the command DID change
-  something), and only an already-manually-stopped VM gets "is already manually stopped".
+  concurrent-start/stop race are re-read-guarded and pinned). Accepted trade in the flag-set path:
+  ops now require a successful backend `status()` where the old path could proceed on the Tailscale
+  ping alone, so a manually-stopped-then-out-of-band-started VM with an unreachable backend fails
+  with the backend's error instead of proceeding -- a narrow corner recoverable via `agw vm start`
+  (which clears the flag), and the honest reading of a state where the operator's intent flag and
+  the world disagree. (2) Vocabulary: "manually stopped" everywhere the OPERATOR reads it (the
+  internal `operator_stopped` column keeps its name): the gate error is "VM 'x' was manually stopped
+  so it will not be auto-started", describe's status annotation is `stopped (manual)` vs `(idle)`.
+  (3) `vm stop` on an already-stopped VM no longer conflates auto-stop with explicit stop: an
+  idle-stopped VM reports "had already stopped on its own; it is now marked manually stopped and
+  will not be auto-started" (the command DID change something), and only an already-manually-stopped
+  VM gets "is already manually stopped".
 
 - **2026-07-13, the proxmox secret is named `proxmox-token`.** Maintainer ruling:
   "proxmox-token-secret" was redundant on every surface (`secret/proxmox-token-secret`,

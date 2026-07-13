@@ -323,10 +323,9 @@ as the first real user:
      never resolve or bind anything themselves. The registry never resolves values.
 
 - The raw `PROXMOX_TOKEN_SECRET` env read in `ProxmoxProvisioner.__init__` (RuntimeError when
-  absent) is deleted. Default resolution reads `AW_SECRET_PROXMOX_TOKEN_SECRET` via the `env-var`
-  backend or falls back to the prompt; a one-line
-  `backend_mappings: {env-var: PROXMOX_TOKEN_SECRET}` on the secret preserves the old variable name
-  (R13).
+  absent) is deleted. Default resolution reads `AW_SECRET_PROXMOX_TOKEN` via the `env-var` backend
+  or falls back to the prompt; a one-line `backend_mappings: {env-var: PROXMOX_TOKEN_SECRET}` on the
+  secret preserves the old variable name (R13).
 - Azure, Lima, and WSL2 declare no config secrets today; their `validate_config` returns no
   references, and their dispatch path never touches the resolve pass. AWS later rides the same rails
   for client secrets.
@@ -350,8 +349,8 @@ smeared across a table, a constructor arg, and a branch. `native_transport()` re
 `LimaTransport` or `RemoteLimaTransport` off the same key; that single branch point is the honest
 encoding of a real capability difference and stays.
 
-`shared_backend` is computed: `vm_host` present (a remote Lima box can be shared between installs;
-local Lima collides only within one workstation user, which the slug also covers).
+~~`shared_backend` is computed from `vm_host` presence~~ -- REMOVED with the R4 nudge (2026-07-13
+ruling; see the plan's sequencing note).
 
 ## Ensure-active + vm_active in the manager
 

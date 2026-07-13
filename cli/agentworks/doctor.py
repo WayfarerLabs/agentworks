@@ -118,7 +118,8 @@ def run_checks(*, completion_version: str | None = None) -> HealthReport:
         sites = HealthGroup("VM sites")
         sites.info(
             "Declared sites",
-            "skipped (configuration unavailable; see the Configuration group)",
+            "skipped (config or manifests unavailable; see the "
+            "Configuration group)",
         )
         report.groups.append(sites)
     report.groups.append(config_group)

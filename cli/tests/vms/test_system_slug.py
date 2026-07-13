@@ -106,9 +106,10 @@ def test_no_prompt_of_any_kind_after_decline(
     db: Database, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """The regression this file exists to prevent: a declined install
-    creating on a shared-backend site (remote Lima, a cloud account)
-    must see NO slug prompt of any kind. Runs through create_vm's real
-    slug block by asserting no prompt call happens at all."""
+    must see NO slug prompt of any kind on later creates (the nudge
+    call site is gone from create_vm entirely; _resolve_system_slug is
+    the only remaining asker, and the declined row short-circuits it
+    before any prompt call)."""
     db.set_setting("system_slug", "")  # declined on an earlier create
     monkeypatch.setattr("agentworks.output.is_interactive", lambda: True)
     monkeypatch.setattr(

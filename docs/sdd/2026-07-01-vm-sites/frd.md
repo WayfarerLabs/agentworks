@@ -451,8 +451,8 @@ The platform surface after this SDD:
 class VMPlatform(ABC):
     # Class-level: name, validate_config (the shipped invoked-validation
     # API: validate the platform_config blob, return the ConfigReference
-    # tuple it implies), shared_backend, legacy_platform_metadata
-    # migration hook (see HLA).
+    # tuple it implies), legacy_platform_metadata migration hook (see
+    # HLA). shared_backend was removed with the R4 nudge (2026-07-13).
 
     @abstractmethod
     def create(self, request: ProvisionRequest) -> ProvisionResult: ...
@@ -575,10 +575,10 @@ hostname, which tailscaled picks up as the node name. Changes:
   `--no-deprecations` escape).
 - **Proxmox token sourcing changes** (R2): the raw `PROXMOX_TOKEN_SECRET` env var read is replaced
   by the `proxmox-token` secret resolved through the standard chain. The default `env-var` backend
-  convention reads `AW_SECRET_PROXMOX_TOKEN_SECRET`; operators keeping the old variable name declare
-  the secret with a one-line `backend_mappings: {env-var: PROXMOX_TOKEN_SECRET}`. Interactive use
-  falls back to the prompt backend instead of a RuntimeError. Release notes and the migration output
-  carry the pointer.
+  convention reads `AW_SECRET_PROXMOX_TOKEN`; operators keeping the old variable name declare the
+  secret with a one-line `backend_mappings: {env-var: PROXMOX_TOKEN_SECRET}`. Interactive use falls
+  back to the prompt backend instead of a RuntimeError. Release notes and the migration output carry
+  the pointer.
 - New registry kinds visible in `agw resource list` / `agw resource kinds`: declarable `vm-site`
   rows (bundled, manifest, and legacy TOML origins) and read-only `vm-platform` capability rows;
   `agw resource sample vm-site` gains real sample documents; `vm-template` accepts an optional

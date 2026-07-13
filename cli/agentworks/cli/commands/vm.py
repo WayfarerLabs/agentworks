@@ -29,7 +29,8 @@ def vm_create(
             help=(
                 "vm-site to create the VM at (a declared vm-site resource; "
                 "falls back to defaults.site, else the single enabled "
-                "site is inferred and several enabled prompt for a choice)"
+                "site is inferred; when several are enabled, prompts for "
+                "a choice)"
             ),
         ),
     ] = None,
