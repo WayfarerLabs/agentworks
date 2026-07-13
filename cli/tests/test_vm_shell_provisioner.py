@@ -13,6 +13,7 @@ interactive SSH layer so the tests stay hermetic.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
 from typing import TYPE_CHECKING
@@ -88,6 +89,23 @@ def _make_config() -> object:
         vm=SimpleNamespace(env={}),
         admin=SimpleNamespace(env={}),
     )
+
+
+def _marking_bind(platform_factory: Callable[[], object]) -> Callable[..., object]:
+    """``bind_platform`` stand-in: mark the root's resolver resolved
+    (empty values, via the private field -- same shape as conftest's
+    ``stub_vm_gates``) so ``resolver.values`` serves the compose_env
+    plumbing, and return the test's stub platform."""
+    from agentworks.secrets.resolver import Resolver
+
+    def _bind(
+        config: object, vm: object, *, resolver: Resolver | None = None, **k: object
+    ) -> object:
+        if resolver is not None and getattr(resolver, "_values", None) is None:
+            resolver._values = {}
+        return platform_factory()
+
+    return _bind
 
 
 def _patch_common(
@@ -209,7 +227,7 @@ def test_shell_vm_provisioner_uses_native_transport(
 
     monkeypatch.setattr(
         vm_manager, "bind_platform",
-        lambda *a, **k: _StubProvisioner(),
+        _marking_bind(_StubProvisioner),
     )
 
     # Also pin the Tailscale path so it would explode if accidentally taken.
@@ -263,7 +281,7 @@ def test_provisioner_shell_target_wraps_missing_native_transport(
 
     monkeypatch.setattr(
         vm_manager, "bind_platform",
-        lambda *a, **k: _UnsupportedProvisioner(),
+        _marking_bind(_UnsupportedProvisioner),
     )
 
     vm = vm_manager._require_vm(db, "vm1")
@@ -309,7 +327,7 @@ def test_provisioner_shell_target_proxmox_hint_points_at_web_console(
 
     monkeypatch.setattr(
         vm_manager, "bind_platform",
-        lambda *a, **k: _ProxmoxProvisioner(),
+        _marking_bind(_ProxmoxProvisioner),
     )
 
     vm = vm_manager._require_vm(db, "vm1")
@@ -373,7 +391,7 @@ def test_provisioner_shell_target_attaches_and_registers_detach_for_azure(
 
     monkeypatch.setattr(
         vm_manager, "bind_platform",
-        lambda *a, **k: _FakeAzureProvisioner(),
+        _marking_bind(_FakeAzureProvisioner),
     )
 
     vm = vm_manager._require_vm(db, "vm1")
@@ -430,7 +448,7 @@ def test_provisioner_shell_target_detaches_on_exception_for_azure(
 
     monkeypatch.setattr(
         vm_manager, "bind_platform",
-        lambda *a, **k: _AzureRaisesAfterAttach(),
+        _marking_bind(_AzureRaisesAfterAttach),
     )
 
     vm = vm_manager._require_vm(db, "vm1")
@@ -495,7 +513,7 @@ def test_provisioner_shell_target_retries_reachability_probe(
 
     monkeypatch.setattr(
         vm_manager, "bind_platform",
-        lambda *a, **k: _FlakyProvisioner(),
+        _marking_bind(_FlakyProvisioner),
     )
 
     vm = vm_manager._require_vm(db, "vm1")
@@ -542,7 +560,7 @@ def test_provisioner_shell_target_raises_defensively_on_empty_host(
 
     monkeypatch.setattr(
         vm_manager, "bind_platform",
-        lambda *a, **k: _BrokenProvisioner(),
+        _marking_bind(_BrokenProvisioner),
     )
 
     vm = vm_manager._require_vm(db, "vm1")

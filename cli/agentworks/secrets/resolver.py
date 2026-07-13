@@ -24,11 +24,12 @@ from typing import TYPE_CHECKING
 from agentworks.errors import StateError
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable
+    from collections.abc import Iterable, Sequence
 
     from agentworks.config import Config
     from agentworks.resources.registry import Registry
     from agentworks.secrets.base import SecretDecl
+    from agentworks.secrets.orchestration import SecretTarget
 
 
 class Resolver:
@@ -63,6 +64,20 @@ class Resolver:
         registration of a name wins; re-registration is a no-op)."""
         for decl in decls:
             self._decls.setdefault(decl.name, decl)
+
+    def register_targets(self, targets: Sequence[SecretTarget]) -> None:
+        """Register every secret referenced by the targets' env chains.
+
+        This is how the runtime env system joins the operation's one
+        resolve pass: each target's merged per-scope env (the FRD R2
+        precedence ladder) is walked for secret references via
+        ``compute_needed_secrets``, and the resulting declarations join
+        the set -- so a command's site secrets, provisioning secrets,
+        and workload env secrets all land in the same prompt session.
+        """
+        from agentworks.secrets.orchestration import compute_needed_secrets
+
+        self.register(compute_needed_secrets(targets, self._registry))
 
     def register_name(self, name: str) -> SecretDecl:
         """Register a secret by name and return its declaration.
@@ -159,3 +174,17 @@ class Resolver:
     def resolved(self) -> bool:
         """Whether the boundary pass has run."""
         return self._values is not None
+
+    @property
+    def values(self) -> dict[str, str]:
+        """The boundary pass's full resolved mapping, for consumers that
+        take the whole set (``compose_env``'s ``values``). Same
+        must-have-resolved contract as :meth:`get`."""
+        if self._values is None:
+            raise StateError(
+                "resolved secret values requested before the operation's "
+                "resolve pass ran. The composition root resolves once at "
+                "the preflight boundary; reaching here means a caller "
+                "skipped that step."
+            )
+        return dict(self._values)

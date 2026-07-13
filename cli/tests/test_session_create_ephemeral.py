@@ -36,6 +36,7 @@ import pytest
 from agentworks import output
 from agentworks.db import Database
 from agentworks.errors import ValidationError
+from agentworks.secrets.resolver import Resolver
 
 from .conftest import stub_build_registry, stub_vm_gates
 
@@ -161,6 +162,11 @@ def test_explicit_vm_agreeing_with_workspace_passes_anchor_check(
     # of ensure_active; stub it so the SimpleNamespace config doesn't
     # need session_templates.
     monkeypatch.setattr(session_manager, "_resolve_template", lambda *a, **k: None)
+    # The pre-create SecretTarget is built before the bind boundary and
+    # reads template env; the None template above has none to read.
+    monkeypatch.setattr(
+        session_manager, "_session_secret_target_pre_create", lambda *a, **k: object()
+    )
 
     called: list[str] = []
 
@@ -246,6 +252,11 @@ def test_no_vm_anchor_with_single_vm_auto_selects(
     config = SimpleNamespace(session=SimpleNamespace(history_limit=50000))
 
     monkeypatch.setattr(session_manager, "_resolve_template", lambda *a, **k: None)
+    # The pre-create SecretTarget is built before the bind boundary and
+    # reads template env; the None template above has none to read.
+    monkeypatch.setattr(
+        session_manager, "_session_secret_target_pre_create", lambda *a, **k: object()
+    )
 
     called: list[str] = []
 
@@ -354,6 +365,11 @@ def test_new_agent_with_explicit_agent_name(
     config = SimpleNamespace(session=SimpleNamespace(history_limit=50000))
 
     monkeypatch.setattr(session_manager, "_resolve_template", lambda *a, **k: None)
+    # The pre-create SecretTarget is built before the bind boundary and
+    # reads template env; the None template above has none to read.
+    monkeypatch.setattr(
+        session_manager, "_session_secret_target_pre_create", lambda *a, **k: object()
+    )
     monkeypatch.setattr(
         session_manager, "_session_secret_target_pre_create", lambda *a, **k: None
     )
@@ -405,6 +421,11 @@ def test_ephemeral_agent_name_defaults_to_session_name(
     config = SimpleNamespace(session=SimpleNamespace(history_limit=50000))
 
     monkeypatch.setattr(session_manager, "_resolve_template", lambda *a, **k: None)
+    # The pre-create SecretTarget is built before the bind boundary and
+    # reads template env; the None template above has none to read.
+    monkeypatch.setattr(
+        session_manager, "_session_secret_target_pre_create", lambda *a, **k: object()
+    )
     monkeypatch.setattr(
         session_manager, "_session_secret_target_pre_create", lambda *a, **k: None
     )
@@ -496,8 +517,9 @@ def test_eager_resolve_fires_exactly_once_for_new_workspace_and_new_agent(
 ) -> None:
     """``new_workspace=True + new_agent=True`` must prompt at most once
     for the union of all secrets across the three creations. Asserts the
-    orchestrator calls resolve_for_command exactly once and that the
-    call happens BEFORE create_workspace / create_agent run."""
+    orchestrator runs exactly one boundary bind (which hosts the one
+    resolve pass: env chain + site secrets) and that it happens BEFORE
+    create_workspace / create_agent run."""
     from agentworks.sessions.manager import create_session
 
     db = Database(tmp_path / "test.db")
@@ -510,9 +532,13 @@ def test_eager_resolve_fires_exactly_once_for_new_workspace_and_new_agent(
 
     sequence: list[str] = []
 
-    def _resolve_spy(*a: object, **k: object) -> dict[str, str]:
-        sequence.append("resolve_for_command")
-        return {}
+    def _bind_spy(
+        config: object, vm: object, *, resolver: Resolver | None = None, **k: object
+    ) -> object:
+        sequence.append("boundary_bind")
+        if resolver is not None and getattr(resolver, "_values", None) is None:
+            resolver._values = {}
+        return object()
 
     def _ws_spy(db: object, config: object, **kwargs: object) -> None:
         sequence.append("create_workspace")
@@ -527,7 +553,7 @@ def test_eager_resolve_fires_exactly_once_for_new_workspace_and_new_agent(
         sequence.append("create_agent")
         db.insert_agent(kwargs["name"], kwargs["vm_name"], f"aw-{kwargs['name']}")  # type: ignore[attr-defined]
 
-    monkeypatch.setattr("agentworks.secrets.resolve_for_command", _resolve_spy)
+    monkeypatch.setattr("agentworks.sessions.manager.bind_platform", _bind_spy)
     monkeypatch.setattr("agentworks.workspaces.manager.create_workspace", _ws_spy)
     monkeypatch.setattr("agentworks.agents.manager.create_agent", _ag_spy)
 
@@ -552,9 +578,9 @@ def test_eager_resolve_fires_exactly_once_for_new_workspace_and_new_agent(
             vm_name="vm1",
         )
 
-    assert sequence.count("resolve_for_command") == 1
+    assert sequence.count("boundary_bind") == 1
     assert sequence == [
-        "resolve_for_command",
+        "boundary_bind",
         "create_workspace",
         "create_agent",
         "prepare_vm",
@@ -709,6 +735,11 @@ def test_new_agent_inherits_vm_from_existing_workspace(
     config = SimpleNamespace(session=SimpleNamespace(history_limit=50000))
 
     monkeypatch.setattr(session_manager, "_resolve_template", lambda *a, **k: None)
+    # The pre-create SecretTarget is built before the bind boundary and
+    # reads template env; the None template above has none to read.
+    monkeypatch.setattr(
+        session_manager, "_session_secret_target_pre_create", lambda *a, **k: object()
+    )
     monkeypatch.setattr(
         session_manager, "_session_secret_target_pre_create", lambda *a, **k: None
     )
@@ -794,6 +825,11 @@ def test_admin_non_interactive_on_vm_with_agents_does_not_prompt(
     # Stub template resolution so the SimpleNamespace doesn't need
     # session_templates; the call we want to land at is ensure_active.
     monkeypatch.setattr(session_manager, "_resolve_template", lambda *a, **k: None)
+    # The pre-create SecretTarget is built before the bind boundary and
+    # reads template env; the None template above has none to read.
+    monkeypatch.setattr(
+        session_manager, "_session_secret_target_pre_create", lambda *a, **k: object()
+    )
 
     called: list[str] = []
 
@@ -875,6 +911,11 @@ def _stub_for_post_prompt_flow(monkeypatch: pytest.MonkeyPatch) -> list[str]:
 
     called: list[str] = []
     monkeypatch.setattr(session_manager, "_resolve_template", lambda *a, **k: None)
+    # The pre-create SecretTarget is built before the bind boundary and
+    # reads template env; the None template above has none to read.
+    monkeypatch.setattr(
+        session_manager, "_session_secret_target_pre_create", lambda *a, **k: object()
+    )
 
     def _spy(*a: object, **k: object) -> None:
         called.append("ensure_vm_up")
@@ -930,6 +971,11 @@ def test_workspace_prompt_picks_create_new(
     # Stub the path up through eager-resolve so we land on the
     # ephemeral-create step cleanly.
     monkeypatch.setattr(session_manager, "_resolve_template", lambda *a, **k: None)
+    # The pre-create SecretTarget is built before the bind boundary and
+    # reads template env; the None template above has none to read.
+    monkeypatch.setattr(
+        session_manager, "_session_secret_target_pre_create", lambda *a, **k: object()
+    )
     monkeypatch.setattr(
         session_manager, "_session_secret_target_pre_create", lambda *a, **k: None
     )
@@ -1036,6 +1082,11 @@ def test_mode_prompt_picks_create_new(
 
     # Stub the path so we land on create_agent cleanly.
     monkeypatch.setattr(session_manager, "_resolve_template", lambda *a, **k: None)
+    # The pre-create SecretTarget is built before the bind boundary and
+    # reads template env; the None template above has none to read.
+    monkeypatch.setattr(
+        session_manager, "_session_secret_target_pre_create", lambda *a, **k: object()
+    )
     monkeypatch.setattr(
         session_manager, "_session_secret_target_pre_create", lambda *a, **k: None
     )

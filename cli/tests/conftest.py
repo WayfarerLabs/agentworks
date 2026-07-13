@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import contextlib
-from collections.abc import Generator, Iterator
+from collections.abc import Generator, Iterator, Sequence
 from contextlib import AbstractContextManager
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -11,6 +11,7 @@ from pathlib import Path
 import pytest
 
 from agentworks.db import Database
+from agentworks.secrets.resolver import Resolver
 
 
 @pytest.fixture
@@ -213,12 +214,27 @@ def stub_vm_gates(monkeypatch: pytest.MonkeyPatch) -> _StubPlatform:
     def _null_hold(*args: object, **kwargs: object) -> Iterator[None]:
         yield
 
+    def _fake_bind(
+        config: object,
+        vm: object,
+        *,
+        registry: object = None,
+        resolver: Resolver | None = None,
+        prepare: bool = True,
+        targets: Sequence[object] = (),
+    ) -> _StubPlatform:
+        # Mirror the real boundary just enough for the roots: record
+        # the env targets for assertions and mark the caller's resolver
+        # resolved (empty values, via the private field -- the stub
+        # must not touch real backends) so ``resolver.values`` serves
+        # the compose_env plumbing.
+        platform.bound_targets = list(targets)  # type: ignore[attr-defined]
+        if resolver is not None and prepare and getattr(resolver, "_values", None) is None:
+            resolver._values = {}
+        return platform
+
     for mod in _GATE_MODULES:
-        monkeypatch.setattr(
-            f"{mod}.bind_platform",
-            lambda config, vm, *, registry=None: platform,
-            raising=False,
-        )
+        monkeypatch.setattr(f"{mod}.bind_platform", _fake_bind, raising=False)
         monkeypatch.setattr(
             f"{mod}.ensure_active", lambda *a, **k: None, raising=False
         )

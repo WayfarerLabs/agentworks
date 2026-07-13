@@ -374,6 +374,10 @@ def add_sessions(
     # any spec carries shells > 0 the live-attach path below will open
     # new shells via _add_session_window. Resolve every referenced
     # secret BEFORE the DB write so a failure leaves no partial state.
+    # No platform instance participates in this command (the live sync
+    # is pure Tailscale, no platform ops), so this is the operation's
+    # ONE prompt session by construction -- nothing to fold into a
+    # bind boundary.
     # default_shells produces {cwd: None, admin: False} entries, so the
     # only admin-promotion path is session_user == admin_user (an
     # admin-mode session). The resolve is skipped when no specs carry
@@ -622,7 +626,10 @@ def add_shell(
 
     # Eager-prompting orchestration (FRD R4 / Phase 6): resolve any
     # secrets referenced by this pane's env chain BEFORE the DB write +
-    # potential pane-split below. Non-interactive failures surface as
+    # potential pane-split below. No platform instance participates in
+    # this command (the live sync is pure Tailscale, no platform ops),
+    # so this is the operation's ONE prompt session by construction.
+    # Non-interactive failures surface as
     # SecretUnavailableError with no partial state to clean up. We
     # always resolve (even when the console isn't live), since the
     # operator typed add-shell expecting to use the new pane shortly.
@@ -779,6 +786,10 @@ def restore_session(
             # _split_shell_pane). Resolve every referenced secret BEFORE
             # any pane is opened. Targets cover ALL configured shells in
             # this case (the window is missing, so every pane is new).
+            # Conditional-need exception to the one-boundary-resolve
+            # contract: whether the window is missing is only knowable
+            # from live tmux state, post-bind (same class as the
+            # Tailscale rejoin).
             from agentworks.secrets import resolve_for_command
 
             all_indices = list(range(configured_count))
@@ -908,7 +919,10 @@ def restore_session(
         session_user = _session_linux_user(db, session, vm)
 
         # Eager-prompting orchestration (FRD R4 / Phase 6): restore_session
-        # opens new shells for the missing pane indices. Resolve secrets
+        # opens new shells for the missing pane indices. Conditional-need
+        # exception to the one-boundary-resolve contract: which panes are
+        # missing is only knowable from live tmux state, post-bind.
+        # Resolve secrets
         # NOW -- after all the validation guards (untagged-panes /
         # duplicate-tags / out-of-range / "already matches config" no-op)
         # so an operator with a tag-corruption gets the actionable
@@ -1871,6 +1885,10 @@ def attach_console(
         # attach path (tmux session already exists) opens no new shells
         # so it skips eager-resolve, matching FRD R4 / R5: "console
         # attach joins existing shells, consumes no secrets."
+        # Conditional-need exception to the one-boundary-resolve
+        # contract: whether a build is needed is only knowable from live
+        # tmux state, post-bind (the bind + its boundary already ran in
+        # _prepare_vm_target_for_attach above).
         if recreate or not exists:
             from agentworks.secrets import resolve_for_command
 

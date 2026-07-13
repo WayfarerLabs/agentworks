@@ -15,7 +15,7 @@ from __future__ import annotations
 
 from pathlib import Path
 from types import SimpleNamespace
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import pytest
 
@@ -109,19 +109,21 @@ def test_session_create_eager_resolve_fires_before_db_insert(
     monkeypatch.setattr(session_manager, "_resolve_template", lambda *a, **k: _Tmpl())
     # _session_secret_target_pre_create reads config.vm_templates /
     # agent_templates which the SimpleNamespace below doesn't have; stub
-    # it to a sentinel so the orchestrator still calls resolve_for_command.
+    # it to a sentinel so the root still builds its bind targets.
     sentinel_target = object()
     monkeypatch.setattr(
         session_manager, "_session_secret_target_pre_create", lambda *a, **k: sentinel_target
     )
 
+    # The env chain now resolves inside the bind's boundary pass, so an
+    # unresolvable secret surfaces from bind_platform itself.
     def _explode(*args: object, **kwargs: object) -> None:
         raise SecretUnavailableError(
             "no active backend could resolve secret(s): api-key",
             hint="api-key: tried env-var",
         )
 
-    monkeypatch.setattr("agentworks.secrets.resolve_for_command", _explode)
+    monkeypatch.setattr("agentworks.sessions.manager.bind_platform", _explode)
 
     config = SimpleNamespace(session=SimpleNamespace(history_limit=50000))
 
@@ -145,8 +147,9 @@ def test_session_create_calls_resolve_with_session_target(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """create_session passes a single SecretTarget (the one returned by
-    ``_session_secret_target_pre_create``) into resolve_for_command.
-    Verifies the glue that turns a session command into a candidate set."""
+    ``_session_secret_target_pre_create``) into the bind's boundary
+    resolve. Verifies the glue that turns a session command into a
+    candidate set."""
     from agentworks.sessions import manager as session_manager
 
     db = _seed_basic_db(tmp_path)
@@ -167,16 +170,16 @@ def test_session_create_calls_resolve_with_session_target(
     )
 
     class _Sentinel(Exception):
-        """Raised from the resolve spy so we can stop the test before the
+        """Raised from the bind spy so we can stop the test before the
         long-running SSH-driven part of create_session runs."""
 
     calls: list[list[object]] = []
 
-    def _spy(targets: list[object], *args: object, **kwargs: object) -> dict[str, str]:
-        calls.append(targets)
+    def _bind_spy(config: object, vm: object, **kwargs: Any) -> object:
+        calls.append(list(kwargs.get("targets") or ()))
         raise _Sentinel
 
-    monkeypatch.setattr("agentworks.secrets.resolve_for_command", _spy)
+    monkeypatch.setattr("agentworks.sessions.manager.bind_platform", _bind_spy)
 
     config = SimpleNamespace(session=SimpleNamespace(history_limit=50000))
 
@@ -191,7 +194,7 @@ def test_session_create_calls_resolve_with_session_target(
             admin=True,
         )
 
-    assert len(calls) == 1, f"expected exactly one eager-resolve call, got {len(calls)}"
+    assert len(calls) == 1, f"expected exactly one boundary bind, got {len(calls)}"
     assert calls[0] == [sentinel_target], "session target list should contain one target"
     db.close()
 
@@ -476,35 +479,35 @@ def test_agent_reinit_does_not_eager_resolve_operator_env() -> None:
     )
 
 
-def test_vm_shell_binds_before_the_env_resolve(
+def test_vm_shell_env_target_joins_the_bind_boundary(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """The lifecycle ordering pin for the runtime roots: shell_vm binds
-    (preflight + boundary resolve) BEFORE the env-chain eager resolve,
-    so no prompt can precede a failing platform preflight."""
+    """The one-prompt-session pin for the runtime roots: shell_vm hands
+    its env-chain SecretTarget to bind_platform, so the env secrets ride
+    the SAME boundary resolve as the site's config secrets -- there is
+    no separate env prompt session, and no prompt can precede the
+    platform preflight (the boundary runs inside the bind)."""
     from agentworks.vms import manager as vm_manager
 
     db = _seed_basic_db(tmp_path)
-    order: list[str] = []
+    sentinel_target = object()
 
-    monkeypatch.setattr(
-        vm_manager, "bind_platform",
-        lambda *a, **k: order.append("bind") or object(),
-    )
     monkeypatch.setattr(
         vm_manager, "_resolve_vm_admin_env_scopes",
         lambda *a, **k: vm_manager._VmAdminEnvScopes(vm={}, workspace=None, admin={}),
     )
-    monkeypatch.setattr(vm_manager, "_vm_secret_target", lambda *a, **k: object())
+    monkeypatch.setattr(vm_manager, "_vm_secret_target", lambda *a, **k: sentinel_target)
 
     class _Stop(Exception):
         pass
 
-    def _env_resolve(*args: object, **kwargs: object) -> None:
-        order.append("env-resolve")
+    bound_targets: list[list[object]] = []
+
+    def _bind_spy(config: object, vm: object, **kwargs: Any) -> object:
+        bound_targets.append(list(kwargs.get("targets") or ()))
         raise _Stop
 
-    monkeypatch.setattr("agentworks.secrets.resolve_for_command", _env_resolve)
+    monkeypatch.setattr(vm_manager, "bind_platform", _bind_spy)
 
     config = SimpleNamespace(
         vm=SimpleNamespace(env={}),
@@ -513,7 +516,7 @@ def test_vm_shell_binds_before_the_env_resolve(
     with pytest.raises(_Stop):
         vm_manager.shell_vm(db, config, "vm1")  # type: ignore[arg-type]
 
-    assert order == ["bind", "env-resolve"]
+    assert bound_targets == [[sentinel_target]]
     db.close()
 
 
@@ -534,7 +537,6 @@ def test_vm_shell_eager_resolve_fires_before_ssh(
         vm_manager, "_resolve_vm_admin_env_scopes",
         lambda *a, **k: vm_manager._VmAdminEnvScopes(vm={}, workspace=None, admin={}),
     )
-    monkeypatch.setattr(vm_manager, "_vm_secret_target", lambda *a, **k: object())
 
     def _explode(*args: object, **kwargs: object) -> None:
         raise SecretUnavailableError(
@@ -542,7 +544,9 @@ def test_vm_shell_eager_resolve_fires_before_ssh(
             hint="api-key: tried env-var",
         )
 
-    monkeypatch.setattr("agentworks.secrets.resolve_for_command", _explode)
+    from agentworks.secrets.resolver import Resolver
+
+    monkeypatch.setattr(Resolver, "resolve", _explode)
 
     ssh_called: list[bool] = []
 
@@ -585,7 +589,6 @@ def test_vm_exec_eager_resolve_fires_before_ssh(
         vm_manager, "_resolve_vm_admin_env_scopes",
         lambda *a, **k: vm_manager._VmAdminEnvScopes(vm={}, workspace=None, admin={}),
     )
-    monkeypatch.setattr(vm_manager, "_vm_secret_target", lambda *a, **k: object())
 
     def _explode(*args: object, **kwargs: object) -> None:
         raise SecretUnavailableError(
@@ -593,7 +596,9 @@ def test_vm_exec_eager_resolve_fires_before_ssh(
             hint="api-key: tried env-var",
         )
 
-    monkeypatch.setattr("agentworks.secrets.resolve_for_command", _explode)
+    from agentworks.secrets.resolver import Resolver
+
+    monkeypatch.setattr(Resolver, "resolve", _explode)
 
     streaming_calls: list[str] = []
 
@@ -636,9 +641,6 @@ def test_agent_exec_eager_resolve_fires_before_ssh(
         agent_manager, "_resolve_agent_direct_env_scopes",
         lambda *a, **k: agent_manager._AgentDirectEnvScopes(vm={}, workspace=None, agent={}),
     )
-    monkeypatch.setattr(
-        agent_manager, "_agent_direct_secret_target", lambda *a, **k: object()
-    )
 
     def _explode(*args: object, **kwargs: object) -> None:
         raise SecretUnavailableError(
@@ -646,7 +648,9 @@ def test_agent_exec_eager_resolve_fires_before_ssh(
             hint="api-key: tried env-var",
         )
 
-    monkeypatch.setattr("agentworks.secrets.resolve_for_command", _explode)
+    from agentworks.secrets.resolver import Resolver
+
+    monkeypatch.setattr(Resolver, "resolve", _explode)
 
     streaming_calls: list[str] = []
 
@@ -670,45 +674,45 @@ def test_agent_exec_eager_resolve_fires_before_ssh(
     db.close()
 
 
-def test_agent_exec_binds_before_the_env_resolve(
+def test_agent_exec_env_target_joins_the_bind_boundary(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """The lifecycle ordering pin for the agent roots (the round-2 bug
-    lived here, not in the vm twins): exec_agent binds (preflight +
-    boundary resolve) BEFORE the env-chain eager resolve."""
+    """The one-prompt-session pin for the agent roots (the Phase 7
+    round-2 ordering bug lived here, not in the vm twins): exec_agent
+    hands its env-chain SecretTarget to bind_platform, so the env
+    secrets ride the SAME boundary resolve as the site's config
+    secrets."""
     from agentworks.agents import manager as agent_manager
 
     db = _seed_basic_db(tmp_path)
     db.insert_agent("a1", "vm1", "agt-a1", template="default")
-    order: list[str] = []
+    sentinel_target = object()
 
-    monkeypatch.setattr(
-        agent_manager, "bind_platform",
-        lambda *a, **k: order.append("bind") or object(),
-    )
     monkeypatch.setattr(
         agent_manager, "_resolve_agent_direct_env_scopes",
         lambda *a, **k: agent_manager._AgentDirectEnvScopes(vm={}, workspace=None, agent={}),
     )
     monkeypatch.setattr(
-        agent_manager, "_agent_direct_secret_target", lambda *a, **k: object()
+        agent_manager, "_agent_direct_secret_target", lambda *a, **k: sentinel_target
     )
 
     class _Stop(Exception):
         pass
 
-    def _env_resolve(*args: object, **kwargs: object) -> None:
-        order.append("env-resolve")
+    bound_targets: list[list[object]] = []
+
+    def _bind_spy(config: object, vm: object, **kwargs: Any) -> object:
+        bound_targets.append(list(kwargs.get("targets") or ()))
         raise _Stop
 
-    monkeypatch.setattr("agentworks.secrets.resolve_for_command", _env_resolve)
+    monkeypatch.setattr(agent_manager, "bind_platform", _bind_spy)
 
     with pytest.raises(_Stop):
         agent_manager.exec_agent(
             db, SimpleNamespace(), name="a1", command=["echo", "hi"],  # type: ignore[arg-type]
         )
 
-    assert order == ["bind", "env-resolve"]
+    assert bound_targets == [[sentinel_target]]
     db.close()
 
 
@@ -745,12 +749,13 @@ def test_shell_agent_passes_workspace_scope_to_secret_target(
     stub_vm_gates(monkeypatch)
 
     class _Sentinel(Exception):
-        """Raised from resolve_for_command so the test stops before SSH."""
+        """Raised from the bind (which now hosts the env resolve) so the
+        test stops before SSH; the scopes are captured before it."""
 
     def _explode(*args: object, **kwargs: object) -> None:
         raise _Sentinel
 
-    monkeypatch.setattr("agentworks.secrets.resolve_for_command", _explode)
+    monkeypatch.setattr(agent_manager, "bind_platform", _explode)
 
     config = SimpleNamespace()
 

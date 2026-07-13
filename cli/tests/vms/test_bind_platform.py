@@ -139,6 +139,44 @@ def test_bind_platforms_union_spans_sites(
     assert resolve_counter[0] == ["proxmox-token-secret"]
 
 
+def test_env_targets_join_the_site_secret_pass(
+    make_config, resolve_counter: list[object], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The headline one-prompt-session pin: a command's env-chain secret
+    (via ``targets=``) and the site's config secret resolve in ONE
+    boundary pass -- the operation never opens a second session."""
+    from agentworks.env import EnvEntry
+    from agentworks.secrets import SecretTarget
+    from agentworks.secrets.resolver import Resolver
+
+    monkeypatch.setenv("AW_SECRET_API_KEY", "k")
+    config = make_config(
+        PROXMOX_SECTION + '\n[secrets.api-key]\ndescription = "workload key"\n'
+    )
+    from agentworks.bootstrap import build_registry
+
+    registry = build_registry(config)
+    resolver = Resolver(config, registry)
+    target = SecretTarget(
+        vm={"API_KEY": EnvEntry(key="API_KEY", secret="api-key")},
+        label="test-shell",
+    )
+    vm_manager.bind_platform(
+        config, _vm("v1", "proxmox"), registry=registry,  # type: ignore[arg-type]
+        resolver=resolver, targets=[target],
+    )
+
+    from typing import cast
+
+    assert len(resolve_counter) == 1
+    assert sorted(cast("list[str]", resolve_counter[0])) == [
+        "api-key",
+        "proxmox-token-secret",
+    ]
+    assert resolver.get("api-key") == "k"
+    assert resolver.get("proxmox-token-secret") == "pve-token"
+
+
 def test_bind_platforms_empty_set_builds_no_registry(
     make_config, monkeypatch: pytest.MonkeyPatch
 ) -> None:

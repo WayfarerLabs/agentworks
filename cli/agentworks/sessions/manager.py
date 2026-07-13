@@ -1415,33 +1415,21 @@ def create_session(
 
     template = _resolve_template(registry, template_name)
 
-    # ===== Ensure VM running + Tailscale reachable (SSH, no mutations) ======
+    # ===== Bind + boundary resolve, then ensure VM running ==================
 
-    # The command's ONE platform bind; threaded through _prepare_vm and
-    # the session-internal hold below (re-binding re-runs the site's
-    # secret resolve pass).
-    vm_platform = bind_platform(config, vm, registry=registry)
-    ensure_active(db, config, vm, vm_platform)
-    # Reload the VM row: ``ensure_active`` may have rejoined Tailscale
-    # (only when the VM was stopped/deallocated) and updated
-    # ``vms.tailscale_host``. The in-memory ``vm`` from our pre-check would
-    # otherwise read stale and the check below could spuriously raise.
-    refreshed_vm = db.get_vm(target_vm_name)
-    assert refreshed_vm is not None  # existed two lines ago; ensure_active can't remove it
-    vm = refreshed_vm
-    if vm.tailscale_host is None:
-        raise StateError(
-            f"VM '{vm.name}' has no Tailscale address",
-            entity_kind="vm",
-            entity_name=vm.name,
-        )
+    # The command's ONE platform bind AND its one resolve pass: the
+    # session's env-chain secrets (via the pre-create SecretTarget)
+    # join the site's config secrets in a single prompt session at the
+    # preflight boundary, before any op (``ensure_active`` may need the
+    # site secret -- proxmox's status read -- so the boundary must
+    # precede it). The bound platform threads through _prepare_vm and
+    # the session-internal hold below (re-binding re-runs the boundary).
+    from agentworks.secrets.resolver import Resolver
 
-    # ===== Eager-resolve secrets (single call, before any state mutation) ===
-
-    from agentworks.secrets import resolve_for_command
-
-    secret_values = resolve_for_command(
-        [
+    resolver = Resolver(config, registry)
+    vm_platform = bind_platform(
+        config, vm, registry=registry, resolver=resolver,
+        targets=[
             _session_secret_target_pre_create(
                 registry,
                 name=name,
@@ -1457,14 +1445,30 @@ def create_session(
                 is_admin_mode=(agent_name is None),
             ),
         ],
-        config,
-        registry,
     )
-    # If we reach here, every secret the SESSION ENV references is
-    # resolved into secret_values (threaded to the compose site below).
-    # A downstream create_agent still performs its own git-token
-    # resolve; those secrets are disjoint from env references in
-    # practice (token names default to git-token-<name>).
+    ensure_active(db, config, vm, vm_platform)
+    # Reload the VM row: ``ensure_active`` may have rejoined Tailscale
+    # (only when the VM was stopped/deallocated) and updated
+    # ``vms.tailscale_host``. The in-memory ``vm`` from our pre-check would
+    # otherwise read stale and the check below could spuriously raise.
+    # (The SecretTarget above read only vm.template, which a refresh
+    # cannot change, so the pre-refresh row was safe to target.)
+    refreshed_vm = db.get_vm(target_vm_name)
+    assert refreshed_vm is not None  # existed two lines ago; ensure_active can't remove it
+    vm = refreshed_vm
+    if vm.tailscale_host is None:
+        raise StateError(
+            f"VM '{vm.name}' has no Tailscale address",
+            entity_kind="vm",
+            entity_name=vm.name,
+        )
+
+    secret_values = resolver.values
+    # Every secret the SESSION ENV references is resolved into
+    # secret_values (threaded to the compose site below). A downstream
+    # create_agent still performs its own git-token resolve; those
+    # secrets are disjoint from env references in practice (token names
+    # default to git-token-<name>).
 
     # ===== Atomic state mutations with rollback =============================
 
@@ -2044,6 +2048,14 @@ def restart_session(
         # secret referenced by this session's env chain BEFORE any kill /
         # destructive step. Non-interactive failures surface as
         # SecretUnavailableError with no partial state to clean up.
+        # This is the recorded bail-before-prompt exception to the
+        # one-boundary-resolve contract: the site's config secrets
+        # resolved at _prepare_vm's bind (before ensure_active's ops
+        # needed them), but the env chain deliberately resolves HERE --
+        # after the BROKEN/--force refusal and the "Restart?" confirm --
+        # so a declined restart never prompts for secrets it was about
+        # to discard. Folding it into the boundary would trade that
+        # operator protection for one fewer session on proxmox only.
         template = _resolve_template(registry, session.template)
 
         # Pre-flight the template's required commands before the destructive

@@ -143,12 +143,19 @@ flag/completion work stays in Phase 5.
   decisions were recorded from its findings: (5) `bind_platforms` wholesale-fails a mixed-health
   batch when ANY distinct site's preflight fails -- contract-consistent (preflight everything before
   anything real) and confirmed intended; a partial-batch degrade would act on some VMs while
-  reporting failure, which is worse than failing clean. (6) The runtime env-chain resolve
-  (`shell_vm` / `exec_vm` / `shell_agent` / `exec_agent` / the session paths) remains its OWN prompt
-  session after the bind's boundary resolve; the round's fixes reordered every such root to bind
-  (preflight + boundary resolve) FIRST, so no prompt precedes a preflight anywhere, but folding the
-  env chain into the resolver is deliberately deferred (that seam belongs to the session-harness
-  capability adoption).
+  reporting failure, which is worse than failing clean. (6) The runtime env-chain resolve was
+  initially deferred and then, on maintainer direction (the harness adoption needs the single seam),
+  FOLDED in this PR: `bind_platform` takes `targets=` (the command's `SecretTarget`s, registered on
+  the resolver via `compute_needed_secrets`) so `shell_vm` / `exec_vm` / `shell_agent` /
+  `exec_agent` / `create_session` resolve site secrets AND env-chain secrets in the ONE boundary
+  pass -- one prompt session per command, pinned end to end
+  (`test_env_targets_join_the_site_secret_pass`). Three recorded exceptions keep their own resolve
+  timing, each with a rationale comment at the site: `restart_session` resolves its env chain after
+  the BROKEN/--force refusal and the "Restart?" confirm (bail-before-prompt: a declined restart must
+  not prompt for secrets it was about to discard); the console attach/restore build paths resolve
+  conditionally on live tmux state discovered post-bind (conditional need, the rejoin's class); and
+  `console add-sessions` / `add-shell` bind no platform at all (pure Tailscale live-sync), so their
+  env resolve IS the operation's one session by construction.
 
 **Compile boundaries**: Phases 1 through 3 are one logical commit boundary, mirroring the
 polymorphic-transports precedent. As planned, Phase 1 would open a non-compiling window when the

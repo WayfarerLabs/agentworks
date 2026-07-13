@@ -672,7 +672,6 @@ def shell_agent(
     import sys
 
     from agentworks.env import ResourceContext, compose_env
-    from agentworks.secrets import resolve_for_command
     from agentworks.transports import agent_transport
 
     # Resolve workspace upfront (needed for authz check, env scope, AND
@@ -680,25 +679,22 @@ def shell_agent(
     # errors and the eager-resolve below sees the right scope chain.
     ws = _resolve_workspace_for_agent(db, vm, agent, workspace_name)
 
-    # Bind FIRST: the platform's preflight must fail before the env
-    # chain prompts the operator for anything (the lifecycle's
-    # no-prompt-before-preflight ordering).
+    # The composition root: the agent shell's env-chain secrets join
+    # the bind's ONE boundary resolve (site secrets + env secrets, one
+    # prompt session), after the platform's preflight. The same scope
+    # dicts feed both the SecretTarget and compose_env below so the two
+    # consumers can't drift.
     from agentworks.bootstrap import build_registry
+    from agentworks.secrets.resolver import Resolver
 
     registry = build_registry(config)
-    bound = bind_platform(config, vm, registry=registry)
-
-    # Eager-prompting orchestration (FRD R4 / Phase 6): resolve every
-    # secret referenced by the agent shell's env chain BEFORE opening
-    # the interactive SSH session. The same scope dicts feed both the
-    # SecretTarget (for resolve_for_command) and compose_env below so
-    # the two consumers can't drift.
     scopes = _resolve_agent_direct_env_scopes(registry, vm, agent, ws=ws)
-    values = resolve_for_command(
-        [_agent_direct_secret_target(scopes, label=f"agent-shell={agent.name}")],
-        config,
-        registry,
+    resolver = Resolver(config, registry)
+    bound = bind_platform(
+        config, vm, registry=registry, resolver=resolver,
+        targets=[_agent_direct_secret_target(scopes, label=f"agent-shell={agent.name}")],
     )
+    values = resolver.values
 
     from agentworks.vms.sites import site_platform_name
 
@@ -767,7 +763,6 @@ def exec_agent(
 
     from agentworks.env import ResourceContext, compose_env
     from agentworks.exec_validation import reject_dash_prefixed_command
-    from agentworks.secrets import resolve_for_command
     from agentworks.transports import agent_transport
 
     reject_dash_prefixed_command(command, kind="agent", name=name)
@@ -787,24 +782,22 @@ def exec_agent(
     # sees the right scope chain.
     ws = _resolve_workspace_for_agent(db, vm, agent, workspace_name)
 
-    # Bind FIRST: the platform's preflight must fail before the env
-    # chain prompts the operator for anything (the lifecycle's
-    # no-prompt-before-preflight ordering).
+    # The composition root: the agent exec env-chain secrets join the
+    # bind's ONE boundary resolve (site secrets + env secrets, one
+    # prompt session), after the platform's preflight. The same scope
+    # dicts feed both the SecretTarget and compose_env below so the two
+    # consumers can't drift.
     from agentworks.bootstrap import build_registry
+    from agentworks.secrets.resolver import Resolver
 
     registry = build_registry(config)
-    bound = bind_platform(config, vm, registry=registry)
-
-    # Eager-prompting orchestration (FRD R4 / Phase 6): resolve every
-    # secret referenced by the agent exec env chain BEFORE running the
-    # remote command. The same scope dicts feed both the SecretTarget
-    # and compose_env below so the two consumers can't drift.
     scopes = _resolve_agent_direct_env_scopes(registry, vm, agent, ws=ws)
-    values = resolve_for_command(
-        [_agent_direct_secret_target(scopes, label=f"agent-exec={agent.name}")],
-        config,
-        registry,
+    resolver = Resolver(config, registry)
+    bound = bind_platform(
+        config, vm, registry=registry, resolver=resolver,
+        targets=[_agent_direct_secret_target(scopes, label=f"agent-exec={agent.name}")],
     )
+    values = resolver.values
 
     from agentworks.vms.sites import site_platform_name
 

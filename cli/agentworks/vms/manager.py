@@ -37,7 +37,7 @@ from agentworks.vms.initializer import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable, Iterator
+    from collections.abc import Iterable, Iterator, Sequence
 
     from agentworks.capabilities.vm_platform import VMPlatform
     from agentworks.config import Config
@@ -244,6 +244,7 @@ def bind_platform(
     registry: Registry | None = None,
     resolver: Resolver | None = None,
     prepare: bool = True,
+    targets: Sequence[SecretTarget] = (),
 ) -> VMPlatform:
     """Composition-root helper: bind a VM's platform through its site.
 
@@ -252,11 +253,17 @@ def bind_platform(
     (cheap; the site's declared config secrets register on the
     operation's resolver, nothing resolves) -> preflight -> the
     operation's one resolve pass at the preflight boundary (one prompt
-    session; proxmox's API token is today's only content, the other
-    platforms' empty set makes it a no-op). Call ONCE at a VM-touching
-    command's entry and thread the bound platform down; the gates
-    (:func:`ensure_active` / :func:`keep_active`) take it as a
-    parameter and never resolve or bind anything themselves.
+    session covering the union of everything registered). Call ONCE at
+    a VM-touching command's entry and thread the bound platform down;
+    the gates (:func:`ensure_active` / :func:`keep_active`) take it as
+    a parameter and never resolve or bind anything themselves.
+
+    ``targets`` folds the command's runtime env chain into the same
+    pass: every secret the targets' merged env references (the shell /
+    exec / session-create roots) registers before the boundary, so the
+    workload's env secrets and the site's config secrets are ONE prompt
+    session. Callers read the mapping back via the resolver they passed
+    in (``resolver.values`` feeds ``compose_env``).
 
     ``prepare=False`` returns the constructed instance without the
     preflight + resolve boundary, for the roots that interleave other
@@ -273,6 +280,8 @@ def bind_platform(
     if resolver is None:
         resolver = Resolver(config, registry)
     platform = platform_for(vm, registry, resolver=resolver)
+    if targets:
+        resolver.register_targets(targets)
     if prepare:
         platform.preflight()
         resolver.resolve()
@@ -849,7 +858,6 @@ def shell_vm(
     import sys
 
     from agentworks.env import ResourceContext, compose_env
-    from agentworks.secrets import resolve_for_command
     from agentworks.transports import native_transport, transport
 
     vm = _require_vm(db, name)
@@ -879,30 +887,27 @@ def shell_vm(
             ),
         )
 
-    # Bind FIRST: the platform's preflight (missing tool, stranded
-    # site, unresolvable site secret) must fail before the env chain
-    # prompts the operator for anything (the lifecycle's
-    # no-prompt-before-preflight ordering).
+    # The composition root: the admin shell's env-chain secrets join
+    # the bind's ONE boundary resolve (site secrets + env secrets, one
+    # prompt session), and the platform's preflight (missing tool,
+    # stranded site, unresolvable secret) fails before any prompt. The
+    # same scope dicts feed both the SecretTarget (via
+    # _vm_secret_target) and compose_env so the two consumers can't
+    # drift. Crucially the vm scope comes from vm.template (DB row),
+    # not the config-default template, which may not match and would
+    # silently route the wrong env into a shell on a
+    # non-default-template VM.
     from agentworks.bootstrap import build_registry
+    from agentworks.secrets.resolver import Resolver
 
     registry = build_registry(config)
-    bound = bind_platform(config, vm, registry=registry)
-
-    # Eager-prompting orchestration (FRD R4 / Phase 6): resolve every
-    # secret referenced by the admin shell's env chain BEFORE opening
-    # the interactive session. The same scope dicts feed both the
-    # SecretTarget (via _vm_secret_target) and compose_env so the two
-    # consumers can't drift. Crucially the vm scope comes from
-    # vm.template (DB row), not the config-default template, which may
-    # not match and would silently route the wrong env into a shell on
-    # a non-default-template VM. (On a secret-bearing site this is a
-    # second prompt session after the bind's boundary resolve; folding
-    # the env chain into the resolver is the recorded follow-up, beside
-    # the rejoin carve-out.)
     scopes = _resolve_vm_admin_env_scopes(registry, vm, ws=ws)
-    values = resolve_for_command(
-        [_vm_secret_target(scopes, label=f"vm-shell={vm.name}")], config, registry,
+    resolver = Resolver(config, registry)
+    bound = bind_platform(
+        config, vm, registry=registry, resolver=resolver,
+        targets=[_vm_secret_target(scopes, label=f"vm-shell={vm.name}")],
     )
+    values = resolver.values
 
     from agentworks.vms.sites import site_platform_name
 
@@ -957,7 +962,6 @@ def exec_vm(
 
     from agentworks.env import ResourceContext, compose_env
     from agentworks.exec_validation import reject_dash_prefixed_command
-    from agentworks.secrets import resolve_for_command
     from agentworks.transports import transport
 
     reject_dash_prefixed_command(command, kind="vm", name=name)
@@ -982,23 +986,23 @@ def exec_vm(
             hint="VM init may not be complete. Check 'vm describe' for status.",
         )
 
-    # Bind FIRST: the platform's preflight must fail before the env
-    # chain prompts the operator for anything (the lifecycle's
-    # no-prompt-before-preflight ordering).
+    # The composition root: the exec env-chain secrets join the bind's
+    # ONE boundary resolve (site secrets + env secrets, one prompt
+    # session), after the platform's preflight. The same scope dicts
+    # feed both the SecretTarget and compose_env so the two consumers
+    # can't drift. The vm scope comes from vm.template (DB row), not
+    # the config-default template.
     from agentworks.bootstrap import build_registry
+    from agentworks.secrets.resolver import Resolver
 
     registry = build_registry(config)
-    bound = bind_platform(config, vm, registry=registry)
-
-    # Eager-prompting orchestration (FRD R4 / Phase 6): resolve every
-    # secret referenced by the admin exec env chain BEFORE running the
-    # remote command. The same scope dicts feed both the SecretTarget
-    # and compose_env so the two consumers can't drift. The vm scope
-    # comes from vm.template (DB row), not the config-default template.
     scopes = _resolve_vm_admin_env_scopes(registry, vm, ws=ws)
-    values = resolve_for_command(
-        [_vm_secret_target(scopes, label=f"vm-exec={vm.name}")], config, registry,
+    resolver = Resolver(config, registry)
+    bound = bind_platform(
+        config, vm, registry=registry, resolver=resolver,
+        targets=[_vm_secret_target(scopes, label=f"vm-exec={vm.name}")],
     )
+    values = resolver.values
 
     from agentworks.vms.sites import site_platform_name
 
