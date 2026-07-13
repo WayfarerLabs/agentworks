@@ -184,6 +184,15 @@ def test_doctor_system_group(
     assert row.status is doctor.Status.OK
     assert row.message == "team-a"
 
+    # No database at all (fresh install): nothing has ever set the
+    # slug, so the same unset row renders without opening the DB.
+    monkeypatch.setattr(
+        _DbFactory, "check_schema", staticmethod(lambda p=None: (False, 0, 0))
+    )
+    fresh = {c.name: c for c in doctor._check_system().checks}["System slug"]
+    assert fresh.status is doctor.Status.INFO
+    assert "will ask" in (fresh.message or "")
+
 
 def test_doctor_vm_sites_group(
     db: Database, monkeypatch: pytest.MonkeyPatch, tmp_path: Path

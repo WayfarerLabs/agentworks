@@ -148,3 +148,39 @@ def test_run_checks_returns_report() -> None:
     assert "Required tools" in group_names
     assert "VM platforms" in group_names
     assert "Database" in group_names
+
+
+@pytest.mark.integration
+def test_run_checks_group_order_and_config_failure_placeholder(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Group order is a presentation choice decoupled from which checks
+    need config: with config unavailable, the report keeps its shape --
+    the VM sites group renders a skipped pointer (it precedes the
+    Configuration group that explains the failure, so silent absence
+    would read as "no sites") and every config-free group renders in
+    presentation order. Integration for the same reason as the smoke
+    test above: the config-free groups probe the real environment.
+    """
+    from agentworks import doctor
+
+    failed = doctor.HealthGroup("Configuration")
+    failed.fail("Config", "did not load")
+    monkeypatch.setattr(doctor, "_check_config", lambda: (failed, None, None))
+
+    report = doctor.run_checks()
+
+    assert [g.name for g in report.groups] == [
+        "System",
+        "Python",
+        "Required tools",
+        "VM platforms",
+        "VM sites",
+        "Tailscale",
+        "Configuration",
+        "Database",
+    ]
+    placeholder = report.groups[4].checks
+    assert len(placeholder) == 1
+    assert placeholder[0].status is doctor.Status.INFO
+    assert "Configuration" in (placeholder[0].message or "")

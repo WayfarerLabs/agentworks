@@ -117,7 +117,7 @@ def run_checks(*, completion_version: str | None = None) -> HealthReport:
         sites = HealthGroup("VM sites")
         sites.info(
             "Declared sites",
-            "skipped (config failed to load; see the Configuration group)",
+            "skipped (configuration unavailable; see the Configuration group)",
         )
         report.groups.append(sites)
     report.groups.append(_check_tailscale())
