@@ -332,12 +332,11 @@ A new `settings` table stores install-level state; the `system_slug` key holds t
 
 - **Effectively immutable**: no rename command in this SDD. The design (R5, R10, R11) is such that a
   slug change would not corrupt existing state, but the operation is not exposed.
-- **Deferred nudge**: when creating a VM on a shared-backend site (Azure, Proxmox, AWS later, or
-  remote Lima) with a null slug, the CLI prompts non-blocking: "you are creating a VM on a site
-  whose backend may be shared with other agentworks installs; VM names may collide. Set a slug now?
-  [Y/n/never-remind-me]". `never-remind-me` writes a suppression flag in settings. Whether a site is
-  shared-backend is declared by its platform (Lima computes it from the presence of `vm_host` in
-  `platform_config`).
+- ~~**Deferred nudge**~~ REMOVED (2026-07-13 maintainer ruling): a blank answer to the one-time
+  prompt is a perfectly valid answer ("no slug"), and it is final -- no prompt of any kind fires
+  again. The originally designed shared-backend nudge existed precisely to re-ask decliners, so it
+  was deleted along with its `never-remind-me` suppression flag and the platforms' `shared_backend`
+  classmethod (the nudge was its only consumer). See the plan's 2026-07-13 sequencing note.
 - **Never surfaced in normal CLI output**: `agw vm list` shows `vm.name`, not the slug. The slug
   appears in `agw doctor`, `agw vm describe`, and error messages that reference backend-side names.
 - The slug is read from the DB at the points that need it (building a `ProvisionRequest`, SSH config
@@ -568,7 +567,8 @@ hostname, which tailscaled picks up as the node name. Changes:
   resource-manifests plan); `defaults.platform` becomes `defaults.site` with the old key as a
   deprecated alias for one release; `vm list`'s PLATFORM column becomes SITE; `vm describe` shows
   both Site and Platform plus the platform's `display_backend_name()`.
-- One-time slug prompt at first `vm create`; deferred nudge on shared-backend sites (R4).
+- One-time slug prompt at first `vm create`; a blank answer is final (R4 -- the deferred
+  shared-backend nudge was removed by the 2026-07-13 ruling).
 - `agw vm-host` command group, `--vm-host` flag, and `defaults.vm_host` removed (R3).
 - `[azure]` / `[proxmox]` sections warn as deprecated TOML resource sections pointing at
   `agw resource migrate` (R2), joining the aggregated dual-path deprecation warning (and its

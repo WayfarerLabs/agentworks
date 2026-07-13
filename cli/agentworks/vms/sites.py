@@ -232,22 +232,6 @@ def site_platform_name(site: str, registry: Registry) -> str:
     return lookup_site(site, registry).platform
 
 
-def site_shared_backend(decl: VMSiteDecl) -> bool:
-    """Whether the site's backend is plausibly shared between
-    agentworks installs (drives the deferred slug nudge). Declared
-    by the platform; lima computes it from ``vm_host`` presence.
-    """
-    from agentworks.capabilities.vm_platform import VM_PLATFORM_REGISTRY
-
-    capability = VM_PLATFORM_REGISTRY.get(decl.platform)
-    if capability is None:
-        # A disabled site (platform not installed) can't be created
-        # against -- resolve_site guards first -- but inspection paths
-        # may still ask; an unknown backend is trivially not shared.
-        return False
-    return capability.shared_backend(decl.platform_config)
-
-
 def resolve_site(
     name: str,
     registry: Registry,

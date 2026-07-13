@@ -153,7 +153,8 @@ The first interactive `vm create` asks once for an optional **system slug** (3-2
 alphanumeric plus dash, no leading/trailing dash): a short identifier for this agentworks
 installation, used to namespace VM hostnames and backend-side names (`{slug}-{vm-name}`) so installs
 sharing a cloud account, Proxmox cluster, or Windows/Mac user don't collide. Leave it blank if this
-install is the only one using its sites' backends; non-interactive runs never prompt.
+install is the only one using its sites' backends -- a blank answer is remembered and it will never
+ask again. Non-interactive runs never prompt (a later interactive create still asks once).
 
 `vm reinit` re-runs the initialization phase using the current config without reprovisioning the VM.
 Changes to config (new packages, different install commands, etc.) are picked up automatically.

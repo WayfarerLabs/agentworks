@@ -89,9 +89,9 @@ class VMPlatform(Capability):
     resolve pass at the preflight boundary.
 
     Class-level contract (consumed by the vm-site kind decoder, the
-    capability publisher, the R4 slug nudge, and the DB migration):
-    ``name``, ``description``, ``validate_config``, ``shared_backend``,
-    and ``legacy_platform_metadata``.
+    capability publisher, and the DB migration): ``name``,
+    ``description``, ``validate_config``, and
+    ``legacy_platform_metadata``.
 
     Idempotency: ops flagged with ``@idempotent_op`` (``start``,
     ``stop``, ``delete``) must land in the same place run twice as run
@@ -142,16 +142,6 @@ class VMPlatform(Capability):
         """The bound site's validated config blob (the
         capability-generic ``config``, under the domain's vocabulary)."""
         return self.config
-
-    @classmethod
-    def shared_backend(cls, platform_config: Mapping[str, object]) -> bool:
-        """True when multiple agentworks installs plausibly share this
-        site's backend (drives the R4 deferred slug nudge). Cloud and
-        cluster platforms return a constant True; lima computes from
-        ``vm_host`` presence. Default False (single-workstation
-        backends).
-        """
-        return False
 
     @classmethod
     def legacy_platform_metadata(

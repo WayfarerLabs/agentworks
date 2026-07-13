@@ -9,7 +9,6 @@ from typing import TYPE_CHECKING, NamedTuple
 from agentworks import output
 from agentworks.config import validate_admin_username, validate_name
 from agentworks.db import (
-    NUDGE_SUPPRESSED_KEY,
     SYSTEM_SLUG_KEY,
     InitStatus,
     ProvisioningStatus,
@@ -47,7 +46,6 @@ if TYPE_CHECKING:
     from agentworks.secrets import SecretTarget
     from agentworks.secrets.base import SecretDecl
     from agentworks.secrets.resolver import Resolver
-    from agentworks.vms.sites import VMSiteDecl
 
 
 class _VmAdminEnvScopes(NamedTuple):
@@ -169,72 +167,33 @@ def validate_slug(slug: str) -> None:
         )
 
 
-def _resolve_system_slug(db: Database) -> tuple[str | None, bool]:
+def _resolve_system_slug(db: Database) -> str | None:
     """The install's slug, prompting once at first interactive
-    ``vm create``. Returns ``(slug, asked_now)``.
+    ``vm create``.
 
     The settings row distinguishes never-asked (absent) from declined
-    (present, empty): an empty answer records the declined row so the
-    prompt fires once regardless of the answer. Non-interactive runs
-    never prompt and never write, so a later interactive create still
-    asks. ``asked_now`` lets the caller skip the deferred nudge when
-    the operator declined the full prompt seconds earlier (the same
-    question twice in one create would be noise, not a reminder).
+    (present, empty): a BLANK answer is a perfectly valid one ("no
+    slug") and records the declined row, so the prompt fires once
+    regardless of the answer and never again -- no nudges, no
+    reminders (an earlier shared-backend nudge that re-asked decliners
+    was removed by maintainer ruling: the blank answer is final).
+    Non-interactive runs never prompt and never write, so a later
+    interactive create still asks.
     """
     stored = db.get_setting(SYSTEM_SLUG_KEY)
     if stored is not None:
-        return stored or None, False
+        return stored or None
     if not output.is_interactive():
-        return None, False
+        return None
     answer = output.prompt(_SLUG_PROMPT, default="").strip()
     if not answer:
         db.set_setting(SYSTEM_SLUG_KEY, "")
-        return None, True
+        return None
     # Invalid input aborts the create before any state mutation; the
     # settings row stays absent, so the next create asks again.
     validate_slug(answer)
     db.set_setting(SYSTEM_SLUG_KEY, answer)
-    return answer, True
-
-
-def _nudge_shared_backend_slug(db: Database, site_decl: VMSiteDecl) -> str | None:
-    """Deferred nudge: creating on a shared-backend site with a null
-    slug offers to set one now. Skipped entirely when non-interactive;
-    ``never-remind-me`` writes a suppression flag in settings.
-    Returns a newly set slug, or None.
-    """
-    from agentworks.vms.sites import site_shared_backend
-
-    if not output.is_interactive():
-        return None
-    if db.get_setting(NUDGE_SUPPRESSED_KEY) is not None:
-        return None
-    if not site_shared_backend(site_decl):
-        return None
-    # Single-line, default-yes prompt (Enter
-    # accepts). Unrecognized input reads as "no": the nudge is
-    # non-blocking and repeats on the next shared-backend create.
-    answer = (
-        output.prompt(
-            "You are creating a VM on a site whose backend may be shared "
-            "with other agentworks installs; VM names may collide. Set a "
-            "slug now? [Y/n/never-remind-me]",
-            default="",
-        )
-        .strip()
-        .lower()
-    )
-    if answer in ("never", "never-remind-me"):
-        db.set_setting(NUDGE_SUPPRESSED_KEY, "1")
-        return None
-    if answer not in ("", "y", "yes"):
-        return None
-    slug_answer = output.prompt(_SLUG_PROMPT, default="").strip()
-    if not slug_answer:
-        return None
-    validate_slug(slug_answer)
-    db.set_setting(SYSTEM_SLUG_KEY, slug_answer)
-    return slug_answer
+    return answer
 
 
 def bind_platform(
@@ -479,15 +438,11 @@ def create_vm(
     providers = resolve_git_credential_providers(registry, admin.git_credentials)
     announce_git_credentials(providers)
 
-    # System slug: first interactive create prompts once; a null
-    # slug on a shared-backend site gets the deferred nudge. Both run
-    # before any secret prompting or state mutation so an aborted slug
-    # entry leaves nothing behind. When the full prompt just ran in
-    # THIS create, the nudge is skipped -- asking twice back-to-back
-    # would be noise, not a reminder.
-    slug, asked_now = _resolve_system_slug(db)
-    if slug is None and not asked_now:
-        slug = _nudge_shared_backend_slug(db, site_decl)
+    # System slug: first interactive create prompts once (a blank
+    # answer is final -- see _resolve_system_slug). Runs before any
+    # secret prompting or state mutation so an aborted slug entry
+    # leaves nothing behind.
+    slug = _resolve_system_slug(db)
 
     # The capability composition root: construct the site's platform
     # against the operation's resolver (cheap; the site's config secrets
@@ -789,9 +744,12 @@ def describe_vm(db: Database, config: Config, name: str) -> None:
     # The slug never shows in normal CLI output (vm list stays
     # name-only); describe and doctor are its surfaces. The slug is
     # install-level, so a VM created before it was set gets a marker --
-    # its hostname and backend names carry no prefix.
-    slug = db.get_setting(SYSTEM_SLUG_KEY) or None
-    slug_label = slug or "-"
+    # its hostname and backend names carry no prefix. A blank answer is
+    # a VALID one: declined ("(none)") renders distinctly from
+    # never-asked ("-").
+    stored_slug = db.get_setting(SYSTEM_SLUG_KEY)
+    slug = stored_slug or None
+    slug_label = slug or ("(none)" if stored_slug == "" else "-")
     # Exact hostname comparison (the slug is immutable and the hostname is
     # recorded as {slug}-{name}); a prefix test could false-negative on
     # a pre-slug VM whose name happens to start with the slug.

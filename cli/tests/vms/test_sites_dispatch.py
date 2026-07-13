@@ -57,7 +57,6 @@ def test_resolve_site_binds_the_platform_config() -> None:
     assert isinstance(platform, LimaPlatform)
     assert platform.site_name == "gpu-box"
     assert platform.is_remote
-    assert platform.shared_backend(platform.platform_config)
 
 
 def test_resolve_site_bundled_lima_is_local() -> None:

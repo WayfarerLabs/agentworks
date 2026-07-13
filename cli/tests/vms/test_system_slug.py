@@ -1,6 +1,8 @@
 """System slug: settings encoding, the one-shot first-create prompt
-(including non-interactive), the deferred shared-backend nudge with its
-suppression flag, and the slug format bounds.
+(including non-interactive), and the slug format bounds. A blank answer
+is a VALID answer -- it records the declined row and the prompt never
+fires again (the former shared-backend nudge that re-asked decliners
+was removed by maintainer ruling).
 """
 
 from __future__ import annotations
@@ -9,10 +11,8 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from agentworks.db import NUDGE_SUPPRESSED_KEY
 from agentworks.errors import ValidationError
 from agentworks.vms import manager as vm_manager
-from agentworks.vms.sites import VMSiteDecl
 
 if TYPE_CHECKING:
     from agentworks.db import Database
@@ -52,16 +52,16 @@ def test_non_interactive_never_prompts_and_never_writes(
 ) -> None:
     """A later interactive create must still ask, so nothing is written."""
     monkeypatch.setattr("agentworks.output.is_interactive", lambda: False)
-    assert vm_manager._resolve_system_slug(db) == (None, False)
+    assert vm_manager._resolve_system_slug(db) is None
     assert db.get_setting("system_slug") is None
 
 
-def test_first_create_prompt_fires_once_on_decline(
+def test_blank_answer_is_final(
     db: Database, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """An empty answer records the declined row (empty value), so the
-    prompt never fires again -- and asked_now is True exactly once so
-    the caller can skip the same-create nudge."""
+    """An empty answer is a valid one ("no slug"): it records the
+    declined row, so the prompt never fires again -- not on the next
+    create, not via any nudge."""
     monkeypatch.setattr("agentworks.output.is_interactive", lambda: True)
     prompts: list[str] = []
 
@@ -71,11 +71,11 @@ def test_first_create_prompt_fires_once_on_decline(
 
     monkeypatch.setattr("agentworks.output.prompt", _prompt)
 
-    assert vm_manager._resolve_system_slug(db) == (None, True)
+    assert vm_manager._resolve_system_slug(db) is None
     assert db.get_setting("system_slug") == ""
     assert len(prompts) == 1
 
-    assert vm_manager._resolve_system_slug(db) == (None, False)
+    assert vm_manager._resolve_system_slug(db) is None
     assert len(prompts) == 1  # declined row short-circuits
 
 
@@ -85,7 +85,7 @@ def test_first_create_prompt_stores_valid_slug(
     monkeypatch.setattr("agentworks.output.is_interactive", lambda: True)
     monkeypatch.setattr("agentworks.output.prompt", lambda label, default=None: "team-a")
 
-    assert vm_manager._resolve_system_slug(db) == ("team-a", True)
+    assert vm_manager._resolve_system_slug(db) == "team-a"
     assert db.get_setting("system_slug") == "team-a"
 
 
@@ -102,94 +102,19 @@ def test_invalid_answer_aborts_without_writing(
     assert db.get_setting("system_slug") is None
 
 
-def _remote_lima_decl() -> VMSiteDecl:
-    return VMSiteDecl(
-        name="gpu-box", platform="lima", platform_config={"vm_host": "me@gpu-box"}
-    )
-
-
-def _prompt_script(answers: list[str]):
-    """A prompt stub yielding scripted answers in order."""
-    seen: list[str] = []
-
-    def _prompt(label: str, default: str | None = None) -> str:
-        seen.append(label)
-        return answers[len(seen) - 1]
-
-    return _prompt, seen
-
-
-def test_nudge_skipped_non_interactive(
+def test_no_prompt_of_any_kind_after_decline(
     db: Database, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setattr("agentworks.output.is_interactive", lambda: False)
-    assert vm_manager._nudge_shared_backend_slug(db, _remote_lima_decl()) is None
-
-
-def test_nudge_skipped_for_single_workstation_site(
-    db: Database, monkeypatch: pytest.MonkeyPatch
-) -> None:
+    """The regression this file exists to prevent: a declined install
+    creating on a shared-backend site (remote Lima, a cloud account)
+    must see NO slug prompt of any kind. Runs through create_vm's real
+    slug block by asserting no prompt call happens at all."""
+    db.set_setting("system_slug", "")  # declined on an earlier create
     monkeypatch.setattr("agentworks.output.is_interactive", lambda: True)
     monkeypatch.setattr(
         "agentworks.output.prompt",
-        lambda *a, **k: (_ for _ in ()).throw(AssertionError("must not nudge")),
+        lambda *a, **k: (_ for _ in ()).throw(
+            AssertionError("prompted after a declined slug")
+        ),
     )
-    local_lima = VMSiteDecl(name="lima", platform="lima")
-    assert vm_manager._nudge_shared_backend_slug(db, local_lima) is None
-
-
-def test_nudge_never_remind_me_suppresses(
-    db: Database, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    monkeypatch.setattr("agentworks.output.is_interactive", lambda: True)
-    prompt, seen = _prompt_script(["never-remind-me"])
-    monkeypatch.setattr("agentworks.output.prompt", prompt)
-
-    assert vm_manager._nudge_shared_backend_slug(db, _remote_lima_decl()) is None
-    assert db.get_setting(NUDGE_SUPPRESSED_KEY) is not None
-    # Suppressed: no second nudge.
-    assert vm_manager._nudge_shared_backend_slug(db, _remote_lima_decl()) is None
-    assert len(seen) == 1
-
-
-def test_nudge_default_yes_on_enter_then_sets_the_slug(
-    db: Database, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """The [Y/n/never-remind-me] shape: Enter accepts, then the
-    full slug prompt runs."""
-    monkeypatch.setattr("agentworks.output.is_interactive", lambda: True)
-    prompt, seen = _prompt_script(["", "team-a"])
-    monkeypatch.setattr("agentworks.output.prompt", prompt)
-
-    assert vm_manager._nudge_shared_backend_slug(db, _remote_lima_decl()) == "team-a"
-    assert db.get_setting("system_slug") == "team-a"
-    assert "[Y/n/never-remind-me]" in seen[0]
-
-
-def test_nudge_accepted_then_blank_slug_writes_nothing(
-    db: Database, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """Enter at the nudge, then Enter at the full prompt: nothing is
-    written (no slug, no declined row, no suppression), so both the
-    first-create prompt and the nudge fire again next time."""
-    monkeypatch.setattr("agentworks.output.is_interactive", lambda: True)
-    prompt, _seen = _prompt_script(["", ""])
-    monkeypatch.setattr("agentworks.output.prompt", prompt)
-
-    assert vm_manager._nudge_shared_backend_slug(db, _remote_lima_decl()) is None
-    assert db.get_setting("system_slug") is None
-    assert db.get_setting(NUDGE_SUPPRESSED_KEY) is None
-
-
-def test_nudge_no_leaves_everything_unset(
-    db: Database, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """'n' neither sets the slug nor suppresses: the nudge repeats on
-    the next shared-backend create."""
-    monkeypatch.setattr("agentworks.output.is_interactive", lambda: True)
-    prompt, _seen = _prompt_script(["n"])
-    monkeypatch.setattr("agentworks.output.prompt", prompt)
-
-    assert vm_manager._nudge_shared_backend_slug(db, _remote_lima_decl()) is None
-    assert db.get_setting("system_slug") is None
-    assert db.get_setting(NUDGE_SUPPRESSED_KEY) is None
+    assert vm_manager._resolve_system_slug(db) is None

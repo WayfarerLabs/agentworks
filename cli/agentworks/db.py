@@ -64,9 +64,9 @@ PID_STOPPED = -1
 
 # Settings-table keys (install-level identity). Defined next to the accessors'
 # owner so consumers (vms.manager, ssh_config) share one spelling
-# without a layering inversion.
+# without a layering inversion. (A retired key may linger as an orphan
+# row in existing DBs -- harmless; the settings table is a plain KV.)
 SYSTEM_SLUG_KEY = "system_slug"
-NUDGE_SUPPRESSED_KEY = "shared_backend_nudge_suppressed"
 
 
 # -- Row types -------------------------------------------------------------

@@ -88,10 +88,6 @@ class ProxmoxPlatform(VMPlatform):
         )
 
     @classmethod
-    def shared_backend(cls, platform_config: Mapping[str, object]) -> bool:
-        return True
-
-    @classmethod
     def legacy_platform_metadata(
         cls, row: Mapping[str, Any], legacy: Mapping[str, Any]
     ) -> dict[str, str]:

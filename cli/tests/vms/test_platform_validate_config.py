@@ -54,16 +54,10 @@ def test_lima_rejects_bad_vm_host_and_unknown_keys() -> None:
         LimaPlatform.validate_config("t", {"host": "x"})
 
 
-def test_lima_shared_backend_tracks_vm_host() -> None:
-    assert LimaPlatform.shared_backend({}) is False
-    assert LimaPlatform.shared_backend({"vm_host": "me@box"}) is True
-
-
 def test_wsl2_accepts_no_configuration() -> None:
     assert WSL2Platform.validate_config("t", {}) == ()
     with pytest.raises(ConfigError, match="accepts no configuration"):
         WSL2Platform.validate_config("t", {"anything": 1})
-    assert WSL2Platform.shared_backend({}) is False
 
 
 def test_azure_requires_the_three_keys() -> None:
@@ -74,7 +68,6 @@ def test_azure_requires_the_three_keys() -> None:
             AzureVMPlatform.validate_config("t", broken)
     with pytest.raises(ConfigError, match="unknown azure"):
         AzureVMPlatform.validate_config("t", {**AZURE_CONFIG, "extra": "x"})
-    assert AzureVMPlatform.shared_backend(AZURE_CONFIG) is True
 
 
 def test_proxmox_returns_the_token_secret_reference() -> None:
@@ -103,7 +96,6 @@ def test_proxmox_validation_errors() -> None:
         )
     with pytest.raises(ConfigError, match="unknown proxmox"):
         ProxmoxPlatform.validate_config("t", {**PROXMOX_CONFIG, "nodee": "x"})
-    assert ProxmoxPlatform.shared_backend(PROXMOX_CONFIG) is True
 
 
 def test_validate_config_is_pure() -> None:

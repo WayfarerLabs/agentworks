@@ -322,6 +322,19 @@ flag/completion work stays in Phase 5.
   `PROXMOX_TOKEN_SECRET` env var via `backend_mappings` -- deliberately stays: that name is not
   redundant, just a different word order, and it is the released vocabulary.
 
+- **2026-07-13, a blank slug answer is final: the shared-backend nudge is removed.** Maintainer
+  ruling from the live install test: blank is a perfectly valid system slug ("no slug"), and
+  answering it must not lead to any further prompting. The settings encoding already differentiated
+  declined ("" row) from never-asked (absent row) -- the offender was R4's deferred shared-backend
+  nudge, whose ONLY interactive trigger was exactly the declined state (an absent row prompts the
+  full question first). Deleted with everything that existed solely to drive it:
+  `_nudge_shared_backend_slug`, the `never-remind-me` suppression settings key,
+  `site_shared_backend`, and the `shared_backend` classmethod on the base and all four platforms
+  (`_resolve_system_slug` loses its `asked_now` tuple return -- the nudge-skip was its only
+  purpose). `vm describe` now also renders the two null states distinctly: declined shows `(none)`,
+  never-asked shows `-` (doctor already differentiated). The FRD's R4 nudge bullet is struck with a
+  pointer here.
+
 **Compile boundaries**: Phases 1 through 3 are one logical commit boundary, mirroring the
 polymorphic-transports precedent. As planned, Phase 1 would open a non-compiling window when the
 platform classes reshape to the new protocol; as built, PHASE-1 BRIDGE shims keep everything

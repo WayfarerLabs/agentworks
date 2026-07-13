@@ -124,7 +124,7 @@ def test_disabled_site_errors_before_tailscale_and_slug_prompt(
     def _no_tailscale() -> None:
         raise AssertionError("tailscale probed for a disabled site")
 
-    def _no_slug(db_: object) -> tuple[None, bool]:
+    def _no_slug(db_: object) -> None:
         raise AssertionError("slug prompt reached for a disabled site")
 
     monkeypatch.setattr(vm_manager, "verify_tailscale_available", _no_tailscale)
@@ -186,9 +186,9 @@ def test_slug_resolution_precedes_secrets_and_insert(
 
     order: list[str] = []
 
-    def _slug_spy(db_: object) -> tuple[None, bool]:
+    def _slug_spy(db_: object) -> None:
         order.append("slug")
-        return None, False
+        return None
 
     class _Stop(Exception):
         pass
@@ -205,39 +205,6 @@ def test_slug_resolution_precedes_secrets_and_insert(
 
     assert order == ["slug", "secrets"]
     assert db.get_vm("ovm") is None  # insert happens after the resolve
-
-
-def test_nudge_skipped_when_prompt_just_declined(
-    db: Database,
-    make_config,
-    monkeypatch: pytest.MonkeyPatch,
-    captured_output: object,
-) -> None:
-    """First-ever create on a shared-backend site: declining the full
-    prompt must not trigger the nudge in the same create."""
-    from agentworks.secrets.resolver import Resolver
-
-    monkeypatch.setattr(
-        vm_manager, "_resolve_system_slug", lambda db_: (None, True)
-    )
-    monkeypatch.setattr(
-        vm_manager,
-        "_nudge_shared_backend_slug",
-        lambda *a, **k: (_ for _ in ()).throw(
-            AssertionError("nudge must not fire in the same create")
-        ),
-    )
-
-    class _Stop(Exception):
-        pass
-
-    monkeypatch.setattr(
-        Resolver, "resolve",
-        lambda self: (_ for _ in ()).throw(_Stop()),
-    )
-
-    with pytest.raises(_Stop):
-        vm_manager.create_vm(db, make_config(), name="nvm")
 
 
 def test_r11_hostname_bound_by_construction() -> None:

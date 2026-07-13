@@ -119,10 +119,9 @@ class VMPlatform(ABC):
       secret reference for ``token_secret``). Platforms with no
       required keys back a bundled built-in site named after
       themselves.
-    - ``shared_backend(platform_config) -> bool`` (classmethod): True
-      when multiple installs plausibly share the backend (azure and
-      proxmox return a constant True; lima computes from vm_host
-      presence). Drives the R4 deferred slug nudge.
+    - ~~``shared_backend(platform_config) -> bool``~~ REMOVED with the
+      R4 nudge (2026-07-13 ruling: a blank slug answer is final); the
+      nudge was its only consumer.
     - ``legacy_platform_metadata(row, legacy) -> dict[str, str]``: pure
       migration hook over the legacy row plus the best-effort parse of
       the legacy TOML sections; maps legacy column values to this
@@ -430,8 +429,8 @@ CREATE TABLE settings (
 Keys used in this SDD:
 
 - `system_slug`: the slug, or empty for explicitly-declined (distinguishes "never asked" from
-  "asked, operator skipped" so the first-create prompt fires once).
-- `shared_backend_nudge_suppressed`: set when the operator picks `never-remind-me` (R4).
+  "asked, operator skipped" so the prompt fires once and the blank answer is final).
+- ~~`shared_backend_nudge_suppressed`~~ REMOVED with the R4 nudge (2026-07-13 ruling).
 
 The slug is read from the DB at the points that need it: `create_vm` (building the
 `ProvisionRequest` and the R11 hostname), `sync_ssh_config` (R10 file name), and the R4 prompts. It

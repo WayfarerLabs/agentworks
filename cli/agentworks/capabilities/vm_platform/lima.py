@@ -93,12 +93,6 @@ class LimaPlatform(VMPlatform):
         return ()
 
     @classmethod
-    def shared_backend(cls, platform_config: Mapping[str, object]) -> bool:
-        # A remote Lima box can be shared between installs; local Lima
-        # collides only within one workstation user.
-        return "vm_host" in platform_config
-
-    @classmethod
     def legacy_platform_metadata(
         cls, row: Mapping[str, Any], legacy: Mapping[str, Any]
     ) -> dict[str, str]:
