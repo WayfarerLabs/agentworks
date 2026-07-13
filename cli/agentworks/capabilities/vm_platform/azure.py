@@ -78,24 +78,6 @@ def _trim_message(message: str) -> str:
     return message
 
 
-def _noninteractive_credential_ok() -> tuple[bool, str]:
-    """Probe ``DefaultAzureCredential`` for a management token (a read;
-    the ``az account show`` equivalent). Never interactive -- this is
-    the preflight half of :func:`_get_credential`, without its
-    browser-login fallback. Returns ``(ok, failure_detail)``. Module
-    seam so tests can stub it without importing the azure SDK (whose
-    native ``cryptography`` dependency is not loadable everywhere).
-    """
-    from azure.core.exceptions import ClientAuthenticationError
-    from azure.identity import DefaultAzureCredential
-
-    try:
-        DefaultAzureCredential().get_token("https://management.azure.com/.default")
-    except ClientAuthenticationError as e:
-        return False, str(e)
-    return True, ""
-
-
 def _get_credential() -> object:
     """Get an Azure credential.
 
@@ -144,30 +126,16 @@ class AzurePlatform(VMPlatform):
     name: ClassVar[str] = "azure"
     description: ClassVar[str] = "Azure VMs (subscription + resource group)"
 
-    def preflight(self) -> None:
-        """Azure readiness: a non-interactive credential must be
-        acquirable (the az-login / env-var / managed-identity chain --
-        the ``az account show`` equivalent, a read). One asymmetry, per
-        the prompt-only-secret rule: in an INTERACTIVE run a missing
-        credential defers to the op's browser-login fallback
-        (``_get_credential``); verifying it here would either be the
-        interaction or make that fallback unreachable. Non-interactive
-        runs fail here, before any mutation. No config secrets, so the
-        base's prediction pass is a no-op.
-        """
-        super().preflight()
-        ok, detail = _noninteractive_credential_ok()
-        if ok or output.is_interactive():
-            return
-        from agentworks.errors import AuthorizationError
-
-        raise AuthorizationError(
-            f"no non-interactive Azure credential is available: {detail}",
-            hint=(
-                "Run `az login`, or set the AZURE_* service-principal "
-                "environment variables."
-            ),
-        )
+    # No preflight override: azure has no config secrets (the base's
+    # prediction pass is a no-op) and no unauthenticated readiness
+    # check worth making. A credential probe is deliberately NOT one --
+    # verifying credentials before the resolve/credential stage forks
+    # behavior on where they happen to come from (a non-interactive
+    # chain passes, the browser-login fallback can't be probed without
+    # BEING the interaction). Credential and reachability failures
+    # surface at the op with typed errors (``_wrap_azure_error``),
+    # which is the contract: preflight is capped at what it can check
+    # without resolved credentials.
 
     @classmethod
     def validate_config(

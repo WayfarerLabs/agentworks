@@ -146,9 +146,12 @@ Two coordination notes:
 >   op's first need.
 > - Everything preflights: every service-layer operation runs `preflight` on all the resources it
 >   will use (the vm-template predicts its Tailscale key can resolve -- the template's
->   responsibility, not the site's; the platform instance checks tools, reachability, and secret
->   mappings) before any mutation and before any secret prompt. Preflight is read-only; doctor
->   reuses it.
+>   responsibility, not the site's; the platform instance checks required tools and secret mappings)
+>   before any mutation and before any secret prompt. Preflight is read-only; doctor reuses it. Its
+>   ceiling is structural: it runs before the resolve pass, so any check needing a resolved
+>   credential (an authenticated read, a credential probe) is the OP's job, surfaced through the
+>   op's typed error handling -- preflight is never bent past the ceiling (see capability-model.md's
+>   preflight section).
 > - The one resolve pass covers the union of secrets needed across all planned ops across all
 >   participating resources: one prompt session per command, values cached.
 > - Catch-all handling around best-effort spans (the resolve pass included) re-raises `UserAbort`; a

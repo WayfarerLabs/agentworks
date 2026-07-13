@@ -148,15 +148,24 @@ problems _clearly_, before any mutation and before any secret prompt. Its defini
 it is **read-only and side-effect-free**:
 
 - It **predicts secret resolvability without prompting.** A declared secret with no mapping at all
-  is fatal and knowable here, without prompting for the others. A secret that resolves
-  non-interactively (an env var that is set) it may read and verify (e.g. a token `GET /user`),
-  still without prompting; a prompt-only secret's value-check defers to the op.
-- It checks the rest of the world: required tools present on the target, an API reachable and
-  authorizing (a _read_).
+  is fatal and knowable here, without prompting for the others. Value checks defer to the op --
+  uniformly. (An earlier draft let preflight read-and-verify "non-interactively resolvable" values;
+  that was ruled out: it forks readiness on where a secret happens to come from.)
+- It checks the rest of the world that needs **no credentials**: required tools present on the
+  target, an unauthenticated endpoint reachable.
 - It does **not** mutate. In particular it does **not** mint or create anything.
 - It is **best-effort, not an oracle.** It catches the common failures cleanly; anything that can
   only be confirmed by mutating is allowed to fail later in the op, with its own clear error. The
   line: _if verifying it requires a side effect, it is not preflight's job._
+
+**The ceiling is structural, and low -- that is fine.** Preflight runs before the resolve pass, so
+it never holds resolved secret values, and any check that needs one (an authenticated API read, a
+credential probe) is out of its reach by design. Do not bend it past that ceiling: partial
+workarounds -- resolving "just the env-var-backed" secrets, probing one credential source but not
+the interactive one -- make readiness depend on where a secret happens to come from, which is
+complexity without a principled line. Preflight does what unresolved-secret, read-only checks can
+do; everything past the ceiling fails at the op, and the op's own typed, actionable error handling
+is the other half of the contract -- invest there, not in stretching preflight.
 
 The read-only property is load-bearing, not stylistic. It is exactly what lets `doctor` reuse
 `preflight` for its per-resource health rows (doctor could never call a method that mutates), and

@@ -130,21 +130,13 @@ class TestCompletionChecks:
 
 
 @pytest.mark.integration
-def test_run_checks_returns_report(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_run_checks_returns_report() -> None:
     """Smoke test: run_checks returns a valid HealthReport with expected groups.
 
     Marked as integration because it probes the real environment (filesystem,
-    subprocesses, database). The azure credential probe is the one stubbed
-    seam: with an azure vm-site declared in the real config, doctor's
-    per-site preflight would import the azure SDK, whose native
-    cryptography wheel is not loadable on every test host.
+    subprocesses, database).
     """
-    from agentworks.capabilities.vm_platform import azure as azure_mod
     from agentworks.doctor import run_checks
-
-    monkeypatch.setattr(
-        azure_mod, "_noninteractive_credential_ok", lambda: (True, "")
-    )
 
     report = run_checks()
 

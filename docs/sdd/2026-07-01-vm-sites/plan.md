@@ -132,23 +132,23 @@ flag/completion work stays in Phase 5.
   proxmox it needs the token), so a stopped-VM failure now lands after the one prompt session
   instead of before it -- the alternative was two prompt sessions, which the contract forbids. (2)
   Proxmox's preflight is the base's token prediction only; the API-reachability read was deferred
-  (the version endpoint needs auth, so a useful read needs the token value, which preflight may only
-  fetch non-interactively -- worth doing, but as a follow-up with its own tests rather than a
-  half-check now). (3) reinit does NOT run the template preflight: the Tailscale key is not among
-  reinit's planned ops (the broken-node rejoin has its own documented conditional-need late
-  resolve), and preflighting a secret no op needs would fail installs that legitimately run reinit
-  without a key configured. (4) Doctor's per-site preflight rows are severity-split: bundled sites
-  report `info` when their local tooling is absent (normal for the host), while operator-declared
-  sites report `warn`. The review round ratified all four (test pins added for 1 and 4) and two more
-  decisions were recorded from its findings: (5) `bind_platforms` wholesale-fails a mixed-health
-  batch when ANY distinct site's preflight fails -- contract-consistent (preflight everything before
-  anything real) and confirmed intended; a partial-batch degrade would act on some VMs while
-  reporting failure, which is worse than failing clean. (6) The runtime env-chain resolve was
-  initially deferred and then, on maintainer direction (the harness adoption needs the single seam),
-  FOLDED in this PR: `bind_platform` takes `targets=` (the command's `SecretTarget`s, registered on
-  the resolver via `compute_needed_secrets`) so `shell_vm` / `exec_vm` / `shell_agent` /
-  `exec_agent` / `create_session` resolve site secrets AND env-chain secrets in the ONE boundary
-  pass -- one prompt session per command, pinned end to end
+  (the version endpoint needs auth, so a useful read needs the token value). Superseded 2026-07-13:
+  the maintainer ruled the whole class past preflight's structural ceiling -- see that note; it is
+  no longer a follow-up, it is the op's job. (3) reinit does NOT run the template preflight: the
+  Tailscale key is not among reinit's planned ops (the broken-node rejoin has its own documented
+  conditional-need late resolve), and preflighting a secret no op needs would fail installs that
+  legitimately run reinit without a key configured. (4) Doctor's per-site preflight rows are
+  severity-split: bundled sites report `info` when their local tooling is absent (normal for the
+  host), while operator-declared sites report `warn`. The review round ratified all four (test pins
+  added for 1 and 4) and two more decisions were recorded from its findings: (5) `bind_platforms`
+  wholesale-fails a mixed-health batch when ANY distinct site's preflight fails --
+  contract-consistent (preflight everything before anything real) and confirmed intended; a
+  partial-batch degrade would act on some VMs while reporting failure, which is worse than failing
+  clean. (6) The runtime env-chain resolve was initially deferred and then, on maintainer direction
+  (the harness adoption needs the single seam), FOLDED in this PR: `bind_platform` takes `targets=`
+  (the command's `SecretTarget`s, registered on the resolver via `compute_needed_secrets`) so
+  `shell_vm` / `exec_vm` / `shell_agent` / `exec_agent` / `create_session` resolve site secrets AND
+  env-chain secrets in the ONE boundary pass -- one prompt session per command, pinned end to end
   (`test_env_targets_join_the_site_secret_pass`). Three recorded exceptions keep their own resolve
   timing, each with a rationale comment at the site: `restart_session` resolves its env chain after
   the BROKEN/--force refusal and the "Restart?" confirm (bail-before-prompt: a declined restart must
@@ -166,18 +166,20 @@ flag/completion work stays in Phase 5.
   target label, and secret) on a referenced name with no registry declaration instead of silently
   dropping it -- a miss violates the auto-declare-at-finalize invariant and used to surface as a
   mysterious downstream resolve failure (regression test added; no legitimate path relied on the
-  drop); (4) azure `preflight` gained the non-interactive credential read (the `az account show`
-  equivalent), with one asymmetry per the prompt-only-secret rule: interactive runs defer a missing
-  credential to the op's browser-login fallback rather than making it unreachable. **Recorded
-  deferred follow-ups (carry into locked.md at merge):** (a) proxmox API-reachability preflight -- a
-  useful read needs the token value, which preflight may fetch only non-interactively; lands as its
-  own change with tests. (b) A platform **dry-run tier**: a real dry-run (Azure what-if/validate:
-  quota, image availability) fits preflight's read-only contract but needs the OP'S parameters,
-  which the no-argument preflight doesn't have -- design is either op-context threaded into
-  preflight or an optional `dry_run(request)` the service layer calls when the platform advertises
-  it. (c) The consoles/restart entrypoints are prompt-once-PER-BOUNDARY, not prompt-once (the
-  exceptions in the note above; the no-prompt-before-preflight invariant holds everywhere). (d)
-  `agent create` remains two prompt sessions (site secrets at bind, git tokens via
+  drop). **(4) reversed by maintainer ruling, same day: preflight's ceiling is structural.** The
+  review's azure credential read briefly landed and was then REMOVED -- verifying credentials before
+  the resolve/credential stage forks readiness on where a secret happens to come from (a
+  non-interactive chain is probeable; the browser-login fallback can't be probed without BEING the
+  interaction), which is complexity without a principled line. The ruling, now pinned in
+  capability-model.md's preflight section: preflight does what unresolved-secret, read-only checks
+  can do (tools present, mappings predicted, unauthenticated reachability) and nothing more; every
+  check past that ceiling -- credential probes, authenticated reads, the once-mooted proxmox
+  API-reachability follow-up and dry-run tier -- is the OP's job, surfaced through the op's own
+  typed, actionable error handling (azure's `_wrap_azure_error` is the pattern). azure and proxmox
+  therefore deliberately keep the base preflight only. **Recorded deferred follow-ups (carry into
+  locked.md at merge):** (a) The consoles/restart entrypoints are prompt-once-PER-BOUNDARY, not
+  prompt-once (the exceptions in the note above; the no-prompt-before-preflight invariant holds
+  everywhere). (b) `agent create` remains two prompt sessions (site secrets at bind, git tokens via
   `_collect_git_tokens`) -- the fold rides the git-credentials capability adoption (#167), not this
   PR. Also ratified: the idempotency marker stays test-enforced (semantic property; the behavioral
   guard suite is the enforcement).
@@ -515,10 +517,10 @@ vm-platform/vm-site pair; the git-credentials and session-harness PRs adopt for 
       declared config secrets on the resolver. `VMPlatform` extends the base; `site_name` /
       `platform_config` are domain-vocabulary properties over the generic base attributes.
 - [x] `preflight` implementations: lima (local `limactl` present; remote sites defer to ops -- an
-      SSH probe is a real round trip), wsl2 (`wsl.exe` present), proxmox (the base's token
-      prediction; the API-reachability read was deliberately deferred -- see the sequencing note),
-      azure (base only: the SDK is a hard dependency and a credential probe risks interactive auth);
-      plus `preflight_vm_template` predicting the Tailscale key resolves (the lookup-or-synthesize
+      SSH probe is a real round trip), wsl2 (`wsl.exe` present), proxmox and azure (base only: both
+      would need resolved credentials to check anything more, which is past preflight's structural
+      ceiling per the 2026-07-13 ruling -- their failures surface at the op with typed errors); plus
+      `preflight_vm_template` predicting the Tailscale key resolves (the lookup-or-synthesize
       fallback now lives in `Resolver.register_name`).
 - [x] Service-layer reorder (create, reinit, rekey, delete, and the gate-using paths): bind, then
       preflight all participating resources (either order), then the one union resolve pass, then
