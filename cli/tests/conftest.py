@@ -200,6 +200,32 @@ _GATE_MODULES = (
 )
 
 
+@pytest.fixture(autouse=True, scope="session")
+def _gate_stub_leak_sentinel() -> Generator[None, None, None]:
+    """Fail the run loudly if a gate stub ever leaks past teardown.
+
+    ``stub_vm_gates`` once poisoned later tests when a gate module was
+    first-imported MID-PATCH-LOOP: its module-level ``from vms.manager
+    import bind_platform`` captured the already-patched stub, which
+    monkeypatch then saved as the "original" and re-installed forever
+    at teardown. The pre-import in ``stub_vm_gates`` fixes that class;
+    this sentinel makes any regression of it a loud session-end failure
+    instead of a seed-dependent mystery in unrelated tests.
+    """
+    yield
+    import importlib
+
+    from agentworks.vms import manager as vms_manager
+
+    for mod_name in _GATE_MODULES:
+        mod = importlib.import_module(mod_name)
+        captured = getattr(mod, "bind_platform", vms_manager.bind_platform)
+        assert captured is vms_manager.bind_platform, (
+            f"{mod_name}.bind_platform is a leaked test stub ({captured!r}); "
+            "a gate-stubbing helper failed to restore the real function"
+        )
+
+
 def stub_vm_gates(monkeypatch: pytest.MonkeyPatch) -> _StubPlatform:
     """Stub ``bind_platform`` / ``ensure_active`` / ``keep_active`` (and
     the multi-VM variants) in every gate-consuming module.
