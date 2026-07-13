@@ -213,7 +213,19 @@ flag/completion work stays in Phase 5.
   the raw tool-presence rows. Pinned by `test_platform_support.py` (gating end to end incl. the
   friendly error and the remote-site-survives-missing-limactl split), the select_site model tests,
   and the bundled-miss hint test; test scaffolding gains `stub_platform_support` /
-  `publish_all_platforms` so shape tests are host-independent by construction.
+  `publish_all_platforms` so shape tests are host-independent by construction. The review round (the
+  rubric's new environment-diversity check's first outing) caught two blockings, both closed: the
+  `--site` help text still taught the removed model, and `validate_sites` lacked the bundled-miss
+  requirement hint (`defaults.site = "lima-local"` with limactl missing said "declare that site" --
+  a reserved name). Also from the round: bundled-site names are reserved UNCONDITIONALLY via a
+  pre-finalize check (the registry's reserved-override only fires when the bundled row publishes, so
+  a limactl-less host could otherwise squat `lima-local` and collide the moment the tool is
+  installed); the real support classmethods are tested on both branches via `sys.platform` /
+  `shutil.which` patching, not only stubs; the v27 reserved-name set is FROZEN as a literal (a
+  migration's output must not change when later builds add platforms); and one ratification: a
+  declared site on an unsupported platform fails EVERY command, not just VM commands (per the
+  maintainer's original hard-failure ruling -- a resources dir shared across hosts must diverge per
+  host rather than half-work; the error's hint says so).
 
 **Compile boundaries**: Phases 1 through 3 are one logical commit boundary, mirroring the
 polymorphic-transports precedent. As planned, Phase 1 would open a non-compiling window when the

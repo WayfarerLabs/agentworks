@@ -28,8 +28,8 @@ def vm_create(
             "--site",
             help=(
                 "vm-site to create the VM at (a declared vm-site resource; "
-                "defaults to the template's site, then defaults.site, then "
-                "the built-in lima)"
+                "falls back to defaults.site, else the single declared "
+                "site is inferred and several prompt for a choice)"
             ),
         ),
     ] = None,

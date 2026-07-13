@@ -245,15 +245,20 @@ def _migrate_vm_sites(conn: sqlite3.Connection, context: MigrationContext) -> No
             )
 
     # Same pre-DDL stance for the remote-Lima site names: a host that
-    # shadows a platform name or a bundled-site name (lima-local, wsl2)
-    # gets a '-host' suffix (platform names are reserved for the
-    # shadow rule; bundled names are reserved built-ins), and a
-    # suffixed name landing on another real host's site would silently
-    # merge two distinct hosts -- fail loudly while the DB is pristine.
-    reserved_site_names = set(VM_PLATFORM_REGISTRY) | {
-        cls.bundled_site
-        for cls in VM_PLATFORM_REGISTRY.values()
-        if cls.bundled_site is not None
+    # shadows a platform name or a bundled-site name gets a '-host'
+    # suffix (platform names are reserved for the shadow rule; bundled
+    # names are reserved built-ins), and a suffixed name landing on
+    # another real host's site would silently merge two distinct hosts
+    # -- fail loudly while the DB is pristine. The set is FROZEN as of
+    # v27: a migration's output must not change when a later build adds
+    # platforms or bundled sites, so this deliberately does not derive
+    # from the live registry.
+    reserved_site_names = {
+        "lima",
+        "wsl2",
+        "azure",
+        "proxmox",
+        "lima-local",
     }
     host_sites: dict[str, str] = {}  # host -> site
     for row in conn.execute(

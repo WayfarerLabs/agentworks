@@ -29,6 +29,7 @@ from agentworks.resources import Registry
 if TYPE_CHECKING:
     from agentworks.config import Config
     from agentworks.manifests import ManifestSet
+    from agentworks.manifests.loader import ManifestEntry
 
 
 def build_registry(config: Config, manifests: ManifestSet | None = None) -> Registry:
@@ -68,23 +69,49 @@ def build_registry(config: Config, manifests: ManifestSet | None = None) -> Regi
         for issue in manifests.issues:
             output.warn(f"Manifest: {issue}")
 
+    from agentworks.errors import ConfigError
+
     # Host-support gating (the platform's own call, not a config knob):
     # an unsupported platform publishes no capability row, and a
     # declared site referencing one must fail HERE with the platform's
     # stated requirement -- pre-finalize, because finalize would
     # otherwise beat us to it with the framework's generic
-    # reference-miss error, which can't say "requires Windows".
+    # reference-miss error, which can't say "requires Windows". Failing
+    # every command (not just VM commands) is the ratified behavior: a
+    # site declaration is per-host intent, and a resources dir shared
+    # across hosts must diverge per host rather than half-work.
+    declared_sites = [
+        (entry.name, getattr(entry.resource, "platform", None))
+        for entry in manifests.entries
+        if entry.kind == "vm-site"
+    ] + [(name, decl.platform) for name, decl in config.vm_sites.items()]
+
+    # Bundled-site names are reserved UNCONDITIONALLY: the registry's
+    # reserved-override check only fires when the bundled row actually
+    # publishes (host-gated), and letting an operator squat lima-local
+    # on a limactl-less host would blow up the moment the tool is
+    # installed -- with their VMs pointing at a name whose meaning just
+    # changed.
+    bundled_names = {
+        cls.bundled_site
+        for cls in vm_platforms.VM_PLATFORM_REGISTRY.values()
+        if cls.bundled_site is not None
+    }
+    for site_name, _ in declared_sites:
+        if site_name in bundled_names:
+            raise ConfigError(
+                f"vm-site '{site_name}' is a reserved bundled-site name",
+                hint=(
+                    "the bundled site owns this name even on hosts where it "
+                    "is currently unavailable; declare a differently-named "
+                    "site instead"
+                ),
+            )
+
     unsupported = vm_platforms.unsupported_platforms()
     if unsupported:
-        declared_sites = [
-            (entry.name, getattr(entry.resource, "platform", None))
-            for entry in manifests.entries
-            if entry.kind == "vm-site"
-        ] + [(name, decl.platform) for name, decl in config.vm_sites.items()]
         for site_name, platform_name in declared_sites:
             if platform_name in unsupported:
-                from agentworks.errors import ConfigError
-
                 raise ConfigError(
                     f"vm-site '{site_name}' references platform "
                     f"'{platform_name}', which is disabled on this host: "
@@ -92,20 +119,26 @@ def build_registry(config: Config, manifests: ManifestSet | None = None) -> Regi
                     hint=(
                         "The platform is installed but its host requirements "
                         "are not met; remove the site declaration on this "
-                        "machine or run it on a host that meets them."
+                        "machine (a resources dir shared across hosts needs "
+                        "per-host content) or run it on a host that meets "
+                        "them."
                     ),
                 )
 
-    def _skip_unsupported_bundled_site(entry: object) -> bool:
+    def _skip_unsupported_bundled_site(entry: ManifestEntry) -> bool:
         # A bundled vm-site publishes only when its platform says the
         # zero-config site is viable here (lima-local needs a local
         # limactl; wsl2 needs Windows + wsl.exe). Operator-declared
         # sites never pass through this predicate.
-        if getattr(entry, "kind", None) != "vm-site":
+        if entry.kind != "vm-site":
             return False
-        platform_name = getattr(entry.resource, "platform", None)  # type: ignore[attr-defined]
-        if not isinstance(platform_name, str):
-            return True
+        platform_name = getattr(entry.resource, "platform", None)
+        # Bundled manifests are app data, asserted issue-free at load;
+        # a shapeless platform field here is a dirty bundle, not a
+        # skippable row.
+        assert isinstance(platform_name, str), (
+            f"bundled vm-site '{entry.name}' has no platform field"
+        )
         platform_cls = vm_platforms.VM_PLATFORM_REGISTRY.get(platform_name)
         return (
             platform_cls is None

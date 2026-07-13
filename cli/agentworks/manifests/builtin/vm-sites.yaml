@@ -5,12 +5,14 @@
 # Their names are reserved (builtin_override = "reserved"): customize by
 # declaring a sibling site, not by redeclaring these.
 #
-# A bundled site publishes ONLY when its platform is enabled on this
-# host ([system].enabled_platforms; host default is wsl2 on Windows,
-# lima elsewhere) -- the skip predicate lives in bootstrap.build_registry.
-# The lima site is named lima-local, not lima: the bundled site is one
-# CONFIGURATION of the platform (this workstation), and remote-Lima
-# sites are ordinary operator declarations.
+# A bundled site publishes ONLY where its platform says the zero-config
+# site is viable (VMPlatform.bundled_site_unsupported_reason: lima-local
+# needs a local limactl; wsl2 needs Windows with WSL). The skip
+# predicate composes in bootstrap.build_registry; `agw doctor` lists
+# each installed platform's state and reason. The lima site is named
+# lima-local, not lima: the bundled site is one CONFIGURATION of the
+# platform (this workstation), and remote-Lima sites are ordinary
+# operator declarations.
 apiVersion: agentworks/v1
 kind: vm-site
 metadata:

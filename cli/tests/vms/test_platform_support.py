@@ -152,3 +152,92 @@ def test_doctor_lists_installed_platforms_with_reasons(
     assert lima_row.status is doctor.Status.OK
     assert "lima-local" in (lima_row.message or "")
     assert by_name["platform: azure"].status is doctor.Status.OK
+
+
+# -- The real classmethods (both branches, deterministically) ----------------
+
+
+def test_wsl2_unsupported_reason_is_the_real_os_check(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Exercise the real check, not a stub: off Windows the platform
+    gates wholesale; on Windows it is supported."""
+    import sys
+
+    monkeypatch.setattr(sys, "platform", "darwin")
+    reason = WSL2Platform.unsupported_reason()
+    assert reason is not None
+    assert "Windows" in reason
+
+    monkeypatch.setattr(sys, "platform", "win32")
+    assert WSL2Platform.unsupported_reason() is None
+
+
+def test_wsl2_bundled_site_additionally_needs_wsl_exe(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import sys
+
+    monkeypatch.setattr(sys, "platform", "win32")
+    monkeypatch.setattr("shutil.which", lambda name: None)
+    reason = WSL2Platform.bundled_site_unsupported_reason()
+    assert reason is not None
+    assert "wsl.exe" in reason
+
+    monkeypatch.setattr("shutil.which", lambda name: "/x/wsl")
+    assert WSL2Platform.bundled_site_unsupported_reason() is None
+
+
+def test_lima_support_split_is_real(monkeypatch: pytest.MonkeyPatch) -> None:
+    """lima the platform is supported everywhere (remote sites run
+    limactl on the vm_host); only the bundled local site needs the
+    local tool."""
+    assert LimaPlatform.unsupported_reason() is None
+
+    monkeypatch.setattr("shutil.which", lambda name: None)
+    reason = LimaPlatform.bundled_site_unsupported_reason()
+    assert reason is not None
+    assert "limactl" in reason
+
+    monkeypatch.setattr("shutil.which", lambda name: "/x/limactl")
+    assert LimaPlatform.bundled_site_unsupported_reason() is None
+
+
+def test_defaults_site_on_unavailable_bundled_site_names_the_requirement(
+    make_config, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """validate_sites gets the same bundled-miss treatment as
+    lookup_site: `defaults.site = "lima-local"` with limactl missing
+    must say "install limactl", never "declare a site named lima-local"
+    (a reserved name)."""
+    _support(
+        monkeypatch, wsl2="requires Windows", lima_bundled="limactl is not installed"
+    )
+    config = make_config('[defaults]\nsite = "lima-local"\n')
+    with pytest.raises(ConfigError, match="unavailable on this host") as exc:
+        build_registry(config)
+    assert "limactl" in str(exc.value)
+    assert "declare a vm-site" not in (exc.value.hint or "")
+
+
+def test_bundled_site_names_are_reserved_even_when_unavailable(
+    make_config, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An operator cannot squat lima-local on a limactl-less host: the
+    name is reserved unconditionally, or installing the tool later
+    would collide with VMs pointing at a name whose meaning changed."""
+    _support(
+        monkeypatch, wsl2="requires Windows", lima_bundled="limactl is not installed"
+    )
+    config = make_config(
+        resources=(
+            "apiVersion: agentworks/v1\n"
+            "kind: vm-site\n"
+            "metadata:\n"
+            "  name: lima-local\n"
+            "spec:\n"
+            "  platform: lima\n"
+        )
+    )
+    with pytest.raises(ConfigError, match="reserved bundled-site name"):
+        build_registry(config)

@@ -2,11 +2,13 @@
 plus site resolution (the only constructor of platform instances).
 
 A ``vm-site`` is "a configured place to create VMs" (ADR 0016's
-instance-identity test): many consumers name the site
-(``vm-template.spec.site``, ``agw vm create --site``, ``defaults.site``,
-``vms.site`` provenance), and one platform backs many sites. Site rows
-arrive from the built-in bundle (``lima``, ``wsl2``), operator
-manifests, and the legacy ``[azure]`` / ``[proxmox]`` TOML sections.
+instance-identity test): consumers name the site (``agw vm create
+--site``, ``defaults.site``, ``vms.site`` provenance -- never a
+template: placement is host/operator-scoped), and one platform backs
+many sites. Site rows arrive from the built-in bundle (``lima-local``,
+``wsl2`` -- published only where their platform's host requirements are
+met), operator manifests, and the legacy ``[azure]`` / ``[proxmox]``
+TOML sections.
 """
 
 from __future__ import annotations
@@ -147,12 +149,31 @@ def select_site(
             ),
         )
     if output.is_interactive():
-        choice = output.choose("Select a site for this VM", names)
+        choice = output.choose("Select a site:", names)
         return names[choice]
     raise ValidationError(
         f"multiple sites are declared ({', '.join(names)})",
         hint="pass --site <name> or set defaults.site in config.toml",
     )
+
+
+def _bundled_site_miss_reason(name: str) -> str | None:
+    """When ``name`` is a bundled site absent because its platform's
+    host requirements aren't met, the platform's stated reason; else
+    ``None``. Shared by every surface that misses on a site name
+    (``lookup_site``, ``validate_sites``) so none of them hands an
+    operator the misleading declare-that-name remedy for a reserved,
+    requirement-gated name.
+    """
+    from agentworks.capabilities.vm_platform import (
+        VM_PLATFORM_REGISTRY,
+        bundled_site_platform,
+    )
+
+    platform_name = bundled_site_platform(name)
+    if platform_name is None:
+        return None
+    return VM_PLATFORM_REGISTRY[platform_name].bundled_site_unsupported_reason()
 
 
 def lookup_site(name: str, registry: Registry) -> VMSiteDecl:
@@ -167,25 +188,13 @@ def lookup_site(name: str, registry: Registry) -> VMSiteDecl:
     try:
         decl = registry.lookup("vm-site", name)
     except KeyError:
-        from agentworks.capabilities.vm_platform import (
-            VM_PLATFORM_REGISTRY,
-            bundled_site_platform,
-        )
-
-        platform_name = bundled_site_platform(name)
-        if platform_name is not None:
-            reason = VM_PLATFORM_REGISTRY[
-                platform_name
-            ].bundled_site_unsupported_reason()
-            if reason is not None:
-                raise ConfigError(
-                    f"the bundled site '{name}' is unavailable on this "
-                    f"host: {reason}",
-                    hint=(
-                        f"meet the requirement to get the site back, or "
-                        f"use a different site (platform: {platform_name})"
-                    ),
-                ) from None
+        reason = _bundled_site_miss_reason(name)
+        if reason is not None:
+            raise ConfigError(
+                f"the bundled site '{name}' is unavailable on this "
+                f"host: {reason}",
+                hint="meet the requirement to get the site back, or use a different site",
+            ) from None
         raise ConfigError(
             f"site '{name}' is not declared",
             hint=site_manifest_hint(name),
@@ -259,6 +268,21 @@ def validate_sites(config: Config, registry: Registry) -> None:
     try:
         registry.lookup("vm-site", site)
     except KeyError:
+        # Same bundled-site miss treatment as lookup_site: with
+        # `defaults.site = "lima-local"` and limactl missing, the
+        # remedy is the platform's stated requirement, never
+        # "declare a site by that (reserved) name".
+        reason = _bundled_site_miss_reason(site)
+        if reason is not None:
+            raise ConfigError(
+                f"defaults.site names the bundled site '{site}', which is "
+                f"unavailable on this host: {reason}",
+                hint=(
+                    "meet the requirement to get the site back, or point "
+                    "defaults.site at a declared site "
+                    "(`agw resource list --kind vm-site`)"
+                ),
+            ) from None
         raise ConfigError(
             f"defaults.site names an unknown site '{site}'",
             hint=(
