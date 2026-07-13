@@ -305,8 +305,8 @@ def _check_vm_sites(config: Config, registry: Registry) -> HealthGroup:
                     )
                 elif vm.site not in sites:
                     g.fail(
-                        f"VM '{vm.name}' site '{vm.site}'",
-                        "not declared",
+                        f"VM '{vm.name}'",
+                        f"site '{vm.site}' is not declared",
                         hint=site_manifest_hint(vm.site),
                     )
         finally:

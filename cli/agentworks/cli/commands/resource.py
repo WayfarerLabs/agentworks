@@ -101,8 +101,11 @@ def resource_list(
     )
     # ``--names-only`` short-circuits the table render. Per the
     # cli-conventions ``--names-only`` rule, render-only work is skipped:
-    # ``list_resources`` does no I/O (pure dict + attribute access over
-    # already-published Resources), so the cost up to here is negligible.
+    # ``list_resources`` does no network or DB-heavy work (attribute
+    # access over already-published Resources, plus each kind's
+    # ``disabled_reason`` hook -- offline host introspection like a PATH
+    # scan by contract), so the cost up to here is completion-cheap.
+    # Keep it that way: heavier per-row work belongs after this check.
     # The cross-kind divergence from the rule: we emit ``kind/name``
     # rather than bare ``name`` because two kinds can publish resources
     # with the same name; completion snippets ``awk -F/`` the prefix.

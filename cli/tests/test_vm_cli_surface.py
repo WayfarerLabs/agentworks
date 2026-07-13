@@ -241,10 +241,11 @@ def test_doctor_vm_sites_group(
     by_name = {c.name: c for c in group.checks}
     assert by_name["lima-local"].status is doctor.Status.OK
     assert by_name["wsl2"].status is doctor.Status.OK
-    stranded = by_name["VM 'lost' site 'gone-box'"]
+    stranded = by_name["VM 'lost'"]
     assert stranded.status is doctor.Status.FAIL
+    assert "gone-box" in (stranded.message or "")
     assert "name: gone-box" in (stranded.hint or "")
-    assert "VM 'good' site 'lima-local'" not in by_name
+    assert "VM 'good'" not in by_name
 
 
 def test_doctor_vm_sites_disabled_and_preflight_rows(

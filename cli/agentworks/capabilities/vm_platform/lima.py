@@ -151,7 +151,12 @@ class LimaPlatform(VMPlatform):
         """Local sites: ``limactl`` must be on PATH. Remote sites defer
         to the ops (probing the vm_host over SSH is a real round trip;
         the first op's error is already clear). No config secrets, so
-        the base's prediction pass is a no-op."""
+        the base's prediction pass is a no-op.
+
+        The limactl check ordinarily never fires here: a limactl-less
+        local site is disabled (``disabled_reason``) before any op
+        reaches preflight. It stays as defense for directly-constructed
+        instances, not as a disagreement about whose check this is."""
         super().preflight()
         if not self.is_remote:
             self._ensure_limactl()

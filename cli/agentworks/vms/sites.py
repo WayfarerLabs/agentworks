@@ -195,6 +195,12 @@ def site_disabled_reason(decl: VMSiteDecl) -> str | None:
         return f"platform '{decl.platform}' is not installed"
     if (reason := platform_cls.unsupported_reason()) is not None:
         return f"platform '{decl.platform}' is disabled: {reason}"
+    # Construction re-runs validate_config, but it cannot fail here:
+    # every decl source runs the same pure classmethod at load whenever
+    # the platform is installed (manifest decode, legacy TOML), and the
+    # branches above returned for the one unvalidated shape (missing
+    # platform). Inspection loops (doctor, resource list) rely on this
+    # -- one bad row must not take down the whole listing.
     return platform_cls(decl.name, decl.platform_config).disabled_reason()
 
 
