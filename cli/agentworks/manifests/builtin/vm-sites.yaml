@@ -2,8 +2,11 @@
 # settings. Bundling these (rather than letting VMs reference the
 # vm-platform capability directly) keeps vms.site one uniform reference
 # space: every VM points at a vm-site, never sometimes at a capability.
-# Their names are reserved (builtin_override = "reserved"): customize by
-# declaring a sibling site, not by redeclaring these.
+# Their names are reserved unconditionally -- a pre-finalize check in
+# bootstrap.build_registry rejects operator declarations even on hosts
+# where the bundled row is gated out (builtin_override = "reserved"
+# backstops the published case): customize by declaring a sibling site,
+# not by redeclaring these.
 #
 # A bundled site publishes ONLY where its platform says the zero-config
 # site is viable (VMPlatform.bundled_site_unsupported_reason: lima-local
