@@ -231,7 +231,12 @@ def disabled_reason_for(
     if method is None:
         return None
     reason = method(registry, resource)
-    assert reason is None or isinstance(reason, str)
+    if reason is not None and not isinstance(reason, str):
+        from agentworks.errors import StateError
+
+        raise StateError(
+            f"{kind}.disabled_reason returned {type(reason).__name__}, expected str | None"
+        )
     return reason
 
 
