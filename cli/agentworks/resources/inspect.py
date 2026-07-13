@@ -476,17 +476,23 @@ def render_resource_table(listing: ResourceListing) -> None:
         # (catalog, providers, backends); render as ``-`` to distinguish
         # "no instance concept" from "zero instances right now."
         used_by_cell = "-" if row.used_by_count is None else str(row.used_by_count)
-        # Disabled rows are marked in place (`agw resource describe`
-        # carries the reason): a disabled resource is still a resource.
-        name_cell = row.name if row.disabled_reason is None else f"{row.name} (disabled)"
+        # Disabled rows are marked in the DESCRIPTION cell, never the
+        # NAME cell: the rendered name must stay the exact selector an
+        # operator copies into `agw resource describe KIND/NAME`.
+        # `describe` carries the full reason.
+        description_cell = (
+            row.description
+            if row.disabled_reason is None
+            else f"(disabled) {row.description}".rstrip()
+        )
         rendered.append(
             (
                 row.kind,
-                name_cell,
+                row.name,
                 format_origin_line(row.origin),
                 str(row.reference_count),
                 used_by_cell,
-                row.description,
+                description_cell,
             )
         )
     widths = [

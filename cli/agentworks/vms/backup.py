@@ -41,14 +41,17 @@ def backup_vm(
             entity_kind="vm",
             entity_name=vm_name,
         )
-    platform = bind_platform(config, vm)
-
+    # Deterministic fatal checks BEFORE the bind: bind_platform runs
+    # preflight and the boundary resolve pass, which can prompt for
+    # site secrets -- the operator must never answer a prompt for a
+    # backup this row already sank.
     if vm.tailscale_host is None:
         raise StateError(
             f"VM '{vm_name}' has no Tailscale address",
             entity_kind="vm",
             entity_name=vm_name,
         )
+    platform = bind_platform(config, vm)
 
     with keep_active(db, config, vm, platform):
         # Create backup directory first so the log goes inside it
