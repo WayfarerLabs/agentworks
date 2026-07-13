@@ -159,16 +159,22 @@ Two coordination notes:
 > - Mutating ops carry per-op idempotency flags on the kind ABC.
 > - The base `Capability` class and the platform implementations live in a `capabilities/` subtree.
 >
-> **Host-support revision (2026-07-13):** platforms self-report host support via two
-> registration-time classmethods (not preflight): `unsupported_reason()` disables a platform
-> wholesale on hosts that can never run it (wsl2 off Windows: no capability row, sites referencing
-> it fail with the stated requirement), and `bundled_site_unsupported_reason()` gates only the
-> zero-config bundled site (lima-local without a local limactl; lima the platform stays supported
-> everywhere for remote sites). This supersedes R2's bundled-sites-always story: the bundled lima
-> site is renamed **`lima-local`**, bundled sites publish only where viable, vm-templates carry NO
-> `site` field (placement is host/operator-scoped: `--site`, then `defaults.site`, then infer-one /
-> prompt / error over declared sites -- the hardcoded lima fallback is gone), and doctor lists
-> installed-but-disabled platforms with their reasons. See the plan's 2026-07-13 sequencing note.
+> **Host-support revision (2026-07-13, refined same day):** platforms self-report host support: the
+> registration-time classmethod `unsupported_reason()` gates the capability row on hosts that can
+> never run the platform (wsl2 off Windows), and availability is otherwise the RESOURCE's own
+> generic `disabled_reason()` (capability-model.md's "Disabled resources"). Every vm-site -- bundled
+> and declared alike -- registers unconditionally and self-disables when its platform is missing
+> (plugin/typo), host-disabled, or the bound instance lacks a local requirement (lima-local without
+> `limactl`; lima the platform stays supported everywhere for remote sites). A disabled site
+> lists/describes with its reason; USING it is a typed error; references to it (VMs,
+> `defaults.site`) are doctor warnings, never command failures. The bundled lima site is renamed
+> **`lima-local`**, vm-templates carry NO `site` field (placement is host/operator-scoped: `--site`,
+> then `defaults.site`, then infer-one / prompt / error over ENABLED sites -- the hardcoded lima
+> fallback is gone), and doctor lists installed-but-disabled platforms and per-site state with
+> reasons. An earlier same-day iteration gated bundled-site PUBLICATION
+> (`bundled_site_unsupported_reason`) and hard-failed declared sites on unsupported platforms; both
+> were superseded by the register-always/self-disable model. See the plan's 2026-07-13 sequencing
+> notes.
 
 ### R1: Platform capability, site resource
 

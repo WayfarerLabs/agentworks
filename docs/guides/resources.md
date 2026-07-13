@@ -108,9 +108,10 @@ spec:
 - `spec.platform` names a `vm-platform` capability row (`lima`, `wsl2`, `azure`, `proxmox`);
   `spec.platform_config` is validated by that platform (unknown keys are errors). Remote Lima is
   just a lima site with `platform_config.vm_host: user@host`.
-- The `lima-local` and `wsl2` sites ship built in with empty config, on hosts where their platform
-  can run (each platform self-reports its host requirements: wsl2 needs Windows; lima-local needs a
-  local `limactl`). Their names are reserved. A site named after a platform must declare that
+- The `lima-local` and `wsl2` sites ship built in with empty config. Like every site they register
+  on every host and disable themselves where this host lacks what they need (wsl2 is Windows-only; a
+  local Lima site needs `limactl`); a disabled site still lists and describes with its reason, and
+  using it is an error. Their names are reserved. A site named after a platform must declare that
   platform.
 - Consumers name sites: `agw vm create --site`, `defaults.site` in config.toml, and each VM row's
   `site`. Templates deliberately carry no site -- placement is per-host, never template state.
@@ -129,12 +130,15 @@ policy is per kind:
   declaring the same name overrides the built-in -- the name is the interface, and same-name
   override is how you customize what `gh` installs.
 - **Bundled vm-sites** (`lima-local`, `wsl2`): reserved names -- redeclaring one is an error;
-  declare a sibling site instead.
+  declare a sibling site instead. Like every vm-site they register on every host and disable
+  themselves where this host lacks what they need (`agw resource list` marks the row; `describe` and
+  `agw doctor` carry the reason); using a disabled site is an error naming the requirement.
 - **Secret backends** (`env-var`, `prompt`) and **VM platforms** (`lima`, `wsl2`, `azure`,
   `proxmox`): registered capabilities, shown as read-only rows. You cannot declare or override them;
   secrets customize per secret via `backend_mappings`, platforms configure per site via
   `platform_config`. A platform whose host requirements are not met publishes no row at all --
-  `agw doctor` lists installed-but-disabled platforms with the reason.
+  `agw doctor` lists installed-but-disabled platforms with the reason, and sites referencing one
+  self-disable rather than erroring.
 
 ## Secrets: backends and the chain
 

@@ -22,13 +22,22 @@ from agentworks.vms.sites import (
 )
 
 
+@pytest.fixture(autouse=True)
+def _enabled_everywhere(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Dispatch tests exercise resolution shape, not this host's OS and
+    tooling: pin every platform supported and every site enabled.
+    Tests OF the disabled model re-patch the individual methods."""
+    from tests.conftest import stub_platform_support
+
+    stub_platform_support(monkeypatch)
+
+
 def _registry(*sites: VMSiteDecl) -> Registry:
     from tests.conftest import publish_all_platforms
 
     registry = Registry.empty()
     builtin_manifests.publish_to(registry)
-    # Bypass the host-support gate: dispatch tests exercise resolution
-    # shape, not this host's OS/tooling.
+    # Publish all four capability rows regardless of the test host.
     publish_all_platforms(registry)
     for site in sites:
         registry.add("vm-site", site.name, site, Origin.built_in(source="test"))
@@ -217,34 +226,29 @@ def test_select_site_errors_when_none_declared() -> None:
     registry = Registry.empty()
     publish_all_platforms(registry)
     registry.finalize()
-    with pytest.raises(ValidationError, match="no vm-sites are declared"):
+    with pytest.raises(ValidationError, match="no vm-sites are enabled"):
         select_site(None, None, registry)
 
 
-# -- lookup_site: bundled-miss hints ----------------------------------------
+# -- Disabled sites at the resolve chokepoint --------------------------------
 
 
-def test_lookup_bundled_site_miss_names_the_requirement(
+def test_resolving_a_disabled_site_names_the_requirement(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A VM on a bundled site whose platform requirements went away
-    (limactl uninstalled) gets the platform's stated reason, never the
-    misleading paste-a-manifest hint."""
-    from agentworks.capabilities.vm_platform.lima import LimaPlatform
-    from agentworks.resources import Registry
+    """A VM on a bundled site whose requirement went away (limactl
+    uninstalled after VMs existed) gets the site's disabled reason at
+    resolve time -- the site still EXISTS (lookup succeeds; the
+    stranded paste-a-manifest error is only for undeclared names)."""
     from agentworks.vms.sites import lookup_site
-    from tests.conftest import publish_all_platforms
 
     monkeypatch.setattr(
-        LimaPlatform,
-        "bundled_site_unsupported_reason",
-        classmethod(lambda cls: "limactl not installed"),
+        LimaPlatform, "disabled_reason", lambda self: "limactl not installed"
     )
-    registry = Registry.empty()
-    publish_all_platforms(registry)
-    registry.finalize()
+    registry = _registry()
 
-    with pytest.raises(ConfigError, match="bundled site 'lima-local' is unavailable") as exc:
-        lookup_site("lima-local", registry)
+    assert lookup_site("lima-local", registry).platform == "lima"
+    with pytest.raises(StateError, match="disabled on this host") as exc:
+        resolve_site("lima-local", registry)
     assert "limactl" in str(exc.value)
     assert "kind: vm-site" not in (exc.value.hint or "")

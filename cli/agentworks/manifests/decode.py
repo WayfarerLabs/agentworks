@@ -277,8 +277,9 @@ def _decode_vm_site(doc: Document, spec: dict[str, object], issues: list[str]) -
             "configuration goes under spec.platform_config"
         )
     # Capability validation on the TRUE blob, with this document's
-    # file:line in the error. Unknown platform names defer to the
-    # framework's miss policy at finalize.
+    # file:line in the error. Unknown platform names are tolerated: the
+    # site registers and self-disables ("platform 'x' is not
+    # installed") -- a plugin's platform may simply not be here.
     from agentworks.capabilities.vm_platform import VM_PLATFORM_REGISTRY
 
     # FRD R2: a site named after a known platform must declare that

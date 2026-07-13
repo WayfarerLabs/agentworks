@@ -107,12 +107,13 @@ Manage virtual machines across declared vm-sites (Lima local or remote, Azure, W
 
 Where VMs are created is declared as `vm-site` resources: YAML manifests under
 `~/.config/agentworks/resources/` that pair a platform (the code that runs VMs on one backend kind)
-with its configuration. The `lima-local` and `wsl2` sites ship built in, appearing only on hosts
-where their platform can actually run (each platform self-reports its host requirements: wsl2 needs
-Windows; lima-local needs a local `limactl`; `agw doctor` lists installed platforms that are
-disabled and why). Run `agw resource sample vm-site` for commented, ready-to-edit examples (an Azure
-site, a remote-Lima site with `platform_config.vm_host`). The former `agw vm-host` registry is gone
--- a remote Lima host is now just a vm-site.
+with its configuration. The `lima-local` and `wsl2` sites ship built in. Every site registers on
+every host and disables itself when this host lacks what it needs (wsl2 is Windows-only; a local
+Lima site needs `limactl`; a platform may simply not be installed): a disabled site still lists and
+describes, using it is an error naming the requirement, and `agw doctor` shows each platform's and
+site's state with the reason. Run `agw resource sample vm-site` for commented, ready-to-edit
+examples (an Azure site, a remote-Lima site with `platform_config.vm_host`). The former
+`agw vm-host` registry is gone -- a remote Lima host is now just a vm-site.
 
 > **Note on WSL2:** WSL2 distros share the Windows workstation's lifecycle. They idle-shut after
 > ~60s of no `wsl.exe` activity (`vmIdleTimeout` in `.wslconfig`) and do not survive workstation
@@ -142,7 +143,7 @@ site, a remote-Lima site with `platform_config.vm_host`). The former `agw vm-hos
 
 `vm create <name>` takes the VM name as a required positional. Optional flags: `--template` (a
 declared vm-template), `--site` (a declared vm-site; falls back to `defaults.site`, else the one
-declared site is inferred when there is exactly one, several prompt interactively, and
+ENABLED site is inferred when there is exactly one, several prompt interactively, and
 non-interactive runs error naming the options), `--admin-username`, `--cpus`, `--memory`, `--disk`,
 and `--azure-vm-size`. These are immutable provisioning parameters stored in the database. All
 initialization behavior (packages, install commands, etc.) is driven by config. Templates carry no

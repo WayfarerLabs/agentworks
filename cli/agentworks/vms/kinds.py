@@ -207,5 +207,16 @@ class _VMSiteKind:
             if vm.site == name:
                 yield InstanceRef(instance_kind="vm", instance_name=vm.name)
 
+    def disabled_reason(self, registry: Registry, resource: Any) -> str | None:
+        """The generic disabled hook (structural, like ``instances``):
+        a site registers on every host and self-disables when its
+        platform is missing, host-disabled, or the bound instance
+        reports a missing requirement. Domain logic lives with the
+        sites module; this is the framework-facing delegation.
+        """
+        from agentworks.vms.sites import site_disabled_reason
+
+        return site_disabled_reason(resource)
+
 
 KIND_REGISTRY["vm-site"] = _VMSiteKind()

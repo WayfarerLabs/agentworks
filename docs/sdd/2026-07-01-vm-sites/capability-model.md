@@ -240,6 +240,33 @@ A flagged, idempotent minting op must therefore **check-then-mint**: read the cu
 it (the preflight-style read), and mint only if it is absent or expired. That guard is real work the
 implementer is on the hook for, and the flag is what tells them so.
 
+## Disabled resources (`disabled_reason`)
+
+Distinct from the lifecycle and cheaper than all of it: any resource -- capability instance or
+declared resource -- may answer **"do you have what you need to run on this host?"** via a generic
+`disabled_reason() -> str | None` (`None` = enabled). The contract is _cheap, offline,
+host-introspection only_: OS, tool presence, the shape of the bound config -- never network,
+secrets, or prompting. Readiness that needs a resolver or a remote read is preflight's job at the op
+boundary; `disabled_reason` runs on inspection and selection surfaces (doctor, `resource list`, site
+selection) where preflight would be too heavy.
+
+For most declared resources the answer is a no-op (a vm-template always has what it needs); the
+resource layer treats absent-on-kind as "never disabled" (the same structural-hook pattern as
+`instances`). Where it is real, the rules are uniform:
+
+- A disabled resource **still registers** -- it lists (marked), describes (with the reason), and
+  holds references. Existence and availability are separate axes.
+- **Using** a disabled resource is a typed error naming the reason chain.
+- **References to** a disabled resource are doctor warnings, never command failures -- a resources
+  dir shared across hosts degrades gracefully on the host that lacks a requirement.
+
+The vm stack is the first adopter: a platform's class-level `unsupported_reason` gates its
+capability row ("could any configuration ever work here" -- wsl2 off Windows), and every vm-site
+registers unconditionally, deriving its own `disabled_reason` from the chain: platform missing (an
+uninstalled plugin and a typo are indistinguishable by design), platform host-disabled, or the bound
+platform instance's own answer (a local-Lima site without `limactl`; remote sites run `limactl` on
+the `vm_host` and need nothing locally).
+
 ## The base class
 
 The shared surface is real (it is a lifecycle, not a boilerplate default), so it earns a base class.

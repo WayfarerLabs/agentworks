@@ -110,13 +110,14 @@ def test_decode_validates_the_blob_via_the_capability(tmp_path: Path) -> None:
         load_manifests(tmp_path)
 
 
-def test_unknown_platform_defers_to_the_miss_policy(tmp_path: Path) -> None:
-    """Decode must not error on an unregistered platform; the framework's
-    error miss policy reports it uniformly at finalize."""
-    doc = SITE_DOC.replace("platform: azure", "platform: nope").replace(
-        "platform_config:", "ignored_config:"
-    )
-    # Rebuild a minimal valid doc for an unknown platform (no blob).
+def test_unknown_platform_registers_a_disabled_site(tmp_path: Path) -> None:
+    """Decode must not error on an unregistered platform, and neither
+    may finalize: the site claims no capability edge and self-disables
+    ("platform 'nope' is not installed") -- an uninstalled plugin and a
+    typo are indistinguishable by design, and both must degrade rather
+    than break the registry."""
+    from agentworks.vms.sites import site_disabled_reason
+
     doc = (
         "apiVersion: agentworks/v1\n"
         "kind: vm-site\n"
@@ -127,11 +128,12 @@ def test_unknown_platform_defers_to_the_miss_policy(tmp_path: Path) -> None:
     )
     site = _load_one(tmp_path, doc)
     assert site.platform == "nope"
+    assert site.referenced_resources() == []
 
     registry = Registry.empty()
     registry.add("vm-site", "mystery", site, Origin.built_in(source="test"))
-    with pytest.raises(ConfigError, match="unknown vm-platform 'nope'"):
-        registry.finalize()
+    registry.finalize()  # no raise
+    assert site_disabled_reason(site) == "platform 'nope' is not installed"
 
 
 def test_reference_emission(tmp_path: Path) -> None:

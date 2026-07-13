@@ -197,12 +197,12 @@ def _check_required_tools() -> HealthGroup:
 
 
 def _check_vm_platforms() -> HealthGroup:
-    """Installed platforms and their host support, from the platforms'
-    own checks (the same gates that decide registration): a supported
-    platform is ``ok``; installed-but-disabled shows the platform's
-    stated reason; a supported platform whose BUNDLED site is
-    unavailable notes why (its operator-declared sites still work --
-    lima's remote sites need no local limactl).
+    """Installed platforms and their host support, from the platform's
+    own check (the same gate that decides capability-row publication):
+    a supported platform is ``ok``; installed-but-disabled shows the
+    platform's stated reason. Per-site availability (a local-Lima site
+    without ``limactl``) is the SITE's state and reports in the VM
+    sites group.
     """
     from agentworks.capabilities.vm_platform import VM_PLATFORM_REGISTRY
 
@@ -211,41 +211,38 @@ def _check_vm_platforms() -> HealthGroup:
         reason = cls.unsupported_reason()
         if reason is not None:
             g.info(name, f"disabled ({reason})")
-            continue
-        bundled_reason = (
-            cls.bundled_site_unsupported_reason()
-            if cls.bundled_site is not None
-            else None
-        )
-        if bundled_reason is not None:
-            # ok, not info: the platform itself works here (declared
-            # sites bind fine); only the zero-config site is absent.
-            g.ok(
-                name,
-                f"bundled site {cls.bundled_site} unavailable "
-                f"({bundled_reason})",
-            )
         else:
             g.ok(name)
     return g
 
 
 def _check_vm_sites(config: Config, registry: Registry) -> HealthGroup:
-    """VM sites: every declared site's platform preflight, and every
-    VM's site resolving to a declaration. A stranded row (e.g. a
-    migrated remote-Lima VM whose site manifest the operator has not
-    added yet) reports its paste-ready manifest snippet.
+    """VM sites: every registered site's state, and every VM's site
+    resolving to a usable declaration.
 
-    The per-site row IS the capability's ``preflight`` -- read-only by
-    contract, which is exactly what lets doctor call it: required tools
-    present, secrets predicted resolvable (never prompted), an API
-    reachable. Same check every service-layer operation runs before
-    doing anything real, so a failing row here is the error the next
-    command would hit.
+    A DISABLED site (its own generic ``disabled_reason``: platform
+    missing/host-disabled, or a missing local requirement) is
+    informational -- normal for the host, the site still exists -- and
+    skips preflight (pointless without its requirements). References
+    to a disabled site are the operator's problem-in-waiting and warn:
+    ``defaults.site`` and each VM row pointing at one. A VM whose site
+    is not declared at all still FAILS with the paste-ready manifest
+    snippet (the stranded remote-Lima case).
+
+    An enabled site's row IS the capability's ``preflight`` --
+    read-only by contract, which is exactly what lets doctor call it.
+    Same check every service-layer operation runs before doing
+    anything real, so a failing row here is the error the next command
+    would hit.
     """
     from agentworks.db import Database
     from agentworks.secrets.resolver import Resolver
-    from agentworks.vms.sites import VMSiteDecl, resolve_site, site_manifest_hint
+    from agentworks.vms.sites import (
+        VMSiteDecl,
+        resolve_site,
+        site_disabled_reason,
+        site_manifest_hint,
+    )
 
     g = HealthGroup("VM sites")
 
@@ -253,27 +250,35 @@ def _check_vm_sites(config: Config, registry: Registry) -> HealthGroup:
     for name, decl in registry.iter_kind_items("vm-site"):
         assert isinstance(decl, VMSiteDecl)
         sites[name] = decl
-    declared = {name: decl.platform for name, decl in sites.items()}
+    disabled: dict[str, str] = {}
     for name in sorted(sites):
         decl = sites[name]
+        reason = site_disabled_reason(decl)
+        if reason is not None:
+            disabled[name] = reason
+            g.info(name, f"disabled ({reason})")
+            continue
         try:
             platform = resolve_site(name, registry, resolver=Resolver(config, registry))
             platform.preflight()
         except Exception as e:
-            # A bundled site's tooling being absent is normal for the
-            # host (no WSL on macOS, no Lima on a cloud-only install):
-            # informational. An operator DECLARED the other sites, so a
-            # failing preflight there is the error their next command
-            # hits: warn.
-            built_in = getattr(decl.origin, "variant", None) == "built-in"
-            row = g.info if built_in else g.warn
-            row(
+            # A failing preflight on an enabled site is the error the
+            # operator's next command hits: warn.
+            g.warn(
                 name,
                 f"platform {decl.platform}; preflight: {e}",
                 hint=getattr(e, "hint", None),
             )
             continue
-        g.ok(name, f"platform {declared[name]}")
+        g.ok(name, f"platform {decl.platform}")
+
+    default_site = config.defaults.site
+    if default_site is not None and default_site in disabled:
+        g.warn(
+            "defaults.site",
+            f"names '{default_site}', which is disabled: "
+            f"{disabled[default_site]}",
+        )
 
     try:
         db_exists, current, latest = Database.check_schema()
@@ -293,13 +298,17 @@ def _check_vm_sites(config: Config, registry: Registry) -> HealthGroup:
         db = Database()
         try:
             for vm in db.list_vms():
-                if vm.site in declared:
-                    continue
-                g.fail(
-                    f"VM '{vm.name}' site '{vm.site}'",
-                    "not declared",
-                    hint=site_manifest_hint(vm.site),
-                )
+                if vm.site in disabled:
+                    g.warn(
+                        f"VM '{vm.name}'",
+                        f"site '{vm.site}' is disabled: {disabled[vm.site]}",
+                    )
+                elif vm.site not in sites:
+                    g.fail(
+                        f"VM '{vm.name}' site '{vm.site}'",
+                        "not declared",
+                        hint=site_manifest_hint(vm.site),
+                    )
         finally:
             db.close()
     except Exception as e:

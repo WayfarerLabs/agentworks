@@ -247,22 +247,21 @@ def publish_all_platforms(registry: object) -> None:
 
 
 def stub_platform_support(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Make every platform (and bundled site) report supported,
-    regardless of the test host's OS and tooling.
+    """Make every platform (and every site bound to one) report
+    supported and enabled, regardless of the test host's OS and
+    tooling.
 
-    Registration is host-gated for real (wsl2 publishes nothing off
-    Windows; lima-local needs a local limactl), so tests that want the
-    full four-platform registry must opt out of the host's actual
-    state. Tests OF the gating itself patch the individual classmethods
-    instead.
+    Platform capability rows are host-gated for real (wsl2 publishes
+    nothing off Windows) and sites self-disable for real (lima-local
+    needs a local limactl), so tests that want the full four-platform
+    graph enabled must opt out of the host's actual state. Tests OF
+    the disabled model itself patch the individual methods instead.
     """
     from agentworks.capabilities.vm_platform import VM_PLATFORM_REGISTRY
 
     for cls in VM_PLATFORM_REGISTRY.values():
         monkeypatch.setattr(cls, "unsupported_reason", classmethod(lambda c: None))
-        monkeypatch.setattr(
-            cls, "bundled_site_unsupported_reason", classmethod(lambda c: None)
-        )
+        monkeypatch.setattr(cls, "disabled_reason", lambda self: None)
 
 
 def stub_vm_gates(monkeypatch: pytest.MonkeyPatch) -> _StubPlatform:

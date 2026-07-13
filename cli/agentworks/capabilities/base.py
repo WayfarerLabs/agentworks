@@ -141,6 +141,25 @@ class Capability(ABC):
             )
         return ()
 
+    def disabled_reason(self) -> str | None:
+        """Why this bound instance cannot run on this host, or ``None``
+        when it can. The generic "do you have what you need to run"
+        surface: the resource layer exposes it as a binary disabled
+        flag plus reason, so a disabled resource still registers (it
+        lists, describes, and holds references) but any attempt to use
+        it is a typed error and existing references degrade to
+        warnings.
+
+        Contract: cheap, offline, host-introspection only (OS, tool
+        presence, the shape of the bound config) -- never network,
+        secrets, or prompting. Readiness that needs a resolver or a
+        remote read is :meth:`preflight`'s job at the op boundary; this
+        runs on inspection surfaces (doctor, ``resource list``,
+        selection) where preflight would be too heavy. Default: never
+        disabled.
+        """
+        return None
+
     def preflight(self) -> None:
         """Verify readiness: "will the real work probably succeed?"
 

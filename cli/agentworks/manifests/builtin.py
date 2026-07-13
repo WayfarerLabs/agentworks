@@ -15,32 +15,22 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
-
-    from agentworks.manifests.loader import ManifestEntry
     from agentworks.resources.registry import Registry
 
 _BUILTIN_SOURCE = "agentworks.manifests.builtin"
 
 
-def publish_to(
-    registry: Registry,
-    *,
-    skip: Callable[[ManifestEntry], bool] | None = None,
-) -> None:
-    """Publish every bundled manifest with a ``built-in`` origin.
+def publish_to(registry: Registry) -> None:
+    """Publish every bundled manifest with a ``built-in`` origin,
+    unconditionally -- host suitability is the resource's own concern
+    (a bundled vm-site registers everywhere and self-disables where it
+    lacks what it needs), never a publish-time filter.
 
     The origin's source carries the bundled filename
     (``agentworks.manifests.builtin/<filename>``) so ``agw resource
     describe`` points at the actual shipped file. Bundled manifests are
     app data: warn-level issues in them are app bugs, asserted here so
     CI catches a dirty bundle the moment content is added.
-
-    ``skip`` is the app composition's host-conditional filter: this
-    module stays a dumb bundle loader, and decisions like "bundled
-    vm-sites publish only for platforms enabled on this host" belong to
-    ``bootstrap.build_registry``, which composes the predicate from
-    config. ``None`` publishes everything.
     """
     from agentworks.manifests.loader import load_manifests
     from agentworks.resources import Origin
@@ -55,8 +45,6 @@ def publish_to(
         f"bundled manifests must be issue-free: {manifests.issues}"
     )
     for entry in manifests.entries:
-        if skip is not None and skip(entry):
-            continue
         registry.add(
             entry.kind,
             entry.name,

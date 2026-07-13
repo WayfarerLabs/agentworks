@@ -101,6 +101,15 @@ def test_vm_shell_provisioner_alias_still_works(
     assert captured["platform_transport"] is True
 
 
+def _config_stub(default_site: str | None = None) -> Any:
+    """The slice of Config that _check_vm_sites reads."""
+    from types import SimpleNamespace
+
+    return cast(
+        "Config", SimpleNamespace(defaults=SimpleNamespace(site=default_site))
+    )
+
+
 def test_doctor_vm_sites_defers_on_pending_migration(
     db: Database, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -129,11 +138,11 @@ def test_doctor_vm_sites_defers_on_pending_migration(
             raise AssertionError("Database() must not open (would auto-migrate)")
 
     monkeypatch.setattr("agentworks.db.Database", _DbFactory)
-    # Deterministic bundled-site preflights: lima/wsl2 check their local
+    # Deterministic site preflights: lima/wsl2 check their local
     # binary; pretend both are present regardless of the host.
     monkeypatch.setattr("shutil.which", lambda name: f"/usr/bin/{name}")
 
-    group = doctor._check_vm_sites(cast("Config", object()), registry)
+    group = doctor._check_vm_sites(_config_stub(), registry)
 
     by_name = {c.name: c for c in group.checks}
     deferred = by_name["VM sites"]
@@ -227,7 +236,7 @@ def test_doctor_vm_sites_group(
     # binary; pretend both are present regardless of the host.
     monkeypatch.setattr("shutil.which", lambda name: f"/usr/bin/{name}")
 
-    group = doctor._check_vm_sites(cast("Config", object()), registry)
+    group = doctor._check_vm_sites(_config_stub(), registry)
 
     by_name = {c.name: c for c in group.checks}
     assert by_name["lima-local"].status is doctor.Status.OK
@@ -238,16 +247,20 @@ def test_doctor_vm_sites_group(
     assert "VM 'good' site 'lima-local'" not in by_name
 
 
-def test_doctor_vm_sites_preflight_severity_split(
+def test_doctor_vm_sites_disabled_and_preflight_rows(
     db: Database, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    """A failing preflight is `info` on a bundled site (absent local
-    tooling is normal for the host) but `warn` on an operator-declared
-    site (that failure is the error the operator's next command hits)."""
+    """A DISABLED site is informational with its reason and skips
+    preflight (normal for the host; the site still exists); an ENABLED
+    site whose preflight fails is the error the operator's next command
+    hits and warns."""
     from pathlib import Path as _Path
 
     from agentworks import doctor
     from agentworks.capabilities import vm_platform as vm_platforms
+    from agentworks.capabilities.vm_platform.lima import LimaPlatform
+    from agentworks.capabilities.vm_platform.wsl2 import WSL2Platform
+    from agentworks.errors import ConfigError
     from agentworks.manifests import builtin as builtin_manifests
     from agentworks.resources import Origin, Registry
     from agentworks.vms.sites import VMSiteDecl
@@ -260,7 +273,7 @@ def test_doctor_vm_sites_preflight_severity_split(
     registry.add(
         "vm-site",
         "mybox",
-        VMSiteDecl(name="mybox", platform="lima"),
+        VMSiteDecl(name="mybox", platform="lima", platform_config={"vm_host": "me@box"}),
         Origin.operator_declared(file=_Path("sites.yaml"), line=1),
     )
     registry.finalize()
@@ -274,14 +287,74 @@ def test_doctor_vm_sites_preflight_severity_split(
             return db
 
     monkeypatch.setattr("agentworks.db.Database", _DbFactory)
-    # No tooling anywhere: every local-lima/wsl2 preflight fails.
-    monkeypatch.setattr("shutil.which", lambda name: None)
+    # The LOCAL lima site disables itself; the remote mybox site stays
+    # enabled but its preflight fails; wsl2 stays fully healthy.
+    monkeypatch.setattr(
+        LimaPlatform,
+        "disabled_reason",
+        lambda self: None if self.platform_config.get("vm_host") else "limactl not installed",
+    )
 
-    group = doctor._check_vm_sites(cast("Config", object()), registry)
+    def _boom(self: object) -> None:
+        raise ConfigError("preflight: ssh unreachable")
+
+    monkeypatch.setattr(LimaPlatform, "preflight", _boom)
+    monkeypatch.setattr(WSL2Platform, "preflight", lambda self: None)
+    monkeypatch.setattr("shutil.which", lambda name: f"/usr/bin/{name}")
+
+    group = doctor._check_vm_sites(_config_stub(), registry)
 
     by_name = {c.name: c for c in group.checks}
-    assert by_name["lima-local"].status is doctor.Status.INFO
-    assert by_name["wsl2"].status is doctor.Status.INFO
+    lima_row = by_name["lima-local"]
+    assert lima_row.status is doctor.Status.INFO
+    assert lima_row.message == "disabled (limactl not installed)"
+    assert by_name["wsl2"].status is doctor.Status.OK
     operator_row = by_name["mybox"]
     assert operator_row.status is doctor.Status.WARN
     assert "preflight" in (operator_row.message or "")
+
+
+def test_doctor_warns_on_references_to_disabled_sites(
+    db: Database, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Existing references to a disabled site are warnings, not
+    failures: the VM row and defaults.site each get one, with the
+    reason. An undeclared site stays the stranded FAIL."""
+    from agentworks import doctor
+    from agentworks.capabilities import vm_platform as vm_platforms
+    from agentworks.capabilities.vm_platform.lima import LimaPlatform
+    from agentworks.manifests import builtin as builtin_manifests
+    from agentworks.resources import Registry
+    from tests.conftest import stub_platform_support
+
+    stub_platform_support(monkeypatch)
+    registry = Registry.empty()
+    builtin_manifests.publish_to(registry)
+    vm_platforms.publish_to(registry)
+    registry.finalize()
+
+    db.insert_vm("boxed", site="lima-local", hostname="boxed")
+
+    class _DbFactory:
+        @staticmethod
+        def check_schema(path: object = None) -> tuple[bool, int, int]:
+            return (True, 27, 27)
+
+        def __new__(cls) -> Database:  # type: ignore[misc]
+            return db
+
+    monkeypatch.setattr("agentworks.db.Database", _DbFactory)
+    monkeypatch.setattr(
+        LimaPlatform, "disabled_reason", lambda self: "limactl not installed"
+    )
+    monkeypatch.setattr("shutil.which", lambda name: f"/usr/bin/{name}")
+
+    group = doctor._check_vm_sites(_config_stub("lima-local"), registry)
+
+    by_name = {c.name: c for c in group.checks}
+    vm_row = by_name["VM 'boxed'"]
+    assert vm_row.status is doctor.Status.WARN
+    assert "limactl not installed" in (vm_row.message or "")
+    default_row = by_name["defaults.site"]
+    assert default_row.status is doctor.Status.WARN
+    assert "lima-local" in (default_row.message or "")

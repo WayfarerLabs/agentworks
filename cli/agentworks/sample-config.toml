@@ -54,10 +54,10 @@ ssh_private_key = "~/.ssh/id_ed25519"        # required: used for SSH connection
 
 [defaults]
 #site = "lima-local"                        # default vm-site for `agw vm create`
-                                            # (a declared vm-site resource; the
-                                            # bundled sites -- lima-local, and
-                                            # wsl2 on Windows -- appear only
-                                            # where their platform can run)
+                                            # (a declared vm-site resource; sites
+                                            # disable themselves where this host
+                                            # lacks what they need -- see
+                                            # `agw doctor` for each site's state)
 # `platform` is the deprecated alias of `site` (one release); rename the key.
 
 # --- Named-console settings ---

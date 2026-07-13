@@ -49,36 +49,16 @@ VM_PLATFORM_REGISTRY: dict[str, type[VMPlatform]] = {
 }
 """Every platform this BUILD ships (INSTALLED, in doctor's vocabulary).
 Which of them are usable on this host is the platform's own call:
-:meth:`VMPlatform.unsupported_reason` gates registration (the capability
-row and everything downstream), and
-:meth:`VMPlatform.bundled_site_unsupported_reason` additionally gates
-the zero-config bundled site. The knowledge lives on the platform class
--- no config knob, no host sniffing anywhere else -- which is exactly
-the shape a plugin's platform brings along. Future plugins register
-here (and publish their own capability resources with plugin origins).
+:meth:`VMPlatform.unsupported_reason` gates the capability row, and
+every site (bundled and declared alike) registers unconditionally and
+self-disables when its platform is missing/unsupported or the bound
+instance reports a missing requirement
+(:meth:`Capability.disabled_reason`). The knowledge lives on the
+platform class -- no config knob, no host sniffing anywhere else --
+which is exactly the shape a plugin's platform brings along. Future
+plugins register here (and publish their own capability resources with
+plugin origins).
 """
-
-
-def unsupported_platforms() -> dict[str, str]:
-    """``{platform_name: reason}`` for every installed platform that
-    cannot run on this host at all (``unsupported_reason``). These
-    publish no capability row; doctor lists them as installed-but-
-    disabled with the reason."""
-    return {
-        name: reason
-        for name, cls in VM_PLATFORM_REGISTRY.items()
-        if (reason := cls.unsupported_reason()) is not None
-    }
-
-
-def bundled_site_platform(site_name: str) -> str | None:
-    """The platform whose bundled site is named ``site_name``, or
-    ``None`` if no platform bundles a site by that name. Drives the
-    targeted hint on a bundled-site lookup miss."""
-    for name, cls in VM_PLATFORM_REGISTRY.items():
-        if cls.bundled_site == site_name:
-            return name
-    return None
 
 
 @dataclass(frozen=True)
@@ -107,11 +87,10 @@ def publish_to(registry: Registry) -> None:
     resource.
 
     An unsupported platform (``unsupported_reason``) publishes nothing:
-    it is installed but disabled on this host, invisible to the
-    resource graph and listed only by doctor. A declared site
-    referencing one gets the friendly requirements error from
-    ``bootstrap.build_registry``'s pre-finalize guard, before the
-    framework's generic reference miss could fire.
+    it is installed but disabled on this host and listed only by
+    doctor. Sites referencing it still register -- they self-disable
+    with the platform's reason in the chain (and emit no capability
+    edge, so the missing row never trips finalize).
     """
     from agentworks.resources import Origin
 

@@ -102,45 +102,27 @@ class VMPlatform(Capability):
     """
 
     owner_kind: ClassVar[str] = "vm-site"
-    # The name of this platform's bundled zero-config site, or None for
-    # platforms that always need operator configuration (azure,
-    # proxmox). Bundled sites publish only when
-    # bundled_site_unsupported_reason() returns None on this host.
-    bundled_site: ClassVar[str | None] = None
 
     @classmethod
     def unsupported_reason(cls) -> str | None:
         """Why this platform cannot run on this host AT ALL, or ``None``
         when it can. A non-None reason disables the platform wholesale:
-        no capability row publishes, no site may reference it, and
-        doctor lists it as installed-but-disabled with this reason.
+        no capability row publishes, every site referencing it
+        self-disables with this reason in its chain, and doctor lists
+        the platform as installed-but-disabled.
 
         This is a registration-time gate, NOT preflight: a pure, fast
         classmethod with no config, no instance, and no secrets, run at
         every registry build. It answers "could any configuration of
         this platform ever work here" (wsl2 off Windows: no), not "is
         this configured site ready" (that is preflight) and not "is a
-        tool merely missing but installable" (that is the bundled-site
-        check or preflight, depending on scope). Default: supported
-        everywhere.
+        tool merely missing but installable" (that is the instance's
+        :meth:`Capability.disabled_reason` -- lima the platform is
+        supported everywhere because remote sites run ``limactl`` on
+        the vm_host over SSH, but a local-Lima site without a local
+        ``limactl`` disables itself). Default: supported everywhere.
         """
         return None
-
-    @classmethod
-    def bundled_site_unsupported_reason(cls) -> str | None:
-        """Why this platform's zero-config bundled site should NOT
-        publish on this host, or ``None`` when it should. Only consulted
-        for platforms with a ``bundled_site``; an operator-declared site
-        is self-evidently intentional and never gated by this (only by
-        :meth:`unsupported_reason`).
-
-        The distinction from :meth:`unsupported_reason` is real: lima
-        the platform is supported everywhere (remote-Lima sites run
-        ``limactl`` on the vm_host over SSH), but ``lima-local`` is
-        pointless without a local ``limactl``. Default: same answer as
-        the platform-level check.
-        """
-        return cls.unsupported_reason()
     # Operator guidance shown when native_transport returns None (the
     # transports factory embeds it in the StateError hint). Platforms
     # that opt out of a native transport override with prose naming

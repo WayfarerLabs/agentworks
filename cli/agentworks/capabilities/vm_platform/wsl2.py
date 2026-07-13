@@ -451,9 +451,6 @@ class WSL2Platform(VMPlatform):
 
     name: ClassVar[str] = "wsl2"
     description: ClassVar[str] = "WSL2 Debian distributions on Windows"
-    # One distro host per Windows workstation, so platform and bundled
-    # site share the name.
-    bundled_site: ClassVar[str | None] = "wsl2"
 
     @classmethod
     def unsupported_reason(cls) -> str | None:
@@ -465,12 +462,11 @@ class WSL2Platform(VMPlatform):
             return "Windows only"
         return None
 
-    @classmethod
-    def bundled_site_unsupported_reason(cls) -> str | None:
-        """On Windows the bundled site additionally needs ``wsl.exe``
-        itself (WSL is an optional Windows feature)."""
-        if (reason := cls.unsupported_reason()) is not None:
-            return reason
+    def disabled_reason(self) -> str | None:
+        """On Windows a wsl2 site additionally needs ``wsl.exe`` itself
+        (WSL is an optional Windows feature). Off Windows the platform
+        gate already disables everything, so this only ever fires on a
+        supported host."""
         import shutil
 
         if not shutil.which("wsl"):

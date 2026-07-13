@@ -245,6 +245,39 @@ flag/completion work stays in Phase 5.
   group header already says it) and the lima row drops the `enabled (...)` wrapper (`[ok]` is the
   enabled signal; the bundled-site note is the whole message).
 
+- **2026-07-13, the disabled-resource model: sites register unconditionally and self-disable.**
+  Maintainer-designed refinement superseding the same-day host-support gating (existence and
+  availability are separate axes; the gating conflated them). The generic surface: any resource may
+  answer "do you have what you need to run?" via `disabled_reason() -> str | None` -- a default-None
+  method on the `Capability` base and an optional structural hook on `ResourceKind` (the `instances`
+  pattern: absent-on-kind = never disabled), surfaced by `resources.inspect.disabled_reason_for`.
+  Contract: cheap, offline, host-introspection only; preflight remains the deeper op-boundary check.
+  No `site_disabled_reason` platform hook exists (maintainer ruling: "sites aren't special at all")
+  -- the platform's capability INSTANCE implements the generic method (a local-Lima site without
+  `limactl`; wsl2's `wsl.exe`), and the vm-site kind derives its chain: platform missing ("not
+  installed" -- an uninstalled plugin and a typo are indistinguishable by design), platform
+  host-disabled (`unsupported_reason`, which still gates the capability row), else the instance's
+  answer. Rules: disabled sites still register, list (marked), describe (with reason), and hold
+  references; `resolve_site` -- the one chokepoint every op passes through -- raises a typed
+  `StateError` on use; references (VM rows, `defaults.site`) are doctor WARNINGS, never command
+  failures (the shared-resources-dir scenario now degrades gracefully, superseding the
+  fail-every-command ratification); `select_site` infers/prompts over ENABLED sites only. The site's
+  vm-platform reference is emitted only when the capability row publishes, so a missing/unsupported
+  platform never trips finalize. DELETED along the way: `bundled_site_unsupported_reason` and the
+  `bundled_site` ClassVar, `bundled_site_platform()` / `unsupported_platforms()`, bootstrap's
+  pre-finalize hard-error guard AND its unconditional reserved-name check (bundled rows publish
+  everywhere now, so the registry's `builtin_override = "reserved"` fires on every host),
+  `_bundled_site_miss_reason` and both bundled-miss error branches, and
+  `builtin_manifests.publish_to`'s `skip` parameter. Doctor: platform rows carry only platform-level
+  state; disabled sites are info rows with the reason (no preflight -- pointless without
+  requirements); enabled-site preflight failures warn regardless of origin (the old
+  bundled-vs-declared severity split is gone: bundled sites that would have preflight-failed are now
+  properly disabled instead). Pinned by the rewritten `test_platform_support.py` (register-always,
+  reason chains, unknown-platform plugin case, reserved-on-every-host,
+  valid-config-with-disabled-default, select-over-enabled, resource list/describe surfacing, real
+  instance-method branches) plus the doctor reference-warning tests; `stub_platform_support` now
+  pins `unsupported_reason` + instance `disabled_reason`.
+
 **Compile boundaries**: Phases 1 through 3 are one logical commit boundary, mirroring the
 polymorphic-transports precedent. As planned, Phase 1 would open a non-compiling window when the
 platform classes reshape to the new protocol; as built, PHASE-1 BRIDGE shims keep everything
