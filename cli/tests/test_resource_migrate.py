@@ -243,7 +243,7 @@ def test_vm_site_selector_by_name(tmp_path: Path) -> None:
 
 def test_vm_site_description_refused_before_write(tmp_path: Path) -> None:
     """The flat legacy sections never supported description (the TOML
-    loader silently drops it), so it must NOT ride into metadata -- the
+    loader silently drops it), so it must NOT ride into metadata: the
     pre-rows carry no description and verification would fail after
     writing. It falls into platform_config and refuses pre-write."""
     resources = MAXIMAL_RESOURCES.replace(

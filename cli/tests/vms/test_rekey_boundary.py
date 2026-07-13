@@ -1,6 +1,6 @@
 """``rekey_vm``'s composition-root ordering: the is-it-running check is
 an op (a backend status read; on proxmox it needs the token), so it runs
-PAST the preflight boundary -- after the one resolve pass, never before.
+PAST the preflight boundary: after the one resolve pass, never before.
 The trade (a stopped-VM error lands after the prompt session) was ruled
 preferable to a second prompt session, which the contract forbids.
 """

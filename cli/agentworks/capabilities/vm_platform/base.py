@@ -81,7 +81,7 @@ class VMPlatform(Capability):
     Registered in ``VM_PLATFORM_REGISTRY`` and published as a read-only
     ``vm-platform`` capability resource; invoked only through site
     resolution (``agentworks.vms.sites``). Instances are constructed by
-    the site layer as ``cls(site_name, platform_config, resolver)`` --
+    the site layer as ``cls(site_name, platform_config, resolver)``:
     the platform bound to one declared site plus the operation's
     resolver (never resolved secret values; see the ``Capability``
     lifecycle). The declared config secrets register on the resolver at
@@ -95,8 +95,8 @@ class VMPlatform(Capability):
 
     Idempotency: ops flagged with ``@idempotent_op`` (``start``,
     ``stop``, ``delete``) must land in the same place run twice as run
-    once -- ``reinit`` re-applies everything and failed commands are
-    retried. ``create`` is deliberately unflagged: it is one-shot per
+    once (``reinit`` re-applies everything and failed commands are
+    retried). ``create`` is deliberately unflagged: it is one-shot per
     VM, and its collision check makes a re-run a loud error rather than
     a silent second resource.
     """
@@ -117,7 +117,7 @@ class VMPlatform(Capability):
         this platform ever work here" (wsl2 off Windows: no), not "is
         this configured site ready" (that is preflight) and not "is a
         tool merely missing but installable" (that is the instance's
-        :meth:`Capability.disabled_reason` -- lima the platform is
+        :meth:`Capability.disabled_reason`: lima the platform is
         supported everywhere because remote sites run ``limactl`` on
         the vm_host over SSH, but a local-Lima site without a local
         ``limactl`` disables itself). Default: supported everywhere.
@@ -235,7 +235,7 @@ class VMPlatform(Capability):
         """
         return None
 
-    def post_tailscale_ready(self, vm: VMRow) -> None:  # noqa: B027 -- intentional concrete no-op
+    def post_tailscale_ready(self, vm: VMRow) -> None:  # noqa: B027  # intentional concrete no-op
         """Hook called once the VM's Tailscale node is up during create.
 
         Default no-op. Azure overrides to detach the cloud-init public

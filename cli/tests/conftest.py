@@ -278,7 +278,7 @@ def stub_vm_gates(monkeypatch: pytest.MonkeyPatch) -> _StubPlatform:
     # setattr that first-imports a module mid-loop would let its
     # module-level ``from vms.manager import bind_platform`` capture an
     # ALREADY-PATCHED stub, which monkeypatch then saves as the
-    # "original" -- teardown would install the stub permanently and
+    # "original": teardown would install the stub permanently and
     # poison every later test in the session (import-order dependent,
     # invisible in full-suite runs).
     for mod in _GATE_MODULES:

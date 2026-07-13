@@ -134,7 +134,7 @@ def resolve_template(registry: Registry, template_name: str | None = None) -> Re
 
 def preflight_vm_template(tmpl: ResolvedVMTemplate, resolver: Resolver) -> None:
     """The vm-template's readiness check: its Tailscale auth key must be
-    predicted resolvable -- without prompting. The key is the template's
+    predicted resolvable, without prompting. The key is the template's
     responsibility, not the site's, so this runs beside (in either
     order with) the platform's preflight, before the operation's one
     resolve pass at the preflight boundary. Registers the declaration on

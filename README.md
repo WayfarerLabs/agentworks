@@ -12,7 +12,7 @@ straightforward to have it all.
 
 ## Architecture at a glance
 
-The operator runs the `agw` CLI on their workstation. VMs are created at declared **vm-sites** --
+The operator runs the `agw` CLI on their workstation. VMs are created at declared **vm-sites**:
 configured places to create VMs, each backed by a **platform** (Lima, WSL2, Azure, or Proxmox).
 Regardless of the platform, every VM runs the same base operating system (Debian Bookworm), is
 joined to the same Tailscale tailnet, and is accessible over SSH at its Tailscale IP address using

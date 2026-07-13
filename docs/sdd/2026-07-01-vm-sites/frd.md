@@ -145,13 +145,13 @@ Two coordination notes:
 >   participating resource's `preflight` passes, never at command entry and never deferred to an
 >   op's first need.
 > - Everything preflights: every service-layer operation runs `preflight` on all the resources it
->   will use (the vm-template predicts its Tailscale key can resolve -- the template's
->   responsibility, not the site's; the platform instance checks required tools and secret mappings)
->   before any mutation and before any secret prompt. Preflight is read-only; doctor reuses it. Its
->   ceiling is structural: it runs before the resolve pass, so any check needing a resolved
->   credential (an authenticated read, a credential probe) is the OP's job, surfaced through the
->   op's typed error handling -- preflight is never bent past the ceiling (see capability-model.md's
->   preflight section).
+>   will use (the vm-template predicts its Tailscale key can resolve: the template's responsibility,
+>   not the site's; the platform instance checks required tools and secret mappings) before any
+>   mutation and before any secret prompt. Preflight is read-only; doctor reuses it. Its ceiling is
+>   structural: it runs before the resolve pass, so any check needing a resolved credential (an
+>   authenticated read, a credential probe) is the OP's job, surfaced through the op's typed error
+>   handling; preflight is never bent past the ceiling (see capability-model.md's preflight
+>   section).
 > - The one resolve pass covers the union of secrets needed across all planned ops across all
 >   participating resources: one prompt session per command, values cached.
 > - Catch-all handling around best-effort spans (the resolve pass included) re-raises `UserAbort`; a
@@ -162,14 +162,14 @@ Two coordination notes:
 > **Host-support revision (2026-07-13, refined same day):** platforms self-report host support: the
 > registration-time classmethod `unsupported_reason()` gates the capability row on hosts that can
 > never run the platform (wsl2 off Windows), and availability is otherwise the RESOURCE's own
-> generic `disabled_reason()` (capability-model.md's "Disabled resources"). Every vm-site -- bundled
-> and declared alike -- registers unconditionally and self-disables when its platform is missing
+> generic `disabled_reason()` (capability-model.md's "Disabled resources"). Every vm-site, bundled
+> and declared alike, registers unconditionally and self-disables when its platform is missing
 > (plugin/typo), host-disabled, or the bound instance lacks a local requirement (lima-local without
 > `limactl`; lima the platform stays supported everywhere for remote sites). A disabled site
 > lists/describes with its reason; USING it is a typed error; references to it (VMs,
 > `defaults.site`) are doctor warnings, never command failures. The bundled lima site is renamed
 > **`lima-local`**, vm-templates carry NO `site` field (placement is host/operator-scoped: `--site`,
-> then `defaults.site`, then infer-one / prompt / error over ENABLED sites -- the hardcoded lima
+> then `defaults.site`, then infer-one / prompt / error over ENABLED sites; the hardcoded lima
 > fallback is gone), and doctor lists installed-but-disabled platforms and per-site state with
 > reasons. An earlier same-day iteration gated bundled-site PUBLICATION
 > (`bundled_site_unsupported_reason`) and hard-failed declared sites on unsupported platforms; both
@@ -333,7 +333,7 @@ A new `settings` table stores install-level state; the `system_slug` key holds t
 - **Effectively immutable**: no rename command in this SDD. The design (R5, R10, R11) is such that a
   slug change would not corrupt existing state, but the operation is not exposed.
 - ~~**Deferred nudge**~~ REMOVED (2026-07-13 maintainer ruling): a blank answer to the one-time
-  prompt is a perfectly valid answer ("no slug"), and it is final -- no prompt of any kind fires
+  prompt is a perfectly valid answer ("no slug"), and it is final: no prompt of any kind fires
   again. The originally designed shared-backend nudge existed precisely to re-ask decliners, so it
   was deleted along with its `never-remind-me` suppression flag and the platforms' `shared_backend`
   classmethod (the nudge was its only consumer). See the plan's 2026-07-13 sequencing note.
@@ -567,7 +567,7 @@ hostname, which tailscaled picks up as the node name. Changes:
   resource-manifests plan); `defaults.platform` becomes `defaults.site` with the old key as a
   deprecated alias for one release; `vm list`'s PLATFORM column becomes SITE; `vm describe` shows
   both Site and Platform plus the platform's `display_backend_name()`.
-- One-time slug prompt at first `vm create`; a blank answer is final (R4 -- the deferred
+- One-time slug prompt at first `vm create`; a blank answer is final (R4; the deferred
   shared-backend nudge was removed by the 2026-07-13 ruling).
 - `agw vm-host` command group, `--vm-host` flag, and `defaults.vm_host` removed (R3).
 - `[azure]` / `[proxmox]` sections warn as deprecated TOML resource sections pointing at

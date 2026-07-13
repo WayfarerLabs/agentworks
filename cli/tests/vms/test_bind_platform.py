@@ -1,7 +1,7 @@
 """``bind_platform`` / ``bind_platforms``: the composition-root helper's
 capability-lifecycle discipline. Construction is cheap and never
 resolves; preflight runs before the operation's single resolve pass
-(one prompt session -- none at all without declared secrets); a batch
+(one prompt session; none at all without declared secrets); a batch
 shares one resolver across sites; the registry build stays lazy.
 """
 
@@ -144,7 +144,7 @@ def test_env_targets_join_the_site_secret_pass(
 ) -> None:
     """The headline one-prompt-session pin: a command's env-chain secret
     (via ``targets=``) and the site's config secret resolve in ONE
-    boundary pass -- the operation never opens a second session."""
+    boundary pass; the operation never opens a second session."""
     from agentworks.env import EnvEntry
     from agentworks.secrets import SecretTarget
     from agentworks.secrets.resolver import Resolver

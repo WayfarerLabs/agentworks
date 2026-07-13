@@ -56,7 +56,7 @@ ssh_private_key = "~/.ssh/id_ed25519"        # required: used for SSH connection
 #site = "lima-local"                        # default vm-site for `agw vm create`
                                             # (a declared vm-site resource; sites
                                             # disable themselves where this host
-                                            # lacks what they need -- see
+                                            # lacks what they need; see
                                             # `agw doctor` for each site's state)
 # `platform` is the deprecated alias of `site` (one release); rename the key.
 
@@ -196,7 +196,7 @@ ssh_private_key = "~/.ssh/id_ed25519"        # required: used for SSH connection
 
 #[vm_templates.default]
 # -- Provisioning (set once at create time) --
-# (Templates carry no `site`: placement is per-host -- use `--site` or
+# (Templates carry no `site`: placement is per-host; use `--site` or
 # defaults.site above.)
 #cpus = 4                                   # number of CPUs (Lima)
 #memory = 8                                 # memory in GiB (Lima)

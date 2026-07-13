@@ -223,15 +223,15 @@ def _check_vm_sites(config: Config, registry: Registry) -> HealthGroup:
 
     A DISABLED site (its own generic ``disabled_reason``: platform
     missing/host-disabled, or a missing local requirement) is
-    informational -- normal for the host, the site still exists -- and
+    informational (normal for the host, the site still exists) and
     skips preflight (pointless without its requirements). References
     to a disabled site are the operator's problem-in-waiting and warn:
     ``defaults.site`` and each VM row pointing at one. A VM whose site
     is not declared at all still FAILS with the paste-ready manifest
     snippet (the stranded remote-Lima case).
 
-    An enabled site's row IS the capability's ``preflight`` --
-    read-only by contract, which is exactly what lets doctor call it.
+    An enabled site's row IS the capability's ``preflight``: read-only
+    by contract, which is exactly what lets doctor call it.
     Same check every service-layer operation runs before doing
     anything real, so a failing row here is the error the next command
     would hit.

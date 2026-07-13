@@ -88,8 +88,8 @@ identical to the pre-migration one -- rolling back if not.
 
 ## VM sites and platforms
 
-Where VMs are created is declared as `vm-site` resources -- "a configured place to create VMs". A
-site pairs a **platform** (the capability: the code that runs VMs on one backend kind) with that
+Where VMs are created is declared as `vm-site` resources: "a configured place to create VMs". A site
+pairs a **platform** (the capability: the code that runs VMs on one backend kind) with that
 backend's configuration:
 
 ```yaml
@@ -114,7 +114,7 @@ spec:
   using it is an error. Their names are reserved. A site named after a platform must declare that
   platform.
 - Consumers name sites: `agw vm create --site`, `defaults.site` in config.toml, and each VM row's
-  `site`. Templates deliberately carry no site -- placement is per-host, never template state.
+  `site`. Templates deliberately carry no site: placement is per-host, never template state.
 - Site config secrets ride the standard secret machinery: a Proxmox site references its API token as
   the `proxmox-token` secret (override with `token_secret`), auto-declared and resolved through the
   backend chain like any other.
@@ -129,14 +129,14 @@ policy is per kind:
 - **Catalog kinds** (`apt-source`, `apt-package`, `system-install-command`, `user-install-command`):
   declaring the same name overrides the built-in -- the name is the interface, and same-name
   override is how you customize what `gh` installs.
-- **Bundled vm-sites** (`lima-local`, `wsl2`): reserved names -- redeclaring one is an error;
-  declare a sibling site instead. Like every vm-site they register on every host and disable
-  themselves where this host lacks what they need (`agw resource list` marks the row; `describe` and
+- **Bundled vm-sites** (`lima-local`, `wsl2`): reserved names. Redeclaring one is an error; declare
+  a sibling site instead. Like every vm-site they register on every host and disable themselves
+  where this host lacks what they need (`agw resource list` marks the row; `describe` and
   `agw doctor` carry the reason); using a disabled site is an error naming the requirement.
 - **Secret backends** (`env-var`, `prompt`) and **VM platforms** (`lima`, `wsl2`, `azure-vm`,
   `proxmox`): registered capabilities, shown as read-only rows. You cannot declare or override them;
   secrets customize per secret via `backend_mappings`, platforms configure per site via
-  `platform_config`. A platform whose host requirements are not met publishes no row at all --
+  `platform_config`. A platform whose host requirements are not met publishes no row at all:
   `agw doctor` lists installed-but-disabled platforms with the reason, and sites referencing one
   self-disable rather than erroring.
 

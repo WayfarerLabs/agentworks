@@ -1,5 +1,5 @@
 """``describe_vm``'s live reads: the SSH resource query is skipped when
-the status probe already observed the VM stopped -- connecting to a
+the status probe already observed the VM stopped; connecting to a
 dead host burns the transport's connect timeout (times its retries)
 just to print the '-' placeholders.
 """

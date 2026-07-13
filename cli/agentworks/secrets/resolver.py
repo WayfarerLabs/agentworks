@@ -6,7 +6,7 @@ register the secrets they declare (a capability instance's config
 secrets register at construct; a vm-template's Tailscale key registers
 at its preflight), preflights *predict* resolvability without prompting,
 and the operation runs ONE :meth:`resolve` pass at the preflight
-boundary -- as soon as every participating resource's preflight passes,
+boundary (as soon as every participating resource's preflight passes),
 covering the union of everything registered, one prompt session. Ops
 then draw values from the cache via :meth:`get`.
 
@@ -39,14 +39,14 @@ class Resolver:
     The three verbs map onto the capability lifecycle:
 
     - :meth:`predict` (preflight): the name of the first active backend
-      that would resolve the secret, or ``None`` when nothing would --
+      that would resolve the secret, or ``None`` when nothing would;
       never prompts (an interactive backend is reported without
       probing; probing would BE the prompt).
     - :meth:`resolve` (the preflight boundary): one batched pass over
-      the active backends for every registered declaration -- one
+      the active backends for every registered declaration: one
       prompt session. Idempotent when nothing new was registered.
     - :meth:`get` (ops): a cached value. Raises a typed error if the
-      boundary resolve has not run -- an op must never trigger
+      boundary resolve has not run; an op must never trigger
       resolution (a prompt mid-op is exactly what the boundary
       ordering exists to prevent).
     """
@@ -72,7 +72,7 @@ class Resolver:
         resolve pass: each target's merged per-scope env (the FRD R2
         precedence ladder) is walked for secret references via
         ``compute_needed_secrets``, and the resulting declarations join
-        the set -- so a command's site secrets, provisioning secrets,
+        the set, so a command's site secrets, provisioning secrets,
         and workload env secrets all land in the same prompt session.
         """
         from agentworks.secrets.orchestration import compute_needed_secrets

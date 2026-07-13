@@ -43,7 +43,7 @@ def backup_vm(
         )
     # Deterministic fatal checks BEFORE the bind: bind_platform runs
     # preflight and the boundary resolve pass, which can prompt for
-    # site secrets -- the operator must never answer a prompt for a
+    # site secrets; the operator must never answer a prompt for a
     # backup this row already sank.
     if vm.tailscale_host is None:
         raise StateError(

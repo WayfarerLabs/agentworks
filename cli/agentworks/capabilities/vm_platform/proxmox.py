@@ -1,4 +1,4 @@
-"""The Proxmox VE VM platform -- clone + cloud-init + guest-agent bootstrap
+"""The Proxmox VE VM platform: clone + cloud-init + guest-agent bootstrap
 via the Proxmox REST API."""
 
 from __future__ import annotations
@@ -356,7 +356,7 @@ class ProxmoxPlatform(VMPlatform):
             except ProxmoxAPIError:
                 pass
             time.sleep(5)
-        # Don't fail -- cloud-init may not be installed or may have already finished
+        # Don't fail: cloud-init may not be installed or may have already finished
 
     def _wait_for_guest_ip(
         self, node: str, vmid: int, *, timeout: int = 120
@@ -395,7 +395,7 @@ class ProxmoxPlatform(VMPlatform):
             node, vmid, "/tmp/agentworks-bootstrap.sh", script
         )
 
-        # Run bootstrap (long-running -- installs packages, joins tailscale)
+        # Run bootstrap (long-running: installs packages, joins tailscale)
         # bash is invoked explicitly so the script doesn't need +x
         result = self._api.guest_agent_exec_wait(
             node, vmid, "/bin/bash", ["/tmp/agentworks-bootstrap.sh"],

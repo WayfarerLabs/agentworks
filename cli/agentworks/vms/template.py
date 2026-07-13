@@ -60,7 +60,7 @@ class VMTemplate:
     # Provisioning. Deliberately NO site field: a template describes
     # WHAT a VM is; placement (--site, defaults.site, or the
     # infer/prompt model) is host/operator-scoped, and a shared
-    # template must not smuggle a per-host placement decision --
+    # template must not smuggle a per-host placement decision,
     # especially with bundled sites publishing per-host.
     cpus: int | None = None
     memory: int | None = None

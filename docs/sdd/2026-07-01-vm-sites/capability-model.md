@@ -148,7 +148,7 @@ problems _clearly_, before any mutation and before any secret prompt. Its defini
 it is **read-only and side-effect-free**:
 
 - It **predicts secret resolvability without prompting.** A declared secret with no mapping at all
-  is fatal and knowable here, without prompting for the others. Value checks defer to the op --
+  is fatal and knowable here, without prompting for the others. Value checks defer to the op,
   uniformly. (An earlier draft let preflight read-and-verify "non-interactively resolvable" values;
   that was ruled out: it forks readiness on where a secret happens to come from.)
 - It checks the rest of the world that needs **no credentials**: required tools present on the
@@ -158,14 +158,14 @@ it is **read-only and side-effect-free**:
   only be confirmed by mutating is allowed to fail later in the op, with its own clear error. The
   line: _if verifying it requires a side effect, it is not preflight's job._
 
-**The ceiling is structural, and low -- that is fine.** Preflight runs before the resolve pass, so
-it never holds resolved secret values, and any check that needs one (an authenticated API read, a
+**The ceiling is structural, and low; that is fine.** Preflight runs before the resolve pass, so it
+never holds resolved secret values, and any check that needs one (an authenticated API read, a
 credential probe) is out of its reach by design. Do not bend it past that ceiling: partial
-workarounds -- resolving "just the env-var-backed" secrets, probing one credential source but not
-the interactive one -- make readiness depend on where a secret happens to come from, which is
-complexity without a principled line. Preflight does what unresolved-secret, read-only checks can
-do; everything past the ceiling fails at the op, and the op's own typed, actionable error handling
-is the other half of the contract -- invest there, not in stretching preflight.
+workarounds (resolving "just the env-var-backed" secrets, probing one credential source but not the
+interactive one) make readiness depend on where a secret happens to come from, which is complexity
+without a principled line. Preflight does what unresolved-secret, read-only checks can do;
+everything past the ceiling fails at the op, and the op's own typed, actionable error handling is
+the other half of the contract: invest there, not in stretching preflight.
 
 The read-only property is load-bearing, not stylistic. It is exactly what lets `doctor` reuse
 `preflight` for its per-resource health rows (doctor could never call a method that mutates), and
@@ -242,11 +242,11 @@ implementer is on the hook for, and the flag is what tells them so.
 
 ## Disabled resources (`disabled_reason`)
 
-Distinct from the lifecycle and cheaper than all of it: any resource -- capability instance or
-declared resource -- may answer **"do you have what you need to run on this host?"** via a generic
+Distinct from the lifecycle and cheaper than all of it: any resource (capability instance or
+declared resource) may answer **"do you have what you need to run on this host?"** via a generic
 `disabled_reason() -> str | None` (`None` = enabled). The contract is _cheap, offline,
-host-introspection only_: OS, tool presence, the shape of the bound config -- never network,
-secrets, or prompting. Readiness that needs a resolver or a remote read is preflight's job at the op
+host-introspection only_: OS, tool presence, the shape of the bound config; never network, secrets,
+or prompting. Readiness that needs a resolver or a remote read is preflight's job at the op
 boundary; `disabled_reason` runs on inspection and selection surfaces (doctor, `resource list`, site
 selection) where preflight would be too heavy.
 
@@ -254,14 +254,14 @@ For most declared resources the answer is a no-op (a vm-template always has what
 resource layer treats absent-on-kind as "never disabled" (the same structural-hook pattern as
 `instances`). Where it is real, the rules are uniform:
 
-- A disabled resource **still registers** -- it lists (marked), describes (with the reason), and
-  holds references. Existence and availability are separate axes.
+- A disabled resource **still registers**: it lists (marked), describes (with the reason), and holds
+  references. Existence and availability are separate axes.
 - **Using** a disabled resource is a typed error naming the reason chain.
-- **References to** a disabled resource are doctor warnings, never command failures -- a resources
-  dir shared across hosts degrades gracefully on the host that lacks a requirement.
+- **References to** a disabled resource are doctor warnings, never command failures: a resources dir
+  shared across hosts degrades gracefully on the host that lacks a requirement.
 
 The vm stack is the first adopter: a platform's class-level `unsupported_reason` gates its
-capability row ("could any configuration ever work here" -- wsl2 off Windows), and every vm-site
+capability row ("could any configuration ever work here": wsl2 off Windows), and every vm-site
 registers unconditionally, deriving its own `disabled_reason` from the chain: platform missing (an
 uninstalled plugin and a typo are indistinguishable by design), platform host-disabled, or the bound
 platform instance's own answer (a local-Lima site without `limactl`; remote sites run `limactl` on

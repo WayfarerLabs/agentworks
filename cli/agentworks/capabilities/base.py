@@ -5,19 +5,19 @@ A capability instance moves through four stages with sharply different
 contracts (the full capability model is documented in
 ``capabilities/README.md`` once a second capability validates it):
 
-1. ``validate_config`` -- pure classmethod; validates a config blob's
+1. ``validate_config``: pure classmethod; validates a config blob's
    shape and returns the resource references it implies.
-2. construct -- cheap, config-valid by construction (re-runs
+2. construct: cheap, config-valid by construction (re-runs
    ``validate_config``); binds ``(name, config, resolver)``, never
    resolved secret values. No network, no resolution, no prompt.
-3. ``preflight`` -- read-only, best-effort readiness; predicts secret
+3. ``preflight``: read-only, best-effort readiness; predicts secret
    resolvability without prompting. Doctor reuses it.
-4. ops -- the mutation phase, subclass-owned. Values come from the
+4. ops: the mutation phase, subclass-owned. Values come from the
    resolver's cache, populated by the operation's single resolve pass
    at the preflight boundary.
 
 Capability implementations extend this base; consuming resources (decls,
-sessions) do not -- a rich consuming resource composes the preflights of
+sessions) do not: a rich consuming resource composes the preflights of
 the instances it holds through its own API.
 """
 
@@ -41,7 +41,7 @@ def idempotent_op[F: "Callable[..., Any]"](fn: F) -> F:
     everything, and failed commands are retried).
 
     Most provisioning ops satisfy this for free (wholesale writes); the
-    marker earns its keep where idempotency stops being free -- a
+    marker earns its keep where idempotency stops being free: a
     minting op must check-then-mint. Implementations of a flagged op
     must conform; :func:`is_idempotent_op` reads the flag through
     overrides.
@@ -85,7 +85,7 @@ class Capability(ABC):
 
         Config validity is a construct-time invariant: ``validate_config``
         re-runs here, so a shape error dies at construction, never later
-        in preflight. Construction is otherwise cheap -- no network, no
+        in preflight. Construction is otherwise cheap: no network, no
         secret resolution, no prompt. The declared secret references
         register on the resolver, so the operation's boundary resolve
         covers the union across every instance constructed against it.
@@ -121,7 +121,7 @@ class Capability(ABC):
         ``file:line`` framing; legacy TOML loaders), by the consuming
         resource's ``referenced_resources()`` at finalize, and again at
         construct; MUST be pure. ``owner`` is display context for error
-        messages -- host-agnostic, never dispatched on.
+        messages: host-agnostic, never dispatched on.
 
         Base behavior: accepts no configuration. Subclasses with config
         override wholesale.
@@ -151,7 +151,7 @@ class Capability(ABC):
         warnings.
 
         Contract: cheap, offline, host-introspection only (OS, tool
-        presence, the shape of the bound config) -- never network,
+        presence, the shape of the bound config); never network,
         secrets, or prompting. Readiness that needs a resolver or a
         remote read is :meth:`preflight`'s job at the op boundary; this
         runs on inspection surfaces (doctor, ``resource list``,
@@ -163,13 +163,13 @@ class Capability(ABC):
     def preflight(self) -> None:
         """Verify readiness: "will the real work probably succeed?"
 
-        Read-only and side-effect-free -- that property is load-bearing:
+        Read-only and side-effect-free; that property is load-bearing:
         it is what lets doctor reuse this for per-resource health rows
         and what makes it safely re-runnable. Best-effort, not an
         oracle: anything only confirmable by mutating is the op's job.
 
         Base behavior: every secret reference the bound config declares
-        must be predicted resolvable by some active backend -- without
+        must be predicted resolvable by some active backend, without
         prompting (an unresolvable secret is fatal and knowable here; a
         prompt-only secret's value check defers past preflight).
         Subclasses extend (``super().preflight()``) with their world

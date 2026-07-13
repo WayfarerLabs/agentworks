@@ -155,7 +155,7 @@ def test_run_checks_group_order_and_config_failure_placeholder(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Group order is a presentation choice decoupled from which checks
-    need config: with config unavailable, the report keeps its shape --
+    need config: with config unavailable, the report keeps its shape;
     the VM sites group renders a skipped pointer (it precedes the
     Configuration group that explains the failure, so silent absence
     would read as "no sites") and every config-free group renders in

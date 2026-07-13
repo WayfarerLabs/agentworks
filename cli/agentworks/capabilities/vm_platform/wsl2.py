@@ -1,4 +1,4 @@
-"""The WSL2 VM platform -- imports Debian distros on Windows."""
+"""The WSL2 VM platform: imports Debian distros on Windows."""
 
 from __future__ import annotations
 
@@ -31,7 +31,7 @@ if TYPE_CHECKING:
 #
 # Without this, an `agw` process that gets hard-killed (SIGKILL, console
 # window closed, Python crash) leaves its `wsl.exe sleep infinity` subprocess
-# orphaned and still anchoring the WSL2 distro -- defeating the user's
+# orphaned and still anchoring the WSL2 distro, defeating the user's
 # expectation that idle-shutdown resumes after the command dies. Windows'
 # job-object KILL_ON_JOB_CLOSE flag exists exactly for this case: when the
 # last handle to the job closes (which the OS guarantees on process death,
@@ -41,7 +41,7 @@ if TYPE_CHECKING:
 # Wired up lazily on Windows; on other platforms _kernel32 stays None and
 # every helper short-circuits to a no-op. Failures during ctypes setup are
 # swallowed so that an unusual Windows configuration doesn't break WSL2
-# provisioning -- we fall back to terminate-only cleanup, accepting the
+# provisioning: we fall back to terminate-only cleanup, accepting the
 # orphan-on-crash risk that mode brings.
 
 _kernel32 = None
@@ -348,7 +348,7 @@ def _keepalive(distro_name: str, vm: VMRow, config: Config | None) -> Iterator[N
 
     When the VM has already joined Tailscale (``vm.tailscale_host`` is
     set) AND we have a config to build an SSH target from, we wait for
-    Tailscale SSH to be reachable before yielding -- a stopped distro
+    Tailscale SSH to be reachable before yielding: a stopped distro
     needs a few seconds for tailscaled to reattach to the tailnet after
     boot, and callers expect a ready VM.
 
@@ -454,7 +454,7 @@ class WSL2Platform(VMPlatform):
 
     @classmethod
     def unsupported_reason(cls) -> str | None:
-        """WSL2 is categorically Windows-only -- no configuration of
+        """WSL2 is categorically Windows-only: no configuration of
         this platform can ever work elsewhere, so the whole platform
         disables off Windows (vs lima, whose remote mode keeps the
         platform supported everywhere)."""
@@ -677,7 +677,7 @@ class WSL2Platform(VMPlatform):
     def start(self, vm: VMRow) -> None:
         # Idempotent by construction (the ABC flags start): running a
         # command boots a stopped distro and is a plain exec on a
-        # running one -- no guard needed.
+        # running one; no guard needed.
         output.info(f"Starting WSL2 distro '{vm.name}'...")
         _wsl(["--distribution", self._distro_name(vm), "--", "echo", "started"])
         output.info(f"WSL2 distro '{vm.name}' started")

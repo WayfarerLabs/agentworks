@@ -94,7 +94,7 @@ def _make_config() -> object:
 def _marking_bind(platform_factory: Callable[[], object]) -> Callable[..., object]:
     """``bind_platform`` stand-in: run the resolver's public boundary
     verb (the stub registered no declarations, so the empty-set
-    short-circuit never touches real backends -- same shape as
+    short-circuit never touches real backends, same shape as
     conftest's ``stub_vm_gates``) so ``resolver.values`` serves the
     compose_env plumbing, and return the test's stub platform."""
     from agentworks.secrets.resolver import Resolver

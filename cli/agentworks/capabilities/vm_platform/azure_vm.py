@@ -1,4 +1,4 @@
-"""The Azure VM platform -- creates and manages VMs via the Azure SDK."""
+"""The Azure VM platform: creates and manages VMs via the Azure SDK."""
 
 from __future__ import annotations
 
@@ -131,7 +131,7 @@ class AzureVMPlatform(VMPlatform):
 
     # No preflight override: azure has no config secrets (the base's
     # prediction pass is a no-op) and no unauthenticated readiness
-    # check worth making. A credential probe is deliberately NOT one --
+    # check worth making. A credential probe is deliberately NOT one:
     # verifying credentials before the resolve/credential stage forks
     # behavior on where they happen to come from (a non-interactive
     # chain passes, the browser-login fallback can't be probed without
@@ -223,7 +223,7 @@ class AzureVMPlatform(VMPlatform):
             )
             cloud_init = generate_cloud_init(bootstrap)
         else:
-            # No Tailscale key -- minimal cloud-init, bootstrap deferred to Phase A
+            # No Tailscale key: minimal cloud-init, bootstrap deferred to Phase A
             cloud_init = "#cloud-config\npackage_update: true\npackages:\n  - openssh-server\n"
         cloud_init_b64 = base64.b64encode(cloud_init.encode()).decode()
 
@@ -271,7 +271,7 @@ class AzureVMPlatform(VMPlatform):
             # Create NIC
             output.detail("Creating network interface...")
 
-            # Need a subnet -- use default VNet or create one
+            # Need a subnet: use default VNet or create one
             vnet_name = f"{vm_name}-vnet"
             subnet_name = "default"
             vnet_poller = network.virtual_networks.begin_create_or_update(  # type: ignore[call-overload]

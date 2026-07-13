@@ -458,7 +458,7 @@ def _emit_document(doc: tomlkit.TOMLDocument, unit: MigrationUnit) -> str:
     # vm-site is excluded: its flat legacy sections never supported the
     # key (the TOML loader silently drops it), so popping it here would
     # smuggle a description past the pre-write stray-key refusal and
-    # into a manifest the pre-rows can't match -- verification would
+    # into a manifest the pre-rows can't match; verification would
     # fail AFTER writing. Left in place, it falls into platform_config
     # and hits the clean pre-write refusal below.
     if (
@@ -472,7 +472,7 @@ def _emit_document(doc: tomlkit.TOMLDocument, unit: MigrationUnit) -> str:
         # Flat legacy [azure] / [proxmox] sections nest under
         # spec.platform_config; the section name becomes the resource
         # name, and the platform comes from the legacy loader's own
-        # mapping (one source of truth -- the [azure] section's
+        # mapping (one source of truth: the [azure] section's
         # platform is azure-vm, so the emitted manifest must match
         # what the loader publishes or verification fails). Validate
         # the blob pre-write in the operator's TOML vocabulary,

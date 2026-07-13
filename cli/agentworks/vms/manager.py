@@ -174,7 +174,7 @@ def _resolve_system_slug(db: Database) -> str | None:
     The settings row distinguishes never-asked (absent) from declined
     (present, empty): a BLANK answer is a perfectly valid one ("no
     slug") and records the declined row, so the prompt fires once
-    regardless of the answer and never again -- no nudges, no
+    regardless of the answer and never again: no nudges, no
     reminders (an earlier shared-backend nudge that re-asked decliners
     was removed by maintainer ruling: the blank answer is final).
     Non-interactive runs never prompt and never write, so a later
@@ -259,7 +259,7 @@ def bind_platforms(
     deduplicated by VM name, preserving first-encounter order. ONE
     resolver spans the whole batch: every site's platform preflights,
     then a single resolve pass covers the union of their declared
-    secrets -- prompt-once holds across sites, not just within one.
+    secrets; prompt-once holds across sites, not just within one.
     Feed the result to :func:`keep_actives`.
     """
     from agentworks.bootstrap import build_registry
@@ -298,7 +298,7 @@ def ensure_active(
 
     Fast path: a Tailscale reachability probe (cheap, no cloud API)
     short-circuits the common case, keeping backend round trips off the
-    per-op hot path -- EXCEPT when the row already says manually
+    per-op hot path, EXCEPT when the row already says manually
     stopped: pinging a stopped VM burns the probe's full timeout just
     to reach the refusal, so the likely-stopped case asks the backend
     directly (an out-of-band start still proceeds via the observed
@@ -403,7 +403,7 @@ def create_vm(
 
     # Resolve the target site and its declaration. An undeclared site
     # fails here with the stranded-site ConfigError + manifest hint,
-    # and a DISABLED one with its reason chain -- both before any DB or
+    # and a DISABLED one with its reason chain, both before any DB or
     # backend work, and critically before the Tailscale check and the
     # interactive system-slug prompt below: the operator must never
     # answer a prompt for an op the site already sank.
@@ -439,7 +439,7 @@ def create_vm(
     announce_git_credentials(providers)
 
     # System slug: first interactive create prompts once (a blank
-    # answer is final -- see _resolve_system_slug). Runs before any
+    # answer is final; see _resolve_system_slug). Runs before any
     # secret prompting or state mutation so an aborted slug entry
     # leaves nothing behind.
     slug = _resolve_system_slug(db)
@@ -447,13 +447,13 @@ def create_vm(
     # The capability composition root: construct the site's platform
     # against the operation's resolver (cheap; the site's config secrets
     # register, nothing resolves yet), preflight every participating
-    # resource -- the vm-template predicts its Tailscale key can resolve
+    # resource: the vm-template predicts its Tailscale key can resolve
     # (the key is the template's responsibility, not the site's) and the
-    # platform checks its world -- then run the operation's ONE resolve
+    # platform checks its world; then run the operation's ONE resolve
     # pass at the preflight boundary: tailscale auth, git-credential
     # tokens, and the site's config secrets (proxmox's API token) in a
     # single prompt session. Provisioning is hermetic: operator
-    # [admin.env] / [vm_templates.*.env] secrets are NOT prompted here --
+    # [admin.env] / [vm_templates.*.env] secrets are NOT prompted here:
     # they're not used until runtime shells, which perform their own
     # resolve at their composition root.
     from agentworks.secrets.resolver import Resolver
@@ -590,7 +590,7 @@ def create_vm(
         # No prompt lives in this span today (the boundary resolve ran
         # at the composition root above), but the catch-all below must
         # never downgrade an operator abort to a Provisioning/External
-        # error -- same discipline as delete_vm's best-effort spans.
+        # error (same discipline as delete_vm's best-effort spans).
         # Same recovery guidance as the KeyboardInterrupt twin: the VM
         # exists and must not be stranded silently.
         output.warn(
@@ -717,7 +717,7 @@ def describe_vm(db: Database, config: Config, name: str) -> None:
     else:
         # The backend reads degrade under the same discipline as the
         # bind above: a live backend flake (API hiccup, SSH timeout)
-        # must not crash the report -- a flaky backend is exactly when
+        # must not crash the report: a flaky backend is exactly when
         # an operator reaches for describe, and the row's static fields
         # still render with '-' placeholders.
         try:
@@ -743,7 +743,7 @@ def describe_vm(db: Database, config: Config, name: str) -> None:
     output.info(f"Hostname:       {vm.hostname}")
     # The slug never shows in normal CLI output (vm list stays
     # name-only); describe and doctor are its surfaces. The slug is
-    # install-level, so a VM created before it was set gets a marker --
+    # install-level, so a VM created before it was set gets a marker:
     # its hostname and backend names carry no prefix. A blank answer is
     # a VALID one: declined ("(none)") renders distinctly from
     # never-asked ("-").
@@ -764,7 +764,7 @@ def describe_vm(db: Database, config: Config, name: str) -> None:
 
     # Resources table: Initial / Current / Used (Used%). The live read
     # SSHes to the VM, so skip it when the status probe above OBSERVED
-    # the VM stopped -- connecting to a dead host would burn the
+    # the VM stopped: connecting to a dead host would burn the
     # transport's connect timeout (times its retries) just to print the
     # '-' placeholders. A degraded/UNKNOWN status still tries: the VM
     # may well be up, and the read has its own error handling.
@@ -1210,7 +1210,7 @@ def rekey_vm(
     # The composition root: construct (registers the site's config
     # secrets), preflight both participating resources (the vm-template
     # predicts the new auth key can resolve; the platform checks its
-    # world), then the operation's one resolve pass -- the new auth key
+    # world), then the operation's one resolve pass: the new auth key
     # and any site secret (proxmox's API token) in a single prompt
     # session. ``ignore_env`` is honored by temporarily masking the
     # env-var backend for the auth-key secret (the env-var source reads
@@ -1381,7 +1381,7 @@ def delete_vm(
         raise
     except Exception as e:
         # Preflight or bind failure (unreachable API, missing tool,
-        # unresolvable secret): warn and skip backend cleanup -- broken
+        # unresolvable secret): warn and skip backend cleanup; broken
         # backends are what delete exists to clean up.
         platform = None
         hint = getattr(e, "hint", None)
@@ -1392,11 +1392,11 @@ def delete_vm(
 
     if platform is not None:
         # Tailscale logout (best-effort, hold-only): the logout wants
-        # the VM alive if it happens to be, but delete must NOT gate --
+        # the VM alive if it happens to be, but delete must NOT gate:
         # an operator-stopped VM would raise. (The WSL2 hold does boot a
         # stopped distro; the logout genuinely needs the VM up.) The
-        # whole hold+logout span is best-effort: broken states -- e.g. a
-        # manually unregistered WSL2 distro whose hold raises -- are
+        # whole hold+logout span is best-effort: broken states (e.g. a
+        # manually unregistered WSL2 distro whose hold raises) are
         # exactly what `vm delete` exists to clean up, so nothing here
         # may skip the delete below. UserAbort is the one exception the
         # catch-alls must NOT downgrade: a swallowed abort would fall

@@ -1,5 +1,5 @@
 """``backup_vm``'s precondition ordering: deterministic fatal checks
-run before the bind -- ``bind_platform`` preflights and runs the
+run before the bind; ``bind_platform`` preflights and runs the
 boundary resolve pass, which can prompt for site secrets, and the
 operator must never answer a prompt for a backup the row already sank.
 """

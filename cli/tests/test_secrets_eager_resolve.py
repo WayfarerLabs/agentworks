@@ -6,10 +6,10 @@ resolution fails (e.g. non-interactive + no AW_SECRET_<NAME> in env),
 the failure surfaces as ``SecretUnavailableError`` with no DB or VM
 side-effects.
 
-The tests work by patching the boundary -- ``resolve_for_command`` for
+The tests work by patching the boundary (``resolve_for_command`` for
 the paths that still call it directly, ``bind_platform`` or
 ``Resolver.resolve`` for the roots whose env chain rides the bind's one
-resolve pass -- to raise; if the manager reaches it AFTER mutating
+resolve pass) to raise; if the manager reaches it AFTER mutating
 state, the DB inspection at the end of the test catches the leak.
 """
 
@@ -409,7 +409,7 @@ def test_vm_create_does_not_eager_resolve_operator_env() -> None:
     """Provisioning is hermetic: operator [admin.env] / [vm_templates.*.env]
     secrets are NOT prompted at vm create. The create path registers
     ONLY the system secrets (tailscale key, git tokens, site config
-    secrets) on the operation's resolver -- a tight declaration set that
+    secrets) on the operation's resolver, a tight declaration set that
     never walks SecretTarget env scopes. Verify by source inspection
     that no ``SecretTarget(...)`` constructor appears in the vm-create
     call path (no env scope handed to the resolver).
@@ -486,7 +486,7 @@ def test_vm_shell_env_target_joins_the_bind_boundary(
 ) -> None:
     """The one-prompt-session pin for the runtime roots: shell_vm hands
     its env-chain SecretTarget to bind_platform, so the env secrets ride
-    the SAME boundary resolve as the site's config secrets -- there is
+    the SAME boundary resolve as the site's config secrets; there is
     no separate env prompt session, and no prompt can precede the
     platform preflight (the boundary runs inside the bind)."""
     from agentworks.vms import manager as vm_manager

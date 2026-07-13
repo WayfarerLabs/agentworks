@@ -279,11 +279,11 @@ def _decode_vm_site(doc: Document, spec: dict[str, object], issues: list[str]) -
     # Capability validation on the TRUE blob, with this document's
     # file:line in the error. Unknown platform names are tolerated: the
     # site registers and self-disables ("platform 'x' is not
-    # installed") -- a plugin's platform may simply not be here.
+    # installed"); a plugin's platform may simply not be here.
     from agentworks.capabilities.vm_platform import VM_PLATFORM_REGISTRY
 
     # FRD R2: a site named after a known platform must declare that
-    # platform -- `vm-site/azure-vm` backed by lima would make every
+    # platform; `vm-site/azure-vm` backed by lima would make every
     # `--site azure-vm` mean something other than it says.
     if doc.name in VM_PLATFORM_REGISTRY and platform != doc.name:
         raise ConfigError(

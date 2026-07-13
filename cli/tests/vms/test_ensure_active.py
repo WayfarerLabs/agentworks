@@ -212,7 +212,7 @@ def test_keep_active_gates_then_holds(
 def test_stop_sets_flag_before_already_stopped_shortcut(
     db: Database, monkeypatch: pytest.MonkeyPatch, captured_output
 ) -> None:
-    """Stopping an idle-stopped VM still records the intent -- and the
+    """Stopping an idle-stopped VM still records the intent, and the
     message says so instead of the misleading bare 'already stopped'
     (the command DID change something: auto-start is now off)."""
     _seed(db)

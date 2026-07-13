@@ -69,12 +69,12 @@ def build_registry(config: Config, manifests: ManifestSet | None = None) -> Regi
             output.warn(f"Manifest: {issue}")
 
     # Host support is NOT a bootstrap concern: platforms gate their own
-    # capability rows (vm_platforms.publish_to), every vm-site --
-    # bundled and declared alike -- registers unconditionally and
-    # self-disables when it lacks what it needs (the vm-site kind's
-    # generic disabled_reason hook), and the registry's reserved-name
-    # override fires on every host because the bundled rows always
-    # publish. Using a disabled site is a typed error at resolve time;
+    # capability rows (vm_platforms.publish_to), every vm-site (bundled
+    # and declared alike) registers unconditionally and self-disables
+    # when it lacks what it needs (the vm-site kind's generic
+    # disabled_reason hook), and the registry's reserved-name override
+    # fires on every host because the bundled rows always publish.
+    # Using a disabled site is a typed error at resolve time;
     # doctor warns on references to one.
     registry = Registry.empty()
     # Built-in publishers first. The bundled manifests precede the

@@ -543,7 +543,7 @@ def _load_defaults(
     # `site` names a vm-site resource; existence is validated at the
     # composition boundary (vms.validate_sites), where the finalized
     # registry knows every declared site. `platform` is the retired
-    # spelling, accepted as a one-release deprecated alias -- its old
+    # spelling, accepted as a one-release deprecated alias; its old
     # values name the built-in and legacy-TOML sites, so the value
     # carries over, with one translation: the old `lima` meant local
     # Lima, whose bundled site is now named `lima-local`.
@@ -1048,7 +1048,7 @@ def _load_session_templates(
 # manifests validate the true blob strictly.
 _LEGACY_SITE_SECTIONS: dict[str, tuple[str, tuple[str, ...]]] = {
     # The section (and thus the declared SITE) keeps its historical
-    # name "azure" -- released configs and VM rows point at it -- while
+    # name "azure" (released configs and VM rows point at it), while
     # the platform underneath is azure-vm (the Azure Virtual Machines
     # service specifically).
     "azure": ("azure-vm", ("subscription_id", "resource_group", "region")),
@@ -1253,7 +1253,7 @@ def _warn_deprecated_resource_sections(
     if not present:
         return ()
     noun = "section" if len(present) == 1 else "sections"
-    # Selectors are KIND names, not section names -- [azure]/[proxmox]
+    # Selectors are KIND names, not section names: [azure]/[proxmox]
     # migrate as `vm-site`, which nothing on screen would suggest.
     site_hint = (
         " (the [azure]/[proxmox] sections migrate as `vm-site`)"
@@ -1408,7 +1408,7 @@ def load_config(
     # Settings-only mode: resource loaders see an empty document, so they
     # produce their framework defaults with zero issues or deprecations.
     # Settings loaders (operator, paths, defaults, session, secret_config)
-    # always see the real data -- they are config. The legacy [azure] /
+    # always see the real data; they are config. The legacy [azure] /
     # [proxmox] sections are RESOURCE declarations (vm-site rows) and go
     # through resource_data like every other resource section.
     resource_data = data if resources else {}

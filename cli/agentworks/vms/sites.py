@@ -3,14 +3,14 @@ plus site resolution (the only constructor of platform instances).
 
 A ``vm-site`` is "a configured place to create VMs" (ADR 0016's
 instance-identity test): consumers name the site (``agw vm create
---site``, ``defaults.site``, ``vms.site`` provenance -- never a
+--site``, ``defaults.site``, ``vms.site`` provenance; never a
 template: placement is host/operator-scoped), and one platform backs
 many sites. Site rows arrive from the built-in bundle (``lima-local``,
 ``wsl2``), operator manifests, and the legacy ``[azure]`` /
 ``[proxmox]`` TOML sections.
 
-Every site registers UNCONDITIONALLY -- bundled and declared alike,
-whatever the host -- and self-disables when it lacks what it needs
+Every site registers UNCONDITIONALLY (bundled and declared alike,
+whatever the host) and self-disables when it lacks what it needs
 (:func:`site_disabled_reason`): its platform is missing (a plugin not
 installed, or a typo), unsupported on this host (wsl2 off Windows), or
 the bound instance reports a missing requirement (a local-Lima site
@@ -70,7 +70,7 @@ class VMSiteDecl:
         # supported here), and the config-implied secret edges would
         # auto-declare and predict-resolve secrets for a site that can
         # never run on this host. A site whose platform merely lacks an
-        # INSTANCE requirement (limactl) keeps its edges -- installing
+        # INSTANCE requirement (limactl) keeps its edges: installing
         # the tool enables it, and its secrets should already predict.
         from agentworks.capabilities.vm_platform import VM_PLATFORM_REGISTRY
 
@@ -134,7 +134,7 @@ def select_site(
     registry: Registry,
 ) -> str:
     """Site selection for ``vm create``: the explicit flag, then
-    ``defaults.site``, then the house model over the ENABLED sites --
+    ``defaults.site``, then the house model over the ENABLED sites:
     infer when exactly one exists, prompt interactively when several
     do, error otherwise. Disabled sites are never a choice (using one
     is an error), but their existence never breaks inference.
@@ -183,10 +183,10 @@ def site_disabled_reason(decl: VMSiteDecl) -> str | None:
     can (the vm-site kind's generic disabled hook delegates here).
 
     The chain, cheapest first: the platform is missing entirely (a
-    plugin not installed, or a typo -- indistinguishable by design),
+    plugin not installed, or a typo, indistinguishable by design),
     the platform is host-disabled (``unsupported_reason``), or the
     bound instance reports a missing requirement
-    (``Capability.disabled_reason`` -- a local-Lima site without
+    (``Capability.disabled_reason``: a local-Lima site without
     ``limactl``). Same offline-and-cheap contract as the methods it
     composes; preflight remains the deeper op-boundary check.
     """
@@ -201,15 +201,15 @@ def site_disabled_reason(decl: VMSiteDecl) -> str | None:
     # every decl source runs the same pure classmethod at load whenever
     # the platform is installed (manifest decode, legacy TOML), and the
     # branches above returned for the one unvalidated shape (missing
-    # platform). Inspection loops (doctor, resource list) rely on this
-    # -- one bad row must not take down the whole listing.
+    # platform). Inspection loops (doctor, resource list) rely on
+    # this: one bad row must not take down the whole listing.
     return platform_cls(decl.name, decl.platform_config).disabled_reason()
 
 
 def lookup_site(name: str, registry: Registry) -> VMSiteDecl:
     """The site's declaration (enabled or disabled), or a
     ``ConfigError`` with the ready-to-paste manifest on a miss (the
-    stranded-site case -- e.g. a migrated remote-Lima row whose site
+    stranded-site case, e.g. a migrated remote-Lima row whose site
     manifest the operator has not added yet). Bundled sites register
     on every host, so a miss is never a host-requirement problem.
     """
@@ -304,7 +304,7 @@ def validate_sites(config: Config, registry: Registry) -> None:
     try:
         registry.lookup("vm-site", site)
     except KeyError:
-        # Unknown only -- a DISABLED site is valid config here (this
+        # Unknown only: a DISABLED site is valid config here (this
         # host may simply lack the requirement); using it errors at
         # resolve_site with the reason, and doctor warns on the
         # reference.

@@ -120,7 +120,7 @@ def test_backfill_and_site_rename(tmp_path: Path, captured_output: CapturedOutpu
         # Hostname backfill uses the PRE-rename platform value (the
         # hostname the create-time bootstrap actually set). The azure
         # row is the load-bearing case: the platform is azure-vm NOW,
-        # but the VM's real hostname was set under the legacy name --
+        # but the VM's real hostname was set under the legacy name;
         # a "cleanup" to registry keys would break exactly this.
         assert by_name["lvm"].hostname == "lima--lvm"
         assert by_name["rvm"].hostname == "lima--rvm"

@@ -113,7 +113,7 @@ def test_decode_validates_the_blob_via_the_capability(tmp_path: Path) -> None:
 def test_unknown_platform_registers_a_disabled_site(tmp_path: Path) -> None:
     """Decode must not error on an unregistered platform, and neither
     may finalize: the site claims no capability edge and self-disables
-    ("platform 'nope' is not installed") -- an uninstalled plugin and a
+    ("platform 'nope' is not installed"); an uninstalled plugin and a
     typo are indistinguishable by design, and both must degrade rather
     than break the registry."""
     from agentworks.vms.sites import site_disabled_reason

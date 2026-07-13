@@ -65,7 +65,7 @@ PID_STOPPED = -1
 # Settings-table keys (install-level identity). Defined next to the accessors'
 # owner so consumers (vms.manager, ssh_config) share one spelling
 # without a layering inversion. (A retired key may linger as an orphan
-# row in existing DBs -- harmless; the settings table is a plain KV.)
+# row in existing DBs, harmless; the settings table is a plain KV.)
 SYSTEM_SLUG_KEY = "system_slug"
 
 
@@ -194,7 +194,7 @@ class MigrationContext:
     ``legacy`` is a best-effort, UNVALIDATED parse of the operator's
     config file (the whole TOML document, so hooks can reach legacy
     sections like ``[proxmox]``). A missing or unreadable config yields
-    an empty mapping -- tolerant by construction, nothing in a
+    an empty mapping: tolerant by construction, nothing in a
     migration may depend on it succeeding.
     """
 
@@ -235,7 +235,7 @@ def _migrate_vm_sites(conn: sqlite3.Connection, context: MigrationContext) -> No
     # loosen this check, and a later platform RENAME (azure -> azure-vm
     # already happened) must not break the backfill lookup, so this
     # deliberately does not go through VM_PLATFORM_REGISTRY keys. The
-    # scan must precede the ALTERs because sqlite3 auto-commits DDL --
+    # scan must precede the ALTERs because sqlite3 auto-commits DDL:
     # failing after them would leave a half-migrated v26 DB that dies
     # on duplicate-column at every retry, even once the operator fixes
     # the corrupt row.
@@ -264,8 +264,8 @@ def _migrate_vm_sites(conn: sqlite3.Connection, context: MigrationContext) -> No
     # shadows a platform name or a bundled-site name gets a '-host'
     # suffix (platform names are reserved for the shadow rule; bundled
     # names are reserved built-ins), and a suffixed name landing on
-    # another real host's site would silently merge two distinct hosts
-    # -- fail loudly while the DB is pristine. The set is FROZEN as of
+    # another real host's site would silently merge two distinct hosts;
+    # fail loudly while the DB is pristine. The set is FROZEN as of
     # v27: a migration's output must not change when a later build adds
     # platforms or bundled sites, so this deliberately does not derive
     # from the live registry.
@@ -316,7 +316,7 @@ def _migrate_vm_sites(conn: sqlite3.Connection, context: MigrationContext) -> No
 
     # Local-Lima rows: the bundled site is named lima-local, not lima
     # (the platform keeps the bare name; the site is one CONFIGURATION
-    # of it). Remote rows are excluded here -- they re-point at their
+    # of it). Remote rows are excluded here: they re-point at their
     # host-named sites below.
     conn.execute(
         "UPDATE vms SET platform = 'lima-local' "
@@ -826,7 +826,7 @@ class Database:
         #
         # Each version commits as a durable checkpoint (schema_version
         # row included): sqlite3 auto-commits DDL anyway, so a
-        # transactional whole-run guard was never real -- but WITHOUT
+        # transactional whole-run guard was never real, but WITHOUT
         # the per-version commit, a failure in version N+1 rolled back
         # version N's schema_version INSERT while N's DDL survived, and
         # the retry re-ran N's DDL into duplicate-column errors. With
@@ -842,7 +842,7 @@ class Database:
                 step = MIGRATIONS[version]
                 if callable(step):
                     # Python steps get the migration context (built once,
-                    # lazily -- string-only runs never read the config).
+                    # lazily; string-only runs never read the config).
                     if context is None:
                         context = MigrationContext(legacy=_load_legacy_toml())
                     step(self._conn, context)

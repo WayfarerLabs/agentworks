@@ -110,7 +110,7 @@ def test_disabled_site_errors_before_tailscale_and_slug_prompt(
 ) -> None:
     """An explicit --site naming a disabled site errors UP FRONT: the
     operator never answers the system-slug prompt (and no Tailscale
-    probe runs) for an op the site already sank -- the same
+    probe runs) for an op the site already sank, the same
     no-work-before-the-fatal-check discipline as the preflight
     boundary, one tier earlier."""
     from agentworks.capabilities.vm_platform.lima import LimaPlatform
@@ -229,7 +229,7 @@ def test_proxmox_token_resolves_end_to_end(
 ) -> None:
     """The site's token secret joins create_vm's single boundary resolve
     pass (env-var backend under the AW_SECRET_ convention) and ops read
-    it from the resolver's cache -- there is no raw
+    it from the resolver's cache; there is no raw
     PROXMOX_TOKEN_SECRET env fallback."""
     from agentworks.capabilities.vm_platform.proxmox import ProxmoxPlatform
 

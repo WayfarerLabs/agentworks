@@ -5,7 +5,7 @@
 per backend kind (lima, wsl2, azure-vm, proxmox; plugin-registered
 platforms later). The declarable ``vm-site`` kind exposes a configured
 platform, and site resolution (``agentworks.vms.sites``) is the only
-consumer that constructs platform instances -- manager code never
+consumer that constructs platform instances; manager code never
 imports this registry or the concrete classes.
 """
 
@@ -54,7 +54,7 @@ every site (bundled and declared alike) registers unconditionally and
 self-disables when its platform is missing/unsupported or the bound
 instance reports a missing requirement
 (:meth:`Capability.disabled_reason`). The knowledge lives on the
-platform class -- no config knob, no host sniffing anywhere else --
+platform class (no config knob, no host sniffing anywhere else),
 which is exactly the shape a plugin's platform brings along. Future
 plugins register here (and publish their own capability resources with
 plugin origins).
@@ -88,7 +88,7 @@ def publish_to(registry: Registry) -> None:
 
     An unsupported platform (``unsupported_reason``) publishes nothing:
     it is installed but disabled on this host and listed only by
-    doctor. Sites referencing it still register -- they self-disable
+    doctor. Sites referencing it still register; they self-disable
     with the platform's reason in the chain (and emit no capability
     edge, so the missing row never trips finalize).
     """

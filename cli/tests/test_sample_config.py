@@ -73,7 +73,7 @@ def test_sample_config_examples_uncomment_cleanly() -> None:
     # Spot-check the major sections all exist after uncommenting.
     # (secret_backends is deliberately absent: those sections are
     # deprecated no-ops and the sample no longer teaches them. The
-    # legacy [azure] / [proxmox] examples are gone too -- vm-sites are
+    # legacy [azure] / [proxmox] examples are gone too: vm-sites are
     # resources now; the sample points at `agw resource sample vm-site`.)
     expected_top = {
         "operator", "paths", "defaults", "named_console",

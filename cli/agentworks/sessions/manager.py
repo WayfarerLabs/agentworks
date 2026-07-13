@@ -307,7 +307,7 @@ def _prepare_vm(
     This is the command's composition root for the VM gate: the
     platform is bound ONCE here (or accepted pre-bound via
     ``platform``) and returned so callers hold it for subsequent
-    ``keep_active`` spans -- re-binding would re-run the site's secret
+    ``keep_active`` spans: re-binding would re-run the site's secret
     resolve pass. If operation is set, creates an SSHLogger and
     attaches it to the Transport so all calls log automatically.
     """
@@ -1421,7 +1421,7 @@ def create_session(
     # session's env-chain secrets (via the pre-create SecretTarget)
     # join the site's config secrets in a single prompt session at the
     # preflight boundary, before any op (``ensure_active`` may need the
-    # site secret -- proxmox's status read -- so the boundary must
+    # site secret (proxmox's status read), so the boundary must
     # precede it). The bound platform threads through _prepare_vm and
     # the session-internal hold below (re-binding re-runs the boundary).
     from agentworks.secrets.resolver import Resolver
@@ -2051,8 +2051,8 @@ def restart_session(
         # This is the recorded bail-before-prompt exception to the
         # one-boundary-resolve contract: the site's config secrets
         # resolved at _prepare_vm's bind (before ensure_active's ops
-        # needed them), but the env chain deliberately resolves HERE --
-        # after the BROKEN/--force refusal and the "Restart?" confirm --
+        # needed them), but the env chain deliberately resolves HERE
+        # (after the BROKEN/--force refusal and the "Restart?" confirm)
         # so a declined restart never prompts for secrets it was about
         # to discard. Folding it into the boundary would trade that
         # operator protection for one fewer session on proxmox only.

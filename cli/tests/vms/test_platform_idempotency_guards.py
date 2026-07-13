@@ -59,7 +59,7 @@ def test_lima_start_proceeds_when_stopped(monkeypatch: pytest.MonkeyPatch, captu
 
 
 def test_proxmox_start_skips_when_already_running(monkeypatch: pytest.MonkeyPatch, captured_output: object) -> None:
-    """Constructed without a resolver, any `_api` access raises -- so a
+    """Constructed without a resolver, any `_api` access raises, so a
     passing guard proves the API was never touched."""
     from agentworks.capabilities.vm_platform.proxmox import ProxmoxPlatform
 

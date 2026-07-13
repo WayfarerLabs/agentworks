@@ -1,6 +1,6 @@
 """The disabled-resource model for VM platforms and sites: platforms
 self-report host support (``unsupported_reason`` gates the capability
-row), and every vm-site -- bundled and declared alike -- registers
+row), and every vm-site, bundled and declared alike, registers
 UNCONDITIONALLY and self-disables (the generic ``disabled_reason``)
 when its platform is missing/host-disabled or the bound instance lacks
 a local requirement. Disabled sites list and describe like any
@@ -160,7 +160,7 @@ def test_unknown_platform_site_registers_disabled(
     make_config, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """The plugin world for free: a site declared against a platform
-    this build doesn't ship (plugin uninstalled, or a typo --
+    this build doesn't ship (plugin uninstalled, or a typo;
     indistinguishable by design) is a disabled site, not a registry
     error."""
     _support(monkeypatch, wsl2=None, lima_local=None)
@@ -185,7 +185,7 @@ def test_bundled_site_names_are_reserved_on_every_host(
     make_config, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Bundled rows publish everywhere, so the registry's reserved
-    override fires even on a host where the bundled site is disabled --
+    override fires even on a host where the bundled site is disabled:
     an operator cannot squat lima-local on a limactl-less box."""
     _support(monkeypatch, wsl2="Windows only", lima_local="limactl not installed")
     config = make_config(
@@ -207,7 +207,7 @@ def test_defaults_site_naming_a_disabled_site_is_valid_config(
 ) -> None:
     """The site exists, so defaults.site resolves; this host merely
     can't use it yet. Using it errors at resolve time and doctor warns
-    on the reference -- build_registry must NOT fail every command."""
+    on the reference; build_registry must NOT fail every command."""
     _support(monkeypatch, wsl2="Windows only", lima_local="limactl not installed")
     config = make_config('[defaults]\nsite = "lima-local"\n')
     registry = build_registry(config)  # no raise
@@ -240,7 +240,7 @@ def test_resource_layer_surfaces_disabled_state(
     make_config, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """`agw resource list` marks disabled rows and describe carries the
-    reason -- a disabled resource is still a resource."""
+    reason: a disabled resource is still a resource."""
     from agentworks.resources.inspect import describe_resource, list_resources
 
     _support(monkeypatch, wsl2="Windows only", lima_local="limactl not installed")

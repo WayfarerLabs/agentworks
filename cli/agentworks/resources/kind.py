@@ -171,7 +171,7 @@ class ResourceKind(Protocol):
     # it (vm-site: platform missing/host-disabled/instance
     # requirement); absent-on-class means the kind's resources are
     # never disabled (a vm-template always has what it needs). The
-    # contract is cheap, offline host-introspection only -- never
+    # contract is cheap, offline host-introspection only: never
     # network, secrets, or prompting (deeper readiness is the
     # capability lifecycle's preflight). A disabled resource still
     # registers, lists, describes, and holds references; USING it is

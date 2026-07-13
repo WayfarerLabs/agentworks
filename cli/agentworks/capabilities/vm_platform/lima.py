@@ -1,4 +1,4 @@
-"""The Lima VM platform -- local limactl, or limactl over SSH when the
+"""The Lima VM platform: local limactl, or limactl over SSH when the
 site's ``platform_config`` declares a ``vm_host``."""
 
 from __future__ import annotations
@@ -63,7 +63,7 @@ class LimaPlatform(VMPlatform):
 
     def disabled_reason(self) -> str | None:
         """A LOCAL Lima site (no ``vm_host``) is pointless without a
-        local ``limactl`` -- this covers the bundled ``lima-local``
+        local ``limactl``. This covers the bundled ``lima-local``
         site and any operator-declared local site alike; a host that
         later installs Lima enables them on the next look. Remote
         sites need nothing here."""
@@ -187,7 +187,7 @@ class LimaPlatform(VMPlatform):
 
         # The platform owns the backend-side name; the slug is
         # the namespacing token. Pre-flight collision check (lima
-        # instance names are the primary identifier -- error, never
+        # instance names are the primary identifier: error, never
         # suffix).
         instance_name = (
             f"{request.system_slug}-{request.vm_name}"
@@ -228,7 +228,7 @@ class LimaPlatform(VMPlatform):
                 swap=swap,
             )
         else:
-            # No Tailscale key -- provision block is a no-op.
+            # No Tailscale key: provision block is a no-op.
             # Phase A bootstrap will handle everything separately.
             provision_script = (
                 "#!/bin/bash\necho '##STEP## Provision'\necho '##SUCCESS## no-op (deferred to Phase A)'\n"
@@ -344,7 +344,7 @@ class LimaPlatform(VMPlatform):
         output.detail("Starting and provisioning VM via Lima (this may take several minutes)...")
         # reuse_completed=False: creation is one-shot, so a leftover
         # status file can only be stale garbage from an interrupted
-        # attempt -- consuming it would report a phantom result for a
+        # attempt; consuming it would report a phantom result for a
         # limactl run that never happened.
         result = run_detached(
             host_target,

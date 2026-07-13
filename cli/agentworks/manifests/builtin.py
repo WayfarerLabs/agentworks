@@ -22,7 +22,7 @@ _BUILTIN_SOURCE = "agentworks.manifests.builtin"
 
 def publish_to(registry: Registry) -> None:
     """Publish every bundled manifest with a ``built-in`` origin,
-    unconditionally -- host suitability is the resource's own concern
+    unconditionally: host suitability is the resource's own concern
     (a bundled vm-site registers everywhere and self-disables where it
     lacks what it needs), never a publish-time filter.
 

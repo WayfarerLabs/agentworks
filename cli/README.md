@@ -113,7 +113,7 @@ Lima site needs `limactl`; a platform may simply not be installed): a disabled s
 describes, using it is an error naming the requirement, and `agw doctor` shows each platform's and
 site's state with the reason. Run `agw resource sample vm-site` for commented, ready-to-edit
 examples (an Azure site, a remote-Lima site with `platform_config.vm_host`). The former
-`agw vm-host` registry is gone -- a remote Lima host is now just a vm-site.
+`agw vm-host` registry is gone: a remote Lima host is now just a vm-site.
 
 > **Note on WSL2:** WSL2 distros share the Windows workstation's lifecycle. They idle-shut after
 > ~60s of no `wsl.exe` activity (`vmIdleTimeout` in `.wslconfig`) and do not survive workstation
@@ -147,13 +147,13 @@ ENABLED site is inferred when there is exactly one, several prompt interactively
 non-interactive runs error naming the options), `--admin-username`, `--cpus`, `--memory`, `--disk`,
 and `--azure-vm-size`. These are immutable provisioning parameters stored in the database. All
 initialization behavior (packages, install commands, etc.) is driven by config. Templates carry no
-`site` -- placement is per-host, so it never travels inside a shared template.
+`site`: placement is per-host, so it never travels inside a shared template.
 
 The first interactive `vm create` asks once for an optional **system slug** (3-20 chars, lowercase
 alphanumeric plus dash, no leading/trailing dash): a short identifier for this agentworks
 installation, used to namespace VM hostnames and backend-side names (`{slug}-{vm-name}`) so installs
 sharing a cloud account, Proxmox cluster, or Windows/Mac user don't collide. Leave it blank if this
-install is the only one using its sites' backends -- a blank answer is remembered and it will never
+install is the only one using its sites' backends; a blank answer is remembered and it will never
 ask again. Non-interactive runs never prompt (a later interactive create still asks once).
 
 `vm reinit` re-runs the initialization phase using the current config without reprovisioning the VM.
@@ -576,10 +576,10 @@ exists). Written samples are inert until you uncomment them (delete one leading 
 
 Configuration splits into two surfaces:
 
-- **Settings** live in `~/.config/agentworks/config.toml` -- your identity, paths, defaults, and the
+- **Settings** live in `~/.config/agentworks/config.toml`: your identity, paths, defaults, and the
   secret backend chain. Run `agw config init` to generate a sample; see
   [sample-config.toml](agentworks/sample-config.toml) for the full reference.
-- **Resources** -- secrets, templates, git credentials, vm-sites, catalog entries -- are declared as
+- **Resources** (secrets, templates, git credentials, vm-sites, catalog entries) are declared as
   YAML manifests under `~/.config/agentworks/resources/`, auto-loaded whenever a command needs them.
   `agw resource sample <kind>` prints a commented starter (`--all` for every kind). The classic TOML
   resource sections keep working (deprecated, with one aggregated load warning naming the sections
@@ -590,22 +590,22 @@ Settings sections (`config.toml`, permanent):
 
 - `[operator]` -- SSH keys (required), additional authorized keys, SSH config management
 - `[paths]` -- VM workspace, VS Code workspace file, and backup directories
-- `[defaults]` -- `site`, the default vm-site for `vm create` (`platform` is the deprecated alias)
+- `[defaults]`: `site`, the default vm-site for `vm create` (`platform` is the deprecated alias)
 - `[session.config]` -- session defaults (history limit)
 - `[secret_config]` -- active secret backend chain (`[secret_backends.*]` sections are deprecated
   no-ops; see Secret Backends below)
 
 Resource kinds (YAML manifests; the deprecated TOML section is noted for each):
 
-- `vm-site` (`[azure]` / `[proxmox]`, flat legacy shape) -- a configured place to create VMs:
+- `vm-site` (`[azure]` / `[proxmox]`, flat legacy shape): a configured place to create VMs.
   `spec.platform` names the backing platform, `spec.platform_config` carries its settings (Azure
   subscription/resource-group/region, Proxmox API endpoint + token secret, remote-Lima `vm_host`).
   The `lima-local` and `wsl2` sites ship built in (on hosts where their platform can run) and their
   names are reserved
-- `vm-platform` -- read-only capability rows for the in-tree platforms (lima, wsl2, azure-vm,
+- `vm-platform`: read-only capability rows for the in-tree platforms (lima, wsl2, azure-vm,
   proxmox); listed by `agw resource kinds`, never declared
-- `vm-template` (`[vm_templates.*]`) -- VM resources, apt packages, system install commands, mise,
-  and the target `site`
+- `vm-template` (`[vm_templates.*]`): VM resources, apt packages, system install commands, mise, and
+  the target `site`
 - `admin-template` (`[admin.config]`) -- admin user shell, dotfiles, git credentials, user install
   commands, mise
 - `agent-template` (`[agent_templates.*]`) -- agent user shell, dotfiles, git credentials, user

@@ -1,6 +1,6 @@
 """System slug: settings encoding, the one-shot first-create prompt
 (including non-interactive), and the slug format bounds. A blank answer
-is a VALID answer -- it records the declined row and the prompt never
+is a VALID answer: it records the declined row and the prompt never
 fires again (the former shared-backend nudge that re-asked decliners
 was removed by maintainer ruling).
 """
@@ -60,7 +60,7 @@ def test_blank_answer_is_final(
     db: Database, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """An empty answer is a valid one ("no slug"): it records the
-    declined row, so the prompt never fires again -- not on the next
+    declined row, so the prompt never fires again, not on the next
     create, not via any nudge."""
     monkeypatch.setattr("agentworks.output.is_interactive", lambda: True)
     prompts: list[str] = []

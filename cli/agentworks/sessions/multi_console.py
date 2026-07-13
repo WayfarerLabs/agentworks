@@ -376,7 +376,7 @@ def add_sessions(
     # secret BEFORE the DB write so a failure leaves no partial state.
     # No platform instance participates in this command (the live sync
     # is pure Tailscale, no platform ops), so this is the operation's
-    # ONE prompt session by construction -- nothing to fold into a
+    # ONE prompt session by construction: nothing to fold into a
     # bind boundary.
     # default_shells produces {cwd: None, admin: False} entries, so the
     # only admin-promotion path is session_user == admin_user (an
@@ -1783,7 +1783,7 @@ def _prepare_vm_target_for_attach(
 
     Use this only for explicit user-driven attach flows where booting a
     stopped VM is acceptable. Raises on failure. The bound platform is
-    returned so callers hold it for subsequent ``vm_active`` spans --
+    returned so callers hold it for subsequent ``vm_active`` spans:
     re-binding would re-run the site's secret resolve pass.
     """
     from agentworks.transports import transport

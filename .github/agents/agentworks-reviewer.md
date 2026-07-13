@@ -385,7 +385,7 @@ Agentworks runs on Windows, macOS, and Linux, on hosts with wildly different too
 (limactl, wsl.exe, cloud CLIs and credentials, shells, tmux versions), under configurations ranging
 from an empty config.toml to a dense one with many templates, sites, and secrets, and in both
 interactive terminals and non-interactive automation. Most installs will never use most features.
-Every change must be evaluated against that matrix -- not just against the machine and config it was
+Every change must be evaluated against that matrix, not just against the machine and config it was
 written on. For any surface a change touches, ask: what does this look like on an OS the author
 isn't running, on a host missing the relevant tooling, with a config that never exercises this
 feature, and in a non-interactive run?
@@ -403,7 +403,7 @@ Look for:
 - Conflating "installed" with "usable" with "intended". A feature can be shipped but categorically
   unsupported here (WSL2 off Windows), supported but not ready (a tool not installed yet), or ready
   but simply unused. Each state needs the right surface: disabled-with-reason, absent-until-ready,
-  and silent, respectively -- an error or warning about a state the operator cannot or need not act
+  and silent, respectively; an error or warning about a state the operator cannot or need not act
   on is noise.
 - Environment mutability: tool presence, credentials, and reachable hosts change between runs, and
   entities created under one environment outlive it. Verify the degraded path: what does an existing

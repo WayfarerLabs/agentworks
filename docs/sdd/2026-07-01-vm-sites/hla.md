@@ -11,7 +11,7 @@
 >   best-effort); its mutating ops carry per-op idempotency flags.
 > - **"Dispatch and site secrets"**: `resolve_site` / `platform_for` lose the `secret_values`
 >   parameter, and the canonical composition-root ordering becomes: (1) config + registry; (2) VM
->   row + site declaration; (3) bind (construct with the resolver -- no resolution); (4) preflight
+>   row + site declaration; (3) bind (construct with the resolver, no resolution); (4) preflight
 >   every participating resource, the vm-template (predicts its Tailscale key resolves; the key is
 >   the template's responsibility, not the site's) and the platform instance, in either order; (5)
 >   the one resolve pass, covering the union of secrets needed across all planned ops across all
@@ -349,7 +349,7 @@ smeared across a table, a constructor arg, and a branch. `native_transport()` re
 `LimaTransport` or `RemoteLimaTransport` off the same key; that single branch point is the honest
 encoding of a real capability difference and stays.
 
-~~`shared_backend` is computed from `vm_host` presence~~ -- REMOVED with the R4 nudge (2026-07-13
+~~`shared_backend` is computed from `vm_host` presence~~: REMOVED with the R4 nudge (2026-07-13
 ruling; see the plan's sequencing note).
 
 ## Ensure-active + vm_active in the manager

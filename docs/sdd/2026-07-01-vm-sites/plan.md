@@ -1,4 +1,4 @@
-# VM sites and platforms -- implementation plan
+# VM sites and platforms: implementation plan
 
 **Status**: all seven phases complete (Phase 7, the capability model adoption, was added 2026-07-12
 and approved by its reviewer round the same day). Phases follow the HLA's sequencing sketch, with
@@ -19,10 +19,10 @@ flag/completion work stays in Phase 5.
   the `platform` column; the vm-site kind's `instances()` reads through the alias. Result: the full
   suite (1500 tests), ruff, and mypy are green at the end of Phase 1. Remaining true window items:
   proxmox lifecycle ops need the token on the resolve pass (Phase 3); the R11 hostname / slug land
-  in Phase 4; and CUSTOM-named sites are refused with a typed `StateError` -- `create_vm` guards up
+  in Phase 4; and CUSTOM-named sites are refused with a typed `StateError`: `create_vm` guards up
   front (a custom-site create would otherwise provision and then half-complete, since every
   subsequent step dispatches through the legacy `get_provisioner` bridge, which only maps the four
-  legacy names), and the bridge itself raises the same typed error for any custom-site row -- until
+  legacy names), and the bridge itself raises the same typed error for any custom-site row, until
   Phase 3 dispatches everything through `platform_for`. A useful corollary: no `vms` row can hold a
   custom site name before the Phase 2 migration runs. Every bridge is marked `PHASE-1 BRIDGE` and is
   deleted by its owning phase.
@@ -42,8 +42,8 @@ flag/completion work stays in Phase 5.
   native SSH transports during `create()` and no longer receive `Config`; now in the HLA sketch) and
   the vm-platform kind description prose.
 - **2026-07-10, Phase 2 review round: the migration validates before any DDL and prints to stderr.**
-  The reviewer caught that the designed unknown-platform loud failure fired AFTER the `ALTER TABLE`s
-  -- sqlite3 auto-commits DDL, so the failure left a half-migrated v26 DB that died on
+  The reviewer caught that the designed unknown-platform loud failure fired AFTER the
+  `ALTER TABLE`s: sqlite3 auto-commits DDL, so the failure left a half-migrated v26 DB that died on
   duplicate-column at every retry. Both validation scans (unknown platform, and the newly-loud
   remote-Lima `-host`-suffix site-name collision, which would otherwise silently merge two hosts)
   now run pre-DDL, so the anticipated failure modes leave a pristine v26 DB and retry-after-fix
@@ -54,7 +54,7 @@ flag/completion work stays in Phase 5.
   6 hardening candidate.
 - **2026-07-11, Phase 3 review round: bind-once is now structural, not aspirational.** The reviewer
   caught the as-built shape binding at every gate site (`keep_active(..., bind_platform(...))`
-  inline), which multiplied resolve passes -- on a prompt-backed proxmox token, reachable
+  inline), which multiplied resolve passes: on a prompt-backed proxmox token, reachable
   multi-prompting (up to five binds on `session create --new-workspace --new-agent`). Fixes:
   `_prepare_vm` / `_prepare_vm_target_for_attach` bind once and RETURN the platform (accepting a
   pre-bound one); holds that follow a gate use `platform.vm_active` directly instead of re-gating;
@@ -62,51 +62,51 @@ flag/completion work stays in Phase 5.
   `_ensure_tailscale` takes the caller's bound platform (the gates never bind); `copy_workspace`
   reuses the source platform on same-VM copies. Two more behavioral catches: `delete_vm` no longer
   gates the best-effort tailscale logout (an operator-stopped VM would have raised and skipped the
-  backend delete; an idle-stopped VM would have been booted just to be deleted -- it now holds
-  without gating, and a logout failure can no longer skip `platform.delete`); `ensure_active`
-  re-reads `operator_stopped` from the DB on the slow path (a concurrent `vm stop` between the
-  caller's row load and the gate no longer auto-restarts the VM). `vm describe` degrades on a
-  stranded site (warn + manifest hint, row fields still render) instead of erroring -- describe is
-  the inspection command an operator reaches for on exactly that row. `reinit` binds before git
-  token collection so the R3 error fires first. New pinning tests: `test_bind_platform.py` (no
-  resolve pass without site secrets, exactly one for a secret-bearing site, one pass + one shared
-  instance per site across a batch, empty-set builds no registry) and the DEALLOCATED /
-  concurrent-stop gate cases. Round 2 closed the residuals: the nested `create_workspace` /
-  `create_agent` calls accept the parent's bound platform (a DELIBERATE carve-out to the
-  resource-manifests SDD's CLI-shaped-args-only seam pin -- the bound platform is the command's one
-  typed platform bind, not the open-ended values/registry smuggling that pin blocks; the pinned test
-  documents the carve-out), so `session create --new-workspace --new-agent` is one resolve pass end
-  to end; `delete_vm`'s hold+logout span is its own try/warn (a broken WSL2 hold -- the exact state
-  delete cleans up -- can no longer abort before the backend delete), `UserAbort` at a bind prompt
-  aborts the whole delete, and the bind-failure warn carries the R3 manifest hint; all pinned by a
-  new `test_delete_vm_gating.py` suite.
+  backend delete; an idle-stopped VM would have been booted just to be deleted; it now holds without
+  gating, and a logout failure can no longer skip `platform.delete`); `ensure_active` re-reads
+  `operator_stopped` from the DB on the slow path (a concurrent `vm stop` between the caller's row
+  load and the gate no longer auto-restarts the VM). `vm describe` degrades on a stranded site
+  (warn + manifest hint, row fields still render) instead of erroring: describe is the inspection
+  command an operator reaches for on exactly that row. `reinit` binds before git token collection so
+  the R3 error fires first. New pinning tests: `test_bind_platform.py` (no resolve pass without site
+  secrets, exactly one for a secret-bearing site, one pass + one shared instance per site across a
+  batch, empty-set builds no registry) and the DEALLOCATED / concurrent-stop gate cases. Round 2
+  closed the residuals: the nested `create_workspace` / `create_agent` calls accept the parent's
+  bound platform (a DELIBERATE carve-out to the resource-manifests SDD's CLI-shaped-args-only seam
+  pin: the bound platform is the command's one typed platform bind, not the open-ended
+  values/registry smuggling that pin blocks; the pinned test documents the carve-out), so
+  `session create --new-workspace --new-agent` is one resolve pass end to end; `delete_vm`'s
+  hold+logout span is its own try/warn (a broken WSL2 hold, the exact state delete cleans up, can no
+  longer abort before the backend delete), `UserAbort` at a bind prompt aborts the whole delete, and
+  the bind-failure warn carries the R3 manifest hint; all pinned by a new `test_delete_vm_gating.py`
+  suite.
 - **2026-07-11, Phase 4 review round: prompt fidelity and three recorded rulings.** The reviewer
   caught that `TyperHandler.prompt` neither translated Ctrl-C to the typed `UserAbort` (every other
-  interactive method does) nor suppressed the noisy `[]` empty-default suffix -- both fixed at the
-  handler -- and that the nudge's `choose` menu lost FRD R4's default-yes affordance; the nudge is
-  now the FRD's single-line `[Y/n/never-remind-me]` prompt (Enter accepts, unrecognized input reads
-  as "no" since the nudge is non-blocking and repeats). Rulings on the three review questions: (1)
-  declining the first-create prompt no longer triggers the nudge in the SAME create --
+  interactive method does) nor suppressed the noisy `[]` empty-default suffix (both fixed at the
+  handler) and that the nudge's `choose` menu lost FRD R4's default-yes affordance; the nudge is now
+  the FRD's single-line `[Y/n/never-remind-me]` prompt (Enter accepts, unrecognized input reads as
+  "no" since the nudge is non-blocking and repeats). Rulings on the three review questions: (1)
+  declining the first-create prompt no longer triggers the nudge in the SAME create:
   `_resolve_system_slug` returns `(slug, asked_now)` and the nudge is skipped when the operator was
   just asked (twice back-to-back is noise, not a reminder); (2) the every-sync removal of the
-  slug-less ssh-config file is accepted -- same-workstation multi-install is out of scope per the
-  FRD (DB-path separation prerequisite), and `agentworks.conf` is an agentworks-owned name inside
-  our own config.d; (3) `vm describe` keeps the install-level slug row but annotates it
+  slug-less ssh-config file is accepted: same-workstation multi-install is out of scope per the FRD
+  (DB-path separation prerequisite), and `agentworks.conf` is an agentworks-owned name inside our
+  own config.d; (3) `vm describe` keeps the install-level slug row but annotates it
   `(not applied to this VM)` when the VM's hostname predates the slug. Also: the settings keys moved
   next to their accessors in `db.py` (ssh_config was hardcoding the literal), and the suite now pins
   the FRD prompt wording and the slug-before-secrets/insert ordering.
 - **2026-07-11, Phase 5 review round: two verification-after-write hazards and the noun sweep.** The
   reviewer caught (1) a `description` key in a legacy `[azure]`/`[proxmox]` section escaping the
   migrator's pre-write guard (vm-site is a `_DESCRIPTION_KINDS` member, so the metadata pop ran
-  before the platform_config sweep) and failing registry-equivalence AFTER files were written --
+  before the platform_config sweep) and failing registry-equivalence AFTER files were written;
   vm-site is now excluded from the pop (its flat sections never supported the key), so the value
   falls into `platform_config` and hits the clean pre-write refusal; and (2) doctor's new VM-sites
-  group opening the Database BEFORE the Database group, silently auto-migrating mid-report -- it now
+  group opening the Database BEFORE the Database group, silently auto-migrating mid-report; it now
   defers on `current != latest` with a pointer at the Database group. The R13 noun sweep also
   reached the last operator-facing `--provisioner` spellings (the shell_vm no-Tailscale hint and the
   issue-#117 heal hint teach `--platform`), and the service-layer kwarg renamed to
   `platform_transport` (the "provisioner" noun is retired; the CLI's `--provisioner` alias remains
-  the one deliberate survivor, and it also appears in completions for its one-release life -- both
+  the one deliberate survivor, and it also appears in completions for its one-release life, both
   facets of the same recorded click-can't-hide-aliases deviation). Minors: `_MIGRATABLE_KINDS`
   became a set (`_SECTION_KINDS` owns the section mapping), the `sites` completer joined the
   registry-sourced completion pin, doctor's catch-all warn carries the exception detail, and
@@ -117,8 +117,8 @@ flag/completion work stays in Phase 5.
   it in this PR, since vm-platform/vm-site is the first pair to implement the full shape and the PR
   is already breaking. The load-bearing inversions vs the phases above: platforms construct bound to
   `(config, resolver)` instead of receiving resolved `secret_values` (binding no longer resolves or
-  prompts); everything preflights (the vm-template predicts its Tailscale key can resolve -- the
-  template's responsibility, not the site's -- and the platform instance checks tools/reachability,
+  prompts); everything preflights (the vm-template predicts its Tailscale key can resolve (the
+  template's responsibility, not the site's) and the platform instance checks tools/reachability,
   all before any mutation or prompt); secret resolution happens once, at the preflight boundary,
   over the union of what all planned ops across all participating resources need (timing refined
   from "first op-need" to "as soon as preflight passes" by maintainer ruling the same day); the base
@@ -130,25 +130,25 @@ flag/completion work stays in Phase 5.
 - **2026-07-12, Phase 7 implementation rulings (all ratified by the Phase 7 review round).** (1)
   rekey's is-it-running check moved PAST the boundary: it is a backend status read (an op; on
   proxmox it needs the token), so a stopped-VM failure now lands after the one prompt session
-  instead of before it -- the alternative was two prompt sessions, which the contract forbids. (2)
+  instead of before it; the alternative was two prompt sessions, which the contract forbids. (2)
   Proxmox's preflight is the base's token prediction only; the API-reachability read was deferred
   (the version endpoint needs auth, so a useful read needs the token value). Superseded 2026-07-13:
-  the maintainer ruled the whole class past preflight's structural ceiling -- see that note; it is
-  no longer a follow-up, it is the op's job. (3) reinit does NOT run the template preflight: the
+  the maintainer ruled the whole class past preflight's structural ceiling (see that note); it is no
+  longer a follow-up, it is the op's job. (3) reinit does NOT run the template preflight: the
   Tailscale key is not among reinit's planned ops (the broken-node rejoin has its own documented
   conditional-need late resolve), and preflighting a secret no op needs would fail installs that
   legitimately run reinit without a key configured. (4) Doctor's per-site preflight rows are
   severity-split: bundled sites report `info` when their local tooling is absent (normal for the
   host), while operator-declared sites report `warn`. The review round ratified all four (test pins
   added for 1 and 4) and two more decisions were recorded from its findings: (5) `bind_platforms`
-  wholesale-fails a mixed-health batch when ANY distinct site's preflight fails --
-  contract-consistent (preflight everything before anything real) and confirmed intended; a
-  partial-batch degrade would act on some VMs while reporting failure, which is worse than failing
-  clean. (6) The runtime env-chain resolve was initially deferred and then, on maintainer direction
-  (the harness adoption needs the single seam), FOLDED in this PR: `bind_platform` takes `targets=`
-  (the command's `SecretTarget`s, registered on the resolver via `compute_needed_secrets`) so
-  `shell_vm` / `exec_vm` / `shell_agent` / `exec_agent` / `create_session` resolve site secrets AND
-  env-chain secrets in the ONE boundary pass -- one prompt session per command, pinned end to end
+  wholesale-fails a mixed-health batch when ANY distinct site's preflight fails: contract-consistent
+  (preflight everything before anything real) and confirmed intended; a partial-batch degrade would
+  act on some VMs while reporting failure, which is worse than failing clean. (6) The runtime
+  env-chain resolve was initially deferred and then, on maintainer direction (the harness adoption
+  needs the single seam), FOLDED in this PR: `bind_platform` takes `targets=` (the command's
+  `SecretTarget`s, registered on the resolver via `compute_needed_secrets`) so `shell_vm` /
+  `exec_vm` / `shell_agent` / `exec_agent` / `create_session` resolve site secrets AND env-chain
+  secrets in the ONE boundary pass: one prompt session per command, pinned end to end
   (`test_env_targets_join_the_site_secret_pass`). Three recorded exceptions keep their own resolve
   timing, each with a rationale comment at the site: `restart_session` resolves its env chain after
   the BROKEN/--force refusal and the "Restart?" confirm (bail-before-prompt: a declined restart must
@@ -159,44 +159,43 @@ flag/completion work stays in Phase 5.
 - **2026-07-13, PR review round (the other workstream's dev): three fixes, one az-now/prox-defer,
   and the recorded deferrals.** Verdict "merge-ready, and genuinely excellent" with seven ruled
   items. Fixed: (1) `create_vm`'s two create/init spans gained the `UserAbort` re-raise carve-out
-  (latent, not live -- no prompt lives in those spans -- but inconsistent with
-  delete/describe/reinit); (2) `describe_vm`'s backend reads (`display_backend_name` / `status`)
-  degrade under the same typed guard as the bind, so a live backend flake renders '-' instead of
-  crashing the report; (3) `compute_needed_secrets` raises a `ConfigError` (naming the env var,
-  target label, and secret) on a referenced name with no registry declaration instead of silently
-  dropping it -- a miss violates the auto-declare-at-finalize invariant and used to surface as a
-  mysterious downstream resolve failure (regression test added; no legitimate path relied on the
-  drop). **(4) reversed by maintainer ruling, same day: preflight's ceiling is structural.** The
-  review's azure credential read briefly landed and was then REMOVED -- verifying credentials before
-  the resolve/credential stage forks readiness on where a secret happens to come from (a
-  non-interactive chain is probeable; the browser-login fallback can't be probed without BEING the
-  interaction), which is complexity without a principled line. The ruling, now pinned in
-  capability-model.md's preflight section: preflight does what unresolved-secret, read-only checks
-  can do (tools present, mappings predicted, unauthenticated reachability) and nothing more; every
-  check past that ceiling -- credential probes, authenticated reads, the once-mooted proxmox
-  API-reachability follow-up and dry-run tier -- is the OP's job, surfaced through the op's own
-  typed, actionable error handling (azure's `_wrap_azure_error` is the pattern). azure and proxmox
-  therefore deliberately keep the base preflight only. **Recorded deferred follow-ups (carry into
-  locked.md at merge):** (a) The consoles/restart entrypoints are prompt-once-PER-BOUNDARY, not
-  prompt-once (the exceptions in the note above; the no-prompt-before-preflight invariant holds
-  everywhere). (b) `agent create` remains two prompt sessions (site secrets at bind, git tokens via
-  `_collect_git_tokens`) -- the fold rides the git-credentials capability adoption (#167), not this
-  PR. Also ratified: the idempotency marker stays test-enforced (semantic property; the behavioral
-  guard suite is the enforcement).
+  (latent, not live: no prompt lives in those spans, but inconsistent with delete/describe/reinit);
+  (2) `describe_vm`'s backend reads (`display_backend_name` / `status`) degrade under the same typed
+  guard as the bind, so a live backend flake renders '-' instead of crashing the report; (3)
+  `compute_needed_secrets` raises a `ConfigError` (naming the env var, target label, and secret) on
+  a referenced name with no registry declaration instead of silently dropping it; a miss violates
+  the auto-declare-at-finalize invariant and used to surface as a mysterious downstream resolve
+  failure (regression test added; no legitimate path relied on the drop). **(4) reversed by
+  maintainer ruling, same day: preflight's ceiling is structural.** The review's azure credential
+  read briefly landed and was then REMOVED: verifying credentials before the resolve/credential
+  stage forks readiness on where a secret happens to come from (a non-interactive chain is
+  probeable; the browser-login fallback can't be probed without BEING the interaction), which is
+  complexity without a principled line. The ruling, now pinned in capability-model.md's preflight
+  section: preflight does what unresolved-secret, read-only checks can do (tools present, mappings
+  predicted, unauthenticated reachability) and nothing more; every check past that ceiling
+  (credential probes, authenticated reads, the once-mooted proxmox API-reachability follow-up and
+  dry-run tier) is the OP's job, surfaced through the op's own typed, actionable error handling
+  (azure's `_wrap_azure_error` is the pattern). azure and proxmox therefore deliberately keep the
+  base preflight only. **Recorded deferred follow-ups (carry into locked.md at merge):** (a) The
+  consoles/restart entrypoints are prompt-once-PER-BOUNDARY, not prompt-once (the exceptions in the
+  note above; the no-prompt-before-preflight invariant holds everywhere). (b) `agent create` remains
+  two prompt sessions (site secrets at bind, git tokens via `_collect_git_tokens`); the fold rides
+  the git-credentials capability adoption (#167), not this PR. Also ratified: the idempotency marker
+  stays test-enforced (semantic property; the behavioral guard suite is the enforcement).
 - **2026-07-13, host-support gating: platforms self-report; bundled sites and the site fallback
   reshape; templates lose `site`.** Trigger: the maintainer's doctor on a lima-less Linux host
-  showed preflight-noise rows for the unconditionally-bundled `lima`/`wsl2` sites -- sites the host
+  showed preflight-noise rows for the unconditionally-bundled `lima`/`wsl2` sites: sites the host
   would never use (also the impetus for the reviewer rubric's new environment-diversity check). Two
   design iterations (a `[system].enabled_platforms` config knob was designed, partially built, and
   DISCARDED mid-build) landed on the cleaner model: the knowledge lives on the platform class. Two
   registration-time classmethods, both pure/fast/config-free and deliberately NOT preflight:
   `unsupported_reason()` (can any configuration of this platform ever run here; a non-None reason
-  disables the platform wholesale -- no capability row, nothing may reference it, doctor lists it as
+  disables the platform wholesale: no capability row, nothing may reference it, doctor lists it as
   installed-but-disabled) and `bundled_site_unsupported_reason()` (should the zero-config bundled
   site publish; operator-declared sites are never gated by it). The split is load-bearing: lima the
   platform is supported everywhere (remote-Lima runs limactl on the vm_host over SSH), but
-  `lima-local` -- the bundled site's NEW name; "lima" conflated the platform with one configuration
-  of it -- needs a local limactl. wsl2 is categorically Windows-only, so the whole platform gates.
+  `lima-local` (the bundled site's NEW name; "lima" conflated the platform with one configuration of
+  it) needs a local limactl. wsl2 is categorically Windows-only, so the whole platform gates.
   Consequences: `build_registry` gains a pre-finalize guard so a declared site on an unsupported
   platform fails with the platform's stated requirement (the framework's generic reference-miss
   can't say "requires Windows"); `lookup_site` gives a bundled-site miss the requirement hint
@@ -206,42 +205,42 @@ flag/completion work stays in Phase 5.
   `defaults.platform` alias translates old `lima` to `lima-local`. Site selection drops BOTH the
   hardcoded lima fallback AND the vm-template `site` field (a template describes WHAT a VM is;
   placement is host/operator-scoped, and a shared template must not smuggle a per-host placement
-  decision -- reversing the Phase 1 design): `--site`, then `defaults.site`, then the house model
-  over declared sites (infer exactly-one silently; several prompt interactively; non-interactive
-  errors naming the options). Doctor's "VM platforms" group now derives from the same two
-  classmethods (ok / installed-but-disabled-with-reason / enabled-with- bundled-site-note) replacing
-  the raw tool-presence rows. Pinned by `test_platform_support.py` (gating end to end incl. the
-  friendly error and the remote-site-survives-missing-limactl split), the select_site model tests,
-  and the bundled-miss hint test; test scaffolding gains `stub_platform_support` /
-  `publish_all_platforms` so shape tests are host-independent by construction. The review round (the
-  rubric's new environment-diversity check's first outing) caught two blockings, both closed: the
-  `--site` help text still taught the removed model, and `validate_sites` lacked the bundled-miss
-  requirement hint (`defaults.site = "lima-local"` with limactl missing said "declare that site" --
-  a reserved name). Also from the round: bundled-site names are reserved UNCONDITIONALLY via a
-  pre-finalize check (the registry's reserved-override only fires when the bundled row publishes, so
-  a limactl-less host could otherwise squat `lima-local` and collide the moment the tool is
-  installed); the real support classmethods are tested on both branches via `sys.platform` /
-  `shutil.which` patching, not only stubs; the v27 reserved-name set is FROZEN as a literal (a
-  migration's output must not change when later builds add platforms); and one ratification: a
-  declared site on an unsupported platform fails EVERY command, not just VM commands (per the
-  maintainer's original hard-failure ruling -- a resources dir shared across hosts must diverge per
-  host rather than half-work; the error's hint says so).
+  decision, reversing the Phase 1 design): `--site`, then `defaults.site`, then the house model over
+  declared sites (infer exactly-one silently; several prompt interactively; non-interactive errors
+  naming the options). Doctor's "VM platforms" group now derives from the same two classmethods (ok
+  / installed-but-disabled-with-reason / enabled-with- bundled-site-note) replacing the raw
+  tool-presence rows. Pinned by `test_platform_support.py` (gating end to end incl. the friendly
+  error and the remote-site-survives-missing-limactl split), the select_site model tests, and the
+  bundled-miss hint test; test scaffolding gains `stub_platform_support` / `publish_all_platforms`
+  so shape tests are host-independent by construction. The review round (the rubric's new
+  environment-diversity check's first outing) caught two blockings, both closed: the `--site` help
+  text still taught the removed model, and `validate_sites` lacked the bundled-miss requirement hint
+  (`defaults.site = "lima-local"` with limactl missing said "declare that site", a reserved name).
+  Also from the round: bundled-site names are reserved UNCONDITIONALLY via a pre-finalize check (the
+  registry's reserved-override only fires when the bundled row publishes, so a limactl-less host
+  could otherwise squat `lima-local` and collide the moment the tool is installed); the real support
+  classmethods are tested on both branches via `sys.platform` / `shutil.which` patching, not only
+  stubs; the v27 reserved-name set is FROZEN as a literal (a migration's output must not change when
+  later builds add platforms); and one ratification: a declared site on an unsupported platform
+  fails EVERY command, not just VM commands (per the maintainer's original hard-failure ruling: a
+  resources dir shared across hosts must diverge per host rather than half-work; the error's hint
+  says so).
 
 - **2026-07-13, doctor report polish (maintainer-directed).** Four presentation changes, no check
-  semantics touched. (1) Row rendering switches from `name (message)` to `name: message` -- the
-  paren wrap fought messages that naturally want parens for asides, nesting them
+  semantics touched. (1) Row rendering switches from `name (message)` to `name: message`; the paren
+  wrap fought messages that naturally want parens for asides, nesting them
   (`Schema (up to date (version 27))`); parens now appear at most one level, inside messages.
   Platform reason strings stay paren-free as policy so every composed surface (doctor rows, the
   bootstrap hard-failure, the bundled-miss hints) stays single-depth: wsl2's reason is now "Windows
   only", lima's "limactl not installed". (2) Group order decouples from which checks need config:
   the config/registry pair loads up front and each group renders in presentation order (System,
   Python, Required tools, Tailscale, VM platforms, VM sites, Configuration, Secrets, Database,
-  completions -- Tailscale moved above the VM pair by a later same-day tweak), putting the adjacent
-  VM pair early per the maintainer's "VM stuff is fundamental". When config fails to load, VM sites
+  completions; Tailscale moved above the VM pair by a later same-day tweak), putting the adjacent VM
+  pair early per the maintainer's "VM stuff is fundamental". When config fails to load, VM sites
   renders a skipped-pointer row (the group now precedes the Configuration group that explains the
   failure; silent absence would read as "no sites"). (3) The system slug moves out of "VM sites"
-  into a new leading "System" group -- it namespaces install-wide (hostnames, backend-side names,
-  the managed SSH config), not per-site; same pending-migration-defers guard. (4) Row names drop the
+  into a new leading "System" group: it namespaces install-wide (hostnames, backend-side names, the
+  managed SSH config), not per-site; same pending-migration-defers guard. (4) Row names drop the
   `platform:` / `vm-site:` prefixes (the group header already says it) and the lima row drops the
   `enabled (...)` wrapper (`[ok]` is the enabled signal; the bundled-site note is the whole
   message).
@@ -249,17 +248,17 @@ flag/completion work stays in Phase 5.
 - **2026-07-13, the disabled-resource model: sites register unconditionally and self-disable.**
   Maintainer-designed refinement superseding the same-day host-support gating (existence and
   availability are separate axes; the gating conflated them). The generic surface: any resource may
-  answer "do you have what you need to run?" via `disabled_reason() -> str | None` -- a default-None
+  answer "do you have what you need to run?" via `disabled_reason() -> str | None`: a default-None
   method on the `Capability` base and an optional structural hook on `ResourceKind` (the `instances`
   pattern: absent-on-kind = never disabled), surfaced by `resources.inspect.disabled_reason_for`.
   Contract: cheap, offline, host-introspection only; preflight remains the deeper op-boundary check.
-  No `site_disabled_reason` platform hook exists (maintainer ruling: "sites aren't special at all")
-  -- the platform's capability INSTANCE implements the generic method (a local-Lima site without
+  No `site_disabled_reason` platform hook exists (maintainer ruling: "sites aren't special at all");
+  the platform's capability INSTANCE implements the generic method (a local-Lima site without
   `limactl`; wsl2's `wsl.exe`), and the vm-site kind derives its chain: platform missing ("not
-  installed" -- an uninstalled plugin and a typo are indistinguishable by design), platform
+  installed"; an uninstalled plugin and a typo are indistinguishable by design), platform
   host-disabled (`unsupported_reason`, which still gates the capability row), else the instance's
   answer. Rules: disabled sites still register, list (marked), describe (with reason), and hold
-  references; `resolve_site` -- the one chokepoint every op passes through -- raises a typed
+  references; `resolve_site` (the one chokepoint every op passes through) raises a typed
   `StateError` on use; references (VM rows, `defaults.site`) are doctor WARNINGS, never command
   failures (the shared-resources-dir scenario now degrades gracefully, superseding the
   fail-every-command ratification); `select_site` infers/prompts over ENABLED sites only. The site's
@@ -270,7 +269,7 @@ flag/completion work stays in Phase 5.
   everywhere now, so the registry's `builtin_override = "reserved"` fires on every host),
   `_bundled_site_miss_reason` and both bundled-miss error branches, and
   `builtin_manifests.publish_to`'s `skip` parameter. Doctor: platform rows carry only platform-level
-  state; disabled sites are info rows with the reason (no preflight -- pointless without
+  state; disabled sites are info rows with the reason (no preflight: pointless without
   requirements); enabled-site preflight failures warn regardless of origin (the old
   bundled-vs-declared severity split is gone: bundled sites that would have preflight-failed are now
   properly disabled instead). Pinned by the rewritten `test_platform_support.py` (register-always,
@@ -279,13 +278,13 @@ flag/completion work stays in Phase 5.
   instance-method branches) plus the doctor reference-warning tests; `stub_platform_support` now
   pins `unsupported_reason` + instance `disabled_reason`. The other dev's PR review round
   (merge-ready, no blocking) landed four fixes: `create_vm` now applies the extracted
-  `ensure_site_enabled` guard right after `lookup_site` -- BEFORE the Tailscale check and the
+  `ensure_site_enabled` guard right after `lookup_site`, BEFORE the Tailscale check and the
   interactive system-slug prompt (the operator must never answer a prompt for an op the site already
   sank; pinned by an ordering test); the `--site` help text says ENABLED (matching `select_site` and
-  the README); a host-disabled site now claims NO edges at all -- the config-implied secret edges
-  are gated with the platform edge, so doctor never predict-resolves a secret for a site that can
-  never run here (pinned against the first plugin shipping a host-gated platform with a config
-  secret); stale lima-vs-lima-local comments swept.
+  the README); a host-disabled site now claims NO edges at all: the config-implied secret edges are
+  gated with the platform edge, so doctor never predict-resolves a secret for a site that can never
+  run here (pinned against the first plugin shipping a host-gated platform with a config secret);
+  stale lima-vs-lima-local comments swept.
 
 - **2026-07-13, the azure platform is named `azure-vm`.** Maintainer ruling: the capability is the
   Azure Virtual Machines service specifically, and Azure could plausibly offer other services worth
@@ -297,7 +296,7 @@ flag/completion work stays in Phase 5.
   validation/backfill now goes through a FROZEN legacy-name -> class map pinned to classes directly
   (`"azure" -> AzureVMPlatform`), so platform renames can never break the backfill and platform
   additions can never loosen the corruption check; `azure-vm` joins the `-host`-suffix reserved set
-  (`azure` stays -- the legacy site owns it). Module/class follow the name: `azure.py` ->
+  (`azure` stays: the legacy site owns it). Module/class follow the name: `azure.py` ->
   `azure_vm.py`, `AzurePlatform` -> `AzureVMPlatform`. `AGENTWORKS_PLATFORM` now reads `azure-vm` on
   those VMs. `proxmox` is deliberately untouched (already the service name).
 
@@ -305,11 +304,11 @@ flag/completion work stays in Phase 5.
   Latency: `ensure_active`'s Tailscale fast-path probe burned its full 5s timeout against a stopped
   VM just to reach the refusal; when the caller's row already says manually stopped, the gate now
   asks the backend directly and skips the probe (an out-of-band start still proceeds via the
-  observed RUNNING -- the flag is intent, not observed state, and both directions of the
+  observed RUNNING: the flag is intent, not observed state, and both directions of the
   concurrent-start/stop race are re-read-guarded and pinned). Accepted trade in the flag-set path:
   ops now require a successful backend `status()` where the old path could proceed on the Tailscale
   ping alone, so a manually-stopped-then-out-of-band-started VM with an unreachable backend fails
-  with the backend's error instead of proceeding -- a narrow corner recoverable via `agw vm start`
+  with the backend's error instead of proceeding, a narrow corner recoverable via `agw vm start`
   (which clears the flag), and the honest reading of a state where the operator's intent flag and
   the world disagree. (2) Vocabulary: "manually stopped" everywhere the OPERATOR reads it (the
   internal `operator_stopped` column keeps its name): the gate error is "VM 'x' was manually stopped
@@ -323,20 +322,20 @@ flag/completion work stays in Phase 5.
   "proxmox-token-secret" was redundant on every surface (`secret/proxmox-token-secret`,
   `AW_SECRET_PROXMOX_TOKEN_SECRET`). The auto-declared default is now `proxmox-token` (env-var
   convention `AW_SECRET_PROXMOX_TOKEN`); the `platform_config.token_secret` override key is
-  unchanged, and the proxmox guide's compat example -- mapping the secret to the released
-  `PROXMOX_TOKEN_SECRET` env var via `backend_mappings` -- deliberately stays: that name is not
+  unchanged, and the proxmox guide's compat example (mapping the secret to the released
+  `PROXMOX_TOKEN_SECRET` env var via `backend_mappings`) deliberately stays: that name is not
   redundant, just a different word order, and it is the released vocabulary.
 
 - **2026-07-13, a blank slug answer is final: the shared-backend nudge is removed.** Maintainer
   ruling from the live install test: blank is a perfectly valid system slug ("no slug"), and
   answering it must not lead to any further prompting. The settings encoding already differentiated
-  declined ("" row) from never-asked (absent row) -- the offender was R4's deferred shared-backend
+  declined ("" row) from never-asked (absent row); the offender was R4's deferred shared-backend
   nudge, whose ONLY interactive trigger was exactly the declined state (an absent row prompts the
   full question first). Deleted with everything that existed solely to drive it:
   `_nudge_shared_backend_slug`, the `never-remind-me` suppression settings key,
   `site_shared_backend`, and the `shared_backend` classmethod on the base and all four platforms
-  (`_resolve_system_slug` loses its `asked_now` tuple return -- the nudge-skip was its only
-  purpose). `vm describe` now also renders the two null states distinctly: declined shows `(none)`,
+  (`_resolve_system_slug` loses its `asked_now` tuple return: the nudge-skip was its only purpose).
+  `vm describe` now also renders the two null states distinctly: declined shows `(none)`,
   never-asked shows `-` (doctor already differentiated). The FRD's R4 nudge bullet is struck with a
   pointer here.
 
@@ -426,7 +425,7 @@ green (see the sequencing note at the top of this plan).
       `cli/tests/vms/test_vm_platform_kind.py` (capability rows, not declarable),
       `cli/tests/vms/test_sites_dispatch.py` (resolve_site happy path, stranded ConfigError + hint,
       secret threading), `cli/tests/vms/test_platform_validate_config.py` (all four platforms:
-      unknown keys, lima vm_host, proxmox token_secret reference + default, azure required keys) --
+      unknown keys, lima vm_host, proxmox token_secret reference + default, azure required keys); it
       joins the pinned `test_capability_config_contract.py` patterns. Also (unplanned, per review):
       `cli/tests/vms/test_legacy_site_sections.py` (legacy `[azure]`/`[proxmox]` loading, defaults
       site/alias/vm_host, TOML-vs-manifest decode parity) and
@@ -453,7 +452,7 @@ One Python migration version; runner support first.
 - [x] `cli/agentworks/db.py`: `MIGRATIONS` values become `str | Callable`; callables receive
       `(conn, context)` where `context.legacy` is the best-effort, unvalidated parse of the config
       file's legacy TOML sections (missing/unreadable config yields an empty mapping; tolerant by
-      construction -- nothing may depend on it succeeding). As built, `context.legacy` carries the
+      construction: nothing may depend on it succeeding). As built, `context.legacy` carries the
       WHOLE parsed document (so hooks index `legacy["proxmox"]` etc.), built lazily once per run.
 - [x] The migration step (v27, `_migrate_vm_sites`), in order:
   - [x] Add `platform_metadata TEXT NOT NULL DEFAULT '{}'`,
@@ -464,7 +463,7 @@ One Python migration version; runner support first.
         strings). Backfill `hostname = '{platform}--{name}'`. The per-platform map only needs the
         four legacy names: pre-SDD schemas constrain the `platform` column to them, and the Phase 1
         create guard refuses custom-named sites mid-window, so no row can hold anything else (a
-        value outside the map would be a genuine corruption -- fail loudly, don't guess).
+        value outside the map would be a genuine corruption: fail loudly, don't guess).
   - [x] Site rename: remote-Lima rows (`vm_host_name` set) get `site = vm_host_name`; collect the
         referenced `vm_hosts` rows and print ready-to-paste `vm-site` manifest documents once at the
         end (suffix `-host` on reserved-name collision, and say so). All other rows keep their value
@@ -489,7 +488,7 @@ One Python migration version; runner support first.
       `ResourceContext.platform` now carries the site name and `vm_host` has no producer
       (`AGENTWORKS_VM_HOST` never emitted) until the Phase 4 identity redesign; describe shows a raw
       platform_metadata dump pending Phase 3's `display_backend_name`.
-- [x] Tests: `cli/tests/test_db_migration_vm_sites.py` -- fixture DBs at the prior schema version
+- [x] Tests: `cli/tests/test_db_migration_vm_sites.py`: fixture DBs at the prior schema version
       covering all four platforms plus a remote-Lima row (and a platform-name-shadowing host);
       assert backfilled metadata shapes, the hostname backfill, the site rename, the printed
       snippets, the NOT NULL rebuild, empty-`legacy` behavior (proxmox node omitted), the
@@ -497,7 +496,7 @@ One Python migration version; runner support first.
       new row shape (the shared VM seeding lives per-file, not in `conftest.py`).
 
 **Definition of done**: a pre-SDD database opens cleanly and lands on the new schema with correct
-data; row helpers and fixtures compile against the new shape. MET -- and as with Phase 1, the
+data; row helpers and fixtures compile against the new shape. MET, and as with Phase 1, the
 suite/ruff/mypy are fully green at the boundary (the plan expected the window to stay open here; the
 bridges keep it closed). Remaining window items are unchanged from the Phase 1 note, plus:
 remote-Lima rows (site = host name) fail typed at the `get_provisioner` bridge until Phase 3
@@ -591,8 +590,8 @@ existing VMs keep hostnames and env values. MET (suite 1550, ruff, mypy green).
 - [x] `cli/agentworks/cli/commands/vm.py`: `--platform` becomes `--site` (static Choice removed;
       validation at dispatch via `lookup_site`); `vm shell --provisioner` becomes boolean
       `--platform` with `--provisioner` as an alias for one release (deviation: click renders both
-      names in help -- it has no per-alias hiding -- so the alias is visible rather than hidden);
-      help text sweep. `create_vm`'s service-layer kwargs follow (`platform` -> `site`; the Phase-2
+      names in help (it has no per-alias hiding), so the alias is visible rather than hidden); help
+      text sweep. `create_vm`'s service-layer kwargs follow (`platform` -> `site`; the Phase-2
       `--vm-host` bridge error deletes with the flag).
 - [x] `cli/agentworks/cli/commands/vm_host.py` + `cli/agentworks/vm_hosts/`: removed (the last
       PHASE-2 BRIDGE retires; `git grep vm_hosts` is now clean outside SDDs and the migration).
@@ -601,14 +600,14 @@ existing VMs keep hostnames and env values. MET (suite 1550, ruff, mypy green).
       the template completers); `vm_host` entries removed; all three shell generators (bash, zsh,
       powershell) gain the `sites` renderer and drop `vm_hosts`. `resource migrate` selector
       completion picks up vm-site automatically through `_MIGRATABLE_KINDS`.
-- [x] `agw doctor`: new "VM sites" group -- declared vm-site rows, the system slug (set / declined /
+- [x] `agw doctor`: new "VM sites" group: declared vm-site rows, the system slug (set / declined /
       unset), and every `vm.site` resolving to a declaration (stranded rows fail with the
       paste-ready manifest snippet as the hint).
 - [x] `cli/agentworks/sample-config.toml`: `[azure]` / `[proxmox]` examples replaced by a pointer at
       `agw resource sample vm-site` (with the migrate command and the token secret's AW*SECRET* env
       var named); `defaults.site` documented with the deprecated `defaults.platform` alias noted;
       `vm_templates.*.site` documented.
-- [x] Migrator: `_MIGRATABLE_KINDS` includes vm-site (the deferred Phase 1 item) -- the one
+- [x] Migrator: `_MIGRATABLE_KINDS` includes vm-site (the deferred Phase 1 item), the one
       multi-section kind: flat `[azure]` / `[proxmox]` sections discover as whole-section units
       (section name = resource name), emission nests platform-owned keys under
       `spec.platform_config` with pre-write capability validation (git-credential precedent), and
@@ -640,7 +639,7 @@ existing VMs keep hostnames and env values. MET (suite 1550, ruff, mypy green).
       as a durable checkpoint (with a per-version foreign_key_check), so retry is safe for
       multi-version jumps; pinned by a v25-fixture jump test (v26 checkpoints despite v27's designed
       failure, retry resumes at v27).
-- [x] Hardening candidate (from the Phase 3 review round): RESOLVED as carve-out -- `delete_agent` /
+- [x] Hardening candidate (from the Phase 3 review round): RESOLVED as carve-out: `delete_agent` /
       `delete_workspace` accept the caller's bound platform and the ephemeral rollback threads it,
       same shape as the create side.
 - [x] PR #169; agentworks-reviewer rounds ran per phase (recorded in the sequencing notes above)
@@ -672,10 +671,10 @@ vm-platform/vm-site pair; the git-credentials and session-harness PRs adopt for 
       `resolver.get`); binding no longer resolves or prompts; construction auto-registers the
       declared config secrets on the resolver. `VMPlatform` extends the base; `site_name` /
       `platform_config` are domain-vocabulary properties over the generic base attributes.
-- [x] `preflight` implementations: lima (local `limactl` present; remote sites defer to ops -- an
-      SSH probe is a real round trip), wsl2 (`wsl.exe` present), proxmox and azure (base only: both
+- [x] `preflight` implementations: lima (local `limactl` present; remote sites defer to ops: an SSH
+      probe is a real round trip), wsl2 (`wsl.exe` present), proxmox and azure (base only: both
       would need resolved credentials to check anything more, which is past preflight's structural
-      ceiling per the 2026-07-13 ruling -- their failures surface at the op with typed errors); plus
+      ceiling per the 2026-07-13 ruling; their failures surface at the op with typed errors); plus
       `preflight_vm_template` predicting the Tailscale key resolves (the lookup-or-synthesize
       fallback now lives in `Resolver.register_name`).
 - [x] Service-layer reorder (create, reinit, rekey, delete, and the gate-using paths): bind, then
@@ -688,7 +687,7 @@ vm-platform/vm-site pair; the git-credentials and session-harness PRs adopt for 
       op-level `UserAbort` re-raise carve-outs. The rejoin path stays a documented conditional-need
       late resolve.
 - [x] Idempotency flags on the `VMPlatform` ABC's ops (`start` / `stop` / `delete` flagged with
-      docstring notes; `create` deliberately unflagged -- its collision check makes a re-run a loud
+      docstring notes; `create` deliberately unflagged: its collision check makes a re-run a loud
       error).
 - [x] Doctor: the VM-sites group calls each declared site's instance `preflight` for its health rows
       (read-only by contract, so doctor-safe). Bundled sites whose local tooling is absent report
@@ -702,11 +701,11 @@ vm-platform/vm-site pair; the git-credentials and session-harness PRs adopt for 
       delete-abort regression covering both best-effort op spans.
 - [x] agentworks-reviewer rounds: round 1 (no blocking findings; four important ones: the vm roots'
       prompt-before-preflight ordering, add_git_credential's second prompt session, describe's
-      too-narrow degrade, two missing ruling pins -- all fixed, and the four implementation rulings
-      ratified); round 2 (one important: the AGENT shell/exec roots had the same ordering bug --
+      too-narrow degrade, two missing ruling pins; all fixed, and the four implementation rulings
+      ratified); round 2 (one important: the AGENT shell/exec roots had the same ordering bug;
       fixed, plus proxmox/wsl2 op guards and the ordering/guard pins); round 3: **approve, Phase 7
-      passes** (two non-gating minors -- the exec_agent ordering pin and azure's
-      idempotent-by-construction comments -- closed in the final commit).
+      passes** (two non-gating minors, the exec_agent ordering pin and azure's
+      idempotent-by-construction comments, closed in the final commit).
 
 **Definition of done**: the vm-platform/vm-site pair conforms to `capability-model.md` end to end;
 full gates green; reviewer round clean.

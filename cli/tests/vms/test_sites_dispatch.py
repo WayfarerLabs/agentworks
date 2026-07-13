@@ -165,8 +165,8 @@ def test_select_site_flag_then_default_win() -> None:
 def test_select_site_infers_the_single_declared_site(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Exactly one declared site: use it silently (the zero-config case
-    -- a default install has only its host's bundled site)."""
+    """Exactly one declared site: use it silently (the zero-config
+    case: a default install has only its host's bundled site)."""
     from agentworks.resources import Registry
     from agentworks.vms.sites import select_site
     from tests.conftest import publish_all_platforms
@@ -237,7 +237,7 @@ def test_resolving_a_disabled_site_names_the_requirement(
 ) -> None:
     """A VM on a bundled site whose requirement went away (limactl
     uninstalled after VMs existed) gets the site's disabled reason at
-    resolve time -- the site still EXISTS (lookup succeeds; the
+    resolve time: the site still EXISTS (lookup succeeds; the
     stranded paste-a-manifest error is only for undeclared names)."""
     from agentworks.vms.sites import lookup_site
 

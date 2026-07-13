@@ -103,7 +103,7 @@ def resource_list(
     # cli-conventions ``--names-only`` rule, render-only work is skipped:
     # ``list_resources`` does no network or DB-heavy work (attribute
     # access over already-published Resources, plus each kind's
-    # ``disabled_reason`` hook -- offline host introspection like a PATH
+    # ``disabled_reason`` hook: offline host introspection like a PATH
     # scan by contract), so the cost up to here is completion-cheap.
     # Keep it that way: heavier per-row work belongs after this check.
     # The cross-kind divergence from the rule: we emit ``kind/name``
