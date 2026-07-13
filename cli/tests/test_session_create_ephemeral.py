@@ -1243,7 +1243,7 @@ def test_vm_and_existing_agent_mismatch_fails_before_workspace_prompt(
     db = _seed_two_vms(tmp_path)
     config = SimpleNamespace(session=SimpleNamespace(history_limit=50000))
 
-    # If a prompt fires, this raises — proves the validation came first.
+    # If a prompt fires, this raises -- proves the validation came first.
     monkeypatch.setattr(output, "is_interactive", lambda: True)
     monkeypatch.setattr(
         output, "choose", lambda *a, **k: (_ for _ in ()).throw(AssertionError("no prompt should fire"))
