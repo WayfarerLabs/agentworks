@@ -560,6 +560,13 @@ def create_vm(
         output.warn(f"Cancelling vm create '{vm_name}'... rolling back.")
         _safe_delete_vm_row()
         raise
+    except UserAbort:
+        # No prompt lives in this span today (the boundary resolve ran
+        # at the composition root above), but an operator abort must
+        # never downgrade to a ProvisioningError; roll back like the
+        # KeyboardInterrupt twin above.
+        _safe_delete_vm_row()
+        raise
     except Exception as e:
         _safe_delete_vm_row()
         raise ProvisioningError(
@@ -607,6 +614,12 @@ def create_vm(
             f"The VM exists but is partially initialized. "
             f"Use 'vm reinit {vm_name}' to retry, or 'vm delete {vm_name} --force' to remove it."
         )
+        raise
+    except UserAbort:
+        # No prompt lives in this span today (the boundary resolve ran
+        # at the composition root above), but the catch-all below must
+        # never downgrade an operator abort to a Provisioning/External
+        # error -- same discipline as delete_vm's best-effort spans.
         raise
     except Exception as e:
         from agentworks.ssh import LOG_DIR
@@ -723,13 +736,23 @@ def describe_vm(db: Database, config: Config, name: str) -> None:
         # row's own fields must still render.
         output.warn(f"{e}" + (f"\n{e.hint}" if e.hint else ""))
     else:
-        backend_label = platform.display_backend_name(vm)
-        # Live observed status, paired with operator intent: an
-        # operator stop reads differently from an idle timeout.
-        observed = platform.status(vm)
-        status_label = observed.value
-        if observed in (VMStatus.STOPPED, VMStatus.DEALLOCATED):
-            status_label += " (operator)" if vm.operator_stopped else " (idle)"
+        # The backend reads degrade under the same discipline as the
+        # bind above: a live backend flake (API hiccup, SSH timeout)
+        # must not crash the report -- a flaky backend is exactly when
+        # an operator reaches for describe, and the row's static fields
+        # still render with '-' placeholders.
+        try:
+            backend_label = platform.display_backend_name(vm)
+            # Live observed status, paired with operator intent: an
+            # operator stop reads differently from an idle timeout.
+            observed = platform.status(vm)
+            status_label = observed.value
+            if observed in (VMStatus.STOPPED, VMStatus.DEALLOCATED):
+                status_label += " (operator)" if vm.operator_stopped else " (idle)"
+        except UserAbort:
+            raise
+        except AgentworksError as e:
+            output.warn(f"{e}" + (f"\n{e.hint}" if e.hint else ""))
 
     # VM details
     output.info(f"Name:           {vm.name}")

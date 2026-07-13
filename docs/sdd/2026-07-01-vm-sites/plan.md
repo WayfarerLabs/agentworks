@@ -156,6 +156,31 @@ flag/completion work stays in Phase 5.
   conditionally on live tmux state discovered post-bind (conditional need, the rejoin's class); and
   `console add-sessions` / `add-shell` bind no platform at all (pure Tailscale live-sync), so their
   env resolve IS the operation's one session by construction.
+- **2026-07-13, PR review round (the other workstream's dev): three fixes, one az-now/prox-defer,
+  and the recorded deferrals.** Verdict "merge-ready, and genuinely excellent" with seven ruled
+  items. Fixed: (1) `create_vm`'s two create/init spans gained the `UserAbort` re-raise carve-out
+  (latent, not live -- no prompt lives in those spans -- but inconsistent with
+  delete/describe/reinit); (2) `describe_vm`'s backend reads (`display_backend_name` / `status`)
+  degrade under the same typed guard as the bind, so a live backend flake renders '-' instead of
+  crashing the report; (3) `compute_needed_secrets` raises a `ConfigError` (naming the env var,
+  target label, and secret) on a referenced name with no registry declaration instead of silently
+  dropping it -- a miss violates the auto-declare-at-finalize invariant and used to surface as a
+  mysterious downstream resolve failure (regression test added; no legitimate path relied on the
+  drop); (4) azure `preflight` gained the non-interactive credential read (the `az account show`
+  equivalent), with one asymmetry per the prompt-only-secret rule: interactive runs defer a missing
+  credential to the op's browser-login fallback rather than making it unreachable. **Recorded
+  deferred follow-ups (carry into locked.md at merge):** (a) proxmox API-reachability preflight -- a
+  useful read needs the token value, which preflight may fetch only non-interactively; lands as its
+  own change with tests. (b) A platform **dry-run tier**: a real dry-run (Azure what-if/validate:
+  quota, image availability) fits preflight's read-only contract but needs the OP'S parameters,
+  which the no-argument preflight doesn't have -- design is either op-context threaded into
+  preflight or an optional `dry_run(request)` the service layer calls when the platform advertises
+  it. (c) The consoles/restart entrypoints are prompt-once-PER-BOUNDARY, not prompt-once (the
+  exceptions in the note above; the no-prompt-before-preflight invariant holds everywhere). (d)
+  `agent create` remains two prompt sessions (site secrets at bind, git tokens via
+  `_collect_git_tokens`) -- the fold rides the git-credentials capability adoption (#167), not this
+  PR. Also ratified: the idempotency marker stays test-enforced (semantic property; the behavioral
+  guard suite is the enforcement).
 
 **Compile boundaries**: Phases 1 through 3 are one logical commit boundary, mirroring the
 polymorphic-transports precedent. As planned, Phase 1 would open a non-compiling window when the

@@ -90,6 +90,25 @@ backends = ["env-var"]
     assert [d.name for d in decls] == ["api-key"]
 
 
+def test_unknown_reference_raises_instead_of_dropping(tmp_path: Path) -> None:
+    """A referenced name with no registry declaration is a
+    registry-construction bug (referenced secrets auto-declare at
+    finalize, so a legitimate reference always has a row); silently
+    dropping it used to surface as a mysterious downstream "secret
+    didn't resolve" far from the cause."""
+    from agentworks.errors import ConfigError
+
+    cfg = _write_config(tmp_path)
+    config = load_config(cfg, warn_issues=False)
+    vm_env = {"API_KEY": EnvEntry(key="API_KEY", secret="ghost-secret")}
+
+    with pytest.raises(ConfigError, match="ghost-secret"):
+        compute_needed_secrets(
+            [SecretTarget(vm=vm_env, label="test-target")],
+            build_registry(config),
+        )
+
+
 def test_unions_across_multiple_targets_dedup_by_name(tmp_path: Path) -> None:
     cfg = _write_config(
         tmp_path,
