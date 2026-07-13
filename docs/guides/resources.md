@@ -116,8 +116,8 @@ spec:
 - Consumers name sites: `agw vm create --site`, `defaults.site` in config.toml, and each VM row's
   `site`. Templates deliberately carry no site -- placement is per-host, never template state.
 - Site config secrets ride the standard secret machinery: a Proxmox site references its API token as
-  the `proxmox-token-secret` secret (override with `token_secret`), auto-declared and resolved
-  through the backend chain like any other.
+  the `proxmox-token` secret (override with `token_secret`), auto-declared and resolved through the
+  backend chain like any other.
 - The legacy flat `[azure]` / `[proxmox]` TOML sections keep loading as deprecated vm-site
   declarations; `agw resource migrate vm-site` moves them to manifests.
 

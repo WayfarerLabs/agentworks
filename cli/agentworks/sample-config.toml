@@ -162,8 +162,8 @@ ssh_private_key = "~/.ssh/id_ed25519"        # required: used for SSH connection
 # `agw resource sample vm-site` for commented, ready-to-edit examples.
 # The legacy [azure] / [proxmox] sections still load as deprecated
 # vm-site declarations; migrate them with `agw resource migrate vm-site`.
-# The proxmox API token is the `proxmox-token-secret` secret (default
-# env-var: AW_SECRET_PROXMOX_TOKEN_SECRET).
+# The proxmox API token is the `proxmox-token` secret (default
+# env-var: AW_SECRET_PROXMOX_TOKEN).
 
 # =============================================================================
 # Templates

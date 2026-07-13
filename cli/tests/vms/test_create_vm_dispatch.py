@@ -267,7 +267,7 @@ def test_proxmox_token_resolves_end_to_end(
     from agentworks.capabilities.vm_platform.proxmox import ProxmoxPlatform
 
     config = make_config(PROXMOX_SECTION)
-    monkeypatch.setenv("AW_SECRET_PROXMOX_TOKEN_SECRET", "pve-token-value")
+    monkeypatch.setenv("AW_SECRET_PROXMOX_TOKEN", "pve-token-value")
     # The deleted legacy shadow path: setting the OLD raw variable to a
     # different value proves nothing reads it.
     monkeypatch.setenv("PROXMOX_TOKEN_SECRET", "must-not-be-read")
@@ -276,7 +276,7 @@ def test_proxmox_token_resolves_end_to_end(
 
     def _fake_create(self: ProxmoxPlatform, request: object) -> ProvisionResult:
         assert self.resolver is not None
-        captured["token"] = self.resolver.get("proxmox-token-secret")
+        captured["token"] = self.resolver.get("proxmox-token")
         raise RuntimeError("halt after binding")
 
     monkeypatch.setattr(ProxmoxPlatform, "create", _fake_create)

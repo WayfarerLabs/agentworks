@@ -306,8 +306,8 @@ draft is gone entirely, because `platform_config` made every constructor the sam
 as the first real user:
 
 - `ProxmoxPlatform.validate_config` declares `token_secret` as a secret-name field defaulting to the
-  well-known name `proxmox-token-secret` and returns the corresponding `ConfigReference`; the site
-  is the reference source, so auto-declaration synthesizes the secret row
+  well-known name `proxmox-token` and returns the corresponding `ConfigReference`; the site is the
+  reference source, so auto-declaration synthesizes the secret row
   (`(auto) the API token for vm-site/proxmox`), reachability validates at finalize, and doctor
   predicts resolution.
 - Values resolve at the consuming command's composition root through the standard single resolve

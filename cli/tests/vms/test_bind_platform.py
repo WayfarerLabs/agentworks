@@ -28,7 +28,7 @@ def make_config(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     key = tmp_path / "id_ed25519"
     key.write_text("private")
     (tmp_path / "id_ed25519.pub").write_text("public")
-    monkeypatch.setenv("AW_SECRET_PROXMOX_TOKEN_SECRET", "pve-token")
+    monkeypatch.setenv("AW_SECRET_PROXMOX_TOKEN", "pve-token")
     # Deterministic platform preflights: lima checks for limactl
     # locally; pretend the tool exists regardless of the host.
     monkeypatch.setattr("shutil.which", lambda name: f"/usr/bin/{name}")
@@ -88,7 +88,7 @@ def test_secret_bearing_site_resolves_exactly_once(
     platform = vm_manager.bind_platform(config, _vm("v1", "proxmox"))  # type: ignore[arg-type]
     assert isinstance(platform, ProxmoxPlatform)
     assert platform.resolver is not None
-    assert platform.resolver.get("proxmox-token-secret") == "pve-token"
+    assert platform.resolver.get("proxmox-token") == "pve-token"
     assert len(resolve_counter) == 1
 
 
@@ -136,7 +136,7 @@ def test_bind_platforms_union_spans_sites(
 
     assert len(pairs) == 2
     assert len(resolve_counter) == 1
-    assert resolve_counter[0] == ["proxmox-token-secret"]
+    assert resolve_counter[0] == ["proxmox-token"]
 
 
 def test_env_targets_join_the_site_secret_pass(
@@ -171,10 +171,10 @@ def test_env_targets_join_the_site_secret_pass(
     assert len(resolve_counter) == 1
     assert sorted(cast("list[str]", resolve_counter[0])) == [
         "api-key",
-        "proxmox-token-secret",
+        "proxmox-token",
     ]
     assert resolver.get("api-key") == "k"
-    assert resolver.get("proxmox-token-secret") == "pve-token"
+    assert resolver.get("proxmox-token") == "pve-token"
 
 
 def test_bind_platforms_empty_set_builds_no_registry(

@@ -157,7 +157,7 @@ def test_proxmox_site_emits_the_token_secret_reference() -> None:
     refs = site.referenced_resources()
     assert [(r.kind, r.name) for r in refs] == [
         ("vm-platform", "proxmox"),
-        ("secret", "proxmox-token-secret"),
+        ("secret", "proxmox-token"),
     ]
     assert all(r.source == ("vm-site", "px") for r in refs)
 

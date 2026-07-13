@@ -33,7 +33,7 @@
 #    resource_group: agw-dev
 #    region: eastus
 ##
-## Proxmox VE. The API token value is the `proxmox-token-secret` secret
+## Proxmox VE. The API token value is the `proxmox-token` secret
 ## (override the name with platform_config.token_secret), resolved
 ## through the backend chain like any other secret.
 ##

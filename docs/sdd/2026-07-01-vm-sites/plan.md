@@ -314,6 +314,14 @@ flag/completion work stays in Phase 5.
   own; it is now marked manually stopped and will not be auto-started" (the command DID change
   something), and only an already-manually-stopped VM gets "is already manually stopped".
 
+- **2026-07-13, the proxmox secret is named `proxmox-token`.** Maintainer ruling:
+  "proxmox-token-secret" was redundant on every surface (`secret/proxmox-token-secret`,
+  `AW_SECRET_PROXMOX_TOKEN_SECRET`). The auto-declared default is now `proxmox-token` (env-var
+  convention `AW_SECRET_PROXMOX_TOKEN`); the `platform_config.token_secret` override key is
+  unchanged, and the proxmox guide's compat example -- mapping the secret to the released
+  `PROXMOX_TOKEN_SECRET` env var via `backend_mappings` -- deliberately stays: that name is not
+  redundant, just a different word order, and it is the released vocabulary.
+
 **Compile boundaries**: Phases 1 through 3 are one logical commit boundary, mirroring the
 polymorphic-transports precedent. As planned, Phase 1 would open a non-compiling window when the
 platform classes reshape to the new protocol; as built, PHASE-1 BRIDGE shims keep everything

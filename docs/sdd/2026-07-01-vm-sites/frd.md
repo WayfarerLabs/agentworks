@@ -249,7 +249,7 @@ spec:
   already use), never at registry build. Concrete first user: the Proxmox API token. Today
   `ProxmoxProvisioner.__init__` raw-reads a `PROXMOX_TOKEN_SECRET` env var and raises RuntimeError
   when absent; it becomes `platform_config.token_secret`, defaulting to the well-known secret name
-  `proxmox-token-secret` (auto-declared, resolvable through the standard chain; see R13 for the
+  `proxmox-token` (auto-declared, resolvable through the standard chain; see R13 for the
   operator-visible compat note).
 - **Built-in sites**: platforms that work with zero configuration ship bundled site manifests named
   after themselves. Today that is `lima` (local) and `wsl2`: the first real content of the app's
@@ -574,11 +574,11 @@ hostname, which tailscaled picks up as the node name. Changes:
   `agw resource migrate` (R2), joining the aggregated dual-path deprecation warning (and its
   `--no-deprecations` escape).
 - **Proxmox token sourcing changes** (R2): the raw `PROXMOX_TOKEN_SECRET` env var read is replaced
-  by the `proxmox-token-secret` secret resolved through the standard chain. The default `env-var`
-  backend convention reads `AW_SECRET_PROXMOX_TOKEN_SECRET`; operators keeping the old variable name
-  declare the secret with a one-line `backend_mappings: {env-var: PROXMOX_TOKEN_SECRET}`.
-  Interactive use falls back to the prompt backend instead of a RuntimeError. Release notes and the
-  migration output carry the pointer.
+  by the `proxmox-token` secret resolved through the standard chain. The default `env-var` backend
+  convention reads `AW_SECRET_PROXMOX_TOKEN_SECRET`; operators keeping the old variable name declare
+  the secret with a one-line `backend_mappings: {env-var: PROXMOX_TOKEN_SECRET}`. Interactive use
+  falls back to the prompt backend instead of a RuntimeError. Release notes and the migration output
+  carry the pointer.
 - New registry kinds visible in `agw resource list` / `agw resource kinds`: declarable `vm-site`
   rows (bundled, manifest, and legacy TOML origins) and read-only `vm-platform` capability rows;
   `agw resource sample vm-site` gains real sample documents; `vm-template` accepts an optional

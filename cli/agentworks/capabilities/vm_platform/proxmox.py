@@ -25,8 +25,10 @@ if TYPE_CHECKING:
 
 # The well-known secret name the token_secret field defaults to. The
 # site emits the reference (auto-declared at finalize); the default
-# env-var backend convention reads AW_SECRET_PROXMOX_TOKEN_SECRET.
-DEFAULT_TOKEN_SECRET = "proxmox-token-secret"
+# env-var backend convention reads AW_SECRET_PROXMOX_TOKEN. Not
+# "proxmox-token-secret": the kind is already secret/ and the env-var
+# prefix already says SECRET, so the suffix was pure redundancy.
+DEFAULT_TOKEN_SECRET = "proxmox-token"
 
 _REQUIRED_KEYS = ("api_url", "node", "token_id", "template_vmid")
 _OPTIONAL_KEYS = ("storage", "bridge", "pool", "verify_ssl", "token_secret")

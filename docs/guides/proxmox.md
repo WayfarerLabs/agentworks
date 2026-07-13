@@ -118,15 +118,15 @@ spec:
 (`agw resource sample vm-site` prints a commented starter. The legacy flat `[proxmox]` section in
 `config.toml` still loads as a deprecated declaration; `agw resource migrate vm-site` converts it.)
 
-The API token value is an ordinary agentworks secret named `proxmox-token-secret` (auto-declared;
-rename per site via `platform_config.token_secret`). The default env-var backend reads it from:
+The API token value is an ordinary agentworks secret named `proxmox-token` (auto-declared; rename
+per site via `platform_config.token_secret`). The default env-var backend reads it from:
 
 ```bash
-export AW_SECRET_PROXMOX_TOKEN_SECRET="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+export AW_SECRET_PROXMOX_TOKEN="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
 ```
 
 With no env var set, agentworks prompts for it when a command needs it.
-`agw secret describe proxmox-token-secret` shows how it resolves.
+`agw secret describe proxmox-token` shows how it resolves.
 
 Upgrading from the legacy flow and already exporting `PROXMOX_TOKEN_SECRET`? Either rename the
 variable, or keep it by declaring the secret with a mapping:
@@ -135,7 +135,7 @@ variable, or keep it by declaring the secret with a mapping:
 apiVersion: agentworks/v1
 kind: secret
 metadata:
-  name: proxmox-token-secret
+  name: proxmox-token
 spec:
   backend_mappings:
     env-var: PROXMOX_TOKEN_SECRET
@@ -189,14 +189,14 @@ The QEMU guest agent is not responding. Check:
 
 ### The token secret won't resolve
 
-Set it for the env-var backend (`export AW_SECRET_PROXMOX_TOKEN_SECRET="your-secret-here"`) or let
-the prompt backend ask. `agw secret describe proxmox-token-secret` shows how each backend would look
-it up; `agw doctor` reports the runtime outcome.
+Set it for the env-var backend (`export AW_SECRET_PROXMOX_TOKEN="your-secret-here"`) or let the
+prompt backend ask. `agw secret describe proxmox-token` shows how each backend would look it up;
+`agw doctor` reports the runtime outcome.
 
 ### "401 Unauthorized" from the API
 
 - Verify `token_id` matches the `full-tokenid` from the setup script output
-- Verify the `proxmox-token-secret` value matches the token secret from the setup script
+- Verify the `proxmox-token` value matches the token secret from the setup script
 - Re-run the setup script to verify all ACLs are in place
 
 ### Permission denied on clone or network

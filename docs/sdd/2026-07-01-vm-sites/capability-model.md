@@ -293,8 +293,8 @@ _resolver_ and uses it two ways: non-prompting _prediction_ in preflight (is thi
 all?), and _resolution_ at the preflight boundary (everything the command declared, one batched
 prompt session, cached; ops draw from the cache). The default secret name is the capability's to
 choose: a per-consumer default (`git-token-<name>`, derived from `owner`) where credentials are
-many, a shared well-known name (`proxmox-token-secret`) where one is typical. Either way the
-capability owns the default; the framework only resolves what was declared.
+many, a shared well-known name (`proxmox-token`) where one is typical. Either way the capability
+owns the default; the framework only resolves what was declared.
 
 ## Where capabilities live
 

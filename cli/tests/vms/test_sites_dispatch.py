@@ -114,7 +114,7 @@ def test_resolver_threads_to_the_bound_platform() -> None:
             return SecretDecl(name=name, description="")
 
         def get(self, name: str) -> str:
-            assert name == "proxmox-token-secret"
+            assert name == "proxmox-token"
             return "s3cret"
 
     stub = _StubResolver()
@@ -122,12 +122,12 @@ def test_resolver_threads_to_the_bound_platform() -> None:
     assert isinstance(bound, ProxmoxPlatform)
     # Construction registered the declared token secret for the
     # operation's boundary resolve.
-    assert stub.registered == ["proxmox-token-secret"]
+    assert stub.registered == ["proxmox-token"]
     assert bound._api is not None
 
     unbound = resolve_site("px", registry)
     assert isinstance(unbound, ProxmoxPlatform)
-    with pytest.raises(StateError, match="proxmox-token-secret"):
+    with pytest.raises(StateError, match="proxmox-token"):
         _ = unbound._api
 
 
