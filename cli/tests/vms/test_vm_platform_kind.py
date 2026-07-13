@@ -31,8 +31,8 @@ def test_publisher_adds_one_row_per_supported_platform(
     registry = Registry.empty()
     vm_platforms.publish_to(registry)
     names = {entry.name for entry in registry.iter_kind("vm-platform")}
-    assert names == {"lima", "wsl2", "azure", "proxmox"}
-    row = registry.lookup("vm-platform", "azure")
+    assert names == {"lima", "wsl2", "azure-vm", "proxmox"}
+    row = registry.lookup("vm-platform", "azure-vm")
     assert row.origin is not None
     assert row.origin.variant == "built-in"
     assert row.description
@@ -55,7 +55,7 @@ def test_publisher_skips_unsupported_platforms(
     vm_platforms.publish_to(registry)
     names = {entry.name for entry in registry.iter_kind("vm-platform")}
     assert "wsl2" not in names
-    assert {"lima", "azure", "proxmox"} <= names
+    assert {"lima", "azure-vm", "proxmox"} <= names
 
 
 def test_vm_platform_is_not_manifest_declarable(tmp_path: Path) -> None:

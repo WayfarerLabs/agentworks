@@ -601,8 +601,8 @@ Resource kinds (YAML manifests; the deprecated TOML section is noted for each):
   subscription/resource-group/region, Proxmox API endpoint + token secret, remote-Lima `vm_host`).
   The `lima-local` and `wsl2` sites ship built in (on hosts where their platform can run) and their
   names are reserved
-- `vm-platform` -- read-only capability rows for the in-tree platforms (lima, wsl2, azure, proxmox);
-  listed by `agw resource kinds`, never declared
+- `vm-platform` -- read-only capability rows for the in-tree platforms (lima, wsl2, azure-vm,
+  proxmox); listed by `agw resource kinds`, never declared
 - `vm-template` (`[vm_templates.*]`) -- VM resources, apt packages, system install commands, mise,
   and the target `site`
 - `admin-template` (`[admin.config]`) -- admin user shell, dotfiles, git credentials, user install

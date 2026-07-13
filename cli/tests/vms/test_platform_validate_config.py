@@ -8,7 +8,7 @@ from __future__ import annotations
 import pytest
 
 from agentworks.capabilities.vm_platform import VM_PLATFORM_REGISTRY
-from agentworks.capabilities.vm_platform.azure import AzurePlatform
+from agentworks.capabilities.vm_platform.azure_vm import AzureVMPlatform
 from agentworks.capabilities.vm_platform.lima import LimaPlatform
 from agentworks.capabilities.vm_platform.proxmox import (
     DEFAULT_TOKEN_SECRET,
@@ -34,7 +34,7 @@ def test_registry_names_match_classes() -> None:
     assert {
         "lima": LimaPlatform,
         "wsl2": WSL2Platform,
-        "azure": AzurePlatform,
+        "azure-vm": AzureVMPlatform,
         "proxmox": ProxmoxPlatform,
     } == VM_PLATFORM_REGISTRY
     for name, cls in VM_PLATFORM_REGISTRY.items():
@@ -67,14 +67,14 @@ def test_wsl2_accepts_no_configuration() -> None:
 
 
 def test_azure_requires_the_three_keys() -> None:
-    assert AzurePlatform.validate_config("t", AZURE_CONFIG) == ()
+    assert AzureVMPlatform.validate_config("t", AZURE_CONFIG) == ()
     for missing in AZURE_CONFIG:
         broken = {k: v for k, v in AZURE_CONFIG.items() if k != missing}
         with pytest.raises(ConfigError, match=missing):
-            AzurePlatform.validate_config("t", broken)
+            AzureVMPlatform.validate_config("t", broken)
     with pytest.raises(ConfigError, match="unknown azure"):
-        AzurePlatform.validate_config("t", {**AZURE_CONFIG, "extra": "x"})
-    assert AzurePlatform.shared_backend(AZURE_CONFIG) is True
+        AzureVMPlatform.validate_config("t", {**AZURE_CONFIG, "extra": "x"})
+    assert AzureVMPlatform.shared_backend(AZURE_CONFIG) is True
 
 
 def test_proxmox_returns_the_token_secret_reference() -> None:
@@ -127,11 +127,11 @@ def test_legacy_platform_metadata_hooks() -> None:
         "distro_name": "dev"
     }
     az_row = {"name": "dev", "azure_resource_id": "/subscriptions/s/x"}
-    assert AzurePlatform.legacy_platform_metadata(az_row, {}) == {
+    assert AzureVMPlatform.legacy_platform_metadata(az_row, {}) == {
         "resource_id": "/subscriptions/s/x"
     }
     az_row_null = {"name": "dev", "azure_resource_id": None}
-    assert AzurePlatform.legacy_platform_metadata(az_row_null, {}) == {}
+    assert AzureVMPlatform.legacy_platform_metadata(az_row_null, {}) == {}
     px_row = {"name": "dev", "proxmox_vmid": "104"}
     assert ProxmoxPlatform.legacy_platform_metadata(px_row, {}) == {"vmid": "104"}
     assert ProxmoxPlatform.legacy_platform_metadata(

@@ -89,7 +89,7 @@ def test_every_site_registers_regardless_of_host(
     assert {"lima-local", "wsl2"} <= set(sites)
     platforms = {e.name for e in registry.iter_kind("vm-platform")}
     assert "wsl2" not in platforms
-    assert {"lima", "azure", "proxmox"} <= platforms
+    assert {"lima", "azure-vm", "proxmox"} <= platforms
 
 
 def test_disabled_reasons_chain(
@@ -115,7 +115,7 @@ def test_supported_host_has_everything_enabled(
     for _, decl in registry.iter_kind_items("vm-site"):
         assert site_disabled_reason(decl) is None
     platforms = {e.name for e in registry.iter_kind("vm-platform")}
-    assert platforms == {"lima", "wsl2", "azure", "proxmox"}
+    assert platforms == {"lima", "wsl2", "azure-vm", "proxmox"}
 
 
 def test_remote_lima_site_enabled_without_local_limactl(
@@ -273,7 +273,7 @@ def test_doctor_lists_platforms_and_disabled_sites(
     lima_row = by_name["lima"]
     assert lima_row.status is doctor.Status.OK
     assert lima_row.message is None  # the bundled-site note moved to VM sites
-    assert by_name["azure"].status is doctor.Status.OK
+    assert by_name["azure-vm"].status is doctor.Status.OK
 
 
 # -- The real methods (both branches, deterministically) ----------------------

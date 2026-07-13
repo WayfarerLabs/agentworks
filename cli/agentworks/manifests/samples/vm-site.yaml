@@ -1,9 +1,9 @@
 ## kind: vm-site -- a configured place to create VMs: a platform (the
-## capability: lima, wsl2, azure, proxmox) plus its settings. Referenced
-## by name from `agw vm create --site` and defaults.site. The
-## `lima-local` and `wsl2` sites ship built-in (zero config) on hosts
-## where their platform can run; declare sites for remote or cloud
-## backends.
+## capability: lima, wsl2, azure-vm, proxmox) plus its settings.
+## Referenced by name from `agw vm create --site` and defaults.site.
+## The `lima-local` and `wsl2` sites ship built-in (zero config) and
+## disable themselves on hosts missing their requirements; declare
+## sites for remote or cloud backends.
 ##
 ## Remote Lima over SSH:
 ##
@@ -27,7 +27,7 @@
 #  name: azure-dev
 #  description: Dev subscription in eastus
 #spec:
-#  platform: azure
+#  platform: azure-vm
 #  platform_config:
 #    subscription_id: 00000000-0000-0000-0000-000000000000
 #    resource_group: agw-dev

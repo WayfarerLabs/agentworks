@@ -11,7 +11,7 @@ core logic.
 
 The currently considered/planned capabilities are:
 
-- a `vm-platform` that provisions and manages VMs different ways (`lima`, `azure`, `proxmox`)
+- a `vm-platform` that provisions and manages VMs different ways (`lima`, `azure-vm`, `proxmox`)
 - a `git-credential-provider` that sources and provisions git credentials for a git host so
   agentworks can use them (`github`, `azdo`)
 - a `secret-backend` that resolves secrets from different sources (`env-var`, `prompt`,

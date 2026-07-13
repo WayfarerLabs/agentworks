@@ -173,8 +173,10 @@ Two coordination notes:
 > fallback is gone), and doctor lists installed-but-disabled platforms and per-site state with
 > reasons. An earlier same-day iteration gated bundled-site PUBLICATION
 > (`bundled_site_unsupported_reason`) and hard-failed declared sites on unsupported platforms; both
-> were superseded by the register-always/self-disable model. See the plan's 2026-07-13 sequencing
-> notes.
+> were superseded by the register-always/self-disable model. Also 2026-07-13: the azure platform is
+> named **`azure-vm`** (the Azure Virtual Machines service specifically); the legacy `[azure]`
+> section's SITE keeps the name `azure`, so released configs and VM rows resolve unchanged. See the
+> plan's 2026-07-13 sequencing notes.
 
 ### R1: Platform capability, site resource
 

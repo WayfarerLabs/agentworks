@@ -2,7 +2,7 @@
 request/result shapes.
 
 A VM platform is the code that runs VMs on one backend kind (lima,
-wsl2, azure, proxmox). Platforms register in ``VM_PLATFORM_REGISTRY``
+wsl2, azure-vm, proxmox). Platforms register in ``VM_PLATFORM_REGISTRY``
 (``agentworks.capabilities.vm_platform``) and publish as read-only ``vm-platform``
 capability resources; the declarable ``vm-site`` kind exposes a
 configured platform ("a place to create VMs"), and all invocation goes

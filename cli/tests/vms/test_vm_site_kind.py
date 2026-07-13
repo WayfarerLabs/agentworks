@@ -21,7 +21,7 @@ metadata:
   name: azure-dev
   description: Dev subscription
 spec:
-  platform: azure
+  platform: azure-vm
   platform_config:
     subscription_id: "0000"
     resource_group: agw-dev
@@ -43,7 +43,7 @@ def _load_one(tmp_path: Path, text: str) -> VMSiteDecl:
 def test_decode_nests_platform_config(tmp_path: Path) -> None:
     site = _load_one(tmp_path, SITE_DOC)
     assert site.name == "azure-dev"
-    assert site.platform == "azure"
+    assert site.platform == "azure-vm"
     assert site.platform_config == {
         "subscription_id": "0000",
         "resource_group": "agw-dev",
@@ -67,13 +67,13 @@ def test_site_names_follow_the_vm_name_rules(tmp_path: Path) -> None:
 
 
 def test_platform_named_site_must_declare_that_platform(tmp_path: Path) -> None:
-    """A site `vm-site/azure` backed by lima would make `--site azure`
-    mean something other than it says."""
+    """A site `vm-site/azure-vm` backed by lima would make
+    `--site azure-vm` mean something other than it says."""
     doc = (
         "apiVersion: agentworks/v1\n"
         "kind: vm-site\n"
         "metadata:\n"
-        "  name: azure\n"
+        "  name: azure-vm\n"
         "spec:\n"
         "  platform: lima\n"
     )
@@ -83,7 +83,7 @@ def test_platform_named_site_must_declare_that_platform(tmp_path: Path) -> None:
 
 
 def test_decode_requires_platform(tmp_path: Path) -> None:
-    doc = SITE_DOC.replace("  platform: azure\n", "")
+    doc = SITE_DOC.replace("  platform: azure-vm\n", "")
     (tmp_path / "site.yaml").write_text(doc)
     with pytest.raises(ConfigError, match="spec.platform"):
         load_manifests(tmp_path)
@@ -139,7 +139,7 @@ def test_unknown_platform_registers_a_disabled_site(tmp_path: Path) -> None:
 def test_reference_emission(tmp_path: Path) -> None:
     site = _load_one(tmp_path, SITE_DOC)
     refs = site.referenced_resources()
-    assert [(r.kind, r.name) for r in refs] == [("vm-platform", "azure")]
+    assert [(r.kind, r.name) for r in refs] == [("vm-platform", "azure-vm")]
     assert refs[0].source == ("vm-site", "azure-dev")
 
 
@@ -196,4 +196,4 @@ def test_bundled_sites_finalize_against_the_platform_rows(
     registry.finalize()
     assert registry.lookup("vm-site", "lima-local").platform == "lima"
     assert registry.lookup("vm-site", "wsl2").platform == "wsl2"
-    assert registry.lookup("vm-platform", "azure").name == "azure"
+    assert registry.lookup("vm-platform", "azure-vm").name == "azure-vm"

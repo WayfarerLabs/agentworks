@@ -120,11 +120,14 @@ def _network_client(az: _HasSubscriptionId) -> NetworkManagementClient:
 _AZURE_REQUIRED_KEYS = ("subscription_id", "resource_group", "region")
 
 
-class AzurePlatform(VMPlatform):
-    """Runs VMs on Azure via the Azure Python SDK."""
+class AzureVMPlatform(VMPlatform):
+    """Runs VMs on the Azure Virtual Machines service via the Azure
+    Python SDK. Named ``azure-vm``, not ``azure``: the capability is
+    one specific Azure service, and other Azure services could plausibly
+    back platforms of their own someday."""
 
-    name: ClassVar[str] = "azure"
-    description: ClassVar[str] = "Azure VMs (subscription + resource group)"
+    name: ClassVar[str] = "azure-vm"
+    description: ClassVar[str] = "Azure Virtual Machines (subscription + resource group)"
 
     # No preflight override: azure has no config secrets (the base's
     # prediction pass is a no-op) and no unauthenticated readiness
@@ -145,13 +148,13 @@ class AzurePlatform(VMPlatform):
             value = config.get(key)
             if not isinstance(value, str) or not value:
                 raise ConfigError(
-                    f"{owner}.{key} is required for the azure platform and "
+                    f"{owner}.{key} is required for the azure-vm platform and "
                     f"must be a non-empty string"
                 )
         unknown = sorted(set(config) - set(_AZURE_REQUIRED_KEYS))
         if unknown:
             raise ConfigError(
-                f"{owner}: unknown azure platform field(s): {', '.join(unknown)}"
+                f"{owner}: unknown azure-vm platform field(s): {', '.join(unknown)}"
             )
         return ()
 

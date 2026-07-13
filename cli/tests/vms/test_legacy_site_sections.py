@@ -56,7 +56,9 @@ def test_legacy_sections_load_as_vm_sites(write_config) -> None:
     )
     assert set(config.vm_sites) == {"azure", "proxmox"}
     azure = config.vm_sites["azure"]
-    assert azure.platform == "azure"
+    # The SITE keeps its legacy section name; the platform underneath
+    # is the renamed azure-vm capability.
+    assert azure.platform == "azure-vm"
     assert azure.platform_config["resource_group"] == "agw"
     proxmox = config.vm_sites["proxmox"]
     assert proxmox.platform == "proxmox"
@@ -80,7 +82,7 @@ def test_legacy_sections_publish_and_finalize(write_config) -> None:
     )
     registry = build_registry(config, ManifestSet.empty())
     row = registry.lookup("vm-site", "azure")
-    assert row.platform == "azure"
+    assert row.platform == "azure-vm"
     assert row.origin is not None
     assert row.origin.variant == "operator-declared"
 

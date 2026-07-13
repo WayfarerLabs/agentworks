@@ -1047,7 +1047,11 @@ def _load_session_templates(
 # ignored keys into validation errors would break released configs);
 # manifests validate the true blob strictly.
 _LEGACY_SITE_SECTIONS: dict[str, tuple[str, tuple[str, ...]]] = {
-    "azure": ("azure", ("subscription_id", "resource_group", "region")),
+    # The section (and thus the declared SITE) keeps its historical
+    # name "azure" -- released configs and VM rows point at it -- while
+    # the platform underneath is azure-vm (the Azure Virtual Machines
+    # service specifically).
+    "azure": ("azure-vm", ("subscription_id", "resource_group", "region")),
     "proxmox": (
         "proxmox",
         (

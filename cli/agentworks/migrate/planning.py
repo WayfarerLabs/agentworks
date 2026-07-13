@@ -470,15 +470,19 @@ def _emit_document(doc: tomlkit.TOMLDocument, unit: MigrationUnit) -> str:
 
     if unit.kind == "vm-site":
         # Flat legacy [azure] / [proxmox] sections nest under
-        # spec.platform_config; the section name doubles as the
-        # resource name AND the platform (the legacy loader's
-        # section-name-becomes-resource-name semantics). Validate the
-        # blob pre-write in the operator's TOML vocabulary, mirroring
-        # the git-credential branch: an unvalidated emission would only
-        # fail the post-run verification after files were written.
+        # spec.platform_config; the section name becomes the resource
+        # name, and the platform comes from the legacy loader's own
+        # mapping (one source of truth -- the [azure] section's
+        # platform is azure-vm, so the emitted manifest must match
+        # what the loader publishes or verification fails). Validate
+        # the blob pre-write in the operator's TOML vocabulary,
+        # mirroring the git-credential branch: an unvalidated emission
+        # would only fail the post-run verification after files were
+        # written.
         from agentworks.capabilities.vm_platform import VM_PLATFORM_REGISTRY
+        from agentworks.config import _LEGACY_SITE_SECTIONS
 
-        platform = unit.section
+        platform = _LEGACY_SITE_SECTIONS[unit.section][0]
         rebuilt_site: dict[str, Any] = {"platform": platform}
         if spec:
             rebuilt_site["platform_config"] = dict(spec)

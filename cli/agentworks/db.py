@@ -221,8 +221,6 @@ def _migrate_vm_sites(conn: sqlite3.Connection, context: MigrationContext) -> No
     legacy per-platform columns and ``vm_hosts`` drop; ``settings``
     lands.
     """
-    from agentworks.capabilities.vm_platform import VM_PLATFORM_REGISTRY
-
     # Name the DB file in validation errors so the operator knows which
     # file to inspect/fix (PRAGMA reports the actual attached file, so
     # this stays honest for non-default paths, e.g. in tests).
@@ -232,15 +230,30 @@ def _migrate_vm_sites(conn: sqlite3.Connection, context: MigrationContext) -> No
     # ever stored the four legacy platform names, and the vm-sites
     # bridge refuses custom-site creates before this migration exists,
     # so anything else is genuine corruption: fail loudly, don't guess.
-    # The set is FROZEN as of v27 (a later build adding a platform must
-    # not loosen this check), which also guarantees the registry lookup
-    # in the backfill below can never miss. The scan must precede the
-    # ALTERs because sqlite3 auto-commits DDL -- failing after them
-    # would leave a half-migrated v26 DB that dies on duplicate-column
-    # at every retry, even once the operator fixes the corrupt row.
-    legacy_platforms = {"lima", "wsl2", "azure", "proxmox"}
+    # The map is FROZEN as of v27 in the PRE-v27 vocabulary and pinned
+    # to classes directly: a later build adding a platform must not
+    # loosen this check, and a later platform RENAME (azure -> azure-vm
+    # already happened) must not break the backfill lookup, so this
+    # deliberately does not go through VM_PLATFORM_REGISTRY keys. The
+    # scan must precede the ALTERs because sqlite3 auto-commits DDL --
+    # failing after them would leave a half-migrated v26 DB that dies
+    # on duplicate-column at every retry, even once the operator fixes
+    # the corrupt row.
+    from agentworks.capabilities.vm_platform import (
+        AzureVMPlatform,
+        LimaPlatform,
+        ProxmoxPlatform,
+        WSL2Platform,
+    )
+
+    legacy_platform_classes = {
+        "lima": LimaPlatform,
+        "wsl2": WSL2Platform,
+        "azure": AzureVMPlatform,
+        "proxmox": ProxmoxPlatform,
+    }
     for row in conn.execute("SELECT name, platform FROM vms").fetchall():
-        if row["platform"] not in legacy_platforms:
+        if row["platform"] not in legacy_platform_classes:
             raise sqlite3.IntegrityError(
                 f"vms row '{row['name']}' has unknown platform "
                 f"'{row['platform']}'; cannot backfill platform metadata "
@@ -259,7 +272,8 @@ def _migrate_vm_sites(conn: sqlite3.Connection, context: MigrationContext) -> No
     reserved_site_names = {
         "lima",
         "wsl2",
-        "azure",
+        "azure",  # the legacy [azure] section's site keeps this name
+        "azure-vm",
         "proxmox",
         "lima-local",
     }
@@ -293,7 +307,7 @@ def _migrate_vm_sites(conn: sqlite3.Connection, context: MigrationContext) -> No
     # keyed by the pre-rename platform column.
     for row in conn.execute("SELECT * FROM vms").fetchall():
         platform = row["platform"]
-        cls = VM_PLATFORM_REGISTRY[platform]  # validated above
+        cls = legacy_platform_classes[platform]  # validated above
         metadata = cls.legacy_platform_metadata(row, context.legacy)
         conn.execute(
             "UPDATE vms SET platform_metadata = ?, hostname = ? WHERE name = ?",

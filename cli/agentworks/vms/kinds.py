@@ -149,7 +149,7 @@ class _VMPlatformKind:
     """Implementation of ``ResourceKind`` for ``"vm-platform"``."""
 
     kind: str = "vm-platform"
-    description: str = "Capability for running VMs on one backend kind (lima, wsl2, azure, proxmox)"
+    description: str = "Capability for running VMs on one backend kind (lima, wsl2, azure-vm, proxmox)"
     miss_policy: Literal["auto-declare", "error"] = "error"
     auto_declare_names: frozenset[str] | None = None
     category: Literal["declarable", "capability"] = "capability"

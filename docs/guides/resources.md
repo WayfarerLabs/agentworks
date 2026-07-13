@@ -98,14 +98,14 @@ kind: vm-site
 metadata:
   name: azure-dev
 spec:
-  platform: azure
+  platform: azure-vm
   platform_config:
     subscription_id: "..."
     resource_group: agentworks-vms
     region: eastus2
 ```
 
-- `spec.platform` names a `vm-platform` capability row (`lima`, `wsl2`, `azure`, `proxmox`);
+- `spec.platform` names a `vm-platform` capability row (`lima`, `wsl2`, `azure-vm`, `proxmox`);
   `spec.platform_config` is validated by that platform (unknown keys are errors). Remote Lima is
   just a lima site with `platform_config.vm_host: user@host`.
 - The `lima-local` and `wsl2` sites ship built in with empty config. Like every site they register
@@ -133,7 +133,7 @@ policy is per kind:
   declare a sibling site instead. Like every vm-site they register on every host and disable
   themselves where this host lacks what they need (`agw resource list` marks the row; `describe` and
   `agw doctor` carry the reason); using a disabled site is an error naming the requirement.
-- **Secret backends** (`env-var`, `prompt`) and **VM platforms** (`lima`, `wsl2`, `azure`,
+- **Secret backends** (`env-var`, `prompt`) and **VM platforms** (`lima`, `wsl2`, `azure-vm`,
   `proxmox`): registered capabilities, shown as read-only rows. You cannot declare or override them;
   secrets customize per secret via `backend_mappings`, platforms configure per site via
   `platform_config`. A platform whose host requirements are not met publishes no row at all --

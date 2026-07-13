@@ -207,8 +207,10 @@ def test_vm_site_sections_migrate_flat_to_nested(tmp_path: Path) -> None:
     docs = _loaded_docs(tmp_path / "resources" / "vm-sites.yaml")
     assert [d["metadata"]["name"] for d in docs] == ["azure", "proxmox"]
     azure, proxmox = docs
+    # The migrated SITE keeps the section name "azure"; the platform
+    # underneath is the renamed azure-vm capability.
     assert azure["spec"] == {
-        "platform": "azure",
+        "platform": "azure-vm",
         "platform_config": {
             "subscription_id": "0000",
             "resource_group": "agw",
@@ -226,7 +228,7 @@ def test_vm_site_sections_migrate_flat_to_nested(tmp_path: Path) -> None:
     # The rewritten config reloads and the sites resolve as manifests.
     reloaded = load_config(cfg, warn_issues=False, warn_deprecations=False)
     registry = build_registry(reloaded)
-    assert registry.lookup("vm-site", "azure").platform == "azure"
+    assert registry.lookup("vm-site", "azure").platform == "azure-vm"
 
 
 def test_vm_site_selector_by_name(tmp_path: Path) -> None:

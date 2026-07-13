@@ -2,7 +2,7 @@
 
 ``VM_PLATFORM_REGISTRY`` holds the code behind the read-only
 ``vm-platform`` capability resources: one :class:`VMPlatform` subclass
-per backend kind (lima, wsl2, azure, proxmox; plugin-registered
+per backend kind (lima, wsl2, azure-vm, proxmox; plugin-registered
 platforms later). The declarable ``vm-site`` kind exposes a configured
 platform, and site resolution (``agentworks.vms.sites``) is the only
 consumer that constructs platform instances -- manager code never
@@ -14,7 +14,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
-from agentworks.capabilities.vm_platform.azure import AzurePlatform
+from agentworks.capabilities.vm_platform.azure_vm import AzureVMPlatform
 from agentworks.capabilities.vm_platform.base import (
     ProvisionRequest,
     ProvisionResult,
@@ -30,7 +30,7 @@ if TYPE_CHECKING:
 
 __all__ = [
     "VM_PLATFORM_REGISTRY",
-    "AzurePlatform",
+    "AzureVMPlatform",
     "LimaPlatform",
     "ProvisionRequest",
     "ProvisionResult",
@@ -44,7 +44,7 @@ __all__ = [
 VM_PLATFORM_REGISTRY: dict[str, type[VMPlatform]] = {
     LimaPlatform.name: LimaPlatform,
     WSL2Platform.name: WSL2Platform,
-    AzurePlatform.name: AzurePlatform,
+    AzureVMPlatform.name: AzureVMPlatform,
     ProxmoxPlatform.name: ProxmoxPlatform,
 }
 """Every platform this BUILD ships (INSTALLED, in doctor's vocabulary).
@@ -64,9 +64,9 @@ plugin origins).
 @dataclass(frozen=True)
 class VMPlatformEntry:
     """A name-keyed marker for one VM platform capability (``"lima"``,
-    ``"azure"``, ...).
+    ``"azure-vm"``, ...).
 
-    The actual platform class (``LimaPlatform``, ``AzurePlatform``)
+    The actual platform class (``LimaPlatform``, ``AzureVMPlatform``)
     lives beside this in ``agentworks.capabilities.vm_platform``; this
     row is what ``vm-site`` ``spec.platform`` references resolve against
     in the framework. Lives with the capability (not ``vms/kinds.py``)

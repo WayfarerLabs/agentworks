@@ -357,7 +357,7 @@ def test_provisioner_shell_target_attaches_and_registers_detach_for_azure(
     come down regardless of how shell_vm unwinds (success, SSH failure, ^C)."""
     import contextlib
 
-    from agentworks.capabilities.vm_platform.azure import AzurePlatform
+    from agentworks.capabilities.vm_platform.azure_vm import AzureVMPlatform
     from agentworks.transports import SSHTransport, Transport
     from agentworks.transports import native_transport as _native_transport
     from agentworks.vms import manager as vm_manager
@@ -367,7 +367,7 @@ def test_provisioner_shell_target_attaches_and_registers_detach_for_azure(
     attach_calls: list[str] = []
     detach_calls: list[str] = []
 
-    class _FakeAzureProvisioner(AzurePlatform):
+    class _FakeAzureProvisioner(AzureVMPlatform):
         # Override the constructor so we don't need a real Azure config.
         def __init__(self) -> None:  # noqa: D401, ANN001
             pass
@@ -426,7 +426,7 @@ def test_provisioner_shell_target_detaches_on_exception_for_azure(
     the surrounding ExitStack closes."""
     import contextlib
 
-    from agentworks.capabilities.vm_platform.azure import AzurePlatform
+    from agentworks.capabilities.vm_platform.azure_vm import AzureVMPlatform
     from agentworks.transports import Transport
     from agentworks.transports import native_transport as _native_transport
     from agentworks.vms import manager as vm_manager
@@ -434,7 +434,7 @@ def test_provisioner_shell_target_detaches_on_exception_for_azure(
     db = _seed_db(tmp_path)
     detach_calls: list[str] = []
 
-    class _AzureRaisesAfterAttach(AzurePlatform):
+    class _AzureRaisesAfterAttach(AzureVMPlatform):
         def __init__(self) -> None:  # noqa: D401
             pass
 

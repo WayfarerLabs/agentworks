@@ -278,6 +278,20 @@ flag/completion work stays in Phase 5.
   instance-method branches) plus the doctor reference-warning tests; `stub_platform_support` now
   pins `unsupported_reason` + instance `disabled_reason`.
 
+- **2026-07-13, the azure platform is named `azure-vm`.** Maintainer ruling: the capability is the
+  Azure Virtual Machines service specifically, and Azure could plausibly offer other services worth
+  backing platforms with someday. Consumers reference SITES, so compat needs no shims: the legacy
+  `[azure]` TOML section still declares a site NAMED `azure` (existing VM rows and `defaults.site` /
+  `defaults.platform = "azure"` values keep resolving) with platform `azure-vm` underneath, and the
+  migrator emits the platform from `_LEGACY_SITE_SECTIONS` (one source of truth with the loader)
+  while the site keeps the section name. The unreleased v27 migration updates in place: the pre-DDL
+  validation/backfill now goes through a FROZEN legacy-name -> class map pinned to classes directly
+  (`"azure" -> AzureVMPlatform`), so platform renames can never break the backfill and platform
+  additions can never loosen the corruption check; `azure-vm` joins the `-host`-suffix reserved set
+  (`azure` stays -- the legacy site owns it). Module/class follow the name: `azure.py` ->
+  `azure_vm.py`, `AzurePlatform` -> `AzureVMPlatform`. `AGENTWORKS_PLATFORM` now reads `azure-vm` on
+  those VMs. `proxmox` is deliberately untouched (already the service name).
+
 **Compile boundaries**: Phases 1 through 3 are one logical commit boundary, mirroring the
 polymorphic-transports precedent. As planned, Phase 1 would open a non-compiling window when the
 platform classes reshape to the new protocol; as built, PHASE-1 BRIDGE shims keep everything
