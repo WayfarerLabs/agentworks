@@ -7,6 +7,7 @@ import re
 from typing import TYPE_CHECKING, NamedTuple
 
 from agentworks import output
+from agentworks.capabilities.base import RunContext
 from agentworks.config import validate_admin_username, validate_name
 from agentworks.db import (
     SYSTEM_SLUG_KEY,
@@ -242,7 +243,7 @@ def bind_platform(
     if targets:
         resolver.register_targets(targets)
     if prepare:
-        platform.preflight()
+        platform.preflight(RunContext(config=config))
         resolver.resolve()
     return platform
 
@@ -285,7 +286,7 @@ def bind_platforms(
     # The batch's preflight boundary: every distinct site's platform
     # preflights, then the one resolve pass for the union.
     for platform in by_site.values():
-        platform.preflight()
+        platform.preflight(RunContext(config=config))
     if resolver is not None:
         resolver.resolve()
     return pairs
@@ -469,9 +470,9 @@ def create_vm(
 
     platform_obj = resolve_site(site, registry, resolver=resolver)
     preflight_vm_template(vm_tmpl, resolver)
-    platform_obj.preflight()
+    platform_obj.preflight(RunContext(config=config))
     for provider in providers.values():
-        provider.preflight()
+        provider.preflight(RunContext(config=config))
     output.info("Collecting credentials...")
     resolver.resolve()
     tailscale_auth_key = resolver.get(vm_tmpl.tailscale_auth_key)
@@ -1103,7 +1104,7 @@ def add_git_credential(db: Database, config: Config, name: str, credential_name:
     bound = bind_platform(
         config, vm, registry=registry, resolver=resolver, prepare=False
     )
-    bound.preflight()
+    bound.preflight(RunContext(config=config))
     resolver.resolve()
     token = _git_tokens_after_resolve(config, providers, resolver)[credential_name]
     new_lines = provider.credential_lines(token)
@@ -1276,7 +1277,7 @@ def rekey_vm(
     ts_decl = resolver.register_name(rekey_vm_tmpl.tailscale_auth_key)
     with _mask_env_var_backend_for(ts_decl, masked=ignore_env):
         preflight_vm_template(rekey_vm_tmpl, resolver)
-        platform.preflight()
+        platform.preflight(RunContext(config=config))
         resolver.resolve()
     ts_auth_key = resolver.get(rekey_vm_tmpl.tailscale_auth_key)
 
@@ -1549,9 +1550,9 @@ def reinit_vm(
     # vm-template's Tailscale key is NOT part of reinit's planned ops
     # (a broken node's rejoin resolves it on its own conditional path),
     # so the template preflight doesn't run here.
-    platform.preflight()
+    platform.preflight(RunContext(config=config))
     for provider in providers.values():
-        provider.preflight()
+        provider.preflight(RunContext(config=config))
     resolver.resolve()
     git_tokens = _git_tokens_after_resolve(config, providers, resolver)
 
@@ -1746,8 +1747,9 @@ def _git_tokens_after_resolve(
     runup runs before any VM/user mutation.
     """
     if config.defaults.verify_git_tokens:
+        ctx = RunContext(config=config, secrets=resolver)
         for provider in providers.values():
-            provider.runup()
+            provider.runup(ctx)
     return {
         name: resolver.get(provider.secret_name)
         for name, provider in providers.items()
@@ -1782,7 +1784,7 @@ def _collect_git_tokens(
     resolver = Resolver(config, registry)
     providers = resolve_git_credential_providers(registry, names, resolver)
     for provider in providers.values():
-        provider.preflight()
+        provider.preflight(RunContext(config=config))
     resolver.resolve()
     return _git_tokens_after_resolve(config, providers, resolver)
 

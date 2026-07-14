@@ -22,6 +22,7 @@ if TYPE_CHECKING:
     from collections.abc import Iterator, Mapping
     from contextlib import AbstractContextManager
 
+    from agentworks.capabilities.base import RunContext
     from agentworks.config import Config
     from agentworks.db import VMRow
     from agentworks.transports import Transport
@@ -473,10 +474,10 @@ class WSL2Platform(VMPlatform):
             return "wsl.exe not installed; run `wsl --install`"
         return None
 
-    def preflight(self) -> None:
+    def preflight(self, ctx: RunContext) -> None:
         """``wsl.exe`` must be on PATH (which also implies Windows).
         No config secrets, so the base's prediction pass is a no-op."""
-        super().preflight()
+        super().preflight(ctx)
         import shutil
 
         if not shutil.which("wsl"):

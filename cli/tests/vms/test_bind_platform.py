@@ -100,7 +100,7 @@ def test_preflight_failure_prevents_the_resolve_pass(
     from agentworks.capabilities.vm_platform.proxmox import ProxmoxPlatform
     from agentworks.errors import ConnectivityError
 
-    def _boom(self: object) -> None:
+    def _boom(self: object, ctx: object) -> None:
         raise ConnectivityError("world broken")
 
     monkeypatch.setattr(ProxmoxPlatform, "preflight", _boom)

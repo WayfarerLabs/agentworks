@@ -296,11 +296,11 @@ def test_doctor_vm_sites_disabled_and_preflight_rows(
         lambda self: None if self.platform_config.get("vm_host") else "limactl not installed",
     )
 
-    def _boom(self: object) -> None:
+    def _boom(self: object, ctx: object) -> None:
         raise ConfigError("preflight: ssh unreachable")
 
     monkeypatch.setattr(LimaPlatform, "preflight", _boom)
-    monkeypatch.setattr(WSL2Platform, "preflight", lambda self: None)
+    monkeypatch.setattr(WSL2Platform, "preflight", lambda self, ctx: None)
     monkeypatch.setattr("shutil.which", lambda name: f"/usr/bin/{name}")
 
     group = doctor._check_vm_sites(_config_stub(), registry)

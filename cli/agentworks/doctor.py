@@ -260,8 +260,10 @@ def _check_vm_sites(config: Config, registry: Registry) -> HealthGroup:
             g.info(name, f"disabled ({reason})")
             continue
         try:
+            from agentworks.capabilities.base import RunContext
+
             platform = resolve_site(name, registry, resolver=Resolver(config, registry))
-            platform.preflight()
+            platform.preflight(RunContext(config=config))
         except Exception as e:
             # A failing preflight on an enabled site is the error the
             # operator's next command hits: warn.

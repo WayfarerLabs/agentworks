@@ -133,6 +133,20 @@ so it runs with full current context and may test anything, including dependenci
 has since satisfied. Hoisting runup to the front would only re-impose preflight's blindness for no
 gain; deferring it is strictly more capable.
 
+That "current context" is a concrete object: **`RunContext`** (`capabilities/base.py`), the resolved
+runtime world the service-layer operation assembles and hands to `preflight`, `runup`, and (as op
+shapes converge) ops. It carries the operation's config, the execution targets (`admin_target` /
+`agent_target` -- transports to run as those users on a VM), and resolved `secrets`. Every field is
+optional, and the timing is what populates it: **preflight gets it as of command start** (targets
+that _already_ exist, no resolved secrets), **runup gets it as of op start** (current targets,
+resolved secrets). It is the same object minus the secrets, differing only by when it is built --
+which is exactly why the dependency-blindness above is structural rather than a rule to remember: a
+`vm create` preflight is simply handed a context with no VM target, so it _cannot_ reach the thing
+the command has not created yet. (A future permission model omits fields the same way: a capability
+not granted a target or a secret just finds it absent.) The rule that pairs with it: pre-resolve
+concerns read `self` (config bound at construct, `self.resolver` for prediction); runup and ops read
+the context.
+
 ### 1. `validate_config` (declare; pure, classmethod)
 
 ```python

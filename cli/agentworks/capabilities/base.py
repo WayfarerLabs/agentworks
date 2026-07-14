@@ -33,15 +33,56 @@ the instances it holds through its own API.
 from __future__ import annotations
 
 from abc import ABC
-from typing import TYPE_CHECKING, Any, ClassVar
+from dataclasses import dataclass
+from typing import TYPE_CHECKING, Any, ClassVar, Protocol
 
 from agentworks.errors import ConfigError
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping
 
+    from agentworks.config import Config
     from agentworks.resources.reference import ConfigReference
     from agentworks.secrets.resolver import Resolver
+    from agentworks.transports import Transport
+
+
+class SecretReader(Protocol):
+    """Read-only access to resolved secret values, as runup/ops see them
+    at the op boundary. The operation's resolver satisfies it (post
+    resolve pass); a future permission model can substitute a scoped
+    view. Raises if a name was not resolved."""
+
+    def get(self, name: str) -> str: ...
+
+
+@dataclass(frozen=True)
+class RunContext:
+    """The resolved runtime world handed to a capability at a stage
+    boundary -- to ``runup`` and, as op shapes converge, to ops (and to
+    ``preflight``, which gets the command-start slice of it).
+
+    The service-layer operation assembles it for its timing, and the
+    timing is the whole difference between the two readiness stages:
+    ``preflight`` gets it as of command start (targets that ALREADY
+    exist, and no resolved secrets yet); ``runup`` gets it as of op start
+    (current targets, resolved secrets). Every field is optional and is
+    present only when it exists at that timing and, in a future
+    permission model, when the capability is granted it: a
+    provisioning-phase runup has no on-VM targets; a `vm create`
+    preflight has none either (the VM is created later -- which is
+    exactly what keeps preflight dependency-blind); a `session create`
+    preflight against an existing VM does have `admin_target`.
+
+    The rule that goes with it: readiness's pre-resolve concerns read
+    ``self`` (config bound at construct, ``self.resolver`` for
+    prediction); ``runup`` and ops read the context.
+    """
+
+    config: Config | None = None
+    admin_target: Transport | None = None
+    agent_target: Transport | None = None
+    secrets: SecretReader | None = None
 
 
 def idempotent_op[F: "Callable[..., Any]"](fn: F) -> F:
@@ -169,7 +210,7 @@ class Capability(ABC):
         """
         return None
 
-    def preflight(self) -> None:
+    def preflight(self, ctx: RunContext) -> None:
         """Verify readiness: "will the real work probably succeed?"
 
         Read-only and side-effect-free; that property is load-bearing:
@@ -186,6 +227,13 @@ class Capability(ABC):
         admin user is absent, or the VM does not exist yet -- all created
         later in that command. Those checks belong in runup, which is
         deferred to the op boundary.)
+
+        ``ctx`` is the command-start world (:class:`RunContext`): it holds
+        targets that ALREADY exist (a `session create` sees the existing
+        VM's ``admin_target``; a `vm create` sees none, which is what
+        structurally enforces the blindness above) but NO resolved secrets
+        yet. Pre-resolve concerns still read ``self`` -- ``self.config``
+        and ``self.resolver`` in its prediction role.
 
         Base behavior: every secret reference the bound config declares
         must be predicted resolvable by some active backend, without
@@ -217,16 +265,18 @@ class Capability(ABC):
                     ),
                 )
 
-    def runup(self) -> None:  # noqa: B027  # intentional concrete no-op default
+    def runup(self, ctx: RunContext) -> None:  # noqa: B027  # intentional concrete no-op default
         """Authenticated readiness: with secrets in hand, does the real
         work look like it will succeed? The engine run-up before takeoff.
 
         Preflight's post-resolve twin (preflight is the walk-around; this
         is the run-up at the hold-short line, right before the op). It
-        reads resolved secret values from the resolver's cache
-        (``self.resolver.get(name)``) and does the authenticated reads
+        reads resolved secret values from the context (``ctx.secrets``,
+        the op-start :class:`RunContext`) and does the authenticated reads
         preflight cannot: a git provider's ``GET /user``, a platform's
-        API connection check. Read-only and side-effect-free exactly like
+        API connection check. It may also use the context's execution
+        targets (``ctx.admin_target`` / ``ctx.agent_target``) that an
+        earlier phase created. Read-only and side-effect-free exactly like
         :meth:`preflight` (it never mints, creates, or mutates), which is
         what lets it be re-run and, via a future ``doctor --verify``,
         called outside an operation.

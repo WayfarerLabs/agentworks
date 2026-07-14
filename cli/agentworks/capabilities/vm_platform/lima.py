@@ -23,6 +23,7 @@ from agentworks.transports import LimaTransport, RemoteLimaTransport, SSHTranspo
 if TYPE_CHECKING:
     from collections.abc import Mapping
 
+    from agentworks.capabilities.base import RunContext
     from agentworks.config import Config
     from agentworks.db import VMRow
     from agentworks.resources.reference import ConfigReference
@@ -141,7 +142,7 @@ class LimaPlatform(VMPlatform):
                 raise SSHError(f"limactl failed: {proc.stderr.strip()}")
             return proc.stdout
 
-    def preflight(self) -> None:
+    def preflight(self, ctx: RunContext) -> None:
         """Local sites: ``limactl`` must be on PATH. Remote sites defer
         to the ops (probing the vm_host over SSH is a real round trip;
         the first op's error is already clear). No config secrets, so
@@ -151,7 +152,7 @@ class LimaPlatform(VMPlatform):
         local site is disabled (``disabled_reason``) before any op
         reaches preflight. It stays as defense for directly-constructed
         instances, not as a disagreement about whose check this is."""
-        super().preflight()
+        super().preflight(ctx)
         if not self.is_remote:
             self._ensure_limactl()
 

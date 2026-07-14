@@ -23,6 +23,7 @@ from agentworks.capabilities.base import Capability
 if TYPE_CHECKING:
     from collections.abc import Mapping
 
+    from agentworks.capabilities.base import RunContext
     from agentworks.resources.reference import ConfigReference
     from agentworks.secrets.resolver import Resolver
 
@@ -161,29 +162,29 @@ class GitCredentialProvider(Capability):
             return f"{self.owner_name} ({self._description})"
         return self.owner_name
 
-    def runup(self) -> None:
+    def runup(self, ctx: RunContext) -> None:
         """Authenticated readiness (the ``runup`` lifecycle stage):
         confirm the resolved PAT authorizes against the host before it is
         written to any VM.
 
-        Post-resolve and read-only: it reads the token from the
-        resolver's cache and does a single authenticated GET. A
-        definitive rejection raises ``TokenRejectedError`` (safe: runup
-        runs before any VM/user mutation); network indeterminacy or any
-        other non-success warns and continues unverified, so a transient
-        outage never blocks work a valid token would have done.
-        Operators skip this whole stage via ``[defaults]
-        verify_git_tokens = false`` (the composition root gates the
-        call); it is not this method's job to consult that flag.
+        Post-resolve and read-only: it reads the token from the context's
+        resolved secrets (``ctx.secrets``) and does a single authenticated
+        GET. A definitive rejection raises ``TokenRejectedError`` (safe:
+        runup runs before any VM/user mutation); network indeterminacy or
+        any other non-success warns and continues unverified, so a
+        transient outage never blocks work a valid token would have done.
+        Operators skip this whole stage via the composition root (which
+        gates the call on ``[defaults]``); it is not this method's job to
+        consult that flag.
         """
         from agentworks.errors import ConfigError
 
-        if self.resolver is None:
+        if ctx.secrets is None:
             raise ConfigError(
-                f"{self._owner_display}: cannot check the token without a "
-                f"resolver (constructed for inspection?)"
+                f"{self._owner_display}: cannot check the token without "
+                f"resolved secrets in the run context (inspection only?)"
             )
-        self._verify_token(self.resolver.get(self.secret_name))
+        self._verify_token(ctx.secrets.get(self.secret_name))
 
     def _probe_pat(
         self,
