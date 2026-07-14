@@ -17,7 +17,6 @@ from agentworks.db import (
 from agentworks.errors import (
     AgentworksError,
     AlreadyExistsError,
-    ConfigError,
     ConnectivityError,
     ExternalError,
     NotFoundError,
@@ -36,12 +35,13 @@ from agentworks.vms.initializer import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable, Iterator, Sequence
+    from collections.abc import Iterable, Iterator, Mapping, Sequence
 
     from agentworks.capabilities.vm_platform import VMPlatform
     from agentworks.config import Config
     from agentworks.db import Database, VMRow, WorkspaceRow
     from agentworks.env import EnvEntry
+    from agentworks.git_credentials.base import GitCredentialProvider
     from agentworks.resources import Registry
     from agentworks.secrets import SecretTarget
     from agentworks.secrets.base import SecretDecl
@@ -435,7 +435,15 @@ def create_vm(
     validate_admin_username(resolved_admin_username)
 
     verify_tailscale_available()
-    providers = resolve_git_credential_providers(registry, admin.git_credentials)
+    from agentworks.secrets.resolver import Resolver
+
+    # Construct the git-credential providers against the operation's
+    # resolver up front, so their token secrets join the one boundary
+    # resolve below (and each can verify() its token afterward).
+    resolver = Resolver(config, registry)
+    providers = resolve_git_credential_providers(
+        registry, admin.git_credentials, resolver
+    )
     announce_git_credentials(providers)
 
     # System slug: first interactive create prompts once (a blank
@@ -456,22 +464,16 @@ def create_vm(
     # [admin.env] / [vm_templates.*.env] secrets are NOT prompted here:
     # they're not used until runtime shells, which perform their own
     # resolve at their composition root.
-    from agentworks.secrets.resolver import Resolver
     from agentworks.vms.sites import resolve_site
     from agentworks.vms.templates import preflight_vm_template
 
-    resolver = Resolver(config, registry)
     platform_obj = resolve_site(site, registry, resolver=resolver)
-    git_token_names = _register_git_token_decls(registry, resolver, providers.keys())
     preflight_vm_template(vm_tmpl, resolver)
     platform_obj.preflight()
     output.info("Collecting credentials...")
     resolver.resolve()
     tailscale_auth_key = resolver.get(vm_tmpl.tailscale_auth_key)
-    git_tokens = {
-        cred_name: resolver.get(token_name)
-        for cred_name, token_name in git_token_names.items()
-    }
+    git_tokens = _git_tokens_after_resolve(config, providers, resolver)
 
     # The VM's OS hostname, computed once at create time and recorded on the
     # row: {slug}-{name} with a slug, the bare name without. Bounded by
@@ -1073,7 +1075,12 @@ def add_git_credential(db: Database, config: Config, name: str, credential_name:
             entity_name=credential_name,
         )
 
-    providers = resolve_git_credential_providers(registry, [credential_name])
+    from agentworks.secrets.resolver import Resolver
+
+    resolver = Resolver(config, registry)
+    providers = resolve_git_credential_providers(
+        registry, [credential_name], resolver
+    )
     provider = providers[credential_name]
 
     entry = provider.helper_entry()
@@ -1087,20 +1094,16 @@ def add_git_credential(db: Database, config: Config, name: str, credential_name:
             f"'agw vm reinit {name}' instead of add-git-credential"
         )
 
-    # The composition root: the credential's token secret joins the
-    # bind's boundary resolve, so the platform preflight runs before
-    # any prompt and the operation stays one prompt session (same
-    # shape as create/reinit's _register_git_token_decls path).
-    from agentworks.secrets.resolver import Resolver
-
-    resolver = Resolver(config, registry)
+    # The composition root: the credential's token secret (registered on
+    # the resolver at construct) joins the bind's boundary resolve, so
+    # the platform preflight runs before any prompt and the operation
+    # stays one prompt session; verify() confirms the token afterward.
     bound = bind_platform(
         config, vm, registry=registry, resolver=resolver, prepare=False
     )
-    token_names = _register_git_token_decls(registry, resolver, [credential_name])
     bound.preflight()
     resolver.resolve()
-    token = resolver.get(token_names[credential_name])
+    token = _git_tokens_after_resolve(config, providers, resolver)[credential_name]
     new_lines = provider.credential_lines(token)
 
     with keep_active(db, config, vm, bound):
@@ -1525,7 +1528,11 @@ def reinit_vm(
 
     verify_tailscale_available()
     admin = admin_template(registry)
-    providers = resolve_git_credential_providers(registry, admin.git_credentials)
+    # Construct against the operation's resolver so the token secrets
+    # join the one boundary resolve below.
+    providers = resolve_git_credential_providers(
+        registry, admin.git_credentials, resolver
+    )
     announce_git_credentials(providers)
 
     # The preflight boundary: git tokens and any site config secret
@@ -1533,13 +1540,9 @@ def reinit_vm(
     # vm-template's Tailscale key is NOT part of reinit's planned ops
     # (a broken node's rejoin resolves it on its own conditional path),
     # so the template preflight doesn't run here.
-    git_token_names = _register_git_token_decls(registry, resolver, providers.keys())
     platform.preflight()
     resolver.resolve()
-    git_tokens = {
-        cred_name: resolver.get(token_name)
-        for cred_name, token_name in git_token_names.items()
-    }
+    git_tokens = _git_tokens_after_resolve(config, providers, resolver)
 
     # Provisioning is hermetic: no operator-env secrets are prompted at
     # reinit. They get prompted at the use site (vm shell, session
@@ -1715,97 +1718,62 @@ def _mask_env_var_backend_for(
         os.environ.update(saved)
 
 
+def _git_tokens_after_resolve(
+    config: Config,
+    providers: Mapping[str, GitCredentialProvider],
+    resolver: Resolver,
+) -> dict[str, str]:
+    """Read each provider's resolved token from the operation's resolver
+    cache, after running the provider's ``verify()`` (the authenticated
+    readiness stage) unless the operator disabled it via ``[defaults]
+    verify_git_tokens = false``.
+
+    The providers must have been constructed against ``resolver`` (so
+    their token secrets joined the boundary resolve), and the pass must
+    already have run. A definitive rejection during ``verify`` raises
+    ``TokenRejectedError``; this is safe at every call site because
+    verification runs before any VM/user mutation.
+    """
+    if config.defaults.verify_git_tokens:
+        for provider in providers.values():
+            provider.verify()
+    return {
+        name: resolver.get(provider.secret_name)
+        for name, provider in providers.items()
+    }
+
+
 def _collect_git_tokens(
     config: Config,
     registry: Registry,
     credential_names: Iterable[str],
 ) -> dict[str, str]:
-    """Resolve token values for the named git credentials via the
-    framework's backend chain.
+    """Resolve (and verify) token values for the named git credentials on
+    a self-contained resolver pass. Returns ``{credential_name:
+    token_value}``.
 
-    Phase 1d of the Resource Registry SDD. Returns ``{credential_name:     token_value}``.
-    Each credential's ``token`` field (default ``"git-token-<name>"``;
-    operator-overridable per ``[git_credentials.<name>]``) names a
-    secret; the registry's finalize pass auto-declared each one via
-    ``GitCredentialConfig.referenced_resources``. The backend chain
-    resolves them all in one batched call so the operator is prompted
-    once for the whole batch (or one round-trip to a persistent store).
-
-    Missing-from-registry secrets get a synthesized ``SecretDecl``
-    matching the auto-declare shape -- same fallback as
-    ``_lookup_or_synthesize_secret`` -- so this helper works even on
-    edge cases where the operator's TOML left the registry sparse.
-
-    Raises ``ConfigError`` if any name in ``credential_names`` isn't
-    declared in ``[git_credentials.*]`` -- the framework's
-    ``GitCredentialKind`` should have errored at config-load, but this
-    guard catches direct-API call sites that bypass load.
+    Used by agent create, whose git tokens resolve on their own boundary
+    (the agent's other secrets resolve at their own use sites). The
+    providers are constructed against a fresh resolver so their token
+    secrets register, preflight predicts each is resolvable, the one
+    resolve pass runs (single prompt session), and ``verify()`` confirms
+    each token before it is written. Raises ``NotFoundError`` if any name
+    isn't a declared credential (the framework's ``GitCredentialKind``
+    normally catches this at config-load).
     """
+    from agentworks.secrets.resolver import Resolver
+    from agentworks.vms.initializer import resolve_git_credential_providers
+
     names = list(credential_names)
     if not names:
         return {}
 
-    from agentworks.secrets import resolve_for_command
-
-    decls: list[SecretDecl] = []
-    from agentworks.resources.access import git_credential
-    from agentworks.vms.initializer import resolve_git_credential_providers
-
-    # The provider owns sourcing: it declares the secret(s) its config
-    # references (validate_config, surfaced through the credential's
-    # referenced_resources), the framework resolves them all in one
-    # batch (single prompt), and the provider produces the token from
-    # them -- a PAT read today, an API mint tomorrow, same seam.
-    providers = resolve_git_credential_providers(registry, names)
-    per_cred_secrets: dict[str, list[str]] = {}
-    seen: set[str] = set()
-    for cred_name in names:
-        cred = git_credential(registry, cred_name)
-        if cred is None:
-            raise ConfigError(
-                f"git credential {cred_name!r} not declared; "
-                f"declare it under [git_credentials.{cred_name}]",
-                entity_kind="git-credential",
-                entity_name=cred_name,
-            )
-        secret_names = [
-            ref.name
-            for ref in cred.referenced_resources()
-            if ref.kind == "secret"
-        ]
-        per_cred_secrets[cred_name] = secret_names
-        for secret_name in secret_names:
-            if secret_name not in seen:
-                seen.add(secret_name)
-                decls.append(_lookup_or_synthesize_secret(registry, secret_name))
-
-    resolved = resolve_for_command([], config, registry, extra_decls=decls)
-
-    # Production + verification at ENTRY (maintainer ruling): this runs
-    # at manager entry, before any user/VM mutation, so a definitive
-    # rejection (TokenRejectedError) is safe to let abort -- nothing to
-    # recover. If collection ever moves mid-flow, downgrade to warn.
-    # Network indeterminacy never raises (acquire_token warns).
-    verify = config.defaults.verify_git_tokens
-    tokens: dict[str, str] = {}
-    for cred_name, provider in providers.items():
-        secret_map = {
-            secret_name: resolved[secret_name]
-            for secret_name in per_cred_secrets[cred_name]
-        }
-        info = provider.acquire_token(secret_map, verify=verify)
-        tokens[cred_name] = info.token
-        if info.verified:
-            extras = []
-            if info.login:
-                extras.append(f"login {info.login}")
-            if info.expires_at is not None:
-                extras.append(f"expires {info.expires_at.isoformat()}")
-            suffix = f" ({', '.join(extras)})" if extras else ""
-            output.detail(
-                f"  Verified git token for '{cred_name}'{suffix}"
-                )
-    return tokens
+    resolver = Resolver(config, registry)
+    providers = resolve_git_credential_providers(registry, names, resolver)
+    for provider in providers.values():
+        provider.preflight()
+    resolver.resolve()
+    return _git_tokens_after_resolve(config, providers, resolver)
 
 
 def _lookup_or_synthesize_secret(registry: Registry, name: str) -> SecretDecl:
@@ -1833,49 +1801,6 @@ def _lookup_or_synthesize_secret(registry: Registry, name: str) -> SecretDecl:
         return found
     except KeyError:
         return SecretDecl(name=name, description="")
-
-
-def _register_git_token_decls(
-    registry: Registry,
-    resolver: Resolver,
-    credential_names: Iterable[str],
-) -> dict[str, str]:
-    """Register each named git credential's token secret on the
-    operation's resolver, so the tokens join the single resolve pass at
-    the preflight boundary instead of getting their own prompt session.
-    Returns ``{credential_name: token_secret_name}`` for reading the
-    values back from the resolver's cache after the pass.
-
-    Same undeclared-credential guard as :func:`_collect_git_tokens`
-    (that helper remains for agent create, whose token pass runs after
-    its root's bind/preflight; folding it into the resolver rides the
-    git-credentials capability adoption, not this change).
-    """
-    from agentworks.resources.access import git_credential
-
-    token_name_for: dict[str, str] = {}
-    for cred_name in credential_names:
-        cred = git_credential(registry, cred_name)
-        if cred is None:
-            raise ConfigError(
-                f"git credential {cred_name!r} not declared; "
-                f"declare it under [git_credentials.{cred_name}]",
-                entity_kind="git-credential",
-                entity_name=cred_name,
-            )
-        # The provider owns sourcing: it declares the token secret via
-        # validate_config, surfaced through referenced_resources. Every
-        # current provider names exactly one secret (the PAT); register
-        # all it declares, and map the credential to that token secret
-        # so callers can read the value back after the resolve pass.
-        secret_names = [
-            ref.name for ref in cred.referenced_resources() if ref.kind == "secret"
-        ]
-        for secret_name in secret_names:
-            resolver.register_name(secret_name)
-        if secret_names:
-            token_name_for[cred_name] = secret_names[0]
-    return token_name_for
 
 
 def _query_live_resources(vm: VMRow, config: Config) -> dict[str, str] | None:

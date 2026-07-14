@@ -516,12 +516,12 @@ def stub_build_registry(monkeypatch: pytest.MonkeyPatch) -> None:
 @pytest.fixture(autouse=True)
 def _no_network_token_verification(monkeypatch: pytest.MonkeyPatch) -> None:
     """The suite must never reach the real network. Token verification
-    probes (git credential acquire_token) hit provider APIs in
+    probes (git credential ``verify()``) hit provider APIs in
     production; here any unmocked probe raises OSError, which the
     providers treat as network indeterminacy (warn + continue
     unverified) -- so unrelated tests keep passing while never leaving
-    the process. Verification tests monkeypatch ``_http_probe`` (or
-    ``acquire_token``) with their own fakes, overriding this guard.
+    the process. Verification tests monkeypatch ``_http_probe`` with
+    their own fakes, overriding this guard.
     """
 
     def _refuse(*_a: object, **_k: object) -> object:

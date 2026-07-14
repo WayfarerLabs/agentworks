@@ -41,8 +41,8 @@ if TYPE_CHECKING:
     from agentworks.config import Config
     from agentworks.db import Database
     from agentworks.git_credentials.base import GitCredentialProvider
-    from agentworks.git_credentials.credential import GitCredentialConfig
     from agentworks.resources.registry import Registry
+    from agentworks.secrets.resolver import Resolver
     from agentworks.vms.admin import AdminConfig
     from agentworks.vms.templates import ResolvedVMTemplate
 
@@ -1116,34 +1116,30 @@ def verify_tailscale_available() -> None:
         )
 
 
-def _token_secret(cred_config: GitCredentialConfig) -> str:
-    """The token secret name for a credential: provider_config's
-    ``token`` if set, else the ``git-token-<name>`` default the
-    provider's validate_config also derives."""
-    from agentworks.git_credentials.base import default_token_secret
-
-    raw = cred_config.provider_config.get("token")
-    return raw if isinstance(raw, str) and raw else default_token_secret(
-        cred_config.name
-    )
-
-
 def resolve_git_credential_providers(
     registry: Registry,
     names: list[str],
+    resolver: Resolver | None = None,
 ) -> dict[str, GitCredentialProvider]:
-    """Resolve git credential provider instances from the registry.
+    """Construct git credential provider (capability) instances from the
+    registry.
 
-    Names are the credential names to resolve (from the admin row's or
-    an agent template's ``git_credentials`` list).
+    ``names`` are the credential names to construct (from the admin
+    row's or an agent template's ``git_credentials`` list). Each
+    provider is built from its ``provider_config`` and re-validates that
+    config at construct (so a bad scope value fails loudly here, never
+    silently WIDENING the credential). When ``resolver`` is passed, each
+    provider registers its token secret on it at construct, so the
+    operation's boundary resolve covers them and the provider can
+    ``verify()`` the token afterward; pass ``None`` for materials-only
+    or inspection construction.
     """
-    from agentworks.git_credentials.azdo import AzDOCredentialProvider
-    from agentworks.git_credentials.github import GitHubCredentialProvider
+    from agentworks.git_credentials import GIT_CREDENTIAL_PROVIDER_REGISTRY
+    from agentworks.resources.access import git_credential
 
     providers: dict[str, GitCredentialProvider] = {}
     if not names:
         return providers
-    from agentworks.resources.access import git_credential
 
     for name in names:
         cred_config = git_credential(registry, name)
@@ -1153,30 +1149,23 @@ def resolve_git_credential_providers(
                 entity_kind="git-credential",
                 entity_name=name,
             )
-        desc = cred_config.description
-        if cred_config.provider == "azdo":
-            org = cred_config.provider_config.get("org")
-            assert isinstance(org, str)  # loader guarantees org for azdo
-            providers[name] = AzDOCredentialProvider(
-                config_name=name, org=org, description=desc,
-                secret_name=_token_secret(cred_config),
+        provider_cls = GIT_CREDENTIAL_PROVIDER_REGISTRY.get(cred_config.provider)
+        if provider_cls is None:
+            # Unknown provider names are caught by the framework's
+            # git-credential-provider miss policy at build_registry; this
+            # guards direct callers that bypass that path.
+            raise NotFoundError(
+                f"git credential '{name}' names unknown provider "
+                f"{cred_config.provider!r}",
+                entity_kind="git-credential-provider",
+                entity_name=cred_config.provider,
             )
-        elif cred_config.provider == "github":
-            from agentworks.git_credentials.github import _validated_scope
-
-            # Re-validate rather than isinstance-and-drop: a bad value
-            # slipping past the loaders must fail loudly, not silently
-            # WIDEN the credential by unscoping it.
-            repos, scope_owner = _validated_scope(
-                f"git-credential/{name}", cred_config.provider_config
-            )
-            providers[name] = GitHubCredentialProvider(
-                config_name=name,
-                description=desc,
-                secret_name=_token_secret(cred_config),
-                repos=repos,
-                owner=scope_owner,
-            )
+        providers[name] = provider_cls(
+            name,
+            cred_config.provider_config,
+            resolver,
+            description=cred_config.description,
+        )
     return providers
 
 

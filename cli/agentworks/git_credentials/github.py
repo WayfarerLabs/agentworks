@@ -1,14 +1,14 @@
 """GitHub git credential provider -- formats credentials for ``~/.git-credentials``.
 
-Token resolution lives in the framework (Phase 1d); this class formats
-the store line and, for scoped credentials (fine-grained PATs), the
-gitconfig credential-context sections that select the right credential
-per repo (issue #166). Selection rides git's own machinery: a context
-section injects a per-credential username (longest-prefix match, slash
-boundaries -- verified against git 2.39), and the username-tagged store
-line supplies the token. No ``credential.useHttpPath`` anywhere: with
-it enabled, path-less store lines stop matching path-carrying queries,
-which would break every unscoped credential.
+Token resolution lives in the framework; this class formats the store
+line and, for scoped credentials (fine-grained PATs), selects the right
+credential per repo via the generated helper (issue #166). Selection
+rides git's own machinery: a context section injects a per-credential
+username (longest-prefix match, slash boundaries -- verified against git
+2.39), and the username-tagged store line supplies the token. No
+``credential.useHttpPath`` anywhere: with it enabled, path-less store
+lines stop matching path-carrying queries, which would break every
+unscoped credential.
 """
 
 from __future__ import annotations
@@ -21,14 +21,14 @@ from agentworks.errors import ConfigError
 from agentworks.git_credentials.base import (
     GitCredentialProvider,
     HelperEntry,
-    TokenInfo,
     token_config_reference,
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping, Sequence
+    from collections.abc import Mapping
 
     from agentworks.resources.reference import ConfigReference
+    from agentworks.secrets.resolver import Resolver
 
 _SCOPE_FIELDS = {"repos", "owner", "token"}
 
@@ -114,7 +114,8 @@ class GitHubCredentialProvider(GitCredentialProvider):
     credentials keep the released host-level line verbatim.
     """
 
-    provider_name = "github"
+    name = "github"
+    description = "GitHub personal access token"
 
     @classmethod
     def validate_config(
@@ -125,72 +126,42 @@ class GitHubCredentialProvider(GitCredentialProvider):
 
     def __init__(
         self,
-        config_name: str,
-        description: str | None = None,
+        owner_name: str,
+        config: Mapping[str, object] | None = None,
+        resolver: Resolver | None = None,
         *,
-        secret_name: str | None = None,
-        repos: Sequence[str] = (),
-        owner: str | None = None,
+        description: str | None = None,
     ) -> None:
-        super().__init__(config_name, description, secret_name=secret_name)
-        self._repos = tuple(repos)
-        self._owner = owner
+        super().__init__(
+            owner_name, config or {}, resolver, description=description
+        )
+        # Scope shape re-parsed from the bound config (validate_config
+        # already ran at construct, so this cannot raise).
+        self._repos, self._owner = _validated_scope(
+            self._owner_display, self.config
+        )
 
-    def acquire_token(
-        self, secrets: Mapping[str, str], *, verify: bool = True
-    ) -> TokenInfo:
-        """Read the PAT from ``secrets`` and (when ``verify``) check it
-        against ``GET /user``.
-
-        200 -> verified TokenInfo enriched with the login and (for
-        fine-grained PATs) the ``github-authentication-token-expiration``
-        header. 401 -> definitive rejection. Anything else (rate
-        limits, 5xx, network failure) -> indeterminate: warn, return
-        unverified. ``verify=False`` returns the token unverified with
-        no network call.
-        """
+    def _verify_token(self, token: str) -> None:
+        """Check the PAT against ``GET /user``: 200 announces the login
+        and (for fine-grained PATs) the expiry; 401 is a definitive
+        rejection; anything else is indeterminate (warn, continue)."""
         import json
 
         from agentworks import output
-        from agentworks.errors import TokenRejectedError
-        from agentworks.git_credentials.base import _http_probe
 
-        resolved_secret = secrets[self.secret_name]
-        if not verify:
-            return TokenInfo(token=resolved_secret)
-        try:
-            status, body, headers = _http_probe(
-                "https://api.github.com/user",
-                {
-                    "Authorization": f"Bearer {resolved_secret}",
-                    "Accept": "application/vnd.github+json",
-                    "User-Agent": "agentworks",
-                },
-            )
-        except OSError as exc:
-            output.warn(
-                f"could not verify git credential {self._config_name!r} "
-                f"(network: {exc}); continuing unverified"
-            )
-            return TokenInfo(token=resolved_secret)
-        if status == 401:
-            raise TokenRejectedError(
-                f"GitHub rejected the token for git credential "
-                f"{self._config_name!r} (secret {self.secret_name!r})",
-                entity_kind="git-credential",
-                entity_name=self._config_name,
-                hint=(
-                    "Check the secret's value: expired, revoked, or "
-                    "mistyped? Set [defaults] verify_git_tokens = false "
-                    "to skip verification."
-                ),
-            )
-        if status != 200:
-            output.warn(
-                f"could not verify git credential {self._config_name!r} "
-                f"(GitHub answered {status}); continuing unverified"
-            )
-            return TokenInfo(token=resolved_secret)
+        result = self._probe_pat(
+            "https://api.github.com/user",
+            {
+                "Authorization": f"Bearer {token}",
+                "Accept": "application/vnd.github+json",
+                "User-Agent": "agentworks",
+            },
+            reject_statuses=(401,),
+            host_label="GitHub",
+        )
+        if result is None:
+            return
+        body, headers = result
         login: str | None = None
         try:
             parsed = json.loads(body.decode("utf-8"))
@@ -201,9 +172,13 @@ class GitHubCredentialProvider(GitCredentialProvider):
         expires = _parse_expiration(
             headers.get("github-authentication-token-expiration")
         )
-        return TokenInfo(
-            token=resolved_secret, login=login, expires_at=expires, verified=True
-        )
+        extras = []
+        if login:
+            extras.append(f"login {login}")
+        if expires is not None:
+            extras.append(f"expires {expires.isoformat()}")
+        suffix = f" ({', '.join(extras)})" if extras else ""
+        output.detail(f"  Verified git token for {self.owner_name!r}{suffix}")
 
     @property
     def store_username(self) -> str:
@@ -212,7 +187,7 @@ class GitHubCredentialProvider(GitCredentialProvider):
         # by (GitHub accepts any username with a PAT, verified against
         # fine-grained tokens). Unscoped keeps the released value.
         if self._repos or self._owner:
-            return self._config_name
+            return self.owner_name
         return "x-access-token"
 
     def credential_lines(self, token: str) -> list[str]:

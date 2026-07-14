@@ -1,6 +1,7 @@
 """Azure DevOps git credential provider -- formats credentials for ``~/.git-credentials``.
 
-Token resolution lives in the framework (Phase 1d); this class just
+Token resolution lives in the framework; this class validates the org,
+verifies the PAT against the org endpoint at the ``verify`` stage, and
 formats the URL line.
 """
 
@@ -13,7 +14,6 @@ from agentworks.errors import ConfigError
 from agentworks.git_credentials.base import (
     GitCredentialProvider,
     HelperEntry,
-    TokenInfo,
     token_config_reference,
 )
 
@@ -21,6 +21,7 @@ if TYPE_CHECKING:
     from collections.abc import Mapping
 
     from agentworks.resources.reference import ConfigReference
+    from agentworks.secrets.resolver import Resolver
 
 
 _ORG_RE = re.compile(r"^[A-Za-z0-9._-]+$")
@@ -29,17 +30,15 @@ _ORG_RE = re.compile(r"^[A-Za-z0-9._-]+$")
 class AzDOCredentialProvider(GitCredentialProvider):
     """Configures git credentials for Azure DevOps via a personal access token."""
 
-    provider_name = "azdo"
+    name = "azdo"
+    description = "Azure DevOps personal access token"
 
     @classmethod
     def validate_config(
         cls, owner: str, config: Mapping[str, object]
     ) -> tuple[ConfigReference, ...]:
         org = config.get("org")
-        if (
-            not isinstance(org, str)
-            or not _ORG_RE.match(org)
-        ):
+        if not isinstance(org, str) or not _ORG_RE.match(org):
             raise ConfigError(
                 f"{owner}.org is required for the azdo provider and must "
                 f"be an organization name (letters, digits, dot, dash, "
@@ -55,70 +54,43 @@ class AzDOCredentialProvider(GitCredentialProvider):
 
     def __init__(
         self,
-        config_name: str,
-        org: str,
-        description: str | None = None,
+        owner_name: str,
+        config: Mapping[str, object] | None = None,
+        resolver: Resolver | None = None,
         *,
-        secret_name: str | None = None,
+        description: str | None = None,
     ) -> None:
-        super().__init__(config_name, description=description, secret_name=secret_name)
+        super().__init__(
+            owner_name, config or {}, resolver, description=description
+        )
+        # validate_config ran at construct and guarantees a str org.
+        org = self.config.get("org")
+        assert isinstance(org, str)
         self._org = org
 
-    def acquire_token(
-        self, secrets: Mapping[str, str], *, verify: bool = True
-    ) -> TokenInfo:
-        """Read the PAT from ``secrets`` and (when ``verify``) check it
-        against the org's connectionData endpoint.
-
-        200 -> verified. 401 (and 203, AzDO's sign-in-page answer for
-        bad PATs on some routes) -> definitive rejection. Anything else
-        -> indeterminate: warn, return unverified. ``verify=False``
-        returns the token unverified with no network call.
-        """
+    def _verify_token(self, token: str) -> None:
+        """Check the PAT against the org's connectionData endpoint: 200
+        announces success; 401 (and 203, AzDO's sign-in-page answer for
+        bad PATs on some routes) is a definitive rejection; anything
+        else is indeterminate (warn, continue)."""
         import base64
 
         from agentworks import output
-        from agentworks.errors import TokenRejectedError
-        from agentworks.git_credentials.base import _http_probe
 
-        resolved_secret = secrets[self.secret_name]
-        if not verify:
-            return TokenInfo(token=resolved_secret)
-        basic = base64.b64encode(f":{resolved_secret}".encode()).decode()
-        try:
-            status, _body, _headers = _http_probe(
-                f"https://dev.azure.com/{self._org}/_apis/connectionData",
-                {
-                    "Authorization": f"Basic {basic}",
-                    "Accept": "application/json",
-                    "User-Agent": "agentworks",
-                },
-            )
-        except OSError as exc:
-            output.warn(
-                f"could not verify git credential {self._config_name!r} "
-                f"(network: {exc}); continuing unverified"
-            )
-            return TokenInfo(token=resolved_secret)
-        if status in (401, 203):
-            raise TokenRejectedError(
-                f"Azure DevOps rejected the token for git credential "
-                f"{self._config_name!r} (secret {self.secret_name!r})",
-                entity_kind="git-credential",
-                entity_name=self._config_name,
-                hint=(
-                    "Check the secret's value: expired, revoked, or "
-                    "mistyped? Set [defaults] verify_git_tokens = false "
-                    "to skip verification."
-                ),
-            )
-        if status != 200:
-            output.warn(
-                f"could not verify git credential {self._config_name!r} "
-                f"(Azure DevOps answered {status}); continuing unverified"
-            )
-            return TokenInfo(token=resolved_secret)
-        return TokenInfo(token=resolved_secret, verified=True)
+        basic = base64.b64encode(f":{token}".encode()).decode()
+        result = self._probe_pat(
+            f"https://dev.azure.com/{self._org}/_apis/connectionData",
+            {
+                "Authorization": f"Basic {basic}",
+                "Accept": "application/json",
+                "User-Agent": "agentworks",
+            },
+            reject_statuses=(401, 203),
+            host_label="Azure DevOps",
+        )
+        if result is None:
+            return
+        output.detail(f"  Verified git token for {self.owner_name!r}")
 
     @property
     def store_username(self) -> str:

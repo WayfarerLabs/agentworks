@@ -25,6 +25,41 @@ from agentworks.git_credentials.github import GitHubCredentialProvider
 from agentworks.manifests import load_manifests
 from agentworks.vms.initializer import resolve_git_credential_providers
 
+
+def _gh(
+    config_name: str,
+    *,
+    owner: str | None = None,
+    repos: tuple[str, ...] | list[str] = (),
+    secret_name: str | None = None,
+    description: str | None = None,
+) -> GitHubCredentialProvider:
+    """Construct a github provider from the pre-capability kwarg shape:
+    the scope fields and token-secret override now live in the bound
+    provider_config blob."""
+    config: dict[str, object] = {}
+    if owner is not None:
+        config["owner"] = owner
+    if repos:
+        config["repos"] = list(repos)
+    if secret_name is not None:
+        config["token"] = secret_name
+    return GitHubCredentialProvider(config_name, config, description=description)
+
+
+def _azdo(
+    config_name: str,
+    org: str,
+    *,
+    secret_name: str | None = None,
+    description: str | None = None,
+) -> AzDOCredentialProvider:
+    config: dict[str, object] = {"org": org}
+    if secret_name is not None:
+        config["token"] = secret_name
+    return AzDOCredentialProvider(config_name, config, description=description)
+
+
 # -- provider_config validation ----------------------------------------------
 
 
@@ -80,7 +115,7 @@ def test_invalid_scopes_rejected(blob: dict[str, object], match: str) -> None:
 def test_unscoped_store_line_unchanged() -> None:
     """Loads-today: unscoped credentials keep the released host-level
     line verbatim (x-access-token username)."""
-    p = GitHubCredentialProvider(config_name="gh")
+    p = _gh(config_name="gh")
     assert p.credential_lines("tok") == ["https://x-access-token:tok@github.com"]
     entry = p.helper_entry()
     assert entry.repos == () and entry.owner is None
@@ -91,11 +126,11 @@ def test_repo_scope_selected_by_path(tmp_path: Path) -> None:
     without the .git suffix, with or without a leading slash) picks the
     repo-scoped credential over the owner scope and the fallback."""
     providers = {
-        "widgets-bot": GitHubCredentialProvider(
+        "widgets-bot": _gh(
             config_name="widgets-bot", repos=["acme/widgets"]
         ),
-        "acme-bot": GitHubCredentialProvider(config_name="acme-bot", owner="acme"),
-        "gh": GitHubCredentialProvider(config_name="gh"),
+        "acme-bot": _gh(config_name="acme-bot", owner="acme"),
+        "gh": _gh(config_name="gh"),
     }
     m = build_credential_materials(
         providers, {"widgets-bot": "tokR", "acme-bot": "tokO", "gh": "tokF"}
@@ -139,10 +174,10 @@ def test_repo_scope_selected_by_path(tmp_path: Path) -> None:
 
 def test_multi_repo_list_selects_each(tmp_path: Path) -> None:
     providers = {
-        "wf-bot": GitHubCredentialProvider(
+        "wf-bot": _gh(
             config_name="wf-bot", repos=["acme/widgets", "acme/gadgets"]
         ),
-        "gh": GitHubCredentialProvider(config_name="gh"),
+        "gh": _gh(config_name="gh"),
     }
     m = build_credential_materials(providers, {"wf-bot": "tokR", "gh": "tokF"})
     home = _write_home(tmp_path, m)
@@ -156,7 +191,7 @@ def test_multi_repo_list_selects_each(tmp_path: Path) -> None:
 
 def test_azdo_org_routes_by_first_segment(tmp_path: Path) -> None:
     providers = {
-        "ado": AzDOCredentialProvider(config_name="ado", org="my-org"),
+        "ado": _azdo(config_name="ado", org="my-org"),
     }
     m = build_credential_materials(providers, {"ado": "tokA"})
     home = _write_home(tmp_path, m)
@@ -173,7 +208,7 @@ def test_github_default_hardcoded_without_unscoped_cred(tmp_path: Path) -> None:
     default baked in -- a later hand-added (add-git-credential) line
     keeps serving; absent that line, the helper just misses."""
     providers = {
-        "acme-bot": GitHubCredentialProvider(config_name="acme-bot", owner="acme"),
+        "acme-bot": _gh(config_name="acme-bot", owner="acme"),
     }
     m = build_credential_materials(providers, {"acme-bot": "tokO"})
     home = _write_home(tmp_path, m)
@@ -204,8 +239,8 @@ def test_unscoped_lines_precede_scoped() -> None:
     the unscoped default precedes scoped lines regardless of provider
     dict order."""
     providers = {
-        "acme-bot": GitHubCredentialProvider(config_name="acme-bot", owner="acme"),
-        "gh": GitHubCredentialProvider(config_name="gh"),
+        "acme-bot": _gh(config_name="acme-bot", owner="acme"),
+        "gh": _gh(config_name="gh"),
     }
     m = build_credential_materials(providers, {"acme-bot": "tokA", "gh": "tokB"})
     lines = m.store_content.splitlines()
@@ -217,8 +252,8 @@ def test_unscoped_lines_precede_scoped() -> None:
 
 def test_scope_collision_is_loud() -> None:
     providers = {
-        "bot-a": GitHubCredentialProvider(config_name="bot-a", owner="acme"),
-        "bot-b": GitHubCredentialProvider(config_name="bot-b", owner="acme"),
+        "bot-a": _gh(config_name="bot-a", owner="acme"),
+        "bot-b": _gh(config_name="bot-b", owner="acme"),
     }
     with pytest.raises(ConfigError, match="both claim scope"):
         build_credential_materials(providers, {"bot-a": "x", "bot-b": "y"})
@@ -228,9 +263,9 @@ def test_include_is_only_usehttppath() -> None:
     """The include carries exactly the useHttpPath switch -- selection
     lives in the helper, so no context sections exist, scoped or not."""
     for providers, tokens in (
-        ({"gh": GitHubCredentialProvider(config_name="gh")}, {"gh": "t"}),
+        ({"gh": _gh(config_name="gh")}, {"gh": "t"}),
         (
-            {"a": GitHubCredentialProvider(config_name="a", owner="acme")},
+            {"a": _gh(config_name="a", owner="acme")},
             {"a": "t"},
         ),
     ):
@@ -312,10 +347,10 @@ def test_repo_and_owner_scopes_on_same_org_coexist() -> None:
     exact repo beats owner in the helper's selection order (pinned by
     execution in test_repo_scope_selected_by_path)."""
     providers = {
-        "widgets-bot": GitHubCredentialProvider(
+        "widgets-bot": _gh(
             config_name="widgets-bot", repos=["acme/widgets"]
         ),
-        "acme-bot": GitHubCredentialProvider(config_name="acme-bot", owner="acme"),
+        "acme-bot": _gh(config_name="acme-bot", owner="acme"),
     }
     build_credential_materials(providers, {"widgets-bot": "x", "acme-bot": "y"})
 
@@ -346,8 +381,8 @@ def _run_helper(
 
 def _scoped_materials() -> CredentialMaterials:
     providers = {
-        "acme-bot": GitHubCredentialProvider(config_name="acme-bot", owner="acme"),
-        "gh": GitHubCredentialProvider(config_name="gh"),
+        "acme-bot": _gh(config_name="acme-bot", owner="acme"),
+        "gh": _gh(config_name="gh"),
     }
     return build_credential_materials(providers, {"acme-bot": "tokS", "gh": "tokF"})
 
@@ -429,7 +464,7 @@ def test_helper_erase_silent_for_foreign_credentials(tmp_path: Path) -> None:
 def test_helper_without_scopes_serves_but_never_warns(tmp_path: Path) -> None:
     """With no scoped credentials there is no scoping to bypass: the
     embedded-username warning is omitted, but get/erase still work."""
-    providers = {"gh": GitHubCredentialProvider(config_name="gh")}
+    providers = {"gh": _gh(config_name="gh")}
     m = build_credential_materials(providers, {"gh": "tokF"})
     home = _write_home(tmp_path, m)
     _out, err = _run_helper(
@@ -469,8 +504,8 @@ def test_initializer_writes_all_three_files() -> None:
     target.run.side_effect = lambda cmd, **kw: runs.append(cmd)
 
     providers = {
-        "gh": GitHubCredentialProvider(config_name="gh"),
-        "acme-bot": GitHubCredentialProvider(config_name="acme-bot", owner="acme"),
+        "gh": _gh(config_name="gh"),
+        "acme-bot": _gh(config_name="acme-bot", owner="acme"),
     }
     _configure_git_credentials(
         "vm1", target, providers, MagicMock(), git_tokens={"gh": "t1", "acme-bot": "t2"}
@@ -600,8 +635,8 @@ def test_generated_materials_work_with_real_git(tmp_path: Path) -> None:
         pytest.skip("git not available")
 
     providers = {
-        "gh": GitHubCredentialProvider(config_name="gh"),
-        "acme-bot": GitHubCredentialProvider(config_name="acme-bot", owner="acme"),
+        "gh": _gh(config_name="gh"),
+        "acme-bot": _gh(config_name="acme-bot", owner="acme"),
     }
     m = build_credential_materials(providers, {"gh": "tokF", "acme-bot": "tokS"})
     home = tmp_path / "home"
@@ -683,7 +718,7 @@ def test_hostile_secret_name_cannot_inject(tmp_path: Path) -> None:
     values are single-quote-escaped, never expanded."""
     hostile = "x$(touch " + str(tmp_path / "pwned") + ")"
     providers = {
-        "gh": GitHubCredentialProvider(config_name="gh", secret_name=hostile),
+        "gh": _gh(config_name="gh", secret_name=hostile),
     }
     m = build_credential_materials(providers, {"gh": "tok"})
     home = _write_home(tmp_path, m)
@@ -707,7 +742,7 @@ def test_unsafe_scope_values_rejected_at_build() -> None:
 
     with pytest.raises(ConfigError, match="unsafe"):
         build_credential_materials(
-            {"s": _Sneaky(config_name="s")}, {"s": "t"}
+            {"s": _Sneaky("s", {})}, {"s": "t"}
         )
 
 
@@ -723,8 +758,8 @@ def test_two_unscoped_creds_first_wins(tmp_path: Path) -> None:
     (released configs may carry them): first-wins by store order, and
     the second is effectively shadowed -- pinned as intended behavior."""
     providers = {
-        "gh1": GitHubCredentialProvider(config_name="gh1"),
-        "gh2": GitHubCredentialProvider(config_name="gh2"),
+        "gh1": _gh(config_name="gh1"),
+        "gh2": _gh(config_name="gh2"),
     }
     m = build_credential_materials(providers, {"gh1": "tok1", "gh2": "tok2"})
     home = _write_home(tmp_path, m)

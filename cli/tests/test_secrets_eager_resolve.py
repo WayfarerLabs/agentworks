@@ -417,13 +417,15 @@ def test_vm_create_does_not_eager_resolve_operator_env() -> None:
     import inspect
 
     from agentworks.secrets import resolver as secrets_resolver
+    from agentworks.vms import initializer as vm_initializer
     from agentworks.vms import manager as vm_manager
     from agentworks.vms import templates as vm_templates
 
     # Walk the call chain explicitly so the check survives refactors.
     sources = [
         inspect.getsource(vm_manager.create_vm),
-        inspect.getsource(vm_manager._register_git_token_decls),
+        inspect.getsource(vm_initializer.resolve_git_credential_providers),
+        inspect.getsource(vm_manager._git_tokens_after_resolve),
         inspect.getsource(vm_templates.preflight_vm_template),
         inspect.getsource(secrets_resolver.Resolver),
     ]

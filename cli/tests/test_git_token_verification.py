@@ -1,20 +1,20 @@
-"""Token verification at provisioning entry and in doctor (Part B of
-the #166/#167 token-UX design).
+"""Authenticated token verification at the capability ``verify()`` stage.
 
-``acquire_token(resolved_secret) -> TokenInfo`` is the transformation
-seam: today the providers verify the mapped secret's value against
-their API and return it enriched; tomorrow a minting provider can
-exchange a bootstrap secret for a fresh token without framework
-changes. Policy: definitive rejection raises ``TokenRejectedError``
-(safe -- callers sit at manager entry, before any mutation); network
-indeterminacy warns and continues unverified. The suite-wide conftest
-guard makes any unmocked probe look like a network failure, so no test
-can reach the real network.
+``verify()`` is the post-resolve readiness stage: the provider reads its
+resolved PAT from the operation's resolver and probes it against the
+host (github ``GET /user``, azdo connectionData). Policy: a definitive
+rejection raises ``TokenRejectedError`` (safe -- verify runs before any
+VM/user mutation); network indeterminacy warns and continues unverified.
+The suite-wide conftest guard makes any unmocked probe look like a
+network failure, so no test can reach the real network.
+
+Doctor no longer runs an authenticated token check (it is preflight-only,
+relying on the Secrets group for resolvability); on-demand authenticated
+checking is the deferred ``doctor --verify`` (issue #176).
 """
 
 from __future__ import annotations
 
-from datetime import date
 from pathlib import Path
 from textwrap import dedent
 
@@ -24,11 +24,6 @@ from agentworks.bootstrap import build_registry
 from agentworks.config import load_config
 from agentworks.errors import TokenRejectedError
 from agentworks.git_credentials.azdo import AzDOCredentialProvider
-from agentworks.git_credentials.base import (
-    GitCredentialProvider,
-    HelperEntry,
-    TokenInfo,
-)
 from agentworks.git_credentials.github import GitHubCredentialProvider
 from agentworks.vms.manager import _collect_git_tokens
 
@@ -46,11 +41,25 @@ def _probe(status: int, body: bytes = b"{}", headers: dict[str, str] | None = No
     return fake
 
 
+class _StubResolver:
+    """Minimal resolver stand-in: a provider registers its token secret
+    at construct and reads the value back in ``verify()``."""
+
+    def __init__(self, tokens: dict[str, str]) -> None:
+        self._tokens = tokens
+
+    def register_name(self, name: str) -> object:  # noqa: ANN401 (matches Resolver)
+        return name
+
+    def get(self, name: str) -> str:
+        return self._tokens[name]
+
+
 # -- github ---------------------------------------------------------------
 
 
 def test_github_200_verifies_with_login_and_expiry(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     fake = _probe(
         200,
@@ -58,11 +67,12 @@ def test_github_200_verifies_with_login_and_expiry(
         {_EXPIRY_HEADER: "2026-10-01 17:24:32 UTC"},
     )
     monkeypatch.setattr("agentworks.git_credentials.base._http_probe", fake)
-    p = GitHubCredentialProvider(config_name="gh")
-    info = p.acquire_token({p.secret_name: "tok"})
-    assert info == TokenInfo(
-        token="tok", login="wfscot", expires_at=date(2026, 10, 1), verified=True
-    )
+    p = GitHubCredentialProvider("gh", {}, _StubResolver({"git-token-gh": "tok"}))
+    p.verify()
+    out = capsys.readouterr().out
+    assert "Verified git token for 'gh'" in out
+    assert "login wfscot" in out
+    assert "expires 2026-10-01" in out
     (url, headers), = fake.calls  # type: ignore[attr-defined]
     assert url == "https://api.github.com/user"
     assert headers["Authorization"] == "Bearer tok"
@@ -74,9 +84,11 @@ def test_github_401_is_definitive_rejection(
     monkeypatch.setattr(
         "agentworks.git_credentials.base._http_probe", _probe(401)
     )
-    p = GitHubCredentialProvider(config_name="gh", secret_name="my-secret")
+    p = GitHubCredentialProvider(
+        "gh", {"token": "my-secret"}, _StubResolver({"my-secret": "bogus"})
+    )
     with pytest.raises(TokenRejectedError, match="rejected the token") as exc:
-        p.acquire_token({p.secret_name: "bogus"})
+        p.verify()
     assert "'gh'" in str(exc.value)
     assert "'my-secret'" in str(exc.value)
     assert "verify_git_tokens = false" in (exc.value.hint or "")
@@ -88,10 +100,8 @@ def test_github_other_status_warns_and_continues(
     monkeypatch.setattr(
         "agentworks.git_credentials.base._http_probe", _probe(503)
     )
-    p = GitHubCredentialProvider(config_name="gh")
-    info = p.acquire_token({p.secret_name: "tok"})
-    assert info.token == "tok"
-    assert not info.verified
+    p = GitHubCredentialProvider("gh", {}, _StubResolver({"git-token-gh": "tok"}))
+    p.verify()
     assert "could not verify" in capsys.readouterr().err
 
 
@@ -100,21 +110,31 @@ def test_network_failure_warns_and_continues(
 ) -> None:
     """No probe monkeypatch here: the conftest guard IS the network
     failure, proving both the guard and the indeterminacy path."""
-    p = GitHubCredentialProvider(config_name="gh")
-    info = p.acquire_token({p.secret_name: "tok"})
-    assert info.token == "tok"
-    assert not info.verified
+    p = GitHubCredentialProvider("gh", {}, _StubResolver({"git-token-gh": "tok"}))
+    p.verify()
     assert "could not verify" in capsys.readouterr().err
 
 
 def test_expiry_header_format_drift_tolerated(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     fake = _probe(200, b'{"login": "x"}', {_EXPIRY_HEADER: "soonish"})
     monkeypatch.setattr("agentworks.git_credentials.base._http_probe", fake)
-    info = GitHubCredentialProvider(config_name="gh").acquire_token({"git-token-gh": "t"})
-    assert info.verified
-    assert info.expires_at is None
+    p = GitHubCredentialProvider("gh", {}, _StubResolver({"git-token-gh": "t"}))
+    p.verify()
+    out = capsys.readouterr().out
+    assert "Verified git token for 'gh'" in out
+    assert "login x" in out
+    assert "expires" not in out  # drift -> no expiry shown
+
+
+def test_github_verify_without_resolver_is_error() -> None:
+    """A provider built for inspection (no resolver) cannot verify."""
+    from agentworks.errors import ConfigError
+
+    p = GitHubCredentialProvider("gh", {})
+    with pytest.raises(ConfigError, match="without a resolver"):
+        p.verify()
 
 
 # -- azdo -------------------------------------------------------------------
@@ -127,36 +147,29 @@ def test_azdo_rejection_statuses(
     monkeypatch.setattr(
         "agentworks.git_credentials.base._http_probe", _probe(status)
     )
-    p = AzDOCredentialProvider(config_name="ado", org="my-org")
+    p = AzDOCredentialProvider(
+        "ado", {"org": "my-org"}, _StubResolver({"git-token-ado": "bogus"})
+    )
     with pytest.raises(TokenRejectedError, match="Azure DevOps rejected"):
-        p.acquire_token({p.secret_name: "bogus"})
+        p.verify()
 
 
-def test_azdo_200_verifies(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_azdo_200_verifies(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
     fake = _probe(200)
     monkeypatch.setattr("agentworks.git_credentials.base._http_probe", fake)
-    p = AzDOCredentialProvider(config_name="ado", org="my-org")
-    assert p.acquire_token({p.secret_name: "tok"}).verified
+    p = AzDOCredentialProvider(
+        "ado", {"org": "my-org"}, _StubResolver({"git-token-ado": "tok"})
+    )
+    p.verify()
+    assert "Verified git token for 'ado'" in capsys.readouterr().out
     (url, headers), = fake.calls  # type: ignore[attr-defined]
     assert url == "https://dev.azure.com/my-org/_apis/connectionData"
     assert headers["Authorization"].startswith("Basic ")
 
 
-def test_base_acquire_is_unverified_identity() -> None:
-    class _Bare(GitCredentialProvider):
-        provider_name = "bare"
-
-        def credential_lines(self, token: str) -> list[str]:
-            return []
-
-        def helper_entry(self) -> HelperEntry:
-            return HelperEntry(host="example.com", username=self.store_username)
-
-    info = _Bare("b").acquire_token({"git-token-b": "tok"})
-    assert info == TokenInfo(token="tok")
-
-
-# -- collector wiring (provisioning entry) ----------------------------------
+# -- collector wiring (agent-create token pass) -----------------------------
 
 
 def _config_with_github_cred(tmp_path: Path, *, extra: str = ""):  # noqa: ANN202
@@ -182,8 +195,7 @@ def test_collect_aborts_on_rejected_token(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """The entry-point contract: a definitively rejected token aborts
-    collection -- which runs at manager entry, before anything is
-    created."""
+    collection -- which runs before anything is created."""
     monkeypatch.setenv("AW_SECRET_GIT_TOKEN_GH", "bogus")
     monkeypatch.setattr(
         "agentworks.git_credentials.base._http_probe", _probe(401)
@@ -231,53 +243,3 @@ def test_collect_skips_verification_when_disabled(
     registry = build_registry(config)
     tokens = _collect_git_tokens(config, registry, ["gh"])
     assert tokens == {"gh": "whatever"}
-
-
-# -- doctor rows --------------------------------------------------------------
-
-
-def _doctor_group(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *, extra: str = ""):  # noqa: ANN202
-    from agentworks.doctor import _check_config
-
-    config = _config_with_github_cred(tmp_path, extra=extra)
-    monkeypatch.setattr("agentworks.config.CONFIG_PATH", config.source_path)
-    g, _config, _registry = _check_config()
-    return g
-
-
-def test_doctor_verified_token_row(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    monkeypatch.setenv("AW_SECRET_GIT_TOKEN_GH", "goodtok")
-    monkeypatch.setattr(
-        "agentworks.git_credentials.base._http_probe",
-        _probe(200, b'{"login": "wfscot"}'),
-    )
-    g = _doctor_group(tmp_path, monkeypatch)
-    rows = [c for c in g.checks if c.name == "Git token 'gh'"]
-    assert rows and rows[0].message is not None
-    assert "login wfscot" in rows[0].message
-
-
-def test_doctor_rejected_token_is_fail_row(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    from agentworks.doctor import Status
-
-    monkeypatch.setenv("AW_SECRET_GIT_TOKEN_GH", "bogus")
-    monkeypatch.setattr(
-        "agentworks.git_credentials.base._http_probe", _probe(401)
-    )
-    g = _doctor_group(tmp_path, monkeypatch)
-    rows = [c for c in g.checks if c.name == "Git token 'gh'"]
-    assert rows and rows[0].status == Status.FAIL
-
-
-def test_doctor_skips_when_not_resolvable_non_interactively(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    monkeypatch.delenv("AW_SECRET_GIT_TOKEN_GH", raising=False)
-    g = _doctor_group(tmp_path, monkeypatch)
-    rows = [c for c in g.checks if c.name == "Git token 'gh'"]
-    assert rows and "skipped" in (rows[0].message or "")
-    assert "AW_SECRET_GIT_TOKEN_GH" in (rows[0].message or "")
