@@ -224,6 +224,11 @@ class Capability(ABC):
         predicts before the prompt (may I even bother resolving?); verify
         confirms after it (may I start mutating?).
 
+        The point is to catch errors cleanly before any op mutates: to
+        avoid unnecessary mutations, and to spare the operator
+        hard-to-diagnose failures partway through the real work. What you
+        check toward that is your call, same as preflight.
+
         Best-effort, not an oracle: it catches what an authenticated read
         can catch and raises a typed error on definitive rejection;
         anything only a mutation can confirm is the op's job, and network
@@ -231,6 +236,7 @@ class Capability(ABC):
         not block work an unverified-but-valid token would have done.
 
         Base behavior: no-op. Many capabilities have nothing to
-        authenticate. Subclasses with a credential or reachable API
+        authenticate, and a no-op verify is a legitimate answer, not an
+        unfinished one. Subclasses with a credential or reachable API
         override wholesale (no ``super().verify()`` to call).
         """

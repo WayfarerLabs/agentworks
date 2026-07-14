@@ -99,13 +99,24 @@ that a bad mapping or a missing tool was going to sink anyway), and authenticate
 runs only once the secrets it needs are in hand.
 
 Readiness is deliberately two stages, `preflight` and `verify`, split by the secret-resolve
-boundary: preflight before the prompt (cheap, unauthenticated, "may I even bother resolving?"),
-verify after it (authenticated, "may I start mutating?"). That split is the load-bearing move behind
-the whole model: an authenticated check that ran _during_ preflight could only use secrets available
-without a prompt, which forks readiness on where a secret happens to come from (an env-var token
-verified, a prompted one not). Moving it _after_ resolution dissolves the asymmetry: by the time
-verify runs, every secret is resolved the same way, so every credential is checked the same way.
-Both readiness stages are read-only and re-runnable; ops are the only mutation.
+boundary. **The boundary is the only hard rule; what each stage checks is the capability author's
+judgment**, driven by two goals:
+
+- **preflight** (pre-resolve): catch every issue you can _before_ burdening the operator with secret
+  prompts. It runs before resolution, so it works without secret values.
+- **verify** (post-resolve): cleanly catch and identify errors _before_ any mutating op, both to
+  avoid unnecessary mutations and to protect against hard-to-diagnose failures partway through the
+  real work. It runs after resolution, so it has the resolved secrets in hand.
+
+Beyond respecting that boundary (and staying read-only), the author decides what belongs in each to
+give the operator good UX. **Either stage may be empty:** a capability with nothing worth checking
+before the prompt has a trivial preflight; one with nothing to authenticate has a no-op verify.
+Neither is a failure to fill in a template. What the boundary forbids is the cross-over that
+reintroduces asymmetry: an authenticated check in preflight could only use secrets available without
+a prompt, which forks readiness on where a secret happens to come from (an env-var token verified, a
+prompted one not). Moving it _after_ resolution dissolves that: by the time verify runs, every
+secret is resolved the same way, so every credential is checked the same way. Both readiness stages
+are read-only and re-runnable; ops are the only mutation.
 
 ### 1. `validate_config` (declare; pure, classmethod)
 
@@ -154,8 +165,11 @@ construction for all of them; runtime context passes per call for all of them.
 
 Preflight answers "will the real work probably succeed?" on an already-constructed,
 already-config-valid instance (config validity is construct's job, not preflight's), using only what
-is knowable _before_ any secret is resolved. It reports problems _clearly_, before any mutation and
-before any secret prompt. Its defining property is that it is **read-only and side-effect-free**:
+is knowable _before_ any secret is resolved. Its aim is to spend the operator's prompt only on ops
+that can actually run. What it checks toward that is the author's call; the list below is the common
+toolkit, not a checklist, and a capability with nothing cheap to catch before the prompt has a
+trivial preflight beyond the base's resolvability prediction. Its defining property is that it is
+**read-only and side-effect-free**:
 
 - It **predicts secret resolvability without prompting.** A declared secret with no mapping at all
   is fatal and knowable here, without prompting for the others. Value checks defer to the op,
@@ -211,6 +225,12 @@ holds the resolved secret values preflight could not, and does the authenticated
 was barred from: a git provider's `GET /user`, a platform's API connection check, a secret backend's
 reachability with the real credential. It answers the question preflight structurally cannot: "with
 the credentials actually in hand, does the real work look like it will succeed?"
+
+Its purpose is to catch and identify errors cleanly before any op mutates, for two reasons: to avoid
+unnecessary mutations, and to spare the operator hard-to-diagnose failures partway through the real
+work (a 401 on a fresh token is far clearer surfaced here than as a git clone failing three steps
+into provisioning). What it checks is the author's call, same as preflight; a capability with
+nothing to authenticate leaves verify a no-op.
 
 Its contract mirrors preflight where it matters and differs where it must:
 
