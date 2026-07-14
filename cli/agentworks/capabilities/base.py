@@ -3,7 +3,7 @@ capability implementation extends.
 
 A capability instance moves through stages with sharply different
 contracts (the full capability model is documented in
-``capabilities/README.md`` once a second capability validates it):
+``capabilities/README.md``):
 
 1. ``validate_config``: pure classmethod; validates a config blob's
    shape and returns the resource references it implies.
