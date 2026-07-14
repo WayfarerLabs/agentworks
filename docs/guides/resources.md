@@ -6,9 +6,8 @@ How agentworks models the things you declare -- secrets, templates, git credenti
 ## The split: config vs resources
 
 `~/.config/agentworks/config.toml` is for **settings**: your identity (SSH keys), paths, CLI
-defaults, platform connections (Azure, Proxmox), and the secret backend chain
-(`[secret_config].backends`). Settings configure your install; they are not named, referenceable
-entities.
+defaults, and the secret backend chain (`[secret_config].backends`). Settings configure your
+install; they are not named, referenceable entities.
 
 **Resources** are the named things everything else refers to: a `secret` called `npm-token`, a
 `vm-template` called `dev`, a `git-credential` called `github`. Every resource lives in the resource
@@ -115,6 +114,41 @@ sections are commented out in place with a `# migrated to ...` marker (or remove
 `--toml delete`), and every real run finishes by rebuilding the registry and verifying it is
 identical to the pre-migration one -- rolling back if not.
 
+## VM sites and platforms
+
+Where VMs are created is declared as `vm-site` resources: "a configured place to create VMs". A site
+pairs a **platform** (the capability: the code that runs VMs on one backend kind) with that
+backend's configuration:
+
+```yaml
+apiVersion: agentworks/v1
+kind: vm-site
+metadata:
+  name: azure-dev
+spec:
+  platform: azure-vm
+  platform_config:
+    subscription_id: "..."
+    resource_group: agentworks-vms
+    region: eastus2
+```
+
+- `spec.platform` names a `vm-platform` capability row (`lima`, `wsl2`, `azure-vm`, `proxmox`);
+  `spec.platform_config` is validated by that platform (unknown keys are errors). Remote Lima is
+  just a lima site with `platform_config.vm_host: user@host`.
+- The `lima-local` and `wsl2` sites ship built in with empty config. Like every site they register
+  on every host and disable themselves where this host lacks what they need (wsl2 is Windows-only; a
+  local Lima site needs `limactl`); a disabled site still lists and describes with its reason, and
+  using it is an error. Their names are reserved. A site named after a platform must declare that
+  platform.
+- Consumers name sites: `agw vm create --site`, `defaults.site` in config.toml, and each VM row's
+  `site`. Templates deliberately carry no site: placement is per-host, never template state.
+- Site config secrets ride the standard secret machinery: a Proxmox site references its API token as
+  the `proxmox-token` secret (override with `token_secret`), auto-declared and resolved through the
+  backend chain like any other.
+- The legacy flat `[azure]` / `[proxmox]` TOML sections keep loading as deprecated vm-site
+  declarations; `agw resource migrate vm-site` moves them to manifests.
+
 ## Built-ins and overrides
 
 Built-in resources ship with the app and appear in `agw resource list --origin builtin`. Override
@@ -123,8 +157,16 @@ policy is per kind:
 - **Catalog kinds** (`apt-source`, `apt-package`, `system-install-command`, `user-install-command`):
   declaring the same name overrides the built-in -- the name is the interface, and same-name
   override is how you customize what `gh` installs.
-- **Secret backends** (`env-var`, `prompt`): registered capabilities, shown as read-only rows (see
-  Secrets below). You cannot override them by name; customize per secret via `backend_mappings`.
+- **Bundled vm-sites** (`lima-local`, `wsl2`): reserved names. Redeclaring one is an error; declare
+  a sibling site instead. Like every vm-site they register on every host and disable themselves
+  where this host lacks what they need (`agw resource list` marks the row; `describe` and
+  `agw doctor` carry the reason); using a disabled site is an error naming the requirement.
+- **Secret backends** (`env-var`, `prompt`) and **VM platforms** (`lima`, `wsl2`, `azure-vm`,
+  `proxmox`): registered capabilities, shown as read-only rows. You cannot declare or override them;
+  secrets customize per secret via `backend_mappings`, platforms configure per site via
+  `platform_config`. A platform whose host requirements are not met publishes no row at all:
+  `agw doctor` lists installed-but-disabled platforms with the reason, and sites referencing one
+  self-disable rather than erroring.
 
 ## Secrets: backends and the chain
 
@@ -153,5 +195,5 @@ agw resource describe secret/npm-token  # where it's referenced, what uses it
 agw doctor                              # health: would every secret resolve?
 ```
 
-The design rationale (the config/resource split, capability kinds, the vocabulary rules, and why
-dual sources are permanent) is recorded in ADR 0016.
+The design rationale (the config/resource split, capability kinds, the vocabulary rules, why dual
+sources are permanent, and the vm-site / vm-platform pair) is recorded in ADR 0016.

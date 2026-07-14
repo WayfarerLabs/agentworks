@@ -280,3 +280,83 @@ def test_doctor_shows_noop_secret_backend_sections(
         "[secret_backends.env-var]" in name and "remove it" in message
         for name, message in warns
     ), warns
+
+
+def test_manifest_issues_surface_as_doctor_rows(tmp_path: Path, monkeypatch, capsys) -> None:
+    """A typo'd key on a manifest-declared resource (e.g.
+    ``github_credentials`` for ``git_credentials`` on an agent-template)
+    used to warn ambiently above the report while the Config row said
+    ok. Doctor now renders manifest issues as warn rows, and passing
+    the pre-loaded set into build_registry keeps the ambient print out
+    of doctor's output entirely."""
+    from textwrap import dedent
+
+    cfg = _write_config(tmp_path)
+    resources = tmp_path / "resources"
+    resources.mkdir()
+    (resources / "agent.yaml").write_text(
+        dedent("""\
+        apiVersion: agentworks/v1
+        kind: agent-template
+        metadata:
+          name: other
+        spec:
+          github_credentials: ["github"]
+        """)
+    )
+    monkeypatch.setattr("agentworks.config.CONFIG_PATH", cfg)
+    g, _, registry = _check_config()
+
+    # The suppression half of the fix: doctor passes the pre-loaded set
+    # into build_registry, so the ambient "Manifest: ..." print must not
+    # appear above the report.
+    captured = capsys.readouterr()
+    assert "Manifest:" not in captured.out + captured.err
+
+    manifest_rows = [c for c in g.checks if c.name == "Manifest"]
+    assert manifest_rows, [c.name for c in g.checks]
+    assert manifest_rows[0].status == Status.WARN
+    assert "github_credentials" in (manifest_rows[0].message or "")
+    assert "agent.yaml" in (manifest_rows[0].message or "")
+    # The ok row is withheld when any issue exists.
+    assert not any(c.name == "Config is valid" for c in g.checks)
+    # The registry still builds (warn, not fail).
+    assert registry is not None
+
+
+def test_clean_manifests_keep_config_valid_row(tmp_path: Path, monkeypatch) -> None:
+    cfg = _write_config(tmp_path)
+    monkeypatch.setattr("agentworks.config.CONFIG_PATH", cfg)
+    g, _, registry = _check_config()
+    assert any(c.name == "Config is valid" for c in g.checks)
+    assert not any(c.name == "Manifest" for c in g.checks)
+    assert registry is not None
+
+
+def test_manifest_load_failure_keeps_other_rows(tmp_path: Path, monkeypatch) -> None:
+    """A broken manifest FILE (parse error) gets a fail row without
+    short-circuiting the rest of the report: TOML issue rows still
+    render, and only the registry-dependent tail is skipped."""
+    cfg = _write_config(
+        tmp_path,
+        extras="""\
+[named_console]
+bogus_key = 1
+""",
+    )
+    resources = tmp_path / "resources"
+    resources.mkdir()
+    (resources / "broken.yaml").write_text("kind: [unclosed\n")
+    monkeypatch.setattr("agentworks.config.CONFIG_PATH", cfg)
+    g, config, registry = _check_config()
+
+    assert config is not None
+    assert registry is None
+    fails = [c for c in g.checks if c.name == "Manifest" and c.status == Status.FAIL]
+    assert fails and "broken.yaml" in (fails[0].message or "")
+    # The TOML unknown-key warn row still rendered after the fail.
+    assert any(
+        c.name == "Config" and c.status == Status.WARN and "bogus_key" in (c.message or "")
+        for c in g.checks
+    )
+    assert not any(c.name == "Config is valid" for c in g.checks)

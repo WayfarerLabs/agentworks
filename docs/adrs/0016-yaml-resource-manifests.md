@@ -179,3 +179,11 @@ then prompt" sourcing is no longer a hardcoded resolver but the default backend 
 (`[secret_config].backends = ["env-var", "prompt"]`) over registered backend capabilities, resolved
 by the loop described above. Where 0013/0014 say "the CLI resolves secret values", read "the active
 backend chain resolves them through the `SecretBackend` API".
+
+## Implementation note: vm-site / vm-platform
+
+The `vm-site` / `vm-platform` pair sketched above has shipped: `vm-site` is the declarable kind ("a
+configured place to create VMs", `spec.platform` + `spec.platform_config`), `vm-platform` the
+read-only capability kind, and the legacy flat `[azure]` / `[proxmox]` sections load as deprecated
+vm-site declarations per this ADR's dual-source ruling. Operator-facing usage is documented in
+`docs/guides/resources.md`.

@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING
 
 from agentworks import output
 from agentworks.config import validate_name
-from agentworks.db import InitStatus, VMStatus
+from agentworks.db import InitStatus
 from agentworks.errors import (
     AgentworksError,
     AlreadyExistsError,
@@ -18,10 +18,11 @@ from agentworks.errors import (
     UserAbort,
     ValidationError,
 )
-from agentworks.vms.manager import keep_vm_active
+from agentworks.vms.manager import bind_platform, keep_active
 from agentworks.workspaces.templates import resolve_template
 
 if TYPE_CHECKING:
+    from agentworks.capabilities.vm_platform import VMPlatform
     from agentworks.config import Config
     from agentworks.db import Database, VMRow, WorkspaceRow
     from agentworks.transports import Transport
@@ -35,8 +36,15 @@ def create_workspace(
     vm_name: str | None = None,
     template_name: str | None = None,
     open_vscode: bool = False,
+    platform: VMPlatform | None = None,
 ) -> None:
-    """Create a workspace on a VM."""
+    """Create a workspace on a VM.
+
+    ``platform`` accepts the caller's already-bound platform (session
+    create's ephemeral-workspace path) so the nested create doesn't
+    re-run the site's secret resolve pass; when None this function is
+    its own composition root and binds once.
+    """
     from agentworks.agents.manager import workspace_group
     from agentworks.bootstrap import build_registry
     from agentworks.ssh import SSHLogger
@@ -65,8 +73,9 @@ def create_workspace(
 
     vm = _resolve_vm(db, vm_name)
     _guard_vm_status(vm)
-    _ensure_vm_running(db, config, vm)
-    with keep_vm_active(db, config, vm):
+    if platform is None:
+        platform = bind_platform(config, vm, registry=registry)
+    with keep_active(db, config, vm, platform):
 
         workspace_path: str | None = None
         vscode_path: str | None = None
@@ -254,9 +263,8 @@ def shell_workspace(
         )
 
     _guard_vm_status(vm)
-    _ensure_vm_running(db, config, vm)
     db.update_workspace_last_seen(name)
-    with keep_vm_active(db, config, vm):
+    with keep_active(db, config, vm, bind_platform(config, vm)):
         shell_vm_workspace(vm, config, ws.workspace_path)
 
 
@@ -313,9 +321,8 @@ def console_workspace(
         )
 
     _guard_vm_status(vm)
-    _ensure_vm_running(db, config, vm)
     db.update_workspace_last_seen(name)
-    with keep_vm_active(db, config, vm):
+    with keep_active(db, config, vm, bind_platform(config, vm)):
         console_vm_workspace(vm, config, name, recreate=recreate)
 
 
@@ -452,7 +459,7 @@ def reinit_workspace(
         )
 
     target = transport(vm, config)
-    with keep_vm_active(db, config, vm):
+    with keep_active(db, config, vm, bind_platform(config, vm)):
         ws_group = ws.linux_group
         fixes = 0
 
@@ -731,8 +738,7 @@ def _rehome_vm(
         )
 
     _guard_vm_status(vm)
-    _ensure_vm_running(db, config, vm)
-    with keep_vm_active(db, config, vm):
+    with keep_active(db, config, vm, bind_platform(config, vm)):
 
         target = transport(vm, config)
 
@@ -904,8 +910,15 @@ def delete_workspace(
     *,
     force: bool = False,
     yes: bool = False,
+    platform: VMPlatform | None = None,
 ) -> None:
-    """Delete a workspace."""
+    """Delete a workspace.
+
+    ``platform`` accepts the caller's already-bound platform (session
+    create's ephemeral ROLLBACK path) so a failed create on a
+    secret-bearing site doesn't re-run the resolve pass mid-rollback;
+    when None this function is its own composition root and binds once.
+    """
 
     ws = db.get_workspace(name)
     if ws is None:
@@ -947,7 +960,11 @@ def delete_workspace(
     console_pairs: list[tuple[str, str]] = []
     with contextlib.ExitStack() as _keepalive_stack:
         if vm is not None:
-            _keepalive_stack.enter_context(keep_vm_active(db, config, vm))
+            if platform is None:
+                platform = bind_platform(config, vm)
+            _keepalive_stack.enter_context(
+                keep_active(db, config, vm, platform)
+            )
 
         if vm is not None and vm.tailscale_host is not None:
             from agentworks.db import SessionStatus
@@ -1072,8 +1089,10 @@ def copy_workspace(
                     entity_name=src_ws.vm_name,
                 )
             _guard_vm_status(src_vm)
-            _ensure_vm_running(db, config, src_vm)
-            _keepalive_stack.enter_context(keep_vm_active(db, config, src_vm))
+            src_platform = bind_platform(config, src_vm)
+            _keepalive_stack.enter_context(
+                keep_active(db, config, src_vm, src_platform)
+            )
             if src_vm.tailscale_host is None:
                 raise StateError(
                     f"VM '{src_vm.name}' has no Tailscale address",
@@ -1107,9 +1126,13 @@ def copy_workspace(
             # --- Unpack to destination VM ---
             dest_vm = _resolve_vm(db, vm_name)
             _guard_vm_status(dest_vm)
-            _ensure_vm_running(db, config, dest_vm)
             if dest_vm.name != src_vm.name:
-                _keepalive_stack.enter_context(keep_vm_active(db, config, dest_vm))
+                dest_platform = bind_platform(config, dest_vm)
+                _keepalive_stack.enter_context(
+                    keep_active(db, config, dest_vm, dest_platform)
+                )
+            # Same VM: the src bind + keepalive above already gate and
+            # hold it; a second bind would re-run the resolve pass.
             if dest_vm.tailscale_host is None:
                 raise StateError(
                     f"VM '{dest_vm.name}' has no Tailscale address",
@@ -1227,27 +1250,8 @@ def _resolve_vm(db: Database, vm_name: str | None) -> VMRow:
         output.info(f"Using VM '{usable_vms[0].name}'")
         return usable_vms[0]
 
-    options = [f"{v.name}  ({v.platform})" for v in usable_vms]
+    options = [f"{v.name}  ({v.site})" for v in usable_vms]
     idx = output.choose("Select a VM:", options)
     return usable_vms[idx]
 
 
-def _ensure_vm_running(db: Database, config: Config, vm: VMRow) -> None:
-    """Auto-start a stopped/deallocated VM and verify Tailscale connectivity."""
-    from agentworks.vms.manager import _ensure_tailscale, get_provisioner_for_vm
-
-    provisioner = get_provisioner_for_vm(db, vm)
-    status = provisioner.status(vm)
-
-    if status in (VMStatus.STOPPED, VMStatus.DEALLOCATED):
-        output.info(f"VM '{vm.name}' is {status.value}. Starting...")
-        # Probe + start happen BEFORE keep_vm_active because the WSL2
-        # keepalive subprocess boots a stopped distro as a side effect; see
-        # the matching note in vms/manager.start_vm. Tailscale verification
-        # then runs inside the keepalive so a freshly booted WSL2 distro
-        # doesn't idle-shut while we wait for tailscaled to come up
-        # (handshake can exceed WSL2's default ~60s vmIdleTimeout).
-        provisioner.start(vm)
-        output.info(f"VM '{vm.name}' started")
-        with keep_vm_active(db, config, vm):
-            _ensure_tailscale(db, config, vm)

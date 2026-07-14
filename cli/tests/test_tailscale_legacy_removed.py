@@ -65,22 +65,20 @@ def test_vm_manager_module_does_not_reference_legacy_tailscale_env_var() -> None
 
 
 def test_vm_manager_does_not_read_legacy_env_for_tailscale_in_collect() -> None:
-    """``_collect_secrets`` in agentworks.vms.manager is the Phase-1c
-    entry point that resolves the Tailscale auth key. It must not fall
+    """``create_vm`` resolves the Tailscale auth key through the
+    operation's resolver at the preflight boundary. It must not fall
     back to the legacy env-var path -- it has to use the framework.
     """
-    from agentworks.vms.manager import _collect_secrets
+    from agentworks.vms.manager import create_vm
 
-    src = inspect.getsource(_collect_secrets)
+    src = inspect.getsource(create_vm)
     forbidden_call = 'read_env_with_legacy("AW_TAILSCALE_AUTH_KEY"'
     assert forbidden_call not in src, (
-        "found legacy env-var fallback in _collect_secrets; the function "
+        "found legacy env-var fallback in create_vm; the create path "
         "must resolve Tailscale via the framework"
     )
-    # The framework call shape is what we DO expect: build the
-    # registry, look up / synthesize the SecretDecl, eager-resolve via
-    # the orchestrator. (The full ``collect_secrets_for`` registry walk
-    # waits for Phase 2a's VMTemplateKind to provide registry-side
-    # auto-declare; Phase 1c uses a direct lookup-with-fallback.)
-    assert "build_registry" in src
-    assert "resolve_for_command" in src
+    # The framework call shape is what we DO expect: the vm-template's
+    # preflight registers + predicts the key on the resolver, the one
+    # boundary pass resolves it, and the value comes from the cache.
+    assert "preflight_vm_template" in src
+    assert "resolver.resolve()" in src

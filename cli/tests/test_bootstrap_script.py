@@ -2,18 +2,10 @@
 
 from __future__ import annotations
 
-from agentworks.vms.bootstrap_script import (
+from agentworks.capabilities.vm_platform.bootstrap_script import (
     generate_bootstrap_script,
     parse_bootstrap_output,
-    vm_hostname,
 )
-
-
-def test_vm_hostname() -> None:
-    """Hostname uses <platform>--<vm_name> format."""
-    assert vm_hostname("lima", "my-vm") == "lima--my-vm"
-    assert vm_hostname("azure", "test") == "azure--test"
-    assert vm_hostname("wsl2", "dev-box") == "wsl2--dev-box"
 
 
 def test_generate_bootstrap_script_all_steps() -> None:
@@ -47,7 +39,7 @@ def test_generate_bootstrap_script_preserves_ssh_host_keys() -> None:
     Guards against drift between the bootstrap template and the constants
     reused by the Phase B reconcile step (initializer._preserve_ssh_host_keys).
     """
-    from agentworks.vms.bootstrap_script import (
+    from agentworks.capabilities.vm_platform.bootstrap_script import (
         SSH_PRESERVE_KEYS_LINES,
         SSH_PRESERVE_KEYS_PATH,
     )
@@ -91,7 +83,7 @@ def test_generate_bootstrap_script_writes_shell_rc_seeds() -> None:
     identity vars only get substituted when the operator opens an
     interactive shell, after init populates /etc/profile.d/.
     """
-    from agentworks.vms.skel import BASHRC, ZSHRC
+    from agentworks.capabilities.vm_platform.skel import BASHRC, ZSHRC
 
     script = generate_bootstrap_script(
         admin_username="testuser",

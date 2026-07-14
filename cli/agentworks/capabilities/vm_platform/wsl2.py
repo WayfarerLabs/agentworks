@@ -1,4 +1,4 @@
-"""WSL2 provisioner -- imports Debian distros on Windows."""
+"""The WSL2 VM platform: imports Debian distros on Windows."""
 
 from __future__ import annotations
 
@@ -10,15 +10,16 @@ import subprocess
 import sys
 import urllib.request
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, ClassVar
 
 from agentworks import output
+from agentworks.capabilities.vm_platform.base import ProvisionRequest, ProvisionResult, VMPlatform
 from agentworks.db import VMStatus
+from agentworks.errors import StateError
 from agentworks.transports import WSL2Transport, transport, wait_for_reconnect
-from agentworks.vms.base import ProvisionResult, VMProvisioner
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator
+    from collections.abc import Iterator, Mapping
     from contextlib import AbstractContextManager
 
     from agentworks.config import Config
@@ -30,7 +31,7 @@ if TYPE_CHECKING:
 #
 # Without this, an `agw` process that gets hard-killed (SIGKILL, console
 # window closed, Python crash) leaves its `wsl.exe sleep infinity` subprocess
-# orphaned and still anchoring the WSL2 distro -- defeating the user's
+# orphaned and still anchoring the WSL2 distro, defeating the user's
 # expectation that idle-shutdown resumes after the command dies. Windows'
 # job-object KILL_ON_JOB_CLOSE flag exists exactly for this case: when the
 # last handle to the job closes (which the OS guarantees on process death,
@@ -40,7 +41,7 @@ if TYPE_CHECKING:
 # Wired up lazily on Windows; on other platforms _kernel32 stays None and
 # every helper short-circuits to a no-op. Failures during ctypes setup are
 # swallowed so that an unusual Windows configuration doesn't break WSL2
-# provisioning -- we fall back to terminate-only cleanup, accepting the
+# provisioning: we fall back to terminate-only cleanup, accepting the
 # orphan-on-crash risk that mode brings.
 
 _kernel32 = None
@@ -221,13 +222,20 @@ _blob_opener = urllib.request.build_opener(_StripAuthRedirectHandler)
 
 
 def _wsl(args: list[str], *, check: bool = True, timeout: int = 300) -> str:
-    """Run a wsl.exe command and return stdout."""
+    """Run a wsl.exe command and return stdout.
+
+    wsl.exe emits UTF-16LE on redirected output unless WSL_UTF8=1 is
+    set; decoding that as UTF-8 leaves a NUL after every ASCII char,
+    which silently breaks the name-equality parsers (``status``,
+    ``_distro_exists``). Strip the NULs so both encodings parse.
+    """
     result = subprocess.run(
         ["wsl", *args], capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=timeout
     )
     if check and result.returncode != 0:
-        raise RuntimeError(f"wsl command failed: {result.stderr.strip()}")
-    return result.stdout
+        stderr = result.stderr.replace("\x00", "").strip()
+        raise RuntimeError(f"wsl command failed: {stderr}")
+    return result.stdout.replace("\x00", "")
 
 
 def _powershell(script: str, *, check: bool = True, timeout: int = 120) -> str:
@@ -328,7 +336,7 @@ def _download_debian_rootfs(tarball_path: Path) -> None:
 
 
 @contextlib.contextmanager
-def _keepalive(vm: VMRow, config: Config | None) -> Iterator[None]:
+def _keepalive(distro_name: str, vm: VMRow, config: Config | None) -> Iterator[None]:
     """Anchor a WSL2 distro for the duration of the context.
 
     Spawns ``wsl --distribution NAME -- sleep infinity`` as a background
@@ -340,7 +348,7 @@ def _keepalive(vm: VMRow, config: Config | None) -> Iterator[None]:
 
     When the VM has already joined Tailscale (``vm.tailscale_host`` is
     set) AND we have a config to build an SSH target from, we wait for
-    Tailscale SSH to be reachable before yielding -- a stopped distro
+    Tailscale SSH to be reachable before yielding: a stopped distro
     needs a few seconds for tailscaled to reattach to the tailnet after
     boot, and callers expect a ready VM.
 
@@ -355,7 +363,7 @@ def _keepalive(vm: VMRow, config: Config | None) -> Iterator[None]:
     the kernel closes the job handle and kills the orphan for us.
     """
     proc = subprocess.Popen(
-        ["wsl", "--distribution", vm.name, "--", "sleep", "infinity"],
+        ["wsl", "--distribution", distro_name, "--", "sleep", "infinity"],
         stdin=subprocess.DEVNULL,
         stdout=subprocess.DEVNULL,
         stderr=subprocess.PIPE,
@@ -404,10 +412,12 @@ def _keepalive(vm: VMRow, config: Config | None) -> Iterator[None]:
         _close_stderr()
         _close_handle(h_job)
         raise RuntimeError(
-            f"WSL2 keepalive for distro {vm.name!r} exited immediately (rc={rc})"
+            f"WSL2 keepalive for distro {distro_name!r} exited immediately (rc={rc})"
             + (f": {stderr}" if stderr else "")
         )
-    output.detail(f"Preventing idle-shutdown of WSL2 distro {vm.name!r} for the duration of this command...")
+    output.detail(
+        f"Preventing idle-shutdown of WSL2 distro {distro_name!r} for the duration of this command..."
+    )
     try:
         if vm.tailscale_host and config is not None:
             target = transport(vm, config)
@@ -436,22 +446,95 @@ def _keepalive(vm: VMRow, config: Config | None) -> Iterator[None]:
         output.detail("Idle-shutdown prevention stopped.")
 
 
-class WSL2Provisioner(VMProvisioner):
-    """Provisions WSL2 Debian distributions on Windows."""
+class WSL2Platform(VMPlatform):
+    """Runs VMs as WSL2 Debian distributions on Windows."""
+
+    name: ClassVar[str] = "wsl2"
+    description: ClassVar[str] = "WSL2 Debian distributions on Windows"
+
+    @classmethod
+    def unsupported_reason(cls) -> str | None:
+        """WSL2 is categorically Windows-only: no configuration of
+        this platform can ever work elsewhere, so the whole platform
+        disables off Windows (vs lima, whose remote mode keeps the
+        platform supported everywhere)."""
+        if sys.platform != "win32":
+            return "Windows only"
+        return None
+
+    def disabled_reason(self) -> str | None:
+        """On Windows a wsl2 site additionally needs ``wsl.exe`` itself
+        (WSL is an optional Windows feature). Off Windows the platform
+        gate already disables everything, so this only ever fires on a
+        supported host."""
+        import shutil
+
+        if not shutil.which("wsl"):
+            return "wsl.exe not installed; run `wsl --install`"
+        return None
+
+    def preflight(self) -> None:
+        """``wsl.exe`` must be on PATH (which also implies Windows).
+        No config secrets, so the base's prediction pass is a no-op."""
+        super().preflight()
+        import shutil
+
+        if not shutil.which("wsl"):
+            from agentworks.errors import ConnectivityError
+
+            raise ConnectivityError(
+                "'wsl.exe' not found. The wsl2 platform runs VMs as WSL2 "
+                "distributions and requires Windows with WSL installed.",
+                hint="Install WSL (`wsl --install`) or use a different site.",
+            )
+
+    @classmethod
+    def legacy_platform_metadata(
+        cls, row: Mapping[str, Any], legacy: Mapping[str, Any]
+    ) -> dict[str, str]:
+        # Pre-v27 rows recorded wsl_distro_name (always equal to the VM
+        # name); read paths keyed off vm.name regardless. Either value
+        # is the distro name for every existing row.
+        distro = row["wsl_distro_name"] or row["name"]
+        return {"distro_name": str(distro)}
+
+    def _distro_name(self, vm: VMRow) -> str:
+        distro = vm.platform_metadata.get("distro_name")
+        if not distro:
+            raise StateError(
+                f"VM '{vm.name}' has no wsl2 distro_name in its platform "
+                f"metadata; the DB row is incomplete",
+                entity_kind="vm",
+                entity_name=vm.name,
+            )
+        return str(distro)
 
     def vm_active(
         self, vm: VMRow, *, config: Config | None = None
     ) -> AbstractContextManager[None]:
-        return _keepalive(vm, config)
+        return _keepalive(self._distro_name(vm), vm, config)
 
-    def create(
-        self,
-        vm_name: str,
-        config: Config,
-        *,
-        swap: int = 4,
-        admin_username: str = "agentworks",
-    ) -> ProvisionResult:
+    def create(self, request: ProvisionRequest) -> ProvisionResult:
+        # The platform owns the backend-side name; distro
+        # names are the primary identifier, so a collision is an error.
+        distro_name = (
+            f"{request.system_slug}-{request.vm_name}"
+            if request.system_slug
+            else request.vm_name
+        )
+        if self._distro_exists(distro_name):
+            raise StateError(
+                f"a WSL2 distro named '{distro_name}' is already registered",
+                entity_kind="vm",
+                entity_name=request.vm_name,
+                hint=(
+                    "unregister it first (wsl --unregister) or pick a "
+                    "different VM name"
+                ),
+            )
+        vm_name = distro_name
+        swap = request.swap_gib if request.swap_gib is not None else 0
+        admin_username = request.admin_username
         output.info(f"Provisioning WSL2 VM '{vm_name}'...")
 
         install_path = _wsl_base_path() / vm_name
@@ -578,47 +661,69 @@ class WSL2Provisioner(VMProvisioner):
 
         output.detail(f"WSL2 VM '{vm_name}' provisioned.")
         return ProvisionResult(
-            provisioner_transport=WSL2Transport(distro_name=vm_name, user=admin_username),
-            wsl_distro_name=vm_name,
+            native_transport=WSL2Transport(distro_name=distro_name, user=admin_username),
+            platform_metadata={"distro_name": distro_name},
         )
 
+    @staticmethod
+    def _distro_exists(distro_name: str) -> bool:
+        """Pre-flight: is a distro with this name already registered?"""
+        try:
+            listing = _wsl(["--list", "--quiet"], check=False)
+        except (RuntimeError, OSError):
+            return False
+        return any(line.strip() == distro_name for line in listing.splitlines())
+
     def start(self, vm: VMRow) -> None:
+        # Idempotent by construction (the ABC flags start): running a
+        # command boots a stopped distro and is a plain exec on a
+        # running one; no guard needed.
         output.info(f"Starting WSL2 distro '{vm.name}'...")
-        _wsl(["--distribution", vm.name, "--", "echo", "started"])
+        _wsl(["--distribution", self._distro_name(vm), "--", "echo", "started"])
         output.info(f"WSL2 distro '{vm.name}' started")
 
     def stop(self, vm: VMRow) -> None:
+        # Idempotency guard (the ABC flags stop): `wsl --terminate` on
+        # a stopped distro is not reliably a no-op across WSL versions.
+        if self.status(vm) == VMStatus.STOPPED:
+            output.detail(f"WSL2 distro '{vm.name}' is already stopped")
+            return
         output.info(f"Terminating WSL2 distro '{vm.name}'...")
-        _wsl(["--terminate", vm.name])
+        _wsl(["--terminate", self._distro_name(vm)])
         output.info(f"WSL2 distro '{vm.name}' terminated")
 
     def delete(self, vm: VMRow) -> None:
+        distro_name = self._distro_name(vm)
         output.info(f"Unregistering WSL2 distro '{vm.name}'...")
-        _wsl(["--unregister", vm.name], check=False)
+        _wsl(["--unregister", distro_name], check=False)
         # Clean up install directory
-        install_path = _wsl_base_path() / vm.name
+        install_path = _wsl_base_path() / distro_name
         _powershell(
             f"Remove-Item -Recurse -Force -Path {_ps_quote(install_path)} -ErrorAction SilentlyContinue",
             check=False,
         )
         output.info(f"WSL2 distro '{vm.name}' deleted")
 
-    def provisioner_transport(
-        self, vm: VMRow, *, config: object | None = None,
-    ) -> Transport:
-        return WSL2Transport(distro_name=vm.name, user=vm.admin_username)
+    def display_backend_name(self, vm: VMRow) -> str:
+        return str(vm.platform_metadata.get("distro_name", vm.name))
+
+    def native_transport(
+        self, vm: VMRow, *, config: Config | None = None,
+    ) -> Transport | None:
+        return WSL2Transport(distro_name=self._distro_name(vm), user=vm.admin_username)
 
     def status(self, vm: VMRow) -> VMStatus:
+        distro_name = self._distro_name(vm)
         try:
-            output = _wsl(["--list", "--verbose"], check=False)
+            listing = _wsl(["--list", "--verbose"], check=False)
         except RuntimeError:
             return VMStatus.UNKNOWN
 
-        for line in output.strip().splitlines():
+        for line in listing.strip().splitlines():
             parts = line.split()
             # WSL --list --verbose output: [*] NAME STATE VERSION
             # Filter to find our distro
-            name_candidates = [p for p in parts if p == vm.name]
+            name_candidates = [p for p in parts if p == distro_name]
             if not name_candidates:
                 continue
             state_str = parts[-2].lower() if len(parts) >= 3 else ""

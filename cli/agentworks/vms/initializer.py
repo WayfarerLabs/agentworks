@@ -19,6 +19,8 @@ from collections.abc import Callable
 from typing import TYPE_CHECKING
 
 from agentworks import output
+from agentworks.capabilities.vm_platform.cloud_init import INIT_SYSTEM_PACKAGES, PROVISIONING_PACKAGES
+from agentworks.capabilities.vm_platform.skel import BASHRC, ZSHRC
 from agentworks.db import InitStatus, ProvisioningStatus
 from agentworks.env import (
     ResourceContext,
@@ -30,12 +32,11 @@ from agentworks.transports import (
     SSHTransport,
     Transport,
 )
-from agentworks.vms.cloud_init import INIT_SYSTEM_PACKAGES, PROVISIONING_PACKAGES
-from agentworks.vms.skel import BASHRC, ZSHRC
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
 
+    from agentworks.capabilities.vm_platform import VMPlatform
     from agentworks.catalog import AptSourceEntry, SystemInstallCommandEntry, UserInstallCommandEntry
     from agentworks.config import Config
     from agentworks.db import Database
@@ -172,7 +173,7 @@ def _write_agentworks_profile(
 #
 #   /etc/profile.d/agentworks-identity.sh
 #     System-wide login-shell fragment with the VM-stable identity vars
-#     (AGENTWORKS_VM / AGENTWORKS_VM_HOST / AGENTWORKS_PLATFORM). Sourced by
+#     (AGENTWORKS_VM / AGENTWORKS_PLATFORM / AGENTWORKS_SITE). Sourced by
 #     every login shell on the VM (including raw `ssh awvm--<name>` from
 #     outside agentworks), so identity vars don't require agentworks to be
 #     the one opening the shell. Also writes to /etc/zsh/zprofile because
@@ -256,8 +257,8 @@ def _write_agentworks_identity_profile(
     """Write the VM-stable identity profile fragment.
 
     System-wide; sourced by every login shell on the VM. ``identity_env``
-    is the VM-stable subset (typically AGENTWORKS_VM, AGENTWORKS_VM_HOST,
-    AGENTWORKS_PLATFORM) produced by ``agentworks.env.vm_stable_identity_env``.
+    is the VM-stable subset (AGENTWORKS_VM, AGENTWORKS_PLATFORM,
+    AGENTWORKS_SITE) produced by ``agentworks.env.vm_stable_identity_env``.
 
     The ``/etc/profile.d/agentworks-identity.sh`` file is fully owned by
     agentworks: each reinit overwrites it. The block in ``/etc/zsh/zprofile``
@@ -806,7 +807,7 @@ def _preserve_ssh_host_keys(
     """
     from pathlib import PurePosixPath
 
-    from agentworks.vms.bootstrap_script import SSH_PRESERVE_KEYS_LINES, SSH_PRESERVE_KEYS_PATH
+    from agentworks.capabilities.vm_platform.bootstrap_script import SSH_PRESERVE_KEYS_LINES, SSH_PRESERVE_KEYS_PATH
 
     logger.step("Preserve SSH host keys")
     output.detail("Ensuring SSH host key preservation...")
@@ -1270,6 +1271,7 @@ def initialize_vm(
     vm_name: str,
     exec_target: Transport,
     providers: dict[str, GitCredentialProvider],
+    platform: VMPlatform,
     *,
     admin_username: str = "agentworks",
     tailscale_auth_key: str,
@@ -1286,10 +1288,12 @@ def initialize_vm(
 
     Phase 1c (Tailscale) + Phase 1d (git credentials): both
     ``tailscale_auth_key`` and ``git_tokens`` are required; ``create_vm``
-    resolves them via the framework at manager-entry and threads them in.
+    resolves them via the framework at manager-entry and threads them in,
+    along with the BOUND ``platform`` from its composition root (used
+    for the keepalive hold; the gates never bind).
     """
     from agentworks.ssh import SSHLogger
-    from agentworks.vms.manager import keep_vm_active
+    from agentworks.vms.manager import keep_active
 
     home = f"/home/{admin_username}"
     logger = SSHLogger(vm_name, "vm-create")
@@ -1310,7 +1314,7 @@ def initialize_vm(
     # (Tailscale SSH).
     vm_for_keepalive = db.get_vm(vm_name)
     assert vm_for_keepalive is not None, "create_vm inserts the row before init"
-    with keep_vm_active(db, config, vm_for_keepalive):
+    with keep_active(db, config, vm_for_keepalive, platform):
         try:
             db.insert_vm_event(vm_name, "provisioning_started", transport)
             ts_target = _phase_a_bootstrap(
@@ -1321,9 +1325,12 @@ def initialize_vm(
                 exec_target,
                 home,
                 admin_username,
-                vm_for_keepalive.platform,
+                vm_for_keepalive.hostname,
                 logger,
                 tailscale_auth_key=tailscale_auth_key,
+                # WSL2 handles swap natively before bootstrap; every
+                # other platform lets the script create the swapfile.
+                script_swap=0 if platform.name == "wsl2" else vm_template.swap,
                 bootstrap_complete=bootstrap_complete,
                 tailscale_ip=tailscale_ip,
             )
@@ -1439,18 +1446,19 @@ def _phase_a_bootstrap(
     exec_target: Transport,
     home: str,
     admin_username: str,
-    platform: str,
+    hostname: str,
     logger: SSHLogger,
     *,
     tailscale_auth_key: str,
+    script_swap: int,
     bootstrap_complete: bool = False,
     tailscale_ip: str | None = None,
 ) -> Transport:
     """Phase A: Bootstrap (over provisioning transport). All steps are fatal.
 
-    Three paths depending on how much the provisioner already handled:
+    Three paths depending on how much the platform already handled:
 
-    1. bootstrap_complete=True (Lima/Azure): The provisioner already ran the
+    1. bootstrap_complete=True (Lima/Azure): The platform already ran the
        full bootstrap. Skip straight to Tailscale SSH verification.
     2. Otherwise (WSL2): Run full bootstrap script over the provisioning
        transport (user, packages, SSH key, swap, Tailscale).
@@ -1460,9 +1468,9 @@ def _phase_a_bootstrap(
     db.update_vm_provisioning_status(vm_name, ProvisioningStatus.IN_PROGRESS)
 
     if bootstrap_complete and tailscale_ip:
-        # Lima/Azure: provisioner already ran the full bootstrap.
+        # Lima/Azure: platform already ran the full bootstrap.
         # Just update DB and move on to SSH verification.
-        logger.step("Bootstrap (provisioner)")
+        logger.step("Bootstrap (platform)")
         logger.output(f"Tailscale IP: {tailscale_ip}")
         db.update_vm_tailscale(vm_name, tailscale_ip)
         db.update_vm_provisioning_status(vm_name, ProvisioningStatus.COMPLETE)
@@ -1475,9 +1483,10 @@ def _phase_a_bootstrap(
             vm_name,
             exec_target,
             admin_username,
-            platform,
+            hostname,
             logger,
             tailscale_auth_key=tailscale_auth_key,
+            script_swap=script_swap,
         )
 
     # Sync the operator's SSH config now that the VM's Tailscale IP is
@@ -1526,21 +1535,22 @@ def _run_bootstrap_script(
     vm_name: str,
     exec_target: Transport,
     admin_username: str,
-    platform: str,
+    hostname: str,
     logger: SSHLogger,
     *,
     tailscale_auth_key: str,
+    script_swap: int,
 ) -> str:
     """Generate, copy, and run a bootstrap script on the VM. Returns Tailscale IP.
 
-    Used for WSL2 where the bootstrap cannot be embedded in a provisioner's
+    Used for WSL2 where the bootstrap cannot be embedded in a platform's
     native mechanism (Lima provision block, Azure cloud-init). Phase 1c:
     ``tailscale_auth_key`` is required; the framework-resolved value
     arrives from ``create_vm`` -> ``initialize_vm`` -> ``_phase_a_bootstrap``.
     """
     import tempfile
 
-    from agentworks.vms.bootstrap_script import generate_bootstrap_script, parse_bootstrap_output, vm_hostname
+    from agentworks.capabilities.vm_platform.bootstrap_script import generate_bootstrap_script, parse_bootstrap_output
 
     output.info("Bootstrapping VM...")
 
@@ -1550,10 +1560,10 @@ def _run_bootstrap_script(
         ssh_public_key=ssh_public_key,
         provisioning_packages=PROVISIONING_PACKAGES,
         tailscale_auth_key=tailscale_auth_key,
-        hostname=vm_hostname(platform, vm_name),
-        # WSL2 provisioner handles swap natively before bootstrap; every other
-        # platform lets the script create the swapfile.
-        swap=0 if platform == "wsl2" else vm_template.swap,
+        # The stored hostname (vms.hostname), never re-derived from
+        # live config.
+        hostname=hostname,
+        swap=script_swap,
     )
 
     # Copy script to VM and execute synchronously over the provisioning transport
@@ -1712,16 +1722,21 @@ def _phase_b_setup(
     # row up front). A None here is an internal invariant violation, not a
     # recoverable state, so surface it loudly.
     assert vm_row is not None, f"VM '{vm_name}' missing from DB mid-init"
+    # The platform name resolves through the site declaration at this
+    # composition root (a stranded remote-Lima VM already failed reinit
+    # at the earlier bind, before any env baking).
+    from agentworks.vms.sites import site_platform_name
+
     identity_ctx = ResourceContext(
         vm_name=vm_row.name,
-        platform=vm_row.platform,
+        platform=site_platform_name(vm_row.site, registry),
+        site=vm_row.site,
         user=admin_username,
-        vm_host=vm_row.vm_host_name,
     )
 
     # Provisioning is hermetic: no operator env, no per-context identity,
     # no secrets from env tables are injected into install commands. Static
-    # identity (AGENTWORKS_VM / VM_HOST / PLATFORM) reaches install commands
+    # identity (AGENTWORKS_VM / SITE / PLATFORM) reaches install commands
     # via /etc/profile.d/agentworks-identity.sh sourcing. Tailscale auth key
     # and git credentials -- the only provisioning-time secrets -- have
     # their own dedicated config paths outside [admin.env]. Operator env

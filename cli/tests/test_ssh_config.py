@@ -131,6 +131,7 @@ def _mock_vm(name: str, host: str) -> MagicMock:
 def test_rebuild_config_dir(tmp_path: Path) -> None:
     config, ssh_dir = _mock_config(tmp_path)
     db = MagicMock()
+    db.get_setting.return_value = None
     db.list_vms.return_value = [
         _mock_vm("dev-vm", "100.64.0.1"),
         _mock_vm("test-vm", "100.64.0.2"),
@@ -159,6 +160,7 @@ def test_rebuild_config_dir_no_vms_removes_file(tmp_path: Path) -> None:
     (conf_d / _MANAGED_CONF).write_text("old content")
 
     db = MagicMock()
+    db.get_setting.return_value = None
     db.list_vms.return_value = []
 
     _rebuild_config_dir(config, db)
@@ -173,6 +175,7 @@ def test_rebuild_config_dir_cleans_legacy(tmp_path: Path) -> None:
     )
 
     db = MagicMock()
+    db.get_setting.return_value = None
     db.list_vms.return_value = []
 
     _rebuild_config_dir(config, db)
@@ -226,6 +229,7 @@ def test_rebuild_config_dir_emits_per_agent_blocks(tmp_path: Path) -> None:
     """Each VM's agents get one top-level ``awagent--<name>`` Host block each."""
     config, ssh_dir = _mock_config(tmp_path)
     db = MagicMock()
+    db.get_setting.return_value = None
     db.list_vms.return_value = [_mock_vm("vm1", "100.64.0.1")]
     db.list_agents.return_value = [
         _mock_agent("claude", "agt-claude", "vm1"),
@@ -256,6 +260,7 @@ def test_rebuild_config_dir_emits_per_agent_blocks(tmp_path: Path) -> None:
 def test_rebuild_config_dir_no_agent_blocks_when_vm_has_none(tmp_path: Path) -> None:
     config, ssh_dir = _mock_config(tmp_path)
     db = MagicMock()
+    db.get_setting.return_value = None
     db.list_vms.return_value = [_mock_vm("solo", "100.64.0.9")]
     db.list_agents.return_value = []
 
@@ -275,6 +280,7 @@ def test_rebuild_config_dir_agent_blocks_global_namespace(tmp_path: Path) -> Non
     is emitted per agent regardless of which VM owns them."""
     config, ssh_dir = _mock_config(tmp_path)
     db = MagicMock()
+    db.get_setting.return_value = None
     db.list_vms.return_value = [
         _mock_vm("vm1", "100.64.0.1"),
         _mock_vm("vm2", "100.64.0.2"),
@@ -310,6 +316,7 @@ def test_legacy_rebuild_emits_per_agent_blocks(tmp_path: Path) -> None:
     config, ssh_dir = _mock_config(tmp_path)
     config.operator.ssh_config_dir = False  # legacy
     db = MagicMock()
+    db.get_setting.return_value = None
     db.list_vms.return_value = [_mock_vm("vm1", "100.64.0.1")]
     db.list_agents.return_value = [
         _mock_agent("claude", "agt-claude", "vm1"),
@@ -335,6 +342,7 @@ def test_legacy_rebuild_no_agents_no_per_agent_blocks(tmp_path: Path) -> None:
     config, ssh_dir = _mock_config(tmp_path)
     config.operator.ssh_config_dir = False
     db = MagicMock()
+    db.get_setting.return_value = None
     db.list_vms.return_value = [_mock_vm("solo", "100.64.0.9")]
     db.list_agents.return_value = []
 
@@ -344,5 +352,57 @@ def test_legacy_rebuild_no_agents_no_per_agent_blocks(tmp_path: Path) -> None:
     assert "Host awvm--solo\n" in content
     assert "Host awvm--solo--" not in content
     assert "Host awagent--" not in content
+
+
+# -- Slug-named managed file --------------------------------------------------
+
+
+def test_rebuild_config_dir_uses_slug_named_file(tmp_path: Path) -> None:
+    """Slug set: the managed file becomes agentworks-{slug}.conf."""
+    config, ssh_dir = _mock_config(tmp_path)
+    db = MagicMock()
+    db.get_setting.return_value = "team-a"
+    db.list_vms.return_value = [_mock_vm("dev-vm", "100.64.0.1")]
+    db.list_agents.return_value = []
+
+    _rebuild_config_dir(config, db)
+
+    slugged = ssh_dir / "config.d" / "agentworks-team-a.conf"
+    assert slugged.exists()
+    assert not (ssh_dir / "config.d" / _MANAGED_CONF).exists()
+    assert "Host awvm--dev-vm" in slugged.read_text()
+
+
+def test_first_sync_after_slug_removes_old_file(tmp_path: Path) -> None:
+    """The pre-slug agentworks.conf must not survive to shadow fresh
+    aliases (the slug arrives at first vm create, not at migration)."""
+    config, ssh_dir = _mock_config(tmp_path)
+    config_d = ssh_dir / "config.d"
+    config_d.mkdir()
+    stale = config_d / _MANAGED_CONF
+    stale.write_text("Host awvm--dev-vm\n    HostName 100.64.9.9\n")
+
+    db = MagicMock()
+    db.get_setting.return_value = "team-a"
+    db.list_vms.return_value = [_mock_vm("dev-vm", "100.64.0.1")]
+    db.list_agents.return_value = []
+
+    _rebuild_config_dir(config, db)
+
+    assert not stale.exists()
+    assert (config_d / "agentworks-team-a.conf").exists()
+
+
+def test_declined_slug_keeps_default_file_name(tmp_path: Path) -> None:
+    """The declined row (empty value) behaves like no slug."""
+    config, ssh_dir = _mock_config(tmp_path)
+    db = MagicMock()
+    db.get_setting.return_value = ""
+    db.list_vms.return_value = [_mock_vm("dev-vm", "100.64.0.1")]
+    db.list_agents.return_value = []
+
+    _rebuild_config_dir(config, db)
+
+    assert (ssh_dir / "config.d" / _MANAGED_CONF).exists()
 
 

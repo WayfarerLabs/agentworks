@@ -40,11 +40,12 @@ from agentworks.sessions.multi_console_layout import (
     _reorder_shell_panes,
 )
 from agentworks.sessions.tmux import tmux_cmd
-from agentworks.vms.manager import keep_vm_active
+from agentworks.vms.manager import bind_platform, ensure_active
 
 if TYPE_CHECKING:
     from collections.abc import Iterator, Mapping
 
+    from agentworks.capabilities.vm_platform import VMPlatform
     from agentworks.config import Config
     from agentworks.db import (
         ConsoleRow,
@@ -373,6 +374,10 @@ def add_sessions(
     # any spec carries shells > 0 the live-attach path below will open
     # new shells via _add_session_window. Resolve every referenced
     # secret BEFORE the DB write so a failure leaves no partial state.
+    # No platform instance participates in this command (the live sync
+    # is pure Tailscale, no platform ops), so this is the operation's
+    # ONE prompt session by construction: nothing to fold into a
+    # bind boundary.
     # default_shells produces {cwd: None, admin: False} entries, so the
     # only admin-promotion path is session_user == admin_user (an
     # admin-mode session). The resolve is skipped when no specs carry
@@ -621,7 +626,10 @@ def add_shell(
 
     # Eager-prompting orchestration (FRD R4 / Phase 6): resolve any
     # secrets referenced by this pane's env chain BEFORE the DB write +
-    # potential pane-split below. Non-interactive failures surface as
+    # potential pane-split below. No platform instance participates in
+    # this command (the live sync is pure Tailscale, no platform ops),
+    # so this is the operation's ONE prompt session by construction.
+    # Non-interactive failures surface as
     # SecretUnavailableError with no partial state to clean up. We
     # always resolve (even when the console isn't live), since the
     # operator typed add-shell expecting to use the new pane shortly.
@@ -729,13 +737,15 @@ def restore_session(
             entity_name=session_name,
         )
 
-    vm, target = _prepare_vm_target_for_attach(db, config, console.vm_name)
+    vm, target, vm_platform = _prepare_vm_target_for_attach(
+        db, config, console.vm_name, registry=registry
+    )
     # restore_session raises StateError/ExternalError on failure, so it's
     # not a best-effort op (those are exempted from the keepalive sweep by
-    # base.VMProvisioner.vm_active's docstring). Wrap the SSH-heavy body
+    # base.VMPlatform.vm_active's docstring). Wrap the SSH-heavy body
     # so a freshly booted WSL2 distro doesn't idle out between the window
-    # probe and the pane reconciliation.
-    with keep_vm_active(db, config, vm):
+    # probe and the pane reconciliation. Already gated above; hold only.
+    with vm_platform.vm_active(vm, config=config):
         if not _console_tmux_exists(target, console_name):
             raise StateError(
                 f"console '{console_name}' has no live tmux session on VM "
@@ -776,6 +786,10 @@ def restore_session(
             # _split_shell_pane). Resolve every referenced secret BEFORE
             # any pane is opened. Targets cover ALL configured shells in
             # this case (the window is missing, so every pane is new).
+            # Conditional-need exception to the one-boundary-resolve
+            # contract: whether the window is missing is only knowable
+            # from live tmux state, post-bind (same class as the
+            # Tailscale rejoin).
             from agentworks.secrets import resolve_for_command
 
             all_indices = list(range(configured_count))
@@ -905,7 +919,10 @@ def restore_session(
         session_user = _session_linux_user(db, session, vm)
 
         # Eager-prompting orchestration (FRD R4 / Phase 6): restore_session
-        # opens new shells for the missing pane indices. Resolve secrets
+        # opens new shells for the missing pane indices. Conditional-need
+        # exception to the one-boundary-resolve contract: which panes are
+        # missing is only knowable from live tmux state, post-bind.
+        # Resolve secrets
         # NOW -- after all the validation guards (untagged-panes /
         # duplicate-tags / out-of-range / "already matches config" no-op)
         # so an operator with a tag-corruption gets the actionable
@@ -1402,10 +1419,12 @@ def _resolve_pane_env(
     # the session itself. No agent_name in the ctx either -- the agent
     # identifier is per-user-static and lives in the on-disk profile
     # fragment, not in per-context SetEnv.
+    from agentworks.vms.sites import site_platform_name
+
     ctx = ResourceContext(
         vm_name=vm.name,
-        vm_host=vm.vm_host_name,
-        platform=vm.platform,
+        platform=site_platform_name(vm.site, registry),
+        site=vm.site,
         user=pane_user,
         workspace_name=workspace.name,
         workspace_dir=workspace.workspace_path,
@@ -1757,15 +1776,17 @@ def _build_console_tmux(
 
 
 def _prepare_vm_target_for_attach(
-    db: Database, config: Config, vm_name: str
-) -> tuple[VMRow, Transport]:
-    """Ensure the VM is running (starting it if needed) and return (vm, target).
+    db: Database, config: Config, vm_name: str, *, registry: Registry | None = None
+) -> tuple[VMRow, Transport, VMPlatform]:
+    """Ensure the VM is running (starting it if needed) and return
+    (vm, target, platform).
 
-    Use this only for explicit user-driven attach flows where booting a stopped
-    VM is acceptable. Raises on failure.
+    Use this only for explicit user-driven attach flows where booting a
+    stopped VM is acceptable. Raises on failure. The bound platform is
+    returned so callers hold it for subsequent ``vm_active`` spans:
+    re-binding would re-run the site's secret resolve pass.
     """
     from agentworks.transports import transport
-    from agentworks.workspaces.manager import _ensure_vm_running
 
     vm = db.get_vm(vm_name)
     if vm is None:
@@ -1774,14 +1795,15 @@ def _prepare_vm_target_for_attach(
             entity_kind="vm",
             entity_name=vm_name,
         )
-    _ensure_vm_running(db, config, vm)
+    platform = bind_platform(config, vm, registry=registry)
+    ensure_active(db, config, vm, platform)
     if vm.tailscale_host is None:
         raise StateError(
             f"VM '{vm.name}' has no Tailscale address",
             entity_kind="vm",
             entity_name=vm.name,
         )
-    return vm, transport(vm, config)
+    return vm, transport(vm, config), platform
 
 
 def _live_target(
@@ -1847,9 +1869,12 @@ def attach_console(
 
     console = _require_console(db, name)
     registry = build_registry(config)
-    vm, target = _prepare_vm_target_for_attach(db, config, console.vm_name)
+    vm, target, vm_platform = _prepare_vm_target_for_attach(
+        db, config, console.vm_name, registry=registry
+    )
 
-    with keep_vm_active(db, config, vm):
+    # Already gated by _prepare_vm_target_for_attach; hold only.
+    with vm_platform.vm_active(vm, config=config):
         exists = _console_tmux_exists(target, name)
         layout = named_console_template(registry).tmux_layout
 
@@ -1860,6 +1885,13 @@ def attach_console(
         # attach path (tmux session already exists) opens no new shells
         # so it skips eager-resolve, matching FRD R4 / R5: "console
         # attach joins existing shells, consumes no secrets."
+        # Conditional-need exception to the one-boundary-resolve
+        # contract: whether a build is needed is only knowable from live
+        # tmux state, post-bind (the bind + its boundary already ran in
+        # _prepare_vm_target_for_attach above). The --recreate half of
+        # the guard IS knowable pre-bind; it deliberately shares this
+        # late resolve so both build paths stay one code shape rather
+        # than forking the target computation across the boundary.
         if recreate or not exists:
             from agentworks.secrets import resolve_for_command
 

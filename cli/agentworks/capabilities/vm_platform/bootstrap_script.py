@@ -16,7 +16,7 @@ from __future__ import annotations
 import shlex
 from dataclasses import dataclass, field
 
-from agentworks.vms.skel import BASHRC, ZSHRC
+from agentworks.capabilities.vm_platform.skel import BASHRC, ZSHRC
 
 # Canonical cloud-init drop-in that stops host-key regeneration on stop/start.
 # By default cloud-init may delete and regenerate /etc/ssh/ssh_host_* on some
@@ -147,11 +147,6 @@ tailscale up --auth-key "$TAILSCALE_AUTH_KEY"
 TS_IP=$(tailscale ip -4)
 echo "##SUCCESS## tailscale-ip=$TS_IP"
 """
-
-
-def vm_hostname(platform: str, vm_name: str) -> str:
-    """Build a consistent VM hostname: <platform>--<vm_name>."""
-    return f"{platform}--{vm_name}"
 
 
 def generate_bootstrap_script(

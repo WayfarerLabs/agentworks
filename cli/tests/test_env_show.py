@@ -50,11 +50,20 @@ shell = "zsh"
     return cfg
 
 
+@pytest.fixture(autouse=True)
+def _all_platforms_supported(monkeypatch: pytest.MonkeyPatch) -> None:
+    """These tests resolve VM rows against real registries; make the
+    bundled sites publish regardless of the test host's tooling."""
+    from tests.conftest import stub_platform_support
+
+    stub_platform_support(monkeypatch)
+
+
 def _seed_db(db: Database, *, with_workspace: bool = True, with_agent: bool = False,
              with_session: bool = False) -> None:
     db._conn.execute(
-        "INSERT INTO vms (name, platform, admin_username, tailscale_host) "
-        "VALUES ('vm-1', 'lima', 'agentworks', '100.64.0.5')"
+        "INSERT INTO vms (name, site, hostname, admin_username, tailscale_host) "
+        "VALUES ('vm-1', 'lima-local', 'h', 'agentworks', '100.64.0.5')"
     )
     if with_workspace:
         db._conn.execute(

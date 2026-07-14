@@ -9,14 +9,14 @@ from __future__ import annotations
 import json
 import sqlite3
 from contextlib import contextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import Enum
-from typing import TYPE_CHECKING, TypedDict
+from typing import TYPE_CHECKING, Any, TypedDict
 
 from agentworks.config import CONFIG_DIR
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator
+    from collections.abc import Callable, Iterator
     from pathlib import Path
 
 DB_PATH = CONFIG_DIR / "agentworks.db"
@@ -62,40 +62,44 @@ class SessionStatus(Enum):
 # Distinct from NULL (never checked / pre-enhancement).
 PID_STOPPED = -1
 
+# Settings-table keys (install-level identity). Defined next to the accessors'
+# owner so consumers (vms.manager, ssh_config) share one spelling
+# without a layering inversion. (A retired key may linger as an orphan
+# row in existing DBs, harmless; the settings table is a plain KV.)
+SYSTEM_SLUG_KEY = "system_slug"
+
 
 # -- Row types -------------------------------------------------------------
 
 
 @dataclass
-class VMHostRow:
-    name: str
-    ssh_host: str
-    platform: str
-    os: str | None
-    created_at: str
-    last_seen_at: str | None
-
-
-@dataclass
 class VMRow:
     name: str
-    platform: str
-    vm_host_name: str | None
+    # The vm-site the VM was created at (the resource name; resolved to
+    # a bound platform via agentworks.vms.sites).
+    site: str
     template: str | None
     extra_packages: list[str]
     provisioning_status: str
     init_status: str
     tailscale_host: str | None
-    azure_resource_id: str | None
-    wsl_distro_name: str | None
-    proxmox_vmid: str | None
     cpus: int | None
     memory_gib: int | None
     disk_gib: int | None
     swap_gib: int | None
     admin_username: str
+    # The VM's OS-level hostname, recorded at create time so later
+    # reads (SSH config, prompts) never re-derive it from live config.
+    hostname: str
     created_at: str
     last_seen_at: str | None
+    # Opaque per-platform identifiers (JSON in the column); the owning
+    # platform is the only reader (azure resource_id, wsl2 distro_name,
+    # proxmox vmid/node, lima instance_name).
+    platform_metadata: dict[str, str] = field(default_factory=dict)
+    # Operator intent flag: the operator explicitly stopped this VM, so
+    # auto-start gates (ensure_active) must not restart it.
+    operator_stopped: bool = False
 
 
 @dataclass
@@ -182,7 +186,224 @@ class ConsoleSessionRow:
 
 # -- Migrations ------------------------------------------------------------
 
-MIGRATIONS: dict[int, str] = {
+
+@dataclass
+class MigrationContext:
+    """Context handed to Python-step migrations.
+
+    ``legacy`` is a best-effort, UNVALIDATED parse of the operator's
+    config file (the whole TOML document, so hooks can reach legacy
+    sections like ``[proxmox]``). A missing or unreadable config yields
+    an empty mapping: tolerant by construction, nothing in a
+    migration may depend on it succeeding.
+    """
+
+    legacy: dict[str, Any] = field(default_factory=dict)
+
+
+def _load_legacy_toml() -> dict[str, Any]:
+    """Best-effort parse of the operator config for MigrationContext."""
+    import tomllib
+
+    from agentworks.config import CONFIG_PATH
+
+    try:
+        with CONFIG_PATH.open("rb") as f:
+            return tomllib.load(f)
+    except (OSError, UnicodeDecodeError, tomllib.TOMLDecodeError):
+        return {}
+
+
+def _migrate_vm_sites(conn: sqlite3.Connection, context: MigrationContext) -> None:
+    """v27 (the vm-site refactor): ``vms`` grows ``platform_metadata`` /
+    ``operator_stopped`` / ``hostname``; remote-Lima rows re-point at
+    their host-named site (printing ready-to-paste site manifests); the
+    legacy per-platform columns and ``vm_hosts`` drop; ``settings``
+    lands.
+    """
+    # Name the DB file in validation errors so the operator knows which
+    # file to inspect/fix (PRAGMA reports the actual attached file, so
+    # this stays honest for non-default paths, e.g. in tests).
+    db_file = conn.execute("PRAGMA database_list").fetchone()[2]
+
+    # Validate BEFORE the first DDL statement. Pre-v27 schemas only
+    # ever stored the four legacy platform names, and the vm-sites
+    # bridge refuses custom-site creates before this migration exists,
+    # so anything else is genuine corruption: fail loudly, don't guess.
+    # The map is FROZEN as of v27 in the PRE-v27 vocabulary and pinned
+    # to classes directly: a later build adding a platform must not
+    # loosen this check, and a later platform RENAME (azure -> azure-vm
+    # already happened) must not break the backfill lookup, so this
+    # deliberately does not go through VM_PLATFORM_REGISTRY keys. The
+    # scan must precede the ALTERs because sqlite3 auto-commits DDL:
+    # failing after them would leave a half-migrated v26 DB that dies
+    # on duplicate-column at every retry, even once the operator fixes
+    # the corrupt row.
+    from agentworks.capabilities.vm_platform import (
+        AzureVMPlatform,
+        LimaPlatform,
+        ProxmoxPlatform,
+        WSL2Platform,
+    )
+
+    legacy_platform_classes = {
+        "lima": LimaPlatform,
+        "wsl2": WSL2Platform,
+        "azure": AzureVMPlatform,
+        "proxmox": ProxmoxPlatform,
+    }
+    for row in conn.execute("SELECT name, platform FROM vms").fetchall():
+        if row["platform"] not in legacy_platform_classes:
+            raise sqlite3.IntegrityError(
+                f"vms row '{row['name']}' has unknown platform "
+                f"'{row['platform']}'; cannot backfill platform metadata "
+                f"(database: {db_file})"
+            )
+
+    # Same pre-DDL stance for the remote-Lima site names: a host that
+    # shadows a platform name or a bundled-site name gets a '-host'
+    # suffix (platform names are reserved for the shadow rule; bundled
+    # names are reserved built-ins), and a suffixed name landing on
+    # another real host's site would silently merge two distinct hosts;
+    # fail loudly while the DB is pristine. The set is FROZEN as of
+    # v27: a migration's output must not change when a later build adds
+    # platforms or bundled sites, so this deliberately does not derive
+    # from the live registry.
+    reserved_site_names = {
+        "lima",
+        "wsl2",
+        "azure",  # the legacy [azure] section's site keeps this name
+        "azure-vm",
+        "proxmox",
+        "lima-local",
+    }
+    host_sites: dict[str, str] = {}  # host -> site
+    for row in conn.execute(
+        "SELECT DISTINCT vm_host_name AS host FROM vms "
+        "WHERE vm_host_name IS NOT NULL"
+    ).fetchall():
+        host = row["host"]
+        site = f"{host}-host" if host in reserved_site_names else host
+        clash = next((h for h, s in host_sites.items() if s == site), None)
+        if clash is not None:
+            raise sqlite3.IntegrityError(
+                f"remote-Lima site name collision: hosts '{clash}' and "
+                f"'{host}' both map to site '{site}'; rename one host in "
+                f"BOTH vm_hosts.name and the referencing vms.vm_host_name "
+                f"rows, then retry (database: {db_file})"
+            )
+        host_sites[host] = site
+
+    conn.execute(
+        "ALTER TABLE vms ADD COLUMN platform_metadata TEXT NOT NULL DEFAULT '{}'"
+    )
+    conn.execute(
+        "ALTER TABLE vms ADD COLUMN operator_stopped INTEGER NOT NULL DEFAULT 0"
+    )
+    conn.execute("ALTER TABLE vms ADD COLUMN hostname TEXT")
+
+    # Backfill platform_metadata (the owning platform's hook) and
+    # hostname (the value the create-time bootstrap actually set),
+    # keyed by the pre-rename platform column.
+    for row in conn.execute("SELECT * FROM vms").fetchall():
+        platform = row["platform"]
+        cls = legacy_platform_classes[platform]  # validated above
+        metadata = cls.legacy_platform_metadata(row, context.legacy)
+        conn.execute(
+            "UPDATE vms SET platform_metadata = ?, hostname = ? WHERE name = ?",
+            (json.dumps(metadata), f"{platform}--{row['name']}", row["name"]),
+        )
+
+    # Local-Lima rows: the bundled site is named lima-local, not lima
+    # (the platform keeps the bare name; the site is one CONFIGURATION
+    # of it). Remote rows are excluded here: they re-point at their
+    # host-named sites below.
+    conn.execute(
+        "UPDATE vms SET platform = 'lima-local' "
+        "WHERE platform = 'lima' AND vm_host_name IS NULL"
+    )
+
+    # Remote-Lima rows: the site IS the host. The operator must
+    # declare the matching vm-site manifest; until then those VMs are
+    # in the designed stranded state, so collect ready-to-paste
+    # manifest documents and print them once at the end (the host ->
+    # site map was validated pre-DDL above).
+    site_hosts: dict[str, tuple[str | None, str]] = {}
+    for host, site in host_sites.items():
+        conn.execute(
+            "UPDATE vms SET platform = ? WHERE vm_host_name = ?", (site, host)
+        )
+        host_row = conn.execute(
+            "SELECT ssh_host FROM vm_hosts WHERE name = ?", (host,)
+        ).fetchone()
+        site_hosts[site] = (host_row["ssh_host"] if host_row else None, host)
+
+    # Rebuild vms (the vm_host_name FK blocks DROP COLUMN): drop the
+    # legacy per-platform columns and vm_host_name, rename platform to
+    # site, declare hostname NOT NULL.
+    conn.execute("""
+        CREATE TABLE vms_new (
+            name                TEXT PRIMARY KEY,
+            site                TEXT NOT NULL,
+            template            TEXT,
+            extra_packages      TEXT,
+            provisioning_status TEXT NOT NULL DEFAULT 'pending',
+            init_status         TEXT NOT NULL DEFAULT 'pending',
+            ssh_public_key      TEXT,
+            tailscale_host      TEXT,
+            cpus                INTEGER,
+            memory_gib          INTEGER,
+            disk_gib            INTEGER,
+            swap_gib            INTEGER,
+            admin_username      TEXT NOT NULL DEFAULT 'agentworks',
+            hostname            TEXT NOT NULL,
+            platform_metadata   TEXT NOT NULL DEFAULT '{}',
+            operator_stopped    INTEGER NOT NULL DEFAULT 0,
+            created_at          TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+            last_seen_at        TEXT
+        )
+    """)
+    conn.execute("""
+        INSERT INTO vms_new
+            (name, site, template, extra_packages, provisioning_status,
+             init_status, ssh_public_key, tailscale_host, cpus, memory_gib,
+             disk_gib, swap_gib, admin_username, hostname, platform_metadata,
+             operator_stopped, created_at, last_seen_at)
+            SELECT name, platform, template, extra_packages,
+                   provisioning_status, init_status, ssh_public_key,
+                   tailscale_host, cpus, memory_gib, disk_gib, swap_gib,
+                   admin_username, hostname, platform_metadata,
+                   operator_stopped, created_at, last_seen_at
+            FROM vms
+    """)
+    conn.execute("DROP TABLE vms")
+    conn.execute("ALTER TABLE vms_new RENAME TO vms")
+    conn.execute("DROP TABLE vm_hosts")
+
+    conn.execute("CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT)")
+
+    if site_hosts:
+        from agentworks import output
+        from agentworks.vms.sites import site_manifest_hint
+
+        # Everything goes through output.warn: migrations run at every
+        # Database() open, including from the shell-completion helpers
+        # that capture stdout (`agw vm list --names-only`), so stdout
+        # must stay clean for machine consumers.
+        output.warn(
+            "remote-Lima VMs now live at host-named sites; declare each "
+            "site or those VMs stay unreachable:"
+        )
+        for site, (ssh_host, host) in sorted(site_hosts.items()):
+            if site != host:
+                output.warn(
+                    f"(the host '{host}' shadows a platform name, so its "
+                    f"site is named '{site}')"
+                )
+            output.warn(f"vm-site '{site}': " + site_manifest_hint(site, vm_host=ssh_host))
+
+
+MIGRATIONS: dict[int, str | Callable[[sqlite3.Connection, MigrationContext], None]] = {
     1: """
         CREATE TABLE vm_hosts (
             name         TEXT PRIMARY KEY,
@@ -509,6 +730,11 @@ MIGRATIONS: dict[int, str] = {
         DROP TABLE workspaces;
         ALTER TABLE workspaces_new RENAME TO workspaces;
     """,
+    # -- vm-sites: platform_metadata / operator_stopped / hostname, --------
+    # -- the platform -> site rename, legacy column + vm_hosts drops, ------
+    # -- and the settings table. Python step: the backfill dispatches ------
+    # -- through the platform classes' legacy_platform_metadata hooks. -----
+    27: _migrate_vm_sites,
 }
 
 LATEST_VERSION = max(MIGRATIONS)
@@ -597,77 +823,53 @@ class Database:
         # momentarily invalidate FK references that hold by name -- the
         # SQLite-recommended pattern is to disable FKs around the rebuild
         # and run a foreign_key_check at the end to confirm consistency.
-        # Note: sqlite3 auto-commits DDL, so a mid-loop failure can leave
-        # the DB partially migrated. The foreign_key_check is best-effort
-        # consistency verification, not a full transactional guard.
+        #
+        # Each version commits as a durable checkpoint (schema_version
+        # row included): sqlite3 auto-commits DDL anyway, so a
+        # transactional whole-run guard was never real, but WITHOUT
+        # the per-version commit, a failure in version N+1 rolled back
+        # version N's schema_version INSERT while N's DDL survived, and
+        # the retry re-ran N's DDL into duplicate-column errors. With
+        # the checkpoint, retry resumes at the failed version. A
+        # failure INSIDE one version can still leave that version
+        # partially applied (the documented residual; per-version
+        # pre-DDL validation in Python steps minimizes it).
         self._conn.commit()
         self._conn.execute("PRAGMA foreign_keys = OFF")
         try:
+            context: MigrationContext | None = None
             for version in range(current + 1, LATEST_VERSION + 1):
-                for stmt in MIGRATIONS[version].split(";"):
-                    stmt = stmt.strip()
-                    if stmt:
-                        self._conn.execute(stmt)
+                step = MIGRATIONS[version]
+                if callable(step):
+                    # Python steps get the migration context (built once,
+                    # lazily; string-only runs never read the config).
+                    if context is None:
+                        context = MigrationContext(legacy=_load_legacy_toml())
+                    step(self._conn, context)
+                else:
+                    for stmt in step.split(";"):
+                        stmt = stmt.strip()
+                        if stmt:
+                            self._conn.execute(stmt)
+                violations = self._conn.execute("PRAGMA foreign_key_check").fetchall()
+                if violations:
+                    raise sqlite3.IntegrityError(
+                        f"foreign key violations after migration {version}: "
+                        f"{violations}"
+                    )
                 self._conn.execute("INSERT INTO schema_version (version) VALUES (?)", (version,))
-            violations = self._conn.execute("PRAGMA foreign_key_check").fetchall()
-            if violations:
-                raise sqlite3.IntegrityError(
-                    f"foreign key violations after migration: {violations}"
-                )
-            self._conn.commit()
+                self._conn.commit()
         finally:
             self._conn.execute("PRAGMA foreign_keys = ON")
-
-    # -- VM Hosts ----------------------------------------------------------
-
-    def insert_vm_host(self, name: str, ssh_host: str, platform: str = "lima", os: str | None = None) -> VMHostRow:
-        self._conn.execute(
-            "INSERT INTO vm_hosts (name, ssh_host, platform, os) VALUES (?, ?, ?, ?)",
-            (name, ssh_host, platform, os),
-        )
-        self._conn.commit()
-        result = self.get_vm_host(name)
-        assert result is not None
-        return result
-
-    def get_vm_host(self, name: str) -> VMHostRow | None:
-        row = self._conn.execute("SELECT * FROM vm_hosts WHERE name = ?", (name,)).fetchone()
-        return _to_vm_host(row) if row else None
-
-    def list_vm_hosts(self) -> list[VMHostRow]:
-        rows = self._conn.execute("SELECT * FROM vm_hosts ORDER BY name").fetchall()
-        return [_to_vm_host(r) for r in rows]
-
-    def update_vm_host_os(self, name: str, os: str) -> None:
-        self._conn.execute("UPDATE vm_hosts SET os = ? WHERE name = ?", (os, name))
-        self._conn.commit()
-
-    def update_vm_host_last_seen(self, name: str) -> None:
-        self._conn.execute(
-            "UPDATE vm_hosts SET last_seen_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now') WHERE name = ?",
-            (name,),
-        )
-        self._conn.commit()
-
-    def delete_vm_host(self, name: str) -> None:
-        self._conn.execute("DELETE FROM vm_hosts WHERE name = ?", (name,))
-        self._conn.commit()
-
-    def count_vms_on_host(self, vm_host_name: str) -> int:
-        row = self._conn.execute("SELECT COUNT(*) FROM vms WHERE vm_host_name = ?", (vm_host_name,)).fetchone()
-        return int(row[0])
 
     # -- VMs ---------------------------------------------------------------
 
     def insert_vm(
         self,
         name: str,
-        platform: str,
-        vm_host_name: str | None = None,
+        site: str,
+        hostname: str,
         template: str | None = None,
-        azure_resource_id: str | None = None,
-        wsl_distro_name: str | None = None,
-        proxmox_vmid: str | None = None,
         cpus: int | None = None,
         memory_gib: int | None = None,
         disk_gib: int | None = None,
@@ -676,17 +878,14 @@ class Database:
     ) -> VMRow:
         self._conn.execute(
             "INSERT INTO vms "
-            "(name, platform, vm_host_name, template, azure_resource_id, wsl_distro_name, "
-            "proxmox_vmid, cpus, memory_gib, disk_gib, swap_gib, admin_username) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "(name, site, hostname, template, cpus, memory_gib, disk_gib, "
+            "swap_gib, admin_username) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 name,
-                platform,
-                vm_host_name,
+                site,
+                hostname,
                 template,
-                azure_resource_id,
-                wsl_distro_name,
-                proxmox_vmid,
                 cpus,
                 memory_gib,
                 disk_gib,
@@ -707,10 +906,6 @@ class Database:
         rows = self._conn.execute("SELECT * FROM vms ORDER BY name").fetchall()
         return [_to_vm(r) for r in rows]
 
-    def update_vm_host_ref(self, name: str, vm_host_name: str | None) -> None:
-        self._conn.execute("UPDATE vms SET vm_host_name = ? WHERE name = ?", (vm_host_name, name))
-        self._conn.commit()
-
     def update_vm_provisioning_status(self, name: str, status: ProvisioningStatus) -> None:
         self._conn.execute("UPDATE vms SET provisioning_status = ? WHERE name = ?", (status.value, name))
         self._conn.commit()
@@ -727,16 +922,21 @@ class Database:
         self._conn.execute("UPDATE vms SET tailscale_host = NULL WHERE name = ?", (name,))
         self._conn.commit()
 
-    def update_vm_azure_resource_id(self, name: str, azure_resource_id: str) -> None:
-        self._conn.execute("UPDATE vms SET azure_resource_id = ? WHERE name = ?", (azure_resource_id, name))
+    def update_vm_platform_metadata(self, name: str, metadata: dict[str, str]) -> None:
+        """Replace the VM's platform_metadata wholesale (the owning
+        platform returns the complete dict from ``create()``)."""
+        self._conn.execute(
+            "UPDATE vms SET platform_metadata = ? WHERE name = ?",
+            (json.dumps(metadata), name),
+        )
         self._conn.commit()
 
-    def update_vm_wsl_distro_name(self, name: str, wsl_distro_name: str) -> None:
-        self._conn.execute("UPDATE vms SET wsl_distro_name = ? WHERE name = ?", (wsl_distro_name, name))
-        self._conn.commit()
-
-    def update_vm_proxmox_vmid(self, name: str, proxmox_vmid: str) -> None:
-        self._conn.execute("UPDATE vms SET proxmox_vmid = ? WHERE name = ?", (proxmox_vmid, name))
+    def set_operator_stopped(self, name: str, stopped: bool) -> None:
+        """Record operator stop/start intent (gates ensure_active)."""
+        self._conn.execute(
+            "UPDATE vms SET operator_stopped = ? WHERE name = ?",
+            (1 if stopped else 0, name),
+        )
         self._conn.commit()
 
     def update_vm_last_seen(self, name: str) -> None:
@@ -763,6 +963,28 @@ class Database:
         self._conn.execute("DELETE FROM workspaces WHERE vm_name = ?", (name,))
         self._conn.execute("DELETE FROM vm_events WHERE vm_name = ?", (name,))
         self._conn.execute("DELETE FROM vms WHERE name = ?", (name,))
+        self._conn.commit()
+
+    # -- Settings ------------------------------------------------------------
+
+    def get_setting(self, key: str) -> str | None:
+        """Install-level state (per ADR 0016 config-side state, not a
+        resource). ``None`` means the key was never written; an empty
+        string is a written-but-empty value (e.g. the declined system
+        slug), so callers can distinguish never-asked from declined.
+        """
+        row = self._conn.execute(
+            "SELECT value FROM settings WHERE key = ?", (key,)
+        ).fetchone()
+        return row["value"] if row else None
+
+    def set_setting(self, key: str, value: str) -> None:
+        """Write (or overwrite) one install-level settings row."""
+        self._conn.execute(
+            "INSERT INTO settings (key, value) VALUES (?, ?) "
+            "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+            (key, value),
+        )
         self._conn.commit()
 
     # -- Workspaces --------------------------------------------------------
@@ -1428,38 +1650,27 @@ def _eq_or_in(column: str, value: str | list[str] | None) -> tuple[str, tuple[st
 # -- Row converters --------------------------------------------------------
 
 
-def _to_vm_host(row: sqlite3.Row) -> VMHostRow:
-    return VMHostRow(
-        name=row["name"],
-        ssh_host=row["ssh_host"],
-        platform=row["platform"],
-        os=row["os"],
-        created_at=row["created_at"],
-        last_seen_at=row["last_seen_at"],
-    )
-
-
 def _to_vm(row: sqlite3.Row) -> VMRow:
     extra = row["extra_packages"]
+    metadata = row["platform_metadata"]
     return VMRow(
         name=row["name"],
-        platform=row["platform"],
-        vm_host_name=row["vm_host_name"],
+        site=row["site"],
         template=row["template"],
         extra_packages=json.loads(extra) if extra else [],
         provisioning_status=row["provisioning_status"],
         init_status=row["init_status"],
         tailscale_host=row["tailscale_host"],
-        azure_resource_id=row["azure_resource_id"],
-        wsl_distro_name=row["wsl_distro_name"],
-        proxmox_vmid=row["proxmox_vmid"],
         cpus=row["cpus"],
         memory_gib=row["memory_gib"],
         disk_gib=row["disk_gib"],
         swap_gib=row["swap_gib"],
         admin_username=row["admin_username"],
+        hostname=row["hostname"],
         created_at=row["created_at"],
         last_seen_at=row["last_seen_at"],
+        platform_metadata=json.loads(metadata) if metadata else {},
+        operator_stopped=bool(row["operator_stopped"]),
     )
 
 

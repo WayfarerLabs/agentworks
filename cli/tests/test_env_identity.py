@@ -8,8 +8,8 @@ from agentworks.env import ResourceContext, agentworks_identity_env
 def _ctx(**overrides: object) -> ResourceContext:
     base: dict[str, object] = {
         "vm_name": "vm-1",
-        "vm_host": "lima-local",
         "platform": "lima",
+        "site": "lima-local",
         "user": "agentworks",
     }
     base.update(overrides)
@@ -23,8 +23,8 @@ def test_vm_only_emits_base_three_vars() -> None:
     out = agentworks_identity_env(_ctx())
     assert out == {
         "AGENTWORKS_VM": "vm-1",
-        "AGENTWORKS_VM_HOST": "lima-local",
         "AGENTWORKS_PLATFORM": "lima",
+        "AGENTWORKS_SITE": "lima-local",
     }
 
 
@@ -67,8 +67,8 @@ def test_full_chain() -> None:
     )
     assert out == {
         "AGENTWORKS_VM": "vm-1",
-        "AGENTWORKS_VM_HOST": "lima-local",
         "AGENTWORKS_PLATFORM": "lima",
+        "AGENTWORKS_SITE": "lima-local",
         "AGENTWORKS_WORKSPACE": "ws-a",
         "AGENTWORKS_WORKSPACE_DIR": "/home/claude/ws-a",
         "AGENTWORKS_AGENT": "claude",
@@ -92,8 +92,8 @@ def test_vm_stable_subset_is_three_vars_only() -> None:
     out = vm_stable_identity_env(_ctx())
     assert out == {
         "AGENTWORKS_VM": "vm-1",
-        "AGENTWORKS_VM_HOST": "lima-local",
         "AGENTWORKS_PLATFORM": "lima",
+        "AGENTWORKS_SITE": "lima-local",
     }
 
 

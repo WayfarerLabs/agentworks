@@ -16,6 +16,7 @@ if TYPE_CHECKING:
     from agentworks.env import EnvEntry
     from agentworks.resources.reference import ResourceReference
     from agentworks.resources.registry import Registry
+    from agentworks.secrets.resolver import Resolver
     from agentworks.vms.template import VMTemplate
 
 
@@ -24,7 +25,9 @@ class ResolvedVMTemplate:
     """A fully resolved VM template with all inheritance applied."""
 
     name: str
-    # Provisioning
+    # Provisioning. No site field: placement is host/operator-scoped
+    # (--site / defaults.site / the infer-prompt model), never template
+    # state.
     cpus: int = 4
     memory: int = 8
     disk: int = 50
@@ -127,6 +130,34 @@ def resolve_template(registry: Registry, template_name: str | None = None) -> Re
     from agentworks.resources.access import kind_dict
 
     return resolve_from_dict(kind_dict(registry, "vm-template"), template_name)
+
+
+def preflight_vm_template(tmpl: ResolvedVMTemplate, resolver: Resolver) -> None:
+    """The vm-template's readiness check: its Tailscale auth key must be
+    predicted resolvable, without prompting. The key is the template's
+    responsibility, not the site's, so this runs beside (in either
+    order with) the platform's preflight, before the operation's one
+    resolve pass at the preflight boundary. Registers the declaration on
+    the resolver so that pass covers it.
+
+    The declaration lookup rides ``Resolver.register_name``'s
+    lookup-or-synthesize fallback: an operator who omits every
+    ``[vm_templates.*]`` and ``[secrets.*]`` section leaves the registry
+    empty under the ``secret`` kind, but the resolved template always
+    exists (built-in defaults apply), so a bare declaration keeps the
+    backend chain callable.
+    """
+    decl = resolver.register_name(tmpl.tailscale_auth_key)
+    if resolver.predict(decl) is None:
+        raise ConfigError(
+            f"vm-template '{tmpl.name}': the Tailscale auth key secret "
+            f"'{decl.name}' is not resolvable by any active backend",
+            hint=(
+                f"`agw secret describe {decl.name}` shows how each backend "
+                "looks the secret up; set the env var, add a backend "
+                "mapping, or extend [secret_config].backends."
+            ),
+        )
 
 
 def _append_dedupe(target: list[str], source: list[str]) -> list[str]:

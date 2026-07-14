@@ -26,7 +26,12 @@ from agentworks.errors import (
 from agentworks.sessions.tmux import AGENT_SOCKET_ROOT
 from agentworks.ssh import SSH_TRANSPORT_ERROR
 from agentworks.transports import transport
-from agentworks.vms.manager import keep_vm_active, keep_vms_active
+from agentworks.vms.manager import (
+    bind_platform,
+    bind_platforms,
+    ensure_active,
+    keep_actives,
+)
 
 _ENV_KEY_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
@@ -37,6 +42,7 @@ _KNOWN_TEMPLATE_VARS = {"session_name", "workspace_name"}
 if TYPE_CHECKING:
     from collections.abc import Mapping
 
+    from agentworks.capabilities.vm_platform import VMPlatform
     from agentworks.config import Config
     from agentworks.db import AgentRow, Database, SessionRow, VMRow, WorkspaceRow
     from agentworks.env import EnvEntry
@@ -288,22 +294,31 @@ def _require_vm_for_workspace(db: Database, ws: WorkspaceRow) -> VMRow:
 
 
 def _prepare_vm(
-    db: Database, config: Config, workspace_name: str, *, operation: str | None = None
-) -> tuple[WorkspaceRow, VMRow, RunCommand, RunCommand, Transport]:
-    """Validate workspace/VM, ensure running, and return (ws, vm, run_command, run_as_root, target).
+    db: Database,
+    config: Config,
+    workspace_name: str,
+    *,
+    operation: str | None = None,
+    platform: VMPlatform | None = None,
+) -> tuple[WorkspaceRow, VMRow, RunCommand, RunCommand, Transport, VMPlatform]:
+    """Validate workspace/VM, ensure running, and return
+    (ws, vm, run_command, run_as_root, target, platform).
 
-    If operation is set, creates an SSHLogger and attaches it to the Transport
-    so all calls log automatically. run_command and run_as_root are bound from
-    the target's methods for callers that consume RunCommand callables.
+    This is the command's composition root for the VM gate: the
+    platform is bound ONCE here (or accepted pre-bound via
+    ``platform``) and returned so callers hold it for subsequent
+    ``keep_active`` spans: re-binding would re-run the site's secret
+    resolve pass. If operation is set, creates an SSHLogger and
+    attaches it to the Transport so all calls log automatically.
     """
     from agentworks.ssh import SSHLogger
 
     ws = _require_workspace(db, workspace_name)
     vm = _require_vm_for_workspace(db, ws)
 
-    from agentworks.workspaces.manager import _ensure_vm_running
-
-    _ensure_vm_running(db, config, vm)
+    if platform is None:
+        platform = bind_platform(config, vm)
+    ensure_active(db, config, vm, platform)
 
     if vm.tailscale_host is None:
         raise StateError(
@@ -316,7 +331,7 @@ def _prepare_vm(
     target = transport(vm, config, logger=logger)
     run_command: RunCommand = target.run
     run_as_root: RunCommand = partial(target.run, sudo=True)
-    return ws, vm, run_command, run_as_root, target
+    return ws, vm, run_command, run_as_root, target, platform
 
 
 def _require_session(db: Database, name: str) -> SessionRow:
@@ -377,7 +392,7 @@ def _distinct_vms_for_sessions(db: Database, sessions: list[SessionRow]) -> list
     """Resolve the distinct set of VMs that host the given sessions.
 
     Used by the batch session operations (stop_all_sessions, restart_all_sessions,
-    list_sessions) to feed `keep_vms_active` with exactly the VMs whose SSH
+    list_sessions) to feed `keep_actives` with exactly the VMs whose SSH
     transports will be touched. Order is insertion order keyed by VM name so
     keepalive entry messages render in a stable order.
     """
@@ -659,10 +674,12 @@ def _resolve_session_env(
         agent_name=agent_name,
     )
 
+    from agentworks.vms.sites import site_platform_name
+
     ctx = ResourceContext(
         vm_name=vm.name,
-        vm_host=vm.vm_host_name,
-        platform=vm.platform,
+        platform=site_platform_name(vm.site, registry),
+        site=vm.site,
         user=linux_user,
         workspace_name=ws.name,
         workspace_dir=ws.workspace_path,
@@ -1074,7 +1091,7 @@ def _prompt_vm(db: Database) -> VMRow:
             "--vm is required in non-interactive mode when no workspace or agent pins the VM",
             entity_kind="session",
         )
-    options = [f"{v.name}  ({v.platform})" for v in usable]
+    options = [f"{v.name}  ({v.site})" for v in usable]
     idx = output.choose("Select a VM:", options)
     return usable[idx]
 
@@ -1398,31 +1415,21 @@ def create_session(
 
     template = _resolve_template(registry, template_name)
 
-    # ===== Ensure VM running + Tailscale reachable (SSH, no mutations) ======
+    # ===== Bind + boundary resolve, then ensure VM running ==================
 
-    from agentworks.workspaces.manager import _ensure_vm_running as _ensure_vm_up
+    # The command's ONE platform bind AND its one resolve pass: the
+    # session's env-chain secrets (via the pre-create SecretTarget)
+    # join the site's config secrets in a single prompt session at the
+    # preflight boundary, before any op (``ensure_active`` may need the
+    # site secret (proxmox's status read), so the boundary must
+    # precede it). The bound platform threads through _prepare_vm and
+    # the session-internal hold below (re-binding re-runs the boundary).
+    from agentworks.secrets.resolver import Resolver
 
-    _ensure_vm_up(db, config, vm)
-    # Reload the VM row: ``_ensure_vm_running`` may have rejoined Tailscale
-    # (only when the VM was stopped/deallocated) and updated
-    # ``vms.tailscale_host``. The in-memory ``vm`` from our pre-check would
-    # otherwise read stale and the check below could spuriously raise.
-    refreshed_vm = db.get_vm(target_vm_name)
-    assert refreshed_vm is not None  # existed two lines ago; provisioner.start() can't remove it
-    vm = refreshed_vm
-    if vm.tailscale_host is None:
-        raise StateError(
-            f"VM '{vm.name}' has no Tailscale address",
-            entity_kind="vm",
-            entity_name=vm.name,
-        )
-
-    # ===== Eager-resolve secrets (single call, before any state mutation) ===
-
-    from agentworks.secrets import resolve_for_command
-
-    secret_values = resolve_for_command(
-        [
+    resolver = Resolver(config, registry)
+    vm_platform = bind_platform(
+        config, vm, registry=registry, resolver=resolver,
+        targets=[
             _session_secret_target_pre_create(
                 registry,
                 name=name,
@@ -1438,14 +1445,30 @@ def create_session(
                 is_admin_mode=(agent_name is None),
             ),
         ],
-        config,
-        registry,
     )
-    # If we reach here, every secret the SESSION ENV references is
-    # resolved into secret_values (threaded to the compose site below).
-    # A downstream create_agent still performs its own git-token
-    # resolve; those secrets are disjoint from env references in
-    # practice (token names default to git-token-<name>).
+    ensure_active(db, config, vm, vm_platform)
+    # Reload the VM row: ``ensure_active`` may have rejoined Tailscale
+    # (only when the VM was stopped/deallocated) and updated
+    # ``vms.tailscale_host``. The in-memory ``vm`` from our pre-check would
+    # otherwise read stale and the check below could spuriously raise.
+    # (The SecretTarget above read only vm.template, which a refresh
+    # cannot change, so the pre-refresh row was safe to target.)
+    refreshed_vm = db.get_vm(target_vm_name)
+    assert refreshed_vm is not None  # existed two lines ago; ensure_active can't remove it
+    vm = refreshed_vm
+    if vm.tailscale_host is None:
+        raise StateError(
+            f"VM '{vm.name}' has no Tailscale address",
+            entity_kind="vm",
+            entity_name=vm.name,
+        )
+
+    secret_values = resolver.values
+    # Every secret the SESSION ENV references is resolved into
+    # secret_values (threaded to the compose site below). A downstream
+    # create_agent still performs its own git-token resolve; those
+    # secrets are disjoint from env references in practice (token names
+    # default to git-token-<name>).
 
     # ===== Atomic state mutations with rollback =============================
 
@@ -1463,7 +1486,10 @@ def create_session(
             try:
                 from agentworks.agents.manager import delete_agent
 
-                delete_agent(db, config, name=agent_name, force=True, yes=True)
+                delete_agent(
+                    db, config, name=agent_name, force=True, yes=True,
+                    platform=vm_platform,
+                )
             except Exception as e:
                 output.warn(
                     f"rollback: failed to delete ephemeral agent '{agent_name}': {e}. "
@@ -1473,7 +1499,10 @@ def create_session(
             try:
                 from agentworks.workspaces.manager import delete_workspace
 
-                delete_workspace(db, config, name=workspace_name, force=True, yes=True)
+                delete_workspace(
+                    db, config, name=workspace_name, force=True, yes=True,
+                    platform=vm_platform,
+                )
             except Exception as e:
                 output.warn(
                     f"rollback: failed to delete ephemeral workspace '{workspace_name}': {e}. "
@@ -1491,6 +1520,7 @@ def create_session(
                 name=workspace_name,
                 vm_name=vm.name,
                 template_name=workspace_template,
+                platform=vm_platform,
             )
             workspace_created = True
         if new_agent:
@@ -1503,14 +1533,17 @@ def create_session(
                 name=agent_name,
                 vm_name=vm.name,
                 template=agent_template,
+                platform=vm_platform,
             )
             agent_created = True
 
         # ---- Session-internal mutations ---------------------------------------
-        ws, vm_check, run_command, run_as_root, target = _prepare_vm(
-            db, config, workspace_name, operation="session-create"
+        ws, vm_check, run_command, run_as_root, target, _ = _prepare_vm(
+            db, config, workspace_name, operation="session-create",
+            platform=vm_platform,
         )
-        with keep_vm_active(db, config, vm_check):
+        # _prepare_vm just gated; hold only (no second gate probe).
+        with vm_platform.vm_active(vm_check, config=config):
             # Resolve mode and linux user (no side effects; safe outside the try).
             resolved_agent_name: str | None = None
             agent_target = None
@@ -1867,10 +1900,11 @@ def stop_session(
     from agentworks.sessions.tmux import force_kill_tmux_server
 
     session = _require_session(db, name)
-    _ws, vm, _run_command, _, admin_target = _prepare_vm(
+    _ws, vm, _run_command, _, admin_target, vm_platform = _prepare_vm(
         db, config, session.workspace_name, operation="session-stop"
     )
-    with keep_vm_active(db, config, vm):
+    # _prepare_vm just gated; hold only (no second gate probe).
+    with vm_platform.vm_active(vm, config=config):
         session = _ensure_pid(session, target=admin_target, db=db)
         status = check_session_status(session, target=admin_target)
 
@@ -1948,10 +1982,11 @@ def restart_session(
     registry = build_registry(config)
 
     session = _require_session(db, name)
-    ws, vm, run_command, _run_as_root, admin_target = _prepare_vm(
+    ws, vm, run_command, _run_as_root, admin_target, vm_platform = _prepare_vm(
         db, config, session.workspace_name, operation="session-restart",
     )
-    with keep_vm_active(db, config, vm):
+    # _prepare_vm just gated; hold only (no second gate probe).
+    with vm_platform.vm_active(vm, config=config):
         session = _ensure_pid(session, target=admin_target, db=db)
 
         # Legacy migration: sessions predating the per-session-socket model
@@ -2013,6 +2048,14 @@ def restart_session(
         # secret referenced by this session's env chain BEFORE any kill /
         # destructive step. Non-interactive failures surface as
         # SecretUnavailableError with no partial state to clean up.
+        # This is the recorded bail-before-prompt exception to the
+        # one-boundary-resolve contract: the site's config secrets
+        # resolved at _prepare_vm's bind (before ensure_active's ops
+        # needed them), but the env chain deliberately resolves HERE
+        # (after the BROKEN/--force refusal and the "Restart?" confirm)
+        # so a declined restart never prompts for secrets it was about
+        # to discard. Folding it into the boundary would trade that
+        # operator protection for one fewer session on proxmox only.
         template = _resolve_template(registry, session.template)
 
         # Pre-flight the template's required commands before the destructive
@@ -2186,7 +2229,7 @@ def stop_all_sessions(
     # batch_check_all_sessions) issue per-VM round-trips; on WSL2 they
     # would race the idle timer without the anchor. No-op on non-WSL2.
     distinct_vms = _distinct_vms_for_sessions(db, sessions)
-    with keep_vms_active(db, config, distinct_vms):
+    with keep_actives(db, config, bind_platforms(config, distinct_vms)):
         # Auto-repair NULL-PID sessions, then batch check
         sessions = ensure_pids_batch(sessions, db=db, config=config)
         status_map = batch_check_all_sessions(sessions, db=db, config=config)
@@ -2283,7 +2326,7 @@ def restart_all_sessions(
     distinct_vms = _distinct_vms_for_sessions(db, sessions)
 
     failed: list[tuple[str, str]] = []
-    with keep_vms_active(db, config, distinct_vms):
+    with keep_actives(db, config, bind_platforms(config, distinct_vms)):
         # Auto-repair NULL-PID sessions, then batch check
         sessions = ensure_pids_batch(sessions, db=db, config=config)
         status_map = batch_check_all_sessions(sessions, db=db, config=config)
@@ -2376,10 +2419,11 @@ def delete_session(
 ) -> None:
     """Delete a session. Prompts if running/unknown (--yes to skip). --force for BROKEN."""
     session = _require_session(db, name)
-    ws, vm, _run_command, _run_as_root, admin_target = _prepare_vm(
+    ws, vm, _run_command, _run_as_root, admin_target, vm_platform = _prepare_vm(
         db, config, session.workspace_name, operation="session-delete"
     )
-    with keep_vm_active(db, config, vm):
+    # _prepare_vm just gated; hold only (no second gate probe).
+    with vm_platform.vm_active(vm, config=config):
         session = _ensure_pid(session, target=admin_target, db=db)
         status = check_session_status(session, target=admin_target)
 
@@ -2549,7 +2593,7 @@ def describe_session(
 ) -> None:
     """Show session details."""
     session = _require_session(db, name)
-    ws, vm, run_command, _, target = _prepare_vm(db, config, session.workspace_name, operation=None)
+    ws, vm, run_command, _, target, _vm_platform = _prepare_vm(db, config, session.workspace_name, operation=None)
     session = _ensure_pid(session, target=target, db=db)
 
     status = check_session_status(session, target=target)
@@ -2681,7 +2725,7 @@ def list_sessions(
     )
 
     status_map: dict[str, SessionStatus] = {}
-    with keep_vms_active(db, config, status_keepalive_vms):
+    with keep_actives(db, config, bind_platforms(config, status_keepalive_vms)):
         if not no_status:
             sessions = ensure_pids_batch(sessions, db=db, config=config)
             status_map = batch_check_all_sessions(sessions, db=db, config=config)
@@ -2767,8 +2811,11 @@ def attach_session(
     from agentworks.sessions.tmux import tmux_cmd
 
     session = _require_session(db, name)
-    _ws, vm, _run_command, _, target = _prepare_vm(db, config, session.workspace_name, operation="session-attach")
-    with keep_vm_active(db, config, vm):
+    _ws, vm, _run_command, _, target, vm_platform = _prepare_vm(
+        db, config, session.workspace_name, operation="session-attach"
+    )
+    # _prepare_vm just gated; hold only (no second gate probe).
+    with vm_platform.vm_active(vm, config=config):
         session = _ensure_pid(session, target=target, db=db)
         status = check_session_status(session, target=target)
 
@@ -2800,8 +2847,11 @@ def session_logs(
     from agentworks.sessions.tmux import capture_output
 
     session = _require_session(db, name)
-    _ws, vm, run_command, _, target = _prepare_vm(db, config, session.workspace_name, operation="session-logs")
-    with keep_vm_active(db, config, vm):
+    _ws, vm, run_command, _, target, vm_platform = _prepare_vm(
+        db, config, session.workspace_name, operation="session-logs"
+    )
+    # _prepare_vm just gated; hold only (no second gate probe).
+    with vm_platform.vm_active(vm, config=config):
         session = _ensure_pid(session, target=target, db=db)
         status = check_session_status(session, target=target)
 

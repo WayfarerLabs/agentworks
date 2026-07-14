@@ -36,8 +36,9 @@ import pytest
 from agentworks import output
 from agentworks.db import Database
 from agentworks.errors import ValidationError
+from agentworks.secrets.resolver import Resolver
 
-from .conftest import stub_build_registry
+from .conftest import stub_build_registry, stub_vm_gates
 
 
 @pytest.fixture(autouse=True)
@@ -55,9 +56,9 @@ def _seed_two_vms(tmp_path: Path) -> Database:
     """
     db = Database(tmp_path / "test.db")
     db._conn.execute(
-        "INSERT INTO vms (name, platform, admin_username, tailscale_host, init_status) VALUES "
-        "('vm-A', 'lima', 'admin', '100.64.0.1', 'complete'),"
-        "('vm-B', 'lima', 'admin', '100.64.0.2', 'complete')"
+        "INSERT INTO vms (name, site, hostname, admin_username, tailscale_host, init_status) VALUES "
+        "('vm-A', 'lima', 'h', 'admin', '100.64.0.1', 'complete'),"
+        "('vm-B', 'lima', 'h', 'admin', '100.64.0.2', 'complete')"
     )
     db._conn.execute(
         "INSERT INTO workspaces (name, vm_name, workspace_path, linux_group) VALUES "
@@ -74,8 +75,8 @@ def _seed_one_vm(tmp_path: Path) -> Database:
     """Single VM with one workspace."""
     db = Database(tmp_path / "test.db")
     db._conn.execute(
-        "INSERT INTO vms (name, platform, admin_username, tailscale_host, init_status) "
-        "VALUES ('vm1', 'lima', 'admin', '100.64.0.5', 'complete')"
+        "INSERT INTO vms (name, site, hostname, admin_username, tailscale_host, init_status) "
+        "VALUES ('vm1', 'lima', 'h', 'admin', '100.64.0.5', 'complete')"
     )
     db._conn.execute(
         "INSERT INTO workspaces (name, vm_name, workspace_path, linux_group) "
@@ -149,7 +150,7 @@ def test_explicit_vm_agreeing_with_workspace_passes_anchor_check(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """--vm vm-A + --workspace ws-A agree, so the anchor check passes.
-    The first downstream call (_ensure_vm_running) is what we use as a
+    The first downstream call (ensure_active) is what we use as a
     sentinel that we got past validation."""
     from agentworks.sessions import manager as session_manager
     from agentworks.sessions.manager import create_session
@@ -158,9 +159,14 @@ def test_explicit_vm_agreeing_with_workspace_passes_anchor_check(
     config = SimpleNamespace(session=SimpleNamespace(history_limit=50000))
 
     # Template resolution is downstream of anchor cross-check but upstream
-    # of _ensure_vm_running; stub it so the SimpleNamespace config doesn't
+    # of ensure_active; stub it so the SimpleNamespace config doesn't
     # need session_templates.
     monkeypatch.setattr(session_manager, "_resolve_template", lambda *a, **k: None)
+    # The pre-create SecretTarget is built before the bind boundary and
+    # reads template env; the None template above has none to read.
+    monkeypatch.setattr(
+        session_manager, "_session_secret_target_pre_create", lambda *a, **k: object()
+    )
 
     called: list[str] = []
 
@@ -168,7 +174,8 @@ def test_explicit_vm_agreeing_with_workspace_passes_anchor_check(
         called.append("ensure_vm_up")
         raise RuntimeError("stop after anchor check")
 
-    monkeypatch.setattr("agentworks.workspaces.manager._ensure_vm_running", _spy)
+    stub_vm_gates(monkeypatch)
+    monkeypatch.setattr("agentworks.sessions.manager.ensure_active", _spy)
 
     with pytest.raises(RuntimeError, match="stop after anchor check"):
         create_session(
@@ -245,6 +252,11 @@ def test_no_vm_anchor_with_single_vm_auto_selects(
     config = SimpleNamespace(session=SimpleNamespace(history_limit=50000))
 
     monkeypatch.setattr(session_manager, "_resolve_template", lambda *a, **k: None)
+    # The pre-create SecretTarget is built before the bind boundary and
+    # reads template env; the None template above has none to read.
+    monkeypatch.setattr(
+        session_manager, "_session_secret_target_pre_create", lambda *a, **k: object()
+    )
 
     called: list[str] = []
 
@@ -252,7 +264,8 @@ def test_no_vm_anchor_with_single_vm_auto_selects(
         called.append("ensure_vm_up")
         raise RuntimeError("stop after VM resolution")
 
-    monkeypatch.setattr("agentworks.workspaces.manager._ensure_vm_running", _spy)
+    stub_vm_gates(monkeypatch)
+    monkeypatch.setattr("agentworks.sessions.manager.ensure_active", _spy)
 
     with pytest.raises(RuntimeError, match="stop after VM resolution"):
         create_session(
@@ -352,13 +365,13 @@ def test_new_agent_with_explicit_agent_name(
     config = SimpleNamespace(session=SimpleNamespace(history_limit=50000))
 
     monkeypatch.setattr(session_manager, "_resolve_template", lambda *a, **k: None)
+    # The pre-create SecretTarget is built before the bind boundary and
+    # reads template env; the None template above has none to read.
     monkeypatch.setattr(
         session_manager, "_session_secret_target_pre_create", lambda *a, **k: None
     )
     monkeypatch.setattr("agentworks.secrets.resolve_for_command", lambda *a, **k: {})
-    monkeypatch.setattr(
-        "agentworks.workspaces.manager._ensure_vm_running", lambda *a, **k: None
-    )
+    stub_vm_gates(monkeypatch)
 
     create_agent_calls: list[dict[str, object]] = []
 
@@ -377,7 +390,10 @@ def test_new_agent_with_explicit_agent_name(
             new_agent=True,
             agent_name="my-named-agent",
         )
-    assert create_agent_calls == [
+    cli_shaped = [
+        {k: v for k, v in c.items() if k != "platform"} for c in create_agent_calls
+    ]
+    assert cli_shaped == [
         {"name": "my-named-agent", "vm_name": "vm1", "template": None}
     ]
     db.close()
@@ -395,20 +411,20 @@ def test_ephemeral_agent_name_defaults_to_session_name(
 
     db = Database(tmp_path / "test.db")
     db._conn.execute(
-        "INSERT INTO vms (name, platform, admin_username, tailscale_host) "
-        "VALUES ('bbvm1', 'azure', 'admin', '100.64.0.5')"
+        "INSERT INTO vms (name, site, hostname, admin_username, tailscale_host) "
+        "VALUES ('bbvm1', 'azure', 'h', 'admin', '100.64.0.5')"
     )
     db._conn.commit()
     config = SimpleNamespace(session=SimpleNamespace(history_limit=50000))
 
     monkeypatch.setattr(session_manager, "_resolve_template", lambda *a, **k: None)
+    # The pre-create SecretTarget is built before the bind boundary and
+    # reads template env; the None template above has none to read.
     monkeypatch.setattr(
         session_manager, "_session_secret_target_pre_create", lambda *a, **k: None
     )
     monkeypatch.setattr("agentworks.secrets.resolve_for_command", lambda *a, **k: {})
-    monkeypatch.setattr(
-        "agentworks.workspaces.manager._ensure_vm_running", lambda *a, **k: None
-    )
+    stub_vm_gates(monkeypatch)
 
     workspace_calls: list[dict[str, object]] = []
     agent_calls: list[dict[str, object]] = []
@@ -471,10 +487,7 @@ def _install_session_prep_stubs(monkeypatch: pytest.MonkeyPatch) -> None:
     config -- no real VM, no real SSH, no real templates."""
     from tests.conftest import stub_session_resolvers
 
-    monkeypatch.setattr(
-        "agentworks.workspaces.manager._ensure_vm_running",
-        lambda *a, **k: None,
-    )
+    stub_vm_gates(monkeypatch)
 
     class _Result:
         ok = True
@@ -498,23 +511,28 @@ def test_eager_resolve_fires_exactly_once_for_new_workspace_and_new_agent(
 ) -> None:
     """``new_workspace=True + new_agent=True`` must prompt at most once
     for the union of all secrets across the three creations. Asserts the
-    orchestrator calls resolve_for_command exactly once and that the
-    call happens BEFORE create_workspace / create_agent run."""
+    orchestrator runs exactly one boundary bind (which hosts the one
+    resolve pass: env chain + site secrets) and that it happens BEFORE
+    create_workspace / create_agent run."""
     from agentworks.sessions.manager import create_session
 
     db = Database(tmp_path / "test.db")
     db._conn.execute(
-        "INSERT INTO vms (name, platform, admin_username, tailscale_host) "
-        "VALUES ('vm1', 'lima', 'admin', '100.64.0.5')"
+        "INSERT INTO vms (name, site, hostname, admin_username, tailscale_host) "
+        "VALUES ('vm1', 'lima', 'h', 'admin', '100.64.0.5')"
     )
     db._conn.commit()
     _install_session_prep_stubs(monkeypatch)
 
     sequence: list[str] = []
 
-    def _resolve_spy(*a: object, **k: object) -> dict[str, str]:
-        sequence.append("resolve_for_command")
-        return {}
+    def _bind_spy(
+        config: object, vm: object, *, resolver: Resolver | None = None, **k: object
+    ) -> object:
+        sequence.append("boundary_bind")
+        if resolver is not None and not resolver.resolved:
+            resolver.resolve()  # empty set: never touches real backends
+        return object()
 
     def _ws_spy(db: object, config: object, **kwargs: object) -> None:
         sequence.append("create_workspace")
@@ -529,7 +547,7 @@ def test_eager_resolve_fires_exactly_once_for_new_workspace_and_new_agent(
         sequence.append("create_agent")
         db.insert_agent(kwargs["name"], kwargs["vm_name"], f"aw-{kwargs['name']}")  # type: ignore[attr-defined]
 
-    monkeypatch.setattr("agentworks.secrets.resolve_for_command", _resolve_spy)
+    monkeypatch.setattr("agentworks.sessions.manager.bind_platform", _bind_spy)
     monkeypatch.setattr("agentworks.workspaces.manager.create_workspace", _ws_spy)
     monkeypatch.setattr("agentworks.agents.manager.create_agent", _ag_spy)
 
@@ -554,9 +572,9 @@ def test_eager_resolve_fires_exactly_once_for_new_workspace_and_new_agent(
             vm_name="vm1",
         )
 
-    assert sequence.count("resolve_for_command") == 1
+    assert sequence.count("boundary_bind") == 1
     assert sequence == [
-        "resolve_for_command",
+        "boundary_bind",
         "create_workspace",
         "create_agent",
         "prepare_vm",
@@ -575,13 +593,19 @@ def test_nested_creates_are_their_own_composition_units(
     single eager resolve covers the session's needs (union prompt), and
     the secret sets are disjoint in practice. If someone threads
     ``values=`` or ``registry=`` through this seam to "save" a resolve,
-    this test trips."""
+    this test trips.
+
+    One deliberate carve-out (the vm-sites bind-once design): the BOUND
+    ``platform`` threads through. It is the command's one platform bind
+    (prompt-once for site config secrets like the proxmox token),
+    a typed, site-scoped object, not the open-ended values/registry
+    smuggling this pin exists to block."""
     from agentworks.sessions.manager import create_session
 
     db = Database(tmp_path / "test.db")
     db._conn.execute(
-        "INSERT INTO vms (name, platform, admin_username, tailscale_host) "
-        "VALUES ('vm1', 'lima', 'admin', '100.64.0.5')"
+        "INSERT INTO vms (name, site, hostname, admin_username, tailscale_host) "
+        "VALUES ('vm1', 'lima', 'h', 'admin', '100.64.0.5')"
     )
     db._conn.commit()
     _install_session_prep_stubs(monkeypatch)
@@ -627,8 +651,8 @@ def test_nested_creates_are_their_own_composition_units(
     # Allowlist, not denylist: the seam contract is CLI-shaped args and
     # NOTHING else, so any smuggled kwarg (values, registry, resolved,
     # parent_registry, ...) trips this regardless of its name.
-    assert seam_kwargs["create_workspace"] == {"name", "vm_name", "template_name"}
-    assert seam_kwargs["create_agent"] == {"name", "vm_name", "template"}
+    assert seam_kwargs["create_workspace"] == {"name", "vm_name", "template_name", "platform"}
+    assert seam_kwargs["create_agent"] == {"name", "vm_name", "template", "platform"}
     db.close()
 
 
@@ -642,8 +666,8 @@ def test_failure_after_ephemeral_create_rolls_back_ephemerals(
 
     db = Database(tmp_path / "test.db")
     db._conn.execute(
-        "INSERT INTO vms (name, platform, admin_username, tailscale_host) "
-        "VALUES ('vm1', 'lima', 'admin', '100.64.0.5')"
+        "INSERT INTO vms (name, site, hostname, admin_username, tailscale_host) "
+        "VALUES ('vm1', 'lima', 'h', 'admin', '100.64.0.5')"
     )
     db._conn.commit()
     _install_session_prep_stubs(monkeypatch)
@@ -705,13 +729,13 @@ def test_new_agent_inherits_vm_from_existing_workspace(
     config = SimpleNamespace(session=SimpleNamespace(history_limit=50000))
 
     monkeypatch.setattr(session_manager, "_resolve_template", lambda *a, **k: None)
+    # The pre-create SecretTarget is built before the bind boundary and
+    # reads template env; the None template above has none to read.
     monkeypatch.setattr(
         session_manager, "_session_secret_target_pre_create", lambda *a, **k: None
     )
     monkeypatch.setattr("agentworks.secrets.resolve_for_command", lambda *a, **k: {})
-    monkeypatch.setattr(
-        "agentworks.workspaces.manager._ensure_vm_running", lambda *a, **k: None
-    )
+    stub_vm_gates(monkeypatch)
 
     create_agent_calls: list[dict[str, object]] = []
 
@@ -790,8 +814,13 @@ def test_admin_non_interactive_on_vm_with_agents_does_not_prompt(
     config = SimpleNamespace(session=SimpleNamespace(history_limit=50000))
 
     # Stub template resolution so the SimpleNamespace doesn't need
-    # session_templates; the call we want to land at is _ensure_vm_running.
+    # session_templates; the call we want to land at is ensure_active.
     monkeypatch.setattr(session_manager, "_resolve_template", lambda *a, **k: None)
+    # The pre-create SecretTarget is built before the bind boundary and
+    # reads template env; the None template above has none to read.
+    monkeypatch.setattr(
+        session_manager, "_session_secret_target_pre_create", lambda *a, **k: object()
+    )
 
     called: list[str] = []
 
@@ -799,9 +828,10 @@ def test_admin_non_interactive_on_vm_with_agents_does_not_prompt(
         called.append("ensure_vm_up")
         raise RuntimeError("stop after mode-prompt gate")
 
-    monkeypatch.setattr("agentworks.workspaces.manager._ensure_vm_running", _spy)
+    stub_vm_gates(monkeypatch)
+    monkeypatch.setattr("agentworks.sessions.manager.ensure_active", _spy)
 
-    # If admin is honored, we reach _ensure_vm_running. If admin is
+    # If admin is honored, we reach ensure_active. If admin is
     # erased and the prompt fires, the autouse non-interactive fixture
     # makes it raise ValidationError first.
     with pytest.raises(RuntimeError, match="stop after mode-prompt gate"):
@@ -872,12 +902,18 @@ def _stub_for_post_prompt_flow(monkeypatch: pytest.MonkeyPatch) -> list[str]:
 
     called: list[str] = []
     monkeypatch.setattr(session_manager, "_resolve_template", lambda *a, **k: None)
+    # The pre-create SecretTarget is built before the bind boundary and
+    # reads template env; the None template above has none to read.
+    monkeypatch.setattr(
+        session_manager, "_session_secret_target_pre_create", lambda *a, **k: object()
+    )
 
     def _spy(*a: object, **k: object) -> None:
         called.append("ensure_vm_up")
         raise RuntimeError("stop after prompt")
 
-    monkeypatch.setattr("agentworks.workspaces.manager._ensure_vm_running", _spy)
+    stub_vm_gates(monkeypatch)
+    monkeypatch.setattr("agentworks.sessions.manager.ensure_active", _spy)
     return called
 
 
@@ -926,13 +962,13 @@ def test_workspace_prompt_picks_create_new(
     # Stub the path up through eager-resolve so we land on the
     # ephemeral-create step cleanly.
     monkeypatch.setattr(session_manager, "_resolve_template", lambda *a, **k: None)
+    # The pre-create SecretTarget is built before the bind boundary and
+    # reads template env; the None template above has none to read.
     monkeypatch.setattr(
         session_manager, "_session_secret_target_pre_create", lambda *a, **k: None
     )
     monkeypatch.setattr("agentworks.secrets.resolve_for_command", lambda *a, **k: {})
-    monkeypatch.setattr(
-        "agentworks.workspaces.manager._ensure_vm_running", lambda *a, **k: None
-    )
+    stub_vm_gates(monkeypatch)
 
     create_workspace_calls: list[dict[str, object]] = []
 
@@ -951,7 +987,11 @@ def test_workspace_prompt_picks_create_new(
         )
     # The flow reached create_workspace, which means new_workspace=True was set
     # by the prompt-driven path.
-    assert create_workspace_calls == [{"name": "s1", "vm_name": "vm1", "template_name": None}]
+    cli_shaped = [
+        {k: v for k, v in c.items() if k != "platform"}
+        for c in create_workspace_calls
+    ]
+    assert cli_shaped == [{"name": "s1", "vm_name": "vm1", "template_name": None}]
     db.close()
 
 
@@ -1030,13 +1070,13 @@ def test_mode_prompt_picks_create_new(
 
     # Stub the path so we land on create_agent cleanly.
     monkeypatch.setattr(session_manager, "_resolve_template", lambda *a, **k: None)
+    # The pre-create SecretTarget is built before the bind boundary and
+    # reads template env; the None template above has none to read.
     monkeypatch.setattr(
         session_manager, "_session_secret_target_pre_create", lambda *a, **k: None
     )
     monkeypatch.setattr("agentworks.secrets.resolve_for_command", lambda *a, **k: {})
-    monkeypatch.setattr(
-        "agentworks.workspaces.manager._ensure_vm_running", lambda *a, **k: None
-    )
+    stub_vm_gates(monkeypatch)
 
     create_agent_calls: list[dict[str, object]] = []
 
@@ -1054,7 +1094,10 @@ def test_mode_prompt_picks_create_new(
             workspace="ws1",
         )
     # The flow reached create_agent with the session name defaulted in.
-    assert create_agent_calls == [{"name": "s1", "vm_name": "vm1", "template": None}]
+    cli_shaped = [
+        {k: v for k, v in c.items() if k != "platform"} for c in create_agent_calls
+    ]
+    assert cli_shaped == [{"name": "s1", "vm_name": "vm1", "template": None}]
     db.close()
 
 
@@ -1200,7 +1243,7 @@ def test_vm_and_existing_agent_mismatch_fails_before_workspace_prompt(
     db = _seed_two_vms(tmp_path)
     config = SimpleNamespace(session=SimpleNamespace(history_limit=50000))
 
-    # If a prompt fires, this raises — proves the validation came first.
+    # If a prompt fires, this raises: proves the validation came first.
     monkeypatch.setattr(output, "is_interactive", lambda: True)
     monkeypatch.setattr(
         output, "choose", lambda *a, **k: (_ for _ in ()).throw(AssertionError("no prompt should fire"))
@@ -1370,8 +1413,8 @@ def _write_parity_config(tmp_path: Path) -> Path:
 def _seed_parity_db(tmp_path: Path) -> Database:
     db = Database(tmp_path / "parity.db")
     db._conn.execute(
-        "INSERT INTO vms (name, platform, admin_username, tailscale_host, template) "
-        "VALUES ('vm1', 'lima', 'admin', '100.64.0.5', 'default')"
+        "INSERT INTO vms (name, site, hostname, admin_username, tailscale_host, template) "
+        "VALUES ('vm1', 'lima', 'h', 'admin', '100.64.0.5', 'default')"
     )
     db._conn.execute(
         "INSERT INTO workspaces (name, vm_name, workspace_path, linux_group, template) "

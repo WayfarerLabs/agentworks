@@ -1,10 +1,11 @@
 """Tests for the factory functions in :mod:`agentworks.transports`.
 
 Covers the three named factories (``transport``, ``agent_transport``,
-``provisioner_transport``), the low-level helper (``transport_for_user``),
-the no-failover invariant (SDD R3), the Azure ``transient_route``
-lifecycle, the Proxmox typed-error hint, the reachability-probe retry
-loop, the defensive empty-host guard, and ``wait_for_reconnect``.
+``native_transport``), the low-level helper (``transport_for_user``),
+the no-failover invariant (polymorphic-transports SDD R3), the Azure
+``transient_route`` lifecycle, the None-return typed error, the
+reachability-probe retry loop, the defensive empty-host guard, and
+``wait_for_reconnect``.
 """
 
 from __future__ import annotations
@@ -24,7 +25,7 @@ from agentworks.transports import (
     Transport,
     WSL2Transport,
     agent_transport,
-    provisioner_transport,
+    native_transport,
     transport,
     transport_for_user,
     wait_for_reconnect,
@@ -36,13 +37,13 @@ def _mock_vm(
     name: str = "vm1",
     tailscale_host: str | None = "100.64.0.1",
     admin_username: str = "agentworks",
-    platform: str = "lima",
+    site: str = "lima",
 ) -> MagicMock:
     vm = MagicMock()
     vm.name = name
     vm.tailscale_host = tailscale_host
     vm.admin_username = admin_username
-    vm.platform = platform
+    vm.site = site
     return vm
 
 
@@ -125,13 +126,13 @@ def test_admin_and_agent_transports_differ_only_in_user() -> None:
 
 # ---------------------------------------------------------------------------
 # R3: no automatic failover. The named factories never reach for the
-# provisioner transport, even when the canonical transport raises.
+# native transport, even when the canonical transport raises.
 # ---------------------------------------------------------------------------
 
 
-def test_transport_failure_does_not_invoke_provisioner_transport() -> None:
+def test_transport_failure_does_not_invoke_native_transport() -> None:
     """SDD R3 invariant. ``transport()`` raising must not silently fall
-    through to ``provisioner_transport()``. The canonical path either
+    through to ``native_transport()``. The canonical path either
     works or fails; the operator opts in to the platform-native path.
 
     Covers two error paths: the no-tailscale-host case (typed
@@ -143,104 +144,102 @@ def test_transport_failure_does_not_invoke_provisioner_transport() -> None:
     config = _mock_config()
 
     with (
-        patch("agentworks.transports.provisioner_transport") as mock_prov,
+        patch("agentworks.transports.native_transport") as mock_native,
         pytest.raises(StateError),
     ):
         transport(vm, config)
-    mock_prov.assert_not_called()
+    mock_native.assert_not_called()
 
     vm = _mock_vm()  # has tailscale_host now
     with (
-        patch("agentworks.transports.provisioner_transport") as mock_prov,
+        patch("agentworks.transports.native_transport") as mock_native,
         patch("agentworks.transports.transport_for_user", side_effect=RuntimeError("synthetic")),
         pytest.raises(RuntimeError),
     ):
         transport(vm, config)
-    mock_prov.assert_not_called()
+    mock_native.assert_not_called()
 
 
 # ---------------------------------------------------------------------------
-# provisioner_transport: Lima happy path
+# native_transport: Lima happy path
 # ---------------------------------------------------------------------------
 
 
-def _fake_lima_provisioner() -> MagicMock:
-    prov = MagicMock()
-    prov.transient_route.return_value = contextlib.nullcontext()
-    prov.provisioner_transport.return_value = LimaTransport(vm_name="vm1")
-    return prov
+def _fake_lima_platform() -> MagicMock:
+    platform = MagicMock()
+    platform.name = "lima"
+    platform.transient_route.return_value = contextlib.nullcontext()
+    platform.native_transport.return_value = LimaTransport(vm_name="vm1")
+    return platform
 
 
-def test_provisioner_transport_invokes_transient_route_then_builder() -> None:
+def test_native_transport_invokes_transient_route_then_builder() -> None:
     """``transient_route`` is entered before the per-platform builder
     runs, so polymorphism replaces the old isinstance check."""
-    vm = _mock_vm(platform="lima")
+    vm = _mock_vm(site="lima")
     config = _mock_config()
-    db = MagicMock()
-    prov = _fake_lima_provisioner()
-    fake_target = prov.provisioner_transport.return_value
+    platform = _fake_lima_platform()
+    fake_target = platform.native_transport.return_value
 
     with (
-        patch("agentworks.vms.manager.get_provisioner_for_vm", return_value=prov),
         patch.object(fake_target, "run") as mock_run,
         contextlib.ExitStack() as stack,
     ):
         mock_run.return_value = SSHResult(returncode=0, stdout="ok\n", stderr="")
-        t = provisioner_transport(db, vm, config, stack=stack)
+        t = native_transport(vm, platform, config, stack=stack)
 
-    prov.transient_route.assert_called_once_with(vm)
-    prov.provisioner_transport.assert_called_once_with(vm, config=config)
+    platform.transient_route.assert_called_once_with(vm)
+    platform.native_transport.assert_called_once_with(vm, config=config)
     assert t is fake_target
 
 
-def test_provisioner_transport_proxmox_raises_typed_state_error() -> None:
-    """Proxmox's ``NotImplementedError`` becomes a ``StateError`` with the
-    web-console hint."""
-    vm = _mock_vm(platform="proxmox")
+def test_native_transport_none_raises_typed_state_error() -> None:
+    """A ``None`` from the platform (proxmox: one-shot guest-agent exec
+    can't host a shell) becomes a ``StateError`` carrying the platform's
+    own console hint (``no_native_transport_hint``)."""
+    from agentworks.capabilities.vm_platform.proxmox import ProxmoxPlatform
+
+    vm = _mock_vm(site="proxmox")
     config = _mock_config()
-    db = MagicMock()
-    prov = MagicMock()
-    prov.transient_route.return_value = contextlib.nullcontext()
-    prov.provisioner_transport.side_effect = NotImplementedError(
-        "guest agent exec not supported",
-    )
+    platform = MagicMock()
+    platform.name = "proxmox"
+    platform.no_native_transport_hint = ProxmoxPlatform.no_native_transport_hint
+    platform.transient_route.return_value = contextlib.nullcontext()
+    platform.native_transport.return_value = None
 
     with (
-        patch("agentworks.vms.manager.get_provisioner_for_vm", return_value=prov),
         contextlib.ExitStack() as stack,
         pytest.raises(StateError) as exc_info,
     ):
-        provisioner_transport(db, vm, config, stack=stack)
+        native_transport(vm, platform, config, stack=stack)
     assert exc_info.value.hint is not None
     assert "serial console" in exc_info.value.hint
 
 
-def test_provisioner_transport_empty_ssh_host_raises_typed_state_error() -> None:
+def test_native_transport_empty_ssh_host_raises_typed_state_error() -> None:
     """The PR #118 defensive guard: an SSH transport with an empty host
     surfaces clearly rather than letting downstream calls hang on it."""
-    vm = _mock_vm(platform="azure")
+    vm = _mock_vm(site="azure")
     config = _mock_config()
-    db = MagicMock()
-    prov = MagicMock()
-    prov.transient_route.return_value = contextlib.nullcontext()
-    prov.provisioner_transport.return_value = SSHTransport(host="", user="agentworks")
+    platform = MagicMock()
+    platform.name = "azure-vm"
+    platform.transient_route.return_value = contextlib.nullcontext()
+    platform.native_transport.return_value = SSHTransport(host="", user="agentworks")
 
     with (
-        patch("agentworks.vms.manager.get_provisioner_for_vm", return_value=prov),
         contextlib.ExitStack() as stack,
         pytest.raises(StateError, match="no host"),
     ):
-        provisioner_transport(db, vm, config, stack=stack)
+        native_transport(vm, platform, config, stack=stack)
 
 
-def test_provisioner_transport_reachability_probe_retries_then_succeeds() -> None:
+def test_native_transport_reachability_probe_retries_then_succeeds() -> None:
     """The 6-attempt probe loop swallows up to 5 SSHErrors before
     succeeding; the 6th fail propagates."""
-    vm = _mock_vm(platform="lima")
+    vm = _mock_vm(site="lima")
     config = _mock_config()
-    db = MagicMock()
-    prov = _fake_lima_provisioner()
-    fake_target = prov.provisioner_transport.return_value
+    platform = _fake_lima_platform()
+    fake_target = platform.native_transport.return_value
 
     call_count = 0
 
@@ -252,48 +251,45 @@ def test_provisioner_transport_reachability_probe_retries_then_succeeds() -> Non
         return SSHResult(returncode=0, stdout="ok\n", stderr="")
 
     with (
-        patch("agentworks.vms.manager.get_provisioner_for_vm", return_value=prov),
         patch.object(fake_target, "run", side_effect=flaky_run),
         patch("agentworks.transports.time.sleep"),
         contextlib.ExitStack() as stack,
     ):
-        t = provisioner_transport(db, vm, config, stack=stack)
+        t = native_transport(vm, platform, config, stack=stack)
     assert t is fake_target
     assert call_count == 3
 
 
-def test_provisioner_transport_reachability_probe_gives_up_after_six() -> None:
-    vm = _mock_vm(platform="lima")
+def test_native_transport_reachability_probe_gives_up_after_six() -> None:
+    vm = _mock_vm(site="lima")
     config = _mock_config()
-    db = MagicMock()
-    prov = _fake_lima_provisioner()
-    fake_target = prov.provisioner_transport.return_value
+    platform = _fake_lima_platform()
+    fake_target = platform.native_transport.return_value
 
     with (
-        patch("agentworks.vms.manager.get_provisioner_for_vm", return_value=prov),
         patch.object(fake_target, "run", side_effect=SSHError("always")),
         patch("agentworks.transports.time.sleep"),
         contextlib.ExitStack() as stack,
         pytest.raises(SSHError),
     ):
-        provisioner_transport(db, vm, config, stack=stack)
+        native_transport(vm, platform, config, stack=stack)
 
 
 # ---------------------------------------------------------------------------
-# provisioner_transport: Azure transient_route lifecycle
+# native_transport: Azure transient_route lifecycle
 # ---------------------------------------------------------------------------
 
 
-def test_provisioner_transport_azure_transient_route_attaches_and_detaches() -> None:
+def test_native_transport_azure_transient_route_attaches_and_detaches() -> None:
     """``transient_route`` calls attach on enter and detach on exit; both
     fire regardless of whether the downstream code raised."""
-    vm = _mock_vm(platform="azure")
+    vm = _mock_vm(site="azure")
     config = _mock_config()
-    db = MagicMock()
 
     events: list[str] = []
 
-    prov = MagicMock()
+    platform = MagicMock()
+    platform.name = "azure-vm"
 
     @contextlib.contextmanager
     def fake_route(_vm):  # type: ignore[no-untyped-def] # noqa: ANN001, ANN202
@@ -303,33 +299,32 @@ def test_provisioner_transport_azure_transient_route_attaches_and_detaches() -> 
         finally:
             events.append("detach")
 
-    prov.transient_route.side_effect = fake_route
+    platform.transient_route.side_effect = fake_route
     fake_target = SSHTransport(host="1.2.3.4", user="agentworks")
-    prov.provisioner_transport.return_value = fake_target
+    platform.native_transport.return_value = fake_target
 
     with (
-        patch("agentworks.vms.manager.get_provisioner_for_vm", return_value=prov),
         patch.object(fake_target, "run", return_value=SSHResult(returncode=0, stdout="", stderr="")),
         contextlib.ExitStack() as stack,
     ):
-        provisioner_transport(db, vm, config, stack=stack)
+        native_transport(vm, platform, config, stack=stack)
         # Inside the stack: attach has fired, detach has NOT.
         assert events == ["attach"]
     # ExitStack unwinds at end-of-with: detach fires deterministically.
     assert events == ["attach", "detach"]
 
 
-def test_provisioner_transport_azure_detach_fires_on_downstream_exception() -> None:
+def test_native_transport_azure_detach_fires_on_downstream_exception() -> None:
     """If the per-platform builder raises after ``transient_route``
     attaches, the detach still runs (context-manager cleanup is bounded
     by the caller's ExitStack)."""
-    vm = _mock_vm(platform="azure")
+    vm = _mock_vm(site="azure")
     config = _mock_config()
-    db = MagicMock()
 
     events: list[str] = []
 
-    prov = MagicMock()
+    platform = MagicMock()
+    platform.name = "azure-vm"
 
     @contextlib.contextmanager
     def fake_route(_vm):  # type: ignore[no-untyped-def] # noqa: ANN001, ANN202
@@ -339,15 +334,14 @@ def test_provisioner_transport_azure_detach_fires_on_downstream_exception() -> N
         finally:
             events.append("detach")
 
-    prov.transient_route.side_effect = fake_route
-    prov.provisioner_transport.side_effect = SSHError("kaboom")
+    platform.transient_route.side_effect = fake_route
+    platform.native_transport.side_effect = SSHError("kaboom")
 
     with (
-        patch("agentworks.vms.manager.get_provisioner_for_vm", return_value=prov),
         contextlib.ExitStack() as stack,
         pytest.raises(SSHError),
     ):
-        provisioner_transport(db, vm, config, stack=stack)
+        native_transport(vm, platform, config, stack=stack)
 
     assert events == ["attach", "detach"]
 

@@ -1,8 +1,9 @@
-"""Tests for Phase 1c's vm-create Tailscale-resolution path.
+"""Tests for the vm-create Tailscale-resolution path.
 
-The framework eager-resolves the Tailscale secret BEFORE any
-state-mutating provisioning starts; the install runner receives the
-value as a keyword argument; no ``env=`` injection.
+The Tailscale secret resolves through the operation's resolver at the
+preflight boundary, BEFORE any state-mutating provisioning starts (the
+vm-template's preflight registers and predicts it); the install runner
+receives the value as a keyword argument; no ``env=`` injection.
 """
 
 from __future__ import annotations
@@ -13,7 +14,18 @@ from textwrap import dedent
 import pytest
 
 from agentworks.config import load_config
-from agentworks.vms.manager import _collect_secrets
+
+
+def _resolve_tailscale_key(config, registry, vm_tmpl) -> str:  # type: ignore[no-untyped-def]
+    """The create-path shape: template preflight registers + predicts
+    the key, the boundary resolve runs, ops read from the cache."""
+    from agentworks.secrets.resolver import Resolver
+    from agentworks.vms.templates import preflight_vm_template
+
+    resolver = Resolver(config, registry)
+    preflight_vm_template(vm_tmpl, resolver)
+    resolver.resolve()
+    return resolver.get(vm_tmpl.tailscale_auth_key)
 
 
 @pytest.fixture()
@@ -42,7 +54,7 @@ def _write_cfg(tmp_path: Path, body: str, ssh_keys: tuple[Path, Path]) -> Path:
     return p
 
 
-def test_collect_secrets_resolves_tailscale_from_env_var(
+def test_boundary_resolves_tailscale_from_env_var(
     tmp_path: Path,
     ssh_keys: tuple[Path, Path],
     monkeypatch: pytest.MonkeyPatch,
@@ -71,14 +83,10 @@ def test_collect_secrets_resolves_tailscale_from_env_var(
 
     registry = build_registry(config)
     vm_tmpl = resolve_template(registry, "default")
-    ts_auth_key, git_tokens = _collect_secrets(
-        config, registry, {}, "test-vm", vm_tmpl
-    )
-    assert ts_auth_key == "tskey-from-env"
-    assert git_tokens == {}
+    assert _resolve_tailscale_key(config, registry, vm_tmpl) == "tskey-from-env"
 
 
-def test_collect_secrets_uses_custom_tailscale_secret_name(
+def test_boundary_uses_custom_tailscale_secret_name(
     tmp_path: Path,
     ssh_keys: tuple[Path, Path],
     monkeypatch: pytest.MonkeyPatch,
@@ -107,20 +115,17 @@ def test_collect_secrets_uses_custom_tailscale_secret_name(
 
     registry = build_registry(config)
     vm_tmpl = resolve_template(registry, "azure-prod")
-    ts_auth_key, _ = _collect_secrets(
-        config, registry, {}, "test-vm", vm_tmpl
-    )
-    assert ts_auth_key == "tskey-custom"
+    assert _resolve_tailscale_key(config, registry, vm_tmpl) == "tskey-custom"
 
 
-def test_collect_secrets_signature_is_keyword_safe(
+def test_template_preflight_fails_on_unresolvable_key(
     tmp_path: Path,
     ssh_keys: tuple[Path, Path],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """The framework-routed Tailscale path returns a non-None auth key
-    when an env-var backend provides one. This is the precondition for
-    the install runner's ``auth_key: str`` kwarg (no None fallback).
+    """With only the env-var backend active and the variable unset, the
+    vm-template's preflight fails the prediction BEFORE any resolve pass
+    (and therefore before any prompt or mutation).
     """
     cfg = _write_cfg(
         tmp_path,
@@ -131,18 +136,19 @@ def test_collect_secrets_signature_is_keyword_safe(
         ssh_keys,
     )
     config = load_config(cfg, warn_issues=False)
-    monkeypatch.setenv("AW_SECRET_TAILSCALE_AUTH_KEY", "non-empty")
+    monkeypatch.delenv("AW_SECRET_TAILSCALE_AUTH_KEY", raising=False)
 
     from agentworks.bootstrap import build_registry
-    from agentworks.vms.templates import resolve_template
+    from agentworks.errors import ConfigError
+    from agentworks.secrets.resolver import Resolver
+    from agentworks.vms.templates import preflight_vm_template, resolve_template
 
     registry = build_registry(config)
     vm_tmpl = resolve_template(registry, "default")
-    ts_auth_key, _ = _collect_secrets(
-        config, registry, {}, "test-vm", vm_tmpl
-    )
-    assert ts_auth_key is not None
-    assert isinstance(ts_auth_key, str)
+    resolver = Resolver(config, registry)
+    with pytest.raises(ConfigError, match="not resolvable"):
+        preflight_vm_template(vm_tmpl, resolver)
+    assert not resolver.resolved
 
 
 def test_join_tailscale_signature_requires_auth_key_kwarg() -> None:

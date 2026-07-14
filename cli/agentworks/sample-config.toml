@@ -10,8 +10,7 @@
 # The TOML resource sections below keep working, but they are deprecated --
 # they load with a deprecation warning, and `agw resource migrate` moves them to
 # YAML whenever you're ready. This file remains the permanent home for
-# SETTINGS: operator identity, paths, defaults, platform connections, and
-# the secret backend chain.
+# SETTINGS: operator identity, paths, defaults, and the secret backend chain.
 #
 # Comment convention: examples are written as `#key = "value"` (no space
 # after `#`), so you can uncomment a line in place by deleting one `#`.
@@ -54,8 +53,12 @@ ssh_private_key = "~/.ssh/id_ed25519"        # required: used for SSH connection
 # --- Default values for CLI flags ---
 
 [defaults]
-#platform = "lima"                          # lima, azure, or wsl2
-#vm_host = "mac-studio"                     # default VM host for remote Lima
+#site = "lima-local"                        # default vm-site for `agw vm create`
+                                            # (a declared vm-site resource; sites
+                                            # disable themselves where this host
+                                            # lacks what they need; see
+                                            # `agw doctor` for each site's state)
+# `platform` is the deprecated alias of `site` (one release); rename the key.
 #verify_git_tokens = true                   # verify git tokens against the provider API at
                                             # provisioning entry and in doctor; rejection aborts
                                             # before anything is created (false for airgapped)
@@ -159,25 +162,14 @@ ssh_private_key = "~/.ssh/id_ed25519"        # required: used for SSH connection
 # precedence: the first backend that produces a value wins. An explicit
 # empty list `backends = []` disables resolution entirely.
 
-# --- Azure settings (only needed for --platform azure) ---
-
-#[azure]
-#subscription_id = "..."                    # required for azure platform
-#resource_group = "agentworks-vms"          # required for azure platform
-#region = "eastus2"                         # required for azure platform
-
-# --- Proxmox settings (only needed for --platform proxmox) ---
-
-#[proxmox]
-#api_url = "https://pve.example.com:8006"   # required: Proxmox API URL
-#node = "pve"                                # required: Proxmox node name
-#token_id = "agentworks@pam!agentworks"      # required: API token ID
-#template_vmid = 9000                        # required: VMID of Debian 12 cloud-init template
-#storage = "local-lvm"                       # target storage for cloned disks
-#bridge = "vmbr0"                            # network bridge
-#pool = "agentworks"                         # Proxmox resource pool for VMs
-#verify_ssl = true                           # verify TLS certificate
-# Token secret: set PROXMOX_TOKEN_SECRET environment variable
+# --- VM sites (azure, proxmox, remote Lima, ...) ---
+# Places to create VMs are declared as vm-site RESOURCES (YAML manifests
+# under ~/.config/agentworks/resources/), not config sections. Run
+# `agw resource sample vm-site` for commented, ready-to-edit examples.
+# The legacy [azure] / [proxmox] sections still load as deprecated
+# vm-site declarations; migrate them with `agw resource migrate vm-site`.
+# The proxmox API token is the `proxmox-token` secret (default
+# env-var: AW_SECRET_PROXMOX_TOKEN).
 
 # =============================================================================
 # Templates
@@ -210,6 +202,8 @@ ssh_private_key = "~/.ssh/id_ed25519"        # required: used for SSH connection
 
 #[vm_templates.default]
 # -- Provisioning (set once at create time) --
+# (Templates carry no `site`: placement is per-host; use `--site` or
+# defaults.site above.)
 #cpus = 4                                   # number of CPUs (Lima)
 #memory = 8                                 # memory in GiB (Lima)
 #azure_vm_size = "Standard_B2s"             # Azure VM size (determines cpu and memory for Azure)

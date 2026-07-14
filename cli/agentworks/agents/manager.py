@@ -16,10 +16,11 @@ from agentworks.errors import (
     ValidationError,
 )
 from agentworks.transports import transport
-from agentworks.vms.manager import keep_vm_active
+from agentworks.vms.manager import bind_platform, keep_active
 
 if TYPE_CHECKING:
     from agentworks.agents.templates import ResolvedAgentTemplate
+    from agentworks.capabilities.vm_platform import VMPlatform
     from agentworks.catalog import UserInstallCommandEntry
     from agentworks.config import Config
     from agentworks.db import AgentRow, Database, VMRow, WorkspaceRow
@@ -222,8 +223,15 @@ def create_agent(
     vm_name: str,
     template: str | None = None,
     grant_all_workspaces: bool = False,
+    platform: VMPlatform | None = None,
 ) -> None:
-    """Create an agent on a VM."""
+    """Create an agent on a VM.
+
+    ``platform`` accepts the caller's already-bound platform (session
+    create's ephemeral-agent path) so the nested create doesn't re-run
+    the site's secret resolve pass; when None this function is its own
+    composition root and binds once.
+    """
 
     from agentworks.agents.templates import resolve_template
     from agentworks.bootstrap import build_registry
@@ -249,6 +257,12 @@ def create_agent(
     vm = _require_vm(db, vm_name)
     linux_user = derive_linux_user(name)
 
+    # Bind FIRST (unless the caller already did at its own root): the
+    # platform's preflight must fail before the git-token collection
+    # prompts the operator for anything.
+    if platform is None:
+        platform = bind_platform(config, vm, registry=registry)
+
     # Collect agent-provisioning credentials (git tokens live outside
     # the env-block system). Operator env secrets are NOT prompted at
     # agent create -- provisioning is hermetic. They get prompted at
@@ -260,7 +274,7 @@ def create_agent(
     output.info(
         f"Creating agent '{name}' on VM '{vm_name}' (template: {agent_tmpl.name})..."
     )
-    with keep_vm_active(db, config, vm):
+    with keep_active(db, config, vm, platform):
 
         def _safe_rollback() -> None:
             # Best-effort: rollback failures must not mask the original KI or
@@ -330,8 +344,15 @@ def delete_agent(
     name: str,
     force: bool = False,
     yes: bool = False,
+    platform: VMPlatform | None = None,
 ) -> None:
-    """Delete an agent from a VM."""
+    """Delete an agent from a VM.
+
+    ``platform`` accepts the caller's already-bound platform (session
+    create's ephemeral ROLLBACK path) so a failed create on a
+    secret-bearing site doesn't re-run the resolve pass mid-rollback;
+    when None this function is its own composition root and binds once.
+    """
     agent = db.get_agent(name)
     if agent is None:
         raise NotFoundError(
@@ -365,7 +386,9 @@ def delete_agent(
     from agentworks.ssh import SSHLogger
     ssh_logger = SSHLogger(vm.name, "agent-delete")
     output.info(f"Deleting agent '{name}' on VM '{vm.name}'...")
-    with keep_vm_active(db, config, vm):
+    if platform is None:
+        platform = bind_platform(config, vm)
+    with keep_active(db, config, vm, platform):
 
         # Kill running sessions for this agent (status-aware)
         if agent_sessions:
@@ -473,7 +496,7 @@ def reinit_agent(
 
     from agentworks.ssh import SSHLogger
     ssh_logger = SSHLogger(vm.name, "agent-reinit")
-    with keep_vm_active(db, config, vm):
+    with keep_active(db, config, vm, bind_platform(config, vm)):
         try:
             try:
                 _create_agent_on_vm(
@@ -646,14 +669,9 @@ def shell_agent(
 
     vm = _require_vm(db, agent.vm_name)
 
-    from agentworks.workspaces.manager import _ensure_vm_running
-
-    _ensure_vm_running(db, config, vm)
-
     import sys
 
     from agentworks.env import ResourceContext, compose_env
-    from agentworks.secrets import resolve_for_command
     from agentworks.transports import agent_transport
 
     # Resolve workspace upfront (needed for authz check, env scope, AND
@@ -661,25 +679,29 @@ def shell_agent(
     # errors and the eager-resolve below sees the right scope chain.
     ws = _resolve_workspace_for_agent(db, vm, agent, workspace_name)
 
-    # Eager-prompting orchestration (FRD R4 / Phase 6): resolve every
-    # secret referenced by the agent shell's env chain BEFORE opening
-    # the interactive SSH session. The same scope dicts feed both the
-    # SecretTarget (for resolve_for_command) and compose_env below so
-    # the two consumers can't drift.
+    # The composition root: the agent shell's env-chain secrets join
+    # the bind's ONE boundary resolve (site secrets + env secrets, one
+    # prompt session), after the platform's preflight. The same scope
+    # dicts feed both the SecretTarget and compose_env below so the two
+    # consumers can't drift.
     from agentworks.bootstrap import build_registry
+    from agentworks.secrets.resolver import Resolver
 
     registry = build_registry(config)
     scopes = _resolve_agent_direct_env_scopes(registry, vm, agent, ws=ws)
-    values = resolve_for_command(
-        [_agent_direct_secret_target(scopes, label=f"agent-shell={agent.name}")],
-        config,
-        registry,
+    resolver = Resolver(config, registry)
+    bound = bind_platform(
+        config, vm, registry=registry, resolver=resolver,
+        targets=[_agent_direct_secret_target(scopes, label=f"agent-shell={agent.name}")],
     )
+    values = resolver.values
+
+    from agentworks.vms.sites import site_platform_name
 
     ctx = ResourceContext(
         vm_name=vm.name,
-        vm_host=vm.vm_host_name,
-        platform=vm.platform,
+        platform=site_platform_name(vm.site, registry),
+        site=vm.site,
         user=agent.linux_user,
         workspace_name=ws.name if ws else None,
         workspace_dir=ws.workspace_path if ws else None,
@@ -697,7 +719,7 @@ def shell_agent(
     # authorized_keys (Phase 3) accepts the operator's key set.
     target = agent_transport(vm, config, agent)
 
-    with keep_vm_active(db, config, vm):
+    with keep_active(db, config, vm, bound):
         # Probe direct agent SSH first so pre-rollout agents (whose
         # authorized_keys was never populated) get an actionable error
         # rather than dropping into a remote shell that immediately exits
@@ -741,7 +763,6 @@ def exec_agent(
 
     from agentworks.env import ResourceContext, compose_env
     from agentworks.exec_validation import reject_dash_prefixed_command
-    from agentworks.secrets import resolve_for_command
     from agentworks.transports import agent_transport
 
     reject_dash_prefixed_command(command, kind="agent", name=name)
@@ -761,24 +782,29 @@ def exec_agent(
     # sees the right scope chain.
     ws = _resolve_workspace_for_agent(db, vm, agent, workspace_name)
 
-    # Eager-prompting orchestration (FRD R4 / Phase 6): resolve every
-    # secret referenced by the agent exec env chain BEFORE running the
-    # remote command. The same scope dicts feed both the SecretTarget
-    # and compose_env below so the two consumers can't drift.
+    # The composition root: the agent exec env-chain secrets join the
+    # bind's ONE boundary resolve (site secrets + env secrets, one
+    # prompt session), after the platform's preflight. The same scope
+    # dicts feed both the SecretTarget and compose_env below so the two
+    # consumers can't drift.
     from agentworks.bootstrap import build_registry
+    from agentworks.secrets.resolver import Resolver
 
     registry = build_registry(config)
     scopes = _resolve_agent_direct_env_scopes(registry, vm, agent, ws=ws)
-    values = resolve_for_command(
-        [_agent_direct_secret_target(scopes, label=f"agent-exec={agent.name}")],
-        config,
-        registry,
+    resolver = Resolver(config, registry)
+    bound = bind_platform(
+        config, vm, registry=registry, resolver=resolver,
+        targets=[_agent_direct_secret_target(scopes, label=f"agent-exec={agent.name}")],
     )
+    values = resolver.values
+
+    from agentworks.vms.sites import site_platform_name
 
     ctx = ResourceContext(
         vm_name=vm.name,
-        vm_host=vm.vm_host_name,
-        platform=vm.platform,
+        platform=site_platform_name(vm.site, registry),
+        site=vm.site,
         user=agent.linux_user,
         workspace_name=ws.name if ws else None,
         workspace_dir=ws.workspace_path if ws else None,
@@ -794,7 +820,7 @@ def exec_agent(
 
     target = agent_transport(vm, config, agent)
 
-    with keep_vm_active(db, config, vm):
+    with keep_active(db, config, vm, bound):
         # Probe direct agent SSH first so pre-rollout agents (whose
         # authorized_keys was never populated) get an actionable error.
         _assert_agent_ssh_works(target, agent)
@@ -839,7 +865,7 @@ def grant_workspaces(
         )
 
     vm = _require_vm(db, agent.vm_name)
-    with keep_vm_active(db, config, vm):
+    with keep_active(db, config, vm, bind_platform(config, vm)):
 
         if grant_all:
             db.update_agent_grant_all(agent_name, True)
@@ -886,7 +912,7 @@ def revoke_workspaces(
         )
 
     vm = _require_vm(db, agent.vm_name)
-    with keep_vm_active(db, config, vm):
+    with keep_active(db, config, vm, bind_platform(config, vm)):
 
         if revoke_all:
             db.update_agent_grant_all(agent_name, False)
@@ -1091,12 +1117,13 @@ def _create_agent_on_vm(
     # gets rewritten at the end of _run_agent_install_commands with
     # accumulated PATH entries from catalog install commands.
     from agentworks.env import ResourceContext, per_user_identity_env
+    from agentworks.vms.sites import site_platform_name
 
     agent_identity_ctx = ResourceContext(
         vm_name=vm.name,
-        platform=vm.platform,
+        platform=site_platform_name(vm.site, registry),
+        site=vm.site,
         user=linux_user,
-        vm_host=vm.vm_host_name,
         agent_name=agent_name,
     )
     agent_identity = per_user_identity_env(agent_identity_ctx)

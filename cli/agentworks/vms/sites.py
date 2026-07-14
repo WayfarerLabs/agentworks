@@ -1,0 +1,318 @@
+"""VM sites: the declared resource that exposes a configured platform,
+plus site resolution (the only constructor of platform instances).
+
+A ``vm-site`` is "a configured place to create VMs" (ADR 0016's
+instance-identity test): consumers name the site (``agw vm create
+--site``, ``defaults.site``, ``vms.site`` provenance; never a
+template: placement is host/operator-scoped), and one platform backs
+many sites. Site rows arrive from the built-in bundle (``lima-local``,
+``wsl2``), operator manifests, and the legacy ``[azure]`` /
+``[proxmox]`` TOML sections.
+
+Every site registers UNCONDITIONALLY (bundled and declared alike,
+whatever the host) and self-disables when it lacks what it needs
+(:func:`site_disabled_reason`): its platform is missing (a plugin not
+installed, or a typo), unsupported on this host (wsl2 off Windows), or
+the bound instance reports a missing requirement (a local-Lima site
+without ``limactl``). A disabled site still lists, describes, and
+holds references; using it (:func:`resolve_site`) is a typed error
+with the reason, and existing references (VMs, ``defaults.site``)
+degrade to doctor warnings rather than breaking every command.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from typing import TYPE_CHECKING
+
+from agentworks.errors import ConfigError
+from agentworks.source_location import SourceLocation, synthesized
+
+if TYPE_CHECKING:
+    from agentworks.capabilities.vm_platform import VMPlatform
+    from agentworks.config import Config
+    from agentworks.db import VMRow
+    from agentworks.resources.origin import Origin
+    from agentworks.resources.reference import ReferenceEntry, ResourceReference
+    from agentworks.resources.registry import Registry
+    from agentworks.secrets.resolver import Resolver
+
+
+@dataclass(frozen=True)
+class VMSiteDecl:
+    """The declared ``vm-site`` resource.
+
+    The internal representation follows the YAML manifest shape (ADR
+    0016): ``platform`` names the capability; ``platform_config`` is
+    the nested platform-owned blob. The flat legacy TOML sections
+    (``[azure]`` / ``[proxmox]``) are the only place platform-owned
+    fields sit at a top level; their loader nests at the boundary.
+    """
+
+    name: str
+    platform: str
+    platform_config: dict[str, object] = field(default_factory=dict)
+    description: str | None = None
+    declared_at: SourceLocation = field(default_factory=synthesized)
+    origin: Origin | None = None
+    references: tuple[ReferenceEntry, ...] = ()
+
+    def referenced_resources(self) -> list[ResourceReference]:
+        from agentworks.resources.reference import (
+            ResourceReference as _ResourceRef,
+        )
+        from agentworks.resources.reference import SecretReference
+
+        source = ("vm-site", self.name)
+        refs: list[ResourceReference] = []
+        # A host-disabled site claims NO edges: the platform edge would
+        # dangle (the capability row publishes only when installed AND
+        # supported here), and the config-implied secret edges would
+        # auto-declare and predict-resolve secrets for a site that can
+        # never run on this host. A site whose platform merely lacks an
+        # INSTANCE requirement (limactl) keeps its edges: installing
+        # the tool enables it, and its secrets should already predict.
+        from agentworks.capabilities.vm_platform import VM_PLATFORM_REGISTRY
+
+        capability = VM_PLATFORM_REGISTRY.get(self.platform)
+        if capability is None or capability.unsupported_reason() is not None:
+            return refs
+        refs.append(
+            _ResourceRef(
+                name=self.platform,
+                kind="vm-platform",
+                usage="the VM platform",
+                source=source,
+            )
+        )
+        # Capability-implied references: the platform validates its
+        # config block and returns the references it implies; this
+        # resource (the config block's owner) attributes them to itself.
+        for cref in capability.validate_config(
+            f"vm-site/{self.name}", self.platform_config
+        ):
+            ref_cls = SecretReference if cref.kind == "secret" else _ResourceRef
+            refs.append(
+                ref_cls(
+                    name=cref.name,
+                    kind=cref.kind,
+                    usage=cref.usage,
+                    source=source,
+                )
+            )
+        return refs
+
+
+def site_manifest_hint(name: str, *, vm_host: str | None = None) -> str:
+    """A ready-to-paste vm-site manifest document for ``name``.
+
+    Used by the stranded-VM ``ConfigError`` (a migrated remote-Lima row
+    whose site manifest the operator has not added yet), the DB
+    migration's printed snippets, and doctor.
+    """
+    config_lines = ""
+    if vm_host is not None:
+        config_lines = f"\n  platform_config:\n    vm_host: {vm_host}"
+    return (
+        "declare it under ~/.config/agentworks/resources/ (any filename), "
+        "e.g.:\n\n"
+        "apiVersion: agentworks/v1\n"
+        "kind: vm-site\n"
+        "metadata:\n"
+        f"  name: {name}\n"
+        "spec:\n"
+        "  platform: lima"
+        f"{config_lines}\n\n"
+        "(adjust the platform and platform_config to match where this "
+        "site's VMs actually live; see `agw resource sample vm-site`)"
+    )
+
+
+def select_site(
+    flag: str | None,
+    default_site: str | None,
+    registry: Registry,
+) -> str:
+    """Site selection for ``vm create``: the explicit flag, then
+    ``defaults.site``, then the house model over the ENABLED sites:
+    infer when exactly one exists, prompt interactively when several
+    do, error otherwise. Disabled sites are never a choice (using one
+    is an error), but their existence never breaks inference.
+
+    Placement is deliberately host/operator-scoped only: templates
+    describe WHAT a VM is and carry no site (a shared template must not
+    smuggle a per-host placement decision), and there is no hardcoded
+    fallback site (sites disabled on this host drop out, so "exactly
+    one enabled" IS the zero-config case).
+    """
+    from agentworks import output
+    from agentworks.errors import ValidationError
+
+    if flag:
+        return flag
+    if default_site:
+        return default_site
+    sites = sorted(registry.iter_kind_items("vm-site"), key=lambda item: item[0])
+    names = [name for name, decl in sites if site_disabled_reason(decl) is None]
+    if len(names) == 1:
+        return names[0]
+    if not names:
+        disabled = [
+            f"{name} ({site_disabled_reason(decl)})" for name, decl in sites
+        ]
+        detail = f" (disabled: {'; '.join(disabled)})" if disabled else ""
+        raise ValidationError(
+            f"no vm-sites are enabled on this host{detail}",
+            hint=(
+                "meet a disabled site's requirement, or declare a site "
+                "under ~/.config/agentworks/resources/ "
+                "(`agw resource sample vm-site`)"
+            ),
+        )
+    if output.is_interactive():
+        choice = output.choose("Select a site:", names)
+        return names[choice]
+    raise ValidationError(
+        f"multiple sites are enabled ({', '.join(names)})",
+        hint="pass --site <name> or set defaults.site in config.toml",
+    )
+
+
+def site_disabled_reason(decl: VMSiteDecl) -> str | None:
+    """Why this site cannot be used on this host, or ``None`` when it
+    can (the vm-site kind's generic disabled hook delegates here).
+
+    The chain, cheapest first: the platform is missing entirely (a
+    plugin not installed, or a typo, indistinguishable by design),
+    the platform is host-disabled (``unsupported_reason``), or the
+    bound instance reports a missing requirement
+    (``Capability.disabled_reason``: a local-Lima site without
+    ``limactl``). Same offline-and-cheap contract as the methods it
+    composes; preflight remains the deeper op-boundary check.
+    """
+    from agentworks.capabilities.vm_platform import VM_PLATFORM_REGISTRY
+
+    platform_cls = VM_PLATFORM_REGISTRY.get(decl.platform)
+    if platform_cls is None:
+        return f"platform '{decl.platform}' is not installed"
+    if (reason := platform_cls.unsupported_reason()) is not None:
+        return f"platform '{decl.platform}' is disabled: {reason}"
+    # Construction re-runs validate_config, but it cannot fail here:
+    # every decl source runs the same pure classmethod at load whenever
+    # the platform is installed (manifest decode, legacy TOML), and the
+    # branches above returned for the one unvalidated shape (missing
+    # platform). Inspection loops (doctor, resource list) rely on
+    # this: one bad row must not take down the whole listing.
+    return platform_cls(decl.name, decl.platform_config).disabled_reason()
+
+
+def lookup_site(name: str, registry: Registry) -> VMSiteDecl:
+    """The site's declaration (enabled or disabled), or a
+    ``ConfigError`` with the ready-to-paste manifest on a miss (the
+    stranded-site case, e.g. a migrated remote-Lima row whose site
+    manifest the operator has not added yet). Bundled sites register
+    on every host, so a miss is never a host-requirement problem.
+    """
+    try:
+        decl = registry.lookup("vm-site", name)
+    except KeyError:
+        raise ConfigError(
+            f"site '{name}' is not declared",
+            hint=site_manifest_hint(name),
+        ) from None
+    assert isinstance(decl, VMSiteDecl)
+    return decl
+
+
+def site_platform_name(site: str, registry: Registry) -> str:
+    """The capability name backing ``site``, for consumers that surface
+    it (``AGENTWORKS_PLATFORM``, ``vm describe``). Same stranded-site
+    ``ConfigError`` as :func:`lookup_site` on an undeclared site.
+    """
+    return lookup_site(site, registry).platform
+
+
+def resolve_site(
+    name: str,
+    registry: Registry,
+    *,
+    resolver: Resolver | None = None,
+) -> VMPlatform:
+    """Resolve a site name to its constructed platform instance.
+
+    Returns the platform class instantiated with the site's validated
+    ``platform_config`` and the operation's ``resolver`` (construction
+    is cheap and never resolves or prompts; the declared config secrets
+    register on the resolver for the operation's single resolve pass at
+    the preflight boundary). Manager code holds the bound platform and
+    never sees ``VM_PLATFORM_REGISTRY`` or platform classes.
+
+    This is the one chokepoint every operation passes through, so the
+    disabled guard lives here: using a disabled site is a typed error
+    naming the reason chain.
+    """
+    from agentworks.capabilities.vm_platform import VM_PLATFORM_REGISTRY
+
+    decl = lookup_site(name, registry)
+    ensure_site_enabled(decl)
+    # Enabled implies the platform is installed and supported here.
+    platform_cls = VM_PLATFORM_REGISTRY[decl.platform]
+    return platform_cls(decl.name, decl.platform_config, resolver)
+
+
+def ensure_site_enabled(decl: VMSiteDecl) -> None:
+    """The typed using-a-disabled-site error. ``resolve_site`` (the
+    chokepoint every op passes through) always applies it; roots with
+    operator interaction BEFORE their resolve (``create_vm``'s system
+    slug prompt) call it up front too, so a disabled explicit choice
+    errors before the operator answers anything.
+    """
+    from agentworks.errors import StateError
+
+    reason = site_disabled_reason(decl)
+    if reason is not None:
+        raise StateError(
+            f"vm-site '{decl.name}' is disabled on this host: {reason}",
+            hint=(
+                "`agw doctor` lists each site's state; meet the "
+                "requirement or use an enabled site"
+            ),
+        )
+
+
+def platform_for(
+    vm: VMRow,
+    registry: Registry,
+    *,
+    resolver: Resolver | None = None,
+) -> VMPlatform:
+    """The bound platform for a VM, resolved through its site."""
+    return resolve_site(vm.site, registry, resolver=resolver)
+
+
+def validate_sites(config: Config, registry: Registry) -> None:
+    """Config consistency at the composition boundary (run by
+    ``bootstrap.build_registry`` after finalize, beside
+    ``secrets.validate_chain``): settings that name sites must resolve.
+
+    Config vocabulary in the errors; settings are never published as
+    pseudo-resources (ADR 0016).
+    """
+    site = config.defaults.site
+    if site is None:
+        return
+    try:
+        registry.lookup("vm-site", site)
+    except KeyError:
+        # Unknown only: a DISABLED site is valid config here (this
+        # host may simply lack the requirement); using it errors at
+        # resolve_site with the reason, and doctor warns on the
+        # reference.
+        raise ConfigError(
+            f"defaults.site names an unknown site '{site}'",
+            hint=(
+                f"declare a vm-site named '{site}' "
+                f"(see `agw resource sample vm-site`) or point defaults.site "
+                f"at a declared site (`agw resource list --kind vm-site`)"
+            ),
+        ) from None

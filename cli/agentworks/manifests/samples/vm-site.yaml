@@ -1,0 +1,52 @@
+## kind: vm-site -- a configured place to create VMs: a platform (the
+## capability: lima, wsl2, azure-vm, proxmox) plus its settings.
+## Referenced by name from `agw vm create --site` and defaults.site.
+## The `lima-local` and `wsl2` sites ship built-in (zero config) and
+## disable themselves on hosts missing their requirements; declare
+## sites for remote or cloud backends.
+##
+## Remote Lima over SSH:
+##
+#apiVersion: agentworks/v1
+#kind: vm-site
+#metadata:
+#  name: gpu-box
+#  description: Lima VMs on the shared GPU box
+#spec:
+#  platform: lima
+#  platform_config:
+#    vm_host: me@gpu-box
+##
+## Azure, in one subscription + resource group (declare one site per
+## subscription/group you target):
+##
+#---
+#apiVersion: agentworks/v1
+#kind: vm-site
+#metadata:
+#  name: azure-dev
+#  description: Dev subscription in eastus
+#spec:
+#  platform: azure-vm
+#  platform_config:
+#    subscription_id: 00000000-0000-0000-0000-000000000000
+#    resource_group: agw-dev
+#    region: eastus
+##
+## Proxmox VE. The API token value is the `proxmox-token` secret
+## (override the name with platform_config.token_secret), resolved
+## through the backend chain like any other secret.
+##
+#---
+#apiVersion: agentworks/v1
+#kind: vm-site
+#metadata:
+#  name: proxmox
+#  description: The homelab Proxmox cluster
+#spec:
+#  platform: proxmox
+#  platform_config:
+#    api_url: https://pve.example.net:8006
+#    node: pve1
+#    token_id: agentworks@pam!agw
+#    template_vmid: 9000

@@ -10,8 +10,8 @@ from agentworks.env import EnvEntry, ResourceContext, compose_env
 def _ctx(**overrides: object) -> ResourceContext:
     base: dict[str, object] = {
         "vm_name": "vm-1",
-        "vm_host": "lima-local",
         "platform": "lima",
+        "site": "lima-local",
         "user": "agentworks",
     }
     base.update(overrides)

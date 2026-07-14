@@ -32,23 +32,27 @@ if TYPE_CHECKING:
     from agentworks.source_location import SourceLocation
 
 
-# Kind identifier -> legacy TOML section name (the migrator's table).
-KIND_SECTIONS: dict[str, str] = {
-    "secret": "secrets",
-    "vm-template": "vm_templates",
-    "agent-template": "agent_templates",
-    "workspace-template": "workspace_templates",
-    "session-template": "session_templates",
-    "git-credential": "git_credentials",
-    "admin-template": "admin",
-    "named-console-template": "named_console",
+# Kind identifier -> legacy TOML section name(s) (the migrator's table).
+# Every kind maps to exactly one section except vm-site, whose legacy
+# declarations are the two flat sections [azure] / [proxmox] with
+# section-name-becomes-resource-name semantics.
+KIND_SECTIONS: dict[str, tuple[str, ...]] = {
+    "secret": ("secrets",),
+    "vm-template": ("vm_templates",),
+    "agent-template": ("agent_templates",),
+    "workspace-template": ("workspace_templates",),
+    "session-template": ("session_templates",),
+    "git-credential": ("git_credentials",),
+    "admin-template": ("admin",),
+    "named-console-template": ("named_console",),
     # secret-backend: capability kind, not declarable (no decoder);
     # listed for the migrator's [secret_backends.*] drop handling only.
-    "secret-backend": "secret_backends",
-    "apt-source": "apt_sources",
-    "apt-package": "apt_packages",
-    "system-install-command": "system_install_commands",
-    "user-install-command": "user_install_commands",
+    "secret-backend": ("secret_backends",),
+    "vm-site": ("azure", "proxmox"),
+    "apt-source": ("apt_sources",),
+    "apt-package": ("apt_packages",),
+    "system-install-command": ("system_install_commands",),
+    "user-install-command": ("user_install_commands",),
 }
 
 # Kinds whose Resource dataclass carries a description field; the
@@ -58,6 +62,7 @@ _DESCRIPTION_KINDS = {
     "secret",
     "session-template",
     "git-credential",
+    "vm-site",
     "apt-source",
     "apt-package",
     "system-install-command",
@@ -249,6 +254,65 @@ def _decode_git_credential(doc: Document, spec: dict[str, object], issues: list[
     return result
 
 
+def _decode_vm_site(doc: Document, spec: dict[str, object], issues: list[str]) -> Any:
+    from agentworks.config import validate_name
+    from agentworks.vms.sites import VMSiteDecl
+
+    # FRD R2: site names follow the VM-name rules (they appear in
+    # hostnames and SSH host aliases).
+    validate_name(doc.name)
+    platform = spec.pop("platform", None)
+    if not isinstance(platform, str) or not platform:
+        raise ConfigError(
+            "vm-site requires spec.platform (a vm-platform capability name, "
+            "e.g. lima, wsl2, azure-vm, proxmox)",
+        )
+    raw_config = spec.pop("platform_config", {})
+    if not isinstance(raw_config, dict):
+        raise ConfigError("spec.platform_config must be a mapping")
+    # The blob may not shadow kind-owned surface (the git-credential
+    # precedent): platform/description in the blob would silently
+    # re-pick the capability or override metadata.
+    reserved = {"platform", "description"} & set(raw_config)
+    if reserved:
+        names = ", ".join(sorted(reserved))
+        raise ConfigError(
+            f"spec.platform_config may not contain kind-owned field(s): "
+            f"{names}; they belong at the spec top level"
+        )
+    description = spec.pop("description", None)
+    if spec:
+        extras = ", ".join(sorted(spec))
+        raise ConfigError(
+            f"unknown vm-site spec field(s): {extras}; platform-specific "
+            "configuration goes under spec.platform_config"
+        )
+    # Capability validation on the TRUE blob, with this document's
+    # file:line in the error. Unknown platform names are tolerated: the
+    # site registers and self-disables ("platform 'x' is not
+    # installed"); a plugin's platform may simply not be here.
+    from agentworks.capabilities.vm_platform import VM_PLATFORM_REGISTRY
+
+    # FRD R2: a site named after a known platform must declare that
+    # platform; `vm-site/azure-vm` backed by lima would make every
+    # `--site azure-vm` mean something other than it says.
+    if doc.name in VM_PLATFORM_REGISTRY and platform != doc.name:
+        raise ConfigError(
+            f"a vm-site named '{doc.name}' must declare platform "
+            f"'{doc.name}' (it shadows a platform name), not '{platform}'"
+        )
+    capability = VM_PLATFORM_REGISTRY.get(platform)
+    if capability is not None:
+        capability.validate_config("spec.platform_config", raw_config)
+    return VMSiteDecl(
+        name=doc.name,
+        platform=platform,
+        platform_config=dict(raw_config),
+        description=str(description) if description is not None else None,
+        declared_at=doc.location,
+    )
+
+
 def _decode_admin_template(doc: Document, spec: dict[str, object], issues: list[str]) -> Any:
     from agentworks.config import _load_admin_config
 
@@ -309,6 +373,7 @@ _DECODERS: dict[str, Callable[[Document, dict[str, object], list[str]], Any]] = 
     "workspace-template": _decode_workspace_template,
     "session-template": _decode_session_template,
     "git-credential": _decode_git_credential,
+    "vm-site": _decode_vm_site,
     "admin-template": _decode_admin_template,
     "named-console-template": _decode_named_console_template,
     "apt-source": _decode_apt_source,

@@ -539,7 +539,7 @@ def test_run_catalog_commands_runs_when_test_dir_missing() -> None:
 
 def test_preserve_ssh_host_keys_writes_dropin() -> None:
     """Writes the cloud-init drop-in as root with the canonical content."""
-    from agentworks.vms.bootstrap_script import (
+    from agentworks.capabilities.vm_platform.bootstrap_script import (
         SSH_PRESERVE_KEYS_LINES,
         SSH_PRESERVE_KEYS_PATH,
     )
@@ -589,7 +589,7 @@ def test_preserve_ssh_host_keys_emits_same_bytes_as_phase_a() -> None:
     """
     import shlex
 
-    from agentworks.vms.bootstrap_script import (
+    from agentworks.capabilities.vm_platform.bootstrap_script import (
         SSH_PRESERVE_KEYS_CONTENT,
         SSH_PRESERVE_KEYS_LINES,
     )

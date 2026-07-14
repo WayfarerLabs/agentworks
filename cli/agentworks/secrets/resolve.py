@@ -285,9 +285,18 @@ def resolve_secrets(
             per_secret[d.name] = f"{d.name}: tried {tried}"
         if errors is None:
             names = [d.name for d in sorted_missing]
+            # Always name a REAL secret in the example command: an
+            # `<name>` placeholder isn't paste-safe (angle brackets are
+            # shell redirection) and the first missing name is exactly
+            # what the operator wants to inspect.
             raise SecretUnavailableError(
                 f"no active backend could resolve secret(s): {', '.join(names)}",
-                hint="; ".join(per_secret.values()),
+                hint=(
+                    "; ".join(per_secret.values())
+                    + f". `agw secret describe {names[0]}` shows how each "
+                    "backend looks a secret up (e.g. which environment "
+                    "variable it reads)."
+                ),
             )
         for name, line in per_secret.items():
             errors[name] = f"no active backend could resolve the secret ({line})"

@@ -165,6 +165,20 @@ class ResourceKind(Protocol):
     # the same ``InstanceRef`` shape from manifests; today's
     # ``instances`` is the config-projected dimension.
     #
+    # The optional ``disabled_reason(registry, resource) -> str | None``
+    # method follows the same structural pattern: a kind whose
+    # resources can lack what they need to run on this host implements
+    # it (vm-site: platform missing/host-disabled/instance
+    # requirement); absent-on-class means the kind's resources are
+    # never disabled (a vm-template always has what it needs). The
+    # contract is cheap, offline host-introspection only: never
+    # network, secrets, or prompting (deeper readiness is the
+    # capability lifecycle's preflight). A disabled resource still
+    # registers, lists, describes, and holds references; USING it is
+    # the owning domain's typed error, and existing references degrade
+    # to doctor warnings. Consumers go through
+    # ``agentworks.resources.inspect.disabled_reason_for``.
+    #
     # Deliberately ABSENT: a kind-level semantic-validation hook.
     # Checks that need config alongside the finalized graph (the secret
     # chain's names and reachability) are the owning subsystem's job,

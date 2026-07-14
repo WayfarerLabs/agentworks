@@ -101,32 +101,27 @@ exits with the conventional SIGINT exit code (130).
 | `agw completion install`   | Install the completion script in-place   |
 | `agw completion uninstall` | Remove installed completions for a shell |
 
-### VM Hosts
-
-Manage machines that host VMs (for remote Lima mode).
-
-| Command                             | Description              |
-| ----------------------------------- | ------------------------ |
-| `agw vm-host add <name> <ssh-host>` | Register a VM host       |
-| `agw vm-host list`                  | List registered VM hosts |
-| `agw vm-host remove <name>`         | Remove a VM host         |
-
-`vm-host remove` refuses if the host has VMs registered against it; pass `--force` to clear those
-VMs' `vm_host_name` reference and remove the host anyway. When the host has no VMs and you run
-without `--force` or `--yes`, the command prompts for confirmation. Both `--yes` and `--force` also
-bypass the confirmation prompt.
-
 ### VMs
 
-Manage virtual machines across Lima (local or remote), Azure, and WSL2.
+Manage virtual machines across declared vm-sites (Lima local or remote, Azure, WSL2, Proxmox).
+
+Where VMs are created is declared as `vm-site` resources: YAML manifests under
+`~/.config/agentworks/resources/` that pair a platform (the code that runs VMs on one backend kind)
+with its configuration. The `lima-local` and `wsl2` sites ship built in. Every site registers on
+every host and disables itself when this host lacks what it needs (wsl2 is Windows-only; a local
+Lima site needs `limactl`; a platform may simply not be installed): a disabled site still lists and
+describes, using it is an error naming the requirement, and `agw doctor` shows each platform's and
+site's state with the reason. Run `agw resource sample vm-site` for commented, ready-to-edit
+examples (an Azure site, a remote-Lima site with `platform_config.vm_host`). The former
+`agw vm-host` registry is gone: a remote Lima host is now just a vm-site.
 
 > **Note on WSL2:** WSL2 distros share the Windows workstation's lifecycle. They idle-shut after
 > ~60s of no `wsl.exe` activity (`vmIdleTimeout` in `.wslconfig`) and do not survive workstation
 > shutdown or sleep. agentworks holds a `wsl.exe` keepalive for the duration of each VM-touching
 > command, so individual `agw` operations work cleanly, but agents and sessions on WSL2 are not
-> suitable for unattended background workflows. Use a different provisioner that provides true
-> long-lived VMs (e.g. Lima, Azure, Proxmox, etc.) if you need a VM that survives independent of
-> your workstation.
+> suitable for unattended background workflows. Use a site on a different platform that provides
+> true long-lived VMs (e.g. Lima, Azure, Proxmox, etc.) if you need a VM that survives independent
+> of your workstation.
 
 | Command                                             | Description                                                   |
 | --------------------------------------------------- | ------------------------------------------------------------- |
@@ -139,14 +134,27 @@ Manage virtual machines across Lima (local or remote), Azure, and WSL2.
 | `agw vm stop <name>`                                | Stop a running VM                                             |
 | `agw vm reinit <name>`                              | Re-run initialization on a provisioned VM                     |
 | `agw vm delete <name>`                              | Delete a VM (with confirmation)                               |
+| `agw vm backup <name>`                              | Back up a VM: metadata, agents, workspaces, and files         |
+| `agw vm rekey <name>`                               | Assign a new Tailscale auth key to a VM (logout + rejoin)     |
+| `agw vm port-forward <name> <ports...>`             | Forward local port(s) to a VM (like kubectl port-forward)     |
 | `agw vm logs <name>`                                | Show SSH logs for a VM                                        |
 | `agw vm console <name>`                             | _Deprecated_: use `agw console`                               |
 | `agw vm add-git-credential <name> <cred>`           | Add or update a git credential                                |
 
-`vm create <name>` takes the VM name as a required positional. Optional flags: `--platform`,
-`--vm-host`, `--admin-username`, `--cpus`, `--memory`, `--disk`, and `--azure-vm-size`. These are
-immutable provisioning parameters stored in the database. All initialization behavior (packages,
-install commands, etc.) is driven by config.
+`vm create <name>` takes the VM name as a required positional. Optional flags: `--template` (a
+declared vm-template), `--site` (a declared vm-site; falls back to `defaults.site`, else the one
+ENABLED site is inferred when there is exactly one, several prompt interactively, and
+non-interactive runs error naming the options), `--admin-username`, `--cpus`, `--memory`, `--disk`,
+and `--azure-vm-size`. These are immutable provisioning parameters stored in the database. All
+initialization behavior (packages, install commands, etc.) is driven by config. Templates carry no
+`site`: placement is per-host, so it never travels inside a shared template.
+
+The first interactive `vm create` asks once for an optional **system slug** (3-20 chars, lowercase
+alphanumeric plus dash, no leading/trailing dash): a short identifier for this agentworks
+installation, used to namespace VM hostnames and backend-side names (`{slug}-{vm-name}`) so installs
+sharing a cloud account, Proxmox cluster, or Windows/Mac user don't collide. Leave it blank if this
+install is the only one using its sites' backends; a blank answer is remembered and it will never
+ask again. Non-interactive runs never prompt (a later interactive create still asks once).
 
 `vm reinit` re-runs the initialization phase using the current config without reprovisioning the VM.
 Changes to config (new packages, different install commands, etc.) are picked up automatically.
@@ -163,19 +171,20 @@ directory on this VM. The workspace's template env joins the env chain (between 
 into the workspace; the exec variant runs the command from the workspace directory. A workspace that
 lives on a different VM is rejected with a `ValidationError` before any SSH work.
 
-Combining `--workspace` with `--provisioner` works (the shell still `cd`s into the workspace) but
-the workspace's template env and the `AGENTWORKS_WORKSPACE` identity vars are not delivered: the
+Combining `--workspace` with `--platform` works (the shell still `cd`s into the workspace) but the
+workspace's template env and the `AGENTWORKS_WORKSPACE` identity vars are not delivered: the
 platform-native transports (`limactl shell`, `wsl.exe`) drop the `env=` kwarg by design. Treat
-`--provisioner` as a transport-repair escape hatch, not a routine combination.
+`--platform` as a transport-repair escape hatch, not a routine combination.
 
-`agw vm shell --provisioner` opens the same shell over the platform-native transport
-(`limactl shell` for Lima, `wsl.exe` for WSL2, SSH via a temporarily-attached public IP for Azure)
-instead of Tailscale. Useful when Tailscale itself is the thing you need to reach the VM to fix (the
-issue #117 latched DNS state is the canonical case: its heal involves restarting tailscaled, which
-would terminate a Tailscale-SSH session mid-sequence). On Azure, a public IP is attached for the
-duration of the session and detached on exit. Proxmox isn't supported by this flag because the QEMU
-guest agent's exec interface is one-shot and non-interactive; use the Proxmox web UI's serial
-console (`VM > Console` in the Proxmox VE web UI) as the equivalent escape hatch.
+`agw vm shell --platform` (legacy alias `--provisioner`, one release) opens the same shell over the
+platform-native transport (`limactl shell` for Lima, `wsl.exe` for WSL2, SSH via a
+temporarily-attached public IP for Azure) instead of Tailscale. Useful when Tailscale itself is the
+thing you need to reach the VM to fix (the issue #117 latched DNS state is the canonical case: its
+heal involves restarting tailscaled, which would terminate a Tailscale-SSH session mid-sequence). On
+Azure, a public IP is attached for the duration of the session and detached on exit. Proxmox isn't
+supported by this flag because the QEMU guest agent's exec interface is one-shot and
+non-interactive; use the Proxmox web UI's serial console (`VM > Console` in the Proxmox VE web UI)
+as the equivalent escape hatch.
 
 ### Workspaces
 
@@ -567,11 +576,11 @@ exists). Written samples are inert until you uncomment them (delete one leading 
 
 Configuration splits into two surfaces:
 
-- **Settings** live in `~/.config/agentworks/config.toml` -- your identity, paths, defaults,
-  platform connections, and the secret backend chain. Run `agw config init` to generate a sample;
-  see [sample-config.toml](agentworks/sample-config.toml) for the full reference.
-- **Resources** -- secrets, templates, git credentials, catalog entries -- are declared as YAML
-  manifests under `~/.config/agentworks/resources/`, auto-loaded whenever a command needs them.
+- **Settings** live in `~/.config/agentworks/config.toml`: your identity, paths, defaults, and the
+  secret backend chain. Run `agw config init` to generate a sample; see
+  [sample-config.toml](agentworks/sample-config.toml) for the full reference.
+- **Resources** (secrets, templates, git credentials, vm-sites, catalog entries) are declared as
+  YAML manifests under `~/.config/agentworks/resources/`, auto-loaded whenever a command needs them.
   `agw resource sample <kind>` prints a commented starter (`--all` for every kind). The classic TOML
   resource sections keep working (deprecated, with one aggregated load warning naming the sections
   present; silence it with the global `--no-deprecations` flag); `agw resource migrate` moves them
@@ -581,16 +590,22 @@ Settings sections (`config.toml`, permanent):
 
 - `[operator]` -- SSH keys (required), additional authorized keys, SSH config management
 - `[paths]` -- VM workspace, VS Code workspace file, and backup directories
-- `[defaults]` -- default platform, VM host
+- `[defaults]`: `site`, the default vm-site for `vm create` (`platform` is the deprecated alias)
 - `[session.config]` -- session defaults (history limit)
 - `[secret_config]` -- active secret backend chain (`[secret_backends.*]` sections are deprecated
   no-ops; see Secret Backends below)
-- `[azure]` -- Azure-specific settings
-- `[proxmox]` -- Proxmox VE API settings
 
 Resource kinds (YAML manifests; the deprecated TOML section is noted for each):
 
-- `vm-template` (`[vm_templates.*]`) -- VM resources, apt packages, system install commands, mise
+- `vm-site` (`[azure]` / `[proxmox]`, flat legacy shape): a configured place to create VMs.
+  `spec.platform` names the backing platform, `spec.platform_config` carries its settings (Azure
+  subscription/resource-group/region, Proxmox API endpoint + token secret, remote-Lima `vm_host`).
+  The `lima-local` and `wsl2` sites ship built in (on hosts where their platform can run) and their
+  names are reserved
+- `vm-platform`: read-only capability rows for the in-tree platforms (lima, wsl2, azure-vm,
+  proxmox); listed by `agw resource kinds`, never declared
+- `vm-template` (`[vm_templates.*]`): VM resources, apt packages, system install commands, mise, and
+  the target `site`
 - `admin-template` (`[admin.config]`) -- admin user shell, dotfiles, git credentials, user install
   commands, mise
 - `agent-template` (`[agent_templates.*]`) -- agent user shell, dotfiles, git credentials, user
@@ -791,7 +806,7 @@ VM creation follows a two-phase lifecycle tracked by separate status columns:
    the admin user
 
 Initialization is fully declarative -- driven entirely by config. `vm create` only accepts immutable
-provisioning parameters (name, platform, resources). `vm reinit` takes only the VM name and re-runs
+provisioning parameters (name, site, resources). `vm reinit` takes only the VM name and re-runs
 initialization using the current config.
 
 Non-fatal initialization failures (packages, dotfiles) produce a `partial` status rather than
@@ -817,7 +832,7 @@ config-management flow). To remove completions installed here, use
 dot-source line the installer appended to `$PROFILE`; user-authored lines around it are left
 untouched.
 
-Completions include dynamic VM, workspace, VM host, session, and template name lookups.
+Completions include dynamic VM, vm-site, workspace, session, and template name lookups.
 
 ## State
 

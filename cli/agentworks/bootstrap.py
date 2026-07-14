@@ -49,9 +49,11 @@ def build_registry(config: Config, manifests: ManifestSet | None = None) -> Regi
     ``ManifestSet`` (e.g. ``ManifestSet.empty()``) to skip the auto-load.
     """
     from agentworks import catalog, git_credentials, output, secrets
+    from agentworks.capabilities import vm_platform as vm_platforms
     from agentworks.errors import StateError
     from agentworks.manifests import RESOURCES_DIRNAME, load_manifests
     from agentworks.manifests import builtin as builtin_manifests
+    from agentworks.vms import sites as vm_sites
 
     if not config.resources_loaded:
         raise StateError(
@@ -66,6 +68,14 @@ def build_registry(config: Config, manifests: ManifestSet | None = None) -> Regi
         for issue in manifests.issues:
             output.warn(f"Manifest: {issue}")
 
+    # Host support is NOT a bootstrap concern: platforms gate their own
+    # capability rows (vm_platforms.publish_to), every vm-site (bundled
+    # and declared alike) registers unconditionally and self-disables
+    # when it lacks what it needs (the vm-site kind's generic
+    # disabled_reason hook), and the registry's reserved-name override
+    # fires on every host because the bundled rows always publish.
+    # Using a disabled site is a typed error at resolve time;
+    # doctor warns on references to one.
     registry = Registry.empty()
     # Built-in publishers first. The bundled manifests precede the
     # catalog publisher because catalog.publish_to also publishes the
@@ -75,14 +85,16 @@ def build_registry(config: Config, manifests: ManifestSet | None = None) -> Regi
     catalog.publish_to(registry, config)
     git_credentials.publish_to(registry)
     secrets.publish_to(registry)
+    vm_platforms.publish_to(registry)
     config.publish_to(registry)
     manifests.publish_to(registry)
     registry.finalize()
     # Config consistency against the finalized graph: subsystems whose
     # SETTINGS name resources validate them here, at the boundary that
-    # holds both worlds. The chain ([secret_config].backends) is config,
-    # not a resource; this is the secrets subsystem consuming its config
-    # in normal operation, so every resource-touching command fails fast
-    # with config vocabulary.
+    # holds both worlds. The chain ([secret_config].backends) and
+    # defaults.site are config, not resources; this is each subsystem
+    # consuming its config in normal operation, so every
+    # resource-touching command fails fast with config vocabulary.
     secrets.validate_chain(config, registry)
+    vm_sites.validate_sites(config, registry)
     return registry
