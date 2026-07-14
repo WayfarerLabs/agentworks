@@ -439,7 +439,7 @@ def create_vm(
 
     # Construct the git-credential providers against the operation's
     # resolver up front, so their token secrets join the one boundary
-    # resolve below (and each can verify() its token afterward).
+    # resolve below (and each can runup() its token afterward).
     resolver = Resolver(config, registry)
     providers = resolve_git_credential_providers(
         registry, admin.git_credentials, resolver
@@ -1099,7 +1099,7 @@ def add_git_credential(db: Database, config: Config, name: str, credential_name:
     # The composition root: the credential's token secret (registered on
     # the resolver at construct) joins the bind's boundary resolve, so
     # the platform preflight runs before any prompt and the operation
-    # stays one prompt session; verify() confirms the token afterward.
+    # stays one prompt session; runup() confirms the token afterward.
     bound = bind_platform(
         config, vm, registry=registry, resolver=resolver, prepare=False
     )
@@ -1735,19 +1735,19 @@ def _git_tokens_after_resolve(
     resolver: Resolver,
 ) -> dict[str, str]:
     """Read each provider's resolved token from the operation's resolver
-    cache, after running the provider's ``verify()`` (the authenticated
+    cache, after running the provider's ``runup()`` (the authenticated
     readiness stage) unless the operator disabled it via ``[defaults]
     verify_git_tokens = false``.
 
     The providers must have been constructed against ``resolver`` (so
     their token secrets joined the boundary resolve), and the pass must
-    already have run. A definitive rejection during ``verify`` raises
+    already have run. A definitive rejection during ``runup`` raises
     ``TokenRejectedError``; this is safe at every call site because
-    verification runs before any VM/user mutation.
+    runup runs before any VM/user mutation.
     """
     if config.defaults.verify_git_tokens:
         for provider in providers.values():
-            provider.verify()
+            provider.runup()
     return {
         name: resolver.get(provider.secret_name)
         for name, provider in providers.items()
@@ -1767,7 +1767,7 @@ def _collect_git_tokens(
     (the agent's other secrets resolve at their own use sites). The
     providers are constructed against a fresh resolver so their token
     secrets register, preflight predicts each is resolvable, the one
-    resolve pass runs (single prompt session), and ``verify()`` confirms
+    resolve pass runs (single prompt session), and ``runup()`` confirms
     each token before it is written. Raises ``NotFoundError`` if any name
     isn't a declared credential (the framework's ``GitCredentialKind``
     normally catches this at config-load).

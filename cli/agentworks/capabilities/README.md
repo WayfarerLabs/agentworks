@@ -95,28 +95,30 @@ A capability instance moves through five stages. Each has a sharply different co
 the whole model is in keeping them from bleeding into each other. The _order_ is part of the
 contract: invalid config dies at construct, cheap fatal readiness dies at preflight, secret
 prompting waits for preflight to pass (so the operator is never asked for a secret to feed an op
-that a bad mapping or a missing tool was going to sink anyway), and authenticated readiness (verify)
+that a bad mapping or a missing tool was going to sink anyway), and authenticated readiness (runup)
 runs only once the secrets it needs are in hand.
 
-Readiness is deliberately two stages, `preflight` and `verify`, split by the secret-resolve
-boundary. **The boundary is the only hard rule; what each stage checks is the capability author's
-judgment**, driven by two goals:
+The two readiness stages take their names from flight: **preflight** is the walk-around inspection
+at the ramp (early, cheap, before you commit anything); **runup** is the engine run-up at the
+hold-short line (everything aboard, throttle up and watch the gauges before committing to the
+takeoff roll). They are split by the secret-resolve boundary. **The boundary is the only hard rule;
+what each stage checks is the capability author's judgment**, driven by two goals:
 
 - **preflight** (pre-resolve): catch every issue you can _before_ burdening the operator with secret
   prompts. It runs before resolution, so it works without secret values.
-- **verify** (post-resolve): cleanly catch and identify errors _before_ any mutating op, both to
+- **runup** (post-resolve): cleanly catch and identify errors _before_ any mutating op, both to
   avoid unnecessary mutations and to protect against hard-to-diagnose failures partway through the
   real work. It runs after resolution, so it has the resolved secrets in hand.
 
 Beyond respecting that boundary (and staying read-only), the author decides what belongs in each to
 give the operator good UX. **Either stage may be empty:** a capability with nothing worth checking
-before the prompt has a trivial preflight; one with nothing to authenticate has a no-op verify.
+before the prompt has a trivial preflight; one with nothing to authenticate has a no-op runup.
 Neither is a failure to fill in a template. What the boundary forbids is the cross-over that
 reintroduces asymmetry: an authenticated check in preflight could only use secrets available without
 a prompt, which forks readiness on where a secret happens to come from (an env-var token verified, a
-prompted one not). Moving it _after_ resolution dissolves that: by the time verify runs, every
-secret is resolved the same way, so every credential is checked the same way. Both readiness stages
-are read-only and re-runnable; ops are the only mutation.
+prompted one not). Moving it _after_ resolution dissolves that: by the time runup runs, every secret
+is resolved the same way, so every credential is checked the same way. Both readiness stages are
+read-only and re-runnable; ops are the only mutation.
 
 ### 1. `validate_config` (declare; pure, classmethod)
 
@@ -198,12 +200,12 @@ resources or starting expiry clocks. It is also what lets preflight run _before_
 the cheap fatal checks (a missing mapping, a missing tool, an unreachable API) are caught without
 spending the operator's time on a prompt for an op that was never going to run.
 
-**Doctor runs preflight, not verify.** Doctor is a passive, non-interactive scan, so it never
+**Doctor runs preflight, not runup.** Doctor is a passive, non-interactive scan, so it never
 prompts; an authenticated check under it could only ever reach the non-interactively-resolvable
-secrets, which is the exact source-asymmetry verify exists to avoid. So doctor stays preflight-only
+secrets, which is the exact source-asymmetry runup exists to avoid. So doctor stays preflight-only
 and uniform, and a secret's resolvability (is it mapped at all?) is already its own doctor row via
 the secret backends. On-demand authenticated checking is an explicit, interactive escalation of the
-same surface (`doctor --verify`: allowed to prompt, therefore allowed to run verify), tracked
+same surface (`doctor --verify`: allowed to prompt, therefore allowed to run runup), tracked
 separately; it is not something doctor's passive pass does.
 
 When does it run? The starting policy: **every service-layer operation runs preflight on all the
@@ -218,19 +220,20 @@ clearly before work starts is worth more than the round-trip it costs, and there
 (caching, per-op opt-outs) once real usage shows where it hurts. Doctor calls the same preflights
 for its per-resource health rows.
 
-### 4. `verify` (confirm readiness; post-resolve, authenticated, read-only)
+### 4. `runup` (confirm readiness; post-resolve, authenticated, read-only)
 
-Verify is preflight's post-resolve twin. It runs _after_ the operation's single resolve pass, so it
-holds the resolved secret values preflight could not, and does the authenticated checks preflight
-was barred from: a git provider's `GET /user`, a platform's API connection check, a secret backend's
-reachability with the real credential. It answers the question preflight structurally cannot: "with
-the credentials actually in hand, does the real work look like it will succeed?"
+Runup is preflight's post-resolve twin -- the engine run-up right before takeoff. It runs _after_
+the operation's single resolve pass, so it holds the resolved secret values preflight could not, and
+does the authenticated checks preflight was barred from: a git provider's `GET /user`, a platform's
+API connection check, a secret backend's reachability with the real credential. It answers the
+question preflight structurally cannot: "with the credentials actually in hand, does the real work
+look like it will succeed?"
 
 Its purpose is to catch and identify errors cleanly before any op mutates, for two reasons: to avoid
 unnecessary mutations, and to spare the operator hard-to-diagnose failures partway through the real
 work (a 401 on a fresh token is far clearer surfaced here than as a git clone failing three steps
 into provisioning). What it checks is the author's call, same as preflight; a capability with
-nothing to authenticate leaves verify a no-op.
+nothing to authenticate leaves runup a no-op.
 
 Its contract mirrors preflight where it matters and differs where it must:
 
@@ -246,12 +249,11 @@ Its contract mirrors preflight where it matters and differs where it must:
 
 When does it run? After the resolve pass, on every participating resource whose readiness has an
 authenticated component, before any op mutates, once per instance. The starting policy pairs it with
-preflight: preflight-all, then resolve, then verify-all, then ops. It is skippable by operator
-policy where the round-trip is unwanted (the git stack exposes
-`[defaults] verify_git_tokens = false`, and airgapped setups want exactly that); preflight is not
-skippable, because predicting resolvability costs nothing. Doctor's passive pass does _not_ run
-verify (see the preflight section); `doctor --verify` is the explicit, prompting escalation that
-does.
+preflight: preflight-all, then resolve, then runup-all, then ops. It is skippable by operator policy
+where the round-trip is unwanted (the git stack exposes `[defaults] verify_git_tokens = false`, and
+airgapped setups want exactly that); preflight is not skippable, because predicting resolvability
+costs nothing. Doctor's passive pass does _not_ run runup (see the preflight section);
+`doctor --verify` is the explicit, prompting escalation that does.
 
 ### 5. ops (do the work; the mutation phase)
 
@@ -261,16 +263,16 @@ them.
 
 Production of a value that requires a mutation lives here, cached and only after the resolve pass,
 never in a readiness stage. This is what dissolves the old `acquire_token`-style method entirely:
-its verify-half became `verify` (post-resolve, authenticated), its produce-half became a
-post-resolve detail of ops. Minting is strictly an op, never verify: minting is a mutation (a new
-token, a fresh expiry clock), and verify is read-only, so for a minting provider verify _reads and
-checks_ the current token and the op mints when that check says it must.
+its verify-half became `runup` (post-resolve, authenticated), its produce-half became a post-resolve
+detail of ops. Minting is strictly an op, never runup: minting is a mutation (a new token, a fresh
+expiry clock), and runup is read-only, so for a minting provider runup _reads and checks_ the
+current token and the op mints when that check says it must.
 
 Secret resolution rides the same seam, and its timing is pinned to the preflight boundary: **resolve
 as soon as preflight passes.** Once the operation's preflight checks clear, the resolver resolves
 the union of secrets needed across all planned ops across all participating resources (the
 template's Tailscale key and the site's API token join the same pass) in one batch, one prompt
-session, values cached; verify then runs on those resolved values, and ops draw from the same cache
+session, values cached; runup then runs on those resolved values, and ops draw from the same cache
 (a minting provider produces its token here, guarded by check-then-mint). Resolution is deliberately
 neither of the two extremes: not eager at command entry (a prompt could precede a fatal check that
 would have sunk the op), and not deferred to first op-need (prompts would land mid-operation,
@@ -293,7 +295,7 @@ Provisioning re-runs: `reinit` re-applies everything, and a failed command is re
 lifecycle has to be safe to re-run, and the five stages divide cleanly on how they get there:
 
 - `validate_config` (pure), `construct` (cheap, side-effect-free), and both readiness stages,
-  `preflight` and `verify` (read-only), are idempotent _by their existing contracts_. Their stated
+  `preflight` and `runup` (read-only), are idempotent _by their existing contracts_. Their stated
   re-runnability is idempotency by another name; nothing extra is required.
 - **ops** are the mutation phase, so idempotency there is an _explicit_ contract, not a free
   consequence. Each kind's ABC **flags the ops that must be idempotent** (a marker plus the standing
@@ -307,7 +309,7 @@ helper registered with `--replace-all`, the include added behind a guard). The f
 where idempotency stops being free, and minting is the canonical case: a mint creates a new token
 and starts a fresh expiry clock, so a naive minting op would mint on _every_ reinit, leaking tokens.
 A flagged, idempotent minting op must therefore **check-then-mint**: read the current token, verify
-it (the same read-only check `verify` runs), and mint only if it is absent or expired. That guard is
+it (the same read-only check `runup` runs), and mint only if it is absent or expired. That guard is
 real work the implementer is on the hook for, and the flag is what tells them so.
 
 ## Disabled resources (`disabled_reason`)
@@ -345,9 +347,9 @@ The shared surface is real (it is a lifecycle, not a boilerplate default), so it
 - the `validate_config` classmethod, with a sensible default (accepts no config) and the standing
   NOTE that this invoked-validation API may later be superseded by capabilities declaring their
   config schema at registration time;
-- the construct, `preflight`, and `verify` instance contract (`preflight` predicting resolvability
-  by default, `verify` a no-op by default: the capabilities with nothing to authenticate get the
-  right behavior for free);
+- the construct, `preflight`, and `runup` instance contract (`preflight` predicting resolvability by
+  default, `runup` a no-op by default: the capabilities with nothing to authenticate get the right
+  behavior for free);
 - the capability's identity (`name`, `description`) as the registry sees it.
 
 Subclasses add their ops. `GitHubCredentialProvider`, `VMPlatform`, `Harness` extend it. Consuming
@@ -363,7 +365,7 @@ Nothing special happens: the secret is an ordinary `ConfigReference` returned by
 The framework owns resolution; the instance never implements it. The instance holds a framework
 _resolver_ and uses it two ways: non-prompting _prediction_ in preflight (is this resolvable at
 all?), and _resolution_ at the preflight boundary (everything the command declared, one batched
-prompt session, cached; ops and verify draw from the cache). The default secret name is the
+prompt session, cached; ops and runup draw from the cache). The default secret name is the
 capability's to choose: a per-consumer default (`git-token-<name>`, derived from `owner`) where
 credentials are many, a shared well-known name (`proxmox-token`) where one is typical. Either way
 the capability owns the default; the framework only resolves what was declared.

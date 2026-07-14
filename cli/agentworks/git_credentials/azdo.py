@@ -1,7 +1,7 @@
 """Azure DevOps git credential provider -- formats credentials for ``~/.git-credentials``.
 
 Token resolution lives in the framework; this class validates the org,
-verifies the PAT against the org endpoint at the ``verify`` stage, and
+checks the PAT against the org endpoint at the ``runup`` stage, and
 formats the URL line.
 """
 

@@ -2,8 +2,8 @@
 
 A git credential provider is a capability (see ``capabilities/README.md``):
 it validates its own ``provider_config`` block (``validate_config``),
-declares the secret its token comes from, verifies that token against the
-host at the post-resolve ``verify`` stage, and produces the credential
+declares the secret its token comes from, checks that token against the
+host at the post-resolve ``runup`` stage, and produces the credential
 materials (``credential_lines`` / ``helper_entry``) as its op. Token
 resolution itself lives in the framework: each provider declares a
 ``SecretReference`` for its token, the active backend chain (env-var /
@@ -141,7 +141,7 @@ class GitCredentialProvider(Capability):
         """The token secret this credential sources its PAT from -- the
         one secret its ``validate_config`` declared (default
         ``git-token-<name>``). Named by the helper's rejection
-        diagnosis and read from the resolver at ``verify``."""
+        diagnosis and read from the resolver at ``runup``."""
         if self._secret_refs:
             return self._secret_refs[0].name
         return default_token_secret(self.owner_name)
@@ -161,14 +161,14 @@ class GitCredentialProvider(Capability):
             return f"{self.owner_name} ({self._description})"
         return self.owner_name
 
-    def verify(self) -> None:
-        """Authenticated readiness (the ``verify`` lifecycle stage):
+    def runup(self) -> None:
+        """Authenticated readiness (the ``runup`` lifecycle stage):
         confirm the resolved PAT authorizes against the host before it is
         written to any VM.
 
         Post-resolve and read-only: it reads the token from the
         resolver's cache and does a single authenticated GET. A
-        definitive rejection raises ``TokenRejectedError`` (safe: verify
+        definitive rejection raises ``TokenRejectedError`` (safe: runup
         runs before any VM/user mutation); network indeterminacy or any
         other non-success warns and continues unverified, so a transient
         outage never blocks work a valid token would have done.
@@ -180,7 +180,7 @@ class GitCredentialProvider(Capability):
 
         if self.resolver is None:
             raise ConfigError(
-                f"{self._owner_display}: cannot verify the token without a "
+                f"{self._owner_display}: cannot check the token without a "
                 f"resolver (constructed for inspection?)"
             )
         self._verify_token(self.resolver.get(self.secret_name))

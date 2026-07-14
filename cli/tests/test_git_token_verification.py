@@ -1,9 +1,9 @@
-"""Authenticated token verification at the capability ``verify()`` stage.
+"""Authenticated token verification at the capability ``runup()`` stage.
 
-``verify()`` is the post-resolve readiness stage: the provider reads its
+``runup()`` is the post-resolve readiness stage: the provider reads its
 resolved PAT from the operation's resolver and probes it against the
 host (github ``GET /user``, azdo connectionData). Policy: a definitive
-rejection raises ``TokenRejectedError`` (safe -- verify runs before any
+rejection raises ``TokenRejectedError`` (safe -- runup runs before any
 VM/user mutation); network indeterminacy warns and continues unverified.
 The suite-wide conftest guard makes any unmocked probe look like a
 network failure, so no test can reach the real network.
@@ -43,7 +43,7 @@ def _probe(status: int, body: bytes = b"{}", headers: dict[str, str] | None = No
 
 class _StubResolver:
     """Minimal resolver stand-in: a provider registers its token secret
-    at construct and reads the value back in ``verify()``."""
+    at construct and reads the value back in ``runup()``."""
 
     def __init__(self, tokens: dict[str, str]) -> None:
         self._tokens = tokens
@@ -68,7 +68,7 @@ def test_github_200_verifies_with_login_and_expiry(
     )
     monkeypatch.setattr("agentworks.git_credentials.base._http_probe", fake)
     p = GitHubCredentialProvider("gh", {}, _StubResolver({"git-token-gh": "tok"}))
-    p.verify()
+    p.runup()
     out = capsys.readouterr().out
     assert "Verified git token for 'gh'" in out
     assert "login wfscot" in out
@@ -88,7 +88,7 @@ def test_github_401_is_definitive_rejection(
         "gh", {"token": "my-secret"}, _StubResolver({"my-secret": "bogus"})
     )
     with pytest.raises(TokenRejectedError, match="rejected the token") as exc:
-        p.verify()
+        p.runup()
     assert "'gh'" in str(exc.value)
     assert "'my-secret'" in str(exc.value)
     assert "verify_git_tokens = false" in (exc.value.hint or "")
@@ -101,7 +101,7 @@ def test_github_other_status_warns_and_continues(
         "agentworks.git_credentials.base._http_probe", _probe(503)
     )
     p = GitHubCredentialProvider("gh", {}, _StubResolver({"git-token-gh": "tok"}))
-    p.verify()
+    p.runup()
     assert "could not verify" in capsys.readouterr().err
 
 
@@ -111,7 +111,7 @@ def test_network_failure_warns_and_continues(
     """No probe monkeypatch here: the conftest guard IS the network
     failure, proving both the guard and the indeterminacy path."""
     p = GitHubCredentialProvider("gh", {}, _StubResolver({"git-token-gh": "tok"}))
-    p.verify()
+    p.runup()
     assert "could not verify" in capsys.readouterr().err
 
 
@@ -121,20 +121,20 @@ def test_expiry_header_format_drift_tolerated(
     fake = _probe(200, b'{"login": "x"}', {_EXPIRY_HEADER: "soonish"})
     monkeypatch.setattr("agentworks.git_credentials.base._http_probe", fake)
     p = GitHubCredentialProvider("gh", {}, _StubResolver({"git-token-gh": "t"}))
-    p.verify()
+    p.runup()
     out = capsys.readouterr().out
     assert "Verified git token for 'gh'" in out
     assert "login x" in out
     assert "expires" not in out  # drift -> no expiry shown
 
 
-def test_github_verify_without_resolver_is_error() -> None:
-    """A provider built for inspection (no resolver) cannot verify."""
+def test_github_runup_without_resolver_is_error() -> None:
+    """A provider built for inspection (no resolver) cannot run up."""
     from agentworks.errors import ConfigError
 
     p = GitHubCredentialProvider("gh", {})
     with pytest.raises(ConfigError, match="without a resolver"):
-        p.verify()
+        p.runup()
 
 
 # -- azdo -------------------------------------------------------------------
@@ -151,7 +151,7 @@ def test_azdo_rejection_statuses(
         "ado", {"org": "my-org"}, _StubResolver({"git-token-ado": "bogus"})
     )
     with pytest.raises(TokenRejectedError, match="Azure DevOps rejected"):
-        p.verify()
+        p.runup()
 
 
 def test_azdo_200_verifies(
@@ -162,7 +162,7 @@ def test_azdo_200_verifies(
     p = AzDOCredentialProvider(
         "ado", {"org": "my-org"}, _StubResolver({"git-token-ado": "tok"})
     )
-    p.verify()
+    p.runup()
     assert "Verified git token for 'ado'" in capsys.readouterr().out
     (url, headers), = fake.calls  # type: ignore[attr-defined]
     assert url == "https://dev.azure.com/my-org/_apis/connectionData"

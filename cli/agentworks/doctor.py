@@ -451,7 +451,7 @@ def _check_config() -> tuple[HealthGroup, Config | None, Registry | None]:
     # resolvability shows in the Secrets group (`_check_secrets` covers
     # the git-token-* family) like any other secret. Live authenticated
     # verification (expired/revoked/wrong-scope) is the capability
-    # `verify()` stage, which runs inside provisioning ops; on-demand
+    # `runup()` stage, which runs inside provisioning ops; on-demand
     # authenticated checking is the deferred `doctor --verify` (issue
     # #176). Doctor never prompts, so an authenticated check here could
     # only ever reach non-interactively-resolvable secrets, forking

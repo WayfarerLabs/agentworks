@@ -1131,7 +1131,7 @@ def resolve_git_credential_providers(
     silently WIDENING the credential). When ``resolver`` is passed, each
     provider registers its token secret on it at construct, so the
     operation's boundary resolve covers them and the provider can
-    ``verify()`` the token afterward; pass ``None`` for materials-only
+    ``runup()`` the token afterward; pass ``None`` for materials-only
     or inspection construction.
     """
     from agentworks.git_credentials import GIT_CREDENTIAL_PROVIDER_REGISTRY

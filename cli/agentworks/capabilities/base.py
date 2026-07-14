@@ -13,15 +13,16 @@ contracts (the full capability model is documented in
 3. ``preflight``: pre-resolve, read-only, best-effort readiness;
    predicts secret resolvability without prompting, checks unauthenticated
    reachability / tools. Doctor reuses it.
-4. ``verify``: post-resolve, read-only, authenticated readiness; with
+4. ``runup``: post-resolve, read-only, authenticated readiness; with
    resolved secrets in hand, does the authenticated dry-run (a git
-   provider's ``GET /user``, a platform's API check). Default no-op.
+   provider's ``GET /user``, a platform's API check) -- the engine
+   run-up before takeoff. Default no-op.
 5. ops: the mutation phase, subclass-owned. Values come from the
    resolver's cache, populated by the operation's single resolve pass at
-   the preflight boundary; minting lives here (verify never mutates).
+   the preflight boundary; minting lives here (runup never mutates).
 
 Readiness is two methods split by the secret-resolve boundary: preflight
-before the prompt, verify after it. That split is what keeps an
+before the prompt, runup after it. That split is what keeps an
 authenticated check from depending on where a secret came from.
 
 Capability implementations extend this base; consuming resources (decls,
@@ -204,24 +205,26 @@ class Capability(ABC):
                     ),
                 )
 
-    def verify(self) -> None:  # noqa: B027  # intentional concrete no-op default
+    def runup(self) -> None:  # noqa: B027  # intentional concrete no-op default
         """Authenticated readiness: with secrets in hand, does the real
-        work look like it will succeed?
+        work look like it will succeed? The engine run-up before takeoff.
 
-        Preflight's post-resolve twin. It runs AFTER the operation's
-        single resolve pass, so it MAY read resolved secret values from
-        the resolver's cache (``self.resolver.get(name)``) and do the
-        authenticated reads preflight cannot: a git provider's
-        ``GET /user``, a platform's API connection check. Read-only and
-        side-effect-free exactly like :meth:`preflight` (it never mints,
-        creates, or mutates), which is what lets it be re-run and, via a
-        future ``doctor --verify``, called outside an operation.
+        Preflight's post-resolve twin (preflight is the walk-around; this
+        is the run-up at the hold-short line, right before the op). It
+        runs AFTER the operation's single resolve pass, so it MAY read
+        resolved secret values from the resolver's cache
+        (``self.resolver.get(name)``) and do the authenticated reads
+        preflight cannot: a git provider's ``GET /user``, a platform's
+        API connection check. Read-only and side-effect-free exactly like
+        :meth:`preflight` (it never mints, creates, or mutates), which is
+        what lets it be re-run and, via a future ``doctor --verify``,
+        called outside an operation.
 
         The split across the resolve boundary is what dissolves
-        source-asymmetry: by the time verify runs, EVERY declared secret
+        source-asymmetry: by the time runup runs, EVERY declared secret
         is resolved (env-var, prompted, 1Password alike), so an
         authenticated check treats them all identically. Preflight
-        predicts before the prompt (may I even bother resolving?); verify
+        predicts before the prompt (may I even bother resolving?); runup
         confirms after it (may I start mutating?).
 
         The point is to catch errors cleanly before any op mutates: to
@@ -236,7 +239,7 @@ class Capability(ABC):
         not block work an unverified-but-valid token would have done.
 
         Base behavior: no-op. Many capabilities have nothing to
-        authenticate, and a no-op verify is a legitimate answer, not an
+        authenticate, and a no-op runup is a legitimate answer, not an
         unfinished one. Subclasses with a credential or reachable API
-        override wholesale (no ``super().verify()`` to call).
+        override wholesale (no ``super().runup()`` to call).
         """
