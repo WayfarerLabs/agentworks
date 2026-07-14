@@ -475,6 +475,12 @@ def create_vm(
         provider.preflight(RunContext(config=config))
     output.info("Collecting credentials...")
     resolver.resolve()
+    # Provisioning-phase runup: authenticate the platform's own
+    # credential (proxmox/azure API token) before create() mutates
+    # anything. A definitive rejection aborts here, before the DB row or
+    # any backend resource exists. lima/wsl2 have no token, so this is a
+    # no-op for them.
+    platform_obj.runup(RunContext(config=config, secrets=resolver))
     tailscale_auth_key = resolver.get(vm_tmpl.tailscale_auth_key)
     git_tokens = _git_tokens_after_resolve(config, providers, resolver)
 
