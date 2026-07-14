@@ -1,7 +1,7 @@
 """The instance-scoped ``Capability`` base: the lifecycle contract every
 capability implementation extends.
 
-A capability instance moves through four stages with sharply different
+A capability instance moves through stages with sharply different
 contracts (the full capability model is documented in
 ``capabilities/README.md`` once a second capability validates it):
 
@@ -10,11 +10,19 @@ contracts (the full capability model is documented in
 2. construct: cheap, config-valid by construction (re-runs
    ``validate_config``); binds ``(name, config, resolver)``, never
    resolved secret values. No network, no resolution, no prompt.
-3. ``preflight``: read-only, best-effort readiness; predicts secret
-   resolvability without prompting. Doctor reuses it.
-4. ops: the mutation phase, subclass-owned. Values come from the
-   resolver's cache, populated by the operation's single resolve pass
-   at the preflight boundary.
+3. ``preflight``: pre-resolve, read-only, best-effort readiness;
+   predicts secret resolvability without prompting, checks unauthenticated
+   reachability / tools. Doctor reuses it.
+4. ``verify``: post-resolve, read-only, authenticated readiness; with
+   resolved secrets in hand, does the authenticated dry-run (a git
+   provider's ``GET /user``, a platform's API check). Default no-op.
+5. ops: the mutation phase, subclass-owned. Values come from the
+   resolver's cache, populated by the operation's single resolve pass at
+   the preflight boundary; minting lives here (verify never mutates).
+
+Readiness is two methods split by the secret-resolve boundary: preflight
+before the prompt, verify after it. That split is what keeps an
+authenticated check from depending on where a secret came from.
 
 Capability implementations extend this base; consuming resources (decls,
 sessions) do not: a rich consuming resource composes the preflights of
@@ -195,3 +203,34 @@ class Capability(ABC):
                         "or extend [secret_config].backends."
                     ),
                 )
+
+    def verify(self) -> None:  # noqa: B027  # intentional concrete no-op default
+        """Authenticated readiness: with secrets in hand, does the real
+        work look like it will succeed?
+
+        Preflight's post-resolve twin. It runs AFTER the operation's
+        single resolve pass, so it MAY read resolved secret values from
+        the resolver's cache (``self.resolver.get(name)``) and do the
+        authenticated reads preflight cannot: a git provider's
+        ``GET /user``, a platform's API connection check. Read-only and
+        side-effect-free exactly like :meth:`preflight` (it never mints,
+        creates, or mutates), which is what lets it be re-run and, via a
+        future ``doctor --verify``, called outside an operation.
+
+        The split across the resolve boundary is what dissolves
+        source-asymmetry: by the time verify runs, EVERY declared secret
+        is resolved (env-var, prompted, 1Password alike), so an
+        authenticated check treats them all identically. Preflight
+        predicts before the prompt (may I even bother resolving?); verify
+        confirms after it (may I start mutating?).
+
+        Best-effort, not an oracle: it catches what an authenticated read
+        can catch and raises a typed error on definitive rejection;
+        anything only a mutation can confirm is the op's job, and network
+        indeterminacy warns (never raises), since a transient outage must
+        not block work an unverified-but-valid token would have done.
+
+        Base behavior: no-op. Many capabilities have nothing to
+        authenticate. Subclasses with a credential or reachable API
+        override wholesale (no ``super().verify()`` to call).
+        """

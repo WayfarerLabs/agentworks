@@ -91,11 +91,21 @@ is a further extension the hosting-shapes doc tracks; it is not needed yet.)
 
 ## The lifecycle
 
-A capability instance moves through four stages. Each has a sharply different contract; the value of
+A capability instance moves through five stages. Each has a sharply different contract; the value of
 the whole model is in keeping them from bleeding into each other. The _order_ is part of the
-contract: invalid config dies at construct, cheap fatal readiness dies at preflight, and secret
-prompting waits for preflight to pass, so the operator is never asked for a secret to feed an op
-that a bad mapping or a missing tool was going to sink anyway.
+contract: invalid config dies at construct, cheap fatal readiness dies at preflight, secret
+prompting waits for preflight to pass (so the operator is never asked for a secret to feed an op
+that a bad mapping or a missing tool was going to sink anyway), and authenticated readiness (verify)
+runs only once the secrets it needs are in hand.
+
+Readiness is deliberately two stages, `preflight` and `verify`, split by the secret-resolve
+boundary: preflight before the prompt (cheap, unauthenticated, "may I even bother resolving?"),
+verify after it (authenticated, "may I start mutating?"). That split is the load-bearing move behind
+the whole model: an authenticated check that ran _during_ preflight could only use secrets available
+without a prompt, which forks readiness on where a secret happens to come from (an env-var token
+verified, a prompted one not). Moving it _after_ resolution dissolves the asymmetry: by the time
+verify runs, every secret is resolved the same way, so every credential is checked the same way.
+Both readiness stages are read-only and re-runnable; ops are the only mutation.
 
 ### 1. `validate_config` (declare; pure, classmethod)
 
@@ -140,12 +150,12 @@ call is _runtime_ execution context (a harness's command channel, a platform's p
 which every capability needs as it runs; that is not a hosting difference. Config binds at
 construction for all of them; runtime context passes per call for all of them.
 
-### 3. `preflight` (verify readiness; read-only, best-effort)
+### 3. `preflight` (predict readiness; pre-resolve, read-only)
 
 Preflight answers "will the real work probably succeed?" on an already-constructed,
-already-config-valid instance (config validity is construct's job, not preflight's). It reports
-problems _clearly_, before any mutation and before any secret prompt. Its defining property is that
-it is **read-only and side-effect-free**:
+already-config-valid instance (config validity is construct's job, not preflight's), using only what
+is knowable _before_ any secret is resolved. It reports problems _clearly_, before any mutation and
+before any secret prompt. Its defining property is that it is **read-only and side-effect-free**:
 
 - It **predicts secret resolvability without prompting.** A declared secret with no mapping at all
   is fatal and knowable here, without prompting for the others. Value checks defer to the op,
@@ -174,6 +184,14 @@ resources or starting expiry clocks. It is also what lets preflight run _before_
 the cheap fatal checks (a missing mapping, a missing tool, an unreachable API) are caught without
 spending the operator's time on a prompt for an op that was never going to run.
 
+**Doctor runs preflight, not verify.** Doctor is a passive, non-interactive scan, so it never
+prompts; an authenticated check under it could only ever reach the non-interactively-resolvable
+secrets, which is the exact source-asymmetry verify exists to avoid. So doctor stays preflight-only
+and uniform, and a secret's resolvability (is it mapped at all?) is already its own doctor row via
+the secret backends. On-demand authenticated checking is an explicit, interactive escalation of the
+same surface (`doctor --verify`: allowed to prompt, therefore allowed to run verify), tracked
+separately; it is not something doctor's passive pass does.
+
 When does it run? The starting policy: **every service-layer operation runs preflight on all the
 resources it will use, before doing anything real** (before any mutation, and before any secret
 prompt). That means the capability instances, and also the declarable resources with readiness
@@ -186,27 +204,59 @@ clearly before work starts is worth more than the round-trip it costs, and there
 (caching, per-op opt-outs) once real usage shows where it hurts. Doctor calls the same preflights
 for its per-resource health rows.
 
-### 4. ops (do the work; the mutation phase)
+### 4. `verify` (confirm readiness; post-resolve, authenticated, read-only)
+
+Verify is preflight's post-resolve twin. It runs _after_ the operation's single resolve pass, so it
+holds the resolved secret values preflight could not, and does the authenticated checks preflight
+was barred from: a git provider's `GET /user`, a platform's API connection check, a secret backend's
+reachability with the real credential. It answers the question preflight structurally cannot: "with
+the credentials actually in hand, does the real work look like it will succeed?"
+
+Its contract mirrors preflight where it matters and differs where it must:
+
+- **Read-only and side-effect-free**, exactly like preflight. It never mints, creates, or mutates.
+  This is what lets it be re-run and, crucially, lets an explicit interactive surface
+  (`doctor --verify`) call it outside an operation.
+- **Authenticated.** Reading resolved secrets and probing with them is the whole point; it is the
+  half of readiness that only makes sense once resolution has happened.
+- **Best-effort, not an oracle**, again like preflight. It raises a typed, actionable error on a
+  _definitive_ rejection (a 401 on the token), but network indeterminacy **warns and continues,
+  never raises**: a transient outage must not block work that an unverified-but-valid credential
+  would have completed. Anything only a mutation can confirm remains the op's job.
+
+When does it run? After the resolve pass, on every participating resource whose readiness has an
+authenticated component, before any op mutates, once per instance. The starting policy pairs it with
+preflight: preflight-all, then resolve, then verify-all, then ops. It is skippable by operator
+policy where the round-trip is unwanted (the git stack exposes
+`[defaults] verify_git_tokens = false`, and airgapped setups want exactly that); preflight is not
+skippable, because predicting resolvability costs nothing. Doctor's passive pass does _not_ run
+verify (see the preflight section); `doctor --verify` is the explicit, prompting escalation that
+does.
+
+### 5. ops (do the work; the mutation phase)
 
 The domain methods: `create` / `destroy` for a platform, credential-materials for a provider,
 `start` / `probe` for a harness. These belong to the subclass, not the base; do not try to unify
 them.
 
-Production of a value that requires a mutation lives here, cached and only after preflight, never in
-preflight. This is what dissolves the old `acquire_token`-style method entirely: its verify-half
-became preflight, its produce-half became a post-preflight detail of ops.
+Production of a value that requires a mutation lives here, cached and only after the resolve pass,
+never in a readiness stage. This is what dissolves the old `acquire_token`-style method entirely:
+its verify-half became `verify` (post-resolve, authenticated), its produce-half became a
+post-resolve detail of ops. Minting is strictly an op, never verify: minting is a mutation (a new
+token, a fresh expiry clock), and verify is read-only, so for a minting provider verify _reads and
+checks_ the current token and the op mints when that check says it must.
 
 Secret resolution rides the same seam, and its timing is pinned to the preflight boundary: **resolve
 as soon as preflight passes.** Once the operation's preflight checks clear, the resolver resolves
 the union of secrets needed across all planned ops across all participating resources (the
 template's Tailscale key and the site's API token join the same pass) in one batch, one prompt
-session, values cached; ops then draw from that cache (a minting provider produces its token through
-the same pass, guarded by check-then-mint). Resolution is deliberately neither of the two extremes:
-not eager at command entry (a prompt could precede a fatal check that would have sunk the op), and
-not deferred to first op-need (prompts would land mid-operation, scattered across the run). The
-operator is prompted exactly once, at a predictable moment, after the work is confirmed able to
-proceed and before it starts. In one line: preflight passing is the trigger, the command's declared
-set is the scope. Wait for preflight, then do it all.
+session, values cached; verify then runs on those resolved values, and ops draw from the same cache
+(a minting provider produces its token here, guarded by check-then-mint). Resolution is deliberately
+neither of the two extremes: not eager at command entry (a prompt could precede a fatal check that
+would have sunk the op), and not deferred to first op-need (prompts would land mid-operation,
+scattered across the run). The operator is prompted exactly once, at a predictable moment, after the
+work is confirmed able to proceed and before it starts. In one line: preflight passing is the
+trigger, the command's declared set is the scope. Wait for preflight, then do it all.
 
 Prompting now happens inside the service-layer operation (at the preflight boundary rather than at
 bind), so the operator's abort point moves with it, and the error discipline moves too. A Ctrl-C at
@@ -220,11 +270,11 @@ the DB row anyway, orphaning the backend VM the operator just declined to authen
 ### Idempotency
 
 Provisioning re-runs: `reinit` re-applies everything, and a failed command is retried. So the
-lifecycle has to be safe to re-run, and the four stages divide cleanly on how they get there:
+lifecycle has to be safe to re-run, and the five stages divide cleanly on how they get there:
 
-- `validate_config` (pure), `construct` (cheap, side-effect-free), and `preflight` (read-only) are
-  idempotent _by their existing contracts_. Preflight's stated re-runnability is idempotency by
-  another name; nothing extra is required.
+- `validate_config` (pure), `construct` (cheap, side-effect-free), and both readiness stages,
+  `preflight` and `verify` (read-only), are idempotent _by their existing contracts_. Their stated
+  re-runnability is idempotency by another name; nothing extra is required.
 - **ops** are the mutation phase, so idempotency there is an _explicit_ contract, not a free
   consequence. Each kind's ABC **flags the ops that must be idempotent** (a marker plus the standing
   docstring note), and implementations must conform: a flagged op, run twice, lands in the same
@@ -237,8 +287,8 @@ helper registered with `--replace-all`, the include added behind a guard). The f
 where idempotency stops being free, and minting is the canonical case: a mint creates a new token
 and starts a fresh expiry clock, so a naive minting op would mint on _every_ reinit, leaking tokens.
 A flagged, idempotent minting op must therefore **check-then-mint**: read the current token, verify
-it (the preflight-style read), and mint only if it is absent or expired. That guard is real work the
-implementer is on the hook for, and the flag is what tells them so.
+it (the same read-only check `verify` runs), and mint only if it is absent or expired. That guard is
+real work the implementer is on the hook for, and the flag is what tells them so.
 
 ## Disabled resources (`disabled_reason`)
 
@@ -275,7 +325,9 @@ The base owns the contract above and nothing domain-specific:
 - the `validate_config` classmethod, with a sensible default (accepts no config) and the standing
   NOTE that this invoked-validation API may later be superseded by capabilities declaring their
   config schema at registration time;
-- the construct and `preflight` instance contract;
+- the construct, `preflight`, and `verify` instance contract (`preflight` predicting resolvability
+  by default, `verify` a no-op by default: the capabilities with nothing to authenticate get the
+  right behavior for free);
 - the capability's identity (`name`, `description`) as the registry sees it.
 
 Subclasses add their ops. `GitHubCredentialProvider`, `VMPlatform`, `Harness` extend it. Consuming
