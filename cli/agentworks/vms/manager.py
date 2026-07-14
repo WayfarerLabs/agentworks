@@ -445,7 +445,6 @@ def create_vm(
     providers = resolve_git_credential_providers(
         registry, admin.git_credentials, resolver
     )
-    announce_git_credentials(providers)
 
     # System slug: first interactive create prompts once (a blank
     # answer is final; see _resolve_system_slug). Runs before any
@@ -469,12 +468,20 @@ def create_vm(
     from agentworks.vms.templates import preflight_vm_template
 
     platform_obj = resolve_site(site, registry, resolver=resolver)
+
+    output.phase("Preflight")
+    output.detail(f"vm-site: {site}")
+    output.detail(f"vm-template: {vm_tmpl.name}")
+    announce_git_credentials(providers)
     preflight_vm_template(vm_tmpl, resolver)
     platform_obj.preflight(RunContext(config=config))
     for provider in providers.values():
         provider.preflight(RunContext(config=config))
+
     output.info("Collecting credentials...")
     resolver.resolve()
+
+    output.phase("Runup")
     # Provisioning-phase runup: authenticate the platform's own
     # credential (proxmox/azure API token) before create() mutates
     # anything. A definitive rejection aborts here, before the DB row or
@@ -536,6 +543,8 @@ def create_vm(
         azure_vm_size=resolved_azure_size,
     )
 
+    output.phase("Provisioning")
+    output.info(f"Creating VM '{vm_name}' on vm-site '{site}'...")
     try:
         result = platform_obj.create(request)
     except KeyboardInterrupt:
@@ -1549,17 +1558,24 @@ def reinit_vm(
     providers = resolve_git_credential_providers(
         registry, admin.git_credentials, resolver
     )
-    announce_git_credentials(providers)
 
     # The preflight boundary: git tokens and any site config secret
     # (proxmox's API token) resolve in one prompt session. The
     # vm-template's Tailscale key is NOT part of reinit's planned ops
     # (a broken node's rejoin resolves it on its own conditional path),
     # so the template preflight doesn't run here.
+    output.phase("Preflight")
+    output.detail(f"vm-site: {vm.site}")
+    announce_git_credentials(providers)
     platform.preflight(RunContext(config=config))
     for provider in providers.values():
         provider.preflight(RunContext(config=config))
     resolver.resolve()
+
+    # No platform runup at reinit: reinit reaches the VM over Tailscale
+    # SSH and never calls the platform API, so its token is not used here
+    # (create is the only op that needs it, and that ran at first create).
+    output.phase("Runup")
     git_tokens = _git_tokens_after_resolve(config, providers, resolver)
 
     # Provisioning is hermetic: no operator-env secrets are prompted at

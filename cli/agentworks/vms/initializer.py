@@ -1395,6 +1395,7 @@ def run_initialization(
     """
     db.insert_vm_event(vm_name, "init_started")
 
+    output.phase("Initialization")
     try:
         _phase_b_setup(
             db,
@@ -1656,7 +1657,7 @@ def _phase_b_setup(
     """
     from agentworks.catalog import catalog_from_registry
 
-    output.info("Initializing VM...")
+    output.detail(f"vm: {vm_name}")
     db.update_vm_init_status(vm_name, InitStatus.IN_PROGRESS)
     # Phase 2b: catalog reference validation moved to the framework
     # (catalog kinds' error miss policy fires at build_registry time,
