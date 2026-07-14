@@ -273,12 +273,22 @@ does.
 
 **What a runup failure means is the caller's call, not runup's.** Runup's own contract is narrow:
 raise a typed error on definitive rejection. Whether that _aborts_ the command or is caught, logged,
-and stepped around is decided by the service-layer operation running it, per its own stakes.
-`vm create` / `vm reinit` and agent provisioning run each git credential's runup right before its
-materials op and, on rejection, **skip that one credential with clear messaging and continue** --
-consistent with initialization being non-fatal and repeatable (fix the token, `reinit`). A command
-where the resource is load-bearing may instead abort. Same stage, same raise; different, deliberate
-handling by the caller.
+and stepped around is decided by the service-layer operation running it, per its own stakes. The
+general recommendation turns on whether the failed resource is idempotently retryable:
+
+- **Retryable -> continue.** If the resource can be re-attempted later (initialization is repeatable
+  via `reinit`; a rejected git credential is fixed and re-run), skip that one resource with clear
+  messaging, degrade the command to partial, and let the retry recover it. Do not sink the whole
+  command over one recoverable resource.
+- **Ultimately fatal -> stop, and roll back.** If the command cannot meaningfully proceed without
+  the resource, there is no point continuing: abort, and best-effort **roll back any mutations
+  already made** (the same discipline delete uses on a half-built VM), so the failure does not leave
+  a stranded half-state.
+
+`vm create` / `vm reinit` and agent provisioning are the retryable case: each git credential's runup
+runs right before its materials op and, on rejection, that one credential is skipped and the rest of
+initialization continues to partial (fix the token, `reinit`). Same stage, same raise; different,
+deliberate handling by the caller.
 
 ### 5. ops (do the work; the mutation phase)
 

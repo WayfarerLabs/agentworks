@@ -240,12 +240,13 @@ class Capability(ABC):
         it to preflight's dependency-blindness for no gain.
 
         And what a runup failure MEANS is the caller's call, not runup's:
-        this method just raises on definitive rejection. Whether that
-        aborts the command or is caught and stepped around (skip this one
-        resource, warn, continue) is decided by the service-layer
-        operation running it, per its own stakes -- vm/agent provisioning
-        skips a rejected credential and degrades to partial; a command
-        where the resource is load-bearing may abort.
+        this method just raises on definitive rejection. The service-layer
+        operation decides, by whether the failed resource is idempotently
+        retryable: retryable -> skip it with clear messaging and continue
+        (degrade to partial; a retry recovers it -- vm/agent provisioning
+        skips a rejected credential and reinit fixes it); ultimately fatal
+        -> stop and best-effort roll back any mutations already made,
+        rather than leave a stranded half-state.
 
         The split across the resolve boundary is what dissolves
         source-asymmetry: by the time runup runs, EVERY declared secret
