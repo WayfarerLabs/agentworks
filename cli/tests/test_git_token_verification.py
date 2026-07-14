@@ -10,7 +10,7 @@ network failure, so no test can reach the real network.
 
 Doctor no longer runs an authenticated token check (it is preflight-only,
 relying on the Secrets group for resolvability); on-demand authenticated
-checking is the deferred ``doctor --verify`` (issue #176).
+checking is the deferred ``doctor --runup`` (issue #176).
 """
 
 from __future__ import annotations
@@ -92,7 +92,7 @@ def test_github_401_is_definitive_rejection(
         p.runup(RunContext(secrets=p.resolver))
     assert "'gh'" in str(exc.value)
     assert "'my-secret'" in str(exc.value)
-    assert "verify_git_tokens = false" in (exc.value.hint or "")
+    assert "runup_git_credentials = false" in (exc.value.hint or "")
 
 
 def test_github_other_status_warns_and_continues(
@@ -239,9 +239,9 @@ def test_collect_skips_verification_when_disabled(
     monkeypatch.setattr("agentworks.git_credentials.base._http_probe", _explode)
     config = _config_with_github_cred(
         tmp_path,
-        extra="[defaults]\nverify_git_tokens = false\n",
+        extra="[defaults]\nrunup_git_credentials = false\n",
     )
-    assert config.defaults.verify_git_tokens is False
+    assert config.defaults.runup_git_credentials is False
     registry = build_registry(config)
     tokens = _collect_git_tokens(config, registry, ["gh"])
     assert tokens == {"gh": "whatever"}

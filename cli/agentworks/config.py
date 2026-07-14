@@ -141,11 +141,11 @@ class DefaultsConfig:
     # boundary). The retired `defaults.platform` key is accepted as a
     # one-release deprecated alias.
     site: str | None = None
-    # Verify git credential tokens against the provider API at
-    # provisioning entry (before anything is created). Definitive
-    # rejection (401) aborts; network indeterminacy only warns. Off for
-    # airgapped setups.
-    verify_git_tokens: bool = True
+    # Run the git-credential runup stage: authenticate each token against
+    # its provider API before it is written. Definitive rejection (401)
+    # is handled by the provisioning logic; network indeterminacy only
+    # warns. Off for airgapped setups.
+    runup_git_credentials: bool = True
 
 
 @dataclass(frozen=True)
@@ -511,7 +511,7 @@ def _load_paths(data: dict[str, object]) -> PathsConfig:
     return PathsConfig(vm_workspaces=vm_ws, vscode_workspaces=vscode_ws, backups=backups)
 
 
-_DEFAULTS_KEYS = {"site", "platform", "verify_git_tokens"}
+_DEFAULTS_KEYS = {"site", "platform", "runup_git_credentials"}
 
 
 def _load_defaults(
@@ -582,7 +582,7 @@ def _load_defaults(
 
     return DefaultsConfig(
         site=str(site) if site is not None else None,
-        verify_git_tokens=bool(raw.get("verify_git_tokens", True)),
+        runup_git_credentials=bool(raw.get("runup_git_credentials", True)),
     )
 
 

@@ -232,7 +232,7 @@ prompts; an authenticated check under it could only ever reach the non-interacti
 secrets, which is the exact source-asymmetry runup exists to avoid. So doctor stays preflight-only
 and uniform, and a secret's resolvability (is it mapped at all?) is already its own doctor row via
 the secret backends. On-demand authenticated checking is an explicit, interactive escalation of the
-same surface (`doctor --verify`: allowed to prompt, therefore allowed to run runup), tracked
+same surface (`doctor --runup`: allowed to prompt, therefore allowed to run runup), tracked
 separately; it is not something doctor's passive pass does.
 
 When does it run? The starting policy: **every service-layer operation runs preflight on all the
@@ -266,7 +266,7 @@ Its contract mirrors preflight where it matters and differs where it must:
 
 - **Read-only and side-effect-free**, exactly like preflight. It never mints, creates, or mutates.
   This is what lets it be re-run and, crucially, lets an explicit interactive surface
-  (`doctor --verify`) call it outside an operation.
+  (`doctor --runup`) call it outside an operation.
 - **Authenticated.** Reading resolved secrets and probing with them is the whole point; it is the
   half of readiness that only makes sense once resolution has happened.
 - **Best-effort, not an oracle**, again like preflight. It raises a typed, actionable error on a
@@ -282,8 +282,7 @@ runup-then-its-ops (not one global runup-all followed by one global ops). It is 
 operator policy where the round-trip is unwanted (the git stack exposes
 `[defaults] verify_git_tokens = false`, and airgapped setups want exactly that); preflight is not
 skippable, because predicting resolvability costs nothing. Doctor's passive pass does _not_ run
-runup (see the preflight section); `doctor --verify` is the explicit, prompting escalation that
-does.
+runup (see the preflight section); `doctor --runup` is the explicit, prompting escalation that does.
 
 **What a runup failure means is the caller's call, not runup's.** Runup's own contract is narrow:
 raise a typed error on definitive rejection. Whether that _aborts_ the command or is caught, logged,

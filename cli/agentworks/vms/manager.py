@@ -1738,7 +1738,7 @@ def _git_tokens_after_resolve(
     """Read each provider's resolved token from the operation's resolver
     cache, after running the provider's ``runup()`` (the authenticated
     readiness stage) unless the operator disabled it via ``[defaults]
-    verify_git_tokens = false``.
+    runup_git_credentials = false``.
 
     The providers must have been constructed against ``resolver`` (so
     their token secrets joined the boundary resolve), and the pass must
@@ -1746,7 +1746,7 @@ def _git_tokens_after_resolve(
     ``TokenRejectedError``; this is safe at every call site because
     runup runs before any VM/user mutation.
     """
-    if config.defaults.verify_git_tokens:
+    if config.defaults.runup_git_credentials:
         ctx = RunContext(config=config, secrets=resolver)
         for provider in providers.values():
             provider.runup(ctx)

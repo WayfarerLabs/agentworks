@@ -221,7 +221,7 @@ class GitCredentialProvider(Capability):
                 entity_name=self.owner_name,
                 hint=(
                     "Check the secret's value: expired, revoked, or "
-                    "mistyped? Set [defaults] verify_git_tokens = false "
+                    "mistyped? Set [defaults] runup_git_credentials = false "
                     "to skip verification."
                 ),
             )

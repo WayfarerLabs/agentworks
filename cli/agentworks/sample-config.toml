@@ -59,9 +59,9 @@ ssh_private_key = "~/.ssh/id_ed25519"        # required: used for SSH connection
                                             # lacks what they need; see
                                             # `agw doctor` for each site's state)
 # `platform` is the deprecated alias of `site` (one release); rename the key.
-#verify_git_tokens = true                   # verify git tokens against the provider API at
-                                            # provisioning entry and in doctor; rejection aborts
-                                            # before anything is created (false for airgapped)
+#runup_git_credentials = true               # run the git-credential runup: authenticate each
+                                            # token against its provider API before it is
+                                            # written (false for airgapped setups)
 
 # --- Named-console settings ---
 # Scope: this section applies only to named multi-session consoles created

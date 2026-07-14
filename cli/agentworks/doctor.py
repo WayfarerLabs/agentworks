@@ -454,7 +454,7 @@ def _check_config() -> tuple[HealthGroup, Config | None, Registry | None]:
     # the git-token-* family) like any other secret. Live authenticated
     # verification (expired/revoked/wrong-scope) is the capability
     # `runup()` stage, which runs inside provisioning ops; on-demand
-    # authenticated checking is the deferred `doctor --verify` (issue
+    # authenticated checking is the deferred `doctor --runup` (issue
     # #176). Doctor never prompts, so an authenticated check here could
     # only ever reach non-interactively-resolvable secrets, forking
     # readiness on where a secret comes from -- the asymmetry we reject.

@@ -278,7 +278,7 @@ class Capability(ABC):
         targets (``ctx.admin_target`` / ``ctx.agent_target``) that an
         earlier phase created. Read-only and side-effect-free exactly like
         :meth:`preflight` (it never mints, creates, or mutates), which is
-        what lets it be re-run and, via a future ``doctor --verify``,
+        what lets it be re-run and, via a future ``doctor --runup``,
         called outside an operation.
 
         Unlike preflight, runup is NOT forced to the front of the command:
