@@ -421,6 +421,36 @@ change, not in one sweep. `vm-platform` lives here (`capabilities/vm_platform/`)
 home, and the already-merged `secret-backend` capability likewise moves in under its own change.
 That is expected, not half-done.
 
+## Open questions
+
+The model is proven on two consuming-side capabilities (`vm-platform`, `git-credential-provider`).
+The `secret-backend` capability -- already merged, adopting the base under its own change --
+stresses it in ways worth recording before that change, because it is a different animal:
+
+- **Shared multiplicity: many consuming resources, one instance.** vm-platform and git-credential
+  are per-consuming-resource -- one instance per site, per credential. A secret-backend is the
+  inverse: one instance built from _global_ backend config, **shared across every secret that maps
+  to it**. The consuming resource (a secret) supplies only a per-secret _mapping_ (the env-var name,
+  the 1Password item ref), not the backend's config. So readiness deduplicates per backend (check
+  1Password once for twenty secrets), and the "consuming resource supplies the config" story flips.
+  The Multiplicity section models one-resource-many-instances (feature maps); this
+  many-resources-one-instance shape is not yet modeled.
+
+- **Provider-side vs consuming-side base.** The `Capability` base is shaped for the _consuming_
+  side: register the secrets your config declares on the resolver, read them back at runup. A
+  backend has no declared secrets -- it is the thing that _serves_ them. Its contract is different:
+  preflight = am I installed/configured, runup = can I reach/authenticate, op = resolve. Adopting it
+  will likely reveal that today's base is really the _consuming-capability_ base, and a backend
+  needs a sibling base or a deliberately looser one.
+
+- **Where its runup lands.** A backend's op _is_ resolution, so "runup right before its op" puts its
+  runup at the resolve-pass boundary -- authenticate/reach the vault once, before serving any value
+  -- upstream of every consuming capability's (post-resolve) runup. That is consistent with the
+  general rule, not an exception; it is noted only because a backend is the first capability whose
+  op precedes the resolve boundary rather than following it. (Most backends have a trivial runup
+  anyway: env-var and prompt are knowable offline, so they are preflight-only; only the network/auth
+  ones like 1Password carry a real one.)
+
 ## Related
 
 - **Hosting shapes.** A consuming resource can host a capability's config three ways: as a dedicated
