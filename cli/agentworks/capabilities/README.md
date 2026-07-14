@@ -120,6 +120,19 @@ prompted one not). Moving it _after_ resolution dissolves that: by the time runu
 is resolved the same way, so every credential is checked the same way. Both readiness stages are
 read-only and re-runnable; ops are the only mutation.
 
+**The two stages sit differently in time, and that difference has teeth.** Preflight has no choice
+about when it runs: the single secret-resolve pass runs once at the start of a command, and
+preflight must precede it, so preflight runs for _every_ resource before anything is touched. That
+forces preflight to be **dependency-blind** -- it may only assume what is true at command entry, and
+must never check state that a later step in the same command creates. The canonical antipattern is a
+git-credential preflight failing `vm create` because git is not installed, the admin user does not
+exist, or the VM does not exist yet -- all created later in that same command; a preflight that
+checked any of them would fail every first-time create. Runup carries no such obligation: it is
+**deferred to right before the ops it gates**, reading the already-resolved secrets from the cache,
+so it runs with full current context and may test anything, including dependencies an earlier phase
+has since satisfied. Hoisting runup to the front would only re-impose preflight's blindness for no
+gain; deferring it is strictly more capable.
+
 ### 1. `validate_config` (declare; pure, classmethod)
 
 ```python
@@ -247,13 +260,25 @@ Its contract mirrors preflight where it matters and differs where it must:
   never raises**: a transient outage must not block work that an unverified-but-valid credential
   would have completed. Anything only a mutation can confirm remains the op's job.
 
-When does it run? After the resolve pass, on every participating resource whose readiness has an
-authenticated component, before any op mutates, once per instance. The starting policy pairs it with
-preflight: preflight-all, then resolve, then runup-all, then ops. It is skippable by operator policy
-where the round-trip is unwanted (the git stack exposes `[defaults] verify_git_tokens = false`, and
-airgapped setups want exactly that); preflight is not skippable, because predicting resolvability
-costs nothing. Doctor's passive pass does _not_ run runup (see the preflight section);
-`doctor --verify` is the explicit, prompting escalation that does.
+When does it run? **Deferred to right before the ops it gates** -- not hoisted to the front with
+preflight. It reads the secrets the one up-front resolve pass already cached, but fires at the op
+boundary, so in a multi-phase command it sees the world as of that phase, with whatever earlier
+phases have since put in place. The shape is: preflight-all, then resolve-once, then _per phase_
+runup-then-its-ops (not one global runup-all followed by one global ops). It is skippable by
+operator policy where the round-trip is unwanted (the git stack exposes
+`[defaults] verify_git_tokens = false`, and airgapped setups want exactly that); preflight is not
+skippable, because predicting resolvability costs nothing. Doctor's passive pass does _not_ run
+runup (see the preflight section); `doctor --verify` is the explicit, prompting escalation that
+does.
+
+**What a runup failure means is the caller's call, not runup's.** Runup's own contract is narrow:
+raise a typed error on definitive rejection. Whether that _aborts_ the command or is caught, logged,
+and stepped around is decided by the service-layer operation running it, per its own stakes.
+`vm create` / `vm reinit` and agent provisioning run each git credential's runup right before its
+materials op and, on rejection, **skip that one credential with clear messaging and continue** --
+consistent with initialization being non-fatal and repeatable (fix the token, `reinit`). A command
+where the resource is load-bearing may instead abort. Same stage, same raise; different, deliberate
+handling by the caller.
 
 ### 5. ops (do the work; the mutation phase)
 

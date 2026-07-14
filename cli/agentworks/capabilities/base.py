@@ -177,12 +177,24 @@ class Capability(ABC):
         and what makes it safely re-runnable. Best-effort, not an
         oracle: anything only confirmable by mutating is the op's job.
 
+        Preflight is forced early -- it precedes the single resolve pass,
+        which runs once at command start, so it runs for every resource
+        before anything is touched. That makes it DEPENDENCY-BLIND: assume
+        only what is true at command entry; never check state a later step
+        in the same command creates. (Antipattern: a git-credential
+        preflight failing ``vm create`` because git is not installed, the
+        admin user is absent, or the VM does not exist yet -- all created
+        later in that command. Those checks belong in runup, which is
+        deferred to the op boundary.)
+
         Base behavior: every secret reference the bound config declares
         must be predicted resolvable by some active backend, without
         prompting (an unresolvable secret is fatal and knowable here; a
         prompt-only secret's value check defers past preflight).
         Subclasses extend (``super().preflight()``) with their world
-        checks: required tools present, an API reachable (a read).
+        checks: required tools present, an unauthenticated endpoint
+        reachable -- anything knowable without secrets or mid-command
+        state.
         """
         if not self._secret_refs:
             return
@@ -211,14 +223,29 @@ class Capability(ABC):
 
         Preflight's post-resolve twin (preflight is the walk-around; this
         is the run-up at the hold-short line, right before the op). It
-        runs AFTER the operation's single resolve pass, so it MAY read
-        resolved secret values from the resolver's cache
-        (``self.resolver.get(name)``) and do the authenticated reads
+        reads resolved secret values from the resolver's cache
+        (``self.resolver.get(name)``) and does the authenticated reads
         preflight cannot: a git provider's ``GET /user``, a platform's
         API connection check. Read-only and side-effect-free exactly like
         :meth:`preflight` (it never mints, creates, or mutates), which is
         what lets it be re-run and, via a future ``doctor --verify``,
         called outside an operation.
+
+        Unlike preflight, runup is NOT forced to the front of the command:
+        it is deferred to right before the ops it gates. The secrets it
+        needs were resolved once up front (cached), but it fires at the op
+        boundary, so it may test anything -- including dependencies an
+        earlier phase of the same command has since put in place (the VM
+        exists, git is installed). Hoisting it forward would only cripple
+        it to preflight's dependency-blindness for no gain.
+
+        And what a runup failure MEANS is the caller's call, not runup's:
+        this method just raises on definitive rejection. Whether that
+        aborts the command or is caught and stepped around (skip this one
+        resource, warn, continue) is decided by the service-layer
+        operation running it, per its own stakes -- vm/agent provisioning
+        skips a rejected credential and degrades to partial; a command
+        where the resource is load-bearing may abort.
 
         The split across the resolve boundary is what dissolves
         source-asymmetry: by the time runup runs, EVERY declared secret
