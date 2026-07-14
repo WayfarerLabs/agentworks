@@ -470,6 +470,8 @@ def create_vm(
     platform_obj = resolve_site(site, registry, resolver=resolver)
     preflight_vm_template(vm_tmpl, resolver)
     platform_obj.preflight()
+    for provider in providers.values():
+        provider.preflight()
     output.info("Collecting credentials...")
     resolver.resolve()
     tailscale_auth_key = resolver.get(vm_tmpl.tailscale_auth_key)
@@ -1126,6 +1128,13 @@ def add_git_credential(db: Database, config: Config, name: str, credential_name:
         all_lines = new_lines + filtered
         cred_content = "\n".join(all_lines) + "\n"
         target.write_file("~/.git-credentials", cred_content, mode="600")
+        # This single-line merge does NOT regenerate the credential helper
+        # script (it stays from the last full init/reinit). The scoped
+        # guard above forces scoped credentials through reinit, so the
+        # added line is always unscoped and selection needs no helper
+        # change; its only gap is that a rejection of a credential added
+        # post-init falls to the helper's generic (unnamed) diagnosis
+        # until the next reinit rebuilds the script. Acceptable.
         # Never downgrade the helper slot: on a helper-provisioned VM
         # the agentworks helper stays registered (reverting to store
         # would reintroduce its erase-on-rejection self-destruct for
@@ -1541,6 +1550,8 @@ def reinit_vm(
     # (a broken node's rejoin resolves it on its own conditional path),
     # so the template preflight doesn't run here.
     platform.preflight()
+    for provider in providers.values():
+        provider.preflight()
     resolver.resolve()
     git_tokens = _git_tokens_after_resolve(config, providers, resolver)
 

@@ -1,14 +1,15 @@
 """GitHub git credential provider -- formats credentials for ``~/.git-credentials``.
 
 Token resolution lives in the framework; this class formats the store
-line and, for scoped credentials (fine-grained PATs), selects the right
-credential per repo via the generated helper (issue #166). Selection
-rides git's own machinery: a context section injects a per-credential
-username (longest-prefix match, slash boundaries -- verified against git
-2.39), and the username-tagged store line supplies the token. No
-``credential.useHttpPath`` anywhere: with it enabled, path-less store
-lines stop matching path-carrying queries, which would break every
-unscoped credential.
+line and, for scoped credentials (fine-grained PATs), contributes its
+scopes (``repos`` / ``owner``) to the generated credential helper that
+selects the right credential per repo (issue #166). Selection lives
+entirely in that helper: the managed include sets
+``credential.useHttpPath = true`` so every query carries the remote
+path, and the helper picks the most specific credential (exact repo,
+then owner, then the host default). See ``build_credential_materials``
+in ``git_credentials/__init__.py`` and ``docs/guides/resources.md`` for
+the full model.
 """
 
 from __future__ import annotations

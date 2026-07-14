@@ -99,7 +99,8 @@ ssh_private_key = "~/.ssh/id_ed25519"        # required: used for SSH connection
 # agent_templates. Each entry's `token` field names a secret (default
 # `git-token-<name>`) that the framework resolves through the backend chain
 # (env-var, prompt, ...) at VM-init time; the resolved value is written to
-# `~/.git-credentials` via git's credential-store helper.
+# `~/.git-credentials` and served by the agentworks-managed credential
+# helper (which replaces git's credential-store).
 
 # Scoped GitHub credentials (fine-grained PATs pinned to a repo or org)
 # are declared in YAML manifests, not TOML: see

@@ -1192,8 +1192,9 @@ def _create_agent_on_vm(
         )
 
         # Same materials as the VM-level (admin) flow: store lines with
-        # the unscoped-first ordering contract, gitconfig context
-        # sections for scoped credentials, and the warn-only helper.
+        # the unscoped-first ordering contract, the gitconfig include
+        # (just useHttpPath = true), and the selecting credential helper
+        # (its get op serves credentials; erase only diagnoses).
         # ``git config --global`` runs as the agent user, so the
         # tilde-literal include.path resolves to the agent's home; the
         # write_file paths spell the home out (agent_target conventions).
