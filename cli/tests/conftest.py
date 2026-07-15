@@ -528,7 +528,7 @@ def _no_network_token_verification(monkeypatch: pytest.MonkeyPatch) -> None:
         raise OSError("network disabled in tests")
 
     monkeypatch.setattr(
-        "agentworks.git_credentials.base._http_probe", _refuse
+        "agentworks.capabilities.git_credential.base._http_probe", _refuse
     )
 
 

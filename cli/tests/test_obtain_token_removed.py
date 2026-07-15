@@ -22,7 +22,7 @@ def _read_module_source(name: str) -> str:
 
 
 def test_obtain_token_method_gone_from_base() -> None:
-    src = _read_module_source("agentworks.git_credentials.base")
+    src = _read_module_source("agentworks.capabilities.git_credential.base")
     assert "obtain_token" not in src, (
         "Phase 1d removed obtain_token from GitCredentialProvider; "
         "reintroducing it would bypass the framework's token resolution path"
@@ -37,8 +37,8 @@ def test_obtain_token_method_gone_from_base() -> None:
 
 def test_obtain_token_method_gone_from_concrete_providers() -> None:
     for module_name in (
-        "agentworks.git_credentials.github",
-        "agentworks.git_credentials.azdo",
+        "agentworks.capabilities.git_credential.github",
+        "agentworks.capabilities.git_credential.azdo",
     ):
         src = _read_module_source(module_name)
         assert "obtain_token" not in src, (
@@ -73,9 +73,9 @@ def test_legacy_env_var_names_gone_from_git_credentials_module() -> None:
     env var names are gone from the provider package.
     """
     for module_name in (
-        "agentworks.git_credentials.base",
-        "agentworks.git_credentials.github",
-        "agentworks.git_credentials.azdo",
+        "agentworks.capabilities.git_credential.base",
+        "agentworks.capabilities.git_credential.github",
+        "agentworks.capabilities.git_credential.azdo",
     ):
         src = _read_module_source(module_name)
         assert "AW_GIT_CREDENTIALS_" not in src

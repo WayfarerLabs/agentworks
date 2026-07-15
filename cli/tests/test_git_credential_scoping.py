@@ -17,11 +17,11 @@ from textwrap import dedent
 import pytest
 
 from agentworks.bootstrap import build_registry
+from agentworks.capabilities.git_credential.azdo import AzDOCredentialProvider
+from agentworks.capabilities.git_credential.github import GitHubCredentialProvider
 from agentworks.config import load_config
 from agentworks.errors import ConfigError
 from agentworks.git_credentials import CredentialMaterials, build_credential_materials
-from agentworks.git_credentials.azdo import AzDOCredentialProvider
-from agentworks.git_credentials.github import GitHubCredentialProvider
 from agentworks.manifests import load_manifests
 from agentworks.vms.initializer import resolve_git_credential_providers
 
@@ -743,7 +743,7 @@ def test_unsafe_scope_values_rejected_at_build() -> None:
     """Case labels and word lists must be glob- and quote-inert; the
     generator refuses anything else loudly (defense in depth behind the
     per-provider charset validation)."""
-    from agentworks.git_credentials.base import HelperEntry
+    from agentworks.capabilities.git_credential.base import HelperEntry
 
     class _Sneaky(GitHubCredentialProvider):
         def helper_entry(self) -> HelperEntry:
@@ -757,7 +757,7 @@ def test_unsafe_scope_values_rejected_at_build() -> None:
 
 def test_azdo_org_charset_validated() -> None:
     with pytest.raises(ConfigError, match="organization name"):
-        from agentworks.git_credentials.azdo import AzDOCredentialProvider as A
+        from agentworks.capabilities.git_credential.azdo import AzDOCredentialProvider as A
 
         A.validate_config("t", {"org": "my org"})
 

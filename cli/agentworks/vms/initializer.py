@@ -36,11 +36,11 @@ from agentworks.transports import (
 if TYPE_CHECKING:
     from collections.abc import Mapping
 
+    from agentworks.capabilities.git_credential.base import GitCredentialProvider
     from agentworks.capabilities.vm_platform import VMPlatform
     from agentworks.catalog import AptSourceEntry, SystemInstallCommandEntry, UserInstallCommandEntry
     from agentworks.config import Config
     from agentworks.db import Database
-    from agentworks.git_credentials.base import GitCredentialProvider
     from agentworks.resources.registry import Registry
     from agentworks.secrets.resolver import Resolver
     from agentworks.vms.admin import AdminConfig
@@ -1134,7 +1134,9 @@ def resolve_git_credential_providers(
     ``runup()`` the token afterward; pass ``None`` for materials-only
     or inspection construction.
     """
-    from agentworks.git_credentials import GIT_CREDENTIAL_PROVIDER_REGISTRY
+    from agentworks.capabilities.git_credential import (
+        GIT_CREDENTIAL_PROVIDER_REGISTRY,
+    )
     from agentworks.resources.access import git_credential
 
     providers: dict[str, GitCredentialProvider] = {}

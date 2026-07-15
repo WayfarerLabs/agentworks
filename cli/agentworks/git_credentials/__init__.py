@@ -17,13 +17,13 @@ from typing import TYPE_CHECKING
 
 from agentworks import output
 from agentworks.errors import ConfigError
-from agentworks.git_credentials.azdo import AzDOCredentialProvider
-from agentworks.git_credentials.github import GitHubCredentialProvider
 
 if TYPE_CHECKING:
+    from agentworks.capabilities.git_credential.base import (
+        GitCredentialProvider,
+        HelperEntry,
+    )
     from agentworks.config import Config
-    from agentworks.git_credentials.base import GitCredentialProvider, HelperEntry
-    from agentworks.resources import Registry
 
 
 class _MappedSecrets:
@@ -407,41 +407,3 @@ esac
         .replace("@SELECT@", _selection_block(records))
         .replace("@CASES@", "\n".join(cases) if cases else "        _none_) : ;;")
     )
-
-
-# The capability registry (the canonical provider list): provider name
-# -> implementation class. ``validate_config`` (blob validation +
-# implied references) is invoked through this dict at each source's
-# blob boundary and at finalize; descriptor rows publish from it.
-GIT_CREDENTIAL_PROVIDER_REGISTRY: dict[str, type[GitCredentialProvider]] = {
-    "azdo": AzDOCredentialProvider,
-    "github": GitHubCredentialProvider,
-}
-
-
-def publish_to(registry: Registry) -> None:
-    """Publish the known git credential provider types into the registry.
-
-    Each entry lands as a ``GitCredentialProviderEntry`` row, built-in
-    with source ``"agentworks.git_credentials"``. Phase 2b.1.
-
-    Unlike the catalog kinds, this kind has no
-    operator-override path today: ``Config.publish_to`` publishes
-    ``git_credentials`` entries (the per-credential config), not
-    ``git-credential-provider`` rows. The kind is read-only from the
-    operator's perspective; a future SDD that wants to let operators
-    register new provider types would add an operator-publish path.
-    """
-    from agentworks.git_credentials.kinds import (
-        GitCredentialProviderEntry,
-    )
-    from agentworks.resources import Origin
-
-    code_origin = Origin.built_in(source="agentworks.git_credentials")
-    for type_name in sorted(GIT_CREDENTIAL_PROVIDER_REGISTRY):
-        registry.add(
-            "git-credential-provider",
-            type_name,
-            GitCredentialProviderEntry(name=type_name),
-            code_origin,
-        )

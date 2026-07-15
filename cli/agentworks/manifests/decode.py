@@ -228,7 +228,9 @@ def _decode_git_credential(doc: Document, spec: dict[str, object], issues: list[
     # spec-shape checks so a misplaced field gets the nesting hint, not
     # a confusing capability complaint. Unknown provider names defer to
     # the framework's miss policy.
-    from agentworks.git_credentials import GIT_CREDENTIAL_PROVIDER_REGISTRY
+    from agentworks.capabilities.git_credential import (
+        GIT_CREDENTIAL_PROVIDER_REGISTRY,
+    )
 
     capability = GIT_CREDENTIAL_PROVIDER_REGISTRY.get(provider)
     if capability is not None:

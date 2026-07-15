@@ -429,10 +429,11 @@ capability-imports-domain violation would go unseen. It is also the natural home
 and this guide and, in a plugin world, the canonical answer to "what does the system support."
 
 The tree fills in incrementally, as each capability adopts the base and moves in under its own
-change, not in one sweep. `vm-platform` lives here (`capabilities/vm_platform/`);
-`git-credential-provider` has adopted the base but still lives in its historical `git_credentials/`
-home, and the already-merged `secret-backend` capability likewise moves in under its own change.
-That is expected, not half-done.
+change, not in one sweep. `vm-platform` (`capabilities/vm_platform/`) and `git-credential-provider`
+(`capabilities/git_credential/`) live here; the `git-credential-provider`'s consuming resource
+(`GitCredentialConfig`) and the materials assembly that writes credentials to a VM stay in the
+`git_credentials/` domain, exactly the split this layer is for. The already-merged `secret-backend`
+capability still moves in under its own change. That is expected, not half-done.
 
 ## Open questions
 

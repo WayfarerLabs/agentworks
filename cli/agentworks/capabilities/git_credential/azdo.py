@@ -10,12 +10,12 @@ from __future__ import annotations
 import re
 from typing import TYPE_CHECKING
 
-from agentworks.errors import ConfigError
-from agentworks.git_credentials.base import (
+from agentworks.capabilities.git_credential.base import (
     GitCredentialProvider,
     HelperEntry,
     token_config_reference,
 )
+from agentworks.errors import ConfigError
 
 if TYPE_CHECKING:
     from collections.abc import Mapping

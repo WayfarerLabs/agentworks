@@ -18,10 +18,10 @@ from typing import Any
 import pytest
 
 from agentworks.bootstrap import build_registry
+from agentworks.capabilities.git_credential import GIT_CREDENTIAL_PROVIDER_REGISTRY
+from agentworks.capabilities.git_credential.base import GitCredentialProvider
 from agentworks.config import load_config
 from agentworks.errors import ConfigError
-from agentworks.git_credentials import GIT_CREDENTIAL_PROVIDER_REGISTRY
-from agentworks.git_credentials.base import GitCredentialProvider
 from agentworks.manifests import load_manifests
 from agentworks.resources.reference import ConfigReference
 
@@ -161,7 +161,7 @@ class _SigningCredentialProvider(GitCredentialProvider):
         return [f"https://signer:{token}@example.test"]
 
     def helper_entry(self):  # noqa: ANN201
-        from agentworks.git_credentials.base import HelperEntry
+        from agentworks.capabilities.git_credential.base import HelperEntry
 
         return HelperEntry(host="example.test", username="signer")
 

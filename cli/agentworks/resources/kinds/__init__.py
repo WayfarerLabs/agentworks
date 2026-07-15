@@ -19,8 +19,8 @@ domain, no logic.
 from __future__ import annotations
 
 import agentworks.agents.kinds  # noqa: F401
+import agentworks.capabilities.git_credential.kinds  # noqa: F401
 import agentworks.catalog  # noqa: F401
-import agentworks.git_credentials.kinds  # noqa: F401
 import agentworks.secrets.kinds  # noqa: F401
 import agentworks.sessions.kinds  # noqa: F401
 import agentworks.vms.kinds  # noqa: F401

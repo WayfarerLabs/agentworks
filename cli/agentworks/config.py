@@ -992,7 +992,9 @@ def _load_git_credentials(
                 )
         if cred_type == "azdo" and "org" in cdata:
             provider_config["org"] = str(cdata["org"])
-        from agentworks.git_credentials import GIT_CREDENTIAL_PROVIDER_REGISTRY
+        from agentworks.capabilities.git_credential import (
+            GIT_CREDENTIAL_PROVIDER_REGISTRY,
+        )
 
         capability = GIT_CREDENTIAL_PROVIDER_REGISTRY.get(cred_type)
         if capability is not None:

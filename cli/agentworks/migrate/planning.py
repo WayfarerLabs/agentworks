@@ -528,7 +528,9 @@ def _emit_document(doc: tomlkit.TOMLDocument, unit: MigrationUnit) -> str:
         # verification AFTER writing (rollback fires and the error cites
         # a rolled-back file). Validate here instead: fail before
         # anything is written, in the operator's TOML vocabulary.
-        from agentworks.git_credentials import GIT_CREDENTIAL_PROVIDER_REGISTRY
+        from agentworks.capabilities.git_credential import (
+            GIT_CREDENTIAL_PROVIDER_REGISTRY,
+        )
 
         capability = GIT_CREDENTIAL_PROVIDER_REGISTRY.get(str(provider))
         if capability is not None and "provider_config" in rebuilt:

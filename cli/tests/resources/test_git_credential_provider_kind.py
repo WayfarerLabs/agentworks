@@ -8,9 +8,9 @@ from textwrap import dedent
 import pytest
 
 from agentworks.bootstrap import build_registry
+from agentworks.capabilities.git_credential import GIT_CREDENTIAL_PROVIDER_REGISTRY
 from agentworks.config import load_config
 from agentworks.errors import ConfigError
-from agentworks.git_credentials import GIT_CREDENTIAL_PROVIDER_REGISTRY
 from agentworks.resources import KIND_REGISTRY, NoUnreferencedDefaultError
 
 
@@ -63,7 +63,7 @@ def test_known_providers_resolve(tmp_path: Path) -> None:
     github = registry.lookup("git-credential-provider", "github")
     assert github.name == "github"
     assert github.origin.variant == "built-in"
-    assert github.origin.source == "agentworks.git_credentials"
+    assert github.origin.source == "agentworks.capabilities.git_credential"
 
 
 def test_unknown_provider_errors_with_framework_shape(tmp_path: Path) -> None:

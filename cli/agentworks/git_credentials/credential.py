@@ -97,7 +97,9 @@ class GitCredentialConfig:
         # provider validating its config block and returning the
         # references it implies; this resource (the config block's
         # owner) attributes them to itself.
-        from agentworks.git_credentials import GIT_CREDENTIAL_PROVIDER_REGISTRY
+        from agentworks.capabilities.git_credential import (
+            GIT_CREDENTIAL_PROVIDER_REGISTRY,
+        )
 
         capability = GIT_CREDENTIAL_PROVIDER_REGISTRY.get(self.provider)
         if capability is not None:

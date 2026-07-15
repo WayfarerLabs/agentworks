@@ -175,7 +175,7 @@ def test_collect_git_tokens_credential_lines_use_resolved_value(
     monkeypatch.setenv("AW_SECRET_GIT_TOKEN_GITHUB", "ghp_xyz")
 
     from agentworks.bootstrap import build_registry
-    from agentworks.git_credentials.github import GitHubCredentialProvider
+    from agentworks.capabilities.git_credential.github import GitHubCredentialProvider
     from agentworks.vms.manager import _collect_git_tokens
 
     registry = build_registry(config)

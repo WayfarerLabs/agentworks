@@ -22,10 +22,10 @@ import pytest
 
 from agentworks.bootstrap import build_registry
 from agentworks.capabilities.base import RunContext
+from agentworks.capabilities.git_credential.azdo import AzDOCredentialProvider
+from agentworks.capabilities.git_credential.github import GitHubCredentialProvider
 from agentworks.config import load_config
 from agentworks.errors import TokenRejectedError
-from agentworks.git_credentials.azdo import AzDOCredentialProvider
-from agentworks.git_credentials.github import GitHubCredentialProvider
 from agentworks.vms.manager import _collect_git_tokens
 
 _EXPIRY_HEADER = "github-authentication-token-expiration"
@@ -67,7 +67,7 @@ def test_github_200_verifies_with_login_and_expiry(
         b'{"login": "wfscot"}',
         {_EXPIRY_HEADER: "2026-10-01 17:24:32 UTC"},
     )
-    monkeypatch.setattr("agentworks.git_credentials.base._http_probe", fake)
+    monkeypatch.setattr("agentworks.capabilities.git_credential.base._http_probe", fake)
     p = GitHubCredentialProvider("gh", {}, _StubResolver({"git-token-gh": "tok"}))
     p.runup(RunContext(secrets=p.resolver))
     out = capsys.readouterr().out
@@ -83,7 +83,7 @@ def test_github_401_is_definitive_rejection(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(
-        "agentworks.git_credentials.base._http_probe", _probe(401)
+        "agentworks.capabilities.git_credential.base._http_probe", _probe(401)
     )
     p = GitHubCredentialProvider(
         "gh", {"token": "my-secret"}, _StubResolver({"my-secret": "bogus"})
@@ -99,7 +99,7 @@ def test_github_other_status_warns_and_continues(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     monkeypatch.setattr(
-        "agentworks.git_credentials.base._http_probe", _probe(503)
+        "agentworks.capabilities.git_credential.base._http_probe", _probe(503)
     )
     p = GitHubCredentialProvider("gh", {}, _StubResolver({"git-token-gh": "tok"}))
     p.runup(RunContext(secrets=p.resolver))
@@ -120,7 +120,7 @@ def test_expiry_header_format_drift_tolerated(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     fake = _probe(200, b'{"login": "x"}', {_EXPIRY_HEADER: "soonish"})
-    monkeypatch.setattr("agentworks.git_credentials.base._http_probe", fake)
+    monkeypatch.setattr("agentworks.capabilities.git_credential.base._http_probe", fake)
     p = GitHubCredentialProvider("gh", {}, _StubResolver({"git-token-gh": "t"}))
     p.runup(RunContext(secrets=p.resolver))
     out = capsys.readouterr().out
@@ -147,7 +147,7 @@ def test_azdo_rejection_statuses(
     monkeypatch: pytest.MonkeyPatch, status: int
 ) -> None:
     monkeypatch.setattr(
-        "agentworks.git_credentials.base._http_probe", _probe(status)
+        "agentworks.capabilities.git_credential.base._http_probe", _probe(status)
     )
     p = AzDOCredentialProvider(
         "ado", {"org": "my-org"}, _StubResolver({"git-token-ado": "bogus"})
@@ -160,7 +160,7 @@ def test_azdo_200_verifies(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     fake = _probe(200)
-    monkeypatch.setattr("agentworks.git_credentials.base._http_probe", fake)
+    monkeypatch.setattr("agentworks.capabilities.git_credential.base._http_probe", fake)
     p = AzDOCredentialProvider(
         "ado", {"org": "my-org"}, _StubResolver({"git-token-ado": "tok"})
     )
@@ -204,7 +204,7 @@ def test_collect_git_tokens_does_not_probe(
     def _explode(*_a: object, **_k: object) -> object:
         raise AssertionError("_collect_git_tokens must not probe")
 
-    monkeypatch.setattr("agentworks.git_credentials.base._http_probe", _explode)
+    monkeypatch.setattr("agentworks.capabilities.git_credential.base._http_probe", _explode)
     config = _config_with_github_cred(tmp_path)
     registry = build_registry(config)
     assert _collect_git_tokens(config, registry, ["gh"]) == {"gh": "goodtok"}
@@ -227,7 +227,7 @@ def test_runup_and_filter_keeps_verified(
     from agentworks.git_credentials import runup_and_filter
 
     monkeypatch.setattr(
-        "agentworks.git_credentials.base._http_probe",
+        "agentworks.capabilities.git_credential.base._http_probe",
         _probe(200, b'{"login": "wfscot"}', {_EXPIRY_HEADER: "2026-10-01 00:00:00 UTC"}),
     )
     providers = {"gh": GitHubCredentialProvider("gh", {})}
@@ -247,7 +247,7 @@ def test_runup_and_filter_skips_rejected(
     from agentworks.git_credentials import runup_and_filter
 
     monkeypatch.setattr(
-        "agentworks.git_credentials.base._http_probe", _probe(401)
+        "agentworks.capabilities.git_credential.base._http_probe", _probe(401)
     )
     providers = {"gh": GitHubCredentialProvider("gh", {})}
     passed = runup_and_filter(providers, {"gh": "bogus"}, _runup_config())  # type: ignore[arg-type]
@@ -265,7 +265,7 @@ def test_runup_and_filter_logs_skip_for_partial(
     from agentworks.git_credentials import runup_and_filter
 
     monkeypatch.setattr(
-        "agentworks.git_credentials.base._http_probe", _probe(401)
+        "agentworks.capabilities.git_credential.base._http_probe", _probe(401)
     )
     logger = MagicMock()
     passed = runup_and_filter(
@@ -286,7 +286,7 @@ def test_runup_and_filter_disabled_keeps_all(
     def _explode(*_a: object, **_k: object) -> object:
         raise AssertionError("must not probe when runup is disabled")
 
-    monkeypatch.setattr("agentworks.git_credentials.base._http_probe", _explode)
+    monkeypatch.setattr("agentworks.capabilities.git_credential.base._http_probe", _explode)
     providers = {"gh": GitHubCredentialProvider("gh", {})}
     passed = runup_and_filter(
         providers, {"gh": "x"}, _runup_config(enabled=False)  # type: ignore[arg-type]
