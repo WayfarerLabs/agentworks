@@ -1399,7 +1399,7 @@ def run_initialization(
     """
     db.insert_vm_event(vm_name, "init_started")
 
-    output.phase("Initialization")
+    output.phase("VM Initialization")
     try:
         _phase_b_setup(
             db,
@@ -1776,11 +1776,31 @@ def _phase_b_setup(
                 logger.warning(msg)
                 output.warn(msg)
 
-    # Non-fatal: set default shell (before install commands so installers
-    # write to the correct rc file). The zsh ``zsh-newuser-install``
-    # first-run wizard is pre-empted by the skel seed.
-    logger.step("Shell configuration")
+    # admin_shell is a pure config read, hoisted above the system install
+    # commands below (which run in it) so they stay in the VM section; the
+    # login-shell usermod is a separate admin step further down.
     admin_shell = admin.shell
+
+    # Non-fatal: system install commands (VM-level, system-wide). Kept in
+    # the VM section: they run via ``{admin_shell} -lc`` explicitly, so
+    # they do not depend on the login-shell usermod, and they install
+    # system-wide tools rather than touching the admin's rc.
+    system_path = _run_catalog_commands(
+        ts_target,
+        vm_template.system_install_commands,
+        catalog.system_install_commands,
+        admin_shell,
+        home,
+        logger,
+        label="System install command",
+    )
+
+    output.phase("Admin Initialization")
+
+    # Non-fatal: set default shell (before the USER install commands so
+    # those installers write to the correct rc file). The zsh
+    # ``zsh-newuser-install`` first-run wizard is pre-empted by the skel seed.
+    logger.step("Shell configuration")
     output.detail(f"Setting shell to {admin_shell}...")
     try:
         ts_target.run(
@@ -1853,17 +1873,6 @@ def _phase_b_setup(
         msg = f"agent tmux socket setup failed: {e}"
         logger.warning(msg)
         output.warn(msg)
-
-    # Non-fatal: system install commands
-    system_path = _run_catalog_commands(
-        ts_target,
-        vm_template.system_install_commands,
-        catalog.system_install_commands,
-        admin_shell,
-        home,
-        logger,
-        label="System install command",
-    )
 
     # Non-fatal: mise config (written before dotfiles so dotfiles can override)
     mise_path: list[str] = _mise_shims_path(home)
