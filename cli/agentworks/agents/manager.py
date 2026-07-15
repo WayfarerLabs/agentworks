@@ -1189,7 +1189,13 @@ def _create_agent_on_vm(
             GIT_CRED_HELPER_PATH,
             GIT_SCOPES_INCLUDE_PATH,
             build_credential_materials,
+            runup_and_filter,
         )
+
+        # Deferred git-credential runup, right before the write: a
+        # rejected token is skipped (warned) and the rest are configured,
+        # so a bad credential does not sink the agent's whole setup.
+        providers = runup_and_filter(providers, git_tokens, config, logger)
 
         # Same materials as the VM-level (admin) flow: store lines with
         # the unscoped-first ordering contract, the gitconfig include
@@ -1198,25 +1204,26 @@ def _create_agent_on_vm(
         # ``git config --global`` runs as the agent user, so the
         # tilde-literal include.path resolves to the agent's home; the
         # write_file paths spell the home out (agent_target conventions).
-        materials = build_credential_materials(providers, git_tokens)
-        agent_target.write_file(
-            f"{home}/.git-credentials", materials.store_content, mode="0600"
-        )
-        agent_target.write_file(
-            f"{home}/{GIT_SCOPES_INCLUDE_PATH.removeprefix('~/')}",
-            materials.gitconfig_content,
-            mode="0600",
-        )
-        agent_target.write_file(
-            f"{home}/{GIT_CRED_HELPER_PATH.removeprefix('~/')}",
-            materials.helper_script,
-            mode="0700",
-        )
-        agent_target.run(
-            f"git config --global --replace-all credential.helper '!{GIT_CRED_HELPER_PATH}' && "
-            f"(git config --global --get-all include.path | grep -qxF '{GIT_SCOPES_INCLUDE_PATH}' "
-            f"|| git config --global --add include.path '{GIT_SCOPES_INCLUDE_PATH}')"
-        )
+        if providers:
+            materials = build_credential_materials(providers, git_tokens)
+            agent_target.write_file(
+                f"{home}/.git-credentials", materials.store_content, mode="0600"
+            )
+            agent_target.write_file(
+                f"{home}/{GIT_SCOPES_INCLUDE_PATH.removeprefix('~/')}",
+                materials.gitconfig_content,
+                mode="0600",
+            )
+            agent_target.write_file(
+                f"{home}/{GIT_CRED_HELPER_PATH.removeprefix('~/')}",
+                materials.helper_script,
+                mode="0700",
+            )
+            agent_target.run(
+                f"git config --global --replace-all credential.helper '!{GIT_CRED_HELPER_PATH}' && "
+                f"(git config --global --get-all include.path | grep -qxF '{GIT_SCOPES_INCLUDE_PATH}' "
+                f"|| git config --global --add include.path '{GIT_SCOPES_INCLUDE_PATH}')"
+            )
 
     # User install commands + login-shell PATH profile fragment.
     _run_agent_install_commands(

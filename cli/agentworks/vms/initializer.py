@@ -1877,7 +1877,9 @@ def _phase_b_setup(
 
     # Non-fatal: git credentials (before dotfiles and mise lockfile for private repos)
     if providers:
-        _configure_git_credentials(vm_name, ts_target, providers, logger, git_tokens=git_tokens)
+        _configure_git_credentials(
+            vm_name, ts_target, providers, logger, git_tokens=git_tokens, config=config
+        )
 
     # Non-fatal: dotfiles (can override mise config, can provide lockfile)
     if admin.dotfiles_source:
@@ -2019,6 +2021,7 @@ def _configure_git_credentials(
     logger: SSHLogger,
     *,
     git_tokens: dict[str, str],
+    config: Config,
 ) -> None:
     """Configure git credential store on the VM with the pre-resolved
     framework tokens.
@@ -2032,11 +2035,14 @@ def _configure_git_credentials(
     silently shipping a VM with a missing credential the operator
     asked for is the worst kind of footgun.
 
-    Deliberate error-semantics change with #166: the old per-credential
-    try/except warn-and-continue around ``credential_lines`` is gone --
-    materials build atomically, so a failure (e.g. a scope collision)
-    aborts credential config as a whole rather than shipping a partial
-    store.
+    Two distinct error semantics here, deliberately: the deferred RUNUP
+    (``runup_and_filter``) is per-credential and forgiving -- a token an
+    authenticated probe rejects is skipped (warned -> PARTIAL) and the
+    rest are still configured, because a bad token is idempotently
+    fixable (fix it, reinit). But the MATERIALS BUILD over whatever
+    survived runup is atomic: a failure there (e.g. a scope collision) is
+    a config error, not a bad-token, so it aborts credential config as a
+    whole rather than shipping a partial store.
     """
     logger.step("Git credentials")
     output.detail("Configuring git credentials...")
@@ -2055,8 +2061,15 @@ def _configure_git_credentials(
         GIT_CRED_HELPER_PATH,
         GIT_SCOPES_INCLUDE_PATH,
         build_credential_materials,
+        runup_and_filter,
     )
 
+    # Deferred git-credential runup: authenticate each token right before
+    # it is written. A rejected credential is skipped (logged as a warning
+    # -> PARTIAL) and the rest are still configured; the operator fixes the
+    # token and reruns reinit. Runs here, not at the command root, so a
+    # bad token never blocks the VM from provisioning.
+    providers = runup_and_filter(providers, git_tokens, config, logger)
     if not providers:
         return
     # Store lines + gitconfig credential-context sections (scoped

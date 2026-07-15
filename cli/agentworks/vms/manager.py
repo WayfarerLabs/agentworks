@@ -489,7 +489,7 @@ def create_vm(
     # no-op for them.
     platform_obj.runup(RunContext(config=config, secrets=resolver))
     tailscale_auth_key = resolver.get(vm_tmpl.tailscale_auth_key)
-    git_tokens = _git_tokens_after_resolve(config, providers, resolver)
+    git_tokens = _resolve_git_tokens(providers, resolver)
 
     # The VM's OS hostname, computed once at create time and recorded on the
     # row: {slug}-{name} with a slug, the bare name without. Bounded by
@@ -1121,7 +1121,12 @@ def add_git_credential(db: Database, config: Config, name: str, credential_name:
     )
     bound.preflight(RunContext(config=config))
     resolver.resolve()
-    token = _git_tokens_after_resolve(config, providers, resolver)[credential_name]
+    # add-git-credential is a single explicit add, so a rejected token is
+    # fatal here (unlike vm/agent provisioning, which skips and continues
+    # to partial): the operator asked to add exactly this one credential.
+    if config.defaults.runup_git_credentials:
+        provider.runup(RunContext(config=config, secrets=resolver))
+    token = _resolve_git_tokens(providers, resolver)[credential_name]
     new_lines = provider.credential_lines(token)
 
     with keep_active(db, config, vm, bound):
@@ -1576,7 +1581,7 @@ def reinit_vm(
     # SSH and never calls the platform API, so its token is not used here
     # (create is the only op that needs it, and that ran at first create).
     output.phase("Runup")
-    git_tokens = _git_tokens_after_resolve(config, providers, resolver)
+    git_tokens = _resolve_git_tokens(providers, resolver)
 
     # Provisioning is hermetic: no operator-env secrets are prompted at
     # reinit. They get prompted at the use site (vm shell, session
@@ -1752,26 +1757,21 @@ def _mask_env_var_backend_for(
         os.environ.update(saved)
 
 
-def _git_tokens_after_resolve(
-    config: Config,
+def _resolve_git_tokens(
     providers: Mapping[str, GitCredentialProvider],
     resolver: Resolver,
 ) -> dict[str, str]:
     """Read each provider's resolved token from the operation's resolver
-    cache, after running the provider's ``runup()`` (the authenticated
-    readiness stage) unless the operator disabled it via ``[defaults]
-    runup_git_credentials = false``.
+    cache into a ``{credential_name: value}`` dict.
 
     The providers must have been constructed against ``resolver`` (so
-    their token secrets joined the boundary resolve), and the pass must
-    already have run. A definitive rejection during ``runup`` raises
-    ``TokenRejectedError``; this is safe at every call site because
-    runup runs before any VM/user mutation.
+    their token secrets joined the boundary resolve) and the pass must
+    already have run. This does NOT run the git-credential runup: that is
+    deferred to the write step (Phase B for vm init, the credential-write
+    step for agent create), where a rejected token is skipped and the
+    operation continues to a partial result rather than failing before
+    the VM even exists. See ``runup_and_filter``.
     """
-    if config.defaults.runup_git_credentials:
-        ctx = RunContext(config=config, secrets=resolver)
-        for provider in providers.values():
-            provider.runup(ctx)
     return {
         name: resolver.get(provider.secret_name)
         for name, provider in providers.items()
@@ -1808,7 +1808,7 @@ def _collect_git_tokens(
     for provider in providers.values():
         provider.preflight(RunContext(config=config))
     resolver.resolve()
-    return _git_tokens_after_resolve(config, providers, resolver)
+    return _resolve_git_tokens(providers, resolver)
 
 
 def _lookup_or_synthesize_secret(registry: Registry, name: str) -> SecretDecl:

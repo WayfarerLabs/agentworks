@@ -193,55 +193,102 @@ def _config_with_github_cred(tmp_path: Path, *, extra: str = ""):  # noqa: ANN20
     return load_config(cfg, warn_issues=False)
 
 
-def test_collect_aborts_on_rejected_token(
+def test_collect_git_tokens_does_not_probe(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The entry-point contract: a definitively rejected token aborts
-    collection -- which runs before anything is created."""
-    monkeypatch.setenv("AW_SECRET_GIT_TOKEN_GH", "bogus")
-    monkeypatch.setattr(
-        "agentworks.git_credentials.base._http_probe", _probe(401)
-    )
+    """Collection only reads resolved values; the runup (the network
+    probe) is deferred to the write step (``runup_and_filter``), so
+    collecting tokens never touches the network."""
+    monkeypatch.setenv("AW_SECRET_GIT_TOKEN_GH", "goodtok")
+
+    def _explode(*_a: object, **_k: object) -> object:
+        raise AssertionError("_collect_git_tokens must not probe")
+
+    monkeypatch.setattr("agentworks.git_credentials.base._http_probe", _explode)
     config = _config_with_github_cred(tmp_path)
     registry = build_registry(config)
-    with pytest.raises(TokenRejectedError, match="'gh'"):
-        _collect_git_tokens(config, registry, ["gh"])
+    assert _collect_git_tokens(config, registry, ["gh"]) == {"gh": "goodtok"}
 
 
-def test_collect_verifies_and_announces(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    capsys: pytest.CaptureFixture[str],
+# -- runup_and_filter (the deferred runup at the write step) ----------------
+
+
+def _runup_config(*, enabled: bool = True) -> object:
+    from unittest.mock import MagicMock
+
+    cfg = MagicMock()
+    cfg.defaults.runup_git_credentials = enabled
+    return cfg
+
+
+def test_runup_and_filter_keeps_verified(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    monkeypatch.setenv("AW_SECRET_GIT_TOKEN_GH", "goodtok")
+    from agentworks.git_credentials import runup_and_filter
+
     monkeypatch.setattr(
         "agentworks.git_credentials.base._http_probe",
         _probe(200, b'{"login": "wfscot"}', {_EXPIRY_HEADER: "2026-10-01 00:00:00 UTC"}),
     )
-    config = _config_with_github_cred(tmp_path)
-    registry = build_registry(config)
-    tokens = _collect_git_tokens(config, registry, ["gh"])
-    assert tokens == {"gh": "goodtok"}
+    providers = {"gh": GitHubCredentialProvider("gh", {})}
+    passed = runup_and_filter(providers, {"gh": "goodtok"}, _runup_config())  # type: ignore[arg-type]
+    assert set(passed) == {"gh"}
     out = capsys.readouterr().out
     assert "Verified git token for 'gh'" in out
     assert "login wfscot" in out
-    assert "expires 2026-10-01" in out
 
 
-def test_collect_skips_verification_when_disabled(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+def test_runup_and_filter_skips_rejected(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    monkeypatch.setenv("AW_SECRET_GIT_TOKEN_GH", "whatever")
+    """A definitively rejected token is SKIPPED (dropped from the result)
+    with a warning -- provisioning continues to a partial result rather
+    than aborting."""
+    from agentworks.git_credentials import runup_and_filter
+
+    monkeypatch.setattr(
+        "agentworks.git_credentials.base._http_probe", _probe(401)
+    )
+    providers = {"gh": GitHubCredentialProvider("gh", {})}
+    passed = runup_and_filter(providers, {"gh": "bogus"}, _runup_config())  # type: ignore[arg-type]
+    assert passed == {}
+    assert "skipping" in capsys.readouterr().err
+
+
+def test_runup_and_filter_logs_skip_for_partial(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """When a logger is passed (vm init), a skip is recorded as a warning
+    so the VM degrades to PARTIAL."""
+    from unittest.mock import MagicMock
+
+    from agentworks.git_credentials import runup_and_filter
+
+    monkeypatch.setattr(
+        "agentworks.git_credentials.base._http_probe", _probe(401)
+    )
+    logger = MagicMock()
+    passed = runup_and_filter(
+        {"gh": GitHubCredentialProvider("gh", {})},
+        {"gh": "bogus"},
+        _runup_config(),  # type: ignore[arg-type]
+        logger,
+    )
+    assert passed == {}
+    logger.warning.assert_called_once()
+
+
+def test_runup_and_filter_disabled_keeps_all(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agentworks.git_credentials import runup_and_filter
 
     def _explode(*_a: object, **_k: object) -> object:
-        raise AssertionError("probe must not be called with verification off")
+        raise AssertionError("must not probe when runup is disabled")
 
     monkeypatch.setattr("agentworks.git_credentials.base._http_probe", _explode)
-    config = _config_with_github_cred(
-        tmp_path,
-        extra="[defaults]\nrunup_git_credentials = false\n",
+    providers = {"gh": GitHubCredentialProvider("gh", {})}
+    passed = runup_and_filter(
+        providers, {"gh": "x"}, _runup_config(enabled=False)  # type: ignore[arg-type]
     )
-    assert config.defaults.runup_git_credentials is False
-    registry = build_registry(config)
-    tokens = _collect_git_tokens(config, registry, ["gh"])
-    assert tokens == {"gh": "whatever"}
+    assert set(passed) == {"gh"}

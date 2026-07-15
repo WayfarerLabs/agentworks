@@ -425,7 +425,7 @@ def test_vm_create_does_not_eager_resolve_operator_env() -> None:
     sources = [
         inspect.getsource(vm_manager.create_vm),
         inspect.getsource(vm_initializer.resolve_git_credential_providers),
-        inspect.getsource(vm_manager._git_tokens_after_resolve),
+        inspect.getsource(vm_manager._resolve_git_tokens),
         inspect.getsource(vm_templates.preflight_vm_template),
         inspect.getsource(secrets_resolver.Resolver),
     ]

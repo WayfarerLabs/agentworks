@@ -507,8 +507,17 @@ def test_initializer_writes_all_three_files() -> None:
         "gh": _gh(config_name="gh"),
         "acme-bot": _gh(config_name="acme-bot", owner="acme"),
     }
+    # Runup off so this stays focused on the materials write, not the
+    # network probe (runup_and_filter is tested separately).
+    cfg = MagicMock()
+    cfg.defaults.runup_git_credentials = False
     _configure_git_credentials(
-        "vm1", target, providers, MagicMock(), git_tokens={"gh": "t1", "acme-bot": "t2"}
+        "vm1",
+        target,
+        providers,
+        MagicMock(),
+        git_tokens={"gh": "t1", "acme-bot": "t2"},
+        config=cfg,
     )
 
     by_path = {path: (content, mode) for path, content, mode in writes}

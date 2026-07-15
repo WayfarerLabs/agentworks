@@ -15,13 +15,73 @@ import re
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
+from agentworks import output
 from agentworks.errors import ConfigError
 from agentworks.git_credentials.azdo import AzDOCredentialProvider
 from agentworks.git_credentials.github import GitHubCredentialProvider
 
 if TYPE_CHECKING:
+    from agentworks.config import Config
     from agentworks.git_credentials.base import GitCredentialProvider, HelperEntry
     from agentworks.resources import Registry
+
+
+class _MappedSecrets:
+    """A resolved-secret view over a plain ``{secret_name: value}`` map,
+    for handing already-resolved git tokens to ``runup`` at the write
+    step without threading the operation's resolver that far."""
+
+    def __init__(self, values: dict[str, str]) -> None:
+        self._values = values
+
+    def get(self, name: str) -> str:
+        return self._values[name]
+
+
+def runup_and_filter(
+    providers: dict[str, GitCredentialProvider],
+    git_tokens: dict[str, str],
+    config: Config,
+    logger: object | None = None,
+) -> dict[str, GitCredentialProvider]:
+    """The deferred git-credential runup, run right before the materials
+    op writes anything.
+
+    Authenticate each provider's resolved token against its host; a
+    definitive rejection is SKIPPED with a warning (the operator fixes
+    the token and re-runs) and dropped from the returned set, rather than
+    sinking the whole operation -- git-credential provisioning is
+    idempotently retryable, so continuing to a partial result and letting
+    a reinit recover it is the right call for its callers (vm/agent
+    provisioning). Returns the providers whose tokens passed, or all of
+    them when the operator disabled the stage via ``[defaults]
+    runup_git_credentials``.
+
+    ``logger`` (an ``SSHLogger``, when the caller has one) records the
+    skip as a warning so a VM initialization degrades to PARTIAL.
+    """
+    if not config.defaults.runup_git_credentials:
+        return providers
+
+    from agentworks.capabilities.base import RunContext
+    from agentworks.errors import TokenRejectedError
+
+    by_secret = {p.secret_name: git_tokens[name] for name, p in providers.items()}
+    ctx = RunContext(config=config, secrets=_MappedSecrets(by_secret))
+    passed: dict[str, GitCredentialProvider] = {}
+    for name, provider in providers.items():
+        try:
+            provider.runup(ctx)
+            passed[name] = provider
+        except TokenRejectedError as e:
+            msg = (
+                f"git credential '{name}' rejected; skipping it "
+                f"(fix the token and reinit): {e}"
+            )
+            output.warn(msg)
+            if logger is not None:
+                logger.warning(msg)  # type: ignore[attr-defined]
+    return passed
 
 
 @dataclass(frozen=True)
