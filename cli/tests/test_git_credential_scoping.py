@@ -1,12 +1,11 @@
 """Fine-grained PAT scoping for github credentials (issue #166).
 
-Selection rides git's own machinery, empirically verified against git
-2.39: provisioned ``[credential "<url>"]`` context sections inject a
-per-credential username (longest-prefix match on slash boundaries) and
-the username-tagged, path-less store line supplies the token. No
-``credential.useHttpPath`` anywhere: with it on, path-less store
-lines stop matching path-carrying queries, which would break every
-unscoped credential.
+Selection lives in the agentworks credential helper. The provisioned
+include turns on ``credential.useHttpPath`` so git hands the helper the
+remote's host and path; the helper picks the most specific credential
+(exact repo, then owner, then the host default, then the first store
+line) and serves the matching path-less store line, keyed by a
+per-credential username. Verified against git 2.39.
 """
 
 from __future__ import annotations

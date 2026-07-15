@@ -2089,9 +2089,9 @@ def _configure_git_credentials(
     providers = runup_and_filter(providers, git_tokens, config, logger)
     if not providers:
         return
-    # Store lines + gitconfig credential-context sections (scoped
-    # credentials select per-repo/per-owner via context-injected
-    # usernames; issue #166). Scope collisions raise here, before
+    # Store lines + the useHttpPath include + the selecting helper (the
+    # helper picks the per-repo/per-owner credential from the remote path
+    # git now sends; issue #166). Scope collisions raise here, before
     # anything is written.
     materials = build_credential_materials(providers, git_tokens)
 

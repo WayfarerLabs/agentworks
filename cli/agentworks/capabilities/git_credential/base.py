@@ -149,10 +149,9 @@ class GitCredentialProvider(Capability):
 
     @property
     def store_username(self) -> str:
-        """The username on this credential's store line, the join key
-        the credential helper and context sections select by. Default:
-        the credential's own name; subclasses override where the host
-        dictates otherwise."""
+        """The username on this credential's store line, the join key the
+        credential helper selects by. Default: the credential's own name;
+        subclasses override where the host dictates otherwise."""
         return self.owner_name
 
     @property

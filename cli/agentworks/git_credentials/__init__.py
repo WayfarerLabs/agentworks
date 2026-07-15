@@ -157,18 +157,18 @@ class CredentialMaterials:
 # The credential helper's on-VM path, registered as "!<path>" in the
 # user's global ``credential.helper`` slot (replacing the old
 # ``store``): git only shell-executes helper values starting with "!"
-# or an absolute path, and the shell is what expands the tilde --
-# per-user, which is what makes the same content work for admin and
-# agents. The old warn-only script (~/.agentworks-git-cred-warn.sh) is
-# orphaned harmlessly on VMs initialized by earlier builds.
+# or an absolute path, and the shell is what expands the tilde per-user,
+# which is what makes the same content work for admin and agents. The
+# old warn-only script (~/.agentworks-git-cred-warn.sh) is orphaned
+# harmlessly on VMs initialized by earlier builds.
 GIT_CRED_HELPER_PATH = "~/.agentworks-git-cred-helper.sh"
 
-# The agentworks-owned gitconfig include carrying the credential-context
-# sections. Referenced from the user's global gitconfig via include.path
+# The agentworks-owned gitconfig include carrying the useHttpPath switch.
+# Referenced from the user's global gitconfig via include.path
 # (tilde-literal, expanded per-user by git); overwritten wholesale on
 # every init, so removing scopes degrades cleanly while at least one
-# credential remains (removing ALL credentials leaves both files stale
-# -- a pre-existing gap shared with the store itself).
+# credential remains (removing ALL credentials leaves both files stale,
+# a pre-existing gap shared with the store itself).
 GIT_SCOPES_INCLUDE_PATH = "~/.agentworks-git-scopes.gitconfig"
 
 
@@ -225,7 +225,7 @@ def build_credential_materials(
     header = "# Managed by agentworks (git credential selection); do not edit.\n"
     return CredentialMaterials(
         store_content="\n".join(store_unscoped + store_scoped) + "\n",
-        # useHttpPath makes git send the remote path to the helper --
+        # useHttpPath makes git send the remote path to the helper,
         # the whole selection mechanism. Harmless globally now that our
         # helper is the only consumer (the old hazard was
         # credential-store's path matching, and store is gone).

@@ -184,9 +184,9 @@ class GitHubCredentialProvider(GitCredentialProvider):
     @property
     def store_username(self) -> str:
         # Scoped: the credential's resource name doubles as the store
-        # username, the join key the gitconfig context sections select
-        # by (GitHub accepts any username with a PAT, verified against
-        # fine-grained tokens). Unscoped keeps the released value.
+        # username, the join key the credential helper selects by (GitHub
+        # accepts any username with a PAT, verified against fine-grained
+        # tokens). Unscoped keeps the released value.
         if self._repos or self._owner:
             return self.owner_name
         return "x-access-token"
@@ -197,10 +197,10 @@ class GitHubCredentialProvider(GitCredentialProvider):
         parts = urlsplit(url)
         if parts.scheme not in ("http", "https") or parts.hostname != "github.com":
             return []
-        # GitHub's store username is the credential's resource name (the
-        # join key the scope sections select by), never something an
-        # operator would type. So ANY embedded username overrides the
-        # scope-injected one and makes the helper serve by it, bypassing
+        # GitHub's store username is the credential's resource name (what
+        # the helper selects by), never something an operator would type.
+        # So ANY embedded username makes git hand it to the helper, whose
+        # fast path serves by it and skips the helper's path-based
         # per-repo/owner selection.
         if parts.username:
             return [
