@@ -1175,17 +1175,17 @@ def resolve_git_credential_providers(
 
 def announce_git_credentials(providers: dict[str, GitCredentialProvider]) -> None:
     """Echo the git credentials the operation will configure, one
-    ``git-credential/<name>`` line each so the Preflight context reads
-    consistently with the ``vm-site/<name>`` / ``vm-template/<name>``
-    lines above, in the ``<kind>/<name>`` form operators pass to
-    ``agw resource`` and the like. (The former per-provider auth
-    pre-flight was vestigial: every provider's check returned True
-    unconditionally once token resolution moved to the secret framework.
-    Token health reports through doctor's Secrets group and resolution
-    failures surface as ``SecretUnavailableError`` at collect time.)
+    ``Checking git-credential/<name>...`` line each so the Preflight
+    context matches the ``vm-site`` / ``vm-template`` lines above, in the
+    ``<kind>/<name>`` form operators pass to ``agw resource`` and the
+    like. (The former per-provider auth pre-flight was vestigial: every
+    provider's check returned True unconditionally once token resolution
+    moved to the secret framework. Token health reports through doctor's
+    Secrets group and resolution failures surface as
+    ``SecretUnavailableError`` at collect time.)
     """
     for name in providers:
-        output.detail(f"git-credential/{name}")
+        output.detail(f"Checking git-credential/{name}...")
 
 
 def rejoin_tailscale(

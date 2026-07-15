@@ -625,16 +625,16 @@ def test_remote_advisories_unions_and_filters(tmp_path: Path) -> None:
 def test_announce_git_credentials_reinforces_names(
     captured_output: CapturedOutput,
 ) -> None:
-    """Preflight echoes one ``git-credential/<name>`` line per credential,
-    in the ``<kind>/<name>`` form matching the vm-site / vm-template
-    context lines."""
+    """Preflight echoes one ``Checking git-credential/<name>...`` line per
+    credential, in the ``<kind>/<name>`` form matching the vm-site /
+    vm-template context lines."""
     from agentworks.vms.initializer import announce_git_credentials
 
     announce_git_credentials(
         {"github": _gh("github", owner="acme"), "azdo_ifc": _azdo("azdo_ifc", "org")}
     )
-    assert "git-credential/github" in captured_output.detail
-    assert "git-credential/azdo_ifc" in captured_output.detail
+    assert "Checking git-credential/github..." in captured_output.detail
+    assert "Checking git-credential/azdo_ifc..." in captured_output.detail
     # Not the old friendly-label / display-name form.
     assert not any(m.startswith("Git credentials:") for m in captured_output.detail)
 
