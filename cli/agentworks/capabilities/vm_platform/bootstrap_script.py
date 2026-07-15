@@ -119,6 +119,37 @@ echo "##STEP## Hostname"
 hostnamectl set-hostname "$VM_HOSTNAME" 2>/dev/null || hostname "$VM_HOSTNAME"
 echo "##SUCCESS## hostname set to $VM_HOSTNAME"
 
+# -- Step 5b: Mask broken SVE on Apple Virtualization guests --
+# Apple's Virtualization.framework advertises SVE/SVE2 in the guest HWCAP
+# that the guest cannot actually execute; the first SVE instruction traps
+# as SIGILL (seen in OpenSSL, and therefore git-over-https and Python
+# cryptography). Disable SVE at the kernel cmdline via a grub drop-in so
+# no library selects an SVE routine. This needs a reboot to take effect,
+# and rebooting inside a provision step is unreliable (lima-vm/lima#4867),
+# so the platform restarts the instance from the host when it sees the
+# sentinel dropped below. Self-gated: a no-op on every non-Apple host.
+echo "##STEP## Mask SVE"
+if grep -qi 'apple virtualization' /sys/class/dmi/id/product_name 2>/dev/null \
+    && grep -qi sve2 /proc/cpuinfo 2>/dev/null; then
+    mkdir -p /etc/default/grub.d
+    cat > /etc/default/grub.d/99-agentworks-nosve.cfg <<'AGW_NOSVE_EOF'
+# agentworks: Apple Virtualization advertises SVE the guest cannot run.
+GRUB_CMDLINE_LINUX="$GRUB_CMDLINE_LINUX arm64.nosve"
+AGW_NOSVE_EOF
+    if update-grub >/dev/null 2>&1; then
+        if grep -qw arm64.nosve /proc/cmdline; then
+            echo "##SUCCESS## SVE already masked (arm64.nosve active)"
+        else
+            touch /run/agentworks-reboot-required
+            echo "##SUCCESS## SVE masked via arm64.nosve (restart pending)"
+        fi
+    else
+        echo "##WARN## update-grub failed; SVE not masked"
+    fi
+else
+    echo "##SUCCESS## SVE mask not needed"
+fi
+
 # -- Step 6: Install Tailscale --
 # tailscaled is configured by its Debian package's systemd unit, which reads
 # /etc/default/tailscaled for the FLAGS env var. We leave both at their

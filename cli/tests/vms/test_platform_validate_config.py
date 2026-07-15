@@ -47,11 +47,18 @@ def test_lima_accepts_empty_and_vm_host() -> None:
     assert LimaPlatform.validate_config("t", {"vm_host": "me@box"}) == ()
 
 
+def test_lima_accepts_nested_virtualization_bool() -> None:
+    assert LimaPlatform.validate_config("t", {"nested_virtualization": True}) == ()
+    assert LimaPlatform.validate_config("t", {"nested_virtualization": False}) == ()
+
+
 def test_lima_rejects_bad_vm_host_and_unknown_keys() -> None:
     with pytest.raises(ConfigError, match="vm_host"):
         LimaPlatform.validate_config("t", {"vm_host": ""})
     with pytest.raises(ConfigError, match="unknown lima"):
         LimaPlatform.validate_config("t", {"host": "x"})
+    with pytest.raises(ConfigError, match="nested_virtualization must be a boolean"):
+        LimaPlatform.validate_config("t", {"nested_virtualization": "yes"})
 
 
 def test_wsl2_accepts_no_configuration() -> None:

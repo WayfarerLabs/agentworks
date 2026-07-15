@@ -26,11 +26,34 @@ def test_generate_bootstrap_script_all_steps() -> None:
     assert "##STEP## SSH public key" in script
     assert "##STEP## Swap file" in script
     assert "##STEP## Hostname" in script
+    assert "##STEP## Mask SVE" in script
     assert "##STEP## Tailscale install" in script
     assert "##STEP## Tailscale join" in script
     assert "tskey-auth-test123" in script
     assert "SWAP_GB=4" in script
     assert "lima--myvm" in script
+
+
+def test_generate_bootstrap_script_masks_sve_gated_on_apple() -> None:
+    """The SVE mask is gated on Apple Virtualization + SVE, writes a grub
+    drop-in with arm64.nosve, and drops a restart sentinel."""
+    script = generate_bootstrap_script(
+        admin_username="testuser",
+        ssh_public_key="ssh-ed25519 AAAA testkey",
+        provisioning_packages=["curl"],
+        tailscale_auth_key="tskey-auth-test123",
+        hostname="lima--myvm",
+    )
+
+    # Self-gated: only Apple Virtualization guests advertising SVE act.
+    assert "apple virtualization" in script
+    assert "/sys/class/dmi/id/product_name" in script
+    assert "sve2 /proc/cpuinfo" in script
+    # The fix and its host-side restart signal.
+    assert "arm64.nosve" in script
+    assert "/etc/default/grub.d/99-agentworks-nosve.cfg" in script
+    assert "update-grub" in script
+    assert "touch /run/agentworks-reboot-required" in script
 
 
 def test_generate_bootstrap_script_preserves_ssh_host_keys() -> None:

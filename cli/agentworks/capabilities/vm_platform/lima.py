@@ -42,7 +42,7 @@ images:
 cpus: {cpus}
 memory: {memory}GiB
 disk: {disk}GiB
-ssh:
+{nested_virtualization}ssh:
   localPort: 0
 mountType: virtiofs
 provision:
@@ -85,7 +85,15 @@ class LimaPlatform(VMPlatform):
                 f"{owner}.vm_host must be a non-empty SSH host string "
                 f"(e.g. 'user@host'), got {vm_host!r}"
             )
-        unknown = sorted(set(config) - {"vm_host"})
+        # Opt-in nested virtualization (Apple M3+/macOS 15+ with the vz
+        # backend): the guest gets /dev/kvm so it can run accelerated VMs
+        # of its own. Off by default; Lima rejects it on unsupported hosts.
+        nested = config.get("nested_virtualization")
+        if nested is not None and not isinstance(nested, bool):
+            raise ConfigError(
+                f"{owner}.nested_virtualization must be a boolean, got {nested!r}"
+            )
+        unknown = sorted(set(config) - {"vm_host", "nested_virtualization"})
         if unknown:
             raise ConfigError(
                 f"{owner}: unknown lima platform field(s): {', '.join(unknown)}"
@@ -236,8 +244,20 @@ class LimaPlatform(VMPlatform):
 
         # Indent the provision script for YAML embedding (6 spaces)
         indented_script = textwrap.indent(provision_script, "      ")
+        # Opt-in nested virtualization (Apple M3+/macOS 15+, vz backend):
+        # a top-level `nestedVirtualization: true` line, emitted only when
+        # the site requests it.
+        nested_line = (
+            "nestedVirtualization: true\n"
+            if self.platform_config.get("nested_virtualization")
+            else ""
+        )
         rendered = LIMA_TEMPLATE.format(
-            cpus=cpus, memory=memory, disk=disk, provision_script=indented_script
+            cpus=cpus,
+            memory=memory,
+            disk=disk,
+            nested_virtualization=nested_line,
+            provision_script=indented_script,
         )
 
         if self.is_remote:
@@ -246,6 +266,17 @@ class LimaPlatform(VMPlatform):
             self._create_local(instance_name, rendered)
 
         output.detail(f"Lima VM '{instance_name}' created.")
+
+        # The bootstrap masks broken SVE on Apple Virtualization guests via
+        # arm64.nosve (see bootstrap_script), which only takes effect after
+        # a reboot. Rebooting mid-provision is unreliable (lima-vm/lima#4867),
+        # so restart the instance from the host when the bootstrap left the
+        # sentinel. A no-op on every other host.
+        if self._sve_reboot_pending(instance_name):
+            output.detail(
+                "Masked unusable SVE (arm64.nosve); restarting VM to apply..."
+            )
+            self._run_lima(f"limactl restart {instance_name}")
 
         # If Tailscale was provisioned via the provision block, extract the IP
         tailscale_ip = None
@@ -269,6 +300,23 @@ class LimaPlatform(VMPlatform):
             bootstrap_complete=bootstrap_complete,
             tailscale_ip=tailscale_ip,
         )
+
+    def _sve_reboot_pending(self, instance_name: str) -> bool:
+        """True if the bootstrap dropped the arm64.nosve restart sentinel.
+
+        The bootstrap touches ``/run/agentworks-reboot-required`` on Apple
+        Virtualization guests where it masked unusable SVE and the running
+        kernel has not yet picked up the change (see ``bootstrap_script``).
+        The sentinel lives on tmpfs, so it clears itself on the restart.
+        """
+        try:
+            self._run_lima(
+                f"limactl shell {instance_name} "
+                "test -f /run/agentworks-reboot-required"
+            )
+        except SSHError:
+            return False
+        return True
 
     def _instance_exists(self, instance_name: str) -> bool:
         """Pre-flight: does a Lima instance with this name exist?"""

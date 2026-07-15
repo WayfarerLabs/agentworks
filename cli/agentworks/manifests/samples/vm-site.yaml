@@ -17,6 +17,23 @@
 #  platform_config:
 #    vm_host: me@gpu-box
 ##
+## Local Lima with nested virtualization (Apple M3+ / macOS 15+): the
+## guest gets /dev/kvm so it can run accelerated VMs of its own. Omit on
+## unsupported hosts, where Lima rejects the flag. The built-in
+## `lima-local` site carries no config, so declare your own local site
+## to opt in.
+##
+#---
+#apiVersion: agentworks/v1
+#kind: vm-site
+#metadata:
+#  name: lima-nested
+#  description: Local Lima with nested virtualization for VM-in-VM testing
+#spec:
+#  platform: lima
+#  platform_config:
+#    nested_virtualization: true
+##
 ## Azure, in one subscription + resource group (declare one site per
 ## subscription/group you target):
 ##
