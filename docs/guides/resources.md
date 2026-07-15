@@ -86,10 +86,11 @@ Clone with plain https URLs; no username needed anywhere. Credentials are served
 agentworks-owned helper (`~/.agentworks-git-cred-helper.sh`, replacing git's `credential-store`):
 when the remote rejects a credential it prints which credential and secret to fix instead of
 silently deleting the provisioned entry (which is what `credential-store` does on every failed
-auth); an embedded username in a remote URL bypasses scoping and draws a warning; and if git stops
-sending repository paths (a local git config overriding `useHttpPath`), the helper warns and serves
-the host default. The credential's resource name appears as the username on scoped store lines and
-in provider-side logs; remotes are never rewritten.
+auth); an embedded username in a remote URL is reviewed per provider (GitHub flags it, since it
+bypasses scoping; Azure DevOps accepts its org, which is both the username and the owner scope); and
+if git stops sending repository paths (a local git config overriding `useHttpPath`), the helper
+warns and serves the host default. The credential's resource name appears as the username on scoped
+store lines and in provider-side logs; remotes are never rewritten.
 
 ## TOML resource sections: deprecated but supported
 

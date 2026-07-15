@@ -191,6 +191,25 @@ class GitHubCredentialProvider(GitCredentialProvider):
             return self.owner_name
         return "x-access-token"
 
+    def review_remote(self, url: str) -> list[str]:
+        from urllib.parse import urlsplit
+
+        parts = urlsplit(url)
+        if parts.scheme not in ("http", "https") or parts.hostname != "github.com":
+            return []
+        # GitHub's store username is the credential's resource name (the
+        # join key the scope sections select by), never something an
+        # operator would type. So ANY embedded username overrides the
+        # scope-injected one and makes the helper serve by it, bypassing
+        # per-repo/owner selection.
+        if parts.username:
+            return [
+                f"the git remote {url!r} embeds a username, which overrides "
+                f"agentworks git credential scoping for github.com (the helper "
+                f"serves by the embedded username); use a plain https remote"
+            ]
+        return []
+
     def credential_lines(self, token: str) -> list[str]:
         return [f"https://{self.store_username}:{token}@github.com"]
 

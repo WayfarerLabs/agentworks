@@ -105,10 +105,6 @@ def validate_admin_username(admin_username: str) -> None:
         )
 
 
-# https/http git URL with embedded userinfo ("https://user@host/...").
-_HTTP_USERINFO_RE = re.compile(r"^https?://[^/@]+@")
-
-
 # -- Data classes ----------------------------------------------------------
 
 
@@ -882,13 +878,10 @@ def _load_workspace_templates(
         if not isinstance(tdata, dict):
             raise ConfigError(f"workspace_templates.{name} must be a table")
         repo = str(tdata["repo"]) if "repo" in tdata else None
-        if repo is not None and _HTTP_USERINFO_RE.match(repo):
-            issues.append(
-                f"workspace_templates.{name}.repo embeds a username; use a "
-                f"plain https remote: git credential scoping selects "
-                f"credentials automatically, and an embedded username "
-                f"bypasses it"
-            )
+        # Embedded-username advice moved to a provider-owned preflight
+        # (git_credentials.remote_advisories, run when a template is
+        # actually used): only the credential instance knows its host and
+        # scope, so the judgment lives there rather than in this loader.
         templates[name] = WorkspaceTemplate(
             name=name,
             inherits=list(tdata.get("inherits", [])),

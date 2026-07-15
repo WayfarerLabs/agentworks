@@ -186,6 +186,23 @@ class GitCredentialProvider(Capability):
             )
         self._verify_token(ctx.secrets.get(self.secret_name))
 
+    def review_remote(self, url: str) -> list[str]:
+        """Advisory review of a declared repo remote URL against THIS
+        credential's resolution semantics. Config-only: no token, no
+        network, no per-user wiring; it reads only this instance's own
+        config (its host and scope), which is exactly why the judgment
+        lives on the instance and not in core config, only the instance
+        knows its host (including a future enterprise host) and how it
+        selects credentials.
+
+        Return advisory strings when the URL is served by this
+        credential's host and something about it would defeat resolution;
+        return ``[]`` when the URL is not this credential's concern or is
+        fine. The default abstains; providers override with their own
+        host and username semantics.
+        """
+        return []
+
     def _probe_pat(
         self,
         url: str,

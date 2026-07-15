@@ -103,5 +103,25 @@ class AzDOCredentialProvider(GitCredentialProvider):
             host="dev.azure.com", username=self._org, owner=self._org
         )
 
+    def review_remote(self, url: str) -> list[str]:
+        from urllib.parse import urlsplit
+
+        parts = urlsplit(url)
+        if parts.scheme not in ("http", "https") or parts.hostname != "dev.azure.com":
+            return []
+        # AzDO uses the org as the store username AND the owner scope, so a
+        # standard 'https://{org}@dev.azure.com/{org}/...' remote resolves
+        # correctly (the embedded org is exactly what the helper serves by).
+        # Only a username that is NOT the org bypasses resolution: the helper
+        # serves by it and finds no matching line.
+        if parts.username and parts.username != self._org:
+            return [
+                f"the git remote {url!r} embeds username {parts.username!r}, "
+                f"not the {self._org!r} org, so the credential helper will not "
+                f"serve it; use https://dev.azure.com/{self._org}/... "
+                f"(the org prefix is optional)"
+            ]
+        return []
+
     def credential_lines(self, token: str) -> list[str]:
         return [f"https://{self._org}:{token}@dev.azure.com/{self._org}"]

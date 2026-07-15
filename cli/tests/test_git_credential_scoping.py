@@ -582,27 +582,41 @@ def test_toml_github_scope_keys_warn_and_unscope(tmp_path: Path) -> None:
     assert config.git_credentials["gh"].provider_config == {}
 
 
-# -- workspace repo userinfo warning -------------------------------------------
+# -- review_remote (provider-owned repo URL advice) ----------------------------
 
 
-def test_workspace_repo_userinfo_warns(tmp_path: Path) -> None:
-    pub = tmp_path / "k.pub"
-    priv = tmp_path / "k"
-    pub.write_text("ssh-ed25519 AAAA test")
-    priv.write_text("key")
-    cfg = tmp_path / "config.toml"
-    cfg.write_text(
-        dedent(f"""\
-        [operator]
-        ssh_public_key = "{pub.as_posix()}"
-        ssh_private_key = "{priv.as_posix()}"
+def test_github_review_remote_flags_embedded_username() -> None:
+    gh = _gh("bot", owner="acme")
+    # Embedded username on github.com overrides scoping: flagged.
+    assert gh.review_remote("https://alice@github.com/acme/widgets.git")
+    # Plain https remote: fine.
+    assert gh.review_remote("https://github.com/acme/widgets.git") == []
+    # Not github's host, or not http(s): not github's concern.
+    assert gh.review_remote("https://alice@dev.azure.com/acme/_git/x") == []
+    assert gh.review_remote("git@github.com:acme/widgets.git") == []
 
-        [workspace_templates.w]
-        repo = "https://alice@github.com/acme/widgets.git"
-        """)
-    )
-    config = load_config(cfg, warn_issues=False)
-    assert any("embeds a username" in issue for issue in config.config_issues)
+
+def test_azdo_review_remote_allows_org_username() -> None:
+    azdo = _azdo("bot", "acme")
+    # The org as username is the standard, self-consistent AzDO form: fine.
+    assert azdo.review_remote("https://acme@dev.azure.com/acme/proj/_git/r") == []
+    assert azdo.review_remote("https://dev.azure.com/acme/proj/_git/r") == []
+    # A username that is NOT the org would not be served: flagged.
+    assert azdo.review_remote("https://someone@dev.azure.com/acme/proj/_git/r")
+    # Not AzDO's host: not its concern.
+    assert azdo.review_remote("https://acme@github.com/acme/widgets") == []
+
+
+def test_remote_advisories_unions_and_filters(tmp_path: Path) -> None:
+    from agentworks.git_credentials import remote_advisories
+
+    registry = _registry_with_scoped_cred(tmp_path)  # one github credential
+    # A github URL with an embedded username draws exactly one advisory.
+    got = remote_advisories(registry, "https://alice@github.com/acme/widgets.git")
+    assert len(got) == 1
+    # Plain remotes and non-http(s) remotes draw nothing.
+    assert remote_advisories(registry, "https://github.com/acme/widgets.git") == []
+    assert remote_advisories(registry, "git@github.com:acme/widgets.git") == []
 
 
 # -- real git against the generated materials ----------------------------------

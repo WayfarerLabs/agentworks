@@ -24,6 +24,7 @@ if TYPE_CHECKING:
         HelperEntry,
     )
     from agentworks.config import Config
+    from agentworks.resources import Registry
 
 
 class _WarnLogger(Protocol):
@@ -43,6 +44,42 @@ class _MappedSecrets:
 
     def get(self, name: str) -> str:
         return self._values[name]
+
+
+def remote_advisories(registry: Registry, url: str) -> list[str]:
+    """Ask every declared git credential to review a repo remote URL and
+    return the deduped advisories.
+
+    Config-only and wiring-blind by design: each declared credential is
+    constructed from its config (no resolver, no token) and judges the
+    URL by its own host and scope semantics (see
+    ``GitCredentialProvider.review_remote``). Whether a given credential
+    is actually wired to the user who will clone is deliberately not
+    considered; that needs per-user resolution this preflight does not
+    have. The advisory is about the URL and the declared config, not the
+    deployment, so a declared-but-unwired credential can still speak up
+    (a mild, acceptable false positive).
+    """
+    if not url or not url.lower().startswith(("http://", "https://")):
+        return []
+    from agentworks.capabilities.git_credential import (
+        GIT_CREDENTIAL_PROVIDER_REGISTRY,
+    )
+
+    seen: set[str] = set()
+    advisories: list[str] = []
+    for name, cred in registry.iter_kind_items("git-credential"):
+        provider_cls = GIT_CREDENTIAL_PROVIDER_REGISTRY.get(cred.provider)
+        if provider_cls is None:
+            continue
+        provider = provider_cls(
+            name, cred.provider_config, None, description=cred.description
+        )
+        for msg in provider.review_remote(url):
+            if msg not in seen:
+                seen.add(msg)
+                advisories.append(msg)
+    return advisories
 
 
 def runup_and_filter(

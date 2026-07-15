@@ -71,6 +71,17 @@ def create_workspace(
     template = resolve_template(registry, template_name)
     template_resolved_name = template.name
 
+    # Preflight: advise if the resolved template's repo remote will not
+    # resolve cleanly against the declared git credentials (config-only,
+    # no tokens). Each credential judges the URL by its own host/scope
+    # semantics; see git_credentials.remote_advisories. Only the single
+    # template actually being used is checked, and only here at use time.
+    if template.repo:
+        from agentworks.git_credentials import remote_advisories
+
+        for advisory in remote_advisories(registry, template.repo):
+            output.warn(advisory)
+
     vm = _resolve_vm(db, vm_name)
     _guard_vm_status(vm)
     if platform is None:
