@@ -15,7 +15,7 @@ contracts (the full capability model is documented in
    reachability / tools. Doctor reuses it.
 4. ``runup``: post-resolve, read-only, authenticated readiness; with
    resolved secrets in hand, does the authenticated dry-run (a git
-   provider's ``GET /user``, a platform's API check) -- the engine
+   provider's ``GET /user``, a platform's API check), the engine
    run-up before takeoff. Default no-op.
 5. ops: the mutation phase, subclass-owned. Values come from the
    resolver's cache, populated by the operation's single resolve pass at
@@ -59,7 +59,7 @@ class SecretReader(Protocol):
 @dataclass(frozen=True)
 class RunContext:
     """The resolved runtime world handed to a capability at a stage
-    boundary -- to ``runup`` and, as op shapes converge, to ops (and to
+    boundary: to ``runup`` and, as op shapes converge, to ops (and to
     ``preflight``, which gets the command-start slice of it).
 
     The service-layer operation assembles it for its timing, and the
@@ -70,7 +70,7 @@ class RunContext:
     present only when it exists at that timing and, in a future
     permission model, when the capability is granted it: a
     provisioning-phase runup has no on-VM targets; a `vm create`
-    preflight has none either (the VM is created later -- which is
+    preflight has none either (the VM is created later, which is
     exactly what keeps preflight dependency-blind); a `session create`
     preflight against an existing VM does have `admin_target`.
 
@@ -218,13 +218,13 @@ class Capability(ABC):
         and what makes it safely re-runnable. Best-effort, not an
         oracle: anything only confirmable by mutating is the op's job.
 
-        Preflight is forced early -- it precedes the single resolve pass,
+        Preflight is forced early: it precedes the single resolve pass,
         which runs once at command start, so it runs for every resource
         before anything is touched. That makes it DEPENDENCY-BLIND: assume
         only what is true at command entry; never check state a later step
         in the same command creates. (Antipattern: a git-credential
         preflight failing ``vm create`` because git is not installed, the
-        admin user is absent, or the VM does not exist yet -- all created
+        admin user is absent, or the VM does not exist yet, all created
         later in that command. Those checks belong in runup, which is
         deferred to the op boundary.)
 
@@ -232,7 +232,7 @@ class Capability(ABC):
         targets that ALREADY exist (a `session create` sees the existing
         VM's ``admin_target``; a `vm create` sees none, which is what
         structurally enforces the blindness above) but NO resolved secrets
-        yet. Pre-resolve concerns still read ``self`` -- ``self.config``
+        yet. Pre-resolve concerns still read ``self``: ``self.config``
         and ``self.resolver`` in its prediction role.
 
         Base behavior: every secret reference the bound config declares
@@ -241,7 +241,7 @@ class Capability(ABC):
         prompt-only secret's value check defers past preflight).
         Subclasses extend (``super().preflight()``) with their world
         checks: required tools present, an unauthenticated endpoint
-        reachable -- anything knowable without secrets or mid-command
+        reachable, anything knowable without secrets or mid-command
         state.
         """
         if not self._secret_refs:
@@ -284,7 +284,7 @@ class Capability(ABC):
         Unlike preflight, runup is NOT forced to the front of the command:
         it is deferred to right before the ops it gates. The secrets it
         needs were resolved once up front (cached), but it fires at the op
-        boundary, so it may test anything -- including dependencies an
+        boundary, so it may test anything, including dependencies an
         earlier phase of the same command has since put in place (the VM
         exists, git is installed). Hoisting it forward would only cripple
         it to preflight's dependency-blindness for no gain.
@@ -293,7 +293,7 @@ class Capability(ABC):
         this method just raises on definitive rejection. The service-layer
         operation decides, by whether the failed resource is idempotently
         retryable: retryable -> skip it with clear messaging and continue
-        (degrade to partial; a retry recovers it -- vm/agent provisioning
+        (degrade to partial; a retry recovers it; vm/agent provisioning
         skips a rejected credential and reinit fixes it); ultimately fatal
         -> stop and best-effort roll back any mutations already made,
         rather than leave a stranded half-state.

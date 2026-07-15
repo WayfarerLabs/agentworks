@@ -139,8 +139,8 @@ class ProxmoxPlatform(VMPlatform):
         cheap read (next available VMID) before ``create`` mutates
         anything, so a bad or unauthorized token fails cleanly here
         rather than mid-provision. A 401/403 is a definitive rejection
-        (fatal, before any VM exists); anything else -- a transient error
-        or an unreachable host -- warns and continues unverified, so an
+        (fatal, before any VM exists); anything else (a transient error
+        or an unreachable host) warns and continues unverified, so an
         outage never blocks work a valid token would have done.
 
         Reuses the op client (built from the resolved token), so a

@@ -123,10 +123,10 @@ read-only and re-runnable; ops are the only mutation.
 **The two stages sit differently in time, and that difference has teeth.** Preflight has no choice
 about when it runs: the single secret-resolve pass runs once at the start of a command, and
 preflight must precede it, so preflight runs for _every_ resource before anything is touched. That
-forces preflight to be **dependency-blind** -- it may only assume what is true at command entry, and
+forces preflight to be **dependency-blind**: it may only assume what is true at command entry, and
 must never check state that a later step in the same command creates. The canonical antipattern is a
 git-credential preflight failing `vm create` because git is not installed, the admin user does not
-exist, or the VM does not exist yet -- all created later in that same command; a preflight that
+exist, or the VM does not exist yet, all created later in that same command; a preflight that
 checked any of them would fail every first-time create. Runup carries no such obligation: it is
 **deferred to right before the ops it gates**, reading the already-resolved secrets from the cache,
 so it runs with full current context and may test anything, including dependencies an earlier phase
@@ -136,7 +136,7 @@ gain; deferring it is strictly more capable.
 That "current context" is a concrete object: **`RunContext`** (`capabilities/base.py`), the resolved
 runtime world the service-layer operation assembles and hands to `preflight`, `runup`, and (as op
 shapes converge) ops. It carries the operation's config, the execution targets (`admin_target` /
-`agent_target` -- transports to run as those users on a VM), and resolved `secrets`. Every field is
+`agent_target`: transports to run as those users on a VM), and resolved `secrets`. Every field is
 optional, and the timing is what populates it: **preflight gets it as of command start** (targets
 that _already_ exist, no resolved secrets), **runup gets it as of op start** (current targets,
 resolved secrets). It is the same object minus the secrets, differing only by when it is built --
@@ -249,8 +249,8 @@ for its per-resource health rows.
 
 ### 4. `runup` (confirm readiness; post-resolve, authenticated, read-only)
 
-Runup is preflight's post-resolve twin -- the engine run-up right before takeoff. It runs _after_
-the operation's single resolve pass, so it holds the resolved secret values preflight could not, and
+Runup is preflight's post-resolve twin, the engine run-up right before takeoff. It runs _after_ the
+operation's single resolve pass, so it holds the resolved secret values preflight could not, and
 does the authenticated checks preflight was barred from: a git provider's `GET /user`, a platform's
 API connection check, a secret backend's reachability with the real credential. It answers the
 question preflight structurally cannot: "with the credentials actually in hand, does the real work
@@ -274,7 +274,7 @@ Its contract mirrors preflight where it matters and differs where it must:
   never raises**: a transient outage must not block work that an unverified-but-valid credential
   would have completed. Anything only a mutation can confirm remains the op's job.
 
-When does it run? **Deferred to right before the ops it gates** -- not hoisted to the front with
+When does it run? **Deferred to right before the ops it gates**, not hoisted to the front with
 preflight. It reads the secrets the one up-front resolve pass already cached, but fires at the op
 boundary, so in a multi-phase command it sees the world as of that phase, with whatever earlier
 phases have since put in place. The shape is: preflight-all, then resolve-once, then _per phase_
@@ -438,11 +438,11 @@ capability still moves in under its own change. That is expected, not half-done.
 ## Open questions
 
 The model is proven on two consuming-side capabilities (`vm-platform`, `git-credential-provider`).
-The `secret-backend` capability -- already merged, adopting the base under its own change --
-stresses it in ways worth recording before that change, because it is a different animal:
+The `secret-backend` capability (already merged, adopting the base under its own change) stresses it
+in ways worth recording before that change, because it is a different animal:
 
 - **Shared multiplicity: many consuming resources, one instance.** vm-platform and git-credential
-  are per-consuming-resource -- one instance per site, per credential. A secret-backend is the
+  are per-consuming-resource: one instance per site, per credential. A secret-backend is the
   inverse: one instance built from _global_ backend config, **shared across every secret that maps
   to it**. The consuming resource (a secret) supplies only a per-secret _mapping_ (the env-var name,
   the 1Password item ref), not the backend's config. So readiness deduplicates per backend (check
@@ -452,16 +452,16 @@ stresses it in ways worth recording before that change, because it is a differen
 
 - **Provider-side vs consuming-side base.** The `Capability` base is shaped for the _consuming_
   side: register the secrets your config declares on the resolver, read them back at runup. A
-  backend has no declared secrets -- it is the thing that _serves_ them. Its contract is different:
+  backend has no declared secrets; it is the thing that _serves_ them. Its contract is different:
   preflight = am I installed/configured, runup = can I reach/authenticate, op = resolve. Adopting it
   will likely reveal that today's base is really the _consuming-capability_ base, and a backend
   needs a sibling base or a deliberately looser one.
 
 - **Where its runup lands.** A backend's op _is_ resolution, so "runup right before its op" puts its
-  runup at the resolve-pass boundary -- authenticate/reach the vault once, before serving any value
-  -- upstream of every consuming capability's (post-resolve) runup. That is consistent with the
-  general rule, not an exception; it is noted only because a backend is the first capability whose
-  op precedes the resolve boundary rather than following it. (Most backends have a trivial runup
+  runup at the resolve-pass boundary: authenticate/reach the vault once, before serving any value,
+  upstream of every consuming capability's (post-resolve) runup. That is consistent with the general
+  rule, not an exception; it is noted only because a backend is the first capability whose op
+  precedes the resolve boundary rather than following it. (Most backends have a trivial runup
   anyway: env-var and prompt are knowable offline, so they are preflight-only; only the network/auth
   ones like 1Password carry a real one.)
 

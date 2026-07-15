@@ -1,4 +1,4 @@
-"""Azure DevOps git credential provider -- formats credentials for ``~/.git-credentials``.
+"""Azure DevOps git credential provider: formats credentials for ``~/.git-credentials``.
 
 Token resolution lives in the framework; this class validates the org,
 checks the PAT against the org endpoint at the ``runup`` stage, and
@@ -42,7 +42,7 @@ class AzDOCredentialProvider(GitCredentialProvider):
             raise ConfigError(
                 f"{owner}.org is required for the azdo provider and must "
                 f"be an organization name (letters, digits, dot, dash, "
-                f"underscore) -- it is interpolated into the generated "
+                f"underscore); it is interpolated into the generated "
                 f"credential helper"
             )
         unknown = sorted(set(config) - {"org", "token"})

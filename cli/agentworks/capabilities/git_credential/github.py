@@ -1,4 +1,4 @@
-"""GitHub git credential provider -- formats credentials for ``~/.git-credentials``.
+"""GitHub git credential provider: formats credentials for ``~/.git-credentials``.
 
 Token resolution lives in the framework; this class formats the store
 line and, for scoped credentials (fine-grained PATs), contributes its
@@ -45,7 +45,7 @@ def _validated_scope(
     """Shared shape validation for the github ``provider_config`` blob.
 
     Returns ``(repos, owner)``; at most one is non-empty/non-None.
-    ``repos`` is always a list in the config (even for one repo -- a
+    ``repos`` is always a list in the config (even for one repo, a
     fine-grained PAT may cover several selected repos, and the plural
     field makes that visible). Raises ``ConfigError`` with
     ``owner_ctx`` framing on any violation.
@@ -184,7 +184,7 @@ class GitHubCredentialProvider(GitCredentialProvider):
     @property
     def store_username(self) -> str:
         # Scoped: the credential's resource name doubles as the store
-        # username -- the join key the gitconfig context sections select
+        # username, the join key the gitconfig context sections select
         # by (GitHub accepts any username with a PAT, verified against
         # fine-grained tokens). Unscoped keeps the released value.
         if self._repos or self._owner:

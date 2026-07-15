@@ -69,8 +69,8 @@ def token_config_reference(
 ) -> ConfigReference:
     """The token-secret reference a token-sourcing provider implies from
     its ``provider_config``: the ``token`` field names the secret
-    (default ``git-token-<name>``). Shared by github and azdo -- both
-    source a PAT from a mapped secret today. A minting provider would
+    (default ``git-token-<name>``). Shared by github and azdo (both
+    source a PAT from a mapped secret today). A minting provider would
     instead declare its bootstrap secret(s) here (or none).
     """
     from agentworks.errors import ConfigError
@@ -110,7 +110,7 @@ class GitCredentialProvider(Capability):
     resource names a provider and supplies its ``provider_config``, and
     the instance does the real work. It is constructed by the site/agent
     composition roots as ``cls(credential_name, provider_config,
-    resolver, description=...)`` -- bound to one declared credential plus
+    resolver, description=...)``: bound to one declared credential plus
     the operation's resolver (never resolved secret values; see the
     ``Capability`` lifecycle). The declared token secret registers on the
     resolver at construct and its value arrives via the operation's
@@ -139,7 +139,7 @@ class GitCredentialProvider(Capability):
 
     @property
     def secret_name(self) -> str:
-        """The token secret this credential sources its PAT from -- the
+        """The token secret this credential sources its PAT from: the
         one secret its ``validate_config`` declared (default
         ``git-token-<name>``). Named by the helper's rejection
         diagnosis and read from the resolver at ``runup``."""
@@ -149,7 +149,7 @@ class GitCredentialProvider(Capability):
 
     @property
     def store_username(self) -> str:
-        """The username on this credential's store line -- the join key
+        """The username on this credential's store line, the join key
         the credential helper and context sections select by. Default:
         the credential's own name; subclasses override where the host
         dictates otherwise."""
@@ -244,8 +244,8 @@ class GitCredentialProvider(Capability):
     def helper_entry(self) -> HelperEntry:
         """This credential's selection entry for the generated helper.
 
-        The helper receives (host, path) per query -- ``useHttpPath``
-        is set globally in the managed include -- and picks the most
+        The helper receives (host, path) per query (``useHttpPath``
+        is set globally in the managed include), and picks the most
         specific credential: exact repo, then owner (first path
         segment), then the host's default (an entry without scopes),
         then the first store line for the host (legacy semantics, which

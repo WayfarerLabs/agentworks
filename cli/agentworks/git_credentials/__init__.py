@@ -57,7 +57,7 @@ def runup_and_filter(
     Authenticate each provider's resolved token against its host; a
     definitive rejection is SKIPPED with a warning (the operator fixes
     the token and re-runs) and dropped from the returned set, rather than
-    sinking the whole operation -- git-credential provisioning is
+    sinking the whole operation; git-credential provisioning is
     idempotently retryable, so continuing to a partial result and letting
     a reinit recover it is the right call for its callers (vm/agent
     provisioning). Returns the providers whose tokens passed, or all of

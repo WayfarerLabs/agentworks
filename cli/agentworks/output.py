@@ -226,8 +226,8 @@ _handler: OutputHandler = _DefaultHandler()
 def phase(title: str) -> None:
     """Emit a delineated phase header (e.g. 'Preflight', 'Provisioning').
 
-    A thin convenience over :func:`info` -- a blank line then a bracketed
-    title -- so a multi-phase command reads as clearly separated
+    A thin convenience over :func:`info` (a blank line then a bracketed
+    title), so a multi-phase command reads as clearly separated
     sections. Follow it with :func:`detail` lines naming the resources
     the phase touches.
     """

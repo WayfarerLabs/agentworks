@@ -2038,13 +2038,13 @@ def _configure_git_credentials(
     asked for is the worst kind of footgun.
 
     Two distinct error semantics here, deliberately: the deferred RUNUP
-    (``runup_and_filter``) is per-credential and forgiving -- a token an
-    authenticated probe rejects is skipped (warned -> PARTIAL) and the
-    rest are still configured, because a bad token is idempotently
-    fixable (fix it, reinit). But the MATERIALS BUILD over whatever
-    survived runup is atomic: a failure there (e.g. a scope collision) is
-    a config error, not a bad-token, so it aborts credential config as a
-    whole rather than shipping a partial store.
+    (``runup_and_filter``) is per-credential and forgiving. A token an
+    authenticated probe rejects is skipped (warned, so init goes PARTIAL)
+    and the rest are still configured, because a bad token is
+    idempotently fixable (fix it, reinit). But the MATERIALS BUILD over
+    whatever survived runup is atomic: a failure there (e.g. a scope
+    collision) is a config error, not a bad token, so it aborts
+    credential config as a whole rather than shipping a partial store.
     """
     logger.step("Git credentials")
     output.detail("Configuring git credentials...")
