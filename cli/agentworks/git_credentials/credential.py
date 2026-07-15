@@ -2,9 +2,11 @@
 plus the ``credential_references`` helper.
 
 Moved out of ``agentworks.config`` so the ``git_credentials`` domain owns
-its declared-resource type next to the provider implementations and the
-kinds (``agentworks.git_credentials.kinds``). ``config.py`` keeps only
-the legacy TOML loader that constructs it.
+its declared-resource type. The provider capability it references (and
+its kind, ``agentworks.capabilities.git_credential.kinds``) lives in the
+capabilities subtree; this consuming resource depends on it, not the
+reverse. ``config.py`` keeps only the legacy TOML loader that constructs
+it.
 """
 
 from __future__ import annotations

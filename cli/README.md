@@ -747,9 +747,9 @@ references are caught earlier as a hard config-load error before doctor runs. Gi
 are just secrets: their _resolvability_ reports as ordinary `git-token-<name>` rows in the Secrets
 group, like any other secret. Doctor is preflight-only and never prompts, so it does not
 authenticate tokens against their provider; live verification (a token expired, revoked, or
-wrong-scope) happens at the capability `verify()` stage inside provisioning ops, and on-demand via
+wrong-scope) happens at the capability `runup()` stage inside provisioning ops, and on-demand via
 the planned `agw doctor --runup` (which may prompt). The Tailscale group checks only workstation
-connectivity -- the auth key is the `tailscale-auth-key` secret row.
+connectivity; the auth key is the `tailscale-auth-key` secret row.
 
 ### Secret Backends
 

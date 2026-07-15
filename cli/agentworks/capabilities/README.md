@@ -280,8 +280,8 @@ boundary, so in a multi-phase command it sees the world as of that phase, with w
 phases have since put in place. The shape is: preflight-all, then resolve-once, then _per phase_
 runup-then-its-ops (not one global runup-all followed by one global ops). It is skippable by
 operator policy where the round-trip is unwanted (the git stack exposes
-`[defaults] verify_git_tokens = false`, and airgapped setups want exactly that); preflight is not
-skippable, because predicting resolvability costs nothing. Doctor's passive pass does _not_ run
+`[defaults] runup_git_credentials = false`, and airgapped setups want exactly that); preflight is
+not skippable, because predicting resolvability costs nothing. Doctor's passive pass does _not_ run
 runup (see the preflight section); `doctor --runup` is the explicit, prompting escalation that does.
 
 **What a runup failure means is the caller's call, not runup's.** Runup's own contract is narrow:

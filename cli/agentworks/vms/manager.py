@@ -1577,10 +1577,11 @@ def reinit_vm(
         provider.preflight(RunContext(config=config))
     resolver.resolve()
 
-    # No platform runup at reinit: reinit reaches the VM over Tailscale
-    # SSH and never calls the platform API, so its token is not used here
-    # (create is the only op that needs it, and that ran at first create).
-    output.phase("Runup")
+    # No command-root runup phase at reinit: reinit reaches the VM over
+    # Tailscale SSH and never calls the platform API (so its token is not
+    # used here), and the git-credential runup is deferred into the
+    # Initialization phase (runup_and_filter at the write step). So the
+    # next banner the operator sees is Initialization.
     git_tokens = _resolve_git_tokens(providers, resolver)
 
     # Provisioning is hermetic: no operator-env secrets are prompted at
@@ -1783,18 +1784,19 @@ def _collect_git_tokens(
     registry: Registry,
     credential_names: Iterable[str],
 ) -> dict[str, str]:
-    """Resolve (and verify) token values for the named git credentials on
-    a self-contained resolver pass. Returns ``{credential_name:
+    """Resolve token values for the named git credentials on a
+    self-contained resolver pass. Returns ``{credential_name:
     token_value}``.
 
     Used by agent create, whose git tokens resolve on their own boundary
     (the agent's other secrets resolve at their own use sites). The
     providers are constructed against a fresh resolver so their token
-    secrets register, preflight predicts each is resolvable, the one
-    resolve pass runs (single prompt session), and ``runup()`` confirms
-    each token before it is written. Raises ``NotFoundError`` if any name
-    isn't a declared credential (the framework's ``GitCredentialKind``
-    normally catches this at config-load).
+    secrets register, preflight predicts each is resolvable, and the one
+    resolve pass runs (single prompt session). The runup (authenticating
+    each token) is deferred to the write step via ``runup_and_filter``,
+    where a rejected token is skipped, not fatal. Raises ``NotFoundError``
+    if any name isn't a declared credential (the framework's
+    ``GitCredentialKind`` normally catches this at config-load).
     """
     from agentworks.secrets.resolver import Resolver
     from agentworks.vms.initializer import resolve_git_credential_providers

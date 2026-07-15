@@ -4,7 +4,7 @@ Kind definitions do NOT live here. Each kind is defined and registered in
 the domain package next to the code that implements it (the declarable
 row dataclasses AND the capability kinds live together with their
 domain): ``agentworks.catalog`` (the catalog kinds),
-``agentworks.secrets.kinds``, ``agentworks.git_credentials.kinds``,
+``agentworks.secrets.kinds``, ``agentworks.capabilities.git_credential.kinds``,
 ``agentworks.vms.kinds``, ``agentworks.agents.kinds``,
 ``agentworks.workspaces.kinds``, ``agentworks.sessions.kinds``.
 

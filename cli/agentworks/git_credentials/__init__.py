@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Protocol
 
 from agentworks import output
 from agentworks.errors import ConfigError
@@ -24,6 +24,13 @@ if TYPE_CHECKING:
         HelperEntry,
     )
     from agentworks.config import Config
+
+
+class _WarnLogger(Protocol):
+    """Just the sink ``runup_and_filter`` needs from an ``SSHLogger``:
+    recording a warning is what drives a VM init to PARTIAL."""
+
+    def warning(self, msg: str) -> None: ...
 
 
 class _MappedSecrets:
@@ -42,7 +49,7 @@ def runup_and_filter(
     providers: dict[str, GitCredentialProvider],
     git_tokens: dict[str, str],
     config: Config,
-    logger: object | None = None,
+    logger: _WarnLogger | None = None,
 ) -> dict[str, GitCredentialProvider]:
     """The deferred git-credential runup, run right before the materials
     op writes anything.
@@ -80,7 +87,7 @@ def runup_and_filter(
             )
             output.warn(msg)
             if logger is not None:
-                logger.warning(msg)  # type: ignore[attr-defined]
+                logger.warning(msg)
     return passed
 
 
