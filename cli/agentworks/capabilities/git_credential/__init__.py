@@ -7,7 +7,7 @@ Each provider implementation (``GitHubCredentialProvider``,
 authenticates its token at the ``runup`` stage, and produces the
 credential materials as its op. The consuming resource
 (``GitCredentialConfig``) and the materials assembly that writes them to
-a VM live in the ``git_credentials`` domain, not here -- capabilities
+a VM live in the ``git_credentials`` domain, not here; capabilities
 depend only on the framework, never on their consuming domain.
 """
 

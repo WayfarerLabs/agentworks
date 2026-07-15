@@ -885,7 +885,7 @@ def _load_workspace_templates(
         if repo is not None and _HTTP_USERINFO_RE.match(repo):
             issues.append(
                 f"workspace_templates.{name}.repo embeds a username; use a "
-                f"plain https remote -- git credential scoping selects "
+                f"plain https remote: git credential scoping selects "
                 f"credentials automatically, and an embedded username "
                 f"bypasses it"
             )
@@ -977,7 +977,7 @@ def _load_git_credentials(
         # hoisting it into the blob for other providers would promote a
         # historically-ignored stray key into a validation error and
         # break released configs (loads-today). The flat domain's
-        # stray-key silence stays until Phase 6 retires it -- EXCEPT
+        # stray-key silence stays until Phase 6 retires it, EXCEPT
         # github scope keys, where silence would ship a credential with
         # BROADER authority than the operator declared; those warn.
         if warn_ignored_scope_keys and cred_type == "github":
@@ -986,7 +986,7 @@ def _load_git_credentials(
                 issues.append(
                     f"git_credentials.{name}: github scope field(s) "
                     f"{', '.join(ignored_scopes)} are manifest-only and "
-                    f"IGNORED here -- the credential is provisioned "
+                    f"IGNORED here: the credential is provisioned "
                     f"unscoped; migrate it to YAML "
                     f"(agw resource migrate git-credential)"
                 )

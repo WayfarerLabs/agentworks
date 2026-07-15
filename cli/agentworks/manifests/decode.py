@@ -198,7 +198,7 @@ def _decode_git_credential(doc: Document, spec: dict[str, object], issues: list[
     # The flatten-into-the-loader trick must not let the blob shadow
     # kind-owned surface: without this check, provider_config.type/
     # provider would silently re-pick the provider. ``token`` is NOT
-    # reserved -- it is provider-owned config now (the secret the
+    # reserved: it is provider-owned config now (the secret the
     # provider sources its PAT from), and lives under provider_config.
     reserved = {"type", "provider", "description"} & set(raw_config)
     if reserved:
@@ -240,7 +240,7 @@ def _decode_git_credential(doc: Document, spec: dict[str, object], issues: list[
         issues,
         _decls(doc.location),
         # The flatten passes blob keys through the loader shape, but the
-        # TRUE blob is re-attached below -- scopes ARE honored on this
+        # TRUE blob is re-attached below; scopes ARE honored on this
         # path, so the TOML-only ignored-scope warning must not fire.
         warn_ignored_scope_keys=False,
     )[doc.name]

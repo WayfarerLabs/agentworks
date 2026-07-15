@@ -1104,7 +1104,7 @@ def add_git_credential(db: Database, config: Config, name: str, credential_name:
     entry = provider.helper_entry()
     if entry.repos or entry.owner:
         # Scoped credentials need the helper's embedded selection map
-        # rebuilt -- a single-line store merge can't provide that. The
+        # rebuilt: a single-line store merge can't provide that. The
         # full-rebuild path (reinit) can.
         raise ValidationError(
             f"git credential '{credential_name}' is scoped (fine-grained "
@@ -1142,7 +1142,7 @@ def add_git_credential(db: Database, config: Config, name: str, credential_name:
         new_keys = {_credential_line_key(line) for line in new_lines} - {None}
         filtered = [e for e in existing if _credential_line_key(e) not in new_keys]
 
-        # New (always unscoped -- see the guard above) lines go FIRST:
+        # New (always unscoped, see the guard above) lines go FIRST:
         # a username-less query takes the first matching store line, so
         # the host-level fallback must precede username-tagged scoped
         # lines that may already be on the VM.

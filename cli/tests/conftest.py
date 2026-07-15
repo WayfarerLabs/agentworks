@@ -519,7 +519,7 @@ def _no_network_token_verification(monkeypatch: pytest.MonkeyPatch) -> None:
     probes (git credential ``runup()``) hit provider APIs in
     production; here any unmocked probe raises OSError, which the
     providers treat as network indeterminacy (warn + continue
-    unverified) -- so unrelated tests keep passing while never leaving
+    unverified), so unrelated tests keep passing while never leaving
     the process. Verification tests monkeypatch ``_http_probe`` with
     their own fakes, overriding this guard.
     """
@@ -538,7 +538,7 @@ def _isolated_database(
 ) -> None:
     """The suite must never touch the operator's real database. Several
     CLI tests isolate CONFIG_PATH but the module-level DB_PATH default
-    still pointed at the live DB -- used-by counts in `resource list`
+    still pointed at the live DB; used-by counts in `resource list`
     were silently querying it (and started crashing the moment the
     operator's DB schema moved ahead of this branch). Every test gets a
     fresh empty DB path; fixtures that build explicit DB state pass

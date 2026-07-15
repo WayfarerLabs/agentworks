@@ -2076,7 +2076,7 @@ def _configure_git_credentials(
         return
     # Store lines + gitconfig credential-context sections (scoped
     # credentials select per-repo/per-owner via context-injected
-    # usernames; issue #166). Scope collisions raise here -- before
+    # usernames; issue #166). Scope collisions raise here, before
     # anything is written.
     materials = build_credential_materials(providers, git_tokens)
 
@@ -2096,7 +2096,7 @@ def _configure_git_credentials(
         )
         # Our helper REPLACES credential-store in the same config slot
         # (single-value replace also migrates released VMs off 'store'
-        # on their next reinit -- store deletes the provisioned line on
+        # on their next reinit; store deletes the provisioned line on
         # every rejected auth).
         ts_target.run(
             f"git config --global --replace-all credential.helper '!{GIT_CRED_HELPER_PATH}' && "

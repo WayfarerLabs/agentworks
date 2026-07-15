@@ -4,7 +4,7 @@ Selection rides git's own machinery, empirically verified against git
 2.39: provisioned ``[credential "<url>"]`` context sections inject a
 per-credential username (longest-prefix match on slash boundaries) and
 the username-tagged, path-less store line supplies the token. No
-``credential.useHttpPath`` anywhere -- with it on, path-less store
+``credential.useHttpPath`` anywhere: with it on, path-less store
 lines stop matching path-carrying queries, which would break every
 unscoped credential.
 """
@@ -142,7 +142,7 @@ def test_repo_scope_selected_by_path(tmp_path: Path) -> None:
             f"protocol=https\nhost=github.com\npath={qpath}\n",
         )
         assert "password=tokR" in out, qpath
-    # Owner scope catches everything else under acme -- including repos
+    # Owner scope catches everything else under acme, including repos
     # nobody declared anywhere (the ad hoc clone case).
     out, _err = _run_helper(
         m.helper_script, home, "get",
@@ -156,7 +156,7 @@ def test_repo_scope_selected_by_path(tmp_path: Path) -> None:
     )
     assert "password=tokF" in out
     # No path at all (useHttpPath overridden / other tooling): serve
-    # the default, but WARN -- the operator may have stepped on the
+    # the default, but WARN: the operator may have stepped on the
     # setting scoping depends on.
     out, err = _run_helper(
         m.helper_script, home, "get", "protocol=https\nhost=github.com\n"
@@ -205,7 +205,7 @@ def test_azdo_org_routes_by_first_segment(tmp_path: Path) -> None:
 
 def test_github_default_hardcoded_without_unscoped_cred(tmp_path: Path) -> None:
     """With only scoped creds, github.com still has the x-access-token
-    default baked in -- a later hand-added (add-git-credential) line
+    default baked in, a later hand-added (add-git-credential) line
     keeps serving; absent that line, the helper just misses."""
     providers = {
         "acme-bot": _gh(config_name="acme-bot", owner="acme"),
@@ -217,7 +217,7 @@ def test_github_default_hardcoded_without_unscoped_cred(tmp_path: Path) -> None:
         "protocol=https\nhost=github.com\npath=other/repo.git\n",
     )
     # No unscoped line exists: legacy fallback serves the first host
-    # line (better a scoped token than a guaranteed failure -- exactly
+    # line (better a scoped token than a guaranteed failure, exactly
     # what credential-store did).
     assert "password=tokO" in out
     (home / ".git-credentials").write_text(
@@ -260,7 +260,7 @@ def test_scope_collision_is_loud() -> None:
 
 
 def test_include_is_only_usehttppath() -> None:
-    """The include carries exactly the useHttpPath switch -- selection
+    """The include carries exactly the useHttpPath switch: selection
     lives in the helper, so no context sections exist, scoped or not."""
     for providers, tokens in (
         ({"gh": _gh(config_name="gh")}, {"gh": "t"}),
@@ -635,7 +635,7 @@ def test_generated_materials_work_with_real_git(tmp_path: Path) -> None:
     helper (registered as "!<path>" in credential.helper) serves get
     for scoped, fallback, and foreign-username cases, and a rejected
     auth leaves the store file BYTE-IDENTICAL while printing the
-    diagnosis -- the exact behaviors credential-store got wrong."""
+    diagnosis: the exact behaviors credential-store got wrong."""
     import os
     import shutil
     import subprocess
@@ -712,7 +712,7 @@ def test_generated_materials_work_with_real_git(tmp_path: Path) -> None:
     assert "rejected git credential 'acme-bot'" in err
     assert "secret 'git-token-acme-bot'" in err
 
-    # And the credential still serves afterward -- no self-destruct.
+    # And the credential still serves afterward, no self-destruct.
     rc, out, err = run("fill", "url=https://github.com/acme/anything.git")
     assert rc == 0, err
     assert "password=tokS" in out
@@ -765,7 +765,7 @@ def test_azdo_org_charset_validated() -> None:
 def test_two_unscoped_creds_first_wins(tmp_path: Path) -> None:
     """Two unscoped credentials on one host are NOT a scope collision
     (released configs may carry them): first-wins by store order, and
-    the second is effectively shadowed -- pinned as intended behavior."""
+    the second is effectively shadowed, pinned as intended behavior."""
     providers = {
         "gh1": _gh(config_name="gh1"),
         "gh2": _gh(config_name="gh2"),

@@ -65,7 +65,7 @@ class GitCredentialConfig:
     # manifest shape.
     # Provider-owned configuration (azdo's org; github's repos/owner;
     # and the ``token`` secret name that every current provider sources
-    # its PAT from -- default ``git-token-<name>``, owned by the
+    # its PAT from, default ``git-token-<name>``, owned by the
     # provider's ``validate_config`` since sourcing is provider-specific
     # (a future minting provider declares a bootstrap secret, or none).
     # The flat TOML section is the ONLY place these live at the top
@@ -94,8 +94,8 @@ class GitCredentialConfig:
                 source=source,
             ),
         ]
-        # Everything the credential references -- its token secret and
-        # any other provider-declared resources -- comes from the
+        # Everything the credential references (its token secret and
+        # any other provider-declared resources) comes from the
         # provider validating its config block and returning the
         # references it implies; this resource (the config block's
         # owner) attributes them to itself.

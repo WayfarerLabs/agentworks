@@ -103,11 +103,11 @@ class CredentialMaterials:
 
     store_content: str
     gitconfig_content: str
-    # THE git credential helper (POSIX sh) -- replaces git's
+    # THE git credential helper (POSIX sh), replacing git's
     # ``credential-store`` in the chain. ``get`` serves from the
     # agentworks-managed store file; ``erase`` never deletes (git
     # invokes it after a rejected auth, which is exactly when the
-    # operator needs a diagnosis, not state destruction -- with
+    # operator needs a diagnosis, not state destruction: with
     # credential-store, every failed auth silently deleted the
     # provisioned line); a foreign embedded username on github.com
     # draws a scoping warning when scoped credentials exist.
@@ -141,17 +141,17 @@ def build_credential_materials(
     the selecting helper.
 
     Selection lives entirely in the generated helper: the include sets
-    ``useHttpPath`` (safe -- credential-store left the chain, and only
+    ``useHttpPath`` (safe: credential-store left the chain, and only
     our helper consumes the queries), so every query carries the remote
     path and the helper picks the most specific credential (exact repo,
     then owner, then the host's default, then the first store line for
-    the host -- the legacy semantics that keep ``add-git-credential``
+    the host, the legacy semantics that keep ``add-git-credential``
     additions serving).
 
     Store ordering: unscoped credentials' lines first, so the legacy
     first-host-line fallback finds the default. Scope collisions (two
     credentials claiming the same repo or owner on one host) are a hard
-    error -- silent shadowing is dead-config ambiguity. Two UNSCOPED
+    error: silent shadowing is dead-config ambiguity. Two UNSCOPED
     credentials on one host are tolerated first-wins (matching store
     order), not errored: released configs may carry them.
     """
@@ -273,7 +273,7 @@ def _helper_script(records: list[_CredRecord]) -> str:
     matches, the first store line for the host is served (legacy
     credential-store semantics). A pathless query on a host with
     scoped credentials warns: useHttpPath was set at init, but a local
-    git config can override it. ``erase`` deletes nothing -- it fires
+    git config can override it. ``erase`` deletes nothing: it fires
     when the remote rejected the credential, so it prints a diagnosis
     naming the credential and its secret. ``store`` is a no-op.
     Queries are read per git's LF protocol; CRLF tolerance is

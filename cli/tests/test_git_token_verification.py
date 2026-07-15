@@ -3,7 +3,7 @@
 ``runup()`` is the post-resolve readiness stage: the provider reads its
 resolved PAT from the operation's resolver and probes it against the
 host (github ``GET /user``, azdo connectionData). Policy: a definitive
-rejection raises ``TokenRejectedError`` (safe -- runup runs before any
+rejection raises ``TokenRejectedError`` (safe: runup runs before any
 VM/user mutation); network indeterminacy warns and continues unverified.
 The suite-wide conftest guard makes any unmocked probe look like a
 network failure, so no test can reach the real network.
@@ -242,7 +242,7 @@ def test_runup_and_filter_skips_rejected(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     """A definitively rejected token is SKIPPED (dropped from the result)
-    with a warning -- provisioning continues to a partial result rather
+    with a warning; provisioning continues to a partial result rather
     than aborting."""
     from agentworks.git_credentials import runup_and_filter
 

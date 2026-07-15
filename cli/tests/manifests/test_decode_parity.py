@@ -296,8 +296,8 @@ def test_git_credential_provider_config_rejects_kind_owned_fields(
     tmp_path: Path,
 ) -> None:
     """The blob may not shadow the kind-owned surface (type/provider/
-    description). token is NOT kind-owned any more -- it is provider
-    config -- so it is tested separately (test_git_credential_token_in
+    description). token is NOT kind-owned any more; it is provider
+    config, so it is tested separately (test_git_credential_token_in
     _provider_config)."""
     _manifest(
         tmp_path,

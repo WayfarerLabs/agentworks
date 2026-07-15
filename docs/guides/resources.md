@@ -67,22 +67,22 @@ declaring a resource in `$EDITOR` (YAML-declared resources only: TOML-declared o
 
 A `git-credential` with `provider: github` may carry a scope in its `provider_config`:
 `repos: ["owner/name", ...]` pins the credential to specific repositories (always a list, even for
-one -- matching a fine-grained PAT's selected repos), while `owner: "org"` covers every repository
-under that user or org -- including repos an agent clones ad hoc that no workspace ever declared.
-The two are mutually exclusive; a credential with neither is the unscoped fallback. Scopes are
+one, matching a fine-grained PAT's selected repos), while `owner: "org"` covers every repository
+under that user or org, including repos an agent clones ad hoc that no workspace ever declared. The
+two are mutually exclusive; a credential with neither is the unscoped fallback. Scopes are
 manifest-only (the legacy flat TOML shape has no GitHub fields).
 
 Selection lives in the agentworks credential helper: initialization sets `credential.useHttpPath`
 (via the managed include `~/.agentworks-git-scopes.gitconfig`), so git hands the helper the remote's
-host and repository path, and the helper picks the most specific credential -- exact repo, then
-owner (first path segment), then the provider's host default (`x-access-token` for GitHub, the org
-for Azure DevOps), then the first stored line for the host. Two credentials claiming the same scope
-is a configuration error at initialization time, evaluated per user (admin and each agent get their
-own store, include, and helper, built from their own credential lists). Declaring a repo under one
-credential and its org under another is fine -- the more specific scope wins, and org scopes cover
+host and repository path, and the helper picks the most specific credential: exact repo, then owner
+(first path segment), then the provider's host default (`x-access-token` for GitHub, the org for
+Azure DevOps), then the first stored line for the host. Two credentials claiming the same scope is a
+configuration error at initialization time, evaluated per user (admin and each agent get their own
+store, include, and helper, built from their own credential lists). Declaring a repo under one
+credential and its org under another is fine: the more specific scope wins, and org scopes cover
 repos cloned ad hoc that nothing declared.
 
-Clone with plain https URLs -- no username needed anywhere. Credentials are served by the
+Clone with plain https URLs; no username needed anywhere. Credentials are served by the
 agentworks-owned helper (`~/.agentworks-git-cred-helper.sh`, replacing git's `credential-store`):
 when the remote rejects a credential it prints which credential and secret to fix instead of
 silently deleting the provisioned entry (which is what `credential-store` does on every failed

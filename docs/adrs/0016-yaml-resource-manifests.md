@@ -109,7 +109,7 @@ live at the top level of the resource spec (a `git-credential`'s `provider` sele
 while its token secret and `azdo`'s `org` are provider-owned and nest under `provider_config`).
 Where the reference site is per-secret (`backend_mappings`), the mapping value carries the
 capability-owned content (an identifier override or structured store addressing) and is validated
-the same way -- same principle, capability-owned config at the reference site.
+the same way: same principle, capability-owned config at the reference site.
 
 The INTERNAL resource representation follows the nested shape too
 (`GitCredentialConfig.provider_config`) as this represents the best representation available. For
