@@ -470,8 +470,8 @@ def create_vm(
     platform_obj = resolve_site(site, registry, resolver=resolver)
 
     output.phase("Preflight")
-    output.detail(f"vm-site: {site}")
-    output.detail(f"vm-template: {vm_tmpl.name}")
+    output.detail(f"vm-site/{site}")
+    output.detail(f"vm-template/{vm_tmpl.name}")
     announce_git_credentials(providers)
     preflight_vm_template(vm_tmpl, resolver)
     platform_obj.preflight(RunContext(config=config))
@@ -1573,7 +1573,7 @@ def reinit_vm(
     # (a broken node's rejoin resolves it on its own conditional path),
     # so the template preflight doesn't run here.
     output.phase("Preflight")
-    output.detail(f"vm-site: {vm.site}")
+    output.detail(f"vm-site/{vm.site}")
     announce_git_credentials(providers)
     platform.preflight(RunContext(config=config))
     for provider in providers.values():
