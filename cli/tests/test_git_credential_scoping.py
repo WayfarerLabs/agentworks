@@ -206,23 +206,24 @@ def test_azdo_org_routes_by_first_segment(tmp_path: Path) -> None:
     assert "password=tokA" in out
 
 
-def test_github_default_hardcoded_without_unscoped_cred(tmp_path: Path) -> None:
-    """With only scoped creds, github.com still has the x-access-token
-    default baked in, a later hand-added (add-git-credential) line
-    keeps serving; absent that line, the helper just misses."""
+def test_scoped_only_out_of_scope_serves_nothing(tmp_path: Path) -> None:
+    """With only scoped creds and no unscoped fallback, an out-of-scope
+    URL serves NO credential (a scoped credential never serves outside its
+    scope) and prints a diagnosis. A later hand-added UNSCOPED line (as
+    add-git-credential does) becomes the host default and serves."""
     providers = {
         "acme-bot": _gh(config_name="acme-bot", owner="acme"),
     }
     m = build_credential_materials(providers, {"acme-bot": "tokO"})
     home = _write_home(tmp_path, m)
-    out, _err = _run_helper(
+    out, err = _run_helper(
         m.helper_script, home, "get",
         "protocol=https\nhost=github.com\npath=other/repo.git\n",
     )
-    # No unscoped line exists: legacy fallback serves the first host
-    # line (better a scoped token than a guaranteed failure, exactly
-    # what credential-store did).
-    assert "password=tokO" in out
+    # No scope matches, no unscoped credential: serve nothing (no leak).
+    assert "password=" not in out
+    assert "no credential is scoped to github.com/other/repo" in err
+    # add-git-credential appends an UNSCOPED line; it becomes the fallback.
     (home / ".git-credentials").write_text(
         (home / ".git-credentials").read_text()
         + "https://x-access-token:added@github.com\n"

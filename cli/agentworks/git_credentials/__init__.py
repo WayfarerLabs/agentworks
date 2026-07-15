@@ -292,9 +292,13 @@ def _selection_block(records: list[_CredRecord]) -> str:
             out.append('        case "${1%%/*}" in')
             out.extend(owner_lines)
             out.append("        esac")
+        # The host default is the UNSCOPED credential's username, or
+        # nothing. No phantom fallback (github once hardcoded
+        # x-access-token here): if no unscoped credential is declared, an
+        # out-of-scope URL must select nothing, never a scoped credential.
         default = next(
             (e.username for e in host_entries if not e.repos and not e.owner),
-            "x-access-token" if host == "github.com" else None,
+            None,
         )
         if default:
             out.append(f"        echo {default}")
@@ -305,23 +309,30 @@ def _selection_block(records: list[_CredRecord]) -> str:
 def _helper_script(records: list[_CredRecord]) -> str:
     """Render THE git credential helper (POSIX sh).
 
-    ``get``: an explicit query username short-circuits to a direct
-    line match (plus the bypasses-scoping warning when scoped
-    credentials exist); otherwise selection runs on (host, path) --
-    normalized by stripping the leading slash and a ``.git`` suffix --
-    and the chosen username keys back into the store file; if nothing
-    matches, the first store line for the host is served (legacy
-    credential-store semantics). A pathless query on a host with
-    scoped credentials warns: useHttpPath was set at init, but a local
-    git config can override it. ``erase`` deletes nothing: it fires
-    when the remote rejected the credential, so it prints a diagnosis
-    naming the credential and its secret. ``store`` is a no-op.
-    Queries are read per git's LF protocol; CRLF tolerance is
+    ``get``: an explicit query username short-circuits to a direct line
+    match (plus the bypasses-scoping warning when scoped credentials
+    exist); otherwise selection runs on (host, path), normalized by
+    stripping the leading slash and a ``.git`` suffix, and the chosen
+    username keys back into the store file. If nothing matches, the first
+    UNSCOPED store line for the host is served (a scoped credential never
+    serves a URL outside its scope); with no unscoped credential either,
+    no credential is served and a diagnosis names the missing scope. A
+    pathless query on a host with scoped credentials warns: useHttpPath
+    was set at init, but a local git config can override it. ``erase``
+    deletes nothing: it fires when the remote rejected the credential, so
+    it prints a diagnosis naming the credential and its secret. ``store``
+    is a no-op. Queries are read per git's LF protocol; CRLF tolerance is
     deliberately out of scope.
     """
     known = " ".join(sorted({r.entry.username for r in records}))
     scoped_hosts = "|".join(
         sorted({r.entry.host for r in records if r.entry.repos or r.entry.owner})
+    )
+    # Usernames that own a scope: the fallback ("serve the first line for
+    # the host") must skip these so a scoped credential never serves a URL
+    # outside its scope.
+    scoped_users = " ".join(
+        sorted({r.entry.username for r in records if r.entry.repos or r.entry.owner})
     )
     cases: list[str] = []
     seen: set[str] = set()
@@ -367,11 +378,25 @@ def _helper_script(records: list[_CredRecord]) -> str:
                 echo "agentworks: git sent no repository path for $host, so"
                 echo "credential scoping cannot select per-repo/per-owner; check that"
                 echo "credential.useHttpPath is still true (agentworks sets it, but a"
-                echo "local git config may override it); serving the host default"
+                echo "local git config may override it); falling back to the host"
+                echo "default, if one is declared"
             } >&2
             ;;
         esac
     fi""".replace("@SCOPED_HOSTS@", scoped_hosts)
+    # Diagnosis for the serve-nothing path: nothing matched the URL and no
+    # unscoped credential exists, so we served no credential rather than
+    # leak a scoped one. Gated to hosts agentworks actually scopes, so it
+    # stays silent for unrelated hosts (another helper may serve those).
+    nocred_block = ""
+    if scoped_hosts:
+        nocred_block = """
+    case "$host" in
+    @SCOPED_HOSTS@)
+        echo "agentworks: no credential is scoped to $host/$p; none served" >&2
+        echo "(scope a credential to cover it, then reinit the vm/agent)" >&2
+        ;;
+    esac""".replace("@SCOPED_HOSTS@", scoped_hosts)
     template = """#!/bin/sh
 # Managed by agentworks (git credential helper); do not edit.
 # Serves the agentworks-owned ~/.git-credentials and never deletes it:
@@ -399,7 +424,9 @@ select_username() {
 }
 
 serve() {
-    # $1 = required username ("" = first line for the host)
+    # $1 = required username; "" = the first UNSCOPED line for the host.
+    # A scoped credential must never serve a URL outside its scope, so the
+    # fallback ($1 empty) skips any username that owns a scope.
     [ -r "$creds" ] || return 1
     while IFS= read -r line; do
         case "$line" in *://*@*) : ;; *) continue ;; esac
@@ -408,8 +435,10 @@ serve() {
         hostpath="${rest#*@}"
         [ "${hostpath%%/*}" = "$host" ] || continue
         luser="${userinfo%%:*}"
-        if [ -n "$1" ] && [ "$luser" != "$1" ]; then
-            continue
+        if [ -n "$1" ]; then
+            [ "$luser" = "$1" ] || continue
+        else
+            case " @SCOPED_USERS@ " in *" $luser "*) continue ;; esac
         fi
         printf 'protocol=%s\\n' "${proto:-https}"
         printf 'host=%s\\n' "$host"
@@ -432,7 +461,9 @@ get)@WARN@
     if [ -n "$wanted" ] && serve "$wanted"; then
         exit 0
     fi
-    serve ""
+    if serve ""; then
+        exit 0
+    fi@NOCRED@
     exit 0
     ;;
 erase)
@@ -451,6 +482,8 @@ esac
     return (
         template.replace("@WARN@", warn_block)
         .replace("@NOPATH@", nopath_block)
+        .replace("@NOCRED@", nocred_block)
         .replace("@SELECT@", _selection_block(records))
+        .replace("@SCOPED_USERS@", scoped_users)
         .replace("@CASES@", "\n".join(cases) if cases else "        _none_) : ;;")
     )
