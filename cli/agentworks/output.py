@@ -235,6 +235,17 @@ def phase(title: str) -> None:
     _handler.info(f"=== {title} ===")
 
 
+def count(n: int, noun: str, plural: str | None = None) -> str:
+    """Format a count with a correctly pluralized noun.
+
+    ``count(1, "package") -> "1 package"``; ``count(3, "package") ->
+    "3 packages"``. Pass ``plural`` for irregular nouns. Keeps operator
+    strings grammatical without the ``(s)`` shortcut.
+    """
+    word = noun if n == 1 else (plural or f"{noun}s")
+    return f"{n} {word}"
+
+
 def info(message: str) -> None:
     """Emit a top-level status message."""
     _handler.info(message)

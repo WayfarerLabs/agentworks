@@ -78,6 +78,9 @@ def runup_and_filter(
     passed: dict[str, GitCredentialProvider] = {}
     for name, provider in providers.items():
         try:
+            output.detail(
+                f"Performing runup test for git-credential {name!r}...", indent=2
+            )
             provider.runup(ctx)
             passed[name] = provider
         except TokenRejectedError as e:

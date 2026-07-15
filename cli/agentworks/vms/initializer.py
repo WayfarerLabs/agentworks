@@ -142,7 +142,9 @@ def _write_agentworks_profile(
             unique_paths.append(p)
 
     logger.step("Shell profile")
-    output.detail(f"Writing agentworks profile ({len(unique_paths)} PATH entries)...")
+    output.detail(
+        f"Writing agentworks profile ({output.count(len(unique_paths), 'PATH entry', 'PATH entries')})..."
+    )
 
     try:
         lines = ["# Managed by agentworks -- do not edit"]
@@ -269,7 +271,7 @@ def _write_agentworks_identity_profile(
     """
     logger.step("Identity profile")
     output.detail(
-        f"Writing {AGENTWORKS_IDENTITY_PROFILE_PATH} ({len(identity_env)} vars)..."
+        f"Writing {AGENTWORKS_IDENTITY_PROFILE_PATH} ({output.count(len(identity_env), 'var')})..."
     )
 
     lines = ["# Managed by agentworks -- do not edit"]
@@ -558,7 +560,7 @@ def _write_mise_config(
         return
 
     logger.step("Mise config")
-    output.detail(f"Writing mise config with {len(packages)} package(s)...")
+    output.detail(f"Writing mise config with {output.count(len(packages), 'package')}...")
 
     settings_lines = ["[settings]", f'install_before = "{install_before}"', ""]
     tools_lines = ["[tools]"]
@@ -960,7 +962,7 @@ def _install_system_packages(
         logger.warning(msg)
         output.warn(msg)
 
-    output.detail(f"Installing {len(INIT_SYSTEM_PACKAGES)} system packages...")
+    output.detail(f"Installing {output.count(len(INIT_SYSTEM_PACKAGES), 'system package')}...")
     apt_str = " ".join(shlex.quote(p) for p in INIT_SYSTEM_PACKAGES)
     try:
         target.run(
@@ -996,7 +998,7 @@ def _install_apt_packages(
         return
 
     logger.step("Apt packages")
-    output.detail(f"Installing {len(all_apt)} apt packages...")
+    output.detail(f"Installing {output.count(len(all_apt), 'apt package')}...")
     apt_str = " ".join(shlex.quote(p) for p in all_apt)
     try:
         target.run(
@@ -1181,7 +1183,7 @@ def announce_git_credentials(providers: dict[str, GitCredentialProvider]) -> Non
     """
     if providers:
         labels = [p.display_name for p in providers.values()]
-        output.info(f"Git credentials configured: {', '.join(labels)}")
+        output.detail(f"Git credentials: {', '.join(labels)}")
 
 
 def rejoin_tailscale(
@@ -1765,7 +1767,7 @@ def _phase_b_setup(
     # Non-fatal: snap packages
     if vm_template.snap:
         logger.step("Snap packages")
-        output.detail(f"Installing {len(vm_template.snap)} snap packages...")
+        output.detail(f"Installing {output.count(len(vm_template.snap), 'snap package')}...")
         for pkg in vm_template.snap:
             try:
                 ts_target.run(f"snap install {shlex.quote(pkg)}", sudo=True, timeout=120)
@@ -1844,7 +1846,9 @@ def _phase_b_setup(
             ensure_agent_socket_dir(ts_target, agent.linux_user)
             removed = cleanup_stale_sockets(ts_target, agent.linux_user)
             if removed:
-                output.detail(f"Cleaned up {removed} stale socket(s) for {agent.linux_user}")
+                output.detail(
+                    f"Cleaned up {output.count(removed, 'stale socket')} for {agent.linux_user}"
+                )
     except SSHError as e:
         msg = f"agent tmux socket setup failed: {e}"
         logger.warning(msg)
@@ -2103,7 +2107,9 @@ def _configure_git_credentials(
             f"(git config --global --get-all include.path | grep -qxF '{GIT_SCOPES_INCLUDE_PATH}' "
             f"|| git config --global --add include.path '{GIT_SCOPES_INCLUDE_PATH}')",
         )
-        output.detail(f"Git credentials configured for {len(providers)} provider(s)")
+        output.detail(
+            f"Git credentials configured for {output.count(len(providers), 'provider')}"
+        )
     except SSHError as e:
         msg = f"git credential store setup failed: {e}"
         logger.warning(msg)

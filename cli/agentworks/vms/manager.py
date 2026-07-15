@@ -478,14 +478,15 @@ def create_vm(
     for provider in providers.values():
         provider.preflight(RunContext(config=config))
 
-    output.info("Collecting credentials...")
+    output.phase("Resolving Secrets")
     resolver.resolve()
 
-    output.phase("Runup")
+    output.phase("Provisioning")
     # Provisioning-phase runup: authenticate the platform's own
-    # credential (proxmox/azure API token) before create() mutates
-    # anything. A definitive rejection aborts here, before the DB row or
-    # any backend resource exists. lima/wsl2 have no token, so this is a
+    # credential (proxmox API token) before create() mutates anything. A
+    # definitive rejection aborts here, before the DB row or any backend
+    # resource exists. Runup is deferred and announced inline (no phase
+    # of its own); lima/wsl2/azure have no token, so this is a silent
     # no-op for them.
     platform_obj.runup(RunContext(config=config, secrets=resolver))
     tailscale_auth_key = resolver.get(vm_tmpl.tailscale_auth_key)
@@ -543,8 +544,7 @@ def create_vm(
         azure_vm_size=resolved_azure_size,
     )
 
-    output.phase("Provisioning")
-    output.info(f"Creating VM '{vm_name}' on vm-site '{site}'...")
+    output.detail(f"Creating VM '{vm_name}' on vm-site '{site}'...")
     try:
         result = platform_obj.create(request)
     except KeyboardInterrupt:
@@ -1125,6 +1125,9 @@ def add_git_credential(db: Database, config: Config, name: str, credential_name:
     # fatal here (unlike vm/agent provisioning, which skips and continues
     # to partial): the operator asked to add exactly this one credential.
     if config.defaults.runup_git_credentials:
+        output.detail(
+            f"Performing runup test for git-credential {credential_name!r}..."
+        )
         provider.runup(RunContext(config=config, secrets=resolver))
     token = _resolve_git_tokens(providers, resolver)[credential_name]
     new_lines = provider.credential_lines(token)
@@ -1575,9 +1578,11 @@ def reinit_vm(
     platform.preflight(RunContext(config=config))
     for provider in providers.values():
         provider.preflight(RunContext(config=config))
+
+    output.phase("Resolving Secrets")
     resolver.resolve()
 
-    # No command-root runup phase at reinit: reinit reaches the VM over
+    # No command-root runup at reinit: reinit reaches the VM over
     # Tailscale SSH and never calls the platform API (so its token is not
     # used here), and the git-credential runup is deferred into the
     # Initialization phase (runup_and_filter at the write step). So the
