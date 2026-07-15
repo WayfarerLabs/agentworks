@@ -1795,6 +1795,33 @@ def _phase_b_setup(
         label="System install command",
     )
 
+    # Non-fatal: agent tmux socket directory infrastructure (VM-level:
+    # shared group, root directory, per-agent subdirectories, all
+    # root-owned system state). No dependency on the admin steps below, so
+    # it closes out the VM phase.
+    try:
+        from agentworks.sessions.tmux import (
+            cleanup_stale_sockets,
+            ensure_agent_socket_dir,
+            ensure_agent_socket_root,
+        )
+
+        logger.step("Agent tmux socket directories")
+        output.detail("Setting up agent tmux socket infrastructure...")
+
+        ensure_agent_socket_root(ts_target, admin_username, warn_if_missing=not is_first_init)
+        for agent in db.list_agents(vm_name=vm_name):
+            ensure_agent_socket_dir(ts_target, agent.linux_user)
+            removed = cleanup_stale_sockets(ts_target, agent.linux_user)
+            if removed:
+                output.detail(
+                    f"Cleaned up {output.count(removed, 'stale socket')} for {agent.linux_user}"
+                )
+    except SSHError as e:
+        msg = f"agent tmux socket setup failed: {e}"
+        logger.warning(msg)
+        output.warn(msg)
+
     output.phase("Admin Initialization")
 
     # Non-fatal: set default shell (before the USER install commands so
@@ -1846,31 +1873,6 @@ def _phase_b_setup(
         )
     except SSHError as e:
         msg = f"workspaces directory setup failed: {e}"
-        logger.warning(msg)
-        output.warn(msg)
-
-    # Non-fatal: agent tmux socket directory infrastructure.
-    # Creates the shared group, root directory, and per-agent subdirectories.
-    try:
-        from agentworks.sessions.tmux import (
-            cleanup_stale_sockets,
-            ensure_agent_socket_dir,
-            ensure_agent_socket_root,
-        )
-
-        logger.step("Agent tmux socket directories")
-        output.detail("Setting up agent tmux socket infrastructure...")
-
-        ensure_agent_socket_root(ts_target, admin_username, warn_if_missing=not is_first_init)
-        for agent in db.list_agents(vm_name=vm_name):
-            ensure_agent_socket_dir(ts_target, agent.linux_user)
-            removed = cleanup_stale_sockets(ts_target, agent.linux_user)
-            if removed:
-                output.detail(
-                    f"Cleaned up {output.count(removed, 'stale socket')} for {agent.linux_user}"
-                )
-    except SSHError as e:
-        msg = f"agent tmux socket setup failed: {e}"
         logger.warning(msg)
         output.warn(msg)
 
