@@ -153,7 +153,7 @@ class ProxmoxPlatform(VMPlatform):
         if self.resolver is None:
             return  # inspection construction; no resolved token to check
         token_secret = str(self._cfg("token_secret", DEFAULT_TOKEN_SECRET))
-        output.detail(f"Performing runup test for vm-site {self.site_name!r}...")
+        output.detail(f"Performing runup test for vm-site/{self.site_name}...")
         try:
             self._api.next_id()
         except ProxmoxAPIError as e:

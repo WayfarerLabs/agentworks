@@ -71,7 +71,7 @@ def test_github_200_verifies_with_login_and_expiry(
     p = GitHubCredentialProvider("gh", {}, _StubResolver({"git-token-gh": "tok"}))
     p.runup(RunContext(secrets=p.resolver))
     out = capsys.readouterr().out
-    assert "Verified git token for 'gh'" in out
+    assert "Verified git token for git-credential/gh" in out
     assert "login wfscot" in out
     assert "expires 2026-10-01" in out
     (url, headers), = fake.calls  # type: ignore[attr-defined]
@@ -124,7 +124,7 @@ def test_expiry_header_format_drift_tolerated(
     p = GitHubCredentialProvider("gh", {}, _StubResolver({"git-token-gh": "t"}))
     p.runup(RunContext(secrets=p.resolver))
     out = capsys.readouterr().out
-    assert "Verified git token for 'gh'" in out
+    assert "Verified git token for git-credential/gh" in out
     assert "login x" in out
     assert "expires" not in out  # drift -> no expiry shown
 
@@ -165,7 +165,7 @@ def test_azdo_200_verifies(
         "ado", {"org": "my-org"}, _StubResolver({"git-token-ado": "tok"})
     )
     p.runup(RunContext(secrets=p.resolver))
-    assert "Verified git token for 'ado'" in capsys.readouterr().out
+    assert "Verified git token for git-credential/ado" in capsys.readouterr().out
     (url, headers), = fake.calls  # type: ignore[attr-defined]
     assert url == "https://dev.azure.com/my-org/_apis/connectionData"
     assert headers["Authorization"].startswith("Basic ")
@@ -234,7 +234,7 @@ def test_runup_and_filter_keeps_verified(
     passed = runup_and_filter(providers, {"gh": "goodtok"}, _runup_config())  # type: ignore[arg-type]
     assert set(passed) == {"gh"}
     out = capsys.readouterr().out
-    assert "Verified git token for 'gh'" in out
+    assert "Verified git token for git-credential/gh" in out
     assert "login wfscot" in out
 
 

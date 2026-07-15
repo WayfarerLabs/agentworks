@@ -116,7 +116,7 @@ def runup_and_filter(
     for name, provider in providers.items():
         try:
             output.detail(
-                f"Performing runup test for git-credential {name!r}...", indent=2
+                f"Performing runup test for git-credential/{name}...", indent=2
             )
             provider.runup(ctx)
             passed[name] = provider

@@ -90,7 +90,9 @@ class AzDOCredentialProvider(GitCredentialProvider):
         )
         if result is None:
             return
-        output.detail(f"Verified git token for {self.owner_name!r}", indent=2)
+        output.detail(
+            f"Verified git token for git-credential/{self.owner_name}", indent=2
+        )
 
     @property
     def store_username(self) -> str:

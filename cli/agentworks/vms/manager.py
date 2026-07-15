@@ -1126,7 +1126,7 @@ def add_git_credential(db: Database, config: Config, name: str, credential_name:
     # to partial): the operator asked to add exactly this one credential.
     if config.defaults.runup_git_credentials:
         output.detail(
-            f"Performing runup test for git-credential {credential_name!r}..."
+            f"Performing runup test for git-credential/{credential_name}..."
         )
         provider.runup(RunContext(config=config, secrets=resolver))
     token = _resolve_git_tokens(providers, resolver)[credential_name]
