@@ -12,6 +12,7 @@ from __future__ import annotations
 
 from pathlib import Path
 from textwrap import dedent
+from typing import TYPE_CHECKING
 
 import pytest
 
@@ -23,6 +24,9 @@ from agentworks.errors import ConfigError
 from agentworks.git_credentials import CredentialMaterials, build_credential_materials
 from agentworks.manifests import load_manifests
 from agentworks.vms.initializer import resolve_git_credential_providers
+
+if TYPE_CHECKING:
+    from tests.conftest import CapturedOutput
 
 
 def _gh(
@@ -616,6 +620,22 @@ def test_remote_advisories_unions_and_filters(tmp_path: Path) -> None:
     # Plain remotes and non-http(s) remotes draw nothing.
     assert remote_advisories(registry, "https://github.com/acme/widgets.git") == []
     assert remote_advisories(registry, "git@github.com:acme/widgets.git") == []
+
+
+def test_announce_git_credentials_reinforces_names(
+    captured_output: CapturedOutput,
+) -> None:
+    """Preflight echoes one ``git-credential: <name>`` line per credential,
+    matching the ``vm-site`` / ``vm-template`` context lines."""
+    from agentworks.vms.initializer import announce_git_credentials
+
+    announce_git_credentials(
+        {"github": _gh("github", owner="acme"), "azdo_ifc": _azdo("azdo_ifc", "org")}
+    )
+    assert "git-credential: github" in captured_output.detail
+    assert "git-credential: azdo_ifc" in captured_output.detail
+    # Not the old friendly-label / display-name form.
+    assert not any(m.startswith("Git credentials:") for m in captured_output.detail)
 
 
 # -- real git against the generated materials ----------------------------------
