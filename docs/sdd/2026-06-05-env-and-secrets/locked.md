@@ -154,3 +154,21 @@ updates this lockfile with a dated entry.
 - [HLA](hla.md): high-level architecture, including the SetEnv-pivot rationale and the env-transport
   diagram.
 - [plan](plan.md): phased implementation plan with all checkboxes ticked.
+
+## Follow-up changes
+
+### 2026-07-15: composed env survives the console agent-pane sudo boundary
+
+Refines the Phase 4 sudoers behavior. As shipped, the console add-shell **agent**-pane path relied
+solely on `env_keep += "AGENTWORKS_* AW_*"`, so only agentworks-managed vars survived the pane's
+`sudo --login` crossing to the agent user. Arbitrarily-named operator env and `agent`-scope secrets
+(which `_resolve_pane_env` composes) were stripped, so a secret present in the agent's main session
+was absent in an agent companion shell in a console.
+
+The pane now names the composed keys on `sudo --login --preserve-env=<keys>` (values still ride the
+tmux `-e` channel, so no secret value hits the argv), permitted by a new user-scoped sudoers fragment
+`/etc/sudoers.d/51-agentworks-console-setenv` (`Defaults:<admin> setenv`) deployed at VM init
+alongside the existing `env_keep` fragment. Scope is unchanged otherwise: the pane still gets
+`vm + workspace + agent` (not `session`) env; extending companion shells to `session` scope remains
+future work. Rationale and alternatives in [ADR 0017](../../adrs/0017-console-pane-preserve-env.md).
+Existing VMs need `agw vm reinit` to deploy the new fragment.

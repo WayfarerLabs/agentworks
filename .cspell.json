@@ -119,6 +119,7 @@
     "rulesync",
     "runnability",
     "sess",
+    "setenv",
     "setgid",
     "setdefault",
     "sgid",

@@ -2032,7 +2032,10 @@ def test_split_shell_pane_agent_branch_uses_sudo(
 
     splits = [c for c in fake_target.commands if "split-window -t aw-console-con:s" in c]
     assert len(splits) == 1
-    assert "sudo --login -u bot-user" in splits[0]
+    # `--preserve-env=<keys>` sits between --login and -u (see the dedicated
+    # preserve-env test); assert the sudo wrapper and target user separately.
+    assert "sudo --login" in splits[0]
+    assert "-u bot-user" in splits[0]
     assert 'exec "$SHELL" -l' in splits[0]
 
 
@@ -2052,6 +2055,44 @@ def test_split_shell_pane_admin_branch_no_sudo(
     assert len(splits) == 1
     assert "sudo --login" not in splits[0]
     assert 'exec "$SHELL" -l' in splits[0]
+    # No sudo crossing, so no --preserve-env needed (the -e vars survive
+    # into the login shell directly).
+    assert "--preserve-env" not in splits[0]
+
+
+def test_split_shell_pane_agent_branch_preserves_composed_env_across_sudo(
+    db: Database, fake_target: _FakeTarget
+) -> None:
+    """The agent pane sudo's to the agent user, which resets the env. The
+    composed keys (which tmux set via -e) are named on `sudo --preserve-env`
+    so they survive the crossing; only the names appear, not the values.
+    Permitted VM-side by the `Defaults:<admin> setenv` sudoers fragment."""
+    _seed_vm(db, with_tailscale=True)
+    db._conn.execute(
+        "INSERT INTO agents (name, vm_name, linux_user) VALUES ('bot', 'vm1', 'bot-user')",
+    )
+    db._conn.execute(
+        "INSERT INTO sessions (name, workspace_name, template, mode, agent_name, socket_path) "
+        "VALUES ('s', 'ws-vm1', 'default', 'agent', 'bot', '/tmp/s.sock')",
+    )
+    db._conn.commit()
+    create_console(db, name="con", vm_name="vm1", session_specs=["s"])
+
+    fake_target.commands.clear()
+    fake_target.responses["has-session -t aw-console-con"] = _FakeResult(returncode=0)
+    add_shell(db, _StubConfig(), console_name="con", session_name="s")
+
+    splits = [c for c in fake_target.commands if "split-window -t aw-console-con:s" in c]
+    assert len(splits) == 1
+    # The composed workspace-identity key is both set via -e and named on
+    # --preserve-env so it crosses the sudo boundary.
+    assert " -e AGENTWORKS_WORKSPACE=ws-vm1" in splits[0]
+    assert "--preserve-env=" in splits[0]
+    preserve_arg = splits[0].split("--preserve-env=", 1)[1].split(" ", 1)[0]
+    assert "AGENTWORKS_WORKSPACE" in preserve_arg
+    # Values are carried by the -e channel, not embedded in the preserve
+    # list (only names appear there).
+    assert "ws-vm1" not in preserve_arg
 
 
 def test_split_shell_pane_emits_workspace_identity_only(

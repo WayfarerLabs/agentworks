@@ -1489,12 +1489,17 @@ def _split_shell_pane(
     Env reaches the pane via:
 
     1. ``tmux split-window -e KEY=VAL`` flags (load-bearing): tmux sets
-       these vars on the pane process before exec; agentworks-managed
-       vars (``AGENTWORKS_*``, ``AW_*``) survive the sudo crossing in
-       the agent-pane branch via the sudoers env_keep fragment
-       deployed by VM init in Phase 4. Until that Phase 4 deploy
-       lands, agent-pane env injection is effectively a no-op (the
-       vars cross into the pane process but sudo strips them).
+       these vars on the pane process before exec. In the agent-pane
+       branch the pane then ``sudo --login``s to the agent user, which
+       resets the environment. Two mechanisms carry vars across that
+       crossing: agentworks-managed vars (``AGENTWORKS_*``, ``AW_*``)
+       survive via the sudoers env_keep fragment, and arbitrarily-named
+       operator env / secrets survive via ``sudo --preserve-env=<keys>``
+       (permitted by the ``Defaults:<admin> setenv`` fragment). Both
+       fragments are deployed by VM init; on a VM initialized before
+       they landed, agent-pane env injection is a no-op until reinit
+       (the vars cross into the pane process but sudo strips them). See
+       docs/adrs/0017-console-pane-preserve-env.md.
     2. SSH SetEnv on ``target.run`` (SSH transport only;
        non-SSH transports are a no-op because the tmux client is
        talking to an already-running server and the client's env
@@ -1552,8 +1557,21 @@ def _split_shell_pane(
             f'cd {q_full} || echo {q_diag}; '
             f'exec "$SHELL" -l'
         )
+        # Carry the composed operator/secret env across the sudo boundary.
+        # tmux set these vars on the pane process (env_flags, above), but
+        # `sudo --login` resets the environment and would drop every var
+        # except the AGENTWORKS_*/AW_* env_keep allowlist. --preserve-env
+        # names the composed keys explicitly so arbitrarily-named agent-scope
+        # vars and secrets survive, while their VALUES stay off the argv
+        # (only names appear; the values ride the tmux -e channel). Honored
+        # because VM init grants the admin user `Defaults:<admin> setenv`
+        # (see _write_sudoers_console_setenv). Omit the flag when there is no
+        # env to preserve so we never emit an empty `--preserve-env=`.
+        preserve = ""
+        if pane_env:
+            preserve = f" --preserve-env={shlex.quote(','.join(pane_env))}"
         pane_cmd = (
-            f"exec sudo --login -u {q_user} bash -c {shlex.quote(bootstrap)}"
+            f"exec sudo --login{preserve} -u {q_user} bash -c {shlex.quote(bootstrap)}"
         )
         cmd = (
             f"tmux split-window -t {q_con}:{q_win} -P -F '#{{pane_id}}'{env_flags} "
