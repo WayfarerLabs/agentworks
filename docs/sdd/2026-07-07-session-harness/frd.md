@@ -59,31 +59,31 @@ SDD it reads:
 
 > **A session is a specification to run a specific harness as an agent in a workspace on a VM.**
 
-The session remains the workload specification -- naming, lifecycle, tmux persistence, env
-composition, and placement (vm / workspace / agent) stay exactly where they are -- but it delegates
-the mechanics of running the underlying process to the harness, which can be smarter than an opaque
+The session remains the workload specification: naming, lifecycle, tmux persistence, env
+composition, and placement (vm / workspace / agent) stay exactly where they are. It delegates the
+mechanics of running the underlying process to the harness, which can be smarter than an opaque
 command string because it knows the specific tooling it runs. The harness joins the model's core
 vocabulary alongside VM, workspace, agent, and session, and the top-level documentation that teaches
 the model is rewritten to teach it this way (R10).
 
 The scope of the harness CONTRACT in this SDD is deliberately narrow (maintainer ruling,
-2026-07-07): **command lifecycle only** -- session start, session restart, and the
-target-environment readiness check (today: required commands), the responsibilities the three
-template fields express today. In the capability model's stage vocabulary that is: `start` and
-`restart` as the harness's ops (each returns the pane command for its case), and the
-required-commands check as the harness's `runup` (it runs against the real, post-provision target;
-see R7 for why it is runup and not preflight). Narrow does not mean string-valued: within that
-lifecycle a harness may execute arbitrary code on the launch target as the target user (R7), which
-is what lets it be smarter than the strings it replaces (R4). Liveness probing of the running
-session stays core (tmux boot-id/PID machinery, tool-agnostic), and asset placement (skills, rules,
-allow/deny lists) is deferred with the plugin SDD, which owns the operator-declared asset model it
-requires. The narrow contract does not narrow the model change: the delegation seam is the point,
-and the contract grows behind it without the model changing again.
+2026-07-07): **command lifecycle only**, session start, session restart, and the target-environment
+readiness check (today: required commands), the responsibilities the three template fields express
+today. In the capability model's stage vocabulary that is: `start` and `restart` as the harness's
+ops (each returns the pane command for its case), and the required-commands check as the harness's
+`runup` (it runs against the real, post-provision target; see R7 for why it is runup and not
+preflight). Narrow does not mean string-valued: within that lifecycle a harness may execute
+arbitrary code on the launch target as the target user (R7), which is what lets it be smarter than
+the strings it replaces (R4). Liveness probing of the running session stays core (tmux boot-id/PID
+machinery, tool-agnostic), and asset placement (skills, rules, allow/deny lists) is deferred with
+the plugin SDD, which owns the operator-declared asset model it requires. The narrow contract does
+not narrow the model change: the delegation seam is the point, and the contract grows behind it
+without the model changing again.
 
 A concrete future direction makes that point. We expect Agentworks to eventually manage artifacts
 such as skills, hooks, and MCP server configurations, and the division of labor is already implied
 by this model: the core handles these objects in the general sense (declaration, storage, scoping),
-and the harness translates them for its specific tooling -- its directory conventions, file formats,
+and the harness translates them for its specific tooling, its directory conventions, file formats,
 and registration mechanics. None of that is in this effort; it is called out so the harness is read
 as the tool-knowledge seam it is, not as plumbing built just for start/restart semantics. It also
 carries a security dimension the harness is the natural place to own: a tool like Claude Code can
@@ -114,7 +114,7 @@ surface, untouched here), and any change to the other capability domains.
 
 ## Terminology
 
-- **Harness**: the session-level capability -- code that knows how a named session of a particular
+- **Harness**: the session-level capability, code that knows how a named session of a particular
   tool is started and restarted, and what executables that requires. A capability kind per ADR 0016:
   read-only registry rows, error miss policy, implementation in a per-domain code registry
   (`HARNESS_REGISTRY`). A consuming-side capability like `git-credential-provider`: its
@@ -136,9 +136,9 @@ surface, untouched here), and any change to the other capability domains.
   is the selector and no dedicated instance kind exists.
 - **`shell` harness**: the built-in default reproducing today's behavior verbatim. Its config
   vocabulary IS the three legacy fields: `command`, `restart_command`, `required_commands`.
-- **`claude-code` harness**: the built-in harness owning the Claude Code session conventions --
-  launch vs resume (chosen by inspecting tool state, R4), required executable -- so templates stop
-  spelling them as strings.
+- **`claude-code` harness**: the built-in harness owning the Claude Code session conventions, launch
+  vs resume (chosen by inspecting tool state, R4), required executable, so templates stop spelling
+  them as strings.
 - **Session template, registry, capability, origin**: as defined by the resource-registry and
   resource-manifests SDDs.
 
@@ -148,7 +148,7 @@ surface, untouched here), and any change to the other capability domains.
 
 - New capability kind `harness`: `category = "capability"`, error miss policy, not
   manifest-declarable (a `kind: harness` document gets the standard capability-kind envelope error),
-  `builtin_override = "reserved"`. Same shape as `git-credential-provider` -- the kind strategy
+  `builtin_override = "reserved"`. Same shape as `git-credential-provider`, the kind strategy
   (`capabilities/harness/kinds.py`) mirrors `_GitCredentialProviderKind` and self-registers into
   `KIND_REGISTRY` via the `resources/kinds/__init__.py` index line.
 - Implementations live in the `capabilities/harness/` package (the capability subtree, alongside
@@ -164,7 +164,7 @@ surface, untouched here), and any change to the other capability domains.
   never imports the `sessions/` domain (the consuming resource depends on the capability, not the
   reverse).
 
-### R2: Template surface -- `harness` and `harness_config`
+### R2: Template surface, `harness` and `harness_config`
 
 The session template selects a harness inline (capability-consumers.md rule 2):
 
@@ -187,24 +187,23 @@ spec:
   resolves to `shell`, preserving today's behavior for templates that declare neither field.
 - `spec.harness_config` (optional mapping): the blob the selected harness owns and validates.
   Declaring `harness_config` without `harness` on the same template is a load error (a blob with no
-  owner) -- the default does not silently adopt a blob.
+  owner); the default does not silently adopt a blob.
 - A declared `spec.harness` emits a `harness`-kind resource reference from the template (usage: "the
   session harness"), so a typo'd name is a finalize-time `ConfigError` naming the template, and the
   harness row's `Referenced by:` lists its templates. Templates that do not declare the field emit
-  no edge -- their effective harness is an inherited or defaulted value that is validated where it
-  was declared (or is the always-valid built-in default).
+  no edge; their effective harness is an inherited or defaulted value that is validated where it was
+  declared (or is the always-valid built-in default).
 - The declared blob is validated by the selected harness at load (decode/parse time), with errors
   carrying the declaration's location (the manifest document's `file:line`; the TOML section's
   location for TOML declarations). Declared-blob validation is VOCABULARY AND SHAPE ONLY (per-field
-  checks); completeness rules -- required fields, cross-field constraints -- apply to the MERGED
-  blob at use (R5, R7), because a child restating the harness may legitimately declare a partial
-  blob. Validation is capability-owned: the core never learns any harness's field vocabulary. It
-  uses the capability config-validation contract the resource-manifests SDD shipped (its Phase 5.7,
-  the `GitCredentialProvider.validate_config` precedent): `validate_config(owner, config)` returns
-  the resource references the blob implies -- none, for both built-in harnesses -- and the session
-  template emits them as itself at finalize, alongside the selector edge. A future harness whose
-  blob names a secret gets auto-declaration, reachability, and doctor coverage with zero new
-  machinery.
+  checks); completeness rules, required fields, cross-field constraints, apply to the MERGED blob at
+  use (R5, R7), because a child restating the harness may legitimately declare a partial blob.
+  Validation is capability-owned: the core never learns any harness's field vocabulary. It uses the
+  capability config-validation contract the resource-manifests SDD shipped (its Phase 5.7, the
+  `GitCredentialProvider.validate_config` precedent): `validate_config(owner, config)` returns the
+  resource references the blob implies (none, for both built-in harnesses), and the session template
+  emits them as itself at finalize, alongside the selector edge. A future harness whose blob names a
+  secret gets auto-declaration, reachability, and doctor coverage with zero new machinery.
 
 **The YAML spec is clean** (maintainer ruling, 2026-07-07): `command`, `restart_command`, and
 `required_commands` are NOT session-template spec fields in manifests. They are `shell`'s config
@@ -224,7 +223,7 @@ spec:
 ### R3: The `shell` harness (built-in default)
 
 - Config vocabulary: `command` (string), `restart_command` (string), `required_commands` (list of
-  strings) -- exactly today's fields, exactly today's semantics. All optional; an empty config is a
+  strings), exactly today's fields, exactly today's semantics. All optional; an empty config is a
   plain login shell, exactly like today's field-less `default` template.
 - Behavior: the `start` op returns `command` (empty means login shell only); the `restart` op
   returns `restart_command` when set, else `command`; the `runup` stage probes `required_commands`
@@ -261,7 +260,7 @@ spec:
     escape hatch that keeps the harness from needing a field per flag.
 - Unknown config fields are validation errors naming the harness and the field.
 - The chosen path is visible to the operator: the launch surfaces whether it resumed the existing
-  Claude session or launched fresh (mechanism at LLD -- an output line or the pane's first visible
+  Claude session or launched fresh (mechanism at LLD, an output line or the pane's first visible
   output). The decision must never be silent (review finding, 2026-07-08; operator-control spirit).
 - `claude_marketplaces` / `claude_plugins` stay on the agent/admin templates: they are
   provision-time (VM/agent setup) concerns, not session-start concerns. The plugin SDD decides
@@ -272,10 +271,10 @@ spec:
   - **User-level MCP availability, and its default.** Claude Code can inherit user-scoped MCP
     servers from the operator's own account/login. Attaching a high-power MCP tool to a personal
     `claude.ai` account could then hand every launched agent that tool with no per-agent grant and
-    no operator awareness -- a real privilege-escalation footgun. The harness is the control point
-    for what MCP surface a launched session inherits (for example, a config flag to disable
-    user-level MCP inheritance, or to pin an explicit MCP config). When this ships, the SAFE DEFAULT
-    is non-inheritance: an agent gets only the MCP surface Agentworks granted it, and inheriting the
+    no operator awareness, a real privilege-escalation footgun. The harness is the control point for
+    what MCP surface a launched session inherits (for example, a config flag to disable user-level
+    MCP inheritance, or to pin an explicit MCP config). When this ships, the SAFE DEFAULT is
+    non-inheritance: an agent gets only the MCP surface Agentworks granted it, and inheriting the
     operator's personal servers is an explicit, visible opt-in. Recorded now so v1 does not
     accidentally build in silent inheritance; connects to the artifact-management future (model
     change, above).
@@ -289,14 +288,14 @@ spec:
     harness consumes). It interacts with the walk-away invariant (any interactivity must precede the
     walk-away point) and with the secret model, so it is deferred until its shape is pinned.
 
-### R5: Inheritance -- the pair travels together
+### R5: Inheritance, the pair travels together
 
 `harness` and `harness_config` inherit as a unit (capability-consumers.md rule 2):
 
 - A child that does not declare `harness` inherits its parents' effective pair unchanged.
 - A child that declares `harness` DIFFERENT from the inherited one starts from a fresh (empty)
   config; the parent's blob is addressed to the wrong capability and never leaks across.
-- A child that declares the SAME `harness` as the inherited one (restating it -- required, since
+- A child that declares the SAME `harness` as the inherited one (restating it, required, since
   `harness_config` may not appear without `harness`) merges its blob into the inherited one,
   child-wins per key. How two values for one key combine is capability-owned: the default is
   child-replaces, and `shell` overrides it for `required_commands`, which keeps today's
@@ -328,7 +327,7 @@ harness surface is expressible there so TOML-declared templates are not locked o
   need a merge rule inside a single declaration, which is complexity with no operator payoff).
 - One R5 interaction stated explicitly because the operator never typed it: a legacy flat-field
   child template under a `harness: claude-code` parent hoists to `harness = "shell"` and switches
-  the lineage back to shell with a fresh blob -- correct per the switch rule, and called out in the
+  the lineage back to shell with a fresh blob, correct per the switch rule, and called out in the
   docs (R10) so it reads as designed behavior rather than a surprise.
 - No new deprecation warning is added for the flat fields themselves: the section already carries
   the TOML-resource deprecation warning. Both TOML spellings are documented, YAML-first (maintainer
@@ -339,34 +338,48 @@ harness surface is expressible there so TOML-declared templates are not locked o
 
 ### R7: Runtime delegation and the harness execution surface
 
+What a harness is FOR: extracting maximum value from the specific tool it wraps. A harness exists
+because it knows its tool deeply, so it can resume the right named session, forward the flags that
+matter, check that the tool's executables are present, and generally do the smart thing an opaque
+command string cannot. That tool knowledge is the whole payoff, and the execution surface below
+exists to serve it.
+
+What a harness is NOT responsible for: the operator's walk-away experience and the system's
+consistency guarantees. Those are Agentworks-wide properties delivered by the ISOLATION machinery
+(secret resolution, ephemeral agents and workspaces, git-token handling, rollback), not by the
+harness. The harness's entire obligation to that machinery is a negative one: stay non-interactive
+so it never reopens a prompt after the operator has walked away. The requirements below describe the
+execution surface and that one obligation; they are careful not to recast the harness as the thing
+that provides walk-away.
+
 - The sessions manager stops reading command strings off the resolved template and delegates to a
   resolved harness INSTANCE instead. It constructs the harness
   (`harness_for(name)(owner_name, merged_config, resolver)`), holds it, and drives its lifecycle:
-  `preflight` (pre-resolve), then -- after the single resolve pass and ephemeral provisioning --
-  `runup` (the target-environment check, today the required-commands probe; shaped to grow into
-  file, tool-state, and vm / workspace / agent state checks without a contract change), then the
-  `start` / `restart` op for the pane command. The session is the model's first RICH consuming
-  resource (it has its own lifecycle -- panes, env, tmux -- AND composes the harness instance's
-  stages); the composition is done imperatively in the manager root, consistent with how `create_vm`
-  and agent init drive their capabilities today.
+  `preflight` (pre-resolve), then, after the single resolve pass and ephemeral provisioning, `runup`
+  (the target-environment check, today the required-commands probe; shaped to grow into file,
+  tool-state, and vm / workspace / agent state checks without a contract change), then the `start` /
+  `restart` op for the pane command. The session is the model's first RICH consuming resource (it
+  has its own lifecycle, panes, env, tmux, AND composes the harness instance's stages); the
+  composition is done imperatively in the manager root, consistent with how `create_vm` and agent
+  init drive their capabilities today.
 - **A harness is not limited to returning a static string.** The contract gives it the ability to
-  execute arbitrary code on the launch target as the TARGET USER -- the user the session runs as:
-  the selected agent, or the admin user in admin mode -- including multiple commands (state probes,
-  tool interrogation) in the course of deciding what the session runs. The `shell` harness uses none
-  of this; `claude-code` needs it (R4); future harnesses get it for free. This surface is the
+  execute arbitrary code on the launch target as the TARGET USER (the user the session runs as: the
+  selected agent, or the admin user in admin mode), including multiple commands (state probes, tool
+  interrogation) in the course of deciding what the session runs. The `shell` harness uses none of
+  this; `claude-code` needs it (R4); future harnesses get it for free. This surface is the
   `RunContext`'s execution targets (`ctx.agent_target` in normal mode, `ctx.admin_target` in admin
   mode): the harness is the FIRST capability whose readiness and ops actually run ON the VM as the
   target user (git-credential and vm-platform runups probe from the CLI host over HTTP/API), so it
-  is the first real consumer of those RunContext transport fields -- which the composition root
+  is the first real consumer of those RunContext transport fields, which the composition root
   populates for the harness's `runup` / op stages.
 - **Room reserved for a permission model.** The execution surface is shaped so that running as the
   target user is the default grant, and the always-admin channel (`ctx.admin_target`, admin
-  regardless of mode) is gated by an explicit grant -- the trust knob for third-party harnesses when
+  regardless of mode) is gated by an explicit grant, the trust knob for third-party harnesses when
   the plugin SDD arrives. This falls out of the model for free: `RunContext` already carries both
   transports as optional fields present only when the operation supplies them and (in a future
   permission model) when the capability is granted them. Only the target-user channel is used by the
   built-ins; nothing here needs more. Stated plainly so the model is honest: a harness is in-process
-  code, so neither the context's contents nor a grant CONFINES a malicious one -- the trust boundary
+  code, so neither the context's contents nor a grant CONFINES a malicious one; the trust boundary
   for third-party harnesses is plugin installation and enablement (distribution trust, per the
   plugin SDD's framing). The permission model and the context's deliberate minimalism buy
   misuse-resistance and auditability for cooperating code, which is their whole claim.
@@ -374,8 +387,8 @@ harness surface is expressible there so TOML-declared templates are not locked o
   capability model runs `preflight` for every resource at command start, BEFORE the single resolve
   pass and before any mutation, which makes preflight dependency-blind: it may not check state a
   later step of the same command creates. The harness's target-environment check depends on exactly
-  such state -- the target user and workspace may be EPHEMERAL, created later in this same command
-  -- so it structurally cannot be preflight (it would fail every first-time ephemeral launch, the
+  such state (the target user and workspace may be EPHEMERAL, created later in this same command),
+  so it structurally cannot be preflight (it would fail every first-time ephemeral launch, the
   direct analog of a git-credential preflight failing `vm create` because git is not installed yet).
   It is therefore `runup`: post-resolve, deferred to right before the launch op, run against the
   real target the provisioning phase just created, with the fully composed env (vm / workspace /
@@ -383,20 +396,23 @@ harness surface is expressible there so TOML-declared templates are not locked o
   `preflight` near-empty (they declare no secrets, so the base's resolvability prediction is the
   whole of it) and puts all the real work in `runup` and the ops. This realigns the pre-realignment
   draft, which called the post-provision check "preflight."
-- **Interactivity first; then non-interactive to success or clean rollback.** The operator
-  experience the contract guarantees is unchanged: start the command, deal with any secret prompts
-  or early failures immediately, then walk away -- everything after the prompts is non-interactive
-  and either succeeds or rolls back to a consistent state with clear error messaging. This is now
-  just the capability model's own ordering applied to the session: preflight-all (before any prompt
-  or mutation) -> the single secret resolve at the preflight boundary (the one prompt session) ->
-  ephemeral provisioning under rollback protection -> the harness `runup` in the real environment ->
-  the `start` op -> tmux. A `runup` failure tears down the just-created ephemerals, the same
-  rollback path any later failure already exercises; when nothing ephemeral was requested there are
-  no mutations before `runup`, so it still naturally precedes any change.
-- **Harness code never prompts.** `validate_config`, `preflight`, `runup`, `start`, and `restart`
-  are non-interactive by contract; all operator interaction happens before dispatch. The walk-away
-  invariant depends on this holding for every harness, plugin-registered ones included, so it is
-  part of the capability contract, not a convention of the built-ins.
+- **The harness slots into the existing ordering; it does not own it.** The command's order is the
+  capability model's own: preflight-all (before any prompt or mutation) -> the single secret resolve
+  at the preflight boundary (the one prompt session) -> ephemeral provisioning under rollback
+  protection -> the harness `runup` in the real environment -> the `start` op -> tmux. The
+  operator-facing consistency of that order (prompts up front, then non-interactive to success or a
+  clean rollback with clear errors) is produced by the secret and isolation machinery, and the
+  harness simply fits into it. Its one contribution to the failure story is small and uniform with
+  every other stage: a `runup` failure tears down the just-created ephemerals via the same rollback
+  path any later failure already exercises; when nothing ephemeral was requested there are no
+  mutations before `runup`, so it still naturally precedes any change.
+- **Harness code never prompts, and that is its whole obligation to the walk-away property.**
+  `validate_config`, `preflight`, `runup`, `start`, and `restart` are non-interactive by contract;
+  all operator interaction happens before dispatch. This is the one place the harness could break
+  the system's walk-away guarantee, and forbidding it is the entire ask: the harness does not
+  otherwise deliver walk-away, it just must not reopen a prompt once the interactive phase is done.
+  The contract binds every harness, plugin-registered ones included, so it is part of the capability
+  contract, not a convention of the built-ins.
 - **The nested-create secret hoist is already handled upstream.** The pre-realignment draft carried
   a requirement to fold a `--new-agent` ephemeral agent's git-token secrets into the single up-front
   resolve (the nested `create_agent` used to resolve them inside the mutation block). Main's
@@ -415,25 +431,31 @@ harness surface is expressible there so TOML-declared templates are not locked o
   restart never prompts for secrets it would discard; the harness `runup` (required-commands) slots
   after that resolve and before the kill, so a missing binary still aborts with the old session
   running.
-- **Getting this API surface right is a big part of the HLA**: what the core hands the harness (the
-  `RunContext` -- its execution targets, resolved secrets, and the model's identity chain; the bound
-  config) and what the harness returns to the tmux layer are pinned there, not here. Note one gap
-  the HLA must resolve: `RunContext` today carries no identity chain (no vm / workspace / agent /
-  session NAMES), and the harness needs at least the session name to address the tool session
-  (`claude --name <session>`) and the chain for probe context and error labels. The harness is the
-  "second consumer" the capability model's own open question predicted would motivate enriching the
-  context beyond `owner`; the HLA proposes how (a host-agnostic identity value on `RunContext`). The
-  requirement here is the capability boundary, not its signature.
+- **The `RunContext` gains the model's identity chain, and this SDD adds it** (maintainer ruling,
+  2026-07-16). `RunContext` today carries global config, the execution targets, and resolved
+  secrets, but no identity: no vm / workspace / agent / session NAMES. A harness needs them, at
+  minimum the session name to address the tool session (`claude --name <session>`, which is distinct
+  from the template name it is constructed under), plus the chain for probe context and error
+  labels. The harness is the "second consumer" the capability model's own open question predicted
+  would motivate enriching the context beyond `owner`, so the enrichment lands as a shared,
+  host-agnostic identity value on `RunContext` rather than harness-specific plumbing. It is
+  NAMES-only for now, with room reserved for fuller representations when a consumer first needs them
+  (the HLA pins the shape); other operations populate what applies to them (a `vm` operation carries
+  just the vm name) and ignore the rest, exactly as they do the optional targets.
+- **Getting the rest of this API surface right is a big part of the HLA**: what the core hands the
+  harness (the `RunContext`: execution targets, resolved secrets, identity chain, bound config) and
+  what the harness returns to the tmux layer are pinned there, not here. The requirement is the
+  capability boundary, not its signature.
 - **Best-effort robustness, not race-proof.** Harnesses should aim to be as robust as practical, but
   there is no expectation that they are perfect against race conditions and similar challenges. The
   canonical example is R4's existence check: the tool session changing state between the check and
   the launch may be problematic, and that is understood and accepted. Where an easy strengthening
   exists (e.g. moving the check into the launch script/command so check and launch are one
-  invocation), take it; it is not worth overengineering beyond that -- these are
-  operator-interactive sessions, and a retry is an acceptable outcome for a window this small.
+  invocation), take it; it is not worth overengineering beyond that. These are operator-interactive
+  sessions, and a retry is an acceptable outcome for a window this small.
 - **The role of tmux is unchanged by this effort.** Every session, regardless of harness, is
   launched by tmux and has its tty owned by tmux. Even a harness whose process has zero need for
-  stdin/stdout/stderr still runs under tmux -- it is how Agentworks manages the harness process
+  stdin/stdout/stderr still runs under tmux; it is how Agentworks manages the harness process
   (lifecycle, attach/detach, persistence), not just how the operator watches it. Harnesses decide
   WHAT runs in the pane, never HOW the pane is hosted.
 - Template-variable substitution, `exec` wrapping, env composition, tmux mechanics, liveness probing
@@ -459,8 +481,8 @@ harness surface is expressible there so TOML-declared templates are not locked o
   registry-equivalence verification proves the divergence is shape-only, since the TOML loader's
   hoist (R6) and the migrator's emission land on the identical internal value.
 - The bundled session-template sample teaches the new shape, leading with the `shell` +
-  `harness_config` form (the default harness -- the docs commit to runtime neutrality; maintainer
-  ruling, 2026-07-08), followed by the `claude-code` document as the worked capability example (one
+  `harness_config` form (the default harness; the docs commit to runtime neutrality, maintainer
+  ruling 2026-07-08), followed by the `claude-code` document as the worked capability example (one
   line where the old sample restated three command strings).
 - `agw resource sample session-template` output updates accordingly; the samples-load-clean test
   keeps covering it.
@@ -487,11 +509,11 @@ The model change (Background) lands in the permanent docs, not just in code and 
 - The decision to introduce the harness is its own ADR covering: the model formulation, the inline
   reference+blob consumer shape as shipped, and the pair-inheritance rule. Per the SDD style, the
   ADR is DRAFTED in this feature directory (`adr-session-harness.md`, unnumbered) and moves into
-  `docs/adrs/` -- receiving its number then -- only at the very end of the effort, so the number is
+  `docs/adrs/`, receiving its number then, only at the very end of the effort, so the number is
   assigned once against the directory as it exists at merge time. ADR 0016 is untouched; the new ADR
   references it for the capability collapse and `capabilities/README.md` for the lifecycle contract
   the harness adopts (it is the first RICH consuming resource of that model, and the first to use
-  the `RunContext` execution targets -- worth calling out in the ADR's consequences).
+  the `RunContext` execution targets, worth calling out in the ADR's consequences).
 - Per the SDD lifecycle rules, each doc change rides the commits that make its claims true; nothing
   here waits for a closeout pass, and nothing permanent cites this SDD's path.
 
@@ -501,8 +523,8 @@ The model change (Background) lands in the permanent docs, not just in code and 
   enablement, namespacing, and origin stamping are the plugin SDD's.
 - **Artifact management (skills, hooks, MCP servers, allow/deny lists, ...)**: an expected future in
   which the core manages such artifacts generically and the harness translates them for its specific
-  tooling (see the model-change section). Deferred -- it needs an operator-declared artifact model
-  first (plugin SDD territory) -- but it is part of why the harness seam exists. Its security
+  tooling (see the model-change section). Deferred: it needs an operator-declared artifact model
+  first (plugin SDD territory), but it is part of why the harness seam exists. Its security
   dimension (a launched agent silently inheriting the operator's user-level MCP servers) is recorded
   in R4's reserved future directions, with the safe default (non-inheritance) pinned now so v1 does
   not build in the footgun.
@@ -511,9 +533,9 @@ The model change (Background) lands in the permanent docs, not just in code and 
   `permission_mode` / `model` / `extra_args` set.
 - **Liveness probing behind the harness**: today's boot-id/PID probe is tool-agnostic and stays
   core; a harness-owned probe can be added to the contract when a harness actually needs one.
-- **Alternatives to tmux**: possibly introduced someday, but that would be an orthogonal effort --
-  the harness concept neither depends on tmux specifics nor would change if the pane host did (R7's
-  tmux invariant).
+- **Alternatives to tmux**: possibly introduced someday, but that would be an orthogonal effort; the
+  harness concept neither depends on tmux specifics nor would change if the pane host did (R7's tmux
+  invariant).
 - **A Codex harness**: nothing blocks one, but no member ships until its conventions are pinned;
   `claude-code` proves the multi-member path.
 - **Moving `claude_marketplaces` / `claude_plugins`**: agent-provision surface, untouched (R4).
@@ -526,8 +548,8 @@ The model change (Background) lands in the permanent docs, not just in code and 
 Operators upgrading across this SDD see:
 
 - TOML session templates keep working unchanged. YAML manifests written against the unreleased PR
-  #156 surface with flat command fields (if any exist) get a load error pointing at `harness_config`
-  -- the `!` flag in R2 covers exactly this.
+  #156 surface with flat command fields (if any exist) get a load error pointing at
+  `harness_config`; the `!` flag in R2 covers exactly this.
 - `agw resource list` gains two `harness` rows; `agw resource kinds` gains the `harness` kind.
 - Newly migrated or sampled session templates spell commands under `harness_config`.
 - Templates can now say `harness: claude-code` instead of restating the Claude Code command strings.

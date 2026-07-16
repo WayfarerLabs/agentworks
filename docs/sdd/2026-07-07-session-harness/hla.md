@@ -217,9 +217,9 @@ Contract points, and why they are shaped this way:
   standard typed errors (`StateError`, `ExternalError`) with `entity_kind="session"`, which the CLI
   already renders.
 
-### The identity gap and the proposed `RunContext` enrichment
+### The identity chain on `RunContext`
 
-`RunContext` carries `config`, `admin_target`, `agent_target`, `secrets`, and nothing else. The
+`RunContext` today carries `config`, `admin_target`, `agent_target`, `secrets`, and nothing else. A
 harness needs the model's identity chain by NAME: at minimum the SESSION name to address the tool
 session (`claude --name <session>`, distinct from the template name, which is the harness's
 `owner_name`), and the vm / workspace / agent names for probe context and error labels. None of that
@@ -232,18 +232,51 @@ This is exactly the "second consumer" the capability model's own open question a
 > value, not passing the consuming resource, designed once, when two real consumers reveal its
 > shape.
 
-The harness reveals that shape. The proposal (a capability-model change, flagged for the
-maintainer): add a single host-agnostic identity value to `RunContext`, populated by the composition
-root for its operation. For a `vm create` it carries just the VM name; for a `session create` it
-carries the full chain (vm, workspace, agent-or-None, session). A capability reads what it needs and
-ignores the rest, the same way it reads the optional targets. This keeps the addition additive and
-shared rather than harness-specific, and it stays NAMES-only for now (see the "Names now" design
-decision for why representations are deliberately deferred). If the maintainer prefers not to touch
-`RunContext`, the fallback is a harness-specific context the sessions manager builds and passes
-alongside the lifecycle calls; that keeps the change out of the shared model at the cost of the
-harness not being a clean `Capability`. The recommendation is the shared identity value: it is
-small, it matches the model's own predicted evolution, and the harness is a genuine second consumer,
-not a special case.
+The harness reveals that shape, so this SDD makes the shared change (maintainer ruling, 2026-07-16):
+`RunContext` gains one host-agnostic identity value, splicing in the names model the pre-realignment
+`HarnessContext` already had (which was well-shaped, just parked on the wrong object). It is
+NAMES-only, with room reserved for fuller representations later:
+
+```python
+# capabilities/base.py (added by this SDD)
+
+@dataclass(frozen=True)
+class OperationIdentity:
+    """The model's identity chain for one operation, by NAME. Every field
+    is optional and populated only when it applies: a `vm` operation
+    carries just `vm_name`; a `session` operation carries the full chain.
+    A capability reads what it needs and ignores the rest, exactly as it
+    does the optional targets.
+
+    NAMES only, deliberately (see the "Names now" design decision). Room
+    is reserved for fuller representations (row dataclasses or read-only
+    projections) as a future additive field, added when a consumer first
+    needs more than a name.
+    """
+
+    vm_name: str | None = None
+    workspace_name: str | None = None
+    agent_name: str | None = None   # None in admin mode (no agent)
+    session_name: str | None = None
+    admin: bool = False             # admin mode; agent_name is None when True
+
+
+@dataclass(frozen=True)
+class RunContext:
+    config: Config | None = None
+    admin_target: Transport | None = None
+    agent_target: Transport | None = None
+    secrets: SecretReader | None = None
+    identity: OperationIdentity | None = None   # <- added by this SDD
+```
+
+The composition root populates `identity` for its operation, the same way it populates the targets;
+existing `RunContext(config=...)` / `RunContext(config=..., secrets=...)` construction sites leave
+it `None` and are unaffected. This keeps the addition additive and shared rather than
+harness-specific, and it keeps the harness a clean `Capability` (it reads `ctx.identity`, not a
+bespoke context). The `admin` flag and `agent_name is None` carry the same signal, matching the old
+`HarnessContext` exactly; the harness picks `ctx.agent_target` vs `ctx.admin_target` off the mode
+and addresses the tool session by `ctx.identity.session_name`.
 
 ## Layer changes
 
@@ -300,11 +333,10 @@ def _merge_pair(acc_name: str | None, acc_config: dict, child: SessionTemplate):
 `merge_config` here is the class-level (getattr-gated) hook, invoked without an instance, since the
 merge is a pure blob operation; the resolved pair is what a harness INSTANCE is later constructed
 against. The resolver validates the MERGED blob through `validate_config` once resolution completes
-(FRD R7: the resolved pair is validated at use) -- a merged blob is a new value no single
-declaration ever saw, so declared-blob validation alone cannot cover it. This is also where
-completeness lives: declared blobs validate vocabulary/shape only (a restating child may be
-partial), and any required-field or cross-field rule a harness has is checked here, against the
-merged whole.
+(FRD R7: the resolved pair is validated at use); a merged blob is a new value no single declaration
+ever saw, so declared-blob validation alone cannot cover it. This is also where completeness lives:
+declared blobs validate vocabulary/shape only (a restating child may be partial), and any
+required-field or cross-field rule a harness has is checked here, against the merged whole.
 
 ### Sessions manager (`sessions/manager.py`)
 
@@ -400,9 +432,12 @@ authority).
 
 The orchestration follows the capability model's canonical order, the same one `create_vm` and agent
 init use: preflight-all before any prompt or mutation, then the single resolve at the preflight
-boundary (one prompt session), then per-phase runup-then-ops. Applied to create:
+boundary (one prompt session), then per-phase runup-then-ops. The harness is one participant in that
+order, not its author: the prompts-up-front-then-walk-away consistency is a property of the resolve
+and isolation machinery around it, and the harness contributes only its `runup` and its two ops at
+the points shown. Applied to create:
 
-1. `build_registry(config)` -- once. Harness rows publish; a template's declared `harness` reference
+1. `build_registry(config)`, once. Harness rows publish; a template's declared `harness` reference
    validates at finalize, so a typo'd name dies here, before any prompt or mutation.
 2. Flag-shape validation, DB checks, operator prompting (unchanged).
 3. Template resolution -> `(harness, harness_config)`; merged-blob `validate_config`; construct the
@@ -440,7 +475,7 @@ claude-code sequencing requirement). A bad blob, a missing binary, or an unresol
 abort with the old session still running. Past the kill, the failure contract changes shape (FRD
 R7): a `restart` op or tmux failure cannot restore the old session, so the pinned end state is
 session row intact, old tmux gone, `agw session restart` cleanly retryable, and an error naming the
-failed step, no resurrection attempt.
+failed step; no resurrection is attempted.
 
 ## Validation responsibilities
 
@@ -493,15 +528,15 @@ than distribution trust.
 
 ### Names now, full representations reserved (and why that is not a security call)
 
-The context should carry the model's whole identity chain (vm, workspace, agent-or-None, session) as
-NAMES, which is what a command-lifecycle harness can actually use (tool addressing, probe context,
-error labels). Full representations (the row dataclasses or projections of them) are deliberately
-absent until a harness has a concrete need: handing out row types would make their shape part of the
-capability contract, and, once plugins arrive, a compatibility surface, for zero current payoff.
-When the need lands (artifact placement is the likely trigger), the addition is a new field, purely
-additive; whether it exposes the row dataclasses or stable read-only projections is decided then,
-with plugin API stability arguing for projections. This is why the proposed `RunContext` identity
-value (above) is names-only.
+`OperationIdentity` carries the model's whole identity chain (vm, workspace, agent-or-None, session)
+as NAMES, which is what a command-lifecycle harness can actually use (tool addressing, probe
+context, error labels). Full representations (the row dataclasses or projections of them) are
+deliberately absent until a harness has a concrete need: handing out row types would make their
+shape part of the capability contract, and, once plugins arrive, a compatibility surface, for zero
+current payoff. When the need lands (artifact placement is the likely trigger), the addition is a
+new field on `OperationIdentity`, purely additive; whether it exposes the row dataclasses or stable
+read-only projections is decided then, with plugin API stability arguing for projections. This is
+why the `RunContext.identity` value is names-only today.
 
 Withholding data is NOT a security mechanism, and this design does not pretend it is. A harness is
 in-process Python: it can import the DB, the config loader, and the transports regardless of what
@@ -554,28 +589,30 @@ the migrator, and the equivalence verification all reason about exactly one enco
 fields' eventual retirement (with the TOML resource path, resource-manifests Phase 6) deletes loader
 lines, not consumer logic.
 
-### Kind module now, framework untouched
+### Kind module now, no framework hook
 
 The capability kind reuses `category` / `builtin_override` / miss-policy machinery as-is; nothing
-about the harness required a framework hook (the one open item, the `RunContext` identity value, is
-a context-object addition, not a framework hook). Adding the capability domain is a package, a kind
-module, and a publisher line, the resource-manifests and capability models paying off.
+about the harness required a framework HOOK. The one shared-code change is additive and small: the
+`OperationIdentity` value and the `RunContext.identity` field in `capabilities/base.py`, an optional
+field that leaves every existing construction site untouched. Beyond that, adding the capability
+domain is a package, a kind module, and a publisher line, with the resource-manifests and capability
+models paying off.
 
 ## Open questions / for LLD
 
-- **`RunContext` identity value**: the maintainer decision on whether to add a shared host-agnostic
-  identity value to `RunContext` (recommended) versus a harness-specific context object. Pin the
-  field's shape (a small frozen value carrying the chain of names, most absent for a `vm` operation,
-  all present for a `session` operation) and which composition roots populate it.
+- **`RunContext.identity` population**: the value's shape is pinned above (`OperationIdentity`,
+  added by this SDD). The LLD detail is which composition roots populate it and with what:
+  `create_session` / `restart_session` fill the full chain; whether `create_vm` / agent init also
+  start populating their slice now (harmless, and it makes the field uniform) or leave it `None`
+  until a consumer needs it is an LLD call.
 - **Populating the target transport on `RunContext`**: the harness is the first consumer of
   `admin_target` / `agent_target`; pin where `create_session` / `restart_session` bind the
   composed-env target transport onto the context, and confirm the admin-mode selection
   (`agent_target` None, `admin_target` set) matches the manager's existing mode handling.
 - **Claude Code detection and flags**: how a resumable session named `<session>` is detected (CLI
   listing surface vs on-disk session files) and the exact spellings for `permission_mode` / `model`
-  / `extra_args` forwarding -- verify against the latest stable Claude Code CLI at implementation
-  time (latest-stable rule), and pin the fixture strategy for testing it without a real `claude`
-  binary.
+  / `extra_args` forwarding; verify against the latest stable Claude Code CLI at implementation time
+  (latest-stable rule), and pin the fixture strategy for testing it without a real `claude` binary.
 - **Template-variable substitution on harness output**: today's `_substitute_template_vars` runs on
   operator-authored strings; with harness-returned strings it must not mangle legitimate literal
   braces in generated snippets. Pin the escaping (or restrict substitution to shell's
@@ -592,7 +629,7 @@ module, and a publisher line, the resource-manifests and capability models payin
   either way).
 - **`require_commands` helper signature**: the exact shape the relocated probe loop exposes
   (target-label wording, aggregation of missing commands, `check=False` probe semantics against the
-  bound transport) -- a mechanical extraction, pinned at LLD.
+  bound transport), a mechanical extraction, pinned at LLD.
 - **Not an LLD question, recorded as deferred**: the `admin_target` grant vocabulary and enforcement
   (who grants, where it is declared) belongs to the plugin SDD's trust story; this SDD only uses the
   target-user field and keeps the context shape extensible for it.
