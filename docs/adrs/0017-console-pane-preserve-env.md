@@ -161,7 +161,7 @@ itself is ADR 0014's call, not this ADR's.
   (`_build_console_tmux`, `add_sessions`, `restore_session`) thread a `PreserveEnvMemo` so the probe
   and its warning happen once per agent user per command.
 - The probe is permanent, not a migration window: nothing records per-VM that the fragment landed,
-  so every console operation asks once. That is a deliberate trade (authoritative over cached); see
-  the last two Alternatives for what retiring it would take.
+  so every console operation asks once per agent user. That is a deliberate trade (authoritative
+  over cached); see the last two Alternatives for what retiring it would take.
 - Existing VMs need `agw vm reinit` to deploy the `51-agentworks-console-setenv` fragment before
   agent companion shells carry non-`AGENTWORKS_*` composed env.

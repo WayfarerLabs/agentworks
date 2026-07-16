@@ -42,7 +42,8 @@ updates this lockfile with a dated entry.
   (`env_keep += "AGENTWORKS_* AW_*"`, validated with visudo via staging),
   `/etc/profile.d/agentworks-identity.sh` for VM-stable static identity, `~/.agentworks-profile.sh`
   for per-user static identity (`AGENTWORKS_AGENT` for agent users) + login-shell PATH additions.
-  Idempotent on reinit.
+  Idempotent on reinit. A third fragment, `/etc/sudoers.d/51-agentworks-console-setenv`, landed
+  later; see the 2026-07-15 follow-up entry below.
 
 ### Eager prompting (Phase 6)
 

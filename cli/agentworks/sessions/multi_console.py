@@ -701,6 +701,8 @@ def add_shell(
             # new_shell is appended to cs.shells, so its index in the updated
             # configured list is the previous list's length.
             config_index=len(cs.shells),
+            # One pane, so no probe verdict to share with a sibling split.
+            preserve_memo={},
         )
         q_con = shlex.quote(tmux_session_name(console_name))
         q_win = shlex.quote(session_name)
@@ -1470,16 +1472,17 @@ def _resolve_workspace_path(db: Database, session: SessionRow) -> str | None:
     return ws.workspace_path if ws else None
 
 
-# Deliberately matches no _SUDOERS_ENV_KEEP_PATTERNS entry, so it is only ever
-# preservable via `setenv`. That is what makes it a clean capability probe: a
-# var the allowlist already covers would pass even without the fragment.
-# _sudo_can_preserve_env's test pins the two against each other.
+# Deliberately matches no AGENTWORKS_SUDOERS_ENV_KEEP_PATTERNS entry, so it is
+# only ever preservable via `setenv`. That is what makes it a clean capability
+# probe: a var the allowlist already covers would pass even without the
+# fragment. test_consoles pins the two against each other.
 _SUDO_PRESERVE_PROBE_VAR = "AWPROBE"
 
-# Memo key -> whether this VM's sudoers honors --preserve-env for that agent
-# user. Scoped to one console operation by the caller, never persisted: a VM's
-# sudoers can change out of band, so the answer is only trustworthy for as long
-# as the command that asked.
+# Agent linux user -> whether this VM's sudoers honors --preserve-env for it.
+# Keyed on the user alone because a console is single-VM by construction, so
+# one memo never spans VMs. Scoped to one console operation by the caller and
+# never persisted: a VM's sudoers can change out of band, so the answer is only
+# trustworthy for as long as the command that asked.
 PreserveEnvMemo = dict[str, bool]
 
 
@@ -1487,7 +1490,6 @@ def _sudo_can_preserve_env(
     target: Transport,
     *,
     session_user: str,
-    q_user: str,
     vm: VMRow,
     admin_user: str,
     memo: PreserveEnvMemo,
@@ -1518,10 +1520,14 @@ def _sudo_can_preserve_env(
     commands* the admin may run as the agent; the admin holds
     ``ALL=(ALL) NOPASSWD:ALL``, so no such restriction exists to model.
 
-    Warns once per agent user per ``memo``, on the first miss. Building a
-    console splits a pane per shell per session, so the un-memoized shape
-    repeats an identical multi-line warning until it buries the rest of the
-    attach output.
+    Probes and warns once per agent user per ``memo``, on the first miss.
+    Building a console splits a pane per shell per session, all asking this
+    same question of the same VM, so without the memo the probe round-trips
+    per pane and an identical multi-line warning repeats until it buries the
+    rest of the attach output. ``memo`` is required rather than defaulted for
+    that reason: every caller either shares one across its splits or passes an
+    empty one to say it has a single pane, and neither is a default we can
+    guess correctly on their behalf.
     """
     from agentworks.vms.initializer import AGENTWORKS_SUDOERS_CONSOLE_SETENV_PATH
 
@@ -1530,7 +1536,8 @@ def _sudo_can_preserve_env(
 
     probe = target.run(
         f"env {_SUDO_PRESERVE_PROBE_VAR}=1 sudo -n "
-        f"--preserve-env={_SUDO_PRESERVE_PROBE_VAR} -u {q_user} true",
+        f"--preserve-env={_SUDO_PRESERVE_PROBE_VAR} "
+        f"-u {shlex.quote(session_user)} true",
         check=False,
     )
     memo[session_user] = probe.ok
@@ -1566,7 +1573,7 @@ def _split_shell_pane(
     session_user: str,
     admin_user: str,
     config_index: int,
-    preserve_memo: PreserveEnvMemo | None = None,
+    preserve_memo: PreserveEnvMemo,
 ) -> str | None:
     """Split off one shell pane in an existing console window and tag the new
     pane with its position in the configured shell list. The tag lets
@@ -1666,10 +1673,9 @@ def _split_shell_pane(
         if pane_env and _sudo_can_preserve_env(
             target,
             session_user=session_user,
-            q_user=q_user,
             vm=vm,
             admin_user=admin_user,
-            memo=preserve_memo if preserve_memo is not None else {},
+            memo=preserve_memo,
         ):
             preserve = f" --preserve-env={shlex.quote(','.join(pane_env))}"
         pane_cmd = (
@@ -1731,7 +1737,7 @@ def _add_session_window(
     member: ConsoleSessionRow,
     vm: VMRow,
     layout: str,
-    preserve_memo: PreserveEnvMemo | None = None,
+    preserve_memo: PreserveEnvMemo,
 ) -> None:
     """Create one session window in the console and attach its shell panes.
 
