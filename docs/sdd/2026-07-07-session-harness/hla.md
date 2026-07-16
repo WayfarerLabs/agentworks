@@ -232,51 +232,90 @@ This is exactly the "second consumer" the capability model's own open question a
 > value, not passing the consuming resource, designed once, when two real consumers reveal its
 > shape.
 
-The harness reveals that shape, so this SDD makes the shared change (maintainer ruling, 2026-07-16):
-`RunContext` gains one host-agnostic identity value, splicing in the names model the pre-realignment
-`HarnessContext` already had (which was well-shaped, just parked on the wrong object). It is
-NAMES-only, with room reserved for fuller representations later:
+The harness reveals that shape, so this SDD makes the shared change (maintainer ruling, 2026-07-16),
+and makes it a real INVARIANT rather than an optional extra. A `RunContext` without the operation's
+identity is an incomplete object, so identity is REQUIRED and the object enforces it, splicing in
+the names model the pre-realignment `HarnessContext` carried (well-shaped, just parked on the wrong
+object) as a coherent, self-validating value:
 
 ```python
 # capabilities/base.py (added by this SDD)
 
 @dataclass(frozen=True)
 class OperationIdentity:
-    """The model's identity chain for one operation, by NAME. Every field
-    is optional and populated only when it applies: a `vm` operation
-    carries just `vm_name`; a `session` operation carries the full chain.
-    A capability reads what it needs and ignores the rest, exactly as it
-    does the optional targets.
+    """The model's placement chain for one operation, by NAME: which VM,
+    workspace, agent, and session the command acts on. Fields are optional
+    at the type level because operations reach different depths (a `vm
+    create` has only vm_name; a placement-free scan has none), but the
+    chain must be COHERENT, which __post_init__ enforces:
 
-    NAMES only, deliberately (see the "Names now" design decision). Room
-    is reserved for fuller representations (row dataclasses or read-only
-    projections) as a future additive field, added when a consumer first
-    needs more than a name.
+      - admin mode has no agent: admin and agent_name are exclusive;
+      - a lower name implies its VM: agent_name, workspace_name, or
+        session_name set requires vm_name set.
+
+    So an incoherent identity (a session with no VM, an admin op naming an
+    agent) cannot be constructed. NAMES only, deliberately (see the "Names
+    now" design decision); room is reserved for fuller representations as a
+    future additive field.
     """
 
     vm_name: str | None = None
     workspace_name: str | None = None
-    agent_name: str | None = None   # None in admin mode (no agent)
+    agent_name: str | None = None       # None in admin mode
     session_name: str | None = None
-    admin: bool = False             # admin mode; agent_name is None when True
+    admin: bool = False
+
+    def __post_init__(self) -> None:
+        if self.admin and self.agent_name is not None:
+            raise ValueError("admin identity cannot name an agent")
+        lower = self.agent_name or self.workspace_name or self.session_name
+        if lower is not None and self.vm_name is None:
+            raise ValueError("agent/workspace/session identity requires a vm_name")
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, kw_only=True)
 class RunContext:
+    identity: OperationIdentity         # REQUIRED: every operation has one
     config: Config | None = None
     admin_target: Transport | None = None
     agent_target: Transport | None = None
     secrets: SecretReader | None = None
-    identity: OperationIdentity | None = None   # <- added by this SDD
 ```
 
-The composition root populates `identity` for its operation, the same way it populates the targets;
-existing `RunContext(config=...)` / `RunContext(config=..., secrets=...)` construction sites leave
-it `None` and are unaffected. This keeps the addition additive and shared rather than
-harness-specific, and it keeps the harness a clean `Capability` (it reads `ctx.identity`, not a
-bespoke context). The `admin` flag and `agent_name is None` carry the same signal, matching the old
-`HarnessContext` exactly; the harness picks `ctx.agent_target` vs `ctx.admin_target` off the mode
-and addresses the tool session by `ctx.identity.session_name`.
+Two things make this an enforced invariant rather than a convention:
+
+- **`identity` is a required field on `RunContext`** (the dataclass becomes `kw_only=True` so the
+  required field composes with the existing defaulted ones). There is no `None` default to fall
+  through: every construction site must pass an identity. This SDD threads it through all fourteen
+  existing construction sites (in `vms/manager.py`, `agents/manager.py`,
+  `git_credentials/__init__.py`, and `doctor.py`) plus this SDD's new `sessions/manager.py` calls,
+  each passing the identity appropriate to its operation: a `vm create` passes
+  `OperationIdentity(vm_name=...)`, agent init passes vm + agent, `create_session` /
+  `restart_session` pass the full chain. All fourteen already build `RunContext(config=...)` by
+  keyword, so the edit is one added argument per call, not a call-shape break.
+- **`OperationIdentity` self-validates**, so "appropriate identity" is the object's guarantee, not a
+  caller's promise: the coherence rules reject a malformed chain at construction.
+
+Why identity can be required where the other fields cannot: the timing-populated fields
+(`admin_target`, `agent_target`, `secrets`) genuinely do not exist yet at some stages (a target is
+created later, a secret is resolved later), which is why they stay optional. The NAMES the operation
+acts on are chosen at command entry and known before anything is touched, even when the resources
+they name are ephemeral and provisioned during the command (the workspace/agent/session names for a
+`session create --new-agent` are known up front; only the resources are created later). Identity is
+therefore the one part of the context always available, and the model states it as a required
+invariant. This carves out the capability README's "every field is optional" line, which this SDD
+updates to note identity as the deliberate exception.
+
+The harness picks `ctx.agent_target` vs `ctx.admin_target` off the mode (`ctx.identity.admin`, with
+`agent_name` None in admin mode) and addresses the tool session by `ctx.identity.session_name`.
+Because its own composition root always supplies the full chain, the harness relies on the placement
+names being present, not merely typed as optional.
+
+One caller to pin at LLD: doctor's passive site scan (`doctor.py`) preflights a vm-site's platform
+with no runtime placement (it checks a site's config, it is not acting on a VM), so its appropriate
+identity is the empty `OperationIdentity()`, coherent by the rules above. The site's own name is the
+capability's `owner_name`, not ambient placement, so it does not belong on the chain. The LLD
+confirms no doctor row wants a richer identity than empty.
 
 ## Layer changes
 
@@ -417,6 +456,10 @@ tests) prove the shape divergence is value-free, exactly as they did for `provid
 - Permanent docs per FRD R10, each riding the commit that makes it true: top-level `README.md` model
   narrative, `cli/README.md` schema/reference, `docs/guides/resources.md` capability story (which
   already carries `secret-backend` and `git-credential-provider`).
+- `capabilities/README.md`: the lifecycle doc's `RunContext` description says "every field is
+  optional"; this SDD updates that line to carve out `identity` as the required exception (known at
+  command entry, unlike the timing-populated fields), so the capability model doc and the code
+  agree.
 - The ADR is drafted as `adr-session-harness.md` in this feature directory and is promoted (and
   numbered) into `docs/adrs/` at the very end of the effort (FRD R10). It references ADR 0016 for
   the capability collapse and `capabilities/README.md` for the lifecycle contract.
@@ -448,8 +491,9 @@ the points shown. Applied to create:
    Power-state convergence is idempotent declared-state maintenance, not a rollback-tracked
    mutation; called out so "any state change" in the invariant reads precisely.
 5. Preflight-all: the harness's `preflight(ctx)` (near-empty for the built-ins) alongside every
-   other participating resource's, all against the command-start `RunContext(config=config)` (no
-   secrets, no on-VM targets), before any prompt or mutation.
+   other participating resource's, all against the command-start
+   `RunContext(identity=..., config=config)` (identity always present, no secrets, no on-VM
+   targets), before any prompt or mutation.
 6. The single secret resolve (`Resolver.resolve()`; the union across every instance registered on
    it, one batched prompt session) and env composition. When `--new-agent` is in play, the ephemeral
    agent's git-credential tokens are already folded into this resolve on main (constructed against
@@ -591,20 +635,23 @@ lines, not consumer logic.
 
 ### Kind module now, no framework hook
 
-The capability kind reuses `category` / `builtin_override` / miss-policy machinery as-is; nothing
-about the harness required a framework HOOK. The one shared-code change is additive and small: the
-`OperationIdentity` value and the `RunContext.identity` field in `capabilities/base.py`, an optional
-field that leaves every existing construction site untouched. Beyond that, adding the capability
-domain is a package, a kind module, and a publisher line, with the resource-manifests and capability
-models paying off.
+The capability KIND reuses `category` / `builtin_override` / miss-policy machinery as-is; nothing
+about the harness required a new framework HOOK, so adding the harness domain itself is a package, a
+kind module, and a publisher line. The one genuinely cross-cutting change is the
+`RunContext.identity` invariant: `OperationIdentity` plus the required field in
+`capabilities/base.py`, the one-line identity argument added at all fourteen existing `RunContext`
+construction sites, and the README carve-out. That is a deliberate MODEL change, landing a final
+identity API rather than an optional bolt-on, not framework plumbing, and it is bounded: every site
+already builds `RunContext` by keyword, so each is a single added argument.
 
 ## Open questions / for LLD
 
-- **`RunContext.identity` population**: the value's shape is pinned above (`OperationIdentity`,
-  added by this SDD). The LLD detail is which composition roots populate it and with what:
-  `create_session` / `restart_session` fill the full chain; whether `create_vm` / agent init also
-  start populating their slice now (harmless, and it makes the field uniform) or leave it `None`
-  until a consumer needs it is an LLD call.
+- **`RunContext.identity` per site**: identity is required (see the identity section), so every
+  construction site passes one. The LLD pins the exact `OperationIdentity` each of the fourteen
+  sites builds (a `vm create` its vm_name, agent init vm + agent, `create_session` /
+  `restart_session` the full chain, doctor's site scan the empty identity), and confirms the
+  coherence rules against admin-session semantics (does an admin session carry a workspace_name? if
+  so, `session_name` can imply `workspace_name` too) before the `__post_init__` set is frozen.
 - **Populating the target transport on `RunContext`**: the harness is the first consumer of
   `admin_target` / `agent_target`; pin where `create_session` / `restart_session` bind the
   composed-env target transport onto the context, and confirm the admin-mode selection

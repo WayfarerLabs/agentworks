@@ -99,8 +99,10 @@ the `Capability` base); the built-in `shell` and `claude-code` harnesses; the
 `session-template.spec.harness` / `spec.harness_config` consumer surface (YAML and TOML); the
 inheritance semantics of the pair; the runtime delegation in the sessions manager, including
 constructing and holding the harness instance and composing its lifecycle stages (the session is the
-model's first RICH consuming resource); the migration-tool and sample updates the surface change
-requires; the top-level documentation rewrite that promotes the new model (R10).
+model's first RICH consuming resource); the required `RunContext.identity` invariant
+(`OperationIdentity`) and its threading through every existing capability composition root (R7); the
+migration-tool and sample updates the surface change requires; the top-level documentation rewrite
+that promotes the new model (R10).
 
 Already handled upstream, so NOT in scope (was in the pre-realignment draft): the single up-front
 secret resolve for a `session create --new-agent` nested ephemeral agent. Main's `create_session`
@@ -431,17 +433,27 @@ that provides walk-away.
   restart never prompts for secrets it would discard; the harness `runup` (required-commands) slots
   after that resolve and before the kill, so a missing binary still aborts with the old session
   running.
-- **The `RunContext` gains the model's identity chain, and this SDD adds it** (maintainer ruling,
-  2026-07-16). `RunContext` today carries global config, the execution targets, and resolved
-  secrets, but no identity: no vm / workspace / agent / session NAMES. A harness needs them, at
-  minimum the session name to address the tool session (`claude --name <session>`, which is distinct
-  from the template name it is constructed under), plus the chain for probe context and error
-  labels. The harness is the "second consumer" the capability model's own open question predicted
-  would motivate enriching the context beyond `owner`, so the enrichment lands as a shared,
-  host-agnostic identity value on `RunContext` rather than harness-specific plumbing. It is
-  NAMES-only for now, with room reserved for fuller representations when a consumer first needs them
-  (the HLA pins the shape); other operations populate what applies to them (a `vm` operation carries
-  just the vm name) and ignore the rest, exactly as they do the optional targets.
+- **The `RunContext` gains the model's identity chain as a REQUIRED invariant, and this SDD adds
+  it** (maintainer ruling, 2026-07-16). `RunContext` today carries global config, the execution
+  targets, and resolved secrets, but no identity: no vm / workspace / agent / session NAMES. A
+  harness needs them, at minimum the session name to address the tool session
+  (`claude --name <session>`, distinct from the template name it is constructed under), plus the
+  chain for probe context and error labels. This SDD adds a self-validating `OperationIdentity`
+  value (the placement chain by name, with coherence enforced by the object: admin excludes an
+  agent, and any lower name implies its VM) and makes it a REQUIRED field on `RunContext`, not an
+  optional extra. A context without the operation's identity is an incomplete object, so the object
+  enforces its presence and every construction site supplies one. Identity can be required where the
+  timing-populated fields (targets, secrets) cannot, because the operation's names are chosen at
+  command entry and known before anything is touched, even when the resources they name are
+  provisioned later. It is names-only for now, with room reserved for fuller representations (the
+  HLA pins the shape).
+- **Threading identity through the existing capability roots is in scope.** Because identity is now
+  required on the shared `RunContext`, this SDD updates every current construction site (in
+  `vms/manager.py`, `agents/manager.py`, `git_credentials/__init__.py`, and `doctor.py`) to pass the
+  `OperationIdentity` appropriate to its operation, and carves out the capability README's "every
+  field is optional" line for identity. This widens the SDD's blast radius beyond harness-local
+  code, deliberately: the alternative (ship identity optional now, tighten later) would launch a
+  non-final API, which the model should not do.
 - **Getting the rest of this API surface right is a big part of the HLA**: what the core hands the
   harness (the `RunContext`: execution targets, resolved secrets, identity chain, bound config) and
   what the harness returns to the tmux layer are pinned there, not here. The requirement is the
