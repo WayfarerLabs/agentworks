@@ -432,6 +432,7 @@ def add_sessions(
         vm, target = live
         if not _console_tmux_exists(target, console_name):
             return
+        preserve_memo: PreserveEnvMemo = {}
         for spec in specs:
             member = db.get_console_session(console_name, spec.name)
             assert member is not None
@@ -444,6 +445,7 @@ def add_sessions(
                 member=member,
                 vm=vm,
                 layout=named_console_template(registry).tmux_layout,
+                preserve_memo=preserve_memo,
             )
 
 
@@ -811,6 +813,7 @@ def restore_session(
                 member=member,
                 vm=vm,
                 layout=layout,
+                preserve_memo={},
             )
             return
 
@@ -948,6 +951,7 @@ def restore_session(
         # Collect each split's outcome so a partial failure becomes a loud error
         # rather than a silent exit-0 leaving panes missing or untagged.
         failed: list[int] = []
+        preserve_memo: PreserveEnvMemo = {}
         for cidx in missing:
             pane_id = _split_shell_pane(
                 target,
@@ -963,6 +967,7 @@ def restore_session(
                 session_user=session_user,
                 admin_user=vm.admin_username,
                 config_index=cidx,
+                preserve_memo=preserve_memo,
             )
             if pane_id is None:
                 failed.append(cidx)
@@ -1465,14 +1470,28 @@ def _resolve_workspace_path(db: Database, session: SessionRow) -> str | None:
     return ws.workspace_path if ws else None
 
 
-# Deliberately matches neither env_keep pattern: `AW_*` needs a literal `AW_`
-# prefix and `AGENTWORKS_*` needs `AGENTWORKS_`, so this name is only ever
-# preservable via `setenv`. That is what makes it a clean capability probe:
-# a var the allowlist already covers would pass even without the fragment.
+# Deliberately matches no _SUDOERS_ENV_KEEP_PATTERNS entry, so it is only ever
+# preservable via `setenv`. That is what makes it a clean capability probe: a
+# var the allowlist already covers would pass even without the fragment.
+# _sudo_can_preserve_env's test pins the two against each other.
 _SUDO_PRESERVE_PROBE_VAR = "AWPROBE"
 
+# Memo key -> whether this VM's sudoers honors --preserve-env for that agent
+# user. Scoped to one console operation by the caller, never persisted: a VM's
+# sudoers can change out of band, so the answer is only trustworthy for as long
+# as the command that asked.
+PreserveEnvMemo = dict[str, bool]
 
-def _sudo_can_preserve_env(target: Transport, *, q_user: str) -> bool:
+
+def _sudo_can_preserve_env(
+    target: Transport,
+    *,
+    session_user: str,
+    q_user: str,
+    vm: VMRow,
+    admin_user: str,
+    memo: PreserveEnvMemo,
+) -> bool:
     """Report whether this VM's sudoers lets the admin use ``--preserve-env``.
 
     VM init grants the admin ``Defaults:<admin> setenv`` (see
@@ -1486,8 +1505,11 @@ def _sudo_can_preserve_env(target: Transport, *, q_user: str) -> bool:
     So ask before committing to the flag. The probe sets its own var rather
     than reusing a composed key: it needs a name no ``env_keep`` pattern
     covers, and it must not depend on the composed env having reached this
-    process (it has not, on non-SSH transports). ``-n`` keeps the probe from
-    blocking on a password prompt if the admin's NOPASSWD grant is ever gone.
+    process (it has not, on non-SSH transports). It goes through ``env`` rather
+    than a ``VAR=val cmd`` prefix because this string runs under the admin's
+    login shell, which is operator-configurable and need not be POSIX (fish
+    only took ``VAR=val cmd`` in 3.1; csh never did). ``-n`` keeps the probe
+    from blocking on a password prompt if the admin's NOPASSWD grant is gone.
 
     Scoped to the setenv gate specifically. The probe runs as ``MODE_RUN`` just
     as the real ``sudo --login`` invocation does (``--login`` only adds the
@@ -1495,12 +1517,37 @@ def _sudo_can_preserve_env(target: Transport, *, q_user: str) -> bool:
     for both. It does not attempt to predict a sudoers that restricts *which
     commands* the admin may run as the agent; the admin holds
     ``ALL=(ALL) NOPASSWD:ALL``, so no such restriction exists to model.
+
+    Warns once per agent user per ``memo``, on the first miss. Building a
+    console splits a pane per shell per session, so the un-memoized shape
+    repeats an identical multi-line warning until it buries the rest of the
+    attach output.
     """
+    from agentworks.vms.initializer import AGENTWORKS_SUDOERS_CONSOLE_SETENV_PATH
+
+    if session_user in memo:
+        return memo[session_user]
+
     probe = target.run(
-        f"{_SUDO_PRESERVE_PROBE_VAR}=1 sudo -n "
+        f"env {_SUDO_PRESERVE_PROBE_VAR}=1 sudo -n "
         f"--preserve-env={_SUDO_PRESERVE_PROBE_VAR} -u {q_user} true",
         check=False,
     )
+    memo[session_user] = probe.ok
+    if not probe.ok:
+        # Report what sudo said rather than diagnosing it. A refused `setenv`
+        # is the expected cause, but the probe fails for any reason (unknown
+        # agent user, sudo missing, a transport blip), and sudo's own text
+        # already tells those apart.
+        detail = probe.stderr.strip() or f"exit {probe.returncode}"
+        output.warn(
+            f"{vm.name}: agent-scope env and secrets will not reach console "
+            f"shell panes for '{session_user}'. Preserving them across the "
+            f"pane's sudo needs `Defaults:{admin_user} setenv` in "
+            f"{AGENTWORKS_SUDOERS_CONSOLE_SETENV_PATH}, which VM init deploys; "
+            f"if this VM predates it, `agw vm reinit {vm.name}` will add it. "
+            f"sudo said: {detail}"
+        )
     return probe.ok
 
 
@@ -1519,6 +1566,7 @@ def _split_shell_pane(
     session_user: str,
     admin_user: str,
     config_index: int,
+    preserve_memo: PreserveEnvMemo | None = None,
 ) -> str | None:
     """Split off one shell pane in an existing console window and tag the new
     pane with its position in the configured shell list. The tag lets
@@ -1556,7 +1604,6 @@ def _split_shell_pane(
     return value; `restore_session` checks each return so a partial restore
     is loud rather than a silent exit-0."""
     from agentworks.sessions.tmux import _tmux_env_flags
-    from agentworks.vms.initializer import AGENTWORKS_SUDOERS_CONSOLE_SETENV_PATH
 
     cwd = shell["cwd"]
     full_path = posixpath.join(workspace_path, cwd) if cwd else workspace_path
@@ -1613,19 +1660,18 @@ def _split_shell_pane(
         # un-preservable vars: it refuses the whole command, which would exit
         # the pane process on spawn. Skip the question when there is no env to
         # preserve (nothing to ask about, and no empty `--preserve-env=`).
+        # _sudo_can_preserve_env warns on a miss; a caller that splits panes in
+        # a loop passes a memo so that happens once rather than per pane.
         preserve = ""
-        if pane_env and _sudo_can_preserve_env(target, q_user=q_user):
+        if pane_env and _sudo_can_preserve_env(
+            target,
+            session_user=session_user,
+            q_user=q_user,
+            vm=vm,
+            admin_user=admin_user,
+            memo=preserve_memo if preserve_memo is not None else {},
+        ):
             preserve = f" --preserve-env={shlex.quote(','.join(pane_env))}"
-        elif pane_env:
-            output.warn(
-                f"{vm.name}: agent-scope env and secrets will not reach this "
-                f"pane. Preserving them across the pane's sudo to "
-                f"'{session_user}' needs `Defaults:{admin_user} setenv` in "
-                f"{AGENTWORKS_SUDOERS_CONSOLE_SETENV_PATH}, which this VM's "
-                f"sudoers does not grant. Run `agw vm reinit {vm.name}` to "
-                f"deploy it. The pane still gets the AGENTWORKS_*/AW_* vars "
-                f"carried by the sudoers env_keep fragment."
-            )
         pane_cmd = (
             f"exec sudo --login{preserve} -u {q_user} bash -c {shlex.quote(bootstrap)}"
         )
@@ -1685,6 +1731,7 @@ def _add_session_window(
     member: ConsoleSessionRow,
     vm: VMRow,
     layout: str,
+    preserve_memo: PreserveEnvMemo | None = None,
 ) -> None:
     """Create one session window in the console and attach its shell panes.
 
@@ -1750,6 +1797,7 @@ def _add_session_window(
                 session_user=session_user,
                 admin_user=vm.admin_username,
                 config_index=config_index,
+                preserve_memo=preserve_memo,
             )
         _apply_layout(target, q_con, q_session, layout)
     # Focus the session pane so the operator lands on the attach output
@@ -1809,6 +1857,9 @@ def _build_console_tmux(
         output.info(
             f"Adding {len(members)} session window(s) to console '{console.name}'..."
         )
+    # One memo for the whole build: every window's agent panes ask the same VM
+    # the same question, so probe (and warn) once per agent user, not per pane.
+    preserve_memo: PreserveEnvMemo = {}
     for member in members:
         _add_session_window(
             target,
@@ -1819,6 +1870,7 @@ def _build_console_tmux(
             member=member,
             vm=vm,
             layout=layout,
+            preserve_memo=preserve_memo,
         )
 
     if not placeholder_used:

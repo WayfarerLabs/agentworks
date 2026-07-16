@@ -204,6 +204,13 @@ AGENTWORKS_IDENTITY_PROFILE_PATH = "/etc/profile.d/agentworks-identity.sh"
 AGENTWORKS_ZPROFILE_PATH = "/etc/zsh/zprofile"
 AGENTWORKS_SSHD_ACCEPT_ENV_PATH = "/etc/ssh/sshd_config.d/50-agentworks-accept-env.conf"
 AGENTWORKS_SUDOERS_ENV_KEEP_PATH = "/etc/sudoers.d/50-agentworks-env-keep"
+
+# The env_keep allowlist, as sudoers glob patterns. Vars matching these cross a
+# sudo boundary without needing `--preserve-env`; everything else in a console
+# agent pane's composed env rides the setenv fragment instead (ADR 0017). The
+# console pane's capability probe picks a var no pattern here covers, so this
+# is the shared source of truth for both.
+AGENTWORKS_SUDOERS_ENV_KEEP_PATTERNS = ("AGENTWORKS_*", "AW_*")
 AGENTWORKS_SUDOERS_CONSOLE_SETENV_PATH = "/etc/sudoers.d/51-agentworks-console-setenv"
 
 # Marker comment used to find and replace the identity block in
@@ -498,7 +505,7 @@ def _write_sudoers_env_keep(
         "# Preserves agentworks-managed env vars across sudo for the\n"
         "# console add-shell agent-pane path; see\n"
         "# docs/adrs/0014-sshd-accept-env-wildcard.md.\n"
-        'Defaults env_keep += "AGENTWORKS_* AW_*"\n'
+        f'Defaults env_keep += "{" ".join(AGENTWORKS_SUDOERS_ENV_KEEP_PATTERNS)}"\n'
     )
     try:
         _install_sudoers_fragment(

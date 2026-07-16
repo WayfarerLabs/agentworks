@@ -54,21 +54,21 @@ shells is a separate identity-model question left for future work.
    with `visudo -cf` on a staging path before promotion, identical to the `env_keep` fragment.
 
 3. Ask sudo before committing to the flag in 1, because a VM missing the fragment from 2 refuses the
-   whole command rather than dropping the un-preservable vars. `_split_shell_pane` probes once as
-   the admin (`AWPROBE=1 sudo -n --preserve-env=AWPROBE -u <agent> true`) and, if refused, omits the
-   flag and warns. `AWPROBE` deliberately matches neither `env_keep` glob, so it isolates the
-   `setenv` grant; a covered name would pass even without the fragment. The probe sets the var
-   itself rather than reusing a composed key, so it does not depend on the composed env having
-   reached the CLI (it has not, on non-SSH transports). See the third Negative for why this is
-   load-bearing rather than defensive padding.
+   whole command rather than dropping the un-preservable vars. The service layer probes as the admin
+   (`env AWPROBE=1 sudo -n --preserve-env=AWPROBE -u <agent> true`) and, if refused, omits the flag
+   and warns. `AWPROBE` deliberately matches no `env_keep` pattern, so it isolates the `setenv`
+   grant; a covered name would pass even without the fragment. The probe sets the var itself rather
+   than reusing a composed key, so it does not depend on the composed env having reached the CLI (it
+   has not, on non-SSH transports). It is once per agent user per console operation, not once per
+   pane: callers that split panes in a loop thread a memo (see the round-trip Negative). See the
+   reinit Negative for why this is load-bearing rather than defensive padding.
 
-The `env_keep` fragment from ADR 0014 stays, for two concrete reasons rather than as
-belt-and-braces. It is what makes the degraded pane in 3 useful rather than empty: on a VM without
-the `setenv` fragment, `AGENTWORKS_*` / `AW_*` are the only vars that survive, and they are the ones
-that carry workspace identity. It also covers vars inherited from the console tmux server's own
-environment, which are never in `pane_env` and so are never named on `--preserve-env`. For keys that
-_are_ in `pane_env`, `--preserve-env` names them explicitly and `env_keep` is redundant; if the
-fallback in 3 is ever retired, that redundancy is what retires with it.
+The `env_keep` fragment from ADR 0014 stays. It is what the fallback in 3 degrades _to_: on a VM
+that has the ADR 0014 fragment but not this one, `AGENTWORKS_*` / `AW_*` are the vars that still
+cross, and they are the ones carrying workspace identity, so the degraded pane is useful rather than
+bare. For keys that are in `pane_env`, `--preserve-env` names them explicitly and `env_keep` is
+redundant; that redundancy is what would retire if the fallback ever does. Retiring `env_keep`
+itself is ADR 0014's call, not this ADR's.
 
 ## Positives
 
@@ -109,14 +109,18 @@ fallback in 3 is ever retired, that redundancy is what retires with it.
   decision 3. Same reinit-to-adopt story as ADR 0014.
 - **A degraded pane is still a real outcome, not just a warning.** On the fallback path the operator
   gets a working shell that is missing its agent-scope env and secrets. We surface that with an
-  `output.warn` naming the missing directive, the fragment path, and `agw vm reinit <vm>`, rather
-  than only inside the pane, because `tmux split-window -P` returns a pane id whether or not the
-  command inside it survives: the service layer cannot infer the degradation from the split's exit
-  status, and an operator who never opens the pane would otherwise never learn of it.
-- **One extra round trip per agent-pane split.** The probe is a real `sudo` call on the VM, so a
-  `restore_session` repairing several agent panes pays it per pane and repeats the warning per pane.
-  Accepted for now: the alternative is caching capability state per VM, which is stale-prone against
-  out-of-band sudoers edits and buys little on a path already dominated by tmux round trips.
+  `output.warn` naming the missing directive, the fragment path, `agw vm reinit <vm>`, and sudo's
+  own refusal text, rather than only inside the pane, because `tmux split-window -P` returns a pane
+  id whether or not the command inside it survives: the service layer cannot infer the degradation
+  from the split's exit status, and an operator who never opens the pane would otherwise never learn
+  of it. The warning quotes sudo rather than diagnosing it, because the probe fails for any reason
+  (an unknown agent user, sudo missing) and only sudo's text tells those apart.
+- **One extra round trip per agent user per console operation, and auth-log noise.** The probe is a
+  real `sudo -u <agent>` call, so it opens and closes a PAM session and an operator auditing the
+  VM's `auth.log` sees a `sudo ... true` entry attributable to agentworks for each one. A memo
+  threaded from the looping callers holds it to one probe per agent user per command rather than one
+  per pane, which is what keeps both the round trips and the warning from scaling with pane count.
+  The memo is deliberately not persisted; see the Alternatives.
 
 ## Alternatives considered
 
@@ -140,10 +144,12 @@ fallback in 3 is ever retired, that redundancy is what retires with it.
   even be relying on. The `output.warn` is the compromise: the operator is told, and still gets a
   shell. If the degraded pane proves to be a footgun in practice, refusing is the natural next step.
 - **Record the fragment's deployment on the VM row and skip the probe when it is known present.**
-  The DB is the source of truth for what init has done, so this would retire the per-split round
-  trip. Rejected for now: it adds schema and a second source of truth for a VM-side fact that can
-  drift (an operator editing sudoers out of band), and the probe is authoritative by construction.
-  Worth revisiting if the round trip shows up in practice.
+  The DB is the source of truth for what init has done, so this would retire the probe entirely.
+  Rejected for now: it adds schema and a second source of truth for a VM-side fact that can drift
+  (an operator editing sudoers out of band), and the probe is authoritative by construction. The
+  per-command memo takes most of the win with no staleness window, since a VM's sudoers cannot
+  meaningfully change mid-command. Worth revisiting if the remaining round trip shows up in
+  practice.
 
 ## Consequences
 
@@ -151,9 +157,11 @@ fallback in 3 is ever retired, that redundancy is what retires with it.
   shared stage -> `visudo -cf` -> promote helper.
 - `_split_shell_pane`'s agent-pane branch adds `--preserve-env=<keys>` built from the composed
   `pane_env`, behind a `_sudo_can_preserve_env` capability probe that warns and falls back to a
-  plain `sudo --login` when the VM lacks the `setenv` fragment.
+  plain `sudo --login` when the VM lacks the `setenv` fragment. Callers that split panes in a loop
+  (`_build_console_tmux`, `add_sessions`, `restore_session`) thread a `PreserveEnvMemo` so the probe
+  and its warning happen once per agent user per command.
 - The probe is permanent, not a migration window: nothing records per-VM that the fragment landed,
-  so every agent-pane split asks. That is a deliberate trade (authoritative over cached, one `sudo`
-  call per split); see the last two Alternatives for what retiring it would take.
+  so every console operation asks once. That is a deliberate trade (authoritative over cached); see
+  the last two Alternatives for what retiring it would take.
 - Existing VMs need `agw vm reinit` to deploy the `51-agentworks-console-setenv` fragment before
   agent companion shells carry non-`AGENTWORKS_*` composed env.
