@@ -190,7 +190,7 @@ def _write_agentworks_profile(
 #     `Defaults env_keep += "AGENTWORKS_* AW_*"`. Lets agentworks-managed
 #     vars survive the sudo boundary in console add-shell agent panes
 #     (where the tmux server runs as admin and a pane sudo's to the agent).
-#     Validated with `visudo -c` before install.
+#     Validated with `visudo -cf` on a staging path before install.
 #
 #   /etc/sudoers.d/51-agentworks-console-setenv
 #     `Defaults:<admin> setenv`. Permits the admin user to use
@@ -198,7 +198,7 @@ def _write_agentworks_profile(
 #     secrets (not just AGENTWORKS_*/AW_*) survive the same sudo boundary
 #     in console add-shell agent panes. See
 #     docs/adrs/0017-console-pane-preserve-env.md. Validated with
-#     `visudo -c` before install.
+#     `visudo -cf` on a staging path before install.
 
 AGENTWORKS_IDENTITY_PROFILE_PATH = "/etc/profile.d/agentworks-identity.sh"
 AGENTWORKS_ZPROFILE_PATH = "/etc/zsh/zprofile"

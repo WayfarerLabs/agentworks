@@ -319,10 +319,12 @@ def test_sudoers_env_keep_rejects_on_visudo_failure() -> None:
     commands = [r for r, _ in target.runs]
     # The staging file got removed; the real path was NOT mv-ed.
     assert any("rm -f" in c and "50-agentworks-env-keep" in c for c in commands)
-    assert not any(
-        f"mv '{AGENTWORKS_SUDOERS_ENV_KEEP_PATH}.tmp' '{AGENTWORKS_SUDOERS_ENV_KEEP_PATH}'" in c
-        for c in commands
-    )
+    # Matched on the mv verb alone, not on a reconstructed command string:
+    # shlex.quote leaves these paths bare, so spelling the quotes out here
+    # would never match and the assertion would hold even if the promote did
+    # happen. Promoting a fragment visudo rejected can lock the operator out
+    # of sudo, so this must fail loudly rather than vacuously pass.
+    assert not any("mv" in c and "50-agentworks-env-keep" in c for c in commands)
     # The helper warned (non-fatal).
     assert any("visudo" in w for w in logger.warnings)
 
@@ -374,11 +376,9 @@ def test_sudoers_console_setenv_rejects_on_visudo_failure() -> None:
     _write_sudoers_console_setenv(target, logger, "agentworks")
     commands = [r for r, _ in target.runs]
     assert any("rm -f" in c and "51-agentworks-console-setenv" in c for c in commands)
-    assert not any(
-        f"mv '{AGENTWORKS_SUDOERS_CONSOLE_SETENV_PATH}.tmp' "
-        f"'{AGENTWORKS_SUDOERS_CONSOLE_SETENV_PATH}'" in c
-        for c in commands
-    )
+    # Matched on the mv verb alone; see the env_keep sibling for why spelling
+    # out the quoted paths here would make this assertion vacuous.
+    assert not any("mv" in c and "51-agentworks-console-setenv" in c for c in commands)
     assert any("visudo" in w for w in logger.warnings)
 
 
