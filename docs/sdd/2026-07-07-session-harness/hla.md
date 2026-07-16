@@ -454,11 +454,16 @@ platform and providers:
   resolved secrets, the global config, the identity names), call `harness.start(ctx)` or
   `harness.restart(ctx)`, then apply template-variable substitution to the returned string exactly
   as today.
-- `_assert_required_commands`'s probe loop, docstring rationale, and error shape relocate verbatim
-  to `capabilities/harness/base.py` as the `require_commands(ctx, commands, ...)` helper (it no-ops
-  when `ctx` has no usable target). The manager calls `harness.preflight(ctx)` in the preflight-all
-  phase and `harness.runup(ctx)` only after ephemeral provisioning; both delegate to the same
-  helper, so the required-commands probe fires once, at whichever stage first has the target.
+- `_assert_required_commands`'s probe loop, docstring rationale, and error shape LEAVE the session
+  entirely (today they are inline in `create_session`) and relocate verbatim to
+  `capabilities/harness/base.py` as the `require_commands(ctx, commands, ...)` helper, which probes
+  whatever target `ctx` carries and no-ops when there is none. The manager then does the STANDARD,
+  UNIFORM two-hook readiness for every session, not branching on ephemeral: `harness.preflight(ctx)`
+  in the preflight-all phase and `harness.runup(ctx)` before the launch op. Both hooks are thin
+  wrappers over the one helper, and a fired-once guard makes the actual probe run exactly once, at
+  whichever hook holds the target (preflight for an existing agent/workspace and every restart;
+  runup for a just-provisioned ephemeral). The session owns none of the check's logic; it only calls
+  the standard hooks.
 
 Sequencing note (pinned so the LLD preserves it): on restart the target already exists, so
 `harness.preflight` (required-commands) runs pre-resolve and pre-kill, and the ephemeral runup
