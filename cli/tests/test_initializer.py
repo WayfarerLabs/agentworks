@@ -12,6 +12,7 @@ from agentworks.catalog import (
     UserInstallCommandEntry,
 )
 from agentworks.vms.initializer import (
+    _apply_sve_mask,
     _configure_apt_sources,
     _install_apt_packages,
     _preserve_ssh_host_keys,
@@ -614,6 +615,151 @@ def test_preserve_ssh_host_keys_emits_same_bytes_as_phase_a() -> None:
     assert (
         "".join(f"{line}\n" for line in SSH_PRESERVE_KEYS_LINES)
         == SSH_PRESERVE_KEYS_CONTENT
+    )
+
+
+# -- Apple-vz SVE mask reconcile (Phase B repair of pre-mask VMs) -----------
+
+
+def _make_sve_target(
+    *, gated: bool, cmdline_active: bool = False, update_grub_ok: bool = True
+) -> MagicMock:
+    """``Transport`` mock for ``_apply_sve_mask``.
+
+    - ``gated``: the Apple-vz + SVE gate grep succeeds (an unmasked Apple guest).
+    - ``cmdline_active``: ``arm64.nosve`` is already on ``/proc/cmdline``.
+    - ``update_grub_ok``: ``update-grub`` exits zero.
+    Every other command (the drop-in write) succeeds.
+    """
+    target = MagicMock()
+
+    def run_side_effect(cmd, **kwargs):  # noqa: ANN001 -- mock side_effect signature
+        result = MagicMock(stderr="", stdout="")
+        if "apple virtualization" in cmd:  # the gate
+            ok = gated
+        elif cmd == "update-grub":
+            ok = update_grub_ok
+        elif "/proc/cmdline" in cmd:
+            ok = cmdline_active
+        else:  # the drop-in write, etc.
+            ok = True
+        result.ok = ok
+        result.returncode = 0 if ok else 1
+        return result
+
+    target.run.side_effect = run_side_effect
+    return target
+
+
+def test_apply_sve_mask_noop_when_gate_closed() -> None:
+    """Non-Apple host or already-masked VM: gate closed, nothing else runs."""
+    target = _make_sve_target(gated=False)
+    logger = MagicMock()
+
+    _apply_sve_mask(target, logger)
+
+    # Only the gate probe ran: no write, no update-grub, no cmdline check.
+    assert target.run.call_count == 1
+    assert "apple virtualization" in target.run.call_args_list[0][0][0]
+    logger.warning.assert_not_called()
+
+
+def test_apply_sve_mask_installs_dropin_as_root_and_warns_restart(
+    warnings: list[str],
+) -> None:
+    """Unmasked Apple guest: install the grub drop-in as root, run update-grub,
+    and warn that a restart is needed (arm64.nosve not yet on the cmdline)."""
+    import shlex
+
+    from agentworks.capabilities.vm_platform.bootstrap_script import (
+        SVE_NOSVE_GRUB_LINES,
+        SVE_NOSVE_GRUB_PATH,
+    )
+
+    target = _make_sve_target(gated=True, cmdline_active=False)
+    logger = MagicMock()
+
+    _apply_sve_mask(target, logger)
+
+    calls = [c for c in target.run.call_args_list]
+    write = next(c for c in calls if "printf" in c[0][0])
+    assert write.kwargs.get("sudo") is True
+    assert SVE_NOSVE_GRUB_PATH in write[0][0]
+    for line in SVE_NOSVE_GRUB_LINES:
+        assert shlex.quote(line) in write[0][0]
+    # update-grub runs as root.
+    update = next(c for c in calls if c[0][0] == "update-grub")
+    assert update.kwargs.get("sudo") is True
+    # The operator is told to restart; not silently left broken.
+    warned = "\n".join(warnings)
+    assert "arm64.nosve" in warned
+    assert "Restart the VM and reinit" in warned
+
+
+def test_apply_sve_mask_warns_and_stops_on_update_grub_failure(
+    warnings: list[str],
+) -> None:
+    """update-grub failure: warn and return without claiming a restart fixes it."""
+    target = _make_sve_target(gated=True, update_grub_ok=False)
+    logger = MagicMock()
+
+    _apply_sve_mask(target, logger)
+
+    logger.warning.assert_called_once()
+    assert "update-grub failed" in "\n".join(warnings)
+    # No /proc/cmdline check after a failed update-grub.
+    assert not any(
+        "/proc/cmdline" in c[0][0] for c in target.run.call_args_list
+    )
+
+
+def test_apply_sve_mask_non_fatal_on_ssh_error() -> None:
+    """A write failure is non-fatal: warns, does not raise (Phase B contract)."""
+    from agentworks.ssh import SSHError
+
+    target = MagicMock()
+
+    def run_side_effect(cmd, **kwargs):  # noqa: ANN001
+        if "apple virtualization" in cmd:
+            return MagicMock(ok=True, returncode=0, stdout="", stderr="")
+        raise SSHError("permission denied")
+
+    target.run.side_effect = run_side_effect
+    logger = MagicMock()
+
+    _apply_sve_mask(target, logger)  # must not raise
+
+    logger.warning.assert_called_once()
+
+
+def test_apply_sve_mask_emits_same_grub_bytes_as_phase_a() -> None:
+    """Drift guard between Phase A (heredoc) and Phase B (printf).
+
+    Phase A writes SVE_NOSVE_GRUB_CONTENT verbatim via a quoted heredoc;
+    Phase B writes via ``printf '%s\\n' <line> ...``. Both must produce the
+    same on-disk bytes, or a masked VM and a reconciled VM would carry
+    different grub drop-ins. Pins the printf format, the arg list, and the
+    byte-equivalence with the canonical content.
+    """
+    import shlex
+
+    from agentworks.capabilities.vm_platform.bootstrap_script import (
+        SVE_NOSVE_GRUB_CONTENT,
+        SVE_NOSVE_GRUB_LINES,
+    )
+
+    target = _make_sve_target(gated=True)
+    logger = MagicMock()
+
+    _apply_sve_mask(target, logger)
+
+    write = next(c for c in target.run.call_args_list if "printf" in c[0][0])
+    cmd = write[0][0]
+    assert "printf '%s\\n' " in cmd
+    for line in SVE_NOSVE_GRUB_LINES:
+        assert shlex.quote(line) in cmd
+    assert (
+        "".join(f"{line}\n" for line in SVE_NOSVE_GRUB_LINES) == SVE_NOSVE_GRUB_CONTENT
     )
 
 
