@@ -1784,40 +1784,6 @@ def _resolve_git_tokens(
     }
 
 
-def _collect_git_tokens(
-    config: Config,
-    registry: Registry,
-    credential_names: Iterable[str],
-) -> dict[str, str]:
-    """Resolve token values for the named git credentials on a
-    self-contained resolver pass. Returns ``{credential_name:
-    token_value}``.
-
-    Used by agent create, whose git tokens resolve on their own boundary
-    (the agent's other secrets resolve at their own use sites). The
-    providers are constructed against a fresh resolver so their token
-    secrets register, preflight predicts each is resolvable, and the one
-    resolve pass runs (single prompt session). The runup (authenticating
-    each token) is deferred to the write step via ``runup_and_filter``,
-    where a rejected token is skipped, not fatal. Raises ``NotFoundError``
-    if any name isn't a declared credential (the framework's
-    ``GitCredentialKind`` normally catches this at config-load).
-    """
-    from agentworks.secrets.resolver import Resolver
-    from agentworks.vms.initializer import resolve_git_credential_providers
-
-    names = list(credential_names)
-    if not names:
-        return {}
-
-    resolver = Resolver(config, registry)
-    providers = resolve_git_credential_providers(registry, names, resolver)
-    for provider in providers.values():
-        provider.preflight(RunContext(config=config))
-    resolver.resolve()
-    return _resolve_git_tokens(providers, resolver)
-
-
 def _lookup_or_synthesize_secret(registry: Registry, name: str) -> SecretDecl:
     """Return the ``SecretDecl`` for ``name`` from the framework
     Registry, or synthesize a bare one matching the auto-declare shape

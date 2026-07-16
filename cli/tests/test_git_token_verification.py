@@ -26,7 +26,6 @@ from agentworks.capabilities.git_credential.azdo import AzDOCredentialProvider
 from agentworks.capabilities.git_credential.github import GitHubCredentialProvider
 from agentworks.config import load_config
 from agentworks.errors import TokenRejectedError
-from agentworks.vms.manager import _collect_git_tokens
 
 _EXPIRY_HEADER = "github-authentication-token-expiration"
 
@@ -202,12 +201,20 @@ def test_collect_git_tokens_does_not_probe(
     monkeypatch.setenv("AW_SECRET_GIT_TOKEN_GH", "goodtok")
 
     def _explode(*_a: object, **_k: object) -> object:
-        raise AssertionError("_collect_git_tokens must not probe")
+        raise AssertionError("resolving git tokens must not probe")
 
     monkeypatch.setattr("agentworks.capabilities.git_credential.base._http_probe", _explode)
     config = _config_with_github_cred(tmp_path)
     registry = build_registry(config)
-    assert _collect_git_tokens(config, registry, ["gh"]) == {"gh": "goodtok"}
+
+    from types import SimpleNamespace
+
+    from agentworks.agents.manager import _preflight_resolve_agent_git
+
+    tmpl = SimpleNamespace(name="t", git_credentials=["gh"])
+    assert _preflight_resolve_agent_git(config, registry, tmpl) == {  # type: ignore[arg-type]
+        "gh": "goodtok"
+    }
 
 
 # -- runup_and_filter (the deferred runup at the write step) ----------------

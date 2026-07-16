@@ -224,6 +224,7 @@ def create_agent(
     template: str | None = None,
     grant_all_workspaces: bool = False,
     platform: VMPlatform | None = None,
+    git_tokens: dict[str, str] | None = None,
 ) -> None:
     """Create an agent on a VM.
 
@@ -267,12 +268,12 @@ def create_agent(
     # Preflight + resolve the agent's git credentials (git tokens live
     # outside the env-block system). Operator env secrets are NOT prompted
     # at agent create; provisioning is hermetic, they get prompted at the
-    # use site (agent shell, session create, etc.). Phase banners show
-    # only when this is the own composition root (not nested under session
-    # create).
-    git_tokens = _preflight_resolve_agent_git(
-        config, registry, agent_tmpl, show_phases=own_root
-    )
+    # use site (agent shell, session create, etc.). At the own root we
+    # preflight + resolve here (framing the phases); nested under session
+    # create the caller folds them into its boundary resolve and passes
+    # the resolved tokens, so we skip.
+    if git_tokens is None:
+        git_tokens = _preflight_resolve_agent_git(config, registry, agent_tmpl)
 
     from agentworks.ssh import SSHLogger
     ssh_logger = SSHLogger(vm.name, "agent-create")
@@ -497,9 +498,7 @@ def reinit_agent(
     # Preflight + resolve the agent's git credentials up front (reinit is
     # always its own composition root, so the phase banners show).
     # Provisioning is hermetic: no operator-env secrets are prompted here.
-    git_tokens = _preflight_resolve_agent_git(
-        config, registry, agent_tmpl, show_phases=True
-    )
+    git_tokens = _preflight_resolve_agent_git(config, registry, agent_tmpl)
 
     from agentworks.ssh import SSHLogger
     ssh_logger = SSHLogger(vm.name, "agent-reinit")
@@ -1005,24 +1004,22 @@ def _preflight_resolve_agent_git(
     config: Config,
     registry: Registry,
     agent_tmpl: ResolvedAgentTemplate,
-    *,
-    show_phases: bool,
 ) -> dict[str, str]:
-    """Preflight and resolve the agent's git credentials in one pass,
-    mirroring the vm composition roots.
+    """Preflight and resolve the agent's git credentials in one pass at
+    the own composition root (``agw agent create`` / ``reinit``),
+    mirroring the vm roots.
 
-    Constructs each provider against the operation's resolver, announces
-    and preflights them (predicting each token secret is resolvable, so
-    an unresolvable one fails BEFORE any prompt), runs the single resolve
-    pass, and returns the resolved ``{credential_name: token}`` map. The
-    providers are re-materialized inside ``_create_agent_on_vm`` for the
-    deferred runup and the store write.
+    Constructs each provider against the operation's resolver, frames the
+    Preflight / Resolving Secrets phases, announces + preflights (predicts
+    each token secret resolvable, so an unresolvable one fails BEFORE any
+    prompt), runs the single resolve pass, and returns the resolved
+    ``{credential_name: token}`` map. The providers are re-materialized
+    inside ``_create_agent_on_vm`` for the deferred runup and store write.
 
-    ``show_phases`` frames the output with the ``Preflight`` /
-    ``Resolving Secrets`` banners at the own composition root
-    (``agw agent create`` / ``reinit``); nested under session create it
-    is False, suppressing the banners (the parent owns the phase
-    structure) while the preflight fail-fast and resolve still run.
+    The nested session-create path does NOT call this: it folds the
+    ephemeral agent's git tokens into its own boundary resolve (so they
+    join the one prompt session) and hands ``create_agent`` the resolved
+    map directly.
     """
     from agentworks.capabilities.base import RunContext
     from agentworks.secrets.resolver import Resolver
@@ -1036,14 +1033,12 @@ def _preflight_resolve_agent_git(
     providers = resolve_git_credential_providers(
         registry, agent_tmpl.git_credentials, resolver
     )
-    if show_phases:
-        output.phase("Preflight")
-        output.detail(f"Checking agent-template/{agent_tmpl.name}...")
-        announce_git_credentials(providers)
+    output.phase("Preflight")
+    output.detail(f"Checking agent-template/{agent_tmpl.name}...")
+    announce_git_credentials(providers)
     for provider in providers.values():
         provider.preflight(RunContext(config=config))
-    if show_phases:
-        output.phase("Resolving Secrets")
+    output.phase("Resolving Secrets")
     resolver.resolve()
     return _resolve_git_tokens(providers, resolver)
 
@@ -1242,17 +1237,17 @@ def _create_agent_on_vm(
         if providers:
             materials = build_credential_materials(providers, git_tokens)
             agent_target.write_file(
-                f"{home}/.git-credentials", materials.store_content, mode="0600"
+                f"{home}/.git-credentials", materials.store_content, mode="600"
             )
             agent_target.write_file(
                 f"{home}/{GIT_SCOPES_INCLUDE_PATH.removeprefix('~/')}",
                 materials.gitconfig_content,
-                mode="0600",
+                mode="600",
             )
             agent_target.write_file(
                 f"{home}/{GIT_CRED_HELPER_PATH.removeprefix('~/')}",
                 materials.helper_script,
-                mode="0700",
+                mode="700",
             )
             agent_target.run(
                 f"git config --global --replace-all credential.helper '!{GIT_CRED_HELPER_PATH}' && "

@@ -199,6 +199,8 @@ def build_credential_materials(
     store_unscoped: list[str] = []
     records: list[_CredRecord] = []
     claimed: dict[tuple[str, str, str], str] = {}
+    scoped_users: set[str] = set()
+    unscoped_users: set[str] = set()
     for name, provider in providers.items():
         entry = provider.helper_entry()
         _assert_sh_safe("store username", entry.username)
@@ -219,8 +221,23 @@ def build_credential_materials(
         lines = provider.credential_lines(tokens[name])
         if entry.repos or entry.owner:
             store_scoped.extend(lines)
+            scoped_users.add(entry.username)
         else:
             store_unscoped.extend(lines)
+            unscoped_users.add(entry.username)
+
+    # The helper's host-default fallback keys on the store username and
+    # skips any scoped username (host-blind). A username claimed by BOTH a
+    # scoped and an unscoped credential would let one shadow the other, so
+    # require the two sets disjoint (e.g. no scoped credential whose store
+    # username is github's reserved unscoped ``x-access-token``).
+    clash = scoped_users & unscoped_users
+    if clash:
+        raise ConfigError(
+            f"git credential store username(s) {sorted(clash)!r} are claimed "
+            f"by both a scoped and an unscoped credential; scoped and unscoped "
+            f"usernames must be disjoint (rename the offending credential)"
+        )
 
     header = "# Managed by agentworks (git credential selection); do not edit.\n"
     return CredentialMaterials(

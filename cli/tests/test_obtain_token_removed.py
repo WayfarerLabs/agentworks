@@ -64,7 +64,7 @@ def test_manager_modules_have_no_obtain_token_calls() -> None:
         src = _read_module_source(module_name)
         assert "obtain_token" not in src, (
             f"found legacy obtain_token call in {module_name}; tokens "
-            f"must resolve via the framework's _collect_git_tokens helper"
+            f"must resolve through the framework's git-token resolve pass"
         )
 
 

@@ -2071,7 +2071,8 @@ def _configure_git_credentials(
         raise StateError(
             f"git credential setup: token(s) not resolved by the framework "
             f"for {missing!r}; caller must pre-resolve every provider's "
-            f"token via _collect_git_tokens before invoking this function",
+            f"token through the operation's resolve pass before invoking "
+            f"this function",
             entity_kind="git-credential",
             entity_name=missing[0],
         )
@@ -2094,7 +2095,8 @@ def _configure_git_credentials(
     # Store lines + the useHttpPath include + the selecting helper (the
     # helper picks the per-repo/per-owner credential from the remote path
     # git now sends; issue #166). Scope collisions raise here, before
-    # anything is written.
+    # anything is written; the check sees only the runup SURVIVORS, so a
+    # collision masked by a rejected token surfaces on the next reinit.
     materials = build_credential_materials(providers, git_tokens)
 
     # Write credentials and configure git on the VM. The context

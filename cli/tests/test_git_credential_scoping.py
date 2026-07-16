@@ -658,7 +658,7 @@ def test_agent_git_preflight_resolves_and_emits_phases(
     agent_tmpl = SimpleNamespace(name="default", git_credentials=["widgets-bot"])
 
     tokens = _preflight_resolve_agent_git(
-        config, registry, agent_tmpl, show_phases=True  # type: ignore[arg-type]
+        config, registry, agent_tmpl  # type: ignore[arg-type]
     )
     assert tokens == {"widgets-bot": "tok123"}
     assert "=== Preflight ===" in captured_output.info
