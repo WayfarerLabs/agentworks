@@ -214,7 +214,20 @@ Contract points, and why they are shaped this way:
   restart, and confines runup to the case where nothing earlier could have checked. (An
   admin-as-proxy preflight that probed the ephemeral target as admin was rejected earlier: it
   false-aborts on agent-template user-level tooling. The check runs as the real target user or not
-  yet at all.)
+  yet at all.) The clean part, and the reason no `--new-agent` special-case leaks into the harness
+  or the orchestration: the harness never asks "am I ephemeral". It reads existence off the CONTEXT.
+  The shared `require_commands(ctx, ...)` helper probes whatever target `ctx` carries and no-ops
+  when there is none, and it is called from both `preflight` and `runup`. The model already hands
+  those two stages different existence snapshots (command-start vs post-provision), so the same
+  context-aware code checks an existing target at preflight and a just-created one at runup, with no
+  "if ephemeral" branch and no orchestration deferring preflight until resources exist (the
+  alternative, and the more complex one). The `runup` re-check is not new machinery: today's
+  `create_session` already probes `required_commands` post-provision as the agent user
+  (`sessions/manager.py`, after the ephemeral `create_agent`), so a session on a `--new-agent` is
+  checked after its agent exists in current code too. Keeping it is PARITY; dropping it would leave
+  ephemeral sessions unchecked. What the preflight-primary shape adds on top is strictly earlier
+  failure for the paths that can afford it (an existing-agent create now fails before the prompt,
+  where today it checks after).
 - **The check needs no secret, and that is fine at either stage.** It reads no secret, so preflight
   (pre-resolve) is its natural home; the runup fallback is about the target existing, not about
   authentication. The preflight/runup boundary is the secret-resolve pass, not an auth boundary, so
