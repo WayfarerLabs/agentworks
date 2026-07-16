@@ -63,12 +63,13 @@ shells is a separate identity-model question left for future work.
    pane: callers that split panes in a loop thread a memo (see the round-trip Negative). See the
    reinit Negative for why this is load-bearing rather than defensive padding.
 
-The `env_keep` fragment from ADR 0014 stays. It is what the fallback in 3 degrades _to_: on a VM
-that has the ADR 0014 fragment but not this one, `AGENTWORKS_*` / `AW_*` are the vars that still
-cross, and they are the ones carrying workspace identity, so the degraded pane is useful rather than
-bare. For keys that are in `pane_env`, `--preserve-env` names them explicitly and `env_keep` is
-redundant; that redundancy is what would retire if the fallback ever does. Retiring `env_keep`
-itself is ADR 0014's call, not this ADR's.
+The `env_keep` fragment from ADR 0014 stays. It is what the fallback in 3 degrades _to_. Every VM in
+service already carries ADR 0014's wildcard env config, so a VM that misses the `setenv` fragment
+still has `env_keep`: `AGENTWORKS_*` / `AW_*` cross regardless, and they are the ones carrying
+workspace identity. The degraded pane is therefore identity-only rather than bare, and that is a
+floor we can rely on rather than a hope. For keys that are in `pane_env`, `--preserve-env` names
+them explicitly and `env_keep` is redundant; that redundancy is what would retire if the fallback
+ever does. Retiring `env_keep` itself is ADR 0014's call, not this ADR's.
 
 ## Positives
 
