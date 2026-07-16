@@ -130,14 +130,17 @@ echo "##SUCCESS## hostname set to $VM_HOSTNAME"
 # Apple's Virtualization.framework advertises SVE/SVE2 in the guest HWCAP
 # that the guest cannot actually execute; the first SVE instruction traps
 # as SIGILL (seen in OpenSSL, and therefore git-over-https and Python
-# cryptography). Disable SVE at the kernel cmdline via a grub drop-in so
+# cryptography). Match either feature as a whole word: SVE2 implies SVE, so
+# a guest advertising SVE alone is the same trap and must mask too, while
+# -w keeps the SVE2-only sub-features (sveaes, svesha3, ...) from matching
+# on their own. Disable SVE at the kernel cmdline via a grub drop-in so
 # no library selects an SVE routine. This needs a reboot to take effect,
 # and rebooting inside a provision step is unreliable (lima-vm/lima#4867),
 # so the platform restarts the instance from the host when it sees the
 # sentinel dropped below. Self-gated: a no-op on every non-Apple host.
 echo "##STEP## Mask SVE"
 if grep -qi 'apple virtualization' /sys/class/dmi/id/product_name 2>/dev/null \
-    && grep -qi sve2 /proc/cpuinfo 2>/dev/null; then
+    && grep -qiwE 'sve|sve2' /proc/cpuinfo 2>/dev/null; then
     mkdir -p /etc/default/grub.d
     cat > /etc/default/grub.d/99-agentworks-nosve.cfg <<'AGW_NOSVE_EOF'
 # agentworks: Apple Virtualization advertises SVE the guest cannot run.
