@@ -155,10 +155,14 @@ class ProxmoxPlatform(VMPlatform):
         reads via the bound resolver. runup builds a throwaway client for
         the check and leaves ``self`` untouched."""
         from agentworks import output
-        from agentworks.errors import ConfigError, TokenRejectedError
+        from agentworks.errors import TokenRejectedError
 
         token_secret = str(self._cfg("token_secret", DEFAULT_TOKEN_SECRET))
         if ctx.secrets is None:
+            # ConfigError, not the op path's StateError, for parity with
+            # every capability's runup: the git-credential base runup raises
+            # the same type for this same "context assembled without a
+            # resolve pass" case, so all runups fail the same way.
             raise ConfigError(
                 f"vm-site '{self.site_name}': cannot check the Proxmox API "
                 f"token without resolved secrets in the run context "
