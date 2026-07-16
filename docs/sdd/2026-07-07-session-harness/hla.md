@@ -247,7 +247,7 @@ class ContextLevel(Enum):
     """The hierarchy level an operation runs at; the identity's ancestor
     set follows from it."""
 
-    SYSTEM = "system"        # the installation; no VM (e.g. a vm-site config check)
+    SYSTEM = "system"        # scope: the whole installation, no VM
     VM = "vm"                # a VM
     WORKSPACE = "workspace"  # a workspace on a VM
     ADMIN = "admin"          # the admin user on a VM
@@ -282,11 +282,18 @@ class OperationIdentity:
     # __post_init__: level -> required/forbidden fields, per the table below.
 ```
 
-The level-to-fields table the object enforces (system_slug is allowed at every level and is the only
-field allowed at SYSTEM):
+A level is the SCOPE of the operation (what entity it concerns), which for a capability is the scope
+of its consuming resource: a secret backend or a git credential is declared once for the whole
+installation and so is system-scoped; a vm-site/platform concerns a VM; a session concerns a
+session. The level-to-fields table the object enforces (system_slug is allowed at every level and is
+the only field allowed at SYSTEM):
 
-- **SYSTEM**: system_slug only; vm/workspace/agent/session all None, admin False. (A vm-site config
-  check has no VM: it is the placement-free level.)
+- **SYSTEM**: system_slug only; vm/workspace/agent/session all None, admin False. Scope is the
+  entire installation, not any VM. This is the natural level for the system-global capabilities:
+  `secret-backend` readiness (am I installed, can I reach the vault) and `git-credential-provider`
+  readiness (the credential and its token are declared once for the system; the runup probe hits the
+  git host, not a VM), plus cross-system scans like doctor's vm-site config check. The credential or
+  backend's OWN name is its `owner_name`, not identity; identity here is just the installation slug.
 - **VM**: vm_name set; workspace/agent/session None, admin False.
 - **WORKSPACE**: vm_name + workspace_name set; agent/session None, admin False.
 - **ADMIN**: vm_name set + admin True; workspace/agent/session None, agent_name None.
@@ -659,13 +666,14 @@ already builds `RunContext` by keyword, so each is a single added argument.
 
 - **`RunContext.identity` level per site**: identity is required (see the identity section), so
   every construction site passes one at the right level. The LLD assigns the `ContextLevel` for each
-  of the fourteen sites (vm-create/reinit/rekey -> VM; agent init -> AGENT; `create_session` /
-  `restart_session` -> SESSION; doctor's site scan -> SYSTEM) and pins the two that are not obvious:
-  `vm add-git-credential` (VM or ADMIN, since a credential is admin-scoped on the VM) and the
-  git-credential deferred runup at the write step (ADMIN under VM init, AGENT under agent init, so
-  it takes its level from the caller). It also confirms the level table against the actual model (is
-  a WORKSPACE really VM-parented rather than agent-parented?) before the `__post_init__` rules are
-  frozen.
+  of the fourteen sites by the operation's scope: vm-create/reinit/rekey platform readiness -> VM;
+  the git-credential readiness stages (preflight and the deferred runup token probe) -> SYSTEM,
+  because the credential and its token are system-global config and the probe hits the git host, not
+  a VM (the per-VM materials WRITE is where VM/admin/agent placement enters, but that is an op, not
+  a `RunContext` site here); `create_session` / `restart_session` -> SESSION; doctor's site scan ->
+  SYSTEM. The one still to pin is `vm add-git-credential` (SYSTEM for the credential's readiness,
+  same as the others). It also confirms the level table against the actual model (is a WORKSPACE
+  really VM-parented rather than agent-parented?) before the `__post_init__` rules are frozen.
 - **Populating the target transport on `RunContext`**: the harness is the first consumer of
   `admin_target` / `agent_target`; pin where `create_session` / `restart_session` bind the
   composed-env target transport onto the context, and confirm the admin-mode selection
