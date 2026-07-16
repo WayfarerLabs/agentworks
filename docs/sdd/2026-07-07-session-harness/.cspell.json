@@ -1,0 +1,17 @@
+{
+  "version": "0.2",
+  "import": ["../../../.cspell.json"],
+  "words": [
+    "ephemerals",
+    "footgun",
+    "hostable",
+    "inspectable",
+    "monkeypatch",
+    "monkeypatches",
+    "overengineering",
+    "preflights",
+    "repoint",
+    "repointed",
+    "stringly"
+  ]
+}
