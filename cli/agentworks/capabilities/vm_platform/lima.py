@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING, Any, ClassVar
 from agentworks import output
 from agentworks.capabilities.vm_platform.base import ProvisionRequest, ProvisionResult, VMPlatform
 from agentworks.capabilities.vm_platform.bootstrap_script import (
-    SVE_REBOOT_SENTINEL_PATH,
+    REBOOT_SENTINEL_PATH,
     generate_bootstrap_script,
     parse_bootstrap_output,
 )
@@ -32,10 +32,10 @@ if TYPE_CHECKING:
     from agentworks.resources.reference import ConfigReference
     from agentworks.transports import Transport
 
-# Markers the SVE sentinel probe echoes on stdout. The probe exits 0 either
-# way, so an absent sentinel stays a normal result instead of an exception.
-_SVE_PENDING_MARKER = "AGW_SVE_RESTART_PENDING"
-_SVE_CLEAR_MARKER = "AGW_SVE_RESTART_CLEAR"
+# Markers the restart-sentinel probe echoes on stdout. The probe exits 0
+# either way, so an absent sentinel stays a normal result, not an exception.
+_REBOOT_PENDING_MARKER = "AGW_REBOOT_PENDING"
+_REBOOT_CLEAR_MARKER = "AGW_REBOOT_CLEAR"
 
 # Lima template for Debian cloud VMs (values substituted at create time).
 # The provision block runs the full bootstrap script (user, packages, swap,
@@ -51,7 +51,7 @@ images:
 cpus: {cpus}
 memory: {memory}GiB
 disk: {disk}GiB
-{nested_virtualization}ssh:
+ssh:
   localPort: 0
 mountType: virtiofs
 provision:
@@ -94,15 +94,7 @@ class LimaPlatform(VMPlatform):
                 f"{owner}.vm_host must be a non-empty SSH host string "
                 f"(e.g. 'user@host'), got {vm_host!r}"
             )
-        # Opt-in nested virtualization (Apple M3+/macOS 15+ with the vz
-        # backend): the guest gets /dev/kvm so it can run accelerated VMs
-        # of its own. Off by default; Lima rejects it on unsupported hosts.
-        nested = config.get("nested_virtualization")
-        if nested is not None and not isinstance(nested, bool):
-            raise ConfigError(
-                f"{owner}.nested_virtualization must be a boolean, got {nested!r}"
-            )
-        unknown = sorted(set(config) - {"vm_host", "nested_virtualization"})
+        unknown = sorted(set(config) - {"vm_host"})
         if unknown:
             raise ConfigError(
                 f"{owner}: unknown lima platform field(s): {', '.join(unknown)}"
@@ -253,19 +245,10 @@ class LimaPlatform(VMPlatform):
 
         # Indent the provision script for YAML embedding (6 spaces)
         indented_script = textwrap.indent(provision_script, "      ")
-        # Opt-in nested virtualization (Apple M3+/macOS 15+, vz backend):
-        # a top-level `nestedVirtualization: true` line, emitted only when
-        # the site requests it.
-        nested_line = (
-            "nestedVirtualization: true\n"
-            if self.platform_config.get("nested_virtualization")
-            else ""
-        )
         rendered = LIMA_TEMPLATE.format(
             cpus=cpus,
             memory=memory,
             disk=disk,
-            nested_virtualization=nested_line,
             provision_script=indented_script,
         )
 
@@ -276,22 +259,27 @@ class LimaPlatform(VMPlatform):
 
         output.detail(f"Lima VM '{instance_name}' created.")
 
-        # The bootstrap masks broken SVE on Apple Virtualization guests via
-        # arm64.nosve (see bootstrap_script), which only takes effect after
-        # a reboot. Rebooting mid-provision is unreliable (lima-vm/lima#4867),
-        # so restart the instance from the host when the bootstrap left the
-        # sentinel. A no-op on every other host.
+        # Some bootstrap steps (currently the Apple-vz SVE mask, see
+        # bootstrap_script) only take effect after a reboot, and rebooting
+        # mid-provision is unreliable (lima-vm/lima#4867). Such steps drop a
+        # restart sentinel; restart the instance from the host when we see it.
+        # The probe stays generic: the host cannot cheaply tell which guest
+        # shape it is, so a bare failure is phrased for what it does know.
         try:
-            sve_restart_pending = self._sve_reboot_pending(instance_name)
+            restart_pending = self._restart_sentinel_present(instance_name)
         except SSHError as e:
-            output.warn(f"could not check whether the SVE mask needs a restart: {e}")
             output.warn(
-                "if this VM crashes with SIGILL, restart it to apply arm64.nosve."
+                f"could not check whether '{instance_name}' needs a restart to "
+                f"finish provisioning: {e}"
             )
-            sve_restart_pending = False
-        if sve_restart_pending:
+            output.warn(
+                f"if the VM misbehaves, 'limactl restart {instance_name}' "
+                "reapplies any deferred bootstrap step."
+            )
+            restart_pending = False
+        if restart_pending:
             output.detail(
-                "Masked unusable SVE (arm64.nosve); restarting VM to apply..."
+                f"A bootstrap step needs a reboot; restarting '{instance_name}'..."
             )
             self._run_lima(f"limactl restart {instance_name}")
 
@@ -318,13 +306,15 @@ class LimaPlatform(VMPlatform):
             tailscale_ip=tailscale_ip,
         )
 
-    def _sve_reboot_pending(self, instance_name: str) -> bool:
-        """True if the bootstrap dropped the arm64.nosve restart sentinel.
+    def _restart_sentinel_present(self, instance_name: str) -> bool:
+        """True if a bootstrap step left the restart sentinel in the guest.
 
-        The bootstrap touches ``/run/agentworks-reboot-required`` on Apple
-        Virtualization guests where it masked unusable SVE and the running
-        kernel has not yet picked up the change (see ``bootstrap_script``).
-        The sentinel lives on tmpfs, so it clears itself on the restart.
+        A bootstrap step that needs a reboot to take effect touches
+        ``REBOOT_SENTINEL_PATH`` (see ``bootstrap_script``); currently only
+        the Apple-vz SVE mask does. The sentinel lives on tmpfs, so it clears
+        itself on the restart. The probe stays deliberately why-agnostic: the
+        host restarts on the sentinel without needing to know which step set
+        it.
 
         The probe reports its answer on stdout and exits 0 whether or not the
         sentinel is there, so a raised ``SSHError`` means a genuine shell or
@@ -332,14 +322,14 @@ class LimaPlatform(VMPlatform):
         """
         probe = self._run_lima(
             f"limactl shell {instance_name} sh -c "
-            f"'test -f {SVE_REBOOT_SENTINEL_PATH} "
-            f"&& echo {_SVE_PENDING_MARKER} || echo {_SVE_CLEAR_MARKER}'"
+            f"'test -f {REBOOT_SENTINEL_PATH} "
+            f"&& echo {_REBOOT_PENDING_MARKER} || echo {_REBOOT_CLEAR_MARKER}'"
         )
-        if _SVE_PENDING_MARKER in probe:
+        if _REBOOT_PENDING_MARKER in probe:
             return True
-        if _SVE_CLEAR_MARKER in probe:
+        if _REBOOT_CLEAR_MARKER in probe:
             return False
-        raise SSHError(f"unrecognized SVE sentinel probe output: {probe.strip()!r}")
+        raise SSHError(f"unrecognized restart-sentinel probe output: {probe.strip()!r}")
 
     def _instance_exists(self, instance_name: str) -> bool:
         """Pre-flight: does a Lima instance with this name exist?"""

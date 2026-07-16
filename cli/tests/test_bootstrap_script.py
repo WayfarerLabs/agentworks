@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from agentworks.capabilities.vm_platform.bootstrap_script import (
-    SVE_REBOOT_SENTINEL_PATH,
+    REBOOT_SENTINEL_PATH,
     generate_bootstrap_script,
     parse_bootstrap_output,
 )
@@ -54,7 +54,7 @@ def test_generate_bootstrap_script_masks_sve_gated_on_apple() -> None:
     assert "arm64.nosve" in script
     assert "/etc/default/grub.d/99-agentworks-nosve.cfg" in script
     assert "update-grub" in script
-    assert f"touch {SVE_REBOOT_SENTINEL_PATH}" in script
+    assert f"touch {REBOOT_SENTINEL_PATH}" in script
 
 
 def test_sve_gate_matches_sve_and_sve2_as_whole_words() -> None:
