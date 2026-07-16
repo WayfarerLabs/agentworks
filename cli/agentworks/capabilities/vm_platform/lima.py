@@ -12,7 +12,11 @@ from typing import TYPE_CHECKING, Any, ClassVar
 
 from agentworks import output
 from agentworks.capabilities.vm_platform.base import ProvisionRequest, ProvisionResult, VMPlatform
-from agentworks.capabilities.vm_platform.bootstrap_script import generate_bootstrap_script, parse_bootstrap_output
+from agentworks.capabilities.vm_platform.bootstrap_script import (
+    SVE_REBOOT_SENTINEL_PATH,
+    generate_bootstrap_script,
+    parse_bootstrap_output,
+)
 from agentworks.capabilities.vm_platform.cloud_init import PROVISIONING_PACKAGES
 from agentworks.db import VMStatus
 from agentworks.errors import ConfigError, StateError
@@ -27,6 +31,11 @@ if TYPE_CHECKING:
     from agentworks.db import VMRow
     from agentworks.resources.reference import ConfigReference
     from agentworks.transports import Transport
+
+# Markers the SVE sentinel probe echoes on stdout. The probe exits 0 either
+# way, so an absent sentinel stays a normal result instead of an exception.
+_SVE_PENDING_MARKER = "AGW_SVE_RESTART_PENDING"
+_SVE_CLEAR_MARKER = "AGW_SVE_RESTART_CLEAR"
 
 # Lima template for Debian cloud VMs (values substituted at create time).
 # The provision block runs the full bootstrap script (user, packages, swap,
@@ -272,7 +281,15 @@ class LimaPlatform(VMPlatform):
         # a reboot. Rebooting mid-provision is unreliable (lima-vm/lima#4867),
         # so restart the instance from the host when the bootstrap left the
         # sentinel. A no-op on every other host.
-        if self._sve_reboot_pending(instance_name):
+        try:
+            sve_restart_pending = self._sve_reboot_pending(instance_name)
+        except SSHError as e:
+            output.warn(f"could not check whether the SVE mask needs a restart: {e}")
+            output.warn(
+                "if this VM crashes with SIGILL, restart it to apply arm64.nosve."
+            )
+            sve_restart_pending = False
+        if sve_restart_pending:
             output.detail(
                 "Masked unusable SVE (arm64.nosve); restarting VM to apply..."
             )
@@ -308,15 +325,21 @@ class LimaPlatform(VMPlatform):
         Virtualization guests where it masked unusable SVE and the running
         kernel has not yet picked up the change (see ``bootstrap_script``).
         The sentinel lives on tmpfs, so it clears itself on the restart.
+
+        The probe reports its answer on stdout and exits 0 whether or not the
+        sentinel is there, so a raised ``SSHError`` means a genuine shell or
+        transport failure and never a merely absent sentinel.
         """
-        try:
-            self._run_lima(
-                f"limactl shell {instance_name} "
-                "test -f /run/agentworks-reboot-required"
-            )
-        except SSHError:
+        probe = self._run_lima(
+            f"limactl shell {instance_name} sh -c "
+            f"'test -f {SVE_REBOOT_SENTINEL_PATH} "
+            f"&& echo {_SVE_PENDING_MARKER} || echo {_SVE_CLEAR_MARKER}'"
+        )
+        if _SVE_PENDING_MARKER in probe:
+            return True
+        if _SVE_CLEAR_MARKER in probe:
             return False
-        return True
+        raise SSHError(f"unrecognized SVE sentinel probe output: {probe.strip()!r}")
 
     def _instance_exists(self, instance_name: str) -> bool:
         """Pre-flight: does a Lima instance with this name exist?"""

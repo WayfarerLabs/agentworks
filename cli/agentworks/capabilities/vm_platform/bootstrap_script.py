@@ -28,6 +28,13 @@ SSH_PRESERVE_KEYS_PATH = "/etc/cloud/cloud.cfg.d/99-preserve-ssh-keys.cfg"
 SSH_PRESERVE_KEYS_LINES = ("ssh_deletekeys: false", "ssh_genkeytypes: []")
 SSH_PRESERVE_KEYS_CONTENT = "".join(f"{line}\n" for line in SSH_PRESERVE_KEYS_LINES)
 
+# Sentinel dropped by the "Mask SVE" step when arm64.nosve is configured but
+# the running kernel has not picked it up yet, i.e. a restart is needed. The
+# lima platform probes it after create and restarts the instance once (see
+# LimaPlatform._sve_reboot_pending). It lives on tmpfs, so the restart clears
+# it. Shared so the writer and the probe cannot drift apart.
+SVE_REBOOT_SENTINEL_PATH = "/run/agentworks-reboot-required"
+
 SCRIPT_TEMPLATE = """\
 #!/bin/bash
 set -euo pipefail
@@ -140,7 +147,7 @@ AGW_NOSVE_EOF
         if grep -qw arm64.nosve /proc/cmdline; then
             echo "##SUCCESS## SVE already masked (arm64.nosve active)"
         else
-            touch /run/agentworks-reboot-required
+            touch {sve_reboot_sentinel}
             echo "##SUCCESS## SVE masked via arm64.nosve (restart pending)"
         fi
     else
@@ -199,6 +206,7 @@ def generate_bootstrap_script(
         swap=swap,
         ssh_preserve_path=SSH_PRESERVE_KEYS_PATH,
         ssh_preserve_content=SSH_PRESERVE_KEYS_CONTENT,
+        sve_reboot_sentinel=SVE_REBOOT_SENTINEL_PATH,
         bashrc_content=BASHRC,
         zshrc_content=ZSHRC,
     )

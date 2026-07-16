@@ -14,7 +14,14 @@ from types import SimpleNamespace
 import pytest
 
 from agentworks.capabilities.vm_platform import ProvisionRequest
-from agentworks.capabilities.vm_platform.lima import LimaPlatform
+from agentworks.capabilities.vm_platform.bootstrap_script import (
+    SVE_REBOOT_SENTINEL_PATH,
+)
+from agentworks.capabilities.vm_platform.lima import (
+    _SVE_CLEAR_MARKER,
+    _SVE_PENDING_MARKER,
+    LimaPlatform,
+)
 from agentworks.ssh import SSHError
 
 
@@ -53,10 +60,10 @@ def _wire(
 
     def _fake_run(self: LimaPlatform, cmd: str, **_kw: object) -> str:
         ran.append(cmd)
-        if "test -f /run/agentworks-reboot-required" in cmd:
-            if sentinel_present:
-                return ""
-            raise SSHError("no sentinel")
+        if SVE_REBOOT_SENTINEL_PATH in cmd:
+            # The real probe exits 0 either way and reports on stdout.
+            marker = _SVE_PENDING_MARKER if sentinel_present else _SVE_CLEAR_MARKER
+            return f"{marker}\n"
         if "tailscale ip" in cmd:
             return "100.64.0.1"
         return ""
@@ -95,3 +102,38 @@ def test_no_restart_when_sentinel_absent(
     _, ran = _wire(monkeypatch, platform, sentinel_present=False)
     platform.create(_request())
     assert not any("limactl restart" in cmd for cmd in ran)
+
+
+def test_probe_failure_warns_and_does_not_restart(
+    monkeypatch: pytest.MonkeyPatch, warnings: list[str]
+) -> None:
+    """A genuine probe failure is reported, not read as an absent sentinel.
+
+    The probe exits 0 whether or not the sentinel is there, so an SSHError
+    means the shell or transport actually broke. Create still completes (the
+    VM exists, and Phase A bootstrap follows), but the operator is told.
+    """
+    platform = LimaPlatform("lima", {})
+    ran: list[str] = []
+
+    monkeypatch.setattr(LimaPlatform, "_ensure_limactl", lambda self: None)
+    monkeypatch.setattr(LimaPlatform, "_instance_exists", lambda self, name: False)
+    monkeypatch.setattr(LimaPlatform, "_create_local", lambda self, name, yaml: None)
+    monkeypatch.setattr(
+        LimaPlatform, "_transport_for", lambda self, name: SimpleNamespace()
+    )
+
+    def _fake_run(self: LimaPlatform, cmd: str, **_kw: object) -> str:
+        ran.append(cmd)
+        if SVE_REBOOT_SENTINEL_PATH in cmd:
+            raise SSHError("connection reset")
+        return ""
+
+    monkeypatch.setattr(LimaPlatform, "_run_lima", _fake_run)
+
+    platform.create(_request())
+
+    assert not any("limactl restart" in cmd for cmd in ran)
+    warned = "\n".join(warnings)
+    assert "SVE mask needs a restart" in warned
+    assert "connection reset" in warned
