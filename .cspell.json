@@ -121,6 +121,7 @@
     "sess",
     "setenv",
     "setgid",
+    "setuid",
     "setdefault",
     "sgid",
     "shai",

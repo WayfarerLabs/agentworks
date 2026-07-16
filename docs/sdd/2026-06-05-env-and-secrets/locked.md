@@ -166,9 +166,9 @@ solely on `env_keep += "AGENTWORKS_* AW_*"`, so only agentworks-managed vars sur
 was absent in an agent companion shell in a console.
 
 The pane now names the composed keys on `sudo --login --preserve-env=<keys>` (values still ride the
-tmux `-e` channel, so no secret value hits the argv), permitted by a new user-scoped sudoers fragment
-`/etc/sudoers.d/51-agentworks-console-setenv` (`Defaults:<admin> setenv`) deployed at VM init
-alongside the existing `env_keep` fragment. Scope is unchanged otherwise: the pane still gets
+tmux `-e` channel, so no secret value hits the argv), permitted by a new user-scoped sudoers
+fragment `/etc/sudoers.d/51-agentworks-console-setenv` (`Defaults:<admin> setenv`) deployed at VM
+init alongside the existing `env_keep` fragment. Scope is unchanged otherwise: the pane still gets
 `vm + workspace + agent` (not `session`) env; extending companion shells to `session` scope remains
 future work. Rationale and alternatives in [ADR 0017](../../adrs/0017-console-pane-preserve-env.md).
 Existing VMs need `agw vm reinit` to deploy the new fragment.

@@ -1496,9 +1496,11 @@ def _split_shell_pane(
        survive via the sudoers env_keep fragment, and arbitrarily-named
        operator env / secrets survive via ``sudo --preserve-env=<keys>``
        (permitted by the ``Defaults:<admin> setenv`` fragment). Both
-       fragments are deployed by VM init; on a VM initialized before
-       they landed, agent-pane env injection is a no-op until reinit
-       (the vars cross into the pane process but sudo strips them). See
+       fragments are deployed by VM init. On a VM initialized before the
+       setenv fragment landed, sudo would refuse the whole command rather
+       than drop the un-preservable vars, so the pane probes for the
+       capability first and falls back to a plain ``sudo --login`` (only
+       the env_keep vars survive) with a reinit hint. See
        docs/adrs/0017-console-pane-preserve-env.md.
     2. SSH SetEnv on ``target.run`` (SSH transport only;
        non-SSH transports are a no-op because the tmux client is
@@ -1570,9 +1572,39 @@ def _split_shell_pane(
         preserve = ""
         if pane_env:
             preserve = f" --preserve-env={shlex.quote(','.join(pane_env))}"
-        pane_cmd = (
-            f"exec sudo --login{preserve} -u {q_user} bash -c {shlex.quote(bootstrap)}"
+        sudo_preserve = (
+            f"sudo --login{preserve} -u {q_user} bash -c {shlex.quote(bootstrap)}"
         )
+        if not preserve:
+            pane_cmd = f"exec {sudo_preserve}"
+        else:
+            # Degrade instead of dying on a VM that lacks the setenv fragment
+            # (initialized before it landed, or its install warned and carried
+            # on). Without `setenv`, sudo does not drop the un-preservable
+            # vars: it refuses the whole command (validate_env_vars rejects any
+            # env_add var outside env_keep, which aborts the run), so the pane
+            # process would exit immediately and the pane would vanish.
+            #
+            # The probe runs the same validation path as the real invocation
+            # with the same key list, so its verdict matches exactly: it fails
+            # only when the real command would also have been refused. That
+            # rules out a false fallback. `-n` keeps it from ever blocking on a
+            # password prompt, and stderr is dropped because sudo's refusal
+            # text is expected noise here (the echo below is the operator's
+            # cue). Vars covered by env_keep still survive the fallback.
+            sudo_plain = (
+                f"sudo --login -u {q_user} bash -c {shlex.quote(bootstrap)}"
+            )
+            probe = f"sudo -n{preserve} -u {q_user} true 2>/dev/null"
+            q_hint = shlex.quote(
+                "agentworks: this VM predates the console setenv sudoers "
+                "fragment, so agent-scope env and secrets will not reach this "
+                f"pane. Run `agw vm reinit {vm.name}` to deploy it."
+            )
+            pane_cmd = (
+                f"if {probe}; then exec {sudo_preserve}; fi; "
+                f"echo {q_hint} >&2; exec {sudo_plain}"
+            )
         cmd = (
             f"tmux split-window -t {q_con}:{q_win} -P -F '#{{pane_id}}'{env_flags} "
             f"-c {q_full} {shlex.quote(pane_cmd)}"

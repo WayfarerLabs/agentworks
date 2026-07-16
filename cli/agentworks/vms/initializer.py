@@ -531,7 +531,7 @@ def _write_sudoers_console_setenv(
     survive. Scoped to the admin user (``Defaults:<user>``), not global.
 
     The admin already holds ``ALL=(ALL) NOPASSWD:ALL``, so granting it
-    ``setenv`` is no meaningful privilege change -- it only permits
+    ``setenv`` is no meaningful privilege change: it only permits
     command-line env preservation, which a full-root user could already
     achieve. See docs/adrs/0017-console-pane-preserve-env.md.
     """
