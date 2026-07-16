@@ -1095,7 +1095,7 @@ def _create_agent_on_vm(
     admin_target = transport(vm, config, logger=logger)
 
     if show_phases:
-        output.phase("Agent Bootstrap")
+        output.phase("Agent Initialization")
     output.detail(f"Creating user '{linux_user}' on VM '{vm.name}'...")
     home = f"/home/{linux_user}"
 
@@ -1137,8 +1137,6 @@ def _create_agent_on_vm(
 
     # -- Phase 2: self-configure (agent) ----------------------------------
 
-    if show_phases:
-        output.phase("Agent Initialization")
     agent_target = transport_for_user(vm, config, user=linux_user, logger=logger)
 
     # Provisioning is hermetic: no operator env from [agent_templates.*.env]
