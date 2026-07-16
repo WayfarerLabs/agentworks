@@ -42,6 +42,7 @@ _KNOWN_TEMPLATE_VARS = {"session_name", "workspace_name"}
 if TYPE_CHECKING:
     from collections.abc import Mapping
 
+    from agentworks.capabilities.git_credential.base import GitCredentialProvider
     from agentworks.capabilities.vm_platform import VMPlatform
     from agentworks.config import Config
     from agentworks.db import AgentRow, Database, SessionRow, VMRow, WorkspaceRow
@@ -1427,6 +1428,28 @@ def create_session(
     from agentworks.secrets.resolver import Resolver
 
     resolver = Resolver(config, registry)
+
+    # Fold a new ephemeral agent's git credentials into THIS boundary
+    # resolve so their token secrets join the one prompt session (rather
+    # than the nested create_agent running a second resolve). Construct the
+    # providers against this resolver and preflight them now; their tokens
+    # resolve in bind_platform's pass below and are handed to create_agent
+    # as an already-resolved map.
+    agent_git_providers: dict[str, GitCredentialProvider] = {}
+    if new_agent:
+        from agentworks.agents.templates import (
+            resolve_template as _resolve_agent_tmpl,
+        )
+        from agentworks.capabilities.base import RunContext
+        from agentworks.vms.initializer import resolve_git_credential_providers
+
+        _ephemeral_tmpl = _resolve_agent_tmpl(registry, agent_template)
+        agent_git_providers = resolve_git_credential_providers(
+            registry, _ephemeral_tmpl.git_credentials, resolver
+        )
+        for _provider in agent_git_providers.values():
+            _provider.preflight(RunContext(config=config))
+
     vm_platform = bind_platform(
         config, vm, registry=registry, resolver=resolver,
         targets=[
@@ -1526,6 +1549,7 @@ def create_session(
         if new_agent:
             assert agent_name is not None  # defaulted to ``name`` above
             from agentworks.agents.manager import create_agent
+            from agentworks.vms.manager import _resolve_git_tokens
 
             create_agent(
                 db,
@@ -1534,6 +1558,8 @@ def create_session(
                 vm_name=vm.name,
                 template=agent_template,
                 platform=vm_platform,
+                # Git tokens already resolved in the boundary pass above.
+                git_tokens=_resolve_git_tokens(agent_git_providers, resolver),
             )
             agent_created = True
 

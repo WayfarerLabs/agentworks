@@ -391,7 +391,7 @@ def test_new_agent_with_explicit_agent_name(
             agent_name="my-named-agent",
         )
     cli_shaped = [
-        {k: v for k, v in c.items() if k != "platform"} for c in create_agent_calls
+        {k: v for k, v in c.items() if k not in ("platform", "git_tokens")} for c in create_agent_calls
     ]
     assert cli_shaped == [
         {"name": "my-named-agent", "vm_name": "vm1", "template": None}
@@ -652,7 +652,9 @@ def test_nested_creates_are_their_own_composition_units(
     # NOTHING else, so any smuggled kwarg (values, registry, resolved,
     # parent_registry, ...) trips this regardless of its name.
     assert seam_kwargs["create_workspace"] == {"name", "vm_name", "template_name", "platform"}
-    assert seam_kwargs["create_agent"] == {"name", "vm_name", "template", "platform"}
+    assert seam_kwargs["create_agent"] == {
+        "name", "vm_name", "template", "platform", "git_tokens"
+    }
     db.close()
 
 
@@ -988,7 +990,7 @@ def test_workspace_prompt_picks_create_new(
     # The flow reached create_workspace, which means new_workspace=True was set
     # by the prompt-driven path.
     cli_shaped = [
-        {k: v for k, v in c.items() if k != "platform"}
+        {k: v for k, v in c.items() if k not in ("platform", "git_tokens")}
         for c in create_workspace_calls
     ]
     assert cli_shaped == [{"name": "s1", "vm_name": "vm1", "template_name": None}]
@@ -1095,7 +1097,7 @@ def test_mode_prompt_picks_create_new(
         )
     # The flow reached create_agent with the session name defaulted in.
     cli_shaped = [
-        {k: v for k, v in c.items() if k != "platform"} for c in create_agent_calls
+        {k: v for k, v in c.items() if k not in ("platform", "git_tokens")} for c in create_agent_calls
     ]
     assert cli_shaped == [{"name": "s1", "vm_name": "vm1", "template": None}]
     db.close()

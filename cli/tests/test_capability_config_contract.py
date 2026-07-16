@@ -18,10 +18,10 @@ from typing import Any
 import pytest
 
 from agentworks.bootstrap import build_registry
+from agentworks.capabilities.git_credential import GIT_CREDENTIAL_PROVIDER_REGISTRY
+from agentworks.capabilities.git_credential.base import GitCredentialProvider
 from agentworks.config import load_config
 from agentworks.errors import ConfigError
-from agentworks.git_credentials import GIT_CREDENTIAL_PROVIDER_REGISTRY
-from agentworks.git_credentials.base import GitCredentialProvider
 from agentworks.manifests import load_manifests
 from agentworks.resources.reference import ConfigReference
 
@@ -86,9 +86,23 @@ def test_azdo_rejects_unknown_blob_fields_yaml(tmp_path: Path) -> None:
     assert "res.yaml" in str(exc.value)
 
 
-def test_github_accepts_no_configuration(tmp_path: Path) -> None:
+def test_base_class_accepts_no_configuration() -> None:
     """The base-class default: capabilities without config reject any
-    blob content."""
+    blob content. (github grew scope fields in #166, so the pin uses a
+    minimal subclass.)"""
+
+    class _Bare(GitCredentialProvider):
+        provider_name = "bare"
+
+        def credential_lines(self, token: str) -> list[str]:
+            return []
+
+    with pytest.raises(ConfigError, match="accepts no configuration"):
+        _Bare.validate_config("spec.provider_config", {"anything": 1})
+
+
+def test_github_rejects_unknown_blob_fields(tmp_path: Path) -> None:
+    """github validates its own vocabulary (scope fields only)."""
     _manifest(
         tmp_path,
         """
@@ -102,7 +116,7 @@ def test_github_accepts_no_configuration(tmp_path: Path) -> None:
             org: nope
         """,
     )
-    with pytest.raises(ConfigError, match="accepts no configuration"):
+    with pytest.raises(ConfigError, match="unknown github provider field"):
         load_manifests(tmp_path / "resources")
 
 
@@ -145,6 +159,11 @@ class _SigningCredentialProvider(GitCredentialProvider):
 
     def credential_lines(self, token: str) -> list[str]:
         return [f"https://signer:{token}@example.test"]
+
+    def helper_entry(self):  # noqa: ANN201
+        from agentworks.capabilities.git_credential.base import HelperEntry
+
+        return HelperEntry(host="example.test", username="signer")
 
 
 @pytest.fixture

@@ -137,6 +137,11 @@ class DefaultsConfig:
     # boundary). The retired `defaults.platform` key is accepted as a
     # one-release deprecated alias.
     site: str | None = None
+    # Run the git-credential runup stage: authenticate each token against
+    # its provider API before it is written. Definitive rejection (401)
+    # is handled by the provisioning logic; network indeterminacy only
+    # warns. Off for airgapped setups.
+    runup_git_credentials: bool = True
 
 
 @dataclass(frozen=True)
@@ -502,7 +507,7 @@ def _load_paths(data: dict[str, object]) -> PathsConfig:
     return PathsConfig(vm_workspaces=vm_ws, vscode_workspaces=vscode_ws, backups=backups)
 
 
-_DEFAULTS_KEYS = {"site", "platform"}
+_DEFAULTS_KEYS = {"site", "platform", "runup_git_credentials"}
 
 
 def _load_defaults(
@@ -571,7 +576,10 @@ def _load_defaults(
             "release."
         )
 
-    return DefaultsConfig(site=str(site) if site is not None else None)
+    return DefaultsConfig(
+        site=str(site) if site is not None else None,
+        runup_git_credentials=bool(raw.get("runup_git_credentials", True)),
+    )
 
 
 _NAMED_CONSOLE_KEYS = {"tmux_layout"}
@@ -869,10 +877,15 @@ def _load_workspace_templates(
     for name, tdata in raw.items():
         if not isinstance(tdata, dict):
             raise ConfigError(f"workspace_templates.{name} must be a table")
+        repo = str(tdata["repo"]) if "repo" in tdata else None
+        # Embedded-username advice moved to a provider-owned preflight
+        # (git_credentials.remote_advisories, run when a template is
+        # actually used): only the credential instance knows its host and
+        # scope, so the judgment lives there rather than in this loader.
         templates[name] = WorkspaceTemplate(
             name=name,
             inherits=list(tdata.get("inherits", [])),
-            repo=str(tdata["repo"]) if "repo" in tdata else None,
+            repo=repo,
             tmuxinator=bool(tdata["tmuxinator"]) if "tmuxinator" in tdata else None,
             env=_parse_env_table(
                 tdata.get("env"),
@@ -893,6 +906,8 @@ def _load_git_credentials(
     data: dict[str, object],
     issues: list[str],
     decls: _SectionLineMap,
+    *,
+    warn_ignored_scope_keys: bool = True,
 ) -> dict[str, GitCredentialConfig]:
     raw = data.get("git_credentials", {})
     if not isinstance(raw, dict):
@@ -930,12 +945,14 @@ def _load_git_credentials(
         # capability validates the assembled blob. Unknown provider
         # names defer to the framework's miss policy at finalize.)
 
-        # ``token`` is a bare secret name; same rules as
-        # ``tailscale_auth_key``. Omission triggers GitCredentialConfig's
-        # ``__post_init__`` default (``git-token-<name>``). Empty-string
-        # is rejected so an operator who types ``token = ""`` doesn't
-        # silently get a default-named secret behind their back.
-        token_raw: str = ""
+        provider_config: dict[str, object] = {}
+        # ``token`` is a bare secret name the provider sources its PAT
+        # from. Flat in TOML, hoisted into provider_config so the
+        # internal rep matches the YAML manifest shape (the provider's
+        # validate_config owns the ``git-token-<name>`` default when it
+        # is omitted). Empty-string is rejected so an operator who types
+        # ``token = ""`` doesn't silently get the default behind their
+        # back.
         if "token" in cdata:
             if not isinstance(cdata["token"], str):
                 raise ConfigError(
@@ -948,27 +965,38 @@ def _load_git_credentials(
                     f"omit the key to inherit the default secret name "
                     f"\"git-token-{name}\""
                 )
-            token_raw = cdata["token"]
-
-        provider_config: dict[str, object] = {}
+            provider_config["token"] = cdata["token"]
         # The flat TOML shape only ever read ``org``, and only for azdo;
         # hoisting it into the blob for other providers would promote a
         # historically-ignored stray key into a validation error and
         # break released configs (loads-today). The flat domain's
-        # stray-key silence stays until Phase 6 retires it.
+        # stray-key silence stays until Phase 6 retires it, EXCEPT
+        # github scope keys, where silence would ship a credential with
+        # BROADER authority than the operator declared; those warn.
+        if warn_ignored_scope_keys and cred_type == "github":
+            ignored_scopes = sorted({"repo", "repos", "owner"} & set(cdata))
+            if ignored_scopes:
+                issues.append(
+                    f"git_credentials.{name}: github scope field(s) "
+                    f"{', '.join(ignored_scopes)} are manifest-only and "
+                    f"IGNORED here: the credential is provisioned "
+                    f"unscoped; migrate it to YAML "
+                    f"(agw resource migrate git-credential)"
+                )
         if cred_type == "azdo" and "org" in cdata:
             provider_config["org"] = str(cdata["org"])
-        from agentworks.git_credentials import GIT_CREDENTIAL_PROVIDER_REGISTRY
+        from agentworks.capabilities.git_credential import (
+            GIT_CREDENTIAL_PROVIDER_REGISTRY,
+        )
 
         capability = GIT_CREDENTIAL_PROVIDER_REGISTRY.get(cred_type)
         if capability is not None:
-            capability.validate_config(f"git_credentials.{name}", provider_config)
+            capability.validate_config(f"git-credential/{name}", provider_config)
         creds[name] = GitCredentialConfig(
             name=name,
             provider=cred_type,
             provider_config=provider_config,
             description=str(cdata["description"]) if "description" in cdata else None,
-            token=token_raw,
             declared_at=decls.lookup("git_credentials", name),
         )
     return creds

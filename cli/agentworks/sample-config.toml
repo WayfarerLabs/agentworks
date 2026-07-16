@@ -59,6 +59,9 @@ ssh_private_key = "~/.ssh/id_ed25519"        # required: used for SSH connection
                                             # lacks what they need; see
                                             # `agw doctor` for each site's state)
 # `platform` is the deprecated alias of `site` (one release); rename the key.
+#runup_git_credentials = true               # run the git-credential runup: authenticate each
+                                            # token against its provider API before it is
+                                            # written (false for airgapped setups)
 
 # --- Named-console settings ---
 # Scope: this section applies only to named multi-session consoles created
@@ -96,8 +99,12 @@ ssh_private_key = "~/.ssh/id_ed25519"        # required: used for SSH connection
 # agent_templates. Each entry's `token` field names a secret (default
 # `git-token-<name>`) that the framework resolves through the backend chain
 # (env-var, prompt, ...) at VM-init time; the resolved value is written to
-# `~/.git-credentials` via git's credential-store helper.
+# `~/.git-credentials` and served by the agentworks-managed credential
+# helper (which replaces git's credential-store).
 
+# Scoped GitHub credentials (fine-grained PATs pinned to a repo or org)
+# are declared in YAML manifests, not TOML: see
+# `agw resource sample git-credential`.
 #[git_credentials.github]
 #provider = "github"                              # `type` is accepted as a legacy alias
 #description = "GitHub full access"               # optional, shown in prompts and logs

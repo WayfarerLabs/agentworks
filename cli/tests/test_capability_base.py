@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING, ClassVar
 import pytest
 
 from agentworks.capabilities import Capability, idempotent_op, is_idempotent_op
+from agentworks.capabilities.base import RunContext
 from agentworks.errors import ConfigError
 
 if TYPE_CHECKING:
@@ -75,21 +76,21 @@ def test_construct_without_resolver_is_allowed_for_inspection() -> None:
 
 def test_base_preflight_predicts_declared_secrets() -> None:
     ok = _SecretCap("t1", {}, _FakeResolver(resolvable=True))  # type: ignore[arg-type]
-    ok.preflight()  # no error
+    ok.preflight(RunContext())  # no error
 
     bad = _SecretCap("t1", {}, _FakeResolver(resolvable=False))  # type: ignore[arg-type]
     with pytest.raises(ConfigError, match="not resolvable"):
-        bad.preflight()
+        bad.preflight(RunContext())
 
 
 def test_base_preflight_without_secrets_is_a_no_op() -> None:
-    _SecretlessCap("t1", {}).preflight()  # no resolver needed
+    _SecretlessCap("t1", {}).preflight(RunContext())  # no resolver needed
 
 
 def test_preflight_with_secrets_but_no_resolver_raises() -> None:
     cap = _SecretCap("t1", {})
     with pytest.raises(ConfigError, match="without a resolver"):
-        cap.preflight()
+        cap.preflight(RunContext())
 
 
 def test_idempotency_marker_reads_through_overrides() -> None:

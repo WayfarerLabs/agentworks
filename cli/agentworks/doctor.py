@@ -260,8 +260,10 @@ def _check_vm_sites(config: Config, registry: Registry) -> HealthGroup:
             g.info(name, f"disabled ({reason})")
             continue
         try:
+            from agentworks.capabilities.base import RunContext
+
             platform = resolve_site(name, registry, resolver=Resolver(config, registry))
-            platform.preflight()
+            platform.preflight(RunContext(config=config))
         except Exception as e:
             # A failing preflight on an enabled site is the error the
             # operator's next command hits: warn.
@@ -446,6 +448,16 @@ def _check_config() -> tuple[HealthGroup, Config | None, Registry | None]:
             g.ok("Admin dotfiles", admin.dotfiles_source)
         else:
             g.warn("Admin dotfiles", f"source missing: {admin.dotfiles_source}")
+
+    # Git token health is preflight-only in doctor: the token secret's
+    # resolvability shows in the Secrets group (`_check_secrets` covers
+    # the git-token-* family) like any other secret. Live authenticated
+    # verification (expired/revoked/wrong-scope) is the capability
+    # `runup()` stage, which runs inside provisioning ops; on-demand
+    # authenticated checking is the deferred `doctor --runup` (issue
+    # #176). Doctor never prompts, so an authenticated check here could
+    # only ever reach non-interactively-resolvable secrets, forking
+    # readiness on where a secret comes from: the asymmetry we reject.
 
     return g, config, registry
 

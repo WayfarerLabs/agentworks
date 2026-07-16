@@ -515,10 +515,10 @@ def _emit_document(doc: tomlkit.TOMLDocument, unit: MigrationUnit) -> str:
         # proves the divergence is shape-only.
         legacy = spec.pop("type", None)
         provider = spec.pop("provider", None) or legacy
-        token = spec.pop("token", None)
+        # token is provider config now: it nests with everything else
+        # provider-owned (org, ...) under provider_config, no longer a
+        # top-level field.
         rebuilt: dict[str, Any] = {"provider": provider}
-        if token is not None:
-            rebuilt["token"] = token
         if spec:
             rebuilt["provider_config"] = dict(spec)
         # The sweep above nests EVERYTHING the flat section carried
@@ -528,13 +528,15 @@ def _emit_document(doc: tomlkit.TOMLDocument, unit: MigrationUnit) -> str:
         # verification AFTER writing (rollback fires and the error cites
         # a rolled-back file). Validate here instead: fail before
         # anything is written, in the operator's TOML vocabulary.
-        from agentworks.git_credentials import GIT_CREDENTIAL_PROVIDER_REGISTRY
+        from agentworks.capabilities.git_credential import (
+            GIT_CREDENTIAL_PROVIDER_REGISTRY,
+        )
 
         capability = GIT_CREDENTIAL_PROVIDER_REGISTRY.get(str(provider))
         if capability is not None and "provider_config" in rebuilt:
             try:
                 capability.validate_config(
-                    f"git_credentials.{unit.name}", rebuilt["provider_config"]
+                    f"git-credential/{unit.name}", rebuilt["provider_config"]
                 )
             except ConfigError as exc:
                 raise ConfigError(

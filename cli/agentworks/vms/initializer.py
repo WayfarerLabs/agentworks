@@ -36,12 +36,13 @@ from agentworks.transports import (
 if TYPE_CHECKING:
     from collections.abc import Mapping
 
+    from agentworks.capabilities.git_credential.base import GitCredentialProvider
     from agentworks.capabilities.vm_platform import VMPlatform
     from agentworks.catalog import AptSourceEntry, SystemInstallCommandEntry, UserInstallCommandEntry
     from agentworks.config import Config
     from agentworks.db import Database
-    from agentworks.git_credentials.base import GitCredentialProvider
     from agentworks.resources.registry import Registry
+    from agentworks.secrets.resolver import Resolver
     from agentworks.vms.admin import AdminConfig
     from agentworks.vms.templates import ResolvedVMTemplate
 
@@ -141,7 +142,9 @@ def _write_agentworks_profile(
             unique_paths.append(p)
 
     logger.step("Shell profile")
-    output.detail(f"Writing agentworks profile ({len(unique_paths)} PATH entries)...")
+    output.detail(
+        f"Writing agentworks profile ({output.count(len(unique_paths), 'PATH entry', 'PATH entries')})..."
+    )
 
     try:
         lines = ["# Managed by agentworks -- do not edit"]
@@ -268,7 +271,7 @@ def _write_agentworks_identity_profile(
     """
     logger.step("Identity profile")
     output.detail(
-        f"Writing {AGENTWORKS_IDENTITY_PROFILE_PATH} ({len(identity_env)} vars)..."
+        f"Writing {AGENTWORKS_IDENTITY_PROFILE_PATH} ({output.count(len(identity_env), 'var')})..."
     )
 
     lines = ["# Managed by agentworks -- do not edit"]
@@ -557,7 +560,7 @@ def _write_mise_config(
         return
 
     logger.step("Mise config")
-    output.detail(f"Writing mise config with {len(packages)} package(s)...")
+    output.detail(f"Writing mise config with {output.count(len(packages), 'package')}...")
 
     settings_lines = ["[settings]", f'install_before = "{install_before}"', ""]
     tools_lines = ["[tools]"]
@@ -959,7 +962,7 @@ def _install_system_packages(
         logger.warning(msg)
         output.warn(msg)
 
-    output.detail(f"Installing {len(INIT_SYSTEM_PACKAGES)} system packages...")
+    output.detail(f"Installing {output.count(len(INIT_SYSTEM_PACKAGES), 'system package')}...")
     apt_str = " ".join(shlex.quote(p) for p in INIT_SYSTEM_PACKAGES)
     try:
         target.run(
@@ -995,7 +998,7 @@ def _install_apt_packages(
         return
 
     logger.step("Apt packages")
-    output.detail(f"Installing {len(all_apt)} apt packages...")
+    output.detail(f"Installing {output.count(len(all_apt), 'apt package')}...")
     apt_str = " ".join(shlex.quote(p) for p in all_apt)
     try:
         target.run(
@@ -1118,19 +1121,29 @@ def verify_tailscale_available() -> None:
 def resolve_git_credential_providers(
     registry: Registry,
     names: list[str],
+    resolver: Resolver | None = None,
 ) -> dict[str, GitCredentialProvider]:
-    """Resolve git credential provider instances from the registry.
+    """Construct git credential provider (capability) instances from the
+    registry.
 
-    Names are the credential names to resolve (from the admin row's or
-    an agent template's ``git_credentials`` list).
+    ``names`` are the credential names to construct (from the admin
+    row's or an agent template's ``git_credentials`` list). Each
+    provider is built from its ``provider_config`` and re-validates that
+    config at construct (so a bad scope value fails loudly here, never
+    silently WIDENING the credential). When ``resolver`` is passed, each
+    provider registers its token secret on it at construct, so the
+    operation's boundary resolve covers them and the provider can
+    ``runup()`` the token afterward; pass ``None`` for materials-only
+    or inspection construction.
     """
-    from agentworks.git_credentials.azdo import AzDOCredentialProvider
-    from agentworks.git_credentials.github import GitHubCredentialProvider
+    from agentworks.capabilities.git_credential import (
+        GIT_CREDENTIAL_PROVIDER_REGISTRY,
+    )
+    from agentworks.resources.access import git_credential
 
     providers: dict[str, GitCredentialProvider] = {}
     if not names:
         return providers
-    from agentworks.resources.access import git_credential
 
     for name in names:
         cred_config = git_credential(registry, name)
@@ -1140,27 +1153,39 @@ def resolve_git_credential_providers(
                 entity_kind="git-credential",
                 entity_name=name,
             )
-        desc = cred_config.description
-        if cred_config.provider == "azdo":
-            org = cred_config.provider_config.get("org")
-            assert isinstance(org, str)  # loader guarantees org for azdo
-            providers[name] = AzDOCredentialProvider(config_name=name, org=org, description=desc)
-        elif cred_config.provider == "github":
-            providers[name] = GitHubCredentialProvider(config_name=name, description=desc)
+        provider_cls = GIT_CREDENTIAL_PROVIDER_REGISTRY.get(cred_config.provider)
+        if provider_cls is None:
+            # Unknown provider names are caught by the framework's
+            # git-credential-provider miss policy at build_registry; this
+            # guards direct callers that bypass that path.
+            raise NotFoundError(
+                f"git credential '{name}' names unknown provider "
+                f"{cred_config.provider!r}",
+                entity_kind="git-credential-provider",
+                entity_name=cred_config.provider,
+            )
+        providers[name] = provider_cls(
+            name,
+            cred_config.provider_config,
+            resolver,
+            description=cred_config.description,
+        )
     return providers
 
 
 def announce_git_credentials(providers: dict[str, GitCredentialProvider]) -> None:
-    """Tell the operator which git credentials the operation will
-    configure. (The former per-provider auth pre-flight was vestigial:
-    every provider's check returned True unconditionally once token
-    resolution moved to the secret framework. Token health reports
-    through doctor's Secrets group and resolution failures surface as
+    """Echo the git credentials the operation will configure, one
+    ``Checking git-credential/<name>...`` line each so the Preflight
+    context matches the ``vm-site`` / ``vm-template`` lines above, in the
+    ``<kind>/<name>`` form operators pass to ``agw resource`` and the
+    like. (The former per-provider auth pre-flight was vestigial: every
+    provider's check returned True unconditionally once token resolution
+    moved to the secret framework. Token health reports through doctor's
+    Secrets group and resolution failures surface as
     ``SecretUnavailableError`` at collect time.)
     """
-    if providers:
-        labels = [p.display_name for p in providers.values()]
-        output.info(f"Git credentials configured: {', '.join(labels)}")
+    for name in providers:
+        output.detail(f"Checking git-credential/{name}...")
 
 
 def rejoin_tailscale(
@@ -1376,6 +1401,7 @@ def run_initialization(
     """
     db.insert_vm_event(vm_name, "init_started")
 
+    output.phase("VM Initialization")
     try:
         _phase_b_setup(
             db,
@@ -1637,7 +1663,7 @@ def _phase_b_setup(
     """
     from agentworks.catalog import catalog_from_registry
 
-    output.info("Initializing VM...")
+    output.detail(f"vm: {vm_name}")
     db.update_vm_init_status(vm_name, InitStatus.IN_PROGRESS)
     # Phase 2b: catalog reference validation moved to the framework
     # (catalog kinds' error miss policy fires at build_registry time,
@@ -1743,7 +1769,7 @@ def _phase_b_setup(
     # Non-fatal: snap packages
     if vm_template.snap:
         logger.step("Snap packages")
-        output.detail(f"Installing {len(vm_template.snap)} snap packages...")
+        output.detail(f"Installing {output.count(len(vm_template.snap), 'snap package')}...")
         for pkg in vm_template.snap:
             try:
                 ts_target.run(f"snap install {shlex.quote(pkg)}", sudo=True, timeout=120)
@@ -1752,11 +1778,58 @@ def _phase_b_setup(
                 logger.warning(msg)
                 output.warn(msg)
 
-    # Non-fatal: set default shell (before install commands so installers
-    # write to the correct rc file). The zsh ``zsh-newuser-install``
-    # first-run wizard is pre-empted by the skel seed.
-    logger.step("Shell configuration")
+    # admin_shell is a pure config read, hoisted above the system install
+    # commands below (which run in it) so they stay in the VM section; the
+    # login-shell usermod is a separate admin step further down.
     admin_shell = admin.shell
+
+    # Non-fatal: system install commands (VM-level, system-wide). Kept in
+    # the VM section: they run via ``{admin_shell} -lc`` explicitly, so
+    # they do not depend on the login-shell usermod, and they install
+    # system-wide tools rather than touching the admin's rc.
+    system_path = _run_catalog_commands(
+        ts_target,
+        vm_template.system_install_commands,
+        catalog.system_install_commands,
+        admin_shell,
+        home,
+        logger,
+        label="System install command",
+    )
+
+    # Non-fatal: agent tmux socket directory infrastructure (VM-level:
+    # shared group, root directory, per-agent subdirectories, all
+    # root-owned system state). No dependency on the admin steps below, so
+    # it closes out the VM phase.
+    try:
+        from agentworks.sessions.tmux import (
+            cleanup_stale_sockets,
+            ensure_agent_socket_dir,
+            ensure_agent_socket_root,
+        )
+
+        logger.step("Agent tmux socket directories")
+        output.detail("Setting up agent tmux socket infrastructure...")
+
+        ensure_agent_socket_root(ts_target, admin_username, warn_if_missing=not is_first_init)
+        for agent in db.list_agents(vm_name=vm_name):
+            ensure_agent_socket_dir(ts_target, agent.linux_user)
+            removed = cleanup_stale_sockets(ts_target, agent.linux_user)
+            if removed:
+                output.detail(
+                    f"Cleaned up {output.count(removed, 'stale socket')} for {agent.linux_user}"
+                )
+    except SSHError as e:
+        msg = f"agent tmux socket setup failed: {e}"
+        logger.warning(msg)
+        output.warn(msg)
+
+    output.phase("Admin Initialization")
+
+    # Non-fatal: set default shell (before the USER install commands so
+    # those installers write to the correct rc file). The zsh
+    # ``zsh-newuser-install`` first-run wizard is pre-empted by the skel seed.
+    logger.step("Shell configuration")
     output.detail(f"Setting shell to {admin_shell}...")
     try:
         ts_target.run(
@@ -1805,40 +1878,6 @@ def _phase_b_setup(
         logger.warning(msg)
         output.warn(msg)
 
-    # Non-fatal: agent tmux socket directory infrastructure.
-    # Creates the shared group, root directory, and per-agent subdirectories.
-    try:
-        from agentworks.sessions.tmux import (
-            cleanup_stale_sockets,
-            ensure_agent_socket_dir,
-            ensure_agent_socket_root,
-        )
-
-        logger.step("Agent tmux socket directories")
-        output.detail("Setting up agent tmux socket infrastructure...")
-
-        ensure_agent_socket_root(ts_target, admin_username, warn_if_missing=not is_first_init)
-        for agent in db.list_agents(vm_name=vm_name):
-            ensure_agent_socket_dir(ts_target, agent.linux_user)
-            removed = cleanup_stale_sockets(ts_target, agent.linux_user)
-            if removed:
-                output.detail(f"Cleaned up {removed} stale socket(s) for {agent.linux_user}")
-    except SSHError as e:
-        msg = f"agent tmux socket setup failed: {e}"
-        logger.warning(msg)
-        output.warn(msg)
-
-    # Non-fatal: system install commands
-    system_path = _run_catalog_commands(
-        ts_target,
-        vm_template.system_install_commands,
-        catalog.system_install_commands,
-        admin_shell,
-        home,
-        logger,
-        label="System install command",
-    )
-
     # Non-fatal: mise config (written before dotfiles so dotfiles can override)
     mise_path: list[str] = _mise_shims_path(home)
     if admin.mise_packages:
@@ -1857,7 +1896,9 @@ def _phase_b_setup(
 
     # Non-fatal: git credentials (before dotfiles and mise lockfile for private repos)
     if providers:
-        _configure_git_credentials(vm_name, ts_target, providers, logger, git_tokens=git_tokens)
+        _configure_git_credentials(
+            vm_name, ts_target, providers, logger, git_tokens=git_tokens, config=config
+        )
 
     # Non-fatal: dotfiles (can override mise config, can provide lockfile)
     if admin.dotfiles_source:
@@ -1999,6 +2040,7 @@ def _configure_git_credentials(
     logger: SSHLogger,
     *,
     git_tokens: dict[str, str],
+    config: Config,
 ) -> None:
     """Configure git credential store on the VM with the pre-resolved
     framework tokens.
@@ -2011,6 +2053,15 @@ def _configure_git_credentials(
     raise loudly rather than silently dropping the credential, since
     silently shipping a VM with a missing credential the operator
     asked for is the worst kind of footgun.
+
+    Two distinct error semantics here, deliberately: the deferred RUNUP
+    (``runup_and_filter``) is per-credential and forgiving. A token an
+    authenticated probe rejects is skipped (warned, so init goes PARTIAL)
+    and the rest are still configured, because a bad token is
+    idempotently fixable (fix it, reinit). But the MATERIALS BUILD over
+    whatever survived runup is atomic: a failure there (e.g. a scope
+    collision) is a config error, not a bad token, so it aborts
+    credential config as a whole rather than shipping a partial store.
     """
     logger.step("Git credentials")
     output.detail("Configuring git credentials...")
@@ -2020,34 +2071,60 @@ def _configure_git_credentials(
         raise StateError(
             f"git credential setup: token(s) not resolved by the framework "
             f"for {missing!r}; caller must pre-resolve every provider's "
-            f"token via _collect_git_tokens before invoking this function",
+            f"token through the operation's resolve pass before invoking "
+            f"this function",
             entity_kind="git-credential",
             entity_name=missing[0],
         )
 
-    # Collect credential lines from all providers.
-    credential_lines: list[str] = []
-    for name, provider in providers.items():
-        try:
-            credential_lines.extend(
-                provider.credential_lines(git_tokens[name])
-            )
-        except Exception as e:
-            msg = f"git credential setup failed for {name}: {e}"
-            logger.warning(msg)
-            output.warn(msg)
+    from agentworks.git_credentials import (
+        GIT_CRED_HELPER_PATH,
+        GIT_SCOPES_INCLUDE_PATH,
+        build_credential_materials,
+        runup_and_filter,
+    )
 
-    if not credential_lines:
+    # Deferred git-credential runup: authenticate each token right before
+    # it is written. A rejected credential is skipped (logged as a warning
+    # -> PARTIAL) and the rest are still configured; the operator fixes the
+    # token and reruns reinit. Runs here, not at the command root, so a
+    # bad token never blocks the VM from provisioning.
+    providers = runup_and_filter(providers, git_tokens, config, logger)
+    if not providers:
         return
+    # Store lines + the useHttpPath include + the selecting helper (the
+    # helper picks the per-repo/per-owner credential from the remote path
+    # git now sends; issue #166). Scope collisions raise here, before
+    # anything is written; the check sees only the runup SURVIVORS, so a
+    # collision masked by a rejected token surfaces on the next reinit.
+    materials = build_credential_materials(providers, git_tokens)
 
-    # Write credentials and configure git on the VM
+    # Write credentials and configure git on the VM. The context
+    # sections live in an agentworks-owned include file (overwritten
+    # wholesale every init, so removing scopes from config is
+    # idempotent) rather than in ~/.gitconfig itself.
     try:
-        cred_content = "\n".join(credential_lines) + "\n"
-        ts_target.write_file("~/.git-credentials", cred_content, mode="600")
-        ts_target.run(
-            "git config --global credential.helper store",
+        ts_target.write_file(
+            "~/.git-credentials", materials.store_content, mode="600"
         )
-        output.detail(f"Git credentials configured for {len(providers)} provider(s)")
+        ts_target.write_file(
+            GIT_SCOPES_INCLUDE_PATH, materials.gitconfig_content, mode="600"
+        )
+        ts_target.write_file(
+            GIT_CRED_HELPER_PATH, materials.helper_script, mode="700"
+        )
+        # Our helper REPLACES credential-store in the same config slot
+        # (single-value replace also migrates released VMs off 'store'
+        # on their next reinit; store deletes the provisioned line on
+        # every rejected auth).
+        ts_target.run(
+            f"git config --global --replace-all credential.helper '!{GIT_CRED_HELPER_PATH}' && "
+            f"(git config --global --get-all include.path | grep -qxF '{GIT_SCOPES_INCLUDE_PATH}' "
+            f"|| git config --global --add include.path '{GIT_SCOPES_INCLUDE_PATH}')",
+        )
+        output.detail(
+            f"Git credentials configured for {output.count(len(providers), 'provider')}"
+        )
     except SSHError as e:
         msg = f"git credential store setup failed: {e}"
         logger.warning(msg)

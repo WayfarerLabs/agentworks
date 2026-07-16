@@ -24,8 +24,8 @@ import pytest
 import agentworks.resources as resources_pkg
 from agentworks import catalog as catalog_mod
 from agentworks.agents import kinds as agents_kinds_mod
+from agentworks.capabilities.git_credential import kinds as git_credentials_kinds_mod
 from agentworks.env.entry import EnvEntry
-from agentworks.git_credentials import kinds as git_credentials_kinds_mod
 from agentworks.resources import inspect as inspect_mod
 from agentworks.resources import reference as reference_mod
 from agentworks.resources import registry as registry_mod

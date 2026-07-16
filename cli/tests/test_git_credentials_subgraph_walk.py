@@ -66,9 +66,10 @@ def test_admin_to_git_credentials_to_secret_walk(
     config = load_config(cfg, warn_issues=False)
     registry = build_registry(config)
 
-    # The intermediate Resource is in the registry.
-    cred = registry.lookup("git-credential", "github")
-    assert cred.token == "git-token-github"
+    # The intermediate Resource is in the registry; token defaults via
+    # the provider now, so the auto-declared secret below is the
+    # observable proof of the walk.
+    assert registry.lookup("git-credential", "github") is not None
 
     # The downstream secret is auto-declared; its source is the
     # git_credentials Resource that emitted the requirement, NOT

@@ -19,6 +19,7 @@ from agentworks.transports import SSHTransport
 if TYPE_CHECKING:
     from collections.abc import Mapping
 
+    from agentworks.capabilities.base import RunContext
     from agentworks.db import VMRow
     from agentworks.resources.reference import ConfigReference
 
@@ -132,6 +133,50 @@ class ProxmoxPlatform(VMPlatform):
             )
             self._api_cached = api
         return api
+
+    def runup(self, ctx: RunContext) -> None:
+        """Provisioning-phase runup: authenticate the API token with a
+        cheap read (next available VMID) before ``create`` mutates
+        anything, so a bad or unauthorized token fails cleanly here
+        rather than mid-provision. A 401/403 is a definitive rejection
+        (fatal, before any VM exists); anything else (a transient error
+        or an unreachable host) warns and continues unverified, so an
+        outage never blocks work a valid token would have done.
+
+        Reuses the op client (built from the resolved token), so a
+        subsequent ``create`` reuses the same authenticated session; the
+        resolved value is the same whether read via the context or the
+        bound resolver here."""
+        from agentworks import output
+        from agentworks.errors import TokenRejectedError
+
+        if self.resolver is None:
+            return  # inspection construction; no resolved token to check
+        token_secret = str(self._cfg("token_secret", DEFAULT_TOKEN_SECRET))
+        output.detail(f"Performing runup test for vm-site/{self.site_name}...")
+        try:
+            self._api.next_id()
+        except ProxmoxAPIError as e:
+            if e.code in (401, 403):
+                raise TokenRejectedError(
+                    f"Proxmox rejected the API token for vm-site "
+                    f"'{self.site_name}' (secret '{token_secret}')",
+                    entity_kind="vm-site",
+                    entity_name=self.site_name,
+                    hint=(
+                        "Check token_id and the token secret's value and "
+                        "permissions on the Proxmox host."
+                    ),
+                ) from e
+            output.warn(
+                f"could not verify the Proxmox API token for "
+                f"'{self.site_name}' ({e}); continuing unverified"
+            )
+        except OSError as e:
+            output.warn(
+                f"could not reach Proxmox for '{self.site_name}' "
+                f"(network: {e}); continuing unverified"
+            )
 
     def _vm_node(self, vm: VMRow) -> str:
         # Prefer the recorded node (decouples existing VMs from config

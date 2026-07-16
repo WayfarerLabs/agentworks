@@ -45,7 +45,7 @@ def test_rekey_running_check_runs_after_the_resolve_boundary(
     class _StoppedPlatform:
         name = "stub"
 
-        def preflight(self) -> None:
+        def preflight(self, ctx: object) -> None:
             order.append("preflight")
 
         def status(self, vm: VMRow) -> VMStatus:

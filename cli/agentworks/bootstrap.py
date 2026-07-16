@@ -48,7 +48,8 @@ def build_registry(config: Config, manifests: ManifestSet | None = None) -> Regi
     ``load_config``'s ``config_issues`` behavior). Pass an explicit
     ``ManifestSet`` (e.g. ``ManifestSet.empty()``) to skip the auto-load.
     """
-    from agentworks import catalog, git_credentials, output, secrets
+    from agentworks import catalog, output, secrets
+    from agentworks.capabilities import git_credential
     from agentworks.capabilities import vm_platform as vm_platforms
     from agentworks.errors import StateError
     from agentworks.manifests import RESOURCES_DIRNAME, load_manifests
@@ -83,7 +84,7 @@ def build_registry(config: Config, manifests: ManifestSet | None = None) -> Regi
     # built-in rows must never land on top of operator rows.
     builtin_manifests.publish_to(registry)
     catalog.publish_to(registry, config)
-    git_credentials.publish_to(registry)
+    git_credential.publish_to(registry)
     secrets.publish_to(registry)
     vm_platforms.publish_to(registry)
     config.publish_to(registry)

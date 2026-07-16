@@ -17,6 +17,21 @@ import pytest
 from agentworks.config import load_config
 
 
+def _resolve_tokens(config: object, registry: object, names: list[str]) -> dict[str, str]:
+    """Resolve git tokens for the named credentials via the agent
+    composition helper (which supersedes the removed _collect_git_tokens:
+    same construct -> preflight -> resolve, plus phase banners)."""
+    from types import SimpleNamespace
+
+    from agentworks.agents.manager import _preflight_resolve_agent_git
+
+    return _preflight_resolve_agent_git(
+        config,  # type: ignore[arg-type]
+        registry,  # type: ignore[arg-type]
+        SimpleNamespace(name="t", git_credentials=names),  # type: ignore[arg-type]
+    )
+
+
 @pytest.fixture()
 def ssh_keys(tmp_path: Path) -> tuple[Path, Path]:
     pub = tmp_path / "id.pub"
@@ -66,10 +81,10 @@ def test_collect_git_tokens_resolves_default_secret_name(
     monkeypatch.setenv("AW_SECRET_GIT_TOKEN_GITHUB", "ghp_abc")
 
     from agentworks.bootstrap import build_registry
-    from agentworks.vms.manager import _collect_git_tokens
+
 
     registry = build_registry(config)
-    tokens = _collect_git_tokens(config, registry, ["github"])
+    tokens = _resolve_tokens(config, registry, ["github"])
     assert tokens == {"github": "ghp_abc"}
 
 
@@ -97,10 +112,10 @@ def test_collect_git_tokens_resolves_custom_secret_name(
     monkeypatch.setenv("AW_SECRET_CUSTOM_TOK", "ghp_custom")
 
     from agentworks.bootstrap import build_registry
-    from agentworks.vms.manager import _collect_git_tokens
+
 
     registry = build_registry(config)
-    tokens = _collect_git_tokens(config, registry, ["github"])
+    tokens = _resolve_tokens(config, registry, ["github"])
     assert tokens["github"] == "ghp_custom"
 
 
@@ -132,10 +147,10 @@ def test_collect_git_tokens_batches_multiple_credentials(
     monkeypatch.setenv("AW_SECRET_GIT_TOKEN_AZDO", "azdo_bbb")
 
     from agentworks.bootstrap import build_registry
-    from agentworks.vms.manager import _collect_git_tokens
+
 
     registry = build_registry(config)
-    tokens = _collect_git_tokens(config, registry, ["github", "azdo"])
+    tokens = _resolve_tokens(config, registry, ["github", "azdo"])
     assert tokens == {"github": "ghp_aaa", "azdo": "azdo_bbb"}
 
 
@@ -146,10 +161,10 @@ def test_collect_git_tokens_empty_list_returns_empty_dict(
     config = load_config(cfg, warn_issues=False)
 
     from agentworks.bootstrap import build_registry
-    from agentworks.vms.manager import _collect_git_tokens
+
 
     registry = build_registry(config)
-    assert _collect_git_tokens(config, registry, []) == {}
+    assert _resolve_tokens(config, registry, []) == {}
 
 
 def test_collect_git_tokens_credential_lines_use_resolved_value(
@@ -175,11 +190,11 @@ def test_collect_git_tokens_credential_lines_use_resolved_value(
     monkeypatch.setenv("AW_SECRET_GIT_TOKEN_GITHUB", "ghp_xyz")
 
     from agentworks.bootstrap import build_registry
-    from agentworks.git_credentials.github import GitHubCredentialProvider
-    from agentworks.vms.manager import _collect_git_tokens
+    from agentworks.capabilities.git_credential.github import GitHubCredentialProvider
+
 
     registry = build_registry(config)
-    tokens = _collect_git_tokens(config, registry, ["github"])
+    tokens = _resolve_tokens(config, registry, ["github"])
 
     provider = GitHubCredentialProvider("github")
     lines = provider.credential_lines(tokens["github"])

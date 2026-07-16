@@ -179,9 +179,9 @@ def _strip(resource: Any) -> Any:
               name: ado
             spec:
               provider: azdo
-              token: git-token-ado
               provider_config:
                 org: my-org
+                token: git-token-ado
             """,
         ),
         (
@@ -295,10 +295,10 @@ def test_git_credential_type_key_rejected(tmp_path: Path) -> None:
 def test_git_credential_provider_config_rejects_kind_owned_fields(
     tmp_path: Path,
 ) -> None:
-    """The blob may not shadow the kind-owned surface: without this,
-    provider_config.token would silently override spec.token and
-    provider_config.type/provider would silently re-pick the provider
-    (the flatten-into-the-loader trick made that possible)."""
+    """The blob may not shadow the kind-owned surface (type/provider/
+    description). token is NOT kind-owned any more; it is provider
+    config, so it is tested separately (test_git_credential_token_in
+    _provider_config)."""
     _manifest(
         tmp_path,
         """
@@ -309,12 +309,31 @@ def test_git_credential_provider_config_rejects_kind_owned_fields(
         spec:
           provider: github
           provider_config:
-            token: sneaky
+            provider: sneaky
         """,
     )
     with pytest.raises(
         ConfigError, match="may not contain kind-owned field"
     ):
+        load_manifests(tmp_path / "resources")
+
+
+def test_git_credential_token_in_provider_config(tmp_path: Path) -> None:
+    """token lives under provider_config now; a top-level spec.token is
+    rejected with a migration hint."""
+    _manifest(
+        tmp_path,
+        """
+        apiVersion: agentworks/v1
+        kind: git-credential
+        metadata:
+          name: gh
+        spec:
+          provider: github
+          token: at-top-level
+        """,
+    )
+    with pytest.raises(ConfigError, match="under spec.provider_config"):
         load_manifests(tmp_path / "resources")
 
 

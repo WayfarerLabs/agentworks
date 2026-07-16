@@ -228,9 +228,9 @@ def _apply_hardening_fstab(target: Transport, logger: SSHLogger) -> None:
     else:
         # action in {"appended", "added-option", "upgraded"}: write the file.
         action_msg = {
-            "appended": "Added /proc entry to /etc/fstab.",
-            "added-option": "Added hidepid=1 to /proc options in /etc/fstab.",
-            "upgraded": "Upgraded /proc from hidepid=0 to hidepid=1 in /etc/fstab.",
+            "appended": "Added /proc entry to /etc/fstab",
+            "added-option": "Added hidepid=1 to /proc options in /etc/fstab",
+            "upgraded": "Upgraded /proc from hidepid=0 to hidepid=1 in /etc/fstab",
         }[action]
         output.detail(action_msg)
         mktemp_result = target.run("mktemp --tmpdir agw-fstab.XXXXXX")

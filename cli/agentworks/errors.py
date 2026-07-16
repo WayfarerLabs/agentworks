@@ -39,6 +39,13 @@ class AgentworksError(Exception):
         self.hint = hint
 
 
+class TokenRejectedError(AgentworksError):
+    """An external service definitively rejected a credential token
+    (e.g. GitHub answered 401 for a PAT). Distinct from network
+    indeterminacy, which never raises; see
+    ``GitCredentialProvider.runup``."""
+
+
 class NotFoundError(AgentworksError):
     """A named entity does not exist (e.g. workspace, vm, session)."""
 

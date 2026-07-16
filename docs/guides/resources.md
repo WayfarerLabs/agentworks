@@ -63,6 +63,35 @@ delete one leading `#` per line to activate. `agw resource edit KIND/NAME` opens
 declaring a resource in `$EDITOR` (YAML-declared resources only: TOML-declared ones point at
 `agw resource migrate` or `agw config edit`).
 
+## Scoped GitHub credentials (fine-grained PATs)
+
+A `git-credential` with `provider: github` may carry a scope in its `provider_config`:
+`repos: ["owner/name", ...]` pins the credential to specific repositories (always a list, even for
+one, matching a fine-grained PAT's selected repos), while `owner: "org"` covers every repository
+under that user or org, including repos an agent clones ad hoc that no workspace ever declared. The
+two are mutually exclusive; a credential with neither is the unscoped fallback. Scopes are
+manifest-only (the legacy flat TOML shape has no GitHub fields).
+
+Selection lives in the agentworks credential helper: initialization sets `credential.useHttpPath`
+(via the managed include `~/.agentworks-git-scopes.gitconfig`), so git hands the helper the remote's
+host and repository path, and the helper picks the most specific credential: exact repo, then owner
+(first path segment), then the provider's host default (`x-access-token` for GitHub, the org for
+Azure DevOps), then the first stored line for the host. Two credentials claiming the same scope is a
+configuration error at initialization time, evaluated per user (admin and each agent get their own
+store, include, and helper, built from their own credential lists). Declaring a repo under one
+credential and its org under another is fine: the more specific scope wins, and org scopes cover
+repos cloned ad hoc that nothing declared.
+
+Clone with plain https URLs; no username needed anywhere. Credentials are served by the
+agentworks-owned helper (`~/.agentworks-git-cred-helper.sh`, replacing git's `credential-store`):
+when the remote rejects a credential it prints which credential and secret to fix instead of
+silently deleting the provisioned entry (which is what `credential-store` does on every failed
+auth); an embedded username in a remote URL is reviewed per provider (GitHub flags it, since it
+bypasses scoping; Azure DevOps accepts its org, which is both the username and the owner scope); and
+if git stops sending repository paths (a local git config overriding `useHttpPath`), the helper
+warns and serves the host default. The credential's resource name appears as the username on scoped
+store lines and in provider-side logs; remotes are never rewritten.
+
 ## TOML resource sections: deprecated but supported
 
 The classic TOML resource sections (`[secrets.*]`, `[vm_templates.*]`, `[git_credentials.*]`, ...)

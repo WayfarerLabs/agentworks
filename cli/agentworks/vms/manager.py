@@ -7,6 +7,7 @@ import re
 from typing import TYPE_CHECKING, NamedTuple
 
 from agentworks import output
+from agentworks.capabilities.base import RunContext
 from agentworks.config import validate_admin_username, validate_name
 from agentworks.db import (
     SYSTEM_SLUG_KEY,
@@ -17,7 +18,6 @@ from agentworks.db import (
 from agentworks.errors import (
     AgentworksError,
     AlreadyExistsError,
-    ConfigError,
     ConnectivityError,
     ExternalError,
     NotFoundError,
@@ -36,8 +36,9 @@ from agentworks.vms.initializer import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable, Iterator, Sequence
+    from collections.abc import Iterable, Iterator, Mapping, Sequence
 
+    from agentworks.capabilities.git_credential.base import GitCredentialProvider
     from agentworks.capabilities.vm_platform import VMPlatform
     from agentworks.config import Config
     from agentworks.db import Database, VMRow, WorkspaceRow
@@ -242,7 +243,7 @@ def bind_platform(
     if targets:
         resolver.register_targets(targets)
     if prepare:
-        platform.preflight()
+        platform.preflight(RunContext(config=config))
         resolver.resolve()
     return platform
 
@@ -285,7 +286,7 @@ def bind_platforms(
     # The batch's preflight boundary: every distinct site's platform
     # preflights, then the one resolve pass for the union.
     for platform in by_site.values():
-        platform.preflight()
+        platform.preflight(RunContext(config=config))
     if resolver is not None:
         resolver.resolve()
     return pairs
@@ -435,8 +436,15 @@ def create_vm(
     validate_admin_username(resolved_admin_username)
 
     verify_tailscale_available()
-    providers = resolve_git_credential_providers(registry, admin.git_credentials)
-    announce_git_credentials(providers)
+    from agentworks.secrets.resolver import Resolver
+
+    # Construct the git-credential providers against the operation's
+    # resolver up front, so their token secrets join the one boundary
+    # resolve below (and each can runup() its token afterward).
+    resolver = Resolver(config, registry)
+    providers = resolve_git_credential_providers(
+        registry, admin.git_credentials, resolver
+    )
 
     # System slug: first interactive create prompts once (a blank
     # answer is final; see _resolve_system_slug). Runs before any
@@ -456,22 +464,33 @@ def create_vm(
     # [admin.env] / [vm_templates.*.env] secrets are NOT prompted here:
     # they're not used until runtime shells, which perform their own
     # resolve at their composition root.
-    from agentworks.secrets.resolver import Resolver
     from agentworks.vms.sites import resolve_site
     from agentworks.vms.templates import preflight_vm_template
 
-    resolver = Resolver(config, registry)
     platform_obj = resolve_site(site, registry, resolver=resolver)
-    git_token_names = _register_git_token_decls(registry, resolver, providers.keys())
+
+    output.phase("Preflight")
+    output.detail(f"Checking vm-site/{site}...")
+    output.detail(f"Checking vm-template/{vm_tmpl.name}...")
+    announce_git_credentials(providers)
     preflight_vm_template(vm_tmpl, resolver)
-    platform_obj.preflight()
-    output.info("Collecting credentials...")
+    platform_obj.preflight(RunContext(config=config))
+    for provider in providers.values():
+        provider.preflight(RunContext(config=config))
+
+    output.phase("Resolving Secrets")
     resolver.resolve()
+
+    output.phase("Provisioning")
+    # Provisioning-phase runup: authenticate the platform's own
+    # credential (proxmox API token) before create() mutates anything. A
+    # definitive rejection aborts here, before the DB row or any backend
+    # resource exists. Runup is deferred and announced inline (no phase
+    # of its own); lima/wsl2/azure have no token, so this is a silent
+    # no-op for them.
+    platform_obj.runup(RunContext(config=config, secrets=resolver))
     tailscale_auth_key = resolver.get(vm_tmpl.tailscale_auth_key)
-    git_tokens = {
-        cred_name: resolver.get(token_name)
-        for cred_name, token_name in git_token_names.items()
-    }
+    git_tokens = _resolve_git_tokens(providers, resolver)
 
     # The VM's OS hostname, computed once at create time and recorded on the
     # row: {slug}-{name} with a slug, the bare name without. Bounded by
@@ -525,6 +544,7 @@ def create_vm(
         azure_vm_size=resolved_azure_size,
     )
 
+    output.detail(f"Creating VM '{vm_name}' on vm-site '{site}'...")
     try:
         result = platform_obj.create(request)
     except KeyboardInterrupt:
@@ -1073,45 +1093,99 @@ def add_git_credential(db: Database, config: Config, name: str, credential_name:
             entity_name=credential_name,
         )
 
-    providers = resolve_git_credential_providers(registry, [credential_name])
-    provider = providers[credential_name]
-
-    # The composition root: the credential's token secret joins the
-    # bind's boundary resolve, so the platform preflight runs before
-    # any prompt and the operation stays one prompt session (same
-    # shape as create/reinit's _register_git_token_decls path).
     from agentworks.secrets.resolver import Resolver
 
     resolver = Resolver(config, registry)
+    providers = resolve_git_credential_providers(
+        registry, [credential_name], resolver
+    )
+    provider = providers[credential_name]
+
+    entry = provider.helper_entry()
+    if entry.repos or entry.owner:
+        # Scoped credentials need the helper's embedded selection map
+        # rebuilt: a single-line store merge can't provide that. The
+        # full-rebuild path (reinit) can.
+        raise ValidationError(
+            f"git credential '{credential_name}' is scoped (fine-grained "
+            f"PAT); add it to the admin or agent template and run "
+            f"'agw vm reinit {name}' instead of add-git-credential"
+        )
+
+    # The composition root: the credential's token secret (registered on
+    # the resolver at construct) joins the bind's boundary resolve, so
+    # the platform preflight runs before any prompt and the operation
+    # stays one prompt session; runup() confirms the token afterward.
     bound = bind_platform(
         config, vm, registry=registry, resolver=resolver, prepare=False
     )
-    token_names = _register_git_token_decls(registry, resolver, [credential_name])
-    bound.preflight()
+    bound.preflight(RunContext(config=config))
     resolver.resolve()
-    token = resolver.get(token_names[credential_name])
+    # add-git-credential is a single explicit add, so a rejected token is
+    # fatal here (unlike vm/agent provisioning, which skips and continues
+    # to partial): the operator asked to add exactly this one credential.
+    if config.defaults.runup_git_credentials:
+        output.detail(
+            f"Performing runup test for git-credential/{credential_name}..."
+        )
+        provider.runup(RunContext(config=config, secrets=resolver))
+    token = _resolve_git_tokens(providers, resolver)[credential_name]
     new_lines = provider.credential_lines(token)
 
     with keep_active(db, config, vm, bound):
         target = transport(vm, config)
 
-        # Read existing credentials, filter out entries for the same host/path
+        # Read existing credentials, filter out entries this credential
+        # replaces. The key is (username, host/path): scoped github
+        # lines are path-less and share the host, so a host-only key
+        # would evict every github line including the scoped ones.
         result = target.run("cat ~/.git-credentials 2>/dev/null || true")
         existing = result.stdout.strip().splitlines() if result.stdout.strip() else []
 
-        # Extract host/path from new lines for matching: "https://user:tok@host/path" -> "host/path"
-        new_hostpaths = {line.split("@", 1)[1] for line in new_lines if "@" in line}
+        new_keys = {_credential_line_key(line) for line in new_lines} - {None}
+        filtered = [e for e in existing if _credential_line_key(e) not in new_keys]
 
-        # Filter out old entries whose host/path matches any new entry
-        filtered = [e for e in existing if "@" not in e or e.split("@", 1)[1] not in new_hostpaths]
-
-        # Write back filtered + new
-        all_lines = filtered + new_lines
+        # New (always unscoped, see the guard above) lines go FIRST:
+        # a username-less query takes the first matching store line, so
+        # the host-level fallback must precede username-tagged scoped
+        # lines that may already be on the VM.
+        all_lines = new_lines + filtered
         cred_content = "\n".join(all_lines) + "\n"
         target.write_file("~/.git-credentials", cred_content, mode="600")
-        target.run("git config --global credential.helper store")
+        # This single-line merge does NOT regenerate the credential helper
+        # script (it stays from the last full init/reinit). The scoped
+        # guard above forces scoped credentials through reinit, so the
+        # added line is always unscoped and selection needs no helper
+        # change; its only gap is that a rejection of a credential added
+        # post-init falls to the helper's generic (unnamed) diagnosis
+        # until the next reinit rebuilds the script. Acceptable.
+        # Never downgrade the helper slot: on a helper-provisioned VM
+        # the agentworks helper stays registered (reverting to store
+        # would reintroduce its erase-on-rejection self-destruct for
+        # EVERY credential); on an old VM without the helper script,
+        # keep store working until the next reinit installs the helper.
+        from agentworks.git_credentials import GIT_CRED_HELPER_PATH
+
+        target.run(
+            f"if [ -x {GIT_CRED_HELPER_PATH} ]; then "
+            f"git config --global --replace-all credential.helper '!{GIT_CRED_HELPER_PATH}'; "
+            f"else git config --global credential.helper store; fi"
+        )
 
     output.info(f"Git credential '{credential_name}' configured on VM '{name}'")
+
+
+def _credential_line_key(line: str) -> tuple[str, str] | None:
+    """Identity of a ``~/.git-credentials`` line: (username, host/path).
+
+    Scoped github lines are path-less and share the host, so a
+    host-only key would evict every github line at once; the username
+    disambiguates. Non-URL lines get ``None`` (never matched).
+    """
+    if "@" not in line or "//" not in line:
+        return None
+    userinfo = line.split("//", 1)[1].split("@", 1)[0]
+    return (userinfo.split(":", 1)[0], line.split("@", 1)[1])
 
 
 def start_vm(db: Database, config: Config, name: str) -> None:
@@ -1226,7 +1300,7 @@ def rekey_vm(
     ts_decl = resolver.register_name(rekey_vm_tmpl.tailscale_auth_key)
     with _mask_env_var_backend_for(ts_decl, masked=ignore_env):
         preflight_vm_template(rekey_vm_tmpl, resolver)
-        platform.preflight()
+        platform.preflight(RunContext(config=config))
         resolver.resolve()
     ts_auth_key = resolver.get(rekey_vm_tmpl.tailscale_auth_key)
 
@@ -1487,21 +1561,33 @@ def reinit_vm(
 
     verify_tailscale_available()
     admin = admin_template(registry)
-    providers = resolve_git_credential_providers(registry, admin.git_credentials)
-    announce_git_credentials(providers)
+    # Construct against the operation's resolver so the token secrets
+    # join the one boundary resolve below.
+    providers = resolve_git_credential_providers(
+        registry, admin.git_credentials, resolver
+    )
 
     # The preflight boundary: git tokens and any site config secret
     # (proxmox's API token) resolve in one prompt session. The
     # vm-template's Tailscale key is NOT part of reinit's planned ops
     # (a broken node's rejoin resolves it on its own conditional path),
     # so the template preflight doesn't run here.
-    git_token_names = _register_git_token_decls(registry, resolver, providers.keys())
-    platform.preflight()
+    output.phase("Preflight")
+    output.detail(f"Checking vm-site/{vm.site}...")
+    announce_git_credentials(providers)
+    platform.preflight(RunContext(config=config))
+    for provider in providers.values():
+        provider.preflight(RunContext(config=config))
+
+    output.phase("Resolving Secrets")
     resolver.resolve()
-    git_tokens = {
-        cred_name: resolver.get(token_name)
-        for cred_name, token_name in git_token_names.items()
-    }
+
+    # No command-root runup at reinit: reinit reaches the VM over
+    # Tailscale SSH and never calls the platform API (so its token is not
+    # used here), and the git-credential runup is deferred into the
+    # Initialization phase (runup_and_filter at the write step). So the
+    # next banner the operator sees is Initialization.
+    git_tokens = _resolve_git_tokens(providers, resolver)
 
     # Provisioning is hermetic: no operator-env secrets are prompted at
     # reinit. They get prompted at the use site (vm shell, session
@@ -1677,58 +1763,24 @@ def _mask_env_var_backend_for(
         os.environ.update(saved)
 
 
-def _collect_git_tokens(
-    config: Config,
-    registry: Registry,
-    credential_names: Iterable[str],
+def _resolve_git_tokens(
+    providers: Mapping[str, GitCredentialProvider],
+    resolver: Resolver,
 ) -> dict[str, str]:
-    """Resolve token values for the named git credentials via the
-    framework's backend chain.
+    """Read each provider's resolved token from the operation's resolver
+    cache into a ``{credential_name: value}`` dict.
 
-    Phase 1d of the Resource Registry SDD. Returns ``{credential_name:     token_value}``.
-    Each credential's ``token`` field (default ``"git-token-<name>"``;
-    operator-overridable per ``[git_credentials.<name>]``) names a
-    secret; the registry's finalize pass auto-declared each one via
-    ``GitCredentialConfig.referenced_resources``. The backend chain
-    resolves them all in one batched call so the operator is prompted
-    once for the whole batch (or one round-trip to a persistent store).
-
-    Missing-from-registry secrets get a synthesized ``SecretDecl``
-    matching the auto-declare shape -- same fallback as
-    ``_lookup_or_synthesize_secret`` -- so this helper works even on
-    edge cases where the operator's TOML left the registry sparse.
-
-    Raises ``ConfigError`` if any name in ``credential_names`` isn't
-    declared in ``[git_credentials.*]`` -- the framework's
-    ``GitCredentialKind`` should have errored at config-load, but this
-    guard catches direct-API call sites that bypass load.
+    The providers must have been constructed against ``resolver`` (so
+    their token secrets joined the boundary resolve) and the pass must
+    already have run. This does NOT run the git-credential runup: that is
+    deferred to the write step (Phase B for vm init, the credential-write
+    step for agent create), where a rejected token is skipped and the
+    operation continues to a partial result rather than failing before
+    the VM even exists. See ``runup_and_filter``.
     """
-    names = list(credential_names)
-    if not names:
-        return {}
-
-    from agentworks.secrets import resolve_for_command
-
-    decls: list[SecretDecl] = []
-    token_name_for: dict[str, str] = {}
-    from agentworks.resources.access import git_credential
-
-    for cred_name in names:
-        cred = git_credential(registry, cred_name)
-        if cred is None:
-            raise ConfigError(
-                f"git credential {cred_name!r} not declared; "
-                f"declare it under [git_credentials.{cred_name}]",
-                entity_kind="git-credential",
-                entity_name=cred_name,
-            )
-        token_name_for[cred_name] = cred.token
-        decls.append(_lookup_or_synthesize_secret(registry, cred.token))
-
-    resolved = resolve_for_command([], config, registry, extra_decls=decls)
     return {
-        cred_name: resolved[token_name]
-        for cred_name, token_name in token_name_for.items()
+        name: resolver.get(provider.secret_name)
+        for name, provider in providers.items()
     }
 
 
@@ -1757,39 +1809,6 @@ def _lookup_or_synthesize_secret(registry: Registry, name: str) -> SecretDecl:
         return found
     except KeyError:
         return SecretDecl(name=name, description="")
-
-
-def _register_git_token_decls(
-    registry: Registry,
-    resolver: Resolver,
-    credential_names: Iterable[str],
-) -> dict[str, str]:
-    """Register each named git credential's token secret on the
-    operation's resolver, so the tokens join the single resolve pass at
-    the preflight boundary instead of getting their own prompt session.
-    Returns ``{credential_name: token_secret_name}`` for reading the
-    values back from the resolver's cache after the pass.
-
-    Same undeclared-credential guard as :func:`_collect_git_tokens`
-    (that helper remains for agent create, whose token pass runs after
-    its root's bind/preflight; folding it into the resolver rides the
-    git-credentials capability adoption, not this change).
-    """
-    from agentworks.resources.access import git_credential
-
-    token_name_for: dict[str, str] = {}
-    for cred_name in credential_names:
-        cred = git_credential(registry, cred_name)
-        if cred is None:
-            raise ConfigError(
-                f"git credential {cred_name!r} not declared; "
-                f"declare it under [git_credentials.{cred_name}]",
-                entity_kind="git-credential",
-                entity_name=cred_name,
-            )
-        token_name_for[cred_name] = cred.token
-        resolver.register_name(cred.token)
-    return token_name_for
 
 
 def _query_live_resources(vm: VMRow, config: Config) -> dict[str, str] | None:

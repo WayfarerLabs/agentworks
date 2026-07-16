@@ -223,6 +223,29 @@ class _DefaultHandler:
 _handler: OutputHandler = _DefaultHandler()
 
 
+def phase(title: str) -> None:
+    """Emit a delineated phase header (e.g. 'Preflight', 'Provisioning').
+
+    A thin convenience over :func:`info` (a blank line then a bracketed
+    title), so a multi-phase command reads as clearly separated
+    sections. Follow it with :func:`detail` lines naming the resources
+    the phase touches.
+    """
+    _handler.info("")
+    _handler.info(f"=== {title} ===")
+
+
+def count(n: int, noun: str, plural: str | None = None) -> str:
+    """Format a count with a correctly pluralized noun.
+
+    ``count(1, "package") -> "1 package"``; ``count(3, "package") ->
+    "3 packages"``. Pass ``plural`` for irregular nouns. Keeps operator
+    strings grammatical without the ``(s)`` shortcut.
+    """
+    word = noun if n == 1 else (plural or f"{noun}s")
+    return f"{n} {word}"
+
+
 def info(message: str) -> None:
     """Emit a top-level status message."""
     _handler.info(message)

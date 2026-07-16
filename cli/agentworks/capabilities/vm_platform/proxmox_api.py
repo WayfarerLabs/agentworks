@@ -18,7 +18,14 @@ from agentworks.errors import ProvisioningError
 
 
 class ProxmoxAPIError(ProvisioningError):
-    """A Proxmox API call failed."""
+    """A Proxmox API call failed.
+
+    ``code`` carries the HTTP status when the failure was an HTTP error
+    (``None`` for a non-HTTP failure), so callers can distinguish an
+    auth rejection (401/403) from other failures without parsing the
+    message. Used by the platform's ``runup`` token check."""
+
+    code: int | None = None
 
 
 class ProxmoxAPI:
@@ -77,9 +84,11 @@ class ProxmoxAPI:
                 resp_body = resp.read().decode()
         except urllib.error.HTTPError as e:
             err_body = e.read().decode() if e.fp else ""
-            raise ProxmoxAPIError(
+            err = ProxmoxAPIError(
                 f"Proxmox API {method} {path} failed ({e.code}): {err_body}"
-            ) from e
+            )
+            err.code = e.code
+            raise err from e
 
         if not resp_body:
             return None

@@ -4,7 +4,7 @@ Kind definitions do NOT live here. Each kind is defined and registered in
 the domain package next to the code that implements it (the declarable
 row dataclasses AND the capability kinds live together with their
 domain): ``agentworks.catalog`` (the catalog kinds),
-``agentworks.secrets.kinds``, ``agentworks.git_credentials.kinds``,
+``agentworks.secrets.kinds``, ``agentworks.capabilities.git_credential.kinds``,
 ``agentworks.vms.kinds``, ``agentworks.agents.kinds``,
 ``agentworks.workspaces.kinds``, ``agentworks.sessions.kinds``.
 
@@ -19,8 +19,8 @@ domain, no logic.
 from __future__ import annotations
 
 import agentworks.agents.kinds  # noqa: F401
+import agentworks.capabilities.git_credential.kinds  # noqa: F401
 import agentworks.catalog  # noqa: F401
-import agentworks.git_credentials.kinds  # noqa: F401
 import agentworks.secrets.kinds  # noqa: F401
 import agentworks.sessions.kinds  # noqa: F401
 import agentworks.vms.kinds  # noqa: F401

@@ -280,10 +280,10 @@ def test_git_credential_type_becomes_provider(tmp_path: Path) -> None:
 
 
 def test_git_credential_org_nests_in_emission(tmp_path: Path) -> None:
-    """The migrator emits the YAML shape (provider-owned org nested
-    under provider_config, kind-owned token top-level); the run's own
-    registry-equivalence verification proves the divergence from the
-    flat TOML is shape-only."""
+    """The migrator emits the YAML shape (provider-owned org AND token
+    nested under provider_config); the run's own registry-equivalence
+    verification proves the divergence from the flat TOML is
+    shape-only."""
     cfg = _write_config(
         tmp_path,
         resources="""\
@@ -299,8 +299,7 @@ description = "AZDO access"
     (doc,) = _loaded_docs(tmp_path / "resources" / "git-credentials.yaml")
     assert doc["spec"] == {
         "provider": "azdo",
-        "token": "git-token-ado",
-        "provider_config": {"org": "my-org"},
+        "provider_config": {"org": "my-org", "token": "git-token-ado"},
     }
     assert doc["metadata"]["description"] == "AZDO access"
 
