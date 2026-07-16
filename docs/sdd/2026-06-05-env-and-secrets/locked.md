@@ -171,4 +171,8 @@ fragment `/etc/sudoers.d/51-agentworks-console-setenv` (`Defaults:<admin> setenv
 init alongside the existing `env_keep` fragment. Scope is unchanged otherwise: the pane still gets
 `vm + workspace + agent` (not `session`) env; extending companion shells to `session` scope remains
 future work. Rationale and alternatives in [ADR 0017](../../adrs/0017-console-pane-preserve-env.md).
-Existing VMs need `agw vm reinit` to deploy the new fragment.
+
+Existing VMs need `agw vm reinit` to deploy the new fragment. Until then the pane asks sudo first
+and comes up degraded rather than failing: without the fragment sudo refuses the whole
+`--preserve-env` command instead of dropping the vars, so the pane omits the flag, keeps the
+`env_keep`-only behavior, and warns naming the missing directive and the reinit command.

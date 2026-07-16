@@ -1786,15 +1786,13 @@ def _phase_b_setup(
     # so dpkg conffile handling doesn't apply.
     _write_sshd_accept_env(ts_target, logger)
     _write_sudoers_env_keep(ts_target, logger)
+    # Pairs with the --preserve-env in _split_shell_pane's agent-pane branch.
+    _write_sudoers_console_setenv(ts_target, logger, admin_username)
     vm_row = db.get_vm(vm_name)
     # Init runs against a VM that exists in the DB (initialize_vm fetches the
     # row up front). A None here is an internal invariant violation, not a
     # recoverable state, so surface it loudly.
     assert vm_row is not None, f"VM '{vm_name}' missing from DB mid-init"
-    # Scoped to the admin user, so it needs vm_row.admin_username (fetched
-    # just above). Pairs with the --preserve-env in _split_shell_pane's
-    # agent-pane branch.
-    _write_sudoers_console_setenv(ts_target, logger, vm_row.admin_username)
     # The platform name resolves through the site declaration at this
     # composition root (a stranded remote-Lima VM already failed reinit
     # at the earlier bind, before any env baking).

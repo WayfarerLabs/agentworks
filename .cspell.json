@@ -45,6 +45,7 @@
     "esac",
     "exitcode",
     "fifos",
+    "footgun",
     "frontmatter",
     "fstype",
     "getattr",

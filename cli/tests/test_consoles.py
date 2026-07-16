@@ -2061,13 +2061,8 @@ def test_split_shell_pane_admin_branch_no_sudo(
     assert "--preserve-env" not in splits[0]
 
 
-def test_split_shell_pane_agent_branch_preserves_composed_env_across_sudo(
-    db: Database, fake_target: _FakeTarget
-) -> None:
-    """The agent pane sudo's to the agent user, which resets the env. The
-    composed keys (which tmux set via -e) are named on `sudo --preserve-env`
-    so they survive the crossing; only the names appear, not the values.
-    Permitted VM-side by the `Defaults:<admin> setenv` sudoers fragment."""
+def _seed_agent_session_console(db: Database) -> None:
+    """VM + agent session 's' + console 'con', the agent-pane fixture shape."""
     _seed_vm(db, with_tailscale=True)
     db._conn.execute(
         "INSERT INTO agents (name, vm_name, linux_user) VALUES ('bot', 'vm1', 'bot-user')",
@@ -2078,6 +2073,21 @@ def test_split_shell_pane_agent_branch_preserves_composed_env_across_sudo(
     )
     db._conn.commit()
     create_console(db, name="con", vm_name="vm1", session_specs=["s"])
+
+
+# Substring identifying the capability probe among the captured commands.
+_PROBE = f"sudo -n --preserve-env={multi_console._SUDO_PRESERVE_PROBE_VAR}"
+
+
+def test_split_shell_pane_agent_branch_preserves_composed_env_across_sudo(
+    db: Database, fake_target: _FakeTarget
+) -> None:
+    """The agent pane sudo's to the agent user, which resets the env. The
+    composed keys (which tmux set via -e) are named on `sudo --preserve-env`
+    so they survive the crossing; only the names appear, not the values.
+    Permitted VM-side by the `Defaults:<admin> setenv` sudoers fragment (the
+    probe reports it present here: _FakeTarget defaults to rc=0)."""
+    _seed_agent_session_console(db)
 
     fake_target.commands.clear()
     fake_target.responses["has-session -t aw-console-con"] = _FakeResult(returncode=0)
@@ -2096,58 +2106,69 @@ def test_split_shell_pane_agent_branch_preserves_composed_env_across_sudo(
     assert "ws-vm1" not in preserve_arg
 
 
-def test_split_shell_pane_agent_branch_falls_back_when_setenv_missing(
+def test_sudo_preserve_probe_uses_a_name_no_env_keep_pattern_covers(
     db: Database, fake_target: _FakeTarget
 ) -> None:
-    """A VM without the `Defaults:<admin> setenv` fragment makes sudo refuse
-    the whole --preserve-env command (it rejects the env_add vars outside
-    env_keep and aborts) rather than dropping the vars, which would kill the
-    pane on spawn. So the pane probes the capability first and falls back to a
-    plain `sudo --login`, keeping the env_keep-only behavior plus a reinit
-    hint."""
-    _seed_vm(db, with_tailscale=True)
-    db._conn.execute(
-        "INSERT INTO agents (name, vm_name, linux_user) VALUES ('bot', 'vm1', 'bot-user')",
-    )
-    db._conn.execute(
-        "INSERT INTO sessions (name, workspace_name, template, mode, agent_name, socket_path) "
-        "VALUES ('s', 'ws-vm1', 'default', 'agent', 'bot', '/tmp/s.sock')",
-    )
-    db._conn.commit()
-    create_console(db, name="con", vm_name="vm1", session_specs=["s"])
+    """The probe must isolate the `setenv` grant, so it names a var that
+    neither env_keep glob (`AGENTWORKS_*`, `AW_*`) matches; a covered name
+    would pass validation on a VM with no setenv fragment and report a
+    capability that isn't there. It also sets the var itself rather than
+    relying on the composed env having reached this process (it has not, on
+    non-SSH transports)."""
+    probe_var = multi_console._SUDO_PRESERVE_PROBE_VAR
+    assert not probe_var.startswith("AW_")
+    assert not probe_var.startswith("AGENTWORKS_")
 
+    _seed_agent_session_console(db)
     fake_target.commands.clear()
     fake_target.responses["has-session -t aw-console-con"] = _FakeResult(returncode=0)
     add_shell(db, _StubConfig(), console_name="con", session_name="s")
 
+    probes = [c for c in fake_target.commands if _PROBE in c]
+    assert len(probes) == 1
+    # The probe sets the var it asks sudo to preserve, and -n keeps it from
+    # blocking on a password prompt.
+    assert probes[0] == f"{probe_var}=1 sudo -n --preserve-env={probe_var} -u bot-user true"
+
+
+def test_split_shell_pane_agent_branch_warns_and_falls_back_when_setenv_missing(
+    db: Database, fake_target: _FakeTarget, captured_output: CapturedOutput
+) -> None:
+    """A VM without the `Defaults:<admin> setenv` fragment makes sudo refuse
+    the whole --preserve-env command (it rejects the env_add vars outside
+    env_keep and aborts) rather than dropping the vars, so asking for the flag
+    anyway would kill the pane on spawn. On a failed probe we drop the flag,
+    keeping the env_keep-only pane, and warn at the operator's surface rather
+    than only inside the pane."""
+    _seed_agent_session_console(db)
+    fake_target.commands.clear()
+    fake_target.responses["has-session -t aw-console-con"] = _FakeResult(returncode=0)
+    # Simulate the VM refusing --preserve-env (no setenv fragment).
+    fake_target.responses[_PROBE] = _FakeResult(returncode=1)
+    add_shell(db, _StubConfig(), console_name="con", session_name="s")
+
     splits = [c for c in fake_target.commands if "split-window -t aw-console-con:s" in c]
     assert len(splits) == 1
-    # Probe uses the same key list as the real invocation, so its verdict
-    # matches exactly; -n keeps it from blocking on a password prompt.
-    preserve_arg = splits[0].split("--preserve-env=", 1)[1].split(" ", 1)[0]
-    assert f"sudo -n --preserve-env={preserve_arg} -u bot-user true" in splits[0]
-    # Both arms are present: preserve on success, plain sudo on refusal.
-    assert f"exec sudo --login --preserve-env={preserve_arg} -u bot-user" in splits[0]
+    # The pane still comes up, just without the flag sudo would have refused.
+    assert "--preserve-env" not in splits[0]
     assert "exec sudo --login -u bot-user" in splits[0]
-    # The operator gets an actionable cue naming the VM to reinit.
-    assert "agw vm reinit vm1" in splits[0]
+    # The -e vars still ride the tmux channel; env_keep carries them over.
+    assert " -e AGENTWORKS_WORKSPACE=ws-vm1" in splits[0]
+    # The warning names the actual requirement and the recovery, not a guess
+    # at why the probe failed.
+    warning = next(w for w in captured_output.warnings if "will not reach this pane" in w)
+    assert "Defaults:admin setenv" in warning
+    assert "51-agentworks-console-setenv" in warning
+    assert "agw vm reinit vm1" in warning
 
 
 def test_split_shell_pane_agent_branch_no_probe_without_composed_env(
-    db: Database, fake_target: _FakeTarget, monkeypatch: pytest.MonkeyPatch
+    db: Database, fake_target: _FakeTarget, monkeypatch: pytest.MonkeyPatch,
+    captured_output: CapturedOutput,
 ) -> None:
-    """With no composed env there is nothing to preserve, so the pane skips
-    the probe entirely and execs sudo directly (no empty --preserve-env=)."""
-    _seed_vm(db, with_tailscale=True)
-    db._conn.execute(
-        "INSERT INTO agents (name, vm_name, linux_user) VALUES ('bot', 'vm1', 'bot-user')",
-    )
-    db._conn.execute(
-        "INSERT INTO sessions (name, workspace_name, template, mode, agent_name, socket_path) "
-        "VALUES ('s', 'ws-vm1', 'default', 'agent', 'bot', '/tmp/s.sock')",
-    )
-    db._conn.commit()
-    create_console(db, name="con", vm_name="vm1", session_specs=["s"])
+    """With no composed env there is nothing to preserve, so there is nothing
+    to ask sudo about: no probe, no warning, no empty `--preserve-env=`."""
+    _seed_agent_session_console(db)
     monkeypatch.setattr(multi_console, "_resolve_pane_env", lambda *a, **k: {})
 
     fake_target.commands.clear()
@@ -2157,8 +2178,25 @@ def test_split_shell_pane_agent_branch_no_probe_without_composed_env(
     splits = [c for c in fake_target.commands if "split-window -t aw-console-con:s" in c]
     assert len(splits) == 1
     assert "--preserve-env" not in splits[0]
-    assert "sudo -n" not in splits[0]
+    assert not [c for c in fake_target.commands if _PROBE in c]
     assert "exec sudo --login -u bot-user" in splits[0]
+    assert not [w for w in captured_output.warnings if "will not reach this pane" in w]
+
+
+def test_split_shell_pane_admin_branch_never_probes(
+    db: Database, fake_target: _FakeTarget
+) -> None:
+    """The admin pane never sudo's, so there is no boundary to preserve across
+    and no reason to spend a probe on every split."""
+    _seed_vm(db, with_tailscale=True)
+    _seed_sessions(db, ["a"])
+    create_console(db, name="con", vm_name="vm1", session_specs=["a"])
+
+    fake_target.commands.clear()
+    fake_target.responses["has-session -t aw-console-con"] = _FakeResult(returncode=0)
+    add_shell(db, _StubConfig(), console_name="con", session_name="a")
+
+    assert not [c for c in fake_target.commands if _PROBE in c]
 
 
 def test_split_shell_pane_emits_workspace_identity_only(

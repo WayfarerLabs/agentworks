@@ -1465,6 +1465,45 @@ def _resolve_workspace_path(db: Database, session: SessionRow) -> str | None:
     return ws.workspace_path if ws else None
 
 
+# Deliberately matches neither env_keep pattern: `AW_*` needs a literal `AW_`
+# prefix and `AGENTWORKS_*` needs `AGENTWORKS_`, so this name is only ever
+# preservable via `setenv`. That is what makes it a clean capability probe:
+# a var the allowlist already covers would pass even without the fragment.
+_SUDO_PRESERVE_PROBE_VAR = "AWPROBE"
+
+
+def _sudo_can_preserve_env(target: Transport, *, q_user: str) -> bool:
+    """Report whether this VM's sudoers lets the admin use ``--preserve-env``.
+
+    VM init grants the admin ``Defaults:<admin> setenv`` (see
+    ``_write_sudoers_console_setenv``). Without it sudo does not merely drop
+    the vars it cannot preserve, it refuses the whole command: the keys reach
+    the policy as command-line ``env_add`` vars (the list form of
+    ``--preserve-env`` does not set ``MODE_PRESERVE_ENV``), so sudoers runs
+    ``validate_env_vars``, rejects every name outside ``env_keep``, and aborts.
+    A pane that asked for the flag anyway would exit on spawn.
+
+    So ask before committing to the flag. The probe sets its own var rather
+    than reusing a composed key: it needs a name no ``env_keep`` pattern
+    covers, and it must not depend on the composed env having reached this
+    process (it has not, on non-SSH transports). ``-n`` keeps the probe from
+    blocking on a password prompt if the admin's NOPASSWD grant is ever gone.
+
+    Scoped to the setenv gate specifically. The probe runs as ``MODE_RUN`` just
+    as the real ``sudo --login`` invocation does (``--login`` only adds the
+    ``MODE_LOGIN_SHELL`` flag), so the ``!def_setenv`` check fires identically
+    for both. It does not attempt to predict a sudoers that restricts *which
+    commands* the admin may run as the agent; the admin holds
+    ``ALL=(ALL) NOPASSWD:ALL``, so no such restriction exists to model.
+    """
+    probe = target.run(
+        f"{_SUDO_PRESERVE_PROBE_VAR}=1 sudo -n "
+        f"--preserve-env={_SUDO_PRESERVE_PROBE_VAR} -u {q_user} true",
+        check=False,
+    )
+    return probe.ok
+
+
 def _split_shell_pane(
     target: Transport,
     db: Database,
@@ -1496,11 +1535,11 @@ def _split_shell_pane(
        survive via the sudoers env_keep fragment, and arbitrarily-named
        operator env / secrets survive via ``sudo --preserve-env=<keys>``
        (permitted by the ``Defaults:<admin> setenv`` fragment). Both
-       fragments are deployed by VM init. On a VM initialized before the
-       setenv fragment landed, sudo would refuse the whole command rather
-       than drop the un-preservable vars, so the pane probes for the
-       capability first and falls back to a plain ``sudo --login`` (only
-       the env_keep vars survive) with a reinit hint. See
+       fragments are deployed by VM init. A VM without the setenv
+       fragment refuses the ``--preserve-env`` command outright rather
+       than dropping the vars, so ``_sudo_can_preserve_env`` asks first
+       and we warn and fall back to a plain ``sudo --login`` (env_keep
+       vars only) rather than hand back a pane that dies on spawn. See
        docs/adrs/0017-console-pane-preserve-env.md.
     2. SSH SetEnv on ``target.run`` (SSH transport only;
        non-SSH transports are a no-op because the tmux client is
@@ -1517,6 +1556,7 @@ def _split_shell_pane(
     return value; `restore_session` checks each return so a partial restore
     is loud rather than a silent exit-0."""
     from agentworks.sessions.tmux import _tmux_env_flags
+    from agentworks.vms.initializer import AGENTWORKS_SUDOERS_CONSOLE_SETENV_PATH
 
     cwd = shell["cwd"]
     full_path = posixpath.join(workspace_path, cwd) if cwd else workspace_path
@@ -1567,44 +1607,28 @@ def _split_shell_pane(
         # vars and secrets survive, while their VALUES stay off the argv
         # (only names appear; the values ride the tmux -e channel). Honored
         # because VM init grants the admin user `Defaults:<admin> setenv`
-        # (see _write_sudoers_console_setenv). Omit the flag when there is no
-        # env to preserve so we never emit an empty `--preserve-env=`.
+        # (see _write_sudoers_console_setenv).
+        #
+        # Ask sudo first, because a VM without that fragment does not drop the
+        # un-preservable vars: it refuses the whole command, which would exit
+        # the pane process on spawn. Skip the question when there is no env to
+        # preserve (nothing to ask about, and no empty `--preserve-env=`).
         preserve = ""
-        if pane_env:
+        if pane_env and _sudo_can_preserve_env(target, q_user=q_user):
             preserve = f" --preserve-env={shlex.quote(','.join(pane_env))}"
-        sudo_preserve = (
-            f"sudo --login{preserve} -u {q_user} bash -c {shlex.quote(bootstrap)}"
+        elif pane_env:
+            output.warn(
+                f"{vm.name}: agent-scope env and secrets will not reach this "
+                f"pane. Preserving them across the pane's sudo to "
+                f"'{session_user}' needs `Defaults:{admin_user} setenv` in "
+                f"{AGENTWORKS_SUDOERS_CONSOLE_SETENV_PATH}, which this VM's "
+                f"sudoers does not grant. Run `agw vm reinit {vm.name}` to "
+                f"deploy it. The pane still gets the AGENTWORKS_*/AW_* vars "
+                f"carried by the sudoers env_keep fragment."
+            )
+        pane_cmd = (
+            f"exec sudo --login{preserve} -u {q_user} bash -c {shlex.quote(bootstrap)}"
         )
-        if not preserve:
-            pane_cmd = f"exec {sudo_preserve}"
-        else:
-            # Degrade instead of dying on a VM that lacks the setenv fragment
-            # (initialized before it landed, or its install warned and carried
-            # on). Without `setenv`, sudo does not drop the un-preservable
-            # vars: it refuses the whole command (validate_env_vars rejects any
-            # env_add var outside env_keep, which aborts the run), so the pane
-            # process would exit immediately and the pane would vanish.
-            #
-            # The probe runs the same validation path as the real invocation
-            # with the same key list, so its verdict matches exactly: it fails
-            # only when the real command would also have been refused. That
-            # rules out a false fallback. `-n` keeps it from ever blocking on a
-            # password prompt, and stderr is dropped because sudo's refusal
-            # text is expected noise here (the echo below is the operator's
-            # cue). Vars covered by env_keep still survive the fallback.
-            sudo_plain = (
-                f"sudo --login -u {q_user} bash -c {shlex.quote(bootstrap)}"
-            )
-            probe = f"sudo -n{preserve} -u {q_user} true 2>/dev/null"
-            q_hint = shlex.quote(
-                "agentworks: this VM predates the console setenv sudoers "
-                "fragment, so agent-scope env and secrets will not reach this "
-                f"pane. Run `agw vm reinit {vm.name}` to deploy it."
-            )
-            pane_cmd = (
-                f"if {probe}; then exec {sudo_preserve}; fi; "
-                f"echo {q_hint} >&2; exec {sudo_plain}"
-            )
         cmd = (
             f"tmux split-window -t {q_con}:{q_win} -P -F '#{{pane_id}}'{env_flags} "
             f"-c {q_full} {shlex.quote(pane_cmd)}"
