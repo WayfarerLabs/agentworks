@@ -71,14 +71,14 @@ The scope of the harness CONTRACT in this SDD is deliberately narrow (maintainer
 readiness check (today: required commands), the responsibilities the three template fields express
 today. In the capability model's stage vocabulary that is: `start` and `restart` as the harness's
 ops (each returns the pane command for its case), and the required-commands check as the harness's
-`runup` (it runs against the real, post-provision target; see R7 for why it is runup and not
-preflight). Narrow does not mean string-valued: within that lifecycle a harness may execute
-arbitrary code on the launch target as the target user (R7), which is what lets it be smarter than
-the strings it replaces (R4). Liveness probing of the running session stays core (tmux boot-id/PID
-machinery, tool-agnostic), and asset placement (skills, rules, allow/deny lists) is deferred with
-the plugin SDD, which owns the operator-declared asset model it requires. The narrow contract does
-not narrow the model change: the delegation seam is the point, and the contract grows behind it
-without the model changing again.
+`preflight` when the target already exists (with a `runup` fallback for the ephemeral-create case;
+see R7). Narrow does not mean string-valued: within that lifecycle a harness may execute arbitrary
+code on the launch target as the target user (R7), which is what lets it be smarter than the strings
+it replaces (R4). Liveness probing of the running session stays core (tmux boot-id/PID machinery,
+tool-agnostic), and asset placement (skills, rules, allow/deny lists) is deferred with the plugin
+SDD, which owns the operator-declared asset model it requires. The narrow contract does not narrow
+the model change: the delegation seam is the point, and the contract grows behind it without the
+model changing again.
 
 A concrete future direction makes that point. We expect Agentworks to eventually manage artifacts
 such as skills, hooks, and MCP server configurations, and the division of labor is already implied
@@ -228,9 +228,10 @@ spec:
   strings), exactly today's fields, exactly today's semantics. All optional; an empty config is a
   plain login shell, exactly like today's field-less `default` template.
 - Behavior: the `start` op returns `command` (empty means login shell only); the `restart` op
-  returns `restart_command` when set, else `command`; the `runup` stage probes `required_commands`
-  on the real target. Template-variable substitution (`{{session_name}}`, `{{workspace_name}}`)
-  stays core and applies to the returned command string, as today.
+  returns `restart_command` when set, else `command`; the `preflight` stage probes
+  `required_commands` on the target when it exists at command entry (with a `runup` fallback for the
+  ephemeral-create case, R7). Template-variable substitution (`{{session_name}}`,
+  `{{workspace_name}}`) stays core and applies to the returned command string, as today.
 - Every existing template resolves to `shell` and behaves identically; the golden rule for this SDD
   is behavior parity for any config that loads today, with exactly one documented divergence in
   multi-parent inheritance (R5's divergence note).
@@ -385,19 +386,21 @@ that provides walk-away.
   for third-party harnesses is plugin installation and enablement (distribution trust, per the
   plugin SDD's framing). The permission model and the context's deliberate minimalism buy
   misuse-resistance and auditability for cooperating code, which is their whole claim.
-- **The readiness check is `runup`, not `preflight`, and that is forced by the model.** The
-  capability model runs `preflight` for every resource at command start, BEFORE the single resolve
-  pass and before any mutation, which makes preflight dependency-blind: it may not check state a
-  later step of the same command creates. The harness's target-environment check depends on exactly
-  such state (the target user and workspace may be EPHEMERAL, created later in this same command),
-  so it structurally cannot be preflight (it would fail every first-time ephemeral launch, the
-  direct analog of a git-credential preflight failing `vm create` because git is not installed yet).
-  It is therefore `runup`: post-resolve, deferred to right before the launch op, run against the
-  real target the provisioning phase just created, with the fully composed env (vm / workspace /
-  agent / session scopes) that the resolved secrets feed. For the built-in harnesses this makes
-  `preflight` near-empty (they declare no secrets, so the base's resolvability prediction is the
-  whole of it) and puts all the real work in `runup` and the ops. This realigns the pre-realignment
-  draft, which called the post-provision check "preflight."
+- **The readiness check is `preflight` wherever the target exists, `runup` only for the ephemeral
+  hole.** The target-environment check (today: required commands) should fail as early as possible,
+  before the operator is prompted for anything, which means `preflight`, pre-resolve. Preflight is
+  dependency-blind: it may not check state a later step of the same command creates. The model's
+  mechanism for that is the optional context: preflight is handed the session's target only when it
+  already exists. So the harness `preflight` probes `required_commands` exactly when the context
+  carries the target (a session on an EXISTING agent/workspace, and every `session restart`),
+  running pre-resolve and bailing before any prompt. The only case it cannot cover is a
+  `--new-agent` / `--new-workspace` create, whose target user/workspace this command creates later
+  (the direct analog of a git-credential preflight not checking a VM `vm create` has not made yet);
+  that one case falls to `runup`, post-provision, against the real target. This keeps today's
+  fail-before-prompt discipline for the common path and every restart, and confines `runup` to the
+  ephemeral case where nothing earlier could have checked. (Probing the ephemeral target as admin at
+  preflight was rejected earlier: it false-aborts on agent-template user-level tooling. The check
+  runs as the real target user, or not yet.)
 - **The harness slots into the existing ordering; it does not own it.** The command's order is the
   capability model's own: preflight-all (before any prompt or mutation) -> the single secret resolve
   at the preflight boundary (the one prompt session) -> ephemeral provisioning under rollback
@@ -428,34 +431,36 @@ that provides walk-away.
   (the `restart` op or tmux creation) cannot restore the old session; "rolls back to a consistent
   state" for that window means: the session row survives, the old tmux is gone,
   `agw session restart` is cleanly retryable, and the error says exactly which step failed. No
-  resurrection is attempted. Note that main's `restart_session` intentionally resolves the session
-  ENV chain (via the legacy `resolve_for_command`) AFTER its BROKEN/confirm gates, so a declined
-  restart never prompts for secrets it would discard; the harness `runup` (required-commands) slots
-  after that resolve and before the kill, so a missing binary still aborts with the old session
-  running.
+  resurrection is attempted. On restart the target already exists, so the required-commands check is
+  a plain `preflight` and runs BEFORE the resolve (and before the kill): this preserves today's
+  discipline that a declined or doomed restart never prompts for secrets it would discard, and a
+  missing binary aborts before any prompt, with the old session still running. (Main's
+  `restart_session` already resolves the session ENV chain via `resolve_for_command` only after its
+  BROKEN/confirm gates; the harness preflight sits ahead of that.)
 - **The `RunContext` gains the model's identity chain as a REQUIRED invariant, and this SDD adds
   it** (maintainer ruling, 2026-07-16). `RunContext` today carries global config, the execution
   targets, and resolved secrets, but no identity: no vm / workspace / agent / session NAMES. A
   harness needs them, at minimum the session name to address the tool session
   (`claude --name <session>`, distinct from the template name it is constructed under), plus the
   chain for probe context and error labels. This SDD adds a self-validating `OperationIdentity`
-  value keyed by a `level` (the point in the model hierarchy the operation runs at: system, vm,
-  workspace, admin, agent, session) and makes it a REQUIRED field on `RunContext`, not an optional
-  extra. A level is the SCOPE of the operation, which for a capability is the scope of its consuming
-  resource. Each level carries its own name plus its ancestors up to the system slug: a session is
-  vm
-  - workspace + agent-or-admin + session; a vm op is just the vm; and the system-global capabilities
-    (`secret-backend` and `git-credential-provider`, whose config is declared once for the whole
-    installation) run at SYSTEM level with identity being only the slug (as do cross-system scans
-    like doctor's vm-site check). The object validates that the identity matches its level exactly,
-    so it is always consistent and valid. A context without the operation's identity is an
-    incomplete object, so the object enforces its presence and every construction site supplies one
-    at the right level. Identity can be required where the timing-populated fields (targets,
-    secrets) cannot, because the operation's names and level are fixed at command entry, known
-    before anything is touched, even when the resources they name are ephemeral and provisioned
-    later (the orchestration layer chooses those names up front, so ephemerality never leaves a name
-    absent). It is names-only for now, with room reserved for fuller representations (the HLA pins
-    the shape).
+  value keyed by a `level` (the scope of the specific capability invocation: `system`, `vm`,
+  `workspace`, `admin`, `agent`, or `session`) and makes it a REQUIRED field on `RunContext`, not an
+  optional extra. A level is what THAT call concerns, not the ambient command: in one `vm create`
+  the platform readiness concerns the VM (VM level) while each git-credential readiness call
+  concerns a system-global credential (SYSTEM level). Each level carries its own name plus its
+  ancestors up to the system slug (a session identity is the vm, workspace, agent-or-admin, and
+  session names; a vm op is just the vm; the system-global capabilities `secret-backend` and
+  `git-credential-provider` run at SYSTEM with identity being only the slug, as do cross-system
+  scans like doctor's vm-site check). The object validates that the identity matches its level
+  exactly, so it is always consistent and valid. The full hierarchy is enumerated, but only the
+  levels a call site constructs today (`system`, `vm`, `session`) have their rules implemented;
+  `workspace` / `admin` / `agent` raise `NotImplementedError` until a real call site needs them
+  (their name fields still exist and are validated within a session). A context without an identity
+  is an incomplete object, so the object enforces its presence and every construction site supplies
+  one at the right level. Identity can be required where the timing-populated fields (targets,
+  secrets) cannot, because the invocation's names and level are fixed at command entry (the one
+  caveat: the system slug can be prompted once on a first-ever create, before any context is built).
+  It is names-only for now, with room reserved for fuller representations (the HLA pins the shape).
 - **Threading identity through the existing capability roots is in scope.** Because identity is now
   required on the shared `RunContext`, this SDD updates every current construction site (in
   `vms/manager.py`, `agents/manager.py`, `git_credentials/__init__.py`, and `doctor.py`) to pass the
@@ -568,9 +573,12 @@ The model change (Background) lands in the permanent docs, not just in code and 
 
 Operators upgrading across this SDD see:
 
-- TOML session templates keep working unchanged. YAML manifests written against the unreleased PR
-  #156 surface with flat command fields (if any exist) get a load error pointing at
-  `harness_config`; the `!` flag in R2 covers exactly this.
+- TOML session templates keep loading unchanged, with one deliberate behavioral divergence: a
+  multi-parent lineage where a later parent declares none of the command fields no longer wipes an
+  earlier parent's command to empty (R5's pair-inheritance divergence). Single-parent and
+  command-declaring lineages are unaffected. YAML manifests written against the unreleased PR #156
+  surface with flat command fields (if any exist) get a load error pointing at `harness_config`; the
+  `!` flag in R2 covers exactly this.
 - `agw resource list` gains two `harness` rows; `agw resource kinds` gains the `harness` kind.
 - Newly migrated or sampled session templates spell commands under `harness_config`.
 - Templates can now say `harness: claude-code` instead of restating the Claude Code command strings.

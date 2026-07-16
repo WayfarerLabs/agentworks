@@ -128,26 +128,32 @@ class Harness(Capability):
         offending field; blob-boundary callers prefix the declaration's
         location."""
 
-    # preflight(ctx): inherited from Capability. Pre-resolve, read-only,
-    #   DEPENDENCY-BLIND: it runs before the resolve pass and before any
-    #   mutation, so it may not assume the target user or workspace exists
-    #   (they may be ephemeral, created later this command). For the
-    #   built-ins the base default is the whole of it (predict the config's
-    #   secret references resolvable; both built-ins declare none, so it is
-    #   effectively a no-op). The real environment check is runup, below.
+    def preflight(self, ctx: RunContext) -> None:
+        """Pre-resolve readiness (the PRIMARY home for the target-
+        environment check). Probes ``required_commands`` on the session's
+        target (``ctx.agent_target`` / ``ctx.admin_target``) WHEN the
+        command-start context carries it, which covers an existing
+        agent/workspace and every restart, so the check runs before the
+        resolve pass and bails before any prompt. When the target is
+        ephemeral and absent here (a ``--new-agent`` / ``--new-workspace``
+        create, whose user/workspace are created later this command),
+        preflight cannot probe it (the model keeps preflight dependency-
+        blind), so the check defers to runup. Also calls
+        ``super().preflight()`` for the base's secret-resolvability
+        prediction. The body is one call to ``base.require_commands(ctx,
+        [...])`` (the relocated probe loop and error shape), which no-ops
+        when ``ctx`` has no usable target. Raises StateError with
+        actionable detail; returning means "safe to proceed"."""
 
     def runup(self, ctx: RunContext) -> None:
-        """Post-resolve readiness in the REAL session environment: the
-        target-environment check the manager runs before the launch op.
-        Today: probe ``required_commands`` on the actual target user
-        (``ctx.agent_target`` / ``ctx.admin_target``), in the actual
-        workspace, with the fully composed env. Deferred to right before
-        the launch op, so the ephemeral target/workspace already exist.
-        Raises StateError with actionable detail; returning means "safe to
-        proceed". The common case is one call to
-        ``base.require_commands(ctx, [...])``, which packages today's
-        required-commands probe loop and error shape. Read-only, like every
-        runup; the mutation is the tmux launch that follows."""
+        """Post-resolve readiness, the EPHEMERAL FALLBACK only: run the
+        ``required_commands`` probe here when preflight could not, i.e. the
+        target was created during this command and exists now
+        (``ctx.agent_target`` present, in the real workspace, composed
+        env). For a non-ephemeral session preflight already checked, so
+        runup is a no-op. Read-only, like every runup; the mutation is the
+        tmux launch that follows. The LLD pins the guard that avoids a
+        redundant second probe."""
 
     def start(self, ctx: RunContext) -> str:
         """Op: the pane command for a fresh ``session create``. Reads its
@@ -172,9 +178,10 @@ Contract points, and why they are shaped this way:
 - **The blob binds at construct; the ops and readiness read `self.config`.** This follows the
   capability model (config is bound at `Capability.__init__`, re-validated there) and REVERSES the
   pre-realignment draft, which passed config as an explicit per-call parameter. The resolved, merged
-  blob is what the instance is constructed against, so `start`, `restart`, and `runup` read
-  `self.config` and take only `ctx`. `RunContext.config` is the GLOBAL `agentworks.config.Config`
-  (settings), not the harness blob, exactly as it is for every other capability.
+  blob is what the instance is constructed against, so `preflight`, `runup`, `start`, and `restart`
+  read `self.config` and take only `ctx`. `RunContext.config` is the GLOBAL
+  `agentworks.config.Config` (settings), not the harness blob, exactly as it is for every other
+  capability.
 - **The return value is a pane command string, and that is the whole tmux story.** The core applies
   template-variable substitution and `exec` wrapping to the op's return and hands it to
   `tmux.create_session`, exactly as it does for today's template `command`. The harness never sees
@@ -193,29 +200,34 @@ Contract points, and why they are shaped this way:
   installed. The harness is the first capability to actually use these fields, so the composition
   root populates them when it builds the `RunContext` for the harness's runup and ops (existing
   runups leave them `None`).
-- **The readiness check is `runup`, not `preflight`, and the model forces that.** Preflight runs
-  before the single resolve pass and before any mutation, which makes it dependency-blind: it may
-  not check state a later step of the same command creates. The harness's target-environment check
-  depends on exactly such state (an ephemeral agent's Linux user, an ephemeral workspace's files),
-  so it cannot be preflight without failing every first-time ephemeral launch (the direct analog of
-  a git-credential preflight failing `vm create` because git is not installed yet). It is therefore
-  `runup`: deferred to the op boundary, run against the real target the provisioning phase created,
-  with the composed env the resolved secrets feed. The built-in harnesses declare no secrets, so
-  their `preflight` is the base's resolvability prediction and nothing more, near-empty by design
-  and a legitimate answer, not an unfinished one.
-- **`runup` needs no secret, and that is allowed.** The preflight/runup boundary is the
-  secret-resolve boundary, not an auth boundary: runup is simply "post-resolve, read-only, before
-  the mutating op". The required-commands probe reads no secret (git-credential's own "is git
-  installed on the target" examples are the same non-authenticated runup shape); it wants the
-  post-resolve slot because it needs the post-provision target and the composed env (which the
-  resolved values feed), not because it authenticates.
+- **The readiness check is `preflight` wherever the target exists, `runup` only for the ephemeral
+  hole.** The target-environment check wants to run as early as possible (fail before spending the
+  operator's prompt), which is preflight, pre-resolve. Preflight is dependency-blind: it may not
+  check state a later step of the same command creates. The model's own mechanism for that is the
+  optional context: preflight is handed the target only when it already exists. So the harness
+  preflight probes `required_commands` exactly when `ctx` carries the session's target (an existing
+  agent/workspace, and every restart), and does not when it is absent (a `--new-agent` /
+  `--new-workspace` create, whose user/workspace this command creates later, the direct analog of a
+  git-credential preflight not checking a VM `vm create` has not made yet). That one ephemeral case
+  is the only thing that cannot be preflighted, so it falls to `runup`, post-provision, against the
+  real target. This keeps the fast-fail-before-prompt property for the common path and every
+  restart, and confines runup to the case where nothing earlier could have checked. (An
+  admin-as-proxy preflight that probed the ephemeral target as admin was rejected earlier: it
+  false-aborts on agent-template user-level tooling. The check runs as the real target user or not
+  yet at all.)
+- **The check needs no secret, and that is fine at either stage.** It reads no secret, so preflight
+  (pre-resolve) is its natural home; the runup fallback is about the target existing, not about
+  authentication. The preflight/runup boundary is the secret-resolve pass, not an auth boundary, so
+  a non-authenticated check on either side is within contract. The built-in harnesses declare no
+  secrets, so `super().preflight()` (the base's resolvability prediction) adds nothing for them; the
+  required-commands probe is the whole of their readiness.
 - **`start` and `restart` are separate ops** rather than one op with a flag: they are the contract's
   verbs (FRD R3/R7 vocabulary), implementations that differ (shell) read naturally, and
   implementations that coincide (claude-code, where both reduce to resume-or-launch) share a private
   helper. A future restart-specific concern (pre-resume cleanup) has an obvious home.
-- **Errors**: `validate_config` raises `ConfigError`; `runup` / `start` / `restart` raise the
-  standard typed errors (`StateError`, `ExternalError`) with `entity_kind="session"`, which the CLI
-  already renders.
+- **Errors**: `validate_config` raises `ConfigError`; `preflight` / `runup` / `start` / `restart`
+  raise the standard typed errors (`StateError`, `ExternalError`) with `entity_kind="session"`,
+  which the CLI already renders.
 
 ### The identity chain on `RunContext`
 
@@ -225,46 +237,60 @@ session (`claude --name <session>`, distinct from the template name, which is th
 `owner_name`), and the vm / workspace / agent names for probe context and error labels. None of that
 is config, `owner`, or a target's `describe()` string.
 
-This is exactly the "second consumer" the capability model's own open question anticipated:
+This rhymes with the capability model's own open question about enriching context beyond the
+validate-time `owner` string:
 
 > `owner` is a host-agnostic string today. If a second consumer (preflight's richer context is the
 > likely trigger) needs more than a name, the right evolution is a small host-agnostic context
 > value, not passing the consuming resource, designed once, when two real consumers reveal its
 > shape.
 
-The harness reveals that shape, so this SDD makes the shared change (maintainer ruling, 2026-07-16),
-and makes it a real INVARIANT rather than an optional extra. A `RunContext` without the operation's
-identity is an incomplete object, so identity is REQUIRED and the object enforces it. The
-enforcement turns on a `level`: the point in the model hierarchy the operation runs at. Each level
-carries its own name plus its ancestors up to the system slug, and the object validates that the
-identity matches its level exactly, so "appropriate identity" is the object's guarantee, not a
-caller's promise:
+That note is about `owner` (read at validate/preflight) and counsels waiting for two consumers; this
+is a different field (`RunContext.identity`, read at readiness and ops) and one consumer, so take it
+as precedent for the SHAPE (a small host-agnostic value, not the consuming resource itself), not as
+a mandate to design now. What settles doing it in this SDD is the maintainer ruling (2026-07-16),
+and the ruling is that identity is a real INVARIANT, not an optional extra: a `RunContext` without
+the operation's identity is an incomplete object, so identity is REQUIRED and the object enforces
+it.
+
+The enforcement turns on a `level`. **A level is the scope of the specific capability invocation:
+what entity THAT call concerns**, not the ambient command and not where the consuming resource is
+declared. That distinction is what makes it coherent within one command: in a single `vm create` the
+vm-platform preflight concerns the VM being made (VM level) while each git-credential readiness call
+concerns a system-global credential and its token (SYSTEM level), so the two carry different-level
+identities in the same command. Each `RunContext` is already built per capability call, so
+per-invocation level matches how the code is shaped.
 
 ```python
 # capabilities/base.py (added by this SDD)
 
 class ContextLevel(Enum):
-    """The hierarchy level an operation runs at; the identity's ancestor
-    set follows from it."""
+    """The scope level a capability invocation runs at; the identity's
+    field set follows from it. The full model hierarchy is enumerated;
+    only the levels a call site constructs today are implemented (see
+    OperationIdentity.__post_init__)."""
 
     SYSTEM = "system"        # scope: the whole installation, no VM
     VM = "vm"                # a VM
-    WORKSPACE = "workspace"  # a workspace on a VM
-    ADMIN = "admin"          # the admin user on a VM
-    AGENT = "agent"          # an agent user on a VM
+    WORKSPACE = "workspace"  # a workspace on a VM        (reserved)
+    ADMIN = "admin"          # the admin user on a VM     (reserved)
+    AGENT = "agent"          # an agent user on a VM       (reserved)
     SESSION = "session"      # a harness as agent-or-admin, in a workspace, on a VM
 
 
 @dataclass(frozen=True)
 class OperationIdentity:
-    """The operation's identity, pinned to a LEVEL. Each level's identity
-    is its own name plus its ancestors': SYSTEM has only the system slug;
-    VM adds vm_name; WORKSPACE / ADMIN / AGENT each add their name on top
-    of the VM; SESSION carries vm_name, workspace_name, session_name, and
-    exactly one of (agent_name, admin). __post_init__ enforces that exactly
-    the level's fields are set and the rest are None, so an identity
-    inconsistent with its level (a SESSION with no workspace, a VM op
-    naming an agent) cannot be constructed.
+    """The invocation's identity, pinned to a LEVEL. __post_init__ enforces
+    that exactly the level's fields are set and the rest are None, so an
+    identity inconsistent with its level (a SESSION with no workspace, a VM
+    op naming an agent) cannot be constructed.
+
+    Only the levels a call site constructs today (SYSTEM, VM, SESSION) have
+    their field rules implemented; WORKSPACE / ADMIN / AGENT are kept in
+    the enum to document the full hierarchy but raise NotImplementedError
+    on construction (their required/forbidden rules are pinned when a real
+    call site first needs them). Their name fields still exist and are
+    validated WITHIN SESSION.
 
     The system slug (the installation identifier, added recently; may be
     blank or unset, so str | None) anchors every level. NAMES only,
@@ -279,48 +305,54 @@ class OperationIdentity:
     agent_name: str | None = None
     session_name: str | None = None
     admin: bool = False
-    # __post_init__: level -> required/forbidden fields, per the table below.
+    # __post_init__: SYSTEM/VM/SESSION field rules enforced (per the table
+    #   below); WORKSPACE/ADMIN/AGENT raise NotImplementedError for now.
 ```
 
-A level is the SCOPE of the operation (what entity it concerns), which for a capability is the scope
-of its consuming resource: a secret backend or a git credential is declared once for the whole
-installation and so is system-scoped; a vm-site/platform concerns a VM; a session concerns a
-session. The level-to-fields table the object enforces (system_slug is allowed at every level and is
-the only field allowed at SYSTEM):
+The level-to-fields table the object enforces (system_slug is allowed at every level and is the only
+field allowed at SYSTEM):
 
 - **SYSTEM**: system_slug only; vm/workspace/agent/session all None, admin False. Scope is the
-  entire installation, not any VM. This is the natural level for the system-global capabilities:
-  `secret-backend` readiness (am I installed, can I reach the vault) and `git-credential-provider`
-  readiness (the credential and its token are declared once for the system; the runup probe hits the
-  git host, not a VM), plus cross-system scans like doctor's vm-site config check. The credential or
-  backend's OWN name is its `owner_name`, not identity; identity here is just the installation slug.
+  entire installation, not any VM: the level for the system-global capabilities, `secret-backend`
+  readiness (am I installed, can I reach the vault) and `git-credential-provider` readiness (the
+  credential and its token are declared once for the system, and the probe hits the git host, not a
+  VM), and for cross-system scans like doctor's vm-site config check. A git-credential readiness
+  call is SYSTEM even when it runs inside `vm create` or agent init, because it concerns the
+  system-global credential, not the VM. The credential or backend's OWN name is its `owner_name`,
+  not identity.
 - **VM**: vm_name set; workspace/agent/session None, admin False.
-- **WORKSPACE**: vm_name + workspace_name set; agent/session None, admin False.
-- **ADMIN**: vm_name set + admin True; workspace/agent/session None, agent_name None.
-- **AGENT**: vm_name + agent_name set; admin False; workspace/session None.
 - **SESSION**: vm_name + workspace_name + session_name set, and exactly one of (agent_name set,
-  admin True); the other names as above.
+  admin True).
+- **WORKSPACE / ADMIN / AGENT**: reserved. Kept in the enum to document the full model hierarchy,
+  but no operation constructs one today, so constructing an identity at these levels raises
+  NotImplementedError; the rules shown by the pre-realignment sketch (WORKSPACE = vm + workspace,
+  ADMIN = vm + admin, AGENT = vm + agent) are the expected shapes, pinned when a real call site
+  appears.
 
 Three things follow:
 
 - **`identity` is a required field on `RunContext`** (the dataclass becomes `kw_only=True` so the
   required field composes with the existing defaulted ones). There is no `None` default to fall
   through: every construction site passes an identity at the right level. This SDD threads it
-  through all fourteen existing construction sites (in `vms/manager.py`, `agents/manager.py`,
-  `git_credentials/__init__.py`, and `doctor.py`) plus this SDD's new `sessions/manager.py` calls:
-  the vm-create and reinit preflights/runups build a VM-level identity, agent init an AGENT-level
-  one, `create_session` / `restart_session` a SESSION-level one, and doctor's site scan a
-  SYSTEM-level one. All fourteen already build `RunContext(config=...)` by keyword, so the edit is
-  one added argument per call, not a call-shape break.
-- **The level answers the questions the earlier coherence sketch left open.** A SESSION always has a
+  through all fourteen existing construction sites: thirteen live in `vms/manager.py`,
+  `agents/manager.py`, `git_credentials/__init__.py`, and `doctor.py`, and the fourteenth already
+  exists in `sessions/manager.py` (the ephemeral-agent git-credential preflight this SDD also builds
+  on). By the per-invocation rule: vm-create/reinit platform readiness -> VM; every git-credential
+  readiness call -> SYSTEM (including the ones inside vm and agent init); doctor's site scan ->
+  SYSTEM; and the harness's own calls -> SESSION. All fourteen already build
+  `RunContext(config=...)` by keyword, so the edit is one added argument per call, not a call-shape
+  break.
+- **The level resolves what the earlier coherence sketch left open.** A SESSION always has a
   workspace (so `session_name` implies `workspace_name`), and admin-vs-agent is the SESSION level's
   one either/or, not a free-floating flag; doctor's placement-free scan is simply SYSTEM level, not
   a hand-built "empty" identity. The capability's OWN name stays its `owner_name` (a vm-site's name,
-  a credential's name); the identity is the ambient placement, which is why a site check is SYSTEM
-  level and not "vm-site level".
+  a credential's name); identity is the invocation's scope, which is why a git-credential readiness
+  call is SYSTEM and not "git-credential level".
 - **`RunContext` otherwise unchanged**: `config` / `admin_target` / `agent_target` / `secrets` stay
-  optional and timing-populated. Identity can be required where they cannot because the operation's
-  names (and its level) are fixed at command entry, before anything is touched.
+  optional and timing-populated. Identity can be required where they cannot because the invocation's
+  names and level are fixed at command entry. (The one caveat the FRD notes: the system slug can be
+  prompted once on a first-ever create, resolved before any `RunContext` is built, so "fixed at
+  entry" describes the identity every readiness stage sees, not a literally untouched world.)
 
 On ephemerals (the open worry): a `session create --new-agent --new-workspace` names resources that
 do not exist yet, but this is a NON-ISSUE for identity, and for the reason given: the orchestration
@@ -410,15 +442,19 @@ platform and providers:
   `harness.restart(ctx)`, then apply template-variable substitution to the returned string exactly
   as today.
 - `_assert_required_commands`'s probe loop, docstring rationale, and error shape relocate verbatim
-  to `capabilities/harness/base.py` as the `require_commands(ctx, commands, ...)` helper; the
-  manager's readiness call site becomes `harness.runup(ctx)`.
+  to `capabilities/harness/base.py` as the `require_commands(ctx, commands, ...)` helper (it no-ops
+  when `ctx` has no usable target). The manager calls `harness.preflight(ctx)` in the preflight-all
+  phase and `harness.runup(ctx)` only after ephemeral provisioning; both delegate to the same
+  helper, so the required-commands probe fires once, at whichever stage first has the target.
 
-Sequencing note (pinned so the LLD preserves it): on restart, `runup` runs BEFORE the destructive
-kill (as today's required-commands check does), while the `restart` op runs AFTER it, which is
-exactly what claude-code needs, since Claude Code's session state is only settled once the old
-process is dead. On create, the `start` op runs after `runup`, before `tmux.create_session`. Both
-paths already hold the correctly-bound target transport at those points; no new threading beyond
-placing it on the `RunContext`.
+Sequencing note (pinned so the LLD preserves it): on restart the target already exists, so
+`harness.preflight` (required-commands) runs pre-resolve and pre-kill, and the ephemeral runup
+fallback never fires; the `restart` op runs AFTER the kill, which is exactly what claude-code needs,
+since Claude Code's session state is only settled once the old process is dead. On create, the
+required-commands check is preflight for an existing agent/workspace and the runup fallback for an
+ephemeral one; the `start` op runs last, before `tmux.create_session`. The manager holds the
+correctly-bound target transport at each of these points; the new work is placing it, and the
+identity, on the `RunContext`.
 
 ### Env composition (unchanged; stated so the story is explicit)
 
@@ -432,11 +468,14 @@ therefore executes with the fully resolved env exactly as today's template `comm
 never composes, reads, or forwards env itself, and `spec.env` stays core template vocabulary, never
 harness config.
 
-One deliberate upgrade over today: the target transport handed to the harness on the `RunContext` is
-bound with the composed env (the same `SetEnv` delivery the pane's SSH connection uses), so runup
-and launch-time probes see the env the pane will see; today's login-env-only probe misses
-PATH-affecting values the session itself gets. Probes run in the workspace directory, matching the
-pane's working directory (the workspace exists by runup time; ephemerals are provisioned first).
+Probes get the env appropriate to their stage. The primary required-commands check runs at
+preflight, pre-resolve, so it sees the target's login env, exactly as today's
+`_assert_required_commands` does (no regression, and adequate for checking a binary on the base
+PATH). The ephemeral runup fallback runs post-resolve, so its target transport is bound with the
+composed env (the same `SetEnv` delivery the pane's SSH connection uses), which is a small upgrade
+for that one path (it sees PATH-affecting values the session itself gets). Probes run in the
+workspace directory, matching the pane's working directory (for the ephemeral runup path the
+workspace exists by then; ephemerals are provisioned before runup).
 
 ### Registry, bootstrap, inspection
 
@@ -495,8 +534,8 @@ The orchestration follows the capability model's canonical order, the same one `
 init use: preflight-all before any prompt or mutation, then the single resolve at the preflight
 boundary (one prompt session), then per-phase runup-then-ops. The harness is one participant in that
 order, not its author: the prompts-up-front-then-walk-away consistency is a property of the resolve
-and isolation machinery around it, and the harness contributes only its `runup` and its two ops at
-the points shown. Applied to create:
+and isolation machinery around it, and the harness contributes its readiness and its two ops at the
+points shown. Applied to create:
 
 1. `build_registry(config)`, once. Harness rows publish; a template's declared `harness` reference
    validates at finalize, so a typo'd name dies here, before any prompt or mutation.
@@ -508,10 +547,12 @@ the points shown. Applied to create:
    stopped VM needs a tailscale auth key, interactivity that rightly precedes the walk-away point.
    Power-state convergence is idempotent declared-state maintenance, not a rollback-tracked
    mutation; called out so "any state change" in the invariant reads precisely.
-5. Preflight-all: the harness's `preflight(ctx)` (near-empty for the built-ins) alongside every
-   other participating resource's, all against the command-start
-   `RunContext(identity=..., config=config)` (identity always present, no secrets, no on-VM
-   targets), before any prompt or mutation.
+5. Preflight-all: the harness's `preflight(ctx)` alongside every other participating resource's, all
+   against the command-start `RunContext(identity=..., config=config, agent_target=...)` (identity
+   always present, no secrets). For a session on an EXISTING agent/workspace the context carries the
+   target, so the harness preflight probes `required_commands` here, pre-resolve, bailing before any
+   prompt. For a `--new-agent` / `--new-workspace` session the target is absent, so that probe
+   defers to step 8. Everything in this step is before any prompt or mutation.
 6. The single secret resolve (`Resolver.resolve()`; the union across every instance registered on
    it, one batched prompt session) and env composition. When `--new-agent` is in play, the ephemeral
    agent's git-credential tokens are already folded into this resolve on main (constructed against
@@ -520,20 +561,21 @@ the points shown. Applied to create:
 7. Ephemeral workspace/agent provisioning (unchanged; rollback-protected from here down), then
    target preparation. Nothing in this block prompts.
 8. `harness.runup(ctx)` against the op-start `RunContext` (config, resolved `secrets`, and the
-   target transport as `agent_target` / `admin_target`, plus the identity value), in the real
-   environment: actual target user, actual workspace, composed env. A failure rolls back the
-   ephemerals and reports; when nothing ephemeral was requested, nothing has mutated yet and the
-   abort is free.
+   target transport, plus the identity), in the real environment. This is the EPHEMERAL FALLBACK: it
+   runs the `required_commands` probe only when step 5 could not (the target was just created); for
+   a non-ephemeral session it is a no-op (preflight already checked). A failure rolls back the
+   ephemerals and reports.
 9. `harness.start(ctx)` -> pane command; template-var substitution; `tmux.create_session` with the
    composed env.
 
 `restart_session` runs against the existing session (template re-resolved by the stored name,
-instance reconstructed). It differs from create in one intentional way already on main: it binds the
-platform via `_prepare_vm` (site secrets resolve there) and resolves the session ENV chain via the
-legacy `resolve_for_command` AFTER its BROKEN/confirm gates, so a declined restart never prompts for
-secrets it would discard. The harness `runup` slots after that resolve and before the kill: resolve
--> compose -> `harness.runup(ctx)` -> kill -> `harness.restart(ctx)` (after the kill, the
-claude-code sequencing requirement). A bad blob, a missing binary, or an unresolvable secret all
+instance reconstructed). The target always exists on restart, so the harness readiness check is a
+plain preflight and runs BEFORE the resolve, which restores today's discipline: a declined or doomed
+restart never prompts for secrets it would discard, and a missing binary aborts before any prompt.
+Sequence: `harness.preflight(ctx)` (required-commands, pre-resolve) -> resolve the session ENV chain
+via the legacy `resolve_for_command` AFTER the BROKEN/confirm gates (as on main) -> compose -> kill
+-> `harness.restart(ctx)` (after the kill, the claude-code sequencing requirement); the ephemeral
+runup fallback never fires on restart. A bad blob, a missing binary, or an unresolvable secret all
 abort with the old session still running. Past the kill, the failure contract changes shape (FRD
 R7): a `restart` op or tmux failure cannot restore the old session, so the pinned end state is
 session row intact, old tmux gone, `agw session restart` cleanly retryable, and an error naming the
@@ -546,8 +588,8 @@ failed step; no resurrection is attempted.
 | TOML loader                 | section/key shapes, flat-field hoist, flat+non-shell and flat+blob conflict errors       |
 | Manifest decoder            | flat-field rejection (clean YAML spec); everything else delegates to the shared loader   |
 | Harness (`validate_config`) | blob field vocabulary, per declared blob at load and per merged blob at resolve          |
-| Harness (`preflight`)       | pre-resolve, dependency-blind readiness (config-secret resolvability; near-empty today)  |
-| Harness (`runup`)           | post-resolve target-environment check in the real session environment (today: commands)  |
+| Harness (`preflight`)       | required-commands probe when the target exists (existing agent/workspace, all restarts)  |
+| Harness (`runup`)           | required-commands probe for the ephemeral-create hole only (target made this command)    |
 | Registry finalize           | unknown `harness` name via the kind's error miss policy (declared references only)       |
 | Sessions manager            | orchestration order, instance construction, `RunContext` assembly, dispatch, {{var}} sub |
 
@@ -665,19 +707,24 @@ already builds `RunContext` by keyword, so each is a single added argument.
 ## Open questions / for LLD
 
 - **`RunContext.identity` level per site**: identity is required (see the identity section), so
-  every construction site passes one at the right level. The LLD assigns the `ContextLevel` for each
-  of the fourteen sites by the operation's scope: vm-create/reinit/rekey platform readiness -> VM;
-  the git-credential readiness stages (preflight and the deferred runup token probe) -> SYSTEM,
-  because the credential and its token are system-global config and the probe hits the git host, not
-  a VM (the per-VM materials WRITE is where VM/admin/agent placement enters, but that is an op, not
-  a `RunContext` site here); `create_session` / `restart_session` -> SESSION; doctor's site scan ->
-  SYSTEM. The one still to pin is `vm add-git-credential` (SYSTEM for the credential's readiness,
-  same as the others). It also confirms the level table against the actual model (is a WORKSPACE
-  really VM-parented rather than agent-parented?) before the `__post_init__` rules are frozen.
+  every construction site passes one at the per-invocation level. The assignment is settled by the
+  rule (level = what the call concerns): vm-create/reinit/rekey platform readiness -> VM; every
+  git-credential readiness call -> SYSTEM (the credential and its token are system-global, the probe
+  hits the git host, not a VM; this covers the sites in `create_vm`, agent init, and
+  `vm add-git-credential`); doctor's site scan -> SYSTEM; the harness -> SESSION. The LLD just
+  applies it per site; no WORKSPACE / ADMIN / AGENT identity is constructed (those enum values raise
+  NotImplementedError until a real call site defines their rules).
 - **Populating the target transport on `RunContext`**: the harness is the first consumer of
-  `admin_target` / `agent_target`; pin where `create_session` / `restart_session` bind the
-  composed-env target transport onto the context, and confirm the admin-mode selection
-  (`agent_target` None, `admin_target` set) matches the manager's existing mode handling.
+  `agent_target` / `admin_target`, and it reads them at PREFLIGHT (for an existing agent/workspace
+  and every restart), not only at runup. Pin where `create_session` / `restart_session` bind the
+  target transport onto the command-start context when the target already exists (and leave it
+  absent for an ephemeral `--new-agent` / `--new-workspace`, which is what routes that one case to
+  the runup fallback), and confirm the admin-mode selection (`agent_target` None, `admin_target`
+  set) matches the manager's existing mode handling.
+- **The required-commands single-fire guard**: `harness.preflight` and `harness.runup` both delegate
+  to `require_commands(ctx, ...)`, which no-ops without a usable target. Pin the guard that makes
+  the probe fire exactly once (preflight when the target is present; runup only for the ephemeral
+  case), avoiding a redundant second probe on the non-ephemeral path.
 - **Claude Code detection and flags**: how a resumable session named `<session>` is detected (CLI
   listing surface vs on-disk session files) and the exact spellings for `permission_mode` / `model`
   / `extra_args` forwarding; verify against the latest stable Claude Code CLI at implementation time
