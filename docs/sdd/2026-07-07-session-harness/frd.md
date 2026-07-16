@@ -439,14 +439,18 @@ that provides walk-away.
   harness needs them, at minimum the session name to address the tool session
   (`claude --name <session>`, distinct from the template name it is constructed under), plus the
   chain for probe context and error labels. This SDD adds a self-validating `OperationIdentity`
-  value (the placement chain by name, with coherence enforced by the object: admin excludes an
-  agent, and any lower name implies its VM) and makes it a REQUIRED field on `RunContext`, not an
-  optional extra. A context without the operation's identity is an incomplete object, so the object
-  enforces its presence and every construction site supplies one. Identity can be required where the
-  timing-populated fields (targets, secrets) cannot, because the operation's names are chosen at
-  command entry and known before anything is touched, even when the resources they name are
-  provisioned later. It is names-only for now, with room reserved for fuller representations (the
-  HLA pins the shape).
+  value keyed by a `level` (the point in the model hierarchy the operation runs at: system, vm,
+  workspace, admin, agent, session) and makes it a REQUIRED field on `RunContext`, not an optional
+  extra. Each level carries its own name plus its ancestors up to the system slug (a session is vm +
+  workspace + agent-or-admin + session; a vm op is just the vm; a placement-free vm-site check is
+  system-level, only the slug), and the object validates that the identity matches its level
+  exactly, so it is always consistent and valid. A context without the operation's identity is an
+  incomplete object, so the object enforces its presence and every construction site supplies one at
+  the right level. Identity can be required where the timing-populated fields (targets, secrets)
+  cannot, because the operation's names and level are fixed at command entry, known before anything
+  is touched, even when the resources they name are ephemeral and provisioned later (the
+  orchestration layer chooses those names up front, so ephemerality never leaves a name absent). It
+  is names-only for now, with room reserved for fuller representations (the HLA pins the shape).
 - **Threading identity through the existing capability roots is in scope.** Because identity is now
   required on the shared `RunContext`, this SDD updates every current construction site (in
   `vms/manager.py`, `agents/manager.py`, `git_credentials/__init__.py`, and `doctor.py`) to pass the
