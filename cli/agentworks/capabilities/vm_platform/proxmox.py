@@ -106,6 +106,19 @@ class ProxmoxPlatform(VMPlatform):
     def _cfg(self, key: str, default: object | None = None) -> Any:
         return self.platform_config.get(key, default)
 
+    def _build_api(self, token_value: str) -> ProxmoxAPI:
+        """Construct an API client for a resolved token. Shared by the op
+        client (which reads the token from the bound resolver) and
+        ``runup`` (which reads it from the context's resolved secrets), so
+        the two stages build the client the same way from the same
+        value."""
+        return ProxmoxAPI(
+            api_url=str(self._cfg("api_url")),
+            token_id=str(self._cfg("token_id")),
+            token_secret=token_value,
+            verify_ssl=bool(self._cfg("verify_ssl", True)),
+        )
+
     @property
     def _api(self) -> ProxmoxAPI:
         api: ProxmoxAPI | None = getattr(self, "_api_cached", None)
@@ -124,13 +137,7 @@ class ProxmoxPlatform(VMPlatform):
             # From the operation's boundary resolve pass; the resolver
             # raises a typed error if the pass hasn't run (an op must
             # never trigger a prompt).
-            token_value = self.resolver.get(token_secret)
-            api = ProxmoxAPI(
-                api_url=str(self._cfg("api_url")),
-                token_id=str(self._cfg("token_id")),
-                token_secret=token_value,
-                verify_ssl=bool(self._cfg("verify_ssl", True)),
-            )
+            api = self._build_api(self.resolver.get(token_secret))
             self._api_cached = api
         return api
 
@@ -143,19 +150,24 @@ class ProxmoxPlatform(VMPlatform):
         or an unreachable host) warns and continues unverified, so an
         outage never blocks work a valid token would have done.
 
-        Reuses the op client (built from the resolved token), so a
-        subsequent ``create`` reuses the same authenticated session; the
-        resolved value is the same whether read via the context or the
-        bound resolver here."""
+        Post-resolve and read-only: the token comes from the context's
+        resolved secrets (``ctx.secrets``), the same value the op client
+        reads via the bound resolver. runup builds a throwaway client for
+        the check and leaves ``self`` untouched."""
         from agentworks import output
-        from agentworks.errors import TokenRejectedError
+        from agentworks.errors import ConfigError, TokenRejectedError
 
-        if self.resolver is None:
-            return  # inspection construction; no resolved token to check
         token_secret = str(self._cfg("token_secret", DEFAULT_TOKEN_SECRET))
+        if ctx.secrets is None:
+            raise ConfigError(
+                f"vm-site '{self.site_name}': cannot check the Proxmox API "
+                f"token without resolved secrets in the run context "
+                f"(inspection only?)"
+            )
         output.detail(f"Performing runup test for vm-site/{self.site_name}...")
+        api = self._build_api(ctx.secrets.get(token_secret))
         try:
-            self._api.next_id()
+            api.next_id()
         except ProxmoxAPIError as e:
             if e.code in (401, 403):
                 raise TokenRejectedError(

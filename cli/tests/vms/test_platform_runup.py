@@ -42,9 +42,15 @@ def _platform() -> ProxmoxPlatform:
     return ProxmoxPlatform("px", _CONFIG, _StubResolver({"proxmox-token": "tok"}))  # type: ignore[arg-type]
 
 
+def _ctx() -> RunContext:
+    """A runup context carrying the resolved API token, as the service
+    layer assembles after the boundary resolve pass."""
+    return RunContext(secrets=_StubResolver({"proxmox-token": "tok"}))  # type: ignore[arg-type]
+
+
 def test_proxmox_runup_ok(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(ProxmoxAPI, "next_id", lambda self: 100)
-    _platform().runup(RunContext())  # no error
+    _platform().runup(_ctx())  # no error
 
 
 @pytest.mark.parametrize("code", [401, 403])
@@ -58,7 +64,7 @@ def test_proxmox_runup_rejection_is_fatal(
 
     monkeypatch.setattr(ProxmoxAPI, "next_id", _boom)
     with pytest.raises(TokenRejectedError, match="Proxmox rejected"):
-        _platform().runup(RunContext())
+        _platform().runup(_ctx())
 
 
 def test_proxmox_runup_other_status_warns(
@@ -70,7 +76,7 @@ def test_proxmox_runup_other_status_warns(
         raise err
 
     monkeypatch.setattr(ProxmoxAPI, "next_id", _boom)
-    _platform().runup(RunContext())  # no raise
+    _platform().runup(_ctx())  # no raise
     assert "could not verify" in capsys.readouterr().err
 
 
@@ -81,11 +87,15 @@ def test_proxmox_runup_network_warns(
         raise OSError("unreachable")
 
     monkeypatch.setattr(ProxmoxAPI, "next_id", _boom)
-    _platform().runup(RunContext())  # no raise
+    _platform().runup(_ctx())  # no raise
     assert "could not reach Proxmox" in capsys.readouterr().err
 
 
-def test_proxmox_runup_without_resolver_is_noop() -> None:
-    """Inspection construction (no resolver) has no resolved token to
-    check; runup is a silent no-op, not a crash."""
-    ProxmoxPlatform("px", _CONFIG).runup(RunContext())
+def test_proxmox_runup_without_secrets_is_error() -> None:
+    """A runup with no resolved secrets in the context (inspection) is a
+    typed error, not a crash: runup runs post-resolve and must be handed
+    the token via ``ctx.secrets``."""
+    from agentworks.errors import ConfigError
+
+    with pytest.raises(ConfigError, match="resolved secrets"):
+        ProxmoxPlatform("px", _CONFIG).runup(RunContext())
