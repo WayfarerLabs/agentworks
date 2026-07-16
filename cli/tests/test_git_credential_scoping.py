@@ -640,6 +640,33 @@ def test_announce_git_credentials_reinforces_names(
     assert not any(m.startswith("Git credentials:") for m in captured_output.detail)
 
 
+def test_agent_git_preflight_resolves_and_emits_phases(
+    tmp_path: Path,
+    captured_output: CapturedOutput,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The agent composition helper preflights + resolves git creds and,
+    at its own root, frames the output with the Preflight / Resolving
+    Secrets banners, mirroring the vm composition roots."""
+    from types import SimpleNamespace
+
+    from agentworks.agents.manager import _preflight_resolve_agent_git
+
+    monkeypatch.setenv("AW_SECRET_GIT_TOKEN_WIDGETS_BOT", "tok123")
+    registry = _registry_with_scoped_cred(tmp_path)  # declares git-credential/widgets-bot
+    config = load_config(tmp_path / "config.toml", warn_issues=False)
+    agent_tmpl = SimpleNamespace(name="default", git_credentials=["widgets-bot"])
+
+    tokens = _preflight_resolve_agent_git(
+        config, registry, agent_tmpl, show_phases=True  # type: ignore[arg-type]
+    )
+    assert tokens == {"widgets-bot": "tok123"}
+    assert "=== Preflight ===" in captured_output.info
+    assert "=== Resolving Secrets ===" in captured_output.info
+    assert "Checking agent-template/default..." in captured_output.detail
+    assert "Checking git-credential/widgets-bot..." in captured_output.detail
+
+
 # -- real git against the generated materials ----------------------------------
 
 

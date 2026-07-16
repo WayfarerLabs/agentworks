@@ -260,20 +260,26 @@ def create_agent(
     # Bind FIRST (unless the caller already did at its own root): the
     # platform's preflight must fail before the git-token collection
     # prompts the operator for anything.
+    own_root = platform is None
     if platform is None:
         platform = bind_platform(config, vm, registry=registry)
 
-    # Collect agent-provisioning credentials (git tokens live outside
-    # the env-block system). Operator env secrets are NOT prompted at
-    # agent create -- provisioning is hermetic. They get prompted at
-    # the use site (agent shell, session create, etc.).
-    git_tokens = _collect_agent_credentials(config, registry, agent_tmpl)
+    # Preflight + resolve the agent's git credentials (git tokens live
+    # outside the env-block system). Operator env secrets are NOT prompted
+    # at agent create; provisioning is hermetic, they get prompted at the
+    # use site (agent shell, session create, etc.). Phase banners show
+    # only when this is the own composition root (not nested under session
+    # create).
+    git_tokens = _preflight_resolve_agent_git(
+        config, registry, agent_tmpl, show_phases=own_root
+    )
 
     from agentworks.ssh import SSHLogger
     ssh_logger = SSHLogger(vm.name, "agent-create")
-    output.info(
-        f"Creating agent '{name}' on VM '{vm_name}' (template: {agent_tmpl.name})..."
-    )
+    if not own_root:
+        output.info(
+            f"Creating agent '{name}' on VM '{vm_name}' (template: {agent_tmpl.name})..."
+        )
     with keep_active(db, config, vm, platform):
 
         def _safe_rollback() -> None:
@@ -297,6 +303,7 @@ def create_agent(
                     vm, config, registry, agent_tmpl, linux_user,
                     agent_name=name,
                     git_tokens=git_tokens,
+                    show_phases=own_root,
                     logger=ssh_logger,
                 )
             except KeyboardInterrupt:
@@ -487,12 +494,12 @@ def reinit_agent(
 
     vm = _require_vm(db, agent.vm_name)
 
-    # Collect credentials up front before any SSH work.
-    git_tokens = _collect_agent_credentials(config, registry, agent_tmpl)
-
-    # Provisioning is hermetic: no operator-env secrets are prompted at
-    # agent reinit. They get prompted at the use site (agent shell,
-    # session create, etc.) once reinit completes.
+    # Preflight + resolve the agent's git credentials up front (reinit is
+    # always its own composition root, so the phase banners show).
+    # Provisioning is hermetic: no operator-env secrets are prompted here.
+    git_tokens = _preflight_resolve_agent_git(
+        config, registry, agent_tmpl, show_phases=True
+    )
 
     from agentworks.ssh import SSHLogger
     ssh_logger = SSHLogger(vm.name, "agent-reinit")
@@ -503,6 +510,7 @@ def reinit_agent(
                     vm, config, registry, agent_tmpl, agent.linux_user,
                     agent_name=agent.name,
                     git_tokens=git_tokens,
+                    show_phases=True,
                     logger=ssh_logger,
                 )
             except KeyboardInterrupt:
@@ -993,27 +1001,51 @@ def _remove_from_workspace_group(
     target.run(f"gpasswd -d {linux_user} {ws_grp}", sudo=True, check=False)
 
 
-def _collect_agent_credentials(
+def _preflight_resolve_agent_git(
     config: Config,
     registry: Registry,
     agent_tmpl: ResolvedAgentTemplate,
+    *,
+    show_phases: bool,
 ) -> dict[str, str]:
-    """Collect git credentials up front before any SSH work begins.
+    """Preflight and resolve the agent's git credentials in one pass,
+    mirroring the vm composition roots.
 
-    Phase 1d of the Resource Registry SDD: tokens flow through the
-    framework (``_collect_git_tokens`` walks each credential's
-    ``token`` field, resolves through the backend chain, returns the
-    ``{credential_name: value}`` map). The legacy provider-side
-    resolution path is gone. The registry is built upstream so its
-    finalize-pass typo errors fire before any other precondition.
+    Constructs each provider against the operation's resolver, announces
+    and preflights them (predicting each token secret is resolvable, so
+    an unresolvable one fails BEFORE any prompt), runs the single resolve
+    pass, and returns the resolved ``{credential_name: token}`` map. The
+    providers are re-materialized inside ``_create_agent_on_vm`` for the
+    deferred runup and the store write.
+
+    ``show_phases`` frames the output with the ``Preflight`` /
+    ``Resolving Secrets`` banners at the own composition root
+    (``agw agent create`` / ``reinit``); nested under session create it
+    is False, suppressing the banners (the parent owns the phase
+    structure) while the preflight fail-fast and resolve still run.
     """
-    agent_cfg = agent_tmpl
-    if not agent_cfg.git_credentials:
-        return {}
+    from agentworks.capabilities.base import RunContext
+    from agentworks.secrets.resolver import Resolver
+    from agentworks.vms.initializer import (
+        announce_git_credentials,
+        resolve_git_credential_providers,
+    )
+    from agentworks.vms.manager import _resolve_git_tokens
 
-    from agentworks.vms.manager import _collect_git_tokens
-
-    return _collect_git_tokens(config, registry, agent_cfg.git_credentials)
+    resolver = Resolver(config, registry)
+    providers = resolve_git_credential_providers(
+        registry, agent_tmpl.git_credentials, resolver
+    )
+    if show_phases:
+        output.phase("Preflight")
+        output.detail(f"Checking agent-template/{agent_tmpl.name}...")
+        announce_git_credentials(providers)
+    for provider in providers.values():
+        provider.preflight(RunContext(config=config))
+    if show_phases:
+        output.phase("Resolving Secrets")
+    resolver.resolve()
+    return _resolve_git_tokens(providers, resolver)
 
 
 def _create_agent_on_vm(
@@ -1025,6 +1057,7 @@ def _create_agent_on_vm(
     *,
     agent_name: str,
     git_tokens: dict[str, str] | None = None,
+    show_phases: bool = True,
     logger: SSHLogger,
 ) -> None:
     """Create an agent Linux user on a VM and configure their environment.
@@ -1061,6 +1094,8 @@ def _create_agent_on_vm(
 
     admin_target = transport(vm, config, logger=logger)
 
+    if show_phases:
+        output.phase("Agent Bootstrap")
     output.detail(f"Creating user '{linux_user}' on VM '{vm.name}'...")
     home = f"/home/{linux_user}"
 
@@ -1087,7 +1122,7 @@ def _create_agent_on_vm(
     ensure_agent_socket_dir(admin_target, linux_user, warn_if_missing=False)
     removed = cleanup_stale_sockets(admin_target, linux_user)
     if removed:
-        output.detail(f"Cleaned up {removed} stale socket(s)")
+        output.detail(f"Cleaned up {output.count(removed, 'stale socket')}")
 
     # Reconcile authorized_keys via stage-and-install. The only admin work
     # that lands content INTO the agent's home; everything below is the
@@ -1102,6 +1137,8 @@ def _create_agent_on_vm(
 
     # -- Phase 2: self-configure (agent) ----------------------------------
 
+    if show_phases:
+        output.phase("Agent Initialization")
     agent_target = transport_for_user(vm, config, user=linux_user, logger=logger)
 
     # Provisioning is hermetic: no operator env from [agent_templates.*.env]
@@ -1160,7 +1197,7 @@ def _create_agent_on_vm(
 
     # Git credentials for the agent (tokens pre-resolved by the
     # framework upstream in agents/manager.create_agent / reinit_agent
-    # via _collect_agent_credentials). Phase 1d invariant: if the
+    # via _preflight_resolve_agent_git). Phase 1d invariant: if the
     # agent template declares git_credentials, the caller MUST have
     # resolved every token; a missing entry is a caller bug and
     # raises loudly rather than shipping a VM with a silently-dropped
@@ -1168,7 +1205,7 @@ def _create_agent_on_vm(
     if agent_cfg.git_credentials:
         from agentworks.vms.initializer import resolve_git_credential_providers
 
-        output.detail("Configuring git credentials for agent...")
+        output.detail("Configuring git credentials...")
         providers = resolve_git_credential_providers(registry, agent_cfg.git_credentials)
         missing = [
             cred_name for cred_name in providers
@@ -1223,6 +1260,9 @@ def _create_agent_on_vm(
                 f"git config --global --replace-all credential.helper '!{GIT_CRED_HELPER_PATH}' && "
                 f"(git config --global --get-all include.path | grep -qxF '{GIT_SCOPES_INCLUDE_PATH}' "
                 f"|| git config --global --add include.path '{GIT_SCOPES_INCLUDE_PATH}')"
+            )
+            output.detail(
+                f"Git credentials configured for {output.count(len(providers), 'provider')}"
             )
 
     # User install commands + login-shell PATH profile fragment.
