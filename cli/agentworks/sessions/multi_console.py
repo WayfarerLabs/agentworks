@@ -1658,10 +1658,13 @@ def _split_shell_pane(
         # `sudo --login` resets the environment and would drop every var
         # except the AGENTWORKS_*/AW_* env_keep allowlist. --preserve-env
         # names the composed keys explicitly so arbitrarily-named agent-scope
-        # vars and secrets survive, while their VALUES stay off the argv
-        # (only names appear; the values ride the tmux -e channel). Honored
-        # because VM init grants the admin user `Defaults:<admin> setenv`
-        # (see _write_sudoers_console_setenv).
+        # vars and secrets survive. sudo reads their VALUES from its inherited
+        # environment (tmux -e set them), not from its command line, so only
+        # the names land on the SUDO argv; passing VAR=value to sudo instead
+        # would respell the values there. (The values are already on the tmux
+        # -e argv from env_flags above, a pre-existing exposure this does not
+        # add to.) Honored because VM init grants the admin `Defaults:<admin>
+        # setenv` (see _write_sudoers_console_setenv).
         #
         # Ask sudo first, because a VM without that fragment does not drop the
         # un-preservable vars: it refuses the whole command, which would exit

@@ -43,9 +43,11 @@ shells is a separate identity-model question left for future work.
 ## Decision
 
 1. At pane-spawn time, pass the composed env keys explicitly on the sudo invocation:
-   `sudo --login --preserve-env=<K1,K2,...> -u <agent> ...`. The **values** continue to ride the
-   `tmux -e` channel; only the **names** appear on the argv, so no secret value is exposed in the
-   process table. The flag is omitted entirely when there is no composed env.
+   `sudo --login --preserve-env=<K1,K2,...> -u <agent> ...`. sudo reads the **values** from its
+   inherited environment (the `tmux -e` channel set them), not from its command line, so only the
+   **names** land on the _sudo_ argv. The flag is omitted entirely when there is no composed env.
+   (The values do appear on the `tmux split-window -e KEY=VAL` argv one frame up; that is the
+   pre-existing env transport, not something this decision adds. See the argv Negative.)
 
 2. Permit that on the VM with a new, user-scoped sudoers fragment deployed at init:
    `/etc/sudoers.d/51-agentworks-console-setenv` containing `Defaults:<admin> setenv`. Without
@@ -75,10 +77,13 @@ ever does. Retiring `env_keep` itself is ADR 0014's call, not this ADR's.
 
 - **Fixes the reported gap:** agent-scope secrets and operator env now reach agent companion shells,
   matching the agent's main session.
-- **No secrets at rest and no secret values on the argv.** Values stay on the tmux `-e` channel that
-  already carried them; `--preserve-env` lists names only. This is why we chose it over a
-  write-env-to-a-file handoff (which would leave secret material on disk to manage and clean up) and
-  over passing `VAR=value` pairs to sudo (which would put values in the process table).
+- **No secrets at rest, and no secret value added to the sudo argv.** `--preserve-env` lists names
+  only; sudo reads the values from the environment the `tmux -e` channel already populated. This is
+  why we chose it over a write-env-to-a-file handoff (which would leave secret material on disk to
+  manage and clean up) and over passing `VAR=value` pairs to sudo (which would respell the values
+  onto the sudo argv). Note this does not make the pane secret-free on the process table: the values
+  are on the `tmux -e` argv regardless (see the argv Negative); `--preserve-env` only avoids a
+  _second_, sudo-side exposure.
 - **No privilege change.** The admin already holds `ALL=(ALL) NOPASSWD:ALL`; granting it `setenv`
   only permits command-line env preservation it could already achieve as root. Scoping the directive
   to the admin user keeps the surface off every other account.
@@ -87,6 +92,15 @@ ever does. Retiring `env_keep` itself is ADR 0014's call, not this ADR's.
 
 ## Negatives
 
+- **Secret values are on the `tmux -e` argv, briefly and world-readably.** The composed env reaches
+  the pane as `tmux split-window -e KEY=VAL` flags, so during that call the values sit on the tmux
+  client's argv, which is world-readable via `/proc/<pid>/cmdline` to any user on the VM until the
+  call returns. This is the pre-existing console env transport, not introduced by this ADR, and it
+  is why the Positive above is scoped to the _sudo_ argv: `--preserve-env` keeps values out of
+  sudo's command line (sudo takes them from its environment, where `/proc/<pid>/environ` is readable
+  only by the owner and root), but it does not and cannot remove the transient tmux-argv exposure.
+  Closing that would mean changing the env transport itself (an env file, or tmux `set-environment`
+  from a here-doc), which is out of scope here and tracked with the SetEnv transport in ADR 0014.
 - **Dynamic-linker names still do not survive.** `LD_PRELOAD`, `LD_LIBRARY_PATH`, and friends are
   stripped by the dynamic linker before sudo begins execution (sudo is setuid), so `--preserve-env`
   never sees them: `parse_env_list` looks each name up with `getenv` and silently skips the misses.
@@ -130,8 +144,9 @@ ever does. Retiring `env_keep` itself is ADR 0014's call, not this ADR's.
 - **Write the composed env to an agent-owned `0600` file and source it post-sudo.** Robust and fully
   name-agnostic, but leaves secret material at rest with a file lifecycle (create, chown, clean up
   on pane death) to get right. Rejected in favor of keeping secrets off disk.
-- **Pass `VAR=value` pairs to sudo directly** (also requires `setenv`). Rejected: puts secret values
-  in the process table.
+- **Pass `VAR=value` pairs to sudo directly** (also requires `setenv`). Rejected: respells the
+  values onto the sudo argv, a second world-readable exposure on top of the `tmux -e` one, for no
+  gain over letting sudo read them from the environment.
 - **Enable `setenv` globally (`Defaults setenv`).** Rejected: broader than needed. Only the admin
   user spawns these panes, so the directive is scoped to it.
 - **Extend the pane to full `session` scope.** Out of scope here; a companion shell is not part of
