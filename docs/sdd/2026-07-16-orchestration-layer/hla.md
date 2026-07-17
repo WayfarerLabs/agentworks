@@ -42,7 +42,7 @@ layering rule and keeps a capability-imports-domain violation as visible as it i
 ```text
 cli/agentworks/orchestration/
   __init__.py
-  node.py        # Node protocol, key convention, creatable-node teardown surface
+  node.py        # Readiness + Node protocols, key convention, creatable-node teardown surface
   walk.py        # memoized multi-root walk over declared edges
   secrets.py     # secret union, central prediction, the scoped delivery reader
   readiness.py   # preflight sweep + the runup policy helpers (skip-and-degrade)
@@ -106,10 +106,17 @@ graph-participation difference that lives correctly in the TYPE (the presence of
 in a renamed verb. So a reader who sees `GitHubCredentialProvider.preflight` sees a `Readiness`, not
 a `Node`, and the question "why is this not walked?" answers itself: its holder composes it.
 
-A node's `preflight`/`runup` COMPOSES its held instances' (a thin wrapper like `git-credential/gh`
-gets a framework default that just fans in to its one instance; a rich resource overrides to add its
-own checks). Either readiness stage may be a no-op. Ops stay domain-specific and un-unified, on the
-instances and the node kinds, never on `Readiness`.
+A node's `preflight`/`runup` COMPOSES its held instances': a thin wrapper like `git-credential/gh`
+fans into its one instance (a one-line `self._instance.preflight(ctx)`); a rich node iterates its
+held instances (an agent template over its feature map) and adds its own checks. This is per-node-
+kind code, not a magic framework default: neither `Readiness` nor `Node` exposes a held-instances
+accessor, so "the thin wrapper composes automatically" would need a held-instances convention the
+protocols do not currently declare. Whether to introduce such a hook (so the second and third thin
+wrappers do not each re-implement the fan-in slightly differently) or keep composition as trivial
+per-kind boilerplate is an explicit LLD decision (reviewer carry, 2026-07-17; the same question
+governs aggregating `secret_refs` across a map of held instances). Either readiness stage may be a
+no-op. Ops stay domain-specific and un-unified, on the instances and the node kinds, never on
+`Readiness`.
 
 **Key convention** (spike finding 3; fixes the spike's own `vm/s1` session collision): `Node`s key
 as `<node-kind>/<name>`, plain, matching the registry's `(kind, name)` exactly. Because only
@@ -426,16 +433,16 @@ unwind reads backwards. `teardown()` is the node's own inverse. Four mechanics, 
 - **Realizing a resource is ORCHESTRATOR choreography composed of node ops; `log.mark_realized` is
   only the bookkeeping at its end.** No node drives its dependencies' creation (that would be the
   resource-driven fan-out R4 rejects): creating the agent is agent-node ops (user, home, store) plus
-  the git-credential nodes' materials ops, sequenced by whichever orchestrator is running; the
-  session node's own realizing slice is just tmux plus its row. The reusable unit is therefore the
-  PHASE-FREE realization choreography per creatable kind, factored as domain code and called by any
-  orchestrator that creates that kind: `agent create` wraps it in its own phases,
-  `session create --new-agent` calls the same body inside its phases. This is what dissolves today's
-  nesting hack, where the nested `create_agent` is a full command root that must be handed
-  `git_tokens` and phase suppression to stop it re-running resolve and banners: a body never
-  resolves and never frames phases, by construction. The flag-flip is NAMED `mark_realized`
-  (settled, maintainer ruling 2026-07-17; the spike's `realize()` spelling dies with the spike)
-  precisely so it cannot be read as doing the work.
+  the materials-write ops of the provider instances held by its git-credential nodes, sequenced by
+  whichever orchestrator is running; the session node's own realizing slice is just tmux plus its
+  row. The reusable unit is therefore the PHASE-FREE realization choreography per creatable kind,
+  factored as domain code and called by any orchestrator that creates that kind: `agent create`
+  wraps it in its own phases, `session create --new-agent` calls the same body inside its phases.
+  This is what dissolves today's nesting hack, where the nested `create_agent` is a full command
+  root that must be handed `git_tokens` and phase suppression to stop it re-running resolve and
+  banners: a body never resolves and never frames phases, by construction. The flag-flip is NAMED
+  `mark_realized` (settled, maintainer ruling 2026-07-17; the spike's `realize()` spelling dies with
+  the spike) precisely so it cannot be read as doing the work.
 
 Two walkthroughs make it concrete.
 
@@ -595,10 +602,14 @@ Interim seams (an orchestrated command calling not-yet-migrated machinery) are d
 
 ## Open questions (for plan.md / LLDs)
 
-- Final key spellings for the template and harness rows of the key table (the live-resource keys are
-  settled: plain `kind/name` over the globally unique names). Settle these before the harness lands
-  (step 3), so FRD R12's "pin the node-key namespace across the full node-kind set" is fully
-  discharged rather than partly.
+- Final key spellings for the template rows of the key table (the live-resource and
+  consuming-resource keys are settled: plain `kind/name` over globally unique names; the harness has
+  no key, it is held by the session node).
+- Held-instance COMPOSITION mechanism: whether a node fans into its held instances via one-line
+  per-kind boilerplate or a shared held-instances hook/convention on the node interface (neither
+  `Readiness` nor `Node` exposes a held-instances accessor today). The same decision governs
+  `secret_refs` aggregation over a map of held instances. Pin at LLD before the second and third
+  consuming-resource kinds land, so they do not each re-implement the fan-in differently.
 - The scoped secret reader's shape and its interaction with `compose_env`'s whole-mapping consumer.
 - `Capability` signature sequencing: when precisely the `resolver` parameter is removed, and the
   order of the proxmox op-client bridge removal relative to it.

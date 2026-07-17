@@ -34,9 +34,11 @@ and behavior-neutral.
       creatable-node `teardown` surface (declared here, first implemented in Phase 2).
 - [ ] Capability instances stay `Readiness`-ONLY on `capabilities/base.py` (R1): no `key`, no
       `deps`, so they are structurally not nodes. The `git-credential` and `vm-site`
-      consuming-resource nodes (their `deps()`/`secret_refs()` and a default `preflight`/`runup`
-      that composes the held instance) land with the tracer in Phase 1; a rich node overrides to add
-      its own checks.
+      consuming-resource nodes (their `deps()`/`secret_refs()` and a `preflight`/`runup` that
+      composes the held instance) land with the tracer in Phase 1. LLD decides whether that
+      composition is a one-line per-kind fan-in or a shared held-instances hook (neither protocol
+      exposes a held-instances accessor today); the same decision governs `secret_refs` aggregation
+      over a map of held instances.
 - [ ] `orchestration/walk.py`: memoized, cycle-checked, deterministic multi-root walk
       (`walk(*roots)` from day one, per spike finding 2).
 - [ ] `orchestration/secrets.py`: `secret_union(nodes)`; central resolvability prediction from
@@ -97,6 +99,11 @@ unwind.
       `status` needs the API token before the boundary), which must demonstrably not double-prompt.
 - [ ] The imperative `add_git_credential` is retired (or reduced to a thin call into the
       orchestrator); the interim seam to any not-yet-migrated machinery is documented here.
+- [ ] `capabilities/README.md` (lockstep, R9): the first consuming-resource node (`git-credential`,
+      `vm-site`) with a composing `preflight` makes the README's thin-case guidance "do not grow a
+      preflight on a consuming resource; construct the instance and call the instance's" false, so
+      REVERSE it here and introduce the `Readiness`/`Node` split, rather than letting the README
+      self-contradict.
 
 Definition of done: `agw vm add-git-credential` runs through the orchestrator; the full suite is
 green; the five assertions pass; no regression in output, prompt timing, or the fatal-rejection

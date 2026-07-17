@@ -88,9 +88,14 @@ behavior. This SDD re-homes the composition around them; it does not redesign th
 
 ### Terminology
 
-- **Node**: a runtime, lifecycle-bearing object the orchestrator constructs and walks. Nodes are not
-  operator-facing and are not registry rows. Capability instances, live resources, and
-  readiness-bearing resolved templates are all nodes.
+- **Node**: a runtime object the orchestrator constructs and walks, with graph identity (a `key` and
+  declared `deps`) plus the `Readiness` contract (R1). Nodes are not operator-facing and are not
+  registry rows. Consuming resources, live resources, and readiness-bearing resolved templates are
+  nodes; **capability instances are NOT** (they are `Readiness`-only, held and composed, see R1).
+- **Held instance**: a capability instance owned by a node (the platform a `vm-site` holds, the
+  provider a `git-credential` holds, the harness and features a `session`/`agent-template` holds).
+  It satisfies `Readiness`, not `Node`; it has no graph key; its holder composes its readiness and
+  folds its declared secrets into the holder's `secret_refs`.
 - **Registry resource**: unchanged. The operator-facing, named, `agw resource list`-visible recipe:
   templates, decls, capability rows. Registry resources are data; the orchestrator constructs nodes
   from them.
@@ -167,8 +172,9 @@ behavior. This SDD re-homes the composition around them; it does not redesign th
 ### R3: Live resources are first-class nodes, including pending ones
 
 - VM, workspace, agent, session, and console instances are nodes, distinct from their templates,
-  constructed from their DB rows. Their runtime machinery enters as graph edges, consistent with R1
-  (a live VM node holds its row; its platform instance is a dependency node, not a contained field).
+  constructed from their DB rows. Their capability machinery enters correctly per R1: a live VM node
+  holds its row and depends (a graph edge) on its `vm-site` node, and the `vm-site` node HOLDS the
+  platform instance as a contained field (the platform instance is not itself a node).
 - Identity is TWO layers (maintainer discussion, 2026-07-17). **Layer 1, intrinsic self-identity**:
   a node's own `kind/name` and, for a live node, the ancestor names its DB row carries (a live agent
   knows its VM and its own name). Path-independent and self-determined, so a node reached by several
@@ -342,13 +348,18 @@ behavior. This SDD re-homes the composition around them; it does not redesign th
 
 ### R9: The capability model is realigned, not replaced
 
-- Capability instances implement the node protocol. Their lifecycle semantics (the preflight/runup
-  boundary, read-only readiness, ops as the mutation phase, idempotency flags) are unchanged; their
-  construction loses the bound resolver (R5) and their ops converge on reading the context,
-  completing the direction PR #182 documented.
-- `capabilities/README.md` is rewritten to teach the realigned model (the node protocol, the
-  orchestrator's ownership of traversal and secrets, the completed declare/receive contract), with
-  each doc change riding the commit that makes it true.
+- Capability instances implement the `Readiness` contract, NOT `Node` (R1): they are held and
+  composed by a consuming-resource node, never walked. Their lifecycle semantics (the
+  preflight/runup boundary, read-only readiness, ops as the mutation phase, idempotency flags) are
+  unchanged; their construction loses the bound resolver (R5) and their ops converge on reading the
+  context, completing the direction PR #182 documented.
+- `capabilities/README.md` is rewritten to teach the realigned model: the `Readiness`/`Node` split
+  (instances are `Readiness`, consuming/live resources are `Node`), the orchestrator's ownership of
+  traversal and secrets, and the completed declare/receive contract, with each doc change riding the
+  commit that makes it true. The rewrite must REVERSE the README's current thin-case guidance "do
+  not grow a preflight on a consuming resource; construct the instance and call the instance's": the
+  new model gives EVERY consuming-resource node a composing preflight (thin ones trivially), so
+  leaving that line would self-contradict (reviewer carry, 2026-07-17).
 - Capability AUTHORS get a strictly simpler contract out of this: declare config and references
   purely, implement your own readiness and ops against the context, and never touch a resolver,
   another node's lifecycle, or phase order. That contract is the stable API future capabilities (and
@@ -371,11 +382,11 @@ behavior. This SDD re-homes the composition around them; it does not redesign th
 ### R11: A spike gates the HLA
 
 - Before the HLA hardens, a throwaway code spike validates the load-bearing bets on real types
-  (maintainer ruling on scope, 2026-07-16). The spike implements: the `Node` protocol; nodes for the
-  dissimilar stress cases (a live VM with its platform instance as a dependency edge, a resolved
-  vm-template absorbing `preflight_vm_template`, a pending live agent, a stub harness that defers on
-  the pending agent and consumes its injected session identity); and a minimal memoized walker over
-  declared dependencies.
+  (maintainer ruling on scope, 2026-07-16). The spike implements (as it then modeled things, before
+  the `Readiness`/`Node` split): the `Node` protocol; nodes for the dissimilar stress cases (a live
+  VM with its platform instance as a dependency edge, a resolved vm-template absorbing
+  `preflight_vm_template`, a pending live agent, a stub harness that defers on the pending agent and
+  consumes its injected session identity); and a minimal memoized walker over declared dependencies.
 - The spike's scenarios are `vm create` and `session create --new-agent`, chosen because together
   they exercise every node species: templates with real readiness, consuming resources holding
   capability instances (a `vm-site` holding a platform, a `git-credential` holding a provider),
