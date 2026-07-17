@@ -97,6 +97,7 @@ exits with the conventional SIGINT exit code (130).
 | Command                    | Description                              |
 | -------------------------- | ---------------------------------------- |
 | `agw doctor`               | Check environment and config             |
+| `agw version`              | Print the installed CLI version          |
 | `agw completion show`      | Print the completion script to stdout    |
 | `agw completion install`   | Install the completion script in-place   |
 | `agw completion uninstall` | Remove installed completions for a shell |
