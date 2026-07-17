@@ -126,9 +126,10 @@ declared references and rows with zero hand-wired edges, and reproduce the imper
 
 **Preflight.** The sweep is a helper over the walk's output: every participating node, against the
 command-start context, before any prompt or mutation. Dependency-blindness stays structural (pending
-targets are pending; command-start contexts carry only existing targets), and the readiness that
-floats (the harness's required-commands) floats by querying its target node's pending-ness, exactly
-as spiked.
+targets are pending; command-start contexts carry only existing targets). The readiness that floats
+(the harness's required-commands) reads both the operation scope's LEVEL and its target node's
+pending-ness: out of scope for the level (a system-scoped doctor scan) skips, in scope but pending
+defers to runup, in scope and realized probes now, in scope and unexpectedly absent is a loud error.
 
 **Runup timing.** Deferred to just before the node's first use, driven by the orchestrator as it
 advances: realize a node, then runup the nodes whose first ops come next, against a context
@@ -237,35 +238,97 @@ spike flagged closes) in a dedicated cleanup step once no migrated command depen
 `ctx.secrets` per the completed declare/receive contract (PR #182's direction; proxmox's op-client
 bridge dies in the same step).
 
-## The context, and how identity actually travels
+## The context: identity, operation scope, and gated access
 
-`RunContext` is the node-facing surface and the spike needed ZERO changes to it: frozen,
-re-assembled per stage by the orchestrator, fields unchanged (`config`, `admin_target`,
-`agent_target`, `secrets`).
+Identity in this model is TWO layers, and keeping them separate is what makes the whole thing hold
+(maintainer discussion, 2026-07-17; this section supersedes an earlier "scope-free context, identity
+by construction" framing that did not survive the diamond case).
 
-**The context is SCOPE-FREE, and that is precisely what makes it passable as-is.** A context is
-"pass it anywhere" only if it contains nothing node-specific, and one command's graph spans
-different scopes: in a single `session create` the git-credential nodes are a system-global concern,
-the platform node a site concern, the harness a session concern. A context that carried "whose
-invocation is this" would have to be re-scoped per node, which is exactly the road that produced the
-harness SDD's `OperationIdentity` + `level` machinery. Scope-free, ONE frozen command-start context
-serves the entire preflight sweep, literally the same object handed to every node. (Contexts still
-vary where the RUNTIME world varies: a later stage carries secrets, and a materials op carries its
-target's transport. Timing-dependent, never scope-dependent.)
+**Layer 1, intrinsic self-identity.** A node's `kind/name` and, for a live node, the ancestor names
+its DB row carries. Path-independent and always present: `git-credential/gh` knows it is `gh` from
+itself, a live agent knows its VM from its row. This is what stays well-defined when a node is
+reached by several paths (a shared git-credential under two consumers): its own identity is
+self-determined, never handed down by a parent, so the diamond has no "which parent's identity"
+problem. Layer 1 is NOT a subset of the operation scope below (`gh` appears nowhere in a
+session-create's chain); it is the node's own name.
 
-**Identity travels by construction, not by a delivery mechanism.** "Injection" oversold it: it is
-ordinary constructor arguments flowing parent to child while the graph is being BUILT. Whoever
-constructs a node hands it what it belongs to, and the constructor is always something that already
-holds that data: the session's node factory builds its harness bound to
-`(harness_config, session_name, target_agent_node)`, all three of which the factory has because it
-is building that session. The same is already true today at every level: `GitCredentialProvider`
-gets its `owner_name` at construct. No orchestrator reach-down into deep nodes exists, because
-construction is compositional (each factory builds its immediate children); the orchestrator only
-roots it. At lifecycle time nodes then carry their identity and the context carries the world.
+**Layer 2, the operation scope.** WHY the command is running: its static identity chain, fixed at
+command entry (names are chosen up front) and IDENTICAL for every node in the graph. It is the
+answer to "why is this node being bothered," so handing all of it to every node is exactly right;
+`node scope <= operation scope`, and a node simply reads the part it cares about and ignores the
+rest (a git-credential reads the system slug and nothing else; the harness reads the session name to
+address `claude --name <session>`). Because it is one static object, uniform across the graph, it
+lives on the context and is passed AS-IS, no per-node re-scoping (that per-invocation rescoping, not
+the concept of scope, was the harness SDD's `level` misstep). It is DESCRIPTIVE, not power-granting,
+so it is handed over ungated: knowing "this is a session-create for `s1`" confers no capability.
 
-One carry for the harness re-scope, recorded here so it is not lost: the real harness target is
-agent-OR-admin, and the admin target is always realized, so `None` stays reserved for genuine bugs
-and admin-mode sessions never trip the anti-silent-skip error.
+```python
+# capabilities/base.py (this SDD)
+
+class ScopeLevel(Enum):
+    SYSTEM = "system"        # the whole installation, no VM
+    VM = "vm"                # a VM
+    WORKSPACE = "workspace"  # a workspace on a VM
+    AGENT = "agent"          # an agent user in a workspace on a VM
+    SESSION = "session"      # a harness as agent-or-admin, in a workspace, on a VM
+
+
+@dataclass(frozen=True)
+class OperationScope:
+    """Why an operation is running: its static identity chain, keyed by
+    LEVEL. __post_init__ ENFORCES that exactly the level's fields are set
+    and the rest are absent, so a scope inconsistent with its level cannot
+    be constructed. This is a promised invariant, not a convention (the
+    same discipline the harness SDD's OperationIdentity used). Built once
+    per command; identical on every context; names only (strings)."""
+
+    level: ScopeLevel
+    system_slug: str | None = None  # the anchor; may be unset on a first-ever create
+    vm: str | None = None
+    workspace: str | None = None
+    agent: str | None = None
+    session: str | None = None
+    admin: bool = False
+```
+
+The level-to-fields invariant the object enforces (`system_slug` is the anchor, allowed at every
+level):
+
+| level     | required beyond slug                                  | forbidden                     | used by                              |
+| --------- | ----------------------------------------------------- | ----------------------------- | ------------------------------------ |
+| SYSTEM    | (none)                                                | vm, workspace, agent, session | doctor; git-credential readiness     |
+| VM        | vm                                                    | workspace, agent, session     | `vm create` / start / stop / gitcred |
+| WORKSPACE | vm, workspace                                         | agent, session                | `workspace create`                   |
+| AGENT     | vm, workspace, agent                                  | session                       | `agent create` / reinit              |
+| SESSION   | vm, workspace, session; exactly one of (agent, admin) | (none)                        | `session create` / restart           |
+
+The level is the operation's, one per command, NOT per node (my repeated mistake; corrected). Its
+DEPTH varies by command, so a batch `keep_actives` over N VMs is only SYSTEM level with each VM's
+identity coming from layer 1, and it is what a node reads to distinguish absences that a bare `None`
+target cannot: the harness's required-commands check reads the level to tell "no agent because this
+is a system-scoped doctor scan" (skip, legitimately) from "no agent yet, it is pending" (defer) from
+"agent in scope but absent for another reason" (loud bug). Three outcomes, one explicit signal, the
+same explicit-beats-inferred argument as `to_create`.
+
+**Gated access to the power-granting world.** The runtime handles that DO grant power (the execution
+targets, the resolved secrets) are reached through ACCESSOR METHODS on the context, not bare fields:
+`ctx.agent_target()`, `ctx.admin_target()`, `ctx.secret(name)`. In v1 they are pass-through; the
+shape exists so a future permission model can gate the request by the REQUESTING node (a plugin
+harness granted agent-but-not-admin gets a raise from `admin_target()`, an ungranted secret is
+refused), with the plugin/trust SDD owning enforcement. Gating needs to know who is asking, so the
+orchestrator binds each context to its requesting node; the operation scope stays identical across
+those per-node contexts, only the accessor's grant check varies. This is the same declare/receive
+move PR #182 made for secrets, extended to targets: shape the API for the future without building
+the future. The scope is a plain field precisely because it is ungated; the world is behind methods
+precisely because it is not. (Scoped secret DELIVERY from R5, a node reads only the secrets it
+declared, is the v1 down payment on this: `ctx.secret` already answers per declaration.)
+
+So `RunContext` becomes: `config` and the `OperationScope` as plain fields (world-independent,
+ungated, uniform), plus accessor methods for targets and secrets (timing-populated, per-node-bound,
+gatable). It is frozen and re-assembled per stage as before. One carry for the harness re-scope,
+recorded so it is not lost: the real harness target is agent-OR-admin, admin is always realized, so
+a `None` target still means a bug, never a silent skip, and admin-mode sessions are covered by the
+SESSION level's `admin` flag rather than by a missing agent.
 
 ## Unwind
 
@@ -327,8 +390,8 @@ Two walkthroughs make it concrete.
 2. OPEN THE ACTIVATION GATE (a span held through the command): converge the VM's power state
    (maintenance; refuse if operator-stopped; just-in-time gate secrets if a start or rejoin is
    needed; hold active for platforms that require it) so the probes that follow query a live target.
-3. PREFLIGHT-ALL over the walk rooted at the live session node: one scope-free command-start
-   context; the harness's target is realized, so required-commands probes NOW, pre-resolve and
+3. PREFLIGHT-ALL over the walk rooted at the live session node: one command-start context at SESSION
+   scope; the harness's target is realized, so required-commands probes NOW, pre-resolve and
    pre-kill; any failure aborts with the old session still running.
 4. Command-shaped middle, exactly today's proven order: the BROKEN/confirm gates, then the resolve
    (restart's env-chain pass sits after its gates), then env composition.
@@ -348,9 +411,9 @@ Two walkthroughs make it concrete.
 2. OPEN THE ACTIVATION GATE (span, held through the command): converge the existing VM's power state
    (maintenance; refuse if operator-stopped; just-in-time gate secrets if needed; hold active for
    platforms that require it), so preflight probes a live target.
-3. PREFLIGHT-ALL, same one scope-free context: predictions run for every declared secret; the
-   harness sees its target pending and defers. Dependency-blindness is structural, not special-
-   cased.
+3. PREFLIGHT-ALL, same one SESSION-scope context: predictions run for every declared secret; the
+   harness's target is in scope (SESSION level) but pending, so it defers. Dependency-blindness is
+   structural, not special-cased.
 4. SECRETS: union from the walk, central prediction, the single resolve (seeded with any
    gate-resolved values). The walk-away point.
 5. ROLL-FORWARD, orchestrator-authored in dependency order, opening with `log = RealizationLog()`:
@@ -370,12 +433,17 @@ their identity, their ops, and their teardown; the walk and the log are the only
 
 ## Doctor
 
-Doctor is not a command with a plan; it is a scan over ALL declared resources. It shares the central
-prediction computation (step 2 above) over the full declared reference graph and keeps calling
-per-resource `preflight` exactly as today for its health rows. No node graph is built and no
-behavior changes (R2/R5 parity). The one implementation note: `secrets.py`'s prediction helper takes
-declarations, not a walk, so both a command's union and doctor's all-resources sweep are callers of
-the same function.
+Doctor is a SYSTEM-scoped operation: a scan over ALL declared resources, not a command with a plan.
+The operation scope makes it fit the model without special-casing. It builds no node graph and
+shares the central prediction computation (step 2 above) over the full declared reference graph for
+its resolvability rows; where it calls a node's `preflight` for a health row, it hands a
+SYSTEM-level context, and each node shapes itself to that level. A harness's required-commands check
+sees SYSTEM scope, notes it has no agent or workspace in scope, and SKIPS, exactly the "out of
+scope, not a bug" outcome the level exists to express, and cleaner than a doctor-specific "which
+checks apply" branch. So doctor's per-resource rows and a command's readiness call the SAME
+preflight code; the level is what tells that code how much of the world to expect. No behavior
+changes versus today (R2/R5 parity); `secrets.py`'s prediction helper takes declarations, not a
+walk, so both a command's union and doctor's all-resources sweep are callers of the same function.
 
 ## Migration map
 
@@ -411,9 +479,18 @@ machinery) are documented in `plan.md` per FRD R8.
   and the scoped-delivery fallback.
 - **Unwind and runup-failure policy are the orchestrator's; mechanism is the node's** (FRD R4). The
   HLA adds: the parity policy table and the skip-and-degrade helper as its first shared form.
-- **Identity intrinsic, traveling by construction** (FRD R3). The HLA adds: the scope-free-context
-  argument (pass-as-is holds BECAUSE identity is off the context) and the key convention that makes
-  node identity operational (memoization, cycles, unwind).
+- **Two-layer identity: intrinsic self plus operation scope** (FRD R3, revised 2026-07-17). Layer 1
+  (a node's own `kind/name` + row-carried ancestors) is intrinsic and path-independent, which is
+  what makes shared nodes well-defined under the diamond; layer 2 (the static, level-enforced
+  `OperationScope`) rides on the context, uniform across the graph, read-what-you-need. This
+  supersedes the earlier "scope-free context / identity by construction" framing. The key convention
+  makes layer-1 identity operational (memoization, cycles, unwind); the level makes layer-2 scope
+  actionable (the required-commands skip/defer/probe/error fork, doctor as SYSTEM scope).
+- **Power-granting world is behind gated accessors; descriptive scope is not** (maintainer ruling,
+  2026-07-17). Targets and secrets are reached through `ctx.agent_target()` / `ctx.admin_target()` /
+  `ctx.secret()` (pass-through in v1, permission-gatable later, per-node-bound); the operation scope
+  is a plain ungated field because reading it grants no capability. The permission model itself is
+  the plugin SDD's; this SDD only shapes the surface so it can arrive without a break.
 - **Preflight gets a LIVE target, at the cost of a narrow just-in-time prompt** (maintainer ruling,
   2026-07-17). The considered alternative, denying preflight active targets so it never needs a gate
   secret, was rejected: it re-imposes the exact limitation the model exists to remove (a readiness
@@ -439,3 +516,11 @@ machinery) are documented in `plan.md` per FRD R8.
 - Console nodes: no migrated command needs one until late; introduce lazily (R8).
 - Whether `readiness.py`'s policy helpers stay two functions (sweep, skip-and-degrade) or the tracer
   reveals a third shape.
+- `OperationScope` exact per-level field rules and `__post_init__` enforcement (the table pins the
+  contract; the LLD pins the asserts), and where each command builds its scope (one site per
+  orchestrator, at entry).
+- The `RunContext` field-to-accessor migration: turning `admin_target` / `agent_target` / `secrets`
+  into `ctx.agent_target()` / `ctx.admin_target()` / `ctx.secret()` methods, whether v1 flips all
+  three at once, and how the per-node requester binding is threaded (the spike used bare fields;
+  this is a post-spike decision). Operation-scope-on-context and gated accessors are both UN-spiked,
+  so the tracer bullet is their first real exercise.

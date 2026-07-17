@@ -40,9 +40,11 @@ class Node(Protocol):
   reference-graph-to-node-graph translation rule the HLA must pin (first-consumer review note 6):
   the rule is adapter work, and it is small but real.
 - **`RunContext` needed ZERO changes.** Preflight ran on `RunContext(config=...)`, runup on
-  `RunContext(config=..., secrets=resolver)` after a real prompt-free resolve. Notably, identity
-  never needed to be ON the context at all (see bet 2), which is the strongest evidence the harness
-  SDD's threaded-identity design is safely superseded.
+  `RunContext(config=..., secrets=resolver)` after a real prompt-free resolve. (Post-spike revision,
+  2026-07-17: the design later ADDED a static `OperationScope` field and turned targets/secrets into
+  gated accessors, see the HLA context section. The spike's narrower claim still holds, the harness
+  SDD's PER-INVOCATION threaded `OperationIdentity` is superseded, but it is superseded by one
+  operation-scope object on the context, not by keeping the context identity-free.)
 
 Not exercised, honestly: platform/provider runups (they probe real endpoints; runup timing was
 proven on the harness stub instead) and ops (out of protocol by design).

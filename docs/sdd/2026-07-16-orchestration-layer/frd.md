@@ -155,26 +155,24 @@ behavior. This SDD re-homes the composition around them; it does not redesign th
 - VM, workspace, agent, session, and console instances are nodes, distinct from their templates,
   constructed from their DB rows. Their runtime machinery enters as graph edges, consistent with R1
   (a live VM node holds its row; its platform instance is a dependency node, not a contained field).
-- A live node knows its own identity: its own name and its ancestors' names (a live agent knows its
-  VM, its workspace context, its agent name). **Identity is intrinsic to the node**, which is what
-  removes the need to thread a separate identity object through every context construction site
-  (supersedes the harness SDD's `OperationIdentity` threading; see R10).
-- Identity travels by CONSTRUCTION, all the way down (maintainer discussion, 2026-07-17): whoever
-  constructs a node hands it what it belongs to, as ordinary constructor arguments, and the
-  constructor is always something that already holds that data (the session's node factory builds
-  its harness with the session name and target agent node it planned with; `GitCredentialProvider`
-  already gets its `owner_name` the same way today). No injection mechanism and no orchestrator
-  reach-down into deep nodes exists; construction is compositional, and it is exactly what keeps the
-  context SCOPE-FREE (R6). Nodes never walk the graph to discover identity (R4); the spike proves
-  the delivery on the stub harness (R11).
+- Identity is TWO layers (maintainer discussion, 2026-07-17). **Layer 1, intrinsic self-identity**:
+  a node's own `kind/name` and, for a live node, the ancestor names its DB row carries (a live agent
+  knows its VM and its own name). Path-independent and self-determined, so a node reached by several
+  paths (a shared git credential) has one well-defined identity, never handed down by a parent; this
+  is what removes the harness SDD's `OperationIdentity` THREADING (see R10). **Layer 2, the
+  operation scope**: the command's static identity chain, delivered on the context (R6), not carried
+  by the node. Nodes never walk the graph to discover identity (R4).
 - A command that creates an instance places a **pending node** for it in the plan up front, with its
   names chosen and its dependencies attached. Existence is a queryable property of the node (pending
   vs realized), updated by the orchestrator when the realizing mutation completes.
-- Pending-ness answers the deferral question explicitly and safely: a readiness check that needs a
-  target probes it when the target's node is realized and defers when it is pending. A target that
-  is missing for any OTHER reason (a selection bug, a permission gap) is a loud error, never a
-  silent skip. This preserves the harness SDD's anti-silent-skip property while dissolving its
-  `to_create` context field: the plan itself carries the information.
+- Pending-ness plus the operation scope's LEVEL (R6) answer the deferral question explicitly and
+  safely, a four-way fork a bare `None` target cannot express: a readiness check that needs a target
+  SKIPS when the target is out of scope for the level (a system-scoped doctor scan has no
+  agent/workspace), DEFERS when the target is in scope but pending, PROBES when it is in scope and
+  realized, and raises a LOUD error when it is in scope, not pending, yet absent (a selection bug, a
+  permission gap). This preserves the harness SDD's anti-silent-skip property while dissolving its
+  `to_create` context field (pending-ness lives in the plan) and its per-invocation `level` (one
+  operation level lives on the context).
 
 ### R4: The orchestrator owns traversal; nodes declare, never walk
 
@@ -256,15 +254,24 @@ behavior. This SDD re-homes the composition around them; it does not redesign th
   secrets); at runup and ops, op-start reality (realized targets, resolved secrets). Contexts are
   FROZEN, like today's `RunContext`: advancing reality means assembling a new context for the next
   stage, never mutating one a node already holds.
-- Because identity is intrinsic to nodes (R3) and pending-ness lives in the plan (R3), the context
-  does not carry a threaded identity object or a `to_create` set. What it carries is the runtime
-  world: config, execution targets, secrets, exactly the fields that are timing-dependent. The
-  context is therefore SCOPE-FREE, which is what makes it passable AS-IS: one frozen command-start
-  context serves the entire preflight sweep, because nothing in it is specific to any node
-  (maintainer discussion, 2026-07-17; contexts still vary by TIMING, never by scope).
-- The context's contract with capability authors (the declare/receive rules, the self-vs-context
-  split) is preserved; existing capability implementations keep working against it with at most
-  mechanical adjustment (R7, R9).
+- The context carries the OPERATION SCOPE, one static `OperationScope` (a `level` plus the level's
+  name fields, `__post_init__`-enforced to match) built once at command entry and identical on every
+  node's context (maintainer ruling, 2026-07-17). It is uniform, so it passes AS-IS across the
+  graph, `node scope <= operation scope`, each node reads the part it needs; it is DESCRIPTIVE (why
+  the operation is running), so it is ungated. This is NOT the harness SDD's per-invocation
+  `OperationIdentity`: one object per operation, one construction site, no per-node level, but the
+  invariant enforcement is kept because the model must promise scope/level consistency. It does not
+  carry a `to_create` set (pending-ness lives in the plan, R3) or a per-node identity (layer 1 is
+  intrinsic, R3).
+- The POWER-GRANTING world (execution targets, resolved secrets) is reached through accessor METHODS
+  on the context (`ctx.agent_target()` / `ctx.admin_target()` / `ctx.secret(name)`), not bare
+  fields, so a future permission model can gate the request by the requesting node; v1 is
+  pass-through, enforcement is the plugin/trust SDD's. The context is bound to its requesting node
+  for that gating; the operation scope stays identical across those per-node contexts.
+- Contexts are FROZEN and re-assembled per stage (advancing reality means a new context, never
+  mutation of one a node holds). The context's contract with capability authors (the declare/receive
+  rules, the self-vs-context split) is preserved; existing capability implementations keep working
+  against it with at most mechanical adjustment (R7, R9).
 
 ### R7: Behavior parity, with the existing suite as the oracle
 

@@ -1,5 +1,15 @@
 {
   "version": "0.2",
   "import": ["../../../.cspell.json"],
-  "words": ["runups", "ephemerals", "interleavings", "rollbackable"]
+  "words": [
+    "runups",
+    "ephemerals",
+    "interleavings",
+    "rollbackable",
+    "ungated",
+    "rescoping",
+    "gitcred",
+    "ungranted",
+    "gatable"
+  ]
 }
