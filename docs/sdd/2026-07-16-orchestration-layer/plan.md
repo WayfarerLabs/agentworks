@@ -22,7 +22,12 @@ boxes rather than editing done ones.
 ## Phase 0: Foundations (the surface the tracer forces)
 
 Goal: the minimal shared node/context/walk/secret/gate surface `vm add-git-credential` needs,
-nothing more. This is not "build the framework"; it is "build exactly the tracer's dependencies."
+nothing more. This is "build exactly the tracer's dependencies," not "build the framework", with one
+honest exception: the `RunContext` field-to-accessor conversion below is a repo-wide MECHANICAL
+migration (every capability reader, e.g. proxmox `runup`, plus all fourteen `RunContext`
+construction sites), not tracer-local. It lands here because flipping it once up front is cleaner
+than per-command (the HLA open question "flip all three at once?" is answered yes); it is green-able
+and behavior-neutral.
 
 - [ ] `orchestration/node.py`: the `Node` protocol (`key`, `deps`, `secret_refs`, `preflight`,
       `runup`); the `<kind>/<name>` key convention; the creatable-node `teardown` surface (declared
@@ -42,14 +47,15 @@ nothing more. This is not "build the framework"; it is "build exactly the tracer
       pass-through, no requester binding, no gating (deferred to the plugin SDD).
 - [ ] `orchestration/readiness.py`: the preflight SWEEP over a walk's output (the skip-and-degrade
       policy helper is Phase 2).
-- [ ] `orchestration/activation.py`: the gate (`ensure_active` + the held `vm_active` span relocated
-      here), the `operator_stopped` refusal, the just-in-time gate-secret resolution, and the
-      gate-to-boundary seed of resolved values (pinning the mechanism that pre-seeds a `Resolver`
-      which refuses post-pass registration, HLA open question).
+- [ ] `orchestration/activation.py`: the gate STRUCTURE (`ensure_active` + the held `vm_active` span
+      relocated here), the `operator_stopped` refusal, and the just-in-time gate-secret resolution.
+      (The gate-to-boundary SEED of resolved values moves to Phase 1, so it is designed against the
+      tracer's real proxmox `status`-needs-token caller rather than speculatively here, reviewer
+      question 2026-07-17.)
 
 Definition of done: unit tests for the walk (dedup/cycle/order), the secret union and prediction,
 `OperationScope` enforcement (a mis-leveled scope cannot construct), the scoped reader, and the gate
-(auto-start vs operator-stopped refusal, span open/close, seed-into-boundary). No command is
+(auto-start vs operator-stopped refusal, span open/close, just-in-time gate resolve). No command is
 migrated yet; the full suite is green. LLD spun out only if the node/context/walk contract reveals a
 decision these boxes gloss (the translation rule below is the likely trigger).
 
@@ -66,15 +72,25 @@ unwind.
       (registry references by kind, secrets as inputs not nodes, row fields to live edges), and the
       tracer's graph DERIVED from real declared references and the DB row with ZERO hand-wired edges
       (the tracer's defining obligation).
-- [ ] The `add-git-credential` orchestrator: build graph -> open the activation gate -> preflight
-      sweep at VM level -> resolve (seeded by any gate secret) -> git-credential `runup` under the
-      FATAL policy -> the materials-write op reading its scoped secret.
+- [ ] The gate-to-boundary SEED (moved from Phase 0): designed here against the tracer's real
+      caller, proxmox's gate `status` needs the API token before the boundary, so the token resolved
+      at the gate must pre-seed the boundary `Resolver` (which refuses post-pass registration)
+      rather than resolve again. This is the likely LLD spin-out.
+- [ ] The `add-git-credential` orchestrator: build graph -> open the activation gate (resolving its
+      just-in-time credential, which seeds the boundary) -> preflight sweep at VM level -> resolve
+      -> git-credential `runup` under the FATAL policy -> the materials-write op reading its scoped
+      secret.
 - [ ] Proof-point assertions (reviewer carry): (a) the derived graph reproduces the imperative
       preflight set and secret union; (b) the runup rejection is fatal, matching HEAD; (c) a
       SCOPED-DELIVERY test that the materials node receives ONLY its declared secret names (guarding
       the whole-cache fallback from becoming permanent); (d) the operation scope reaches the node's
-      readiness; (e) GATE-PROMPT parity: the pre-boundary credential prompt matches HEAD's count and
-      timing.
+      readiness; (e) GATE-PROMPT parity, stated precisely because the gate's TIMING legitimately
+      shifts (HEAD opens `keep_active` AFTER its single resolve and wraps only the write; the model
+      opens the gate BEFORE preflight-all and holds it through the command, so the gate's credential
+      is resolved earlier): the assertion is "exactly ONE prompt session, entirely before the
+      walk-away point, and no secret resolved or prompted twice", NOT literal timing parity. The
+      tracer genuinely exercises the just-in-time gate resolve plus boundary seed (proxmox's
+      `status` needs the API token before the boundary), which must demonstrably not double-prompt.
 - [ ] The imperative `add_git_credential` is retired (or reduced to a thin call into the
       orchestrator); the interim seam to any not-yet-migrated machinery is documented here.
 
@@ -109,8 +125,16 @@ parity asserted against HEAD behavior.
 Goal: the harness's landing pad (FRD R8/R10). The nested ephemeral fan-out becomes ordinary graph
 behavior; the phase-free realization choreography is factored so it is callable by both this
 orchestrator and Phase 4's. This phase provides the session/workspace/agent live-and-pending nodes
-and the session orchestrator; the HARNESS node itself is delivered by the re-scoped harness SDD
-landing on this pad.
+and the session orchestrator; the HARNESS node itself is delivered by the re-scoped harness SDD.
+
+Cross-SDD independence (reviewer carry, 2026-07-17): Phase 3 must be a green shippable unit whether
+or not PR #168 has landed, so the harness node is NOT a hard prerequisite. If it has not landed,
+this phase migrates `session create` / `restart` to the orchestrator while invoking TODAY's
+imperative harness path (the command string that `_build_session_command` produces) through a
+documented interim seam, and the level-skip proof uses a harness-LIKE required-commands node (doctor
+at SYSTEM level). When PR #168 lands, the real harness node replaces the seam with no orchestrator
+change. This keeps R8's "pausable, always green" across the SDD boundary rather than assuming
+lockstep landing.
 
 - [ ] `sessions/nodes.py` and `workspaces/nodes.py`: live-and-pending session and workspace nodes;
       `agents/nodes.py`: the live-and-pending agent node with intrinsic (row-carried) identity.
@@ -129,9 +153,10 @@ landing on this pad.
       pending nodes; the harness node reads only the LEVEL off the operation scope and addresses via
       its own `session_name`.
 
-Definition of done: session create/restart orchestrated; the nested fan-out reproduces the
-`git_tokens` fold; the realization body is shared (Phase 4 consumes it); the skip branch is proven;
-the full suite green.
+Definition of done: session create/restart orchestrated (against the real harness node if PR #168
+has landed, else the documented interim seam to today's imperative harness path); the nested fan-out
+reproduces the `git_tokens` fold; the realization body is shared (Phase 4 consumes it); the skip
+branch is proven; the full suite green.
 
 ## Phase 4: `agent create` / `agent reinit`
 
@@ -170,7 +195,11 @@ are NOT here; they ride their phases per the lockstep rule.)
       completed declare/receive contract, the two-layer identity + operation scope), each having
       landed with its phase.
 - [ ] Promote and NUMBER the ADR from this feature directory into `docs/adrs/` (it references ADR
-      0016 for the capability collapse and `capabilities/README.md` for the lifecycle contract).
+      0016, `0016-yaml-resource-manifests.md`, for the capability collapse and
+      `capabilities/README.md` for the lifecycle contract; its own number is assigned at promotion,
+      0019+ given 0018 is current). The ADR notes in one line that best-effort reverse-order unwind,
+      rather than Terraform-style taint-and-leave, is a conscious PARITY-driven choice (preserving
+      today's rollback behavior under R7), not a fresh design decision (reviewer note, 2026-07-17).
 - [ ] Write `locked.md` summarizing the final state.
 
 Definition of done: the ADR is numbered and promoted; permanent docs are accurate at HEAD; the

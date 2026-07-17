@@ -291,9 +291,11 @@ behavior. This SDD re-homes the composition around them; it does not redesign th
   every migrated command the parity suite carries a "no prompt after the resolve boundary" assertion
   (first-consumer review note, 2026-07-17). Discipline plus helpers plus tests is the chosen trade;
   the tests are the part that makes it durable. A migrated existing-VM command additionally carries
-  a GATE-PROMPT parity assertion: the activation gate's pre-boundary credential prompt (R4/R5's
-  sanctioned pre-preflight resolution) matches HEAD's prompt count and timing, so the one prompt the
-  model allows before preflight is oracle-pinned, not assumed (reviewer carry, 2026-07-17).
+  a GATE-PROMPT parity assertion (reviewer carry, 2026-07-17). Its TIMING legitimately shifts (the
+  gate moves from post-resolve to pre-preflight), so the assertion is not literal timing parity but
+  the invariant that actually holds: exactly ONE prompt session, entirely before the walk-away
+  point, with no secret resolved or prompted twice (gate-resolved values seed the boundary). That
+  pins R4/R5's sanctioned pre-preflight resolution without over-claiming an unchanged schedule.
 - The ops and their internal choreography (each resource's mutation sequence, its idempotency
   contract, its own teardown) are reused as-is. Unwind SEQUENCING moves to the orchestrator (R4)
   with identical operator-visible semantics; the per-node teardown code it invokes is today's,

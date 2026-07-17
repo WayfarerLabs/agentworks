@@ -500,10 +500,12 @@ first proven against HEAD rather than letting it ride implicitly:
   fallback quietly becoming the permanent shape.
 
 Each migrated command adds the R7 parity assertion ("no prompt after the resolve boundary"), plus a
-GATE-PROMPT parity assertion (the activation gate's pre-boundary credential prompt matches HEAD's
-count and timing, so the sanctioned pre-preflight resolution is oracle-pinned, not assumed), and
-keeps the full suite green. Interim seams (an orchestrated command calling not-yet-migrated
-machinery) are documented in `plan.md` per FRD R8.
+GATE-PROMPT parity assertion. The gate's timing legitimately SHIFTS (it moves from post-resolve to
+pre-preflight, e.g. `add-git-credential` today opens `keep_active` only after its resolve and around
+the write), so the assertion is not literal timing parity but the true invariant: exactly ONE prompt
+session, entirely pre-walk-away, nothing resolved or prompted twice. Both keep the full suite green.
+Interim seams (an orchestrated command calling not-yet-migrated machinery) are documented in
+`plan.md` per FRD R8.
 
 ## Design decisions (recap of rulings, with the HLA's additions)
 
