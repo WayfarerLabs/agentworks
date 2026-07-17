@@ -422,10 +422,17 @@ unwind reads backwards. `teardown()` is the node's own inverse. Four mechanics, 
 - **Pending-to-realized is a mutation OF the node, by design.** The same object flips (one-way,
   `realized` false to true) and absorbs its realization artifacts (the created DB row), so every
   edge holder sees the transition without rewiring: the harness's target reference IS the agent node
-  that just got realized. The node graph is the model's one deliberately mutable runtime record,
-  with a single writer (the orchestrator, via `log.mark_realized` immediately after the bespoke
-  mutation succeeds); a node's key, identity, and edges stay immutable. Contexts, by contrast, stay
-  frozen snapshots (R6): mutable graph, immutable views.
+  that just got realized. This makes ONE-OBJECT-PER-NODE a construction-contract INVARIANT
+  (first-consumer note, 2026-07-17): a held instance that watches a graph node (the harness reads
+  its `target.realized`) must hold the SAME memoized object the orchestrator flips via
+  `mark_realized`, not a second construction of it. If a factory built two agent objects (one for
+  the session's dep, one for the harness's `target`), the harness would watch the wrong one and
+  defer forever. Subtle to get wrong, so the node-construction contract states it: the session's
+  agent DEP and the harness's `target` field are the same object. The node graph is the model's one
+  deliberately mutable runtime record, with a single writer (the orchestrator, via
+  `log.mark_realized` immediately after the bespoke mutation succeeds); a node's key, identity, and
+  edges stay immutable. Contexts, by contrast, stay frozen snapshots (R6): mutable graph, immutable
+  views.
 - **`log` is a command-local `RealizationLog`**, instantiated by the orchestrator at the top of its
   mutation phase (`log = RealizationLog()`, the `unwind.py` helper). It lives on no context, no
   node, and no global; it is the production form of the closure locals today's

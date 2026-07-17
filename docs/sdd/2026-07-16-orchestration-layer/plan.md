@@ -148,7 +148,11 @@ orchestrator change. This keeps R8's "pausable, always green" across the SDD bou
 assuming lockstep landing.
 
 - [ ] `sessions/nodes.py` and `workspaces/nodes.py`: live-and-pending session and workspace nodes;
-      `agents/nodes.py`: the live-and-pending agent node with intrinsic (row-carried) identity.
+      `agents/nodes.py`: the live-and-pending agent node with intrinsic (row-carried) identity. The
+      session factory MUST pass the SAME agent-node object as both the session's dep and the held
+      harness's `target` field (one memoized object), so the harness's `target.realized` observes
+      the node the orchestrator flips via `mark_realized`; two constructions would make the harness
+      defer forever (first-consumer note, 2026-07-17).
 - [ ] The PHASE-FREE realization choreography per creatable kind (the agent-realization body: agent
       ops plus the git-credential nodes' materials ops), factored as domain code with no phases and
       no resolve of its own, replacing the `git_tokens` + `own_root` nesting hack.
