@@ -386,21 +386,25 @@ that provides walk-away.
   for third-party harnesses is plugin installation and enablement (distribution trust, per the
   plugin SDD's framing). The permission model and the context's deliberate minimalism buy
   misuse-resistance and auditability for cooperating code, which is their whole claim.
-- **The readiness check is `preflight` wherever the target exists, `runup` only for the ephemeral
-  hole.** The target-environment check (today: required commands) should fail as early as possible,
-  before the operator is prompted for anything, which means `preflight`, pre-resolve. Preflight is
-  dependency-blind: it may not check state a later step of the same command creates. The model's
-  mechanism for that is the optional context: preflight is handed the session's target only when it
-  already exists. So the harness `preflight` probes `required_commands` exactly when the context
-  carries the target (a session on an EXISTING agent/workspace, and every `session restart`),
-  running pre-resolve and bailing before any prompt. The only case it cannot cover is a
-  `--new-agent` / `--new-workspace` create, whose target user/workspace this command creates later
-  (the direct analog of a git-credential preflight not checking a VM `vm create` has not made yet);
-  that one case falls to `runup`, post-provision, against the real target. This keeps today's
-  fail-before-prompt discipline for the common path and every restart, and confines `runup` to the
-  ephemeral case where nothing earlier could have checked. (Probing the ephemeral target as admin at
-  preflight was rejected earlier: it false-aborts on agent-template user-level tooling. The check
-  runs as the real target user, or not yet.)
+- **`preflight` and `runup` are general readiness hooks; the required-commands check floats between
+  them by target existence.** Both hooks are open to whatever readiness a harness needs (target-
+  independent or secret-free checks in `preflight`; authenticated or post-provision checks in
+  `runup`); the built-ins fill only the required-commands slice today, and the contract is not
+  limited to it. That check should fail as early as possible, before the operator is prompted, which
+  means `preflight`, pre-resolve. Preflight is dependency-blind (it may not check state a later step
+  of the command creates), so it can only probe a target that already exists. The harness learns
+  which entities exist from an EXPLICIT context signal, `to_create` (the set of named entities this
+  command will make that do not exist yet at this stage), NOT from a missing target. So the harness
+  probes `required_commands` when its target user is not in `to_create` (an EXISTING
+  agent/workspace, and every `session restart`), pre-resolve, bailing before any prompt; for a
+  `--new-agent` / `--new-workspace` create (the entity is in `to_create`, made later this command,
+  the analog of a git-credential preflight not checking a VM `vm create` has not made yet) it defers
+  to `runup`, post-provision, once the entity has left `to_create`. Gating on the explicit
+  `to_create` rather than on `agent_target is None` is a safety property: a target missing for any
+  OTHER reason (admin-mode, a permission gap, a bug) then raises a loud error instead of silently
+  SKIPPING the readiness check. (Probing the ephemeral target as admin at preflight was also
+  rejected: it false-aborts on agent-template user-level tooling. The check runs as the real target
+  user, or is deferred, never faked.)
 - **The harness slots into the existing ordering; it does not own it.** The command's order is the
   capability model's own: preflight-all (before any prompt or mutation) -> the single secret resolve
   at the preflight boundary (the one prompt session) -> ephemeral provisioning under rollback
@@ -469,9 +473,9 @@ that provides walk-away.
   code, deliberately: the alternative (ship identity optional now, tighten later) would launch a
   non-final API, which the model should not do.
 - **Getting the rest of this API surface right is a big part of the HLA**: what the core hands the
-  harness (the `RunContext`: execution targets, resolved secrets, identity chain, bound config) and
-  what the harness returns to the tmux layer are pinned there, not here. The requirement is the
-  capability boundary, not its signature.
+  harness (the `RunContext`: execution targets, resolved secrets, identity chain, bound config, and
+  the explicit `to_create` existence signal) and what the harness returns to the tmux layer are
+  pinned there, not here. The requirement is the capability boundary, not its signature.
 - **Best-effort robustness, not race-proof.** Harnesses should aim to be as robust as practical, but
   there is no expectation that they are perfect against race conditions and similar challenges. The
   canonical example is R4's existence check: the tool session changing state between the check and

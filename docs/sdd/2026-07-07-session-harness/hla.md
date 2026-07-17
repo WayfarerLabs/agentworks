@@ -129,31 +129,31 @@ class Harness(Capability):
         location."""
 
     def preflight(self, ctx: RunContext) -> None:
-        """Pre-resolve readiness (the PRIMARY home for the target-
-        environment check). Probes ``required_commands`` on the session's
-        target (``ctx.agent_target`` / ``ctx.admin_target``) WHEN the
-        command-start context carries it, which covers an existing
-        agent/workspace and every restart, so the check runs before the
-        resolve pass and bails before any prompt. When the target is
-        ephemeral and absent here (a ``--new-agent`` / ``--new-workspace``
-        create, whose user/workspace are created later this command),
-        preflight cannot probe it (the model keeps preflight dependency-
-        blind), so the check defers to runup. Also calls
-        ``super().preflight()`` for the base's secret-resolvability
-        prediction. The body is one call to ``base.require_commands(ctx,
-        [...])`` (the relocated probe loop and error shape), which no-ops
-        when ``ctx`` has no usable target. Raises StateError with
-        actionable detail; returning means "safe to proceed"."""
+        """Pre-resolve readiness. A general hook: a harness may do any
+        target-independent, secret-free check here (config-derived checks,
+        a tool-version probe on an existing target), plus ``super()`` for
+        the base's secret-resolvability prediction. For the built-ins the
+        one check today is ``required_commands``, run via
+        ``base.require_commands(ctx, [...])`` (the relocated probe loop),
+        which probes ``ctx.agent_target`` / ``ctx.admin_target`` WHEN the
+        target user's entity is not in ``ctx.to_create`` (an existing
+        agent/workspace, and every restart), so it runs pre-resolve and
+        bails before any prompt. When the target user IS in ``ctx.to_create``
+        (a ``--new-agent`` create, whose user is made later this command),
+        the probe is deferred to runup; preflight stays dependency-blind.
+        Raises StateError; returning means "safe to proceed"."""
 
     def runup(self, ctx: RunContext) -> None:
-        """Post-resolve readiness, the EPHEMERAL FALLBACK only: run the
-        ``required_commands`` probe here when preflight could not, i.e. the
-        target was created during this command and exists now
-        (``ctx.agent_target`` present, in the real workspace, composed
-        env). For a non-ephemeral session preflight already checked, so
-        runup is a no-op. Read-only, like every runup; the mutation is the
-        tmux launch that follows. The LLD pins the guard that avoids a
-        redundant second probe."""
+        """Post-resolve readiness. Also a general hook: a harness with a
+        secret or an authenticated post-provision check does it here, with
+        ``ctx.secrets`` in hand. For the built-ins its only use today is the
+        ephemeral fallback for ``required_commands``: the same
+        ``require_commands`` call, which now finds the just-created target
+        no longer in ``ctx.to_create`` and probes it (real workspace,
+        composed env). For a non-ephemeral session preflight already
+        checked, so runup no-ops. Read-only, like every runup; the mutation
+        is the tmux launch that follows. The LLD pins the fired-once
+        guard."""
 
     def start(self, ctx: RunContext) -> str:
         """Op: the pane command for a fresh ``session create``. Reads its
@@ -200,40 +200,42 @@ Contract points, and why they are shaped this way:
   installed. The harness is the first capability to actually use these fields, so the composition
   root populates them when it builds the `RunContext` for the harness's runup and ops (existing
   runups leave them `None`).
-- **The readiness check is `preflight` wherever the target exists, `runup` only for the ephemeral
-  hole.** The target-environment check wants to run as early as possible (fail before spending the
-  operator's prompt), which is preflight, pre-resolve. Preflight is dependency-blind: it may not
-  check state a later step of the same command creates. The model's own mechanism for that is the
-  optional context: preflight is handed the target only when it already exists. So the harness
-  preflight probes `required_commands` exactly when `ctx` carries the session's target (an existing
-  agent/workspace, and every restart), and does not when it is absent (a `--new-agent` /
-  `--new-workspace` create, whose user/workspace this command creates later, the direct analog of a
-  git-credential preflight not checking a VM `vm create` has not made yet). That one ephemeral case
-  is the only thing that cannot be preflighted, so it falls to `runup`, post-provision, against the
-  real target. This keeps the fast-fail-before-prompt property for the common path and every
-  restart, and confines runup to the case where nothing earlier could have checked. (An
-  admin-as-proxy preflight that probed the ephemeral target as admin was rejected earlier: it
-  false-aborts on agent-template user-level tooling. The check runs as the real target user or not
-  yet at all.) The clean part, and the reason no `--new-agent` special-case leaks into the harness
-  or the orchestration: the harness never asks "am I ephemeral". It reads existence off the CONTEXT.
-  The shared `require_commands(ctx, ...)` helper probes whatever target `ctx` carries and no-ops
-  when there is none, and it is called from both `preflight` and `runup`. The model already hands
-  those two stages different existence snapshots (command-start vs post-provision), so the same
-  context-aware code checks an existing target at preflight and a just-created one at runup, with no
-  "if ephemeral" branch and no orchestration deferring preflight until resources exist (the
-  alternative, and the more complex one). The `runup` re-check is not new machinery: today's
-  `create_session` already probes `required_commands` post-provision as the agent user
-  (`sessions/manager.py`, after the ephemeral `create_agent`), so a session on a `--new-agent` is
-  checked after its agent exists in current code too. Keeping it is PARITY; dropping it would leave
-  ephemeral sessions unchecked. What the preflight-primary shape adds on top is strictly earlier
-  failure for the paths that can afford it (an existing-agent create now fails before the prompt,
-  where today it checks after).
-- **The check needs no secret, and that is fine at either stage.** It reads no secret, so preflight
-  (pre-resolve) is its natural home; the runup fallback is about the target existing, not about
-  authentication. The preflight/runup boundary is the secret-resolve pass, not an auth boundary, so
-  a non-authenticated check on either side is within contract. The built-in harnesses declare no
-  secrets, so `super().preflight()` (the base's resolvability prediction) adds nothing for them; the
-  required-commands probe is the whole of their readiness.
+- **`preflight` and `runup` are general readiness hooks; `required_commands` is the one check that
+  floats between them by target existence.** A harness may do any pre-resolve, secret-free check in
+  preflight (config-derived checks, a tool-version probe) and any post-resolve check in runup
+  (authenticated probes once a harness has secrets, post-provision tool-state). The built-ins fill
+  only the required-commands slice today, but the hooks are not defined by it. That one check wants
+  to run as early as it can (fail before spending the operator's prompt), which is preflight,
+  pre-resolve. Preflight is dependency-blind (it may not check state a later step of the command
+  creates), so it can only probe a target that already exists. The harness learns which is which
+  from the context, EXPLICITLY: the shared `require_commands(ctx, [...])` helper probes the target
+  user when that user's entity is not in `ctx.to_create`, and defers when it is. So for an existing
+  agent/workspace and every restart the probe runs at preflight, pre-resolve, bailing before any
+  prompt; for a `--new-agent` create (agent in `ctx.to_create`, made later this command, the direct
+  analog of a git-credential preflight not checking a VM `vm create` has not made yet) it defers to
+  runup, where the just-created agent is no longer in `to_create` and gets probed post-provision. No
+  `--new-agent` special-case leaks into the harness or the orchestration: the harness never asks "am
+  I ephemeral", it reads `ctx.to_create`, and the same helper called from both hooks does the right
+  thing because the two stages carry different `to_create` snapshots.
+- **Gating on `to_create`, not a `None` target, is a safety property.** The harness defers ONLY when
+  the context explicitly says the entity is pending. A target that is missing for any OTHER reason
+  (an admin-mode selection, a permission gap, a bug) is not silently treated as "defer"; it surfaces
+  as a loud error when the harness tries to use it. Inferring deferral from `agent_target is None`
+  would turn every such absence into a SKIPPED readiness check, the exact failure the check exists
+  to prevent. (An admin-as-proxy preflight that probed the ephemeral target as admin was also
+  rejected: it false-aborts on agent-template user-level tooling. The check runs as the real target
+  user or is deferred, never faked.)
+- **The `runup` re-check is parity, not new machinery.** Today's `create_session` already probes
+  `required_commands` post-provision as the agent user (`sessions/manager.py`, after the ephemeral
+  `create_agent`), so a `--new-agent` session is checked after its agent exists in current code too.
+  Keeping the runup fallback preserves that; dropping it would leave ephemeral sessions unchecked.
+  What the preflight-primary shape adds is strictly earlier failure for the paths that can afford it
+  (an existing-agent create now fails before the prompt, where today it checks after).
+- **The check needs no secret, and that is fine at either stage.** The preflight/runup boundary is
+  the secret-resolve pass, not an auth boundary, so a non-authenticated check on either side is
+  within contract. That is why required-commands can sit in preflight (pre-resolve) for the common
+  path and fall back to runup (post-provision) for the ephemeral one without any secret entering the
+  picture.
 - **`start` and `restart` are separate ops** rather than one op with a flag: they are the contract's
   verbs (FRD R3/R7 vocabulary), implementations that differ (shell) read naturally, and
   implementations that coincide (claude-code, where both reduce to resume-or-launch) share a private
@@ -361,24 +363,36 @@ Three things follow:
   a hand-built "empty" identity. The capability's OWN name stays its `owner_name` (a vm-site's name,
   a credential's name); identity is the invocation's scope, which is why a git-credential readiness
   call is SYSTEM and not "git-credential level".
-- **`RunContext` otherwise unchanged**: `config` / `admin_target` / `agent_target` / `secrets` stay
-  optional and timing-populated. Identity can be required where they cannot because the invocation's
-  names and level are fixed at command entry. (The one caveat the FRD notes: the system slug can be
+- **`identity` stays stable; existence is separate.** `config` / `admin_target` / `agent_target` /
+  `secrets` stay optional and timing-populated. `OperationIdentity` itself is fixed at command entry
+  (stable names and level), which is why it can be required. What is NOT stable, and is added here
+  explicitly rather than inferred, is which of its named entities exist yet: `RunContext` gains a
+  `to_create` field, the set of entities the command will create that do NOT exist at this stage
+  (`{"agent", "workspace"}` for a `--new-agent --new-workspace` create at command start, and empty
+  once they are provisioned). This is stage-state, like the targets, so it lives on `RunContext`
+  beside them, not on the stable identity. (The one caveat the FRD notes: the system slug can be
   prompted once on a first-ever create, resolved before any `RunContext` is built, so "fixed at
   entry" describes the identity every readiness stage sees, not a literally untouched world.)
 
-On ephemerals (the open worry): a `session create --new-agent --new-workspace` names resources that
-do not exist yet, but this is a NON-ISSUE for identity, and for the reason given: the orchestration
-layer chooses those names up front (before it builds any `RunContext`), so a SESSION-level identity
-always carries valid names whether or not the underlying agent/workspace exist yet. Identity is
-names, the level check is over names, and ephemerality (object not yet provisioned) is invisible to
-it. Nothing special is needed in the identity object; the orchestration layer's existing
-name-up-front discipline is what makes it work.
+Why `to_create` is explicit and not read off a `None` target: a capability must be able to tell
+"this entity will exist but does not yet" (defer the check) from "there is no such target here at
+all" (an admin-mode selection, a permission gap, or a bug). If deferral were inferred from
+`agent_target is None`, any of those other absences would SILENTLY SKIP a readiness check instead of
+raising, which is exactly the failure a readiness check exists to prevent. With `to_create`
+explicit, a harness defers only when the context says the entity is genuinely pending, and a target
+that is missing for any other reason surfaces as a loud error, not a skipped check.
+
+On ephemerals, then: a `session create --new-agent --new-workspace` names resources that do not
+exist yet, but this is a NON-ISSUE for the IDENTITY (the orchestration layer chooses the names up
+front, so a SESSION-level identity always carries valid names), and the existence question is
+answered by `to_create` rather than by any missing name or target. Identity is stable names;
+`to_create` is the stage's honest statement of what is not built yet.
 
 The harness runs at SESSION level: it picks `ctx.agent_target` vs `ctx.admin_target` off
-`ctx.identity.admin` and addresses the tool session by `ctx.identity.session_name`. Because its own
-composition root always supplies a full SESSION-level identity, the harness relies on those names
-being present, not merely typed as optional.
+`ctx.identity.admin`, addresses the tool session by `ctx.identity.session_name`, and consults
+`ctx.to_create` to decide whether its target user/workspace exist yet. Because its composition root
+always supplies a full SESSION-level identity, the harness relies on those names being present, not
+merely typed as optional.
 
 ## Layer changes
 
@@ -457,13 +471,14 @@ platform and providers:
 - `_assert_required_commands`'s probe loop, docstring rationale, and error shape LEAVE the session
   entirely (today they are inline in `create_session`) and relocate verbatim to
   `capabilities/harness/base.py` as the `require_commands(ctx, commands, ...)` helper, which probes
-  whatever target `ctx` carries and no-ops when there is none. The manager then does the STANDARD,
-  UNIFORM two-hook readiness for every session, not branching on ephemeral: `harness.preflight(ctx)`
-  in the preflight-all phase and `harness.runup(ctx)` before the launch op. Both hooks are thin
-  wrappers over the one helper, and a fired-once guard makes the actual probe run exactly once, at
-  whichever hook holds the target (preflight for an existing agent/workspace and every restart;
-  runup for a just-provisioned ephemeral). The session owns none of the check's logic; it only calls
-  the standard hooks.
+  the target user when that user's entity is not in `ctx.to_create` and defers when it is. The
+  manager then does the STANDARD, UNIFORM two-hook readiness for every session, not branching on
+  ephemeral: `harness.preflight(ctx)` in the preflight-all phase and `harness.runup(ctx)` before the
+  launch op. Both hooks are thin wrappers over the one helper, and a fired-once guard makes the
+  actual probe run exactly once, at whichever hook first sees the target user out of `ctx.to_create`
+  (preflight for an existing agent/workspace and every restart; runup for a just-provisioned
+  ephemeral). The session owns none of the check's logic; it only builds each stage's `RunContext`
+  (including `to_create`) and calls the standard hooks.
 
 Sequencing note (pinned so the LLD preserves it): on restart the target already exists, so
 `harness.preflight` (required-commands) runs pre-resolve and pre-kill, and the ephemeral runup
@@ -566,11 +581,13 @@ points shown. Applied to create:
    Power-state convergence is idempotent declared-state maintenance, not a rollback-tracked
    mutation; called out so "any state change" in the invariant reads precisely.
 5. Preflight-all: the harness's `preflight(ctx)` alongside every other participating resource's, all
-   against the command-start `RunContext(identity=..., config=config, agent_target=...)` (identity
-   always present, no secrets). For a session on an EXISTING agent/workspace the context carries the
-   target, so the harness preflight probes `required_commands` here, pre-resolve, bailing before any
-   prompt. For a `--new-agent` / `--new-workspace` session the target is absent, so that probe
-   defers to step 8. Everything in this step is before any prompt or mutation.
+   against the command-start
+   `RunContext(identity=..., config=config, agent_target=..., to_create=...)` (identity always
+   present, no secrets). For a session on an EXISTING agent/workspace `to_create` is empty and the
+   context carries the target, so the harness preflight probes `required_commands` here,
+   pre-resolve, bailing before any prompt. For a `--new-agent` / `--new-workspace` session those
+   entities are in `to_create`, so that probe defers to step 8. Everything in this step is before
+   any prompt or mutation.
 6. The single secret resolve (`Resolver.resolve()`; the union across every instance registered on
    it, one batched prompt session) and env composition. When `--new-agent` is in play, the ephemeral
    agent's git-credential tokens are already folded into this resolve on main (constructed against
@@ -578,11 +595,11 @@ points shown. Applied to create:
    harness adds no resolve calls and no prompts. **This is the walk-away point.**
 7. Ephemeral workspace/agent provisioning (unchanged; rollback-protected from here down), then
    target preparation. Nothing in this block prompts.
-8. `harness.runup(ctx)` against the op-start `RunContext` (config, resolved `secrets`, and the
-   target transport, plus the identity), in the real environment. This is the EPHEMERAL FALLBACK: it
-   runs the `required_commands` probe only when step 5 could not (the target was just created); for
-   a non-ephemeral session it is a no-op (preflight already checked). A failure rolls back the
-   ephemerals and reports.
+8. `harness.runup(ctx)` against the op-start `RunContext` (config, resolved `secrets`, the target
+   transport, the identity, and now-empty `to_create`), in the real environment. This is the
+   EPHEMERAL FALLBACK: the just-created agent/workspace are no longer in `to_create`, so the
+   `required_commands` probe that deferred in step 5 runs here; for a non-ephemeral session it
+   already ran at preflight, so runup no-ops. A failure rolls back the ephemerals and reports.
 9. `harness.start(ctx)` -> pane command; template-var substitution; `tmux.create_session` with the
    composed env.
 
@@ -606,8 +623,8 @@ failed step; no resurrection is attempted.
 | TOML loader                 | section/key shapes, flat-field hoist, flat+non-shell and flat+blob conflict errors       |
 | Manifest decoder            | flat-field rejection (clean YAML spec); everything else delegates to the shared loader   |
 | Harness (`validate_config`) | blob field vocabulary, per declared blob at load and per merged blob at resolve          |
-| Harness (`preflight`)       | required-commands probe when the target exists (existing agent/workspace, all restarts)  |
-| Harness (`runup`)           | required-commands probe for the ephemeral-create hole only (target made this command)    |
+| Harness (`preflight`)       | pre-resolve readiness; required-commands probe when target not in `ctx.to_create`        |
+| Harness (`runup`)           | post-resolve readiness; required-commands fallback once target leaves `ctx.to_create`    |
 | Registry finalize           | unknown `harness` name via the kind's error miss policy (declared references only)       |
 | Sessions manager            | orchestration order, instance construction, `RunContext` assembly, dispatch, {{var}} sub |
 
@@ -732,17 +749,19 @@ already builds `RunContext` by keyword, so each is a single added argument.
   `vm add-git-credential`); doctor's site scan -> SYSTEM; the harness -> SESSION. The LLD just
   applies it per site; no WORKSPACE / ADMIN / AGENT identity is constructed (those enum values raise
   NotImplementedError until a real call site defines their rules).
-- **Populating the target transport on `RunContext`**: the harness is the first consumer of
-  `agent_target` / `admin_target`, and it reads them at PREFLIGHT (for an existing agent/workspace
-  and every restart), not only at runup. Pin where `create_session` / `restart_session` bind the
-  target transport onto the command-start context when the target already exists (and leave it
-  absent for an ephemeral `--new-agent` / `--new-workspace`, which is what routes that one case to
-  the runup fallback), and confirm the admin-mode selection (`agent_target` None, `admin_target`
-  set) matches the manager's existing mode handling.
+- **Populating the target transport and `to_create` on `RunContext`**: the harness is the first
+  consumer of `agent_target` / `admin_target`, and it reads them at PREFLIGHT (for an existing
+  agent/workspace and every restart), not only at runup. Pin where `create_session` /
+  `restart_session` bind the target transport and set `to_create` on each stage's context (the
+  ephemeral entities are in `to_create` at command-start and gone by runup), pin the shape of
+  `to_create` (a frozenset of an entity enum vs bools), and confirm the admin-mode selection
+  (`agent_target` None, `admin_target` set, admin never in `to_create`) matches the manager's
+  existing mode handling.
 - **The required-commands single-fire guard**: `harness.preflight` and `harness.runup` both delegate
-  to `require_commands(ctx, ...)`, which no-ops without a usable target. Pin the guard that makes
-  the probe fire exactly once (preflight when the target is present; runup only for the ephemeral
-  case), avoiding a redundant second probe on the non-ephemeral path.
+  to `require_commands(ctx, ...)`, which probes when the target user is not in `ctx.to_create` and
+  defers when it is. Pin the guard that makes the probe fire exactly once (at preflight for a
+  non-ephemeral session; at runup for the ephemeral one), avoiding a redundant second probe on the
+  non-ephemeral path where the target is out of `to_create` at both stages.
 - **Claude Code detection and flags**: how a resumable session named `<session>` is detected (CLI
   listing surface vs on-disk session files) and the exact spellings for `permission_mode` / `model`
   / `extra_args` forwarding; verify against the latest stable Claude Code CLI at implementation time
