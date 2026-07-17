@@ -243,6 +243,11 @@ behavior. This SDD re-homes the composition around them; it does not redesign th
   (prompt-once at the preflight boundary, walk-away after), error types and shapes, rollback
   semantics (best-effort unwind, `UserAbort` never swallowed), and partial-failure degradation (a
   rejected credential skips, the command degrades to partial) all behave as they do at HEAD.
+- The walk-away invariant is oracle-guarded EXPLICITLY, not structurally: because orchestrators are
+  bespoke, nothing in the code's shape prevents a future orchestrator from prompting late, so for
+  every migrated command the parity suite carries a "no prompt after the resolve boundary" assertion
+  (first-consumer review note, 2026-07-17). Discipline plus helpers plus tests is the chosen trade;
+  the tests are the part that makes it durable.
 - The ops and their internal choreography (each resource's mutation sequence, its idempotency
   contract, its own teardown) are reused as-is. Unwind SEQUENCING moves to the orchestrator (R4)
   with identical operator-visible semantics; the per-node teardown code it invokes is today's,
@@ -256,11 +261,15 @@ behavior. This SDD re-homes the composition around them; it does not redesign th
   are migrated one at a time; each migration is a complete, green, shippable unit.
 - No big-bang cutover exists anywhere in the plan. The effort is pausable and resumable at every
   command boundary, deliberately, so it survives interruption by higher-priority work.
-- The migration order is chosen to de-risk: the first migrated command is a thin vertical slice (the
-  tracer bullet), chosen at HLA time; `vm create` and `session create --new-agent` (the spike
-  scenarios, R11) are the reference targets that prove generality. `session create` is an EARLY
-  migrated command, not a late one: the re-scoped harness SDD (R10) lands on it, and this SDD owes
-  its first consumer a landing pad rather than a long wait behind other commands.
+- The migration order does DOUBLE DUTY (first-consumer review note, 2026-07-17): it de-risks, and it
+  is where the shared helpers crystallize, because helpers emerge from repetition rather than
+  up-front design, the early commands are the ones that force their shapes. The first migrated
+  command is a thin vertical slice (the tracer bullet), chosen at HLA time; `vm create` and
+  `session create --new-agent` (the spike scenarios, R11) are the reference targets that prove
+  generality, and the latter's fan-out is precisely what forces the walker, the secret-union sweep,
+  and the unwind skeleton to earn their shapes. `session create` is an EARLY migrated command, not a
+  late one: the re-scoped harness SDD (R10) lands on it, and this SDD owes its first consumer a
+  landing pad rather than a long wait behind other commands.
 - Node kinds are introduced lazily, per migrated command, rather than standing up all five
   live-resource kinds in the tracer bullet.
 - The interim seams are explicit: while both models coexist, the boundary between an orchestrated
@@ -332,7 +341,11 @@ behavior. This SDD re-homes the composition around them; it does not redesign th
   Terraform's resource graph, Kubernetes reconciliation, systemd ordering; scoped to what informs
   the walker and pending-node design), `plan.md`, and the ADR draft. The HLA explicitly pins the
   reference-graph-to-node-graph translation rule (one registry resource to many nodes; nodes with no
-  registry resource of their own), the subtlest part of the walker's input.
+  registry resource of their own), the subtlest part of the walker's input. The HLA also pins the
+  MINIMAL SHARED STATE the walker and unwind helpers operate on (what is in the walk, what is
+  realized so far): unwind-read-backwards needs a record to read, and a shared helper needs an
+  agreed shape for it, so "plan is vocabulary, not an artifact" is reconciled there with helpers
+  that carry the smallest record that works (first-consumer review note, 2026-07-17).
 
 ## Non-goals
 
