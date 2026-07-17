@@ -238,7 +238,7 @@ reads backwards. `teardown()` is the node's own inverse. Three mechanics, pinned
   snapshots (R6): mutable graph, immutable views.
 - **`log` is a command-local `RealizationLog`**, instantiated by the orchestrator at the top of its
   mutation phase (`log = RealizationLog()`, the `unwind.py` helper). It lives on no context, no
-  node, and no global; it is the productionized version of the closure locals today's
+  node, and no global; it is the production form of the closure locals today's
   `_rollback_ephemerals` captures, and it is the ONLY materialized plan-state in the model.
 
 Two walkthroughs make it concrete.
