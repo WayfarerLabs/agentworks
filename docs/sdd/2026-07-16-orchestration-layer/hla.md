@@ -51,16 +51,18 @@ cli/agentworks/orchestration/
 ```
 
 This is the EVENTUAL shape, not the tracer's starting set. The package is created LAZILY and grows
-as migrated commands force it (FRD: helpers emerge, no up-front framework), so the tracer
-(`vm add-git-credential`, no pending nodes, no unwind) starts with only `node.py`, `walk.py`, and
-the secret union in `secrets.py`; `activation.py`, `unwind.py` (`RealizationLog`), and
-`readiness.py`'s skip-and-degrade policy helper each wait for the first command that needs them
-(`vm create` forces unwind and skip-and-degrade; the activation gate arrives with the first
-existing-VM command). The plan states each command's starting file set (reviewer carry, 2026-07-17).
-Node implementations live in their domains, exactly as kinds do (`vms/nodes.py`, `agents/nodes.py`,
-`sessions/nodes.py`, ...); capability instances implement the protocol directly on
-`capabilities/base.py` (R9), no adapter class in production (the spike's `CapabilityInstanceNode`
-adapter becomes three small members on `Capability`: `key`, `deps`, `secret_refs`).
+as migrated commands force it (FRD: helpers emerge, no up-front framework). The tracer
+(`vm add-git-credential`) touches an EXISTING VM (it wraps its work in `keep_active` today) with a
+FATAL runup and no pending nodes, so it needs `node.py`, `walk.py`, `secrets.py` (union, prediction,
+scoped reader), `readiness.py`'s preflight SWEEP, and `activation.py` (the gate), but NOT
+`unwind.py` (`RealizationLog`, first forced by `vm create`'s pending nodes) or `readiness.py`'s
+skip-and-degrade POLICY helper (first forced by `vm create` / `vm reinit` init, whose credential
+rejection degrades to partial rather than aborting). The plan states each command's starting file
+set (reviewer carry, 2026-07-17). Node implementations live in their domains, exactly as kinds do
+(`vms/nodes.py`, `agents/nodes.py`, `sessions/nodes.py`, ...); capability instances implement the
+protocol directly on `capabilities/base.py` (R9), no adapter class in production (the spike's
+`CapabilityInstanceNode` adapter becomes three small members on `Capability`: `key`, `deps`,
+`secret_refs`).
 
 ## The node protocol
 
@@ -260,12 +262,18 @@ session-create's chain); it is the node's own name.
 **Layer 2, the operation scope.** WHY the command is running: its static identity chain, fixed at
 command entry (names are chosen up front) and IDENTICAL for every node in the graph. It is the
 answer to "why is this node being bothered," so handing all of it to every node is exactly right;
-`node scope <= operation scope`, and a node simply reads the part it cares about and ignores the
-rest (a git-credential reads the system slug and nothing else; the harness reads the session name to
-address `claude --name <session>`). Because it is one static object, uniform across the graph, it
-lives on the context and is passed AS-IS, no per-node re-scoping (that per-invocation rescoping, not
-the concept of scope, was the harness SDD's `level` misstep). It is DESCRIPTIVE, not power-granting,
-so it is handed over ungated: knowing "this is a session-create for `s1`" confers no capability.
+`node scope <= operation scope`, and a node reads the part it cares about and ignores the rest. The
+DIVISION OF LABOR between the layers is sharp (first-consumer clarity nit, 2026-07-17): a node
+ADDRESSES and acts through its own layer-1 identity, never through layer-2 names, so the harness
+takes `claude --name <session>` from its OWN `session_name` (given at construction), not from
+`operation_scope.session`. From layer 2 a node reads the LEVEL (the skip/defer/probe/error fork) and
+treats the scope's name fields as DESCRIPTIVE only, for error and log framing ("while provisioning
+session `s1`..."). The two coincide for a session command (no divergence risk), but keeping layer 2
+a pure scope signal rather than a redundant name source keeps each node's construction contract
+crisp. Because it is one static object, uniform across the graph, it lives on the context and is
+passed AS-IS, no per-node re-scoping (that per-invocation rescoping, not the concept of scope, was
+the harness SDD's `level` misstep). It is DESCRIPTIVE, not power-granting, so it is handed over
+ungated: knowing "this is a session-create for `s1`" confers no capability.
 
 ```python
 # capabilities/base.py (this SDD)

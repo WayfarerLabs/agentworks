@@ -384,17 +384,19 @@ behavior. This SDD re-homes the composition around them; it does not redesign th
 - The decision to split orchestration from resources, with the node/registry-resource distinction
   and the protocol-not-hierarchy ruling, is recorded as an ADR, drafted unnumbered in this feature
   directory and promoted into `docs/adrs/` at the end of the effort.
-- This SDD's artifacts follow the standard set: this FRD, `hla.md` (after the spike),
-  `spike-findings.md`, `prior-art-research.md` (graph-walking orchestrators in adjacent tools:
-  Terraform's resource graph, Kubernetes reconciliation, systemd ordering; scoped to what informs
-  the walker and pending-node design), `plan.md`, and the ADR draft. The HLA explicitly pins the
-  reference-graph-to-node-graph translation rule (one registry resource to many nodes; nodes with no
-  registry resource of their own), the subtlest part of the walker's input. The HLA also pins the
-  MINIMAL SHARED STATE the walker and unwind helpers operate on (what is in the walk, what is
-  realized so far): unwind-read-backwards needs a record to read, and a shared helper needs an
-  agreed shape for it, so "plan is vocabulary, not an artifact" is reconciled there with helpers
-  that carry the smallest record that works (first-consumer review note, 2026-07-17). Three further
-  HLA obligations from the spike review (2026-07-17): show the orchestrator's runup driving
+- This SDD's artifacts are this FRD, `hla.md` (after the spike), `spike-findings.md`, `plan.md`, and
+  the ADR draft. NO dedicated `prior-art-research.md`: the SDD-skill default is to include one, but
+  the exception applies (maintainer ruling, 2026-07-17): this is an internal refactor that follows
+  the already-established capability model, and the only adjacent prior art (graph-walking
+  orchestrators, Terraform's resource graph, Kubernetes reconciliation, systemd ordering) informs
+  the walker at a level a couple of inline touchpoints cover, not a research artifact. The HLA
+  explicitly pins the reference-graph-to-node-graph translation rule (one registry resource to many
+  nodes; nodes with no registry resource of their own), the subtlest part of the walker's input. The
+  HLA also pins the MINIMAL SHARED STATE the walker and unwind helpers operate on (what is in the
+  walk, what is realized so far): unwind-read-backwards needs a record to read, and a shared helper
+  needs an agreed shape for it, so "plan is vocabulary, not an artifact" is reconciled there with
+  helpers that carry the smallest record that works (first-consumer review note, 2026-07-17). Three
+  further HLA obligations from the spike review (2026-07-17): show the orchestrator's runup driving
   reproducing today's per-caller continue-vs-abort policies (R4); pin the node-key namespace across
   the full node-kind set (the spike keyed its stand-in session as `vm/s1`, a real collision hazard);
   and state how scoped secret delivery (R5) gets proven, since the spike did not exercise it.
