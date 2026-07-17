@@ -418,6 +418,41 @@ capability's to choose: a per-consumer default (`git-token-<name>`, derived from
 credentials are many, a shared well-known name (`proxmox-token`) where one is typical. Either way
 the capability owns the default; the framework only resolves what was declared.
 
+### Declare, then receive: the contract that keeps a capability forward-compatible
+
+Everything above reduces, for a capability author, to two obligations at two moments, with the
+framework owning everything in between:
+
+1. **Declare, purely.** Name every secret (and every other resource reference) in `validate_config`:
+   no resolver, no I/O, no resolution. This is the capability's _entire_ input side. The framework
+   reads those references to build the resolvability prediction preflight uses and to scope the one
+   batched resolve pass.
+2. **Receive, from the context.** Read resolved secret values only from `ctx.secrets`, in `runup`
+   (and in ops as their signatures converge on `RunContext`). Never fetch a value through
+   `self.resolver`: the bound resolver is a _prediction_ tool for preflight (`register_name` /
+   `predict`, which never returns a value), not a value source. And construct only _binds_ (config
+   plus resolver); it never resolves.
+
+The rule that ties the two together is the self-vs-context split stated with `RunContext` above:
+pre-resolve concerns read `self`, post-resolve concerns read the context. A secret is absent from
+`ctx.secrets` only when the context was assembled without a resolve pass (inspection), and that is a
+typed `ConfigError`, not a silent skip: runup runs post-resolve, so a missing value is a caller bug,
+not a state to tolerate.
+
+Holding this line is what keeps a capability **forward-compatible with the resolution model moving
+under it.** The direction of travel is an orchestration layer that resolves the whole reference
+graph once and hands each capability its values through the context, retiring the per-instance bound
+resolver. A capability that only ever declares (rule 1) and receives (rule 2) does not change shape
+when that lands: the `RunContext` it reads is the stable surface, and only the framework plumbing
+behind it moves. One that reaches into `self.resolver` for values, or resolves at construct, has to
+be rewritten.
+
+Both shipped capabilities are the reference: `git-credential-provider` (github, azdo) and
+`vm-platform/proxmox` read their tokens from `ctx.secrets` in `runup` and raise a typed
+`ConfigError` when it is absent. Proxmox's op client is the one remaining bridge (its `_api` still
+reads the token through the bound resolver, pending the op-signature convergence noted with
+`RunContext`); a new capability should not add a second.
+
 ## Where capabilities live
 
 Capabilities form a clean layer: framework (`resources/`), then capabilities, then domains. A
