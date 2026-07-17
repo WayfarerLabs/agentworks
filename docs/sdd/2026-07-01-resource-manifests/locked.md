@@ -107,3 +107,15 @@ and a Copilot pass (one valid loader-robustness fix). The maintainer manually te
 loading, doctor, and migration surfaces against a real config during development.
 
 The FRD, HLA, plan, and LLDs are accurate as-built as of this date; they lock at merge.
+
+## 2026-07-16: vm-template drops `azure_vm_size`
+
+Post-lock follow-up (issue #178, [ADR 0018](../../adrs/0018-azure-vm-size-from-spec.md)). The
+vm-template spec field list pinned in `manifest-schema-lld.md` (Per-kind spec schemas) included
+`azure_vm_size`. That field is now removed: Azure VMs are sized from the standard `cpus` + `memory`
+spec, and the `azure-vm` platform selects the smallest fitting SKU from a built-in catalog (or the
+site's `platform_config.vm_sizes` override). The locked LLD is not edited in place (it is a
+point-in-time record); this entry is the authoritative note that the vm-template field set is now
+`inherits`, `cpus`, `memory`, `disk`, `swap`, `apt`, `apt_packages`, `snap`,
+`system_install_commands`, `tailscale_auth_key`, `env`. The `vm create` hardware/admin override
+flags were removed in the same change (see the ADR).

@@ -56,7 +56,6 @@ class ProvisionRequest:
     memory_gib: int | None = None
     disk_gib: int | None = None
     swap_gib: int | None = None
-    azure_vm_size: str | None = None
 
 
 @dataclass

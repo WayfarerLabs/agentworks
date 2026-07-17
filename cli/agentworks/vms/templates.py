@@ -31,7 +31,6 @@ class ResolvedVMTemplate:
     cpus: int = 4
     memory: int = 8
     disk: int = 50
-    azure_vm_size: str = "Standard_B2s"
     swap: int = 4
     # System-wide init
     apt: list[str] = field(default_factory=list)
@@ -176,7 +175,6 @@ def _merge(target: ResolvedVMTemplate, source: ResolvedVMTemplate) -> None:
     target.cpus = source.cpus
     target.memory = source.memory
     target.disk = source.disk
-    target.azure_vm_size = source.azure_vm_size
     target.swap = source.swap
     target.apt = _append_dedupe(target.apt, source.apt)
     target.apt_packages = _append_dedupe(target.apt_packages, source.apt_packages)
@@ -196,8 +194,6 @@ def _merge_template(target: ResolvedVMTemplate, tmpl: VMTemplate) -> None:
         target.memory = tmpl.memory
     if tmpl.disk is not None:
         target.disk = tmpl.disk
-    if tmpl.azure_vm_size is not None:
-        target.azure_vm_size = tmpl.azure_vm_size
     if tmpl.swap is not None:
         target.swap = tmpl.swap
     if tmpl.apt is not None:

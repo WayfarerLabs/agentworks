@@ -34,13 +34,13 @@ def vm_create(
             ),
         ),
     ] = None,
-    cpus: Annotated[int | None, typer.Option("--cpus", help="Number of CPUs")] = None,
-    memory: Annotated[int | None, typer.Option("--memory", help="Memory in GiB")] = None,
-    disk: Annotated[int | None, typer.Option("--disk", help="Disk size in GiB")] = None,
-    azure_vm_size: Annotated[str | None, typer.Option("--azure-vm-size", help="Azure VM size")] = None,
-    admin_username: Annotated[str | None, typer.Option("--admin-username", help="Admin username on the VM")] = None,
 ) -> None:
-    """Create a new VM (provision + initialize)."""
+    """Create a new VM (provision + initialize).
+
+    Hardware (cpus, memory, disk, swap) and the admin username come from
+    the selected vm-template and admin-template. To deviate, declare a
+    new template rather than overriding on the command line.
+    """
     from agentworks.config import load_config
     from agentworks.vms.manager import create_vm
 
@@ -51,11 +51,6 @@ def vm_create(
         name=name,
         template=template,
         site=site,
-        cpus=cpus,
-        memory=memory,
-        disk=disk,
-        azure_vm_size=azure_vm_size,
-        admin_username=admin_username,
     )
 
 

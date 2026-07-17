@@ -62,11 +62,12 @@ def test_create_vm_request_shape_and_row(
 ) -> None:
     """The bound lima platform receives the provision request (bare-name
     hostname, null slug pre-Phase-4) and the returned platform_metadata
-    persists verbatim."""
+    persists verbatim. Hardware is template-owned (no per-create
+    override): the request's cpus comes from the vm-template."""
     from agentworks.capabilities.vm_platform import ProvisionRequest
     from agentworks.capabilities.vm_platform.lima import LimaPlatform
 
-    config = make_config()
+    config = make_config("[vm_templates.default]\ncpus = 2\n")
     captured_request: list[ProvisionRequest] = []
     captured_platform: list[LimaPlatform] = []
 
@@ -83,13 +84,13 @@ def test_create_vm_request_shape_and_row(
     monkeypatch.setattr(LimaPlatform, "create", _fake_create)
     monkeypatch.setattr(vm_manager, "initialize_vm", lambda *a, **k: None)
 
-    vm_manager.create_vm(db, config, name="dvm", cpus=2)
+    vm_manager.create_vm(db, config, name="dvm")
 
     (request,) = captured_request
     assert request.vm_name == "dvm"
     assert request.hostname == "dvm"  # no slug: the bare name
     assert request.system_slug is None
-    assert request.cpus == 2
+    assert request.cpus == 2  # from the vm-template, not a CLI override
     assert request.ssh_public_key == "public ssh key"
     (bound,) = captured_platform
     assert bound.site_name == "lima-local"
