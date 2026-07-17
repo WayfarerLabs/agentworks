@@ -222,7 +222,7 @@ build the SAME graph shapes; the difference is which nodes are pending, and ther
 roll-forward realizes anything. Realization itself is bespoke mutation plus a recorded flag flip:
 the mutation choreography is the command's authored code (ops stay un-unified, FRD R1), and
 `log.realize(node)` records the pending-to-realized transition that readiness queries and unwind
-reads backwards. `teardown()` is the node's own inverse. Three mechanics, pinned explicitly:
+reads backwards. `teardown()` is the node's own inverse. Four mechanics, pinned explicitly:
 
 - **The walk ROOTS at the command's target node(s).** The orchestrator constructs the node for what
   the command is about (the pending session; for batch commands, each target: the walk is
@@ -240,6 +240,19 @@ reads backwards. `teardown()` is the node's own inverse. Three mechanics, pinned
   mutation phase (`log = RealizationLog()`, the `unwind.py` helper). It lives on no context, no
   node, and no global; it is the production form of the closure locals today's
   `_rollback_ephemerals` captures, and it is the ONLY materialized plan-state in the model.
+- **Realizing a resource is ORCHESTRATOR choreography composed of node ops; `log.realize` is only
+  the bookkeeping at its end.** No node's realize drives its dependencies (a realize that
+  orchestrates would be the resource-driven fan-out R4 rejects): creating the agent is agent-node
+  ops (user, home, store) plus the git-credential nodes' materials ops, sequenced by whichever
+  orchestrator is running; the session node's own realizing slice is just tmux plus its row. The
+  reusable unit is therefore the PHASE-FREE realization choreography per creatable kind, factored as
+  domain code and called by any orchestrator that creates that kind: `agent create` wraps it in its
+  own phases, `session create --new-agent` calls the same body inside its phases. This is what
+  dissolves today's nesting hack, where the nested `create_agent` is a full command root that must
+  be handed `git_tokens` and phase suppression to stop it re-running resolve and banners: a body
+  never resolves and never frames phases, by construction. (LLD note: the spike's
+  `PendingNode.realize()` flag-flip wants a name like `mark_realized` so it cannot be read as doing
+  the work.)
 
 Two walkthroughs make it concrete.
 
