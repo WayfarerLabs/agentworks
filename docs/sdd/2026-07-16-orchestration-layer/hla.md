@@ -50,12 +50,17 @@ cli/agentworks/orchestration/
   unwind.py      # RealizationLog
 ```
 
-Created LAZILY: the package starts with exactly what the tracer bullet needs and grows as migrated
-commands force it (FRD: helpers emerge, no up-front framework). Node implementations live in their
-domains, exactly as kinds do (`vms/nodes.py`, `agents/nodes.py`, `sessions/nodes.py`, ...);
-capability instances implement the protocol directly on `capabilities/base.py` (R9), no adapter
-class in production (the spike's `CapabilityInstanceNode` adapter becomes three small members on
-`Capability`: `key`, `deps`, `secret_refs`).
+This is the EVENTUAL shape, not the tracer's starting set. The package is created LAZILY and grows
+as migrated commands force it (FRD: helpers emerge, no up-front framework), so the tracer
+(`vm add-git-credential`, no pending nodes, no unwind) starts with only `node.py`, `walk.py`, and
+the secret union in `secrets.py`; `activation.py`, `unwind.py` (`RealizationLog`), and
+`readiness.py`'s skip-and-degrade policy helper each wait for the first command that needs them
+(`vm create` forces unwind and skip-and-degrade; the activation gate arrives with the first
+existing-VM command). The plan states each command's starting file set (reviewer carry, 2026-07-17).
+Node implementations live in their domains, exactly as kinds do (`vms/nodes.py`, `agents/nodes.py`,
+`sessions/nodes.py`, ...); capability instances implement the protocol directly on
+`capabilities/base.py` (R9), no adapter class in production (the spike's `CapabilityInstanceNode`
+adapter becomes three small members on `Capability`: `key`, `deps`, `secret_refs`).
 
 ## The node protocol
 
@@ -310,25 +315,29 @@ is a system-scoped doctor scan" (skip, legitimately) from "no agent yet, it is p
 "agent in scope but absent for another reason" (loud bug). Three outcomes, one explicit signal, the
 same explicit-beats-inferred argument as `to_create`.
 
-**Gated access to the power-granting world.** The runtime handles that DO grant power (the execution
-targets, the resolved secrets) are reached through ACCESSOR METHODS on the context, not bare fields:
-`ctx.agent_target()`, `ctx.admin_target()`, `ctx.secret(name)`. In v1 they are pass-through; the
-shape exists so a future permission model can gate the request by the REQUESTING node (a plugin
-harness granted agent-but-not-admin gets a raise from `admin_target()`, an ungranted secret is
-refused), with the plugin/trust SDD owning enforcement. Gating needs to know who is asking, so the
-orchestrator binds each context to its requesting node; the operation scope stays identical across
-those per-node contexts, only the accessor's grant check varies. This is the same declare/receive
-move PR #182 made for secrets, extended to targets: shape the API for the future without building
-the future. The scope is a plain field precisely because it is ungated; the world is behind methods
-precisely because it is not. (Scoped secret DELIVERY from R5, a node reads only the secrets it
-declared, is the v1 down payment on this: `ctx.secret` already answers per declaration.)
+**Access to the power-granting world, shaped for a future gate but NOT gated in v1.** The runtime
+handles that grant power (the execution targets, the resolved secrets) are reached through ACCESSOR
+METHODS on the context, `ctx.agent_target()`, `ctx.admin_target()`, `ctx.secret(name)`, rather than
+bare fields. In v1 they are plain pass-through: no per-node requester binding, no grant check, no
+new machinery, they return what today's fields return. The ONLY thing the method shape buys now is
+that the harness (consumer number one, in THIS effort) reads `ctx.agent_target()` from day one, so
+when a permission model later gates by the requesting node it changes the orchestrator's plumbing,
+not the node-facing signature. Everything about the gate itself, the per-node requester binding, the
+grant check, the raise on an ungranted target, is DEFERRED to the plugin/trust SDD that needs it and
+is explicitly NOT built here (a scope call the reviewer pushed on, 2026-07-17: it would be inert
+machinery ahead of its consumer, and this effort's non-goals fence the plugin system). The context
+stays merely SHAPED to admit it: methods, not fields. Scoped secret DELIVERY (R5, a node reads only
+the secrets it declared) is the one piece with real v1 value, and it rides `ctx.secret(name)`
+naturally; whether it ships in v1 or falls back to the whole-cache reader is the tracer's call (see
+Secrets and the plan obligations below).
 
 So `RunContext` becomes: `config` and the `OperationScope` as plain fields (world-independent,
-ungated, uniform), plus accessor methods for targets and secrets (timing-populated, per-node-bound,
-gatable). It is frozen and re-assembled per stage as before. One carry for the harness re-scope,
-recorded so it is not lost: the real harness target is agent-OR-admin, admin is always realized, so
-a `None` target still means a bug, never a silent skip, and admin-mode sessions are covered by the
-SESSION level's `admin` flag rather than by a missing agent.
+ungated, uniform, doing real v1 work), plus plain accessor methods for targets and secrets
+(pass-through in v1, the seam a later permission model gates behind). It is frozen and re-assembled
+per stage as before. One carry for the harness re-scope, recorded so it is not lost: the real
+harness target is agent-OR-admin, admin is always realized, so a `None` target still means a bug,
+never a silent skip, and admin-mode sessions are covered by the SESSION level's `admin` flag rather
+than by a missing agent.
 
 ## Unwind
 
@@ -465,7 +474,26 @@ Order after the tracer (FRD R8's double duty: de-risk AND crystallize helpers):
 5. remaining commands opportunistically (`vm delete`, `vm start/stop`, shell/exec roots), each a
    green, shippable unit
 
-Each migrated command adds the R7 parity assertion ("no prompt after the resolve boundary") and
+**Proof points the plan must assign, because the spike could not** (reviewer carry, 2026-07-17). The
+spike validated the graph walk, pending-node deferral, and unwind ORDER, but several
+newest-and-un-spiked mechanisms land only across these steps, and the plan must name where each is
+first proven against HEAD rather than letting it ride implicitly:
+
+- **The level-driven SKIP branch** (out-of-scope-for-level): the spike has no level object, so this
+  branch is unproven. First real exercise is a doctor scan reaching a harness at SYSTEM level (that
+  path exists: doctor calls node preflight) or `session create`; the plan pins which and asserts the
+  harness no-ops rather than erroring.
+- **`OperationScope` on the context and the plain accessors**: un-spiked (the spike used bare
+  fields). The tracer introduces the scope field and the accessor methods; the plan states the
+  minimal introduction and an assertion that the operation scope reaches a node's readiness.
+- **Scoped secret delivery** (a node receives only its declared names): the tracer's single `github`
+  materials write may not stress multi-declaration scoping, so the plan carries an explicit
+  acceptance test that a node is handed only its declared secrets, guarding against the whole-cache
+  fallback quietly becoming the permanent shape.
+
+Each migrated command adds the R7 parity assertion ("no prompt after the resolve boundary"), plus a
+GATE-PROMPT parity assertion (the activation gate's pre-boundary credential prompt matches HEAD's
+count and timing, so the sanctioned pre-preflight resolution is oracle-pinned, not assumed), and
 keeps the full suite green. Interim seams (an orchestrated command calling not-yet-migrated
 machinery) are documented in `plan.md` per FRD R8.
 
@@ -486,11 +514,13 @@ machinery) are documented in `plan.md` per FRD R8.
   supersedes the earlier "scope-free context / identity by construction" framing. The key convention
   makes layer-1 identity operational (memoization, cycles, unwind); the level makes layer-2 scope
   actionable (the required-commands skip/defer/probe/error fork, doctor as SYSTEM scope).
-- **Power-granting world is behind gated accessors; descriptive scope is not** (maintainer ruling,
-  2026-07-17). Targets and secrets are reached through `ctx.agent_target()` / `ctx.admin_target()` /
-  `ctx.secret()` (pass-through in v1, permission-gatable later, per-node-bound); the operation scope
-  is a plain ungated field because reading it grants no capability. The permission model itself is
-  the plugin SDD's; this SDD only shapes the surface so it can arrive without a break.
+- **Power-granting world reached through plain accessors; descriptive scope is a field** (maintainer
+  ruling 2026-07-17, scoped by reviewer 2026-07-17). Targets and secrets are `ctx.agent_target()` /
+  `ctx.admin_target()` / `ctx.secret()`, PASS-THROUGH in v1 (no requester binding, no gating); the
+  method shape exists only so the harness (consumer one) is not rewritten when a later permission
+  model gates behind it. The gate, the per-node binding, and enforcement are the plugin SDD's and
+  are not built here. The operation scope is a plain ungated field because reading it grants no
+  capability and it does real v1 work (the level fork, error labels).
 - **Preflight gets a LIVE target, at the cost of a narrow just-in-time prompt** (maintainer ruling,
   2026-07-17). The considered alternative, denying preflight active targets so it never needs a gate
   secret, was rejected: it re-imposes the exact limitation the model exists to remove (a readiness
@@ -504,7 +534,9 @@ machinery) are documented in `plan.md` per FRD R8.
 ## Open questions (for plan.md / LLDs)
 
 - Final key spellings for the template and harness rows of the key table (the live-resource keys are
-  settled: plain `kind/name` over the globally unique names).
+  settled: plain `kind/name` over the globally unique names). Settle these before the harness lands
+  (step 3), so FRD R12's "pin the node-key namespace across the full node-kind set" is fully
+  discharged rather than partly.
 - The scoped secret reader's shape and its interaction with `compose_env`'s whole-mapping consumer.
 - `Capability` signature sequencing: when precisely the `resolver` parameter is removed, and the
   order of the proxmox op-client bridge removal relative to it.
@@ -518,9 +550,11 @@ machinery) are documented in `plan.md` per FRD R8.
   reveals a third shape.
 - `OperationScope` exact per-level field rules and `__post_init__` enforcement (the table pins the
   contract; the LLD pins the asserts), and where each command builds its scope (one site per
-  orchestrator, at entry).
+  orchestrator, at entry). The full five-level enum is defined once up front (a cheap contract), but
+  the tracer and step 2 construct only SYSTEM and VM levels, so WORKSPACE / AGENT / SESSION are
+  exercised as their commands migrate; the LLD confirms nothing dead ships early.
 - The `RunContext` field-to-accessor migration: turning `admin_target` / `agent_target` / `secrets`
-  into `ctx.agent_target()` / `ctx.admin_target()` / `ctx.secret()` methods, whether v1 flips all
-  three at once, and how the per-node requester binding is threaded (the spike used bare fields;
-  this is a post-spike decision). Operation-scope-on-context and gated accessors are both UN-spiked,
-  so the tracer bullet is their first real exercise.
+  into PLAIN `ctx.agent_target()` / `ctx.admin_target()` / `ctx.secret()` methods (pass-through, no
+  requester binding, no gating; those are the plugin/trust SDD's, see the context section) and
+  whether v1 flips all three at once. The spike used bare fields, so this and
+  operation-scope-on-context are UN-spiked; the tracer is their first exercise.

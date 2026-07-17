@@ -65,8 +65,12 @@ graph-walking by the node.
   PAT).
 - `session create --new-agent`: the git-credential provider enters the plan ONLY through agent ->
   agent-template -> provider edges; the "command" names none of it. The hand-rolled ephemeral fold
-  (`_preflight_resolve_agent_git` plus the `git_tokens` threading) is reproduced as ordinary graph
-  behavior.
+  is reproduced as ordinary graph behavior. (Precise HEAD mechanism, corrected 2026-07-17: the
+  session inlines `resolve_git_credential_providers` + a per-provider `preflight`, then threads
+  `_resolve_git_tokens(...)` as `git_tokens` into the nested `create_agent`, which suppresses its
+  own phases via `own_root = platform is None`. `_preflight_resolve_agent_git` is `create_agent`'s
+  OWN-root helper and the session path bypasses it; an earlier draft of this doc misattributed the
+  fold to it.)
 - Memoization reproduces `bind_platforms`' by-site dedup: two VMs, one platform visit. Cycles are
   loud errors.
 

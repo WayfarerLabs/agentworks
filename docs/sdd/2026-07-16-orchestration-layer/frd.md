@@ -265,9 +265,12 @@ behavior. This SDD re-homes the composition around them; it does not redesign th
   intrinsic, R3).
 - The POWER-GRANTING world (execution targets, resolved secrets) is reached through accessor METHODS
   on the context (`ctx.agent_target()` / `ctx.admin_target()` / `ctx.secret(name)`), not bare
-  fields, so a future permission model can gate the request by the requesting node; v1 is
-  pass-through, enforcement is the plugin/trust SDD's. The context is bound to its requesting node
-  for that gating; the operation scope stays identical across those per-node contexts.
+  fields, so the node-facing signature is stable when a future permission model gates by the
+  requesting node. v1 accessors are PLAIN pass-through: no per-node requester binding, no grant
+  check, no new machinery (the gate, its binding, and its enforcement are DEFERRED to the
+  plugin/trust SDD; building them here would be inert machinery ahead of a fenced non-goal, reviewer
+  carry 2026-07-17). Only scoped secret delivery (a node reads only the secrets it declared) rides
+  the accessor with real v1 value.
 - Contexts are FROZEN and re-assembled per stage (advancing reality means a new context, never
   mutation of one a node holds). The context's contract with capability authors (the declare/receive
   rules, the self-vs-context split) is preserved; existing capability implementations keep working
@@ -287,7 +290,10 @@ behavior. This SDD re-homes the composition around them; it does not redesign th
   bespoke, nothing in the code's shape prevents a future orchestrator from prompting late, so for
   every migrated command the parity suite carries a "no prompt after the resolve boundary" assertion
   (first-consumer review note, 2026-07-17). Discipline plus helpers plus tests is the chosen trade;
-  the tests are the part that makes it durable.
+  the tests are the part that makes it durable. A migrated existing-VM command additionally carries
+  a GATE-PROMPT parity assertion: the activation gate's pre-boundary credential prompt (R4/R5's
+  sanctioned pre-preflight resolution) matches HEAD's prompt count and timing, so the one prompt the
+  model allows before preflight is oracle-pinned, not assumed (reviewer carry, 2026-07-17).
 - The ops and their internal choreography (each resource's mutation sequence, its idempotency
   contract, its own teardown) are reused as-is. Unwind SEQUENCING moves to the orchestrator (R4)
   with identical operator-visible semantics; the per-node teardown code it invokes is today's,

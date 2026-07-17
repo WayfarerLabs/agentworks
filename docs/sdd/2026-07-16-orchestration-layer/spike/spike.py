@@ -220,9 +220,13 @@ class PendingAgentNode(PendingNode):
 class AgentTemplateNode:
     """The agent template: its git-credential readiness IS its provider
     dependencies. This edge is what generalizes `create_session`'s
-    hand-rolled ephemeral fold (`_preflight_resolve_agent_git`): the
-    providers enter the plan through the graph, not through the command
-    knowing about them (FRD R4)."""
+    hand-rolled ephemeral fold: at HEAD the session inlines
+    `resolve_git_credential_providers` + a per-provider `preflight`, then
+    threads `_resolve_git_tokens(...)` as `git_tokens` into the nested
+    `create_agent` (which suppresses its own phases via
+    `own_root = platform is None`). Here the providers enter the plan
+    through the graph, not through the command knowing about them
+    (FRD R4)."""
 
     name: str
     providers: tuple[CapabilityInstanceNode, ...]
