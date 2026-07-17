@@ -198,6 +198,13 @@ behavior. This SDD re-homes the composition around them; it does not redesign th
   never masks the original error, `UserAbort` re-raised, never swallowed). Nodes contribute only
   their own teardown op (R1). Non-rollbackable windows (restart past its kill) remain explicitly
   pinned per command, exactly as the harness SDD pins its one.
+- Runup FAILURE POLICY (continue vs abort) is likewise the orchestrator's (spike-review carry,
+  2026-07-17): runup's own contract stays narrow (raise typed on definitive rejection; warn inside
+  the node on network indeterminacy), and each command's orchestrator decides skip-and-degrade vs
+  fatal, exactly as the capability README already assigns to "the caller." Today's per-caller
+  policies (a rejected credential skips and degrades provisioning to partial but is fatal in
+  `vm add-git-credential`; `[defaults] runup_git_credentials = false` skips the stage) are the
+  parity targets.
 
 ### R5: The orchestrator owns secrets end to end
 
@@ -264,12 +271,14 @@ behavior. This SDD re-homes the composition around them; it does not redesign th
 - The migration order does DOUBLE DUTY (first-consumer review note, 2026-07-17): it de-risks, and it
   is where the shared helpers crystallize, because helpers emerge from repetition rather than
   up-front design, the early commands are the ones that force their shapes. The first migrated
-  command is a thin vertical slice (the tracer bullet), chosen at HLA time; `vm create` and
-  `session create --new-agent` (the spike scenarios, R11) are the reference targets that prove
-  generality, and the latter's fan-out is precisely what forces the walker, the secret-union sweep,
-  and the unwind skeleton to earn their shapes. `session create` is an EARLY migrated command, not a
-  late one: the re-scoped harness SDD (R10) lands on it, and this SDD owes its first consumer a
-  landing pad rather than a long wait behind other commands.
+  command is a thin vertical slice (the tracer bullet), chosen at HLA time, and it must include
+  END-TO-END EDGE DERIVATION: its node graph derives from real declared references and DB rows, not
+  hand-wired edges, closing the one gap the spike deliberately left (spike-review carry,
+  2026-07-17). `vm create` and `session create --new-agent` (the spike scenarios, R11) are the
+  reference targets that prove generality, and the latter's fan-out is precisely what forces the
+  walker, the secret-union sweep, and the unwind skeleton to earn their shapes. `session create` is
+  an EARLY migrated command, not a late one: the re-scoped harness SDD (R10) lands on it, and this
+  SDD owes its first consumer a landing pad rather than a long wait behind other commands.
 - Node kinds are introduced lazily, per migrated command, rather than standing up all five
   live-resource kinds in the tracer bullet.
 - The interim seams are explicit: while both models coexist, the boundary between an orchestrated
@@ -345,7 +354,11 @@ behavior. This SDD re-homes the composition around them; it does not redesign th
   MINIMAL SHARED STATE the walker and unwind helpers operate on (what is in the walk, what is
   realized so far): unwind-read-backwards needs a record to read, and a shared helper needs an
   agreed shape for it, so "plan is vocabulary, not an artifact" is reconciled there with helpers
-  that carry the smallest record that works (first-consumer review note, 2026-07-17).
+  that carry the smallest record that works (first-consumer review note, 2026-07-17). Three further
+  HLA obligations from the spike review (2026-07-17): show the orchestrator's runup driving
+  reproducing today's per-caller continue-vs-abort policies (R4); pin the node-key namespace across
+  the full node-kind set (the spike keyed its stand-in session as `vm/s1`, a real collision hazard);
+  and state how scoped secret delivery (R5) gets proven, since the spike did not exercise it.
 
 ## Non-goals
 
