@@ -384,13 +384,13 @@ def create_vm(
     name: str,
     template: str | None = None,
     site: str | None = None,
-    cpus: int | None = None,
-    memory: int | None = None,
-    disk: int | None = None,
-    azure_vm_size: str | None = None,
-    admin_username: str | None = None,
 ) -> None:
-    """Create a new VM: provision + initialize."""
+    """Create a new VM: provision + initialize.
+
+    Hardware and the admin username are template-owned: the vm-template
+    supplies cpus/memory/disk/swap and the admin-template the username.
+    There are no per-create overrides; deviations are new templates.
+    """
 
     from agentworks.bootstrap import build_registry
     from agentworks.vms.templates import resolve_template
@@ -424,15 +424,15 @@ def create_vm(
             entity_name=vm_name,
         )
 
-    # Resolve resource settings: CLI flag > template > built-in default
-    resolved_cpus = cpus if cpus is not None else vm_tmpl.cpus
-    resolved_memory = memory if memory is not None else vm_tmpl.memory
-    resolved_disk = disk if disk is not None else vm_tmpl.disk
-    resolved_azure_size = azure_vm_size or vm_tmpl.azure_vm_size
+    # Resource settings are template-owned (no per-create overrides): the
+    # vm-template carries hardware, the admin-template the username.
+    resolved_cpus = vm_tmpl.cpus
+    resolved_memory = vm_tmpl.memory
+    resolved_disk = vm_tmpl.disk
     from agentworks.resources.access import admin_template
 
     admin = admin_template(registry)
-    resolved_admin_username = admin_username or admin.username
+    resolved_admin_username = admin.username
     validate_admin_username(resolved_admin_username)
 
     verify_tailscale_available()
@@ -541,7 +541,6 @@ def create_vm(
         memory_gib=resolved_memory,
         disk_gib=resolved_disk,
         swap_gib=vm_tmpl.swap,
-        azure_vm_size=resolved_azure_size,
     )
 
     output.detail(f"Creating VM '{vm_name}' on vm-site '{site}'...")

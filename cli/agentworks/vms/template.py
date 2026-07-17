@@ -65,7 +65,6 @@ class VMTemplate:
     cpus: int | None = None
     memory: int | None = None
     disk: int | None = None
-    azure_vm_size: str | None = None
     swap: int | None = None
     # System-wide initialization
     apt: list[str] | None = None

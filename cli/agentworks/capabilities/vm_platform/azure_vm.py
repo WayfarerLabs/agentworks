@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import base64
 import contextlib
-from typing import TYPE_CHECKING, Any, ClassVar, Protocol
+from typing import TYPE_CHECKING, Any, ClassVar, NamedTuple, Protocol
 
 from agentworks import output
 from agentworks.capabilities.vm_platform.base import ProvisionRequest, ProvisionResult, VMPlatform
@@ -118,6 +118,97 @@ def _network_client(az: _HasSubscriptionId) -> NetworkManagementClient:
 
 
 _AZURE_REQUIRED_KEYS = ("subscription_id", "resource_group", "region")
+_AZURE_OPTIONAL_KEYS = ("vm_sizes",)
+
+
+class _VMSize(NamedTuple):
+    """One Azure VM size in the selection catalog: a SKU name plus the
+    cpus and memory (GiB) it provides."""
+
+    cpus: int
+    memory_gib: int
+    name: str
+
+
+# Built-in Azure VM size catalog: the B-series (burstable) general-purpose
+# ladder. `vm create` picks the smallest entry whose cpus AND memory both
+# satisfy the vm-template's request, so the operator specifies compute and
+# memory like every other platform instead of an Azure-specific SKU. The
+# ratios are fixed by Azure (a template asking for an off-ratio shape, e.g.
+# 4 vCPU / 8 GiB, rounds UP to the nearest fitting SKU and warns). Ordered
+# small to large for readability; selection takes the minimum by
+# (cpus, memory), so an operator override in platform_config.vm_sizes
+# need not be pre-sorted.
+_DEFAULT_VM_SIZES: tuple[_VMSize, ...] = (
+    _VMSize(1, 2, "Standard_B1ms"),
+    _VMSize(2, 4, "Standard_B2s"),
+    _VMSize(2, 8, "Standard_B2ms"),
+    _VMSize(4, 16, "Standard_B4ms"),
+    _VMSize(8, 32, "Standard_B8ms"),
+    _VMSize(12, 48, "Standard_B12ms"),
+    _VMSize(16, 64, "Standard_B16ms"),
+    _VMSize(20, 80, "Standard_B20ms"),
+)
+
+
+def _parse_size_catalog(
+    config: Mapping[str, object], owner: str
+) -> tuple[_VMSize, ...]:
+    """The site's VM-size catalog: the operator override
+    (``platform_config.vm_sizes``) when present, else the built-in
+    B-series ladder. Raises ``ConfigError`` on a malformed override so
+    the shape is validated at config-load time, not first ``vm create``.
+    """
+    raw = config.get("vm_sizes")
+    if raw is None:
+        return _DEFAULT_VM_SIZES
+    if not isinstance(raw, (list, tuple)) or not raw:
+        raise ConfigError(
+            f"{owner}.vm_sizes must be a non-empty list of "
+            f"{{cpus, memory, size}} tables"
+        )
+    catalog: list[_VMSize] = []
+    for i, entry in enumerate(raw):
+        if not isinstance(entry, dict):
+            raise ConfigError(
+                f"{owner}.vm_sizes[{i}] must be a {{cpus, memory, size}} table"
+            )
+        unknown = sorted(set(entry) - {"cpus", "memory", "size"})
+        if unknown:
+            raise ConfigError(
+                f"{owner}.vm_sizes[{i}]: unknown field(s): {', '.join(unknown)}"
+            )
+        cpus, memory, size = entry.get("cpus"), entry.get("memory"), entry.get("size")
+        # bool is an int subclass; reject it explicitly so `cpus = true`
+        # does not sneak through as 1.
+        if not isinstance(cpus, int) or isinstance(cpus, bool) or cpus <= 0:
+            raise ConfigError(f"{owner}.vm_sizes[{i}].cpus must be a positive integer")
+        if not isinstance(memory, int) or isinstance(memory, bool) or memory <= 0:
+            raise ConfigError(f"{owner}.vm_sizes[{i}].memory must be a positive integer")
+        if not isinstance(size, str) or not size:
+            raise ConfigError(f"{owner}.vm_sizes[{i}].size must be a non-empty string")
+        catalog.append(_VMSize(cpus, memory, size))
+    return tuple(catalog)
+
+
+def _select_vm_size(
+    catalog: tuple[_VMSize, ...], *, cpus: int, memory_gib: int
+) -> _VMSize:
+    """The catalog entry that both satisfies the request and is smallest
+    by (cpus, memory), chosen with ``min`` so the result is independent
+    of catalog order. Raises ``ConfigError`` when the request exceeds
+    every entry (the template is bigger than anything on offer)."""
+    fits = [s for s in catalog if s.cpus >= cpus and s.memory_gib >= memory_gib]
+    if not fits:
+        largest = max(catalog, key=lambda s: (s.cpus, s.memory_gib))
+        raise ConfigError(
+            f"no Azure VM size satisfies the requested {cpus} vCPU / "
+            f"{memory_gib} GiB (largest available is {largest.name}: "
+            f"{largest.cpus} vCPU / {largest.memory_gib} GiB)",
+            hint="shrink the vm-template's cpus/memory, or add a larger "
+            "entry to the site's platform_config.vm_sizes catalog",
+        )
+    return min(fits, key=lambda s: (s.cpus, s.memory_gib))
 
 
 class AzureVMPlatform(VMPlatform):
@@ -151,11 +242,14 @@ class AzureVMPlatform(VMPlatform):
                     f"{owner}.{key} is required for the azure-vm platform and "
                     f"must be a non-empty string"
                 )
-        unknown = sorted(set(config) - set(_AZURE_REQUIRED_KEYS))
+        unknown = sorted(set(config) - set(_AZURE_REQUIRED_KEYS) - set(_AZURE_OPTIONAL_KEYS))
         if unknown:
             raise ConfigError(
                 f"{owner}: unknown azure-vm platform field(s): {', '.join(unknown)}"
             )
+        # Validate the optional size-catalog override's shape here so a
+        # malformed vm_sizes fails at config load, not first vm create.
+        _parse_size_catalog(config, owner)
         return ()
 
     @classmethod
@@ -177,7 +271,21 @@ class AzureVMPlatform(VMPlatform):
             region=str(self.platform_config["region"]),
         )
 
-        azure_vm_size = request.azure_vm_size or "Standard_B2s"
+        # Select the smallest Azure SKU that satisfies the template's
+        # compute/memory request (the standard cross-platform model);
+        # the catalog is the built-in B-series ladder or the site's
+        # platform_config.vm_sizes override.
+        catalog = _parse_size_catalog(self.platform_config, f"vm-site/{self.site_name}")
+        req_cpus = request.cpus if request.cpus is not None else 4
+        req_memory = request.memory_gib if request.memory_gib is not None else 8
+        selected = _select_vm_size(catalog, cpus=req_cpus, memory_gib=req_memory)
+        azure_vm_size = selected.name
+        if selected.cpus > req_cpus or selected.memory_gib > req_memory:
+            output.warn(
+                f"no exact Azure size for {req_cpus} vCPU / {req_memory} GiB; "
+                f"rounding up to {selected.name} "
+                f"({selected.cpus} vCPU / {selected.memory_gib} GiB)"
+            )
         disk = request.disk_gib if request.disk_gib is not None else 50
         swap = request.swap_gib if request.swap_gib is not None else 0
         admin_username = request.admin_username

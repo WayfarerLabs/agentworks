@@ -45,6 +45,26 @@ def test_vm_create_site_flag_forwards(monkeypatch: pytest.MonkeyPatch) -> None:
     assert captured["site"] == "azure-dev"
 
 
+@pytest.mark.parametrize(
+    "flag",
+    ["--cpus", "--memory", "--disk", "--azure-vm-size", "--admin-username"],
+)
+def test_vm_create_template_override_flags_removed(
+    monkeypatch: pytest.MonkeyPatch, flag: str
+) -> None:
+    """Hardware and admin-username overrides are gone from `vm create`:
+    those values live in the vm-template / admin-template now."""
+    captured: dict[str, Any] = {}
+    result = _invoke(
+        monkeypatch,
+        ["vm", "create", "box", flag, "2"],
+        "agentworks.vms.manager.create_vm",
+        captured,
+    )
+    assert result.exit_code != 0
+    assert flag in _ANSI_RE.sub("", result.output)
+
+
 def test_vm_create_platform_flag_removed(monkeypatch: pytest.MonkeyPatch) -> None:
     captured: dict[str, Any] = {}
     result = _invoke(

@@ -142,12 +142,15 @@ examples (an Azure site, a remote-Lima site with `platform_config.vm_host`). The
 | `agw vm add-git-credential <name> <cred>`           | Add or update a git credential                                |
 
 `vm create <name>` takes the VM name as a required positional. Optional flags: `--template` (a
-declared vm-template), `--site` (a declared vm-site; falls back to `defaults.site`, else the one
+declared vm-template) and `--site` (a declared vm-site; falls back to `defaults.site`, else the one
 ENABLED site is inferred when there is exactly one, several prompt interactively, and
-non-interactive runs error naming the options), `--admin-username`, `--cpus`, `--memory`, `--disk`,
-and `--azure-vm-size`. These are immutable provisioning parameters stored in the database. All
-initialization behavior (packages, install commands, etc.) is driven by config. Templates carry no
-`site`: placement is per-host, so it never travels inside a shared template.
+non-interactive runs error naming the options). Hardware (`cpus`, `memory`, `disk`, `swap`) comes
+from the vm-template and the admin username from the admin-template; there are no per-create
+overrides, so to deviate you declare a new template. On Azure, `cpus` + `memory` select the smallest
+fitting VM size from the site's catalog (built-in B-series, or `platform_config.vm_sizes`); an
+off-ratio request rounds up and warns. These are immutable provisioning parameters stored in the
+database. All initialization behavior (packages, install commands, etc.) is driven by config.
+Templates carry no `site`: placement is per-host, so it never travels inside a shared template.
 
 The first interactive `vm create` asks once for an optional **system slug** (3-20 chars, lowercase
 alphanumeric plus dash, no leading/trailing dash): a short identifier for this agentworks
@@ -806,9 +809,10 @@ VM creation follows a two-phase lifecycle tracked by separate status columns:
    credentials, sync dotfiles, fetch mise lockfile, run mise install, run user install commands for
    the admin user
 
-Initialization is fully declarative -- driven entirely by config. `vm create` only accepts immutable
-provisioning parameters (name, site, resources). `vm reinit` takes only the VM name and re-runs
-initialization using the current config.
+Initialization is fully declarative, driven entirely by config. `vm create` only accepts a name,
+`--template`, and `--site`; the immutable provisioning parameters (resources, admin username) come
+from the selected templates. `vm reinit` takes only the VM name and re-runs initialization using the
+current config.
 
 Non-fatal initialization failures (packages, dotfiles) produce a `partial` status rather than
 aborting. Fatal failures prompt for deletion or reinit. Use `vm describe` to view the full event

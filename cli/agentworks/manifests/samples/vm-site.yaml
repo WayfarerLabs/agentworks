@@ -32,6 +32,13 @@
 #    subscription_id: 00000000-0000-0000-0000-000000000000
 #    resource_group: agw-dev
 #    region: eastus
+#    # Optional: override the built-in B-series size catalog. `vm create`
+#    # picks the smallest entry whose cpus AND memory satisfy the
+#    # vm-template's request (off-ratio requests round up and warn).
+#    vm_sizes:
+#      - {cpus: 2, memory: 8, size: Standard_D2s_v5}
+#      - {cpus: 4, memory: 16, size: Standard_D4s_v5}
+#      - {cpus: 8, memory: 32, size: Standard_D8s_v5}
 ##
 ## Proxmox VE. The API token value is the `proxmox-token` secret
 ## (override the name with platform_config.token_secret), resolved

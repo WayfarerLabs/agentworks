@@ -205,11 +205,13 @@ ssh_private_key = "~/.ssh/id_ed25519"        # required: used for SSH connection
 # -- Provisioning (set once at create time) --
 # (Templates carry no `site`: placement is per-host; use `--site` or
 # defaults.site above.)
-#cpus = 4                                   # number of CPUs (Lima)
-#memory = 8                                 # memory in GiB (Lima)
-#azure_vm_size = "Standard_B2s"             # Azure VM size (determines cpu and memory for Azure)
+#cpus = 4                                   # number of vCPUs
+#memory = 8                                 # memory in GiB
 #disk = 50                                  # disk size in GiB
 #swap = 4                                   # swap file size in GiB (0 to disable)
+# On Azure, cpus + memory select the smallest fitting VM size from the
+# site's catalog (built-in B-series, or platform_config.vm_sizes); an
+# off-ratio request rounds up to the nearest fitting size and warns.
 # -- Provisioning-time secret references --
 # Name of the secret declaration whose value is used as the Tailscale
 # auth key during `vm create` / `vm reinit`. Default: "tailscale-auth-key".
