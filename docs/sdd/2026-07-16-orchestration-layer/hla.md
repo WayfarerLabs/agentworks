@@ -168,6 +168,16 @@ cannot start a VM; the gate is the ORCHESTRATOR driving the live VM node's own p
 calls. Power state is VM-node vocabulary, not a shared-protocol method, so nothing about it touches
 the thin `Node` surface (readiness plus deps); it is one more piece of orchestrator choreography
 over node ops, and `ensure_active` / `keep_active` become an `activation.py` orchestration helper.
+
+**This placement is provisional, and cheap to revisit** (maintainer note, 2026-07-17). Activation
+could plausibly become an optional protocol stage (an `ensure_available`-style hook that most node
+kinds no-op), and the case for keeping it as domain ops now is only that power state is meaningful
+for so few node kinds that a protocol slot would sit empty on nearly all of them. If driving it
+through domain ops turns awkward as commands migrate (for example, a second node kind grows a
+real "make yourself available" step, or the gate helper starts special-casing node types), that is
+the signal to fold it into the protocol. The tracer bullet and `vm create` will exercise it first;
+revisit then if it chafes.
+
 Five properties keep it crisp:
 
 - **It is a SPAN, not a point** (WSL2, and any future platform that must be HELD active rather than
