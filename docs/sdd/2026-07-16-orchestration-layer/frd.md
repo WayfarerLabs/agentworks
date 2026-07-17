@@ -60,16 +60,26 @@ Today the model reads: each service-layer command imperatively composes its reso
 instances, orders preflights, runs the one resolve, drives runups and ops, and hand-rolls rollback).
 After this SDD it reads:
 
-> **A command is a plan over a graph of nodes.** The orchestration layer owns the plan: which nodes
-> participate, the dependency edges between them, the readiness phases, the single secret resolve,
-> and the staged execution that follows. Every node exposes the same lifecycle through one thin
-> protocol, and receives everything it needs through the context. Nodes never resolve secrets, never
-> walk the graph, and never order phases.
+> **A command is a plan over a graph of nodes, and each command's orchestrator owns its plan**:
+> which nodes participate, the dependency edges between them, the readiness phases, the single
+> secret resolve, the sequencing of the command's roll-forward, and the roll-back when it fails.
+> Every node exposes the same lifecycle through one thin protocol, and receives everything it needs
+> through the context. Nodes never resolve secrets, never walk the graph, never order phases, and
+> operate only within their own scope.
 
-The split gives each side a crisp job. The orchestration layer (the top of the current service
-layer, entered through the current CLI-shaped APIs) owns traversal, phase order, secret resolution,
-and context assembly. Resources own their OWN readiness, their own ops, and the declaration of their
-own dependencies, nothing else.
+Orchestrators are PLURAL and BESPOKE (maintainer ruling, 2026-07-17): one per command, at the top of
+the current service layer, entered through the current CLI-shaped APIs. Writing a new command IS
+writing its orchestrator. What this SDD standardizes is not an engine that runs commands but the
+separation of responsibilities and the interface between the orchestrators and the nodes they drive:
+orchestrators own traversal, phase order, secret resolution, context assembly, and unwind; nodes own
+their OWN readiness, their own ops (including their own teardown), and the declaration of their own
+dependencies, nothing else. An orchestrator is just a layer of code this SDD defines and gives a
+name: no required shape, no mandated plan artifact, no lifecycle of its own. Constraining or
+facilitating that bespoke logic beyond the responsibility split is explicitly out of scope; an
+engine general enough to cover all our ops is the rabbit hole this SDD refuses (see Non-goals).
+Shared helpers around dependency resolution, the preflight sweep, secret resolution, and unwind
+(possibly a slim shared base) are expected to EMERGE and are factored out as they prove themselves
+across commands, not designed up front.
 
 What deliberately does NOT change: the ops and their choreography. The per-resource mutation
 sequences (clone + configure + start for a VM; user + home + store for an agent), the rollback
@@ -91,20 +101,30 @@ behavior. This SDD re-homes the composition around them; it does not redesign th
   (identity, dependencies, readiness contributions) before it exists in the world, and is marked
   realized when its mutation completes. Pending-ness is a property of the node in the plan, not a
   field threaded through contexts.
-- **Plan**: the orchestrator's product for one command: the participating nodes, their edges, and
-  the phase order over them.
+- **Orchestrator**: the authored, command-specific composition code at the top of the service layer.
+  One per command; plural by design; just code. This SDD names the layer and assigns its
+  responsibilities; it deliberately does not prescribe the code's structure.
+- **Plan**: shorthand for what an orchestrator has decided to do: the nodes it will touch (including
+  pending ones), their edges, and what it has realized so far. Vocabulary, not an artifact: this SDD
+  mandates no plan object, and whether an orchestrator materializes one is its own business.
 - **Context**: the per-invocation object a node's lifecycle stage receives (the evolution of today's
   `RunContext`): global config, execution targets, resolved secrets, and whatever else the stage's
-  timing makes available. Assembled by the orchestrator, updated as the plan advances.
+  timing makes available. Assembled by the orchestrator per stage and frozen: advancing reality
+  means a new context for the next stage, never mutation of one a node already holds.
 
 ## Requirements
 
 ### R1: One lifecycle, on every node, through a thin protocol
 
-- Every node exposes the same lifecycle surface: `preflight` (pre-resolve, dependency-blind,
-  read-only), `runup` (post-resolve, read-only, deferred to just before the node's first use), and
-  its domain ops. The preflight/runup semantics are the capability model's, unchanged; what changes
-  is WHO has them (every node, not just capability instances).
+- Every node exposes the same READINESS surface: `preflight` (pre-resolve, dependency-blind,
+  read-only) and `runup` (post-resolve, read-only, deferred to just before the node's first use),
+  plus its dependency declaration. The preflight/runup semantics are the capability model's,
+  unchanged; what changes is WHO has them (every node, not just capability instances).
+- The protocol pins readiness and dependency declaration ONLY. Ops stay domain-specific and are
+  deliberately NOT unified (`start() -> str`, `create()/destroy()`, and credential-materials writes
+  share nothing); the capability README's "these belong to the subclass, do not try to unify them"
+  carries over verbatim. A node kind that a command can create also exposes its own TEARDOWN op
+  (delete what I made), the node-scope half of unwind (R4).
 - The shared surface is a **protocol (structural typing), not an inheritance hierarchy** (maintainer
   ruling, 2026-07-16). A thin `Node` protocol pins the lifecycle shape; node kinds implement it
   directly. There is no deep class tree, and composition (a session is made of a harness, an agent,
@@ -133,12 +153,16 @@ behavior. This SDD re-homes the composition around them; it does not redesign th
 ### R3: Live resources are first-class nodes, including pending ones
 
 - VM, workspace, agent, session, and console instances are nodes, distinct from their templates,
-  constructed from their DB rows plus their bound runtime machinery (a live VM node wraps its row
-  and its bound platform instance).
+  constructed from their DB rows. Their runtime machinery enters as graph edges, consistent with R1
+  (a live VM node holds its row; its platform instance is a dependency node, not a contained field).
 - A live node knows its own identity: its own name and its ancestors' names (a live agent knows its
   VM, its workspace context, its agent name). **Identity is intrinsic to the node**, which is what
   removes the need to thread a separate identity object through every context construction site
   (supersedes the harness SDD's `OperationIdentity` threading; see R10).
+- Identity reaches LEAF nodes by injection at construction: a capability node hanging off a live or
+  pending resource (the harness under a session) is constructed WITH its owning scope's identity
+  (the session name it addresses), supplied by the orchestrator from the plan. Nodes never walk the
+  graph to discover identity (R4); the spike proves this delivery on the stub harness (R11).
 - A command that creates an instance places a **pending node** for it in the plan up front, with its
   names chosen and its dependencies attached. Existence is a queryable property of the node (pending
   vs realized), updated by the orchestrator when the realizing mutation completes.
@@ -153,18 +177,27 @@ behavior. This SDD re-homes the composition around them; it does not redesign th
 - Nodes **declare** their dependencies (the existing reference machinery: `validate_config` implied
   references, `referenced_resources()`, plus the live-resource edges the plan adds). Nodes never
   call other nodes' lifecycle stages.
-- The orchestrator walks the declared graph: memoized (a node shared by two consumers, a vm-site
-  under two agents, is visited once), deduplicated, cycle-checked, deterministic. Traversal logic
-  exists in exactly one place.
+- An orchestrator walks the declared graph: memoized (a node shared by two consumers, a vm-site
+  under two agents, is visited once), deduplicated, cycle-checked, deterministic. The traversal
+  MECHANISM is a shared helper implemented once and used by every orchestrator; which nodes to root
+  the walk at, and when, is each orchestrator's call.
 - A command's entry point names only the resources it uses DIRECTLY (the session template, the
   target workspace and agent, the VM). Everything transitive (the agent template's git credentials,
   the site's platform, their secrets) enters the plan through declared edges, not through the
   command knowing about them. This replaces the hand-rolled fan-outs of observation 2, including
   `create_session`'s bespoke ephemeral-agent fold, with one mechanism.
-- The canonical phase order is preserved and becomes the orchestrator's to enforce, once, instead of
-  each root's to re-author: preflight-all (before any prompt or mutation) -> the single secret
-  resolve at the preflight boundary -> staged execution, with each node's runup deferred to just
-  before its first use, and context updated as realization proceeds.
+- The phase INVARIANT every orchestrator upholds is exactly the walk-away boundary: preflight-all
+  (before any prompt or mutation) -> the single secret resolve. Everything after the resolve
+  (mutation order, runup timing against "just before first use", interleavings like restart's
+  env-chain resolution after its confirm gates) is command-shaped, authored in that command's
+  orchestrator; the invariant is a discipline the shared helpers make easy, not an engine-enforced
+  template.
+- Roll-BACK is the orchestrator's too (maintainer ruling, 2026-07-17): the orchestrator knows what
+  it has realized, and unwind is that record read backwards (tear down the realized nodes, reverse
+  realization order), invoked with today's discipline (best-effort, a failed teardown warns and
+  never masks the original error, `UserAbort` re-raised, never swallowed). Nodes contribute only
+  their own teardown op (R1). Non-rollbackable windows (restart past its kill) remain explicitly
+  pinned per command, exactly as the harness SDD pins its one.
 
 ### R5: The orchestrator owns secrets end to end
 
@@ -178,8 +211,10 @@ behavior. This SDD re-homes the composition around them; it does not redesign th
   and preflight-time resolvability prediction move to the orchestrator, which owns the graph and can
   predict over it centrally.
 - Resolvability prediction (doctor's and preflight's "is this secret mapped at all?") remains a
-  pre-resolve, non-prompting property with the same operator-facing behavior; it is computed from
-  the plan rather than by each instance.
+  pre-resolve, non-prompting property with the same operator-facing behavior. It is computed
+  centrally from the DECLARED REFERENCE GRAPH, not by each instance; a command's plan and doctor's
+  all-resources scan are two views over the same computation, which is how doctor keeps its
+  per-resource rows without needing a command plan.
 - Delivery may be scoped: a node receives the secrets it declared, not the command-wide mapping.
   (Exact filtering semantics are an HLA decision; the requirement is that nothing about delivery
   reintroduces node-side resolution.)
@@ -187,8 +222,10 @@ behavior. This SDD re-homes the composition around them; it does not redesign th
 ### R6: The context is rich, orchestrator-assembled, and stage-accurate
 
 - The context (evolving today's `RunContext`) is assembled by the orchestrator per node invocation
-  and reflects the plan's current reality: at preflight, command-start reality (existing targets
-  only, no secrets); at runup and ops, current reality (realized targets, resolved secrets).
+  and reflects current reality: at preflight, command-start reality (existing targets only, no
+  secrets); at runup and ops, op-start reality (realized targets, resolved secrets). Contexts are
+  FROZEN, like today's `RunContext`: advancing reality means assembling a new context for the next
+  stage, never mutating one a node already holds.
 - Because identity is intrinsic to nodes (R3) and pending-ness lives in the plan (R3), the context
   does not carry a threaded identity object or a `to_create` set. What it carries is the runtime
   world: config, execution targets, secrets, exactly the fields that are timing-dependent.
@@ -207,8 +244,10 @@ behavior. This SDD re-homes the composition around them; it does not redesign th
   semantics (best-effort unwind, `UserAbort` never swallowed), and partial-failure degradation (a
   rejected credential skips, the command degrades to partial) all behave as they do at HEAD.
 - The ops and their internal choreography (each resource's mutation sequence, its idempotency
-  contract, its rollback) are reused as-is. Where today's code interleaves phases for good reason
-  (restart's env-chain resolution after its confirm gates), the plan expresses that command's proven
+  contract, its own teardown) are reused as-is. Unwind SEQUENCING moves to the orchestrator (R4)
+  with identical operator-visible semantics; the per-node teardown code it invokes is today's,
+  relocated onto the node. Where today's code interleaves phases for good reason (restart's
+  env-chain resolution after its confirm gates), that command's orchestrator expresses its proven
   order rather than flattening it into a single template.
 
 ### R8: Migration is incremental, command by command, always green
@@ -219,7 +258,11 @@ behavior. This SDD re-homes the composition around them; it does not redesign th
   command boundary, deliberately, so it survives interruption by higher-priority work.
 - The migration order is chosen to de-risk: the first migrated command is a thin vertical slice (the
   tracer bullet), chosen at HLA time; `vm create` and `session create --new-agent` (the spike
-  scenarios, R11) are the reference targets that prove generality.
+  scenarios, R11) are the reference targets that prove generality. `session create` is an EARLY
+  migrated command, not a late one: the re-scoped harness SDD (R10) lands on it, and this SDD owes
+  its first consumer a landing pad rather than a long wait behind other commands.
+- Node kinds are introduced lazily, per migrated command, rather than standing up all five
+  live-resource kinds in the tracer bullet.
 - The interim seams are explicit: while both models coexist, the boundary between an orchestrated
   command and the not-yet-migrated machinery it calls into is documented in the plan, and no
   migrated command regresses to hand-rolled composition to work around a seam.
@@ -256,19 +299,22 @@ behavior. This SDD re-homes the composition around them; it does not redesign th
 
 - Before the HLA hardens, a throwaway code spike validates the load-bearing bets on real types
   (maintainer ruling on scope, 2026-07-16). The spike implements: the `Node` protocol; nodes for the
-  dissimilar stress cases (a live VM wrapping its row and platform, a resolved vm-template absorbing
-  `preflight_vm_template`, a pending live agent, a stub harness that defers on the pending agent);
-  and a minimal memoized walker over declared dependencies.
+  dissimilar stress cases (a live VM with its platform instance as a dependency edge, a resolved
+  vm-template absorbing `preflight_vm_template`, a pending live agent, a stub harness that defers on
+  the pending agent and consumes its injected session identity); and a minimal memoized walker over
+  declared dependencies.
 - The spike's scenarios are `vm create` and `session create --new-agent`, chosen because together
   they exercise every node species: templates with real readiness, capability instances (platform,
   git credentials) entering as ordinary dependency nodes, existing live resources, pending live
   resources, and the nested secret fold. For each scenario the spike asserts, against the current
-  imperative code's behavior: the preflight set, the deferral behavior on pending nodes, and the
-  union of secrets the resolve pass would cover.
-- The spike answers three questions: does one thin protocol fit dissimilar nodes without contortion;
-  does identity-intrinsic-to-nodes hold at construction time; does a memoized walk over declared
-  edges reproduce the hand-rolled fan-outs. Findings land in `spike-findings.md` in this feature
-  directory, and the HLA cites them.
+  imperative code's behavior: the preflight set, the deferral behavior on pending nodes, the union
+  of secrets the resolve pass would cover, and the unwind set and order a failure injected at each
+  phase would produce (matching today's hand-rolled rollback).
+- The spike answers four questions: does one thin protocol fit dissimilar nodes without contortion;
+  does identity-intrinsic-to-nodes (plus orchestrator injection for leaf nodes) hold at construction
+  time; does a memoized walk over declared edges reproduce the hand-rolled fan-outs; does
+  realization-order unwind reproduce today's rollback. Findings land in `spike-findings.md` in this
+  feature directory, and the HLA cites them.
 - The spike touches nothing under `agentworks/` (no production code, no wiring into commands) and is
   discarded or kept as reference in this feature directory. It is explicitly NOT the tracer bullet:
   migrating a real command is the plan's first implementation phase, after FRD/HLA review.
@@ -284,7 +330,9 @@ behavior. This SDD re-homes the composition around them; it does not redesign th
 - This SDD's artifacts follow the standard set: this FRD, `hla.md` (after the spike),
   `spike-findings.md`, `prior-art-research.md` (graph-walking orchestrators in adjacent tools:
   Terraform's resource graph, Kubernetes reconciliation, systemd ordering; scoped to what informs
-  the walker and pending-node design), `plan.md`, and the ADR draft.
+  the walker and pending-node design), `plan.md`, and the ADR draft. The HLA explicitly pins the
+  reference-graph-to-node-graph translation rule (one registry resource to many nodes; nodes with no
+  registry resource of their own), the subtlest part of the walker's input.
 
 ## Non-goals
 
@@ -292,6 +340,10 @@ behavior. This SDD re-homes the composition around them; it does not redesign th
   resource's mutation choreography stays authored, imperative code; the orchestrator sequences WHEN
   nodes act, never HOW a node does its work. Anyone reading this SDD as "Terraform inside
   Agentworks" has misread it.
+- **A generic orchestration engine.** Orchestrators are bespoke, one per command; an engine general
+  enough to cover all our ops is a rabbit hole this SDD deliberately refuses (maintainer ruling,
+  2026-07-17). Shared helpers are factored out opportunistically as repetition proves them, never
+  designed up front as a framework commands plug into.
 - **Operator surface changes.** No new commands, flags, config keys, or resource kinds; no changes
   to `agw resource` output or doctor rows beyond parity. An operator upgrading across this effort
   should notice nothing.
