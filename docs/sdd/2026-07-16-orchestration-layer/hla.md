@@ -24,7 +24,7 @@ node graph          orchestration helpers
   vm/box              walk() . preflight sweep . secret union+predict+resolve
   vm-site/px          scoped delivery . RealizationLog (unwind)
   git-credential/gh
-  agent/box/dev ...
+  agent/dev ...
         |
         v
 backing data: registry resources (declared recipes) . DB rows (live state)
@@ -76,21 +76,26 @@ creatable node kinds additionally expose `teardown()` (their half of unwind). Ei
 may be a no-op.
 
 **Key convention** (spike finding 3; fixes the spike's own `vm/s1` session collision):
-`<node-kind>/<qualified-name>`, unique within a command's graph.
+`<node-kind>/<name>`, plain, matching the registry's `(kind, name)` convention exactly.
 
 | node                           | key shape                   | example               |
 | ------------------------------ | --------------------------- | --------------------- |
 | live/pending VM                | `vm/<name>`                 | `vm/box`              |
-| live/pending workspace         | `workspace/<vm>/<name>`     | `workspace/box/ws1`   |
-| live/pending agent             | `agent/<vm>/<name>`         | `agent/box/dev`       |
-| live/pending session           | `session/<vm>/<name>`       | `session/box/s1`      |
+| live/pending workspace         | `workspace/<name>`          | `workspace/ws1`       |
+| live/pending agent             | `agent/<name>`              | `agent/dev`           |
+| live/pending session           | `session/<name>`            | `session/s1`          |
 | capability instance            | `<owner-kind>/<owner-name>` | `vm-site/px`          |
 | resolved template              | `<template-kind>/<name>`    | `vm-template/default` |
-| harness instance (per session) | `harness/<vm>/<session>`    | `harness/box/s1`      |
+| harness instance (per session) | `harness/<session>`         | `harness/s1`          |
 
-VM-scoped names carry the VM in the key because their names are only unique per VM. Exact spellings
-are pinned at LLD; the invariant is per-graph uniqueness, since memoization, cycle reporting, and
-the unwind log all key off it (the node-graph analog of the registry's `(kind, name)`).
+No VM qualification: agent, workspace, and session names are GLOBALLY unique in the current model
+(`workspaces.name` is the table's primary key; agent and session lookups are by bare name;
+`agents.linux_user` is globally unique), and global uniqueness carries load-bearing value the model
+keeps (maintainer ruling, 2026-07-17). The one future that could revisit this (same-named agents on
+different VMs, if agents ever go multi-VM) would be its own model change, not a key-spelling tweak,
+and is deliberately not designed for. The spike's collision is fixed by the node KIND (`session/s1`
+vs `vm/s1`), not by qualification. Memoization, cycle reporting, and the unwind log all key off
+these strings.
 
 ## Deriving the graph (the translation rule)
 
@@ -171,14 +176,35 @@ spike flagged closes) in a dedicated cleanup step once no migrated command depen
 `ctx.secrets` per the completed declare/receive contract (PR #182's direction; proxmox's op-client
 bridge dies in the same step).
 
-## The context
+## The context, and how identity actually travels
 
 `RunContext` is the node-facing surface and the spike needed ZERO changes to it: frozen,
 re-assembled per stage by the orchestrator, fields unchanged (`config`, `admin_target`,
-`agent_target`, `secrets`). Identity stays OFF the context (intrinsic to nodes; injected at
-construction for leaves). One carry for the harness re-scope, recorded here so it is not lost: the
-real harness target is agent-OR-admin, and the admin target is always realized, so `None` stays
-reserved for genuine bugs and admin-mode sessions never trip the anti-silent-skip error.
+`agent_target`, `secrets`).
+
+**The context is SCOPE-FREE, and that is precisely what makes it passable as-is.** A context is
+"pass it anywhere" only if it contains nothing node-specific, and one command's graph spans
+different scopes: in a single `session create` the git-credential nodes are a system-global concern,
+the platform node a site concern, the harness a session concern. A context that carried "whose
+invocation is this" would have to be re-scoped per node, which is exactly the road that produced the
+harness SDD's `OperationIdentity` + `level` machinery. Scope-free, ONE frozen command-start context
+serves the entire preflight sweep, literally the same object handed to every node. (Contexts still
+vary where the RUNTIME world varies: a later stage carries secrets, and a materials op carries its
+target's transport. Timing-dependent, never scope-dependent.)
+
+**Identity travels by construction, not by a delivery mechanism.** "Injection" oversold it: it is
+ordinary constructor arguments flowing parent to child while the graph is being BUILT. Whoever
+constructs a node hands it what it belongs to, and the constructor is always something that already
+holds that data: the session's node factory builds its harness bound to
+`(harness_config, session_name, target_agent_node)`, all three of which the factory has because it
+is building that session. The same is already true today at every level: `GitCredentialProvider`
+gets its `owner_name` at construct. No orchestrator reach-down into deep nodes exists, because
+construction is compositional (each factory builds its immediate children); the orchestrator only
+roots it. At lifecycle time nodes then carry their identity and the context carries the world.
+
+One carry for the harness re-scope, recorded here so it is not lost: the real harness target is
+agent-OR-admin, and the admin target is always realized, so `None` stays reserved for genuine bugs
+and admin-mode sessions never trip the anti-silent-skip error.
 
 ## Unwind
 
@@ -188,6 +214,56 @@ never masks the original error, `UserAbort` re-raised). The teardown bodies are 
 code relocated onto the nodes (`_rollback_ephemerals`' per-entity blocks, `create_vm`'s row delete);
 the log is the minimal shared state the FRD's R12 promised to pin, and it is a list, not a `Plan`
 class. Non-rollbackable windows stay pinned per command by its orchestrator.
+
+## Create vs use: the same graph, different pending sets
+
+There is no separate "create mode" in this model. Creating a resource and using an existing one
+build the SAME graph shapes; the difference is which nodes are pending, and therefore whether the
+roll-forward realizes anything. Realization itself is bespoke mutation plus a recorded flag flip:
+the mutation choreography is the command's authored code (ops stay un-unified, FRD R1), and
+`log.realize(node)` records the pending-to-realized transition that readiness queries and unwind
+reads backwards. `teardown()` is the node's own inverse. Two walkthroughs make it concrete.
+
+**Use: `session restart`** (everything exists; no realization record at all):
+
+1. BUILD: the session row names its agent, workspace, and VM; the domain factories construct live
+   nodes from those rows (the VM's `site` field pulling in the vm-site instance node per the
+   derivation rule); session-template re-resolution by the stored name yields
+   `(harness, harness_config)`, and the session factory constructs the harness node with the session
+   name and the live agent node as target.
+2. PREFLIGHT-ALL, one scope-free command-start context: the harness's target is realized, so
+   required-commands probes NOW, pre-resolve and pre-kill; any failure aborts with the old session
+   still running.
+3. Command-shaped middle, exactly today's proven order: the BROKEN/confirm gates, then the resolve
+   (restart's env-chain pass sits after its gates), then env composition.
+4. OPS: kill (a session-node domain op), `harness.restart(ctx)` returns the pane command, tmux
+   re-create. No `RealizationLog` exists because nothing is pending; there is nothing to unwind, and
+   the post-kill non-rollbackable window stays pinned per command exactly as today.
+
+**Create: `session create --new-agent`** (target nodes pending; realization drives the middle):
+
+1. BUILD: live VM node from its row; PENDING workspace node; PENDING agent node (deps: its
+   agent-template node, whose declared references pull in the git-credential instance nodes, plus
+   the VM node); the harness node constructed by the session factory with the CHOSEN session name
+   and the pending agent as target; PENDING session node (deps: harness, agent, workspace, VM).
+   Names are chosen up front, so every node's identity is complete while it is still pending.
+2. PREFLIGHT-ALL, same one scope-free context: predictions run for every declared secret; the
+   harness sees its target pending and defers. Dependency-blindness is structural, not special-
+   cased.
+3. SECRETS: union from the walk, central prediction, the single resolve. The walk-away point.
+4. ROLL-FORWARD, orchestrator-authored in dependency order: ensure the VM is active; run the
+   workspace mutation (today's `create_workspace` body) and `log.realize(workspace)`; run the agent
+   mutation (today's `create_agent` body, its git-credential runups firing just before the materials
+   write under the skip-and-degrade policy) and `log.realize(agent)`; `harness.runup` now probes
+   (target realized, fires once); `harness.start(ctx)` returns the pane command; tmux create plus
+   the session row, `log.realize(session)`.
+5. FAILURE anywhere post-resolve: `log.unwind()` tears down whatever realized, in reverse (session,
+   then agent, then workspace, as far as realization got), with today's discipline.
+
+`vm create` is the same shape as the second walkthrough with the pending VM as the target node, and
+every other command sits somewhere on the same spectrum. The layers hold throughout: the
+orchestrator owns build, phases, secrets, realization order, and unwind; nodes own their readiness,
+their identity, their ops, and their teardown; the walk and the log are the only shared state.
 
 ## Doctor
 
@@ -232,12 +308,14 @@ machinery) are documented in `plan.md` per FRD R8.
   and the scoped-delivery fallback.
 - **Unwind and runup-failure policy are the orchestrator's; mechanism is the node's** (FRD R4). The
   HLA adds: the parity policy table and the skip-and-degrade helper as its first shared form.
-- **Identity intrinsic + injected** (FRD R3). The HLA adds: the key convention that makes node
-  identity operational (memoization, cycles, unwind).
+- **Identity intrinsic, traveling by construction** (FRD R3). The HLA adds: the scope-free-context
+  argument (pass-as-is holds BECAUSE identity is off the context) and the key convention that makes
+  node identity operational (memoization, cycles, unwind).
 
 ## Open questions (for plan.md / LLDs)
 
-- Exact qualified-key spellings (the table above pins shape, not final strings).
+- Final key spellings for the template and harness rows of the key table (the live-resource keys are
+  settled: plain `kind/name` over the globally unique names).
 - The scoped secret reader's shape and its interaction with `compose_env`'s whole-mapping consumer.
 - `Capability` signature sequencing: when precisely the `resolver` parameter is removed, and the
   order of the proxmox op-client bridge removal relative to it.

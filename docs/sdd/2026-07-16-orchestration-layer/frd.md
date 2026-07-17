@@ -159,10 +159,14 @@ behavior. This SDD re-homes the composition around them; it does not redesign th
   VM, its workspace context, its agent name). **Identity is intrinsic to the node**, which is what
   removes the need to thread a separate identity object through every context construction site
   (supersedes the harness SDD's `OperationIdentity` threading; see R10).
-- Identity reaches LEAF nodes by injection at construction: a capability node hanging off a live or
-  pending resource (the harness under a session) is constructed WITH its owning scope's identity
-  (the session name it addresses), supplied by the orchestrator from the plan. Nodes never walk the
-  graph to discover identity (R4); the spike proves this delivery on the stub harness (R11).
+- Identity travels by CONSTRUCTION, all the way down (maintainer discussion, 2026-07-17): whoever
+  constructs a node hands it what it belongs to, as ordinary constructor arguments, and the
+  constructor is always something that already holds that data (the session's node factory builds
+  its harness with the session name and target agent node it planned with; `GitCredentialProvider`
+  already gets its `owner_name` the same way today). No injection mechanism and no orchestrator
+  reach-down into deep nodes exists; construction is compositional, and it is exactly what keeps the
+  context SCOPE-FREE (R6). Nodes never walk the graph to discover identity (R4); the spike proves
+  the delivery on the stub harness (R11).
 - A command that creates an instance places a **pending node** for it in the plan up front, with its
   names chosen and its dependencies attached. Existence is a queryable property of the node (pending
   vs realized), updated by the orchestrator when the realizing mutation completes.
@@ -235,7 +239,10 @@ behavior. This SDD re-homes the composition around them; it does not redesign th
   stage, never mutating one a node already holds.
 - Because identity is intrinsic to nodes (R3) and pending-ness lives in the plan (R3), the context
   does not carry a threaded identity object or a `to_create` set. What it carries is the runtime
-  world: config, execution targets, secrets, exactly the fields that are timing-dependent.
+  world: config, execution targets, secrets, exactly the fields that are timing-dependent. The
+  context is therefore SCOPE-FREE, which is what makes it passable AS-IS: one frozen command-start
+  context serves the entire preflight sweep, because nothing in it is specific to any node
+  (maintainer discussion, 2026-07-17; contexts still vary by TIMING, never by scope).
 - The context's contract with capability authors (the declare/receive rules, the self-vs-context
   split) is preserved; existing capability implementations keep working against it with at most
   mechanical adjustment (R7, R9).
