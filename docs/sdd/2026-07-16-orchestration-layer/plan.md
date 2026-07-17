@@ -29,11 +29,14 @@ construction sites), not tracer-local. It lands here because flipping it once up
 than per-command (the HLA open question "flip all three at once?" is answered yes); it is green-able
 and behavior-neutral.
 
-- [ ] `orchestration/node.py`: the `Node` protocol (`key`, `deps`, `secret_refs`, `preflight`,
-      `runup`); the `<kind>/<name>` key convention; the creatable-node `teardown` surface (declared
-      here, first implemented in Phase 2).
-- [ ] `Capability` implements `Node` directly on `capabilities/base.py` (R9): add `key` (from
-      `owner_kind`/`owner_name`), `deps`, `secret_refs` (from `validate_config`); no adapter class.
+- [ ] `orchestration/node.py`: the `Readiness` protocol (`preflight`, `runup`) and the `Node`
+      protocol (`Readiness` + `key`, `deps`, `secret_refs`); the `<kind>/<name>` key convention; the
+      creatable-node `teardown` surface (declared here, first implemented in Phase 2).
+- [ ] Capability instances stay `Readiness`-ONLY on `capabilities/base.py` (R1): no `key`, no
+      `deps`, so they are structurally not nodes. The `git-credential` and `vm-site`
+      consuming-resource nodes (their `deps()`/`secret_refs()` and a default `preflight`/`runup`
+      that composes the held instance) land with the tracer in Phase 1; a rich node overrides to add
+      its own checks.
 - [ ] `orchestration/walk.py`: memoized, cycle-checked, deterministic multi-root walk
       (`walk(*roots)` from day one, per spike finding 2).
 - [ ] `orchestration/secrets.py`: `secret_union(nodes)`; central resolvability prediction from
@@ -66,8 +69,9 @@ could not (FRD R8 + the reviewer's proof points). This command touches an EXISTI
 runup and no pending nodes, so it exercises derivation, the gate, and scoped delivery without
 unwind.
 
-- [ ] `vms/nodes.py`: the live VM node factory (from `VMRow`); the vm-site platform capability node
-      and the git-credential provider node enter as its declared dependency edges.
+- [ ] `vms/nodes.py`: the live VM node factory (from `VMRow`); the `vm-site` node (holding the
+      platform instance) and the `git-credential` node (holding the provider instance) enter as its
+      declared dependency edges.
 - [ ] The reference-graph-to-node-graph TRANSLATION RULE implemented in each node kind's `deps()`
       (registry references by kind, secrets as inputs not nodes, row fields to live edges), and the
       tracer's graph DERIVED from real declared references and the DB row with ZERO hand-wired edges
@@ -128,13 +132,13 @@ orchestrator and Phase 4's. This phase provides the session/workspace/agent live
 and the session orchestrator; the HARNESS node itself is delivered by the re-scoped harness SDD.
 
 Cross-SDD independence (reviewer carry, 2026-07-17): Phase 3 must be a green shippable unit whether
-or not PR #168 has landed, so the harness node is NOT a hard prerequisite. If it has not landed,
+or not PR 168 has landed, so the harness instance is NOT a hard prerequisite. If it has not landed,
 this phase migrates `session create` / `restart` to the orchestrator while invoking TODAY's
 imperative harness path (the command string that `_build_session_command` produces) through a
 documented interim seam, and the level-skip proof uses a harness-LIKE required-commands node (doctor
-at SYSTEM level). When PR #168 lands, the real harness node replaces the seam with no orchestrator
-change. This keeps R8's "pausable, always green" across the SDD boundary rather than assuming
-lockstep landing.
+at SYSTEM level). When PR 168 lands, the real harness instance replaces the seam with no
+orchestrator change. This keeps R8's "pausable, always green" across the SDD boundary rather than
+assuming lockstep landing.
 
 - [ ] `sessions/nodes.py` and `workspaces/nodes.py`: live-and-pending session and workspace nodes;
       `agents/nodes.py`: the live-and-pending agent node with intrinsic (row-carried) identity.
@@ -150,13 +154,13 @@ lockstep landing.
       (the branch the spike structurally could not prove).
 - [ ] Coordinate with the re-scoped harness SDD: this pad drops the threaded `OperationIdentity` and
       `to_create` in favor of intrinsic layer-1 identity, the per-command operation scope, and
-      pending nodes; the harness node reads only the LEVEL off the operation scope and addresses via
-      its own `session_name`.
+      pending nodes; the harness instance reads only the LEVEL off the operation scope and addresses
+      via its own `session_name`.
 
-Definition of done: session create/restart orchestrated (against the real harness node if PR #168
-has landed, else the documented interim seam to today's imperative harness path); the nested fan-out
-reproduces the `git_tokens` fold; the realization body is shared (Phase 4 consumes it); the skip
-branch is proven; the full suite green.
+Definition of done: session create/restart orchestrated (against the real harness instance when the
+harness SDD has landed, else the documented interim seam to today's imperative harness path); the
+nested fan-out reproduces the `git_tokens` fold; the realization body is shared (Phase 4 consumes
+it); the skip branch is proven; the full suite green.
 
 ## Phase 4: `agent create` / `agent reinit`
 

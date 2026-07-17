@@ -114,28 +114,39 @@ behavior. This SDD re-homes the composition around them; it does not redesign th
 
 ## Requirements
 
-### R1: One lifecycle, on every node, through a thin protocol
+### R1: Two complementary contracts, `Readiness` and `Node`
 
-- Every node exposes the same READINESS surface: `preflight` (pre-resolve, dependency-blind,
-  read-only) and `runup` (post-resolve, read-only, deferred to just before the node's first use),
-  plus its dependency declaration. The preflight/runup semantics are the capability model's,
-  unchanged; what changes is WHO has them (every node, not just capability instances).
-- The protocol pins readiness and dependency declaration ONLY. Ops stay domain-specific and are
-  deliberately NOT unified (`start() -> str`, `create()/destroy()`, and credential-materials writes
-  share nothing); the capability README's "these belong to the subclass, do not try to unify them"
-  carries over verbatim. A node kind that a command can create also exposes its own TEARDOWN op
-  (delete what I made), the node-scope half of unwind (R4).
-- The shared surface is a **protocol (structural typing), not an inheritance hierarchy** (maintainer
-  ruling, 2026-07-16). A thin `Node` protocol pins the lifecycle shape; node kinds implement it
-  directly. There is no deep class tree, and composition (a session is made of a harness, an agent,
-  a workspace, a VM) is expressed as graph edges, never as inheritance.
-- Either readiness stage may be a no-op for a given node kind, exactly as the capability model
-  already allows. A vm-template's preflight predicts its Tailscale key; a live, already-running VM's
-  preflight may be empty.
+- Readiness is a shared contract, `preflight` (pre-resolve, dependency-blind, read-only) and `runup`
+  (post-resolve, read-only, deferred to just before first use). Its semantics are the capability
+  model's, unchanged; what changes is WHO has them: readiness is no longer only on capability
+  instances, it is on every NODE, and a node COMPOSES the readiness of the capability instances it
+  holds.
+- **`Node` = `Readiness` + graph identity** (`key` + declared `deps`), and ONLY consuming resources
+  and live resources are nodes. **Capability instances are `Readiness`-only, NOT nodes** (maintainer
+  ruling, 2026-07-17, correcting an earlier framing that put instances on the graph). An instance is
+  HELD by a node and composed by that node's `preflight`/`runup`, never walked by the orchestrator.
+  This is forced by identity (R2): an inline instance (an agent template's feature map) has no
+  globally-unique name, so a node graph containing it would need owner-qualified keys, the exact
+  ugliness rejected elsewhere; keeping instances off the graph keeps every key a natural unique
+  name. The shared `preflight`/`runup` verbs are deliberate (identical readiness semantics); the
+  walked-vs-composed difference lives in the TYPE (the presence of `key`/`deps`), not a renamed
+  verb.
+- The contracts pin readiness (and, for `Node`, dependency declaration) ONLY. Ops stay
+  domain-specific and are deliberately NOT unified (`start() -> str`, `create()/destroy()`, and
+  credential-materials writes share nothing); the capability README's "these belong to the subclass,
+  do not try to unify them" carries over verbatim. A node kind that a command can create also
+  exposes its own TEARDOWN op (delete what I made), the node-scope half of unwind (R4).
+- **Protocol (structural typing), not an inheritance hierarchy** (maintainer ruling, 2026-07-16).
+  Thin protocols pin the shapes; kinds implement them directly. There is no deep class tree, and
+  composition (a session holds a harness; an agent template holds features and references
+  git-credentials) is expressed as held instances plus graph edges, never as inheritance.
+- Either readiness stage may be a no-op. A vm-template's preflight predicts its Tailscale key; a
+  live, already-running VM's preflight may be empty.
 - The readiness code that currently lives outside the lifecycle moves onto it: the free function
   `preflight_vm_template` becomes the vm-template node's preflight; the sessions manager's
-  `_assert_required_commands` becomes harness readiness (per the harness SDD, which already
-  relocates it); any future readiness check has exactly one home.
+  `_assert_required_commands` becomes the harness instance's readiness, composed by the session node
+  (per the harness SDD, which already relocates it); any future readiness check has exactly one
+  home.
 
 ### R2: Nodes and registry resources are distinct, and the operator surface does not change
 
@@ -143,12 +154,15 @@ behavior. This SDD re-homes the composition around them; it does not redesign th
   doctor's per-resource rows) is untouched as an operator surface. Registry resources remain the
   declared recipes.
 - Nodes are internal runtime objects. No new registry category is added for them, and nothing about
-  them is operator-visible. (The alternative, promoting capability instances to registry resources,
-  was considered and rejected: an instance needs a lifecycle, not a name, a list row, or operator
-  visibility. Ruling, 2026-07-16.)
+  them is operator-visible. (Two alternatives were considered and rejected: promoting capability
+  instances to registry resources, an instance needs neither a name, a list row, nor operator
+  visibility; and making capability instances NODES, which R1 rules out because an inline instance
+  has no unique graph identity. Rulings 2026-07-16 and 2026-07-17.)
 - The existing relationship stands: a registry resource is data the orchestrator constructs a node
-  from. One registry resource may give rise to one node per command (a vm-site's platform instance),
-  and one node may exist with no registry resource of its own (a live VM).
+  from. A declared consuming resource becomes one node (a `vm-site` decl -> a `vm-site` node that
+  HOLDS its platform instance); a live resource is a node with no registry resource of its own (a
+  live VM); a capability instance is neither, it is held by the node built from the resource that
+  references it.
 
 ### R3: Live resources are first-class nodes, including pending ones
 
@@ -363,12 +377,16 @@ behavior. This SDD re-homes the composition around them; it does not redesign th
   the pending agent and consumes its injected session identity); and a minimal memoized walker over
   declared dependencies.
 - The spike's scenarios are `vm create` and `session create --new-agent`, chosen because together
-  they exercise every node species: templates with real readiness, capability instances (platform,
-  git credentials) entering as ordinary dependency nodes, existing live resources, pending live
-  resources, and the nested secret fold. For each scenario the spike asserts, against the current
-  imperative code's behavior: the preflight set, the deferral behavior on pending nodes, the union
-  of secrets the resolve pass would cover, and the unwind set and order a failure injected at each
-  phase would produce (matching today's hand-rolled rollback).
+  they exercise every node species: templates with real readiness, consuming resources holding
+  capability instances (a `vm-site` holding a platform, a `git-credential` holding a provider),
+  existing live resources, pending live resources, and the nested secret fold. (The spike itself
+  collapsed the consuming resource and its instance into one node in the thin case, which is what
+  the later Readiness/Node split un-conflates, R1; the spike's finding that the readiness contract
+  fits survives, it just belongs to the consuming-resource node, not the instance.) For each
+  scenario the spike asserts, against the current imperative code's behavior: the preflight set, the
+  deferral behavior on pending nodes, the union of secrets the resolve pass would cover, and the
+  unwind set and order a failure injected at each phase would produce (matching today's hand-rolled
+  rollback).
 - The spike answers four questions: does one thin protocol fit dissimilar nodes without contortion;
   does identity-intrinsic-to-nodes (plus orchestrator injection for leaf nodes) hold at construction
   time; does a memoized walk over declared edges reproduce the hand-rolled fan-outs; does

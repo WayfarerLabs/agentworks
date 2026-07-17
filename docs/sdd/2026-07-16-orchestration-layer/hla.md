@@ -58,43 +58,77 @@ scoped reader), `readiness.py`'s preflight SWEEP, and `activation.py` (the gate)
 `unwind.py` (`RealizationLog`, first forced by `vm create`'s pending nodes) or `readiness.py`'s
 skip-and-degrade POLICY helper (first forced by `vm create` / `vm reinit` init, whose credential
 rejection degrades to partial rather than aborting). The plan states each command's starting file
-set (reviewer carry, 2026-07-17). Node implementations live in their domains, exactly as kinds do
-(`vms/nodes.py`, `agents/nodes.py`, `sessions/nodes.py`, ...); capability instances implement the
-protocol directly on `capabilities/base.py` (R9), no adapter class in production (the spike's
-`CapabilityInstanceNode` adapter becomes three small members on `Capability`: `key`, `deps`,
-`secret_refs`).
+set (reviewer carry, 2026-07-17). NODE implementations (the consuming and live resources) live in
+their domains, exactly as kinds do (`vms/nodes.py`, `agents/nodes.py`, `sessions/nodes.py`, ...); a
+`git-credential` or `vm-site` node HOLDS its capability instance and composes its readiness.
+Capability instances themselves stay `Readiness`-only on `capabilities/base.py` (R9): they gain
+nothing node-shaped (no `key`, no `deps`), and the spike's `CapabilityInstanceNode` adapter, which
+treated an instance AS a node, does not survive, its job (a git-credential's readiness in the graph)
+moves onto the `git-credential` node that holds the provider.
 
-## The node protocol
+## Readiness and Node: two complementary contracts
 
-As validated by the spike, unchanged:
+The lifecycle splits into two contracts, and keeping them distinct is what keeps the graph's
+identity clean (maintainer ruling, 2026-07-17; this supersedes an earlier "capability instances are
+nodes" framing, see the design decision below):
 
 ```python
 @runtime_checkable
-class Node(Protocol):
+class Readiness(Protocol):
+    """A thing that can be checked for readiness. Both nodes and the
+    capability instances a node holds satisfy it. NOT a graph participant."""
+    def preflight(self, ctx: RunContext) -> None: ...
+    def runup(self, ctx: RunContext) -> None: ...
+
+
+@runtime_checkable
+class Node(Readiness, Protocol):
+    """A readiness-bearing thing WITH graph identity: the orchestrator
+    walks these. Readiness plus a key and declared dependencies."""
     @property
     def key(self) -> str: ...
     def deps(self) -> tuple[Node, ...]: ...
     def secret_refs(self) -> tuple[str, ...]: ...
-    def preflight(self, ctx: RunContext) -> None: ...
-    def runup(self, ctx: RunContext) -> None: ...
 ```
 
-Readiness plus dependency declaration ONLY (FRD R1). Ops are domain-specific and un-unified;
-creatable node kinds additionally expose `teardown()` (their half of unwind). Either readiness stage
-may be a no-op.
+- **`Node`** (consuming resources and live resources only): has graph identity (`key`, `deps`) and
+  is what the orchestrator walks. Creatable node kinds additionally expose `teardown()` (their half
+  of unwind).
+- **`Readiness`** (capability instances): has the readiness verbs and nothing else, no `key`, no
+  `deps`, so it is STRUCTURALLY not a `Node` and cannot be walked. A capability instance is HELD by
+  a node and its readiness is COMPOSED by that node's `preflight`/`runup`, never invoked by the
+  orchestrator. (It also keeps `validate_config` and its ops; its declared secrets surface through
+  its holding node's `secret_refs`.)
 
-**Key convention** (spike finding 3; fixes the spike's own `vm/s1` session collision):
-`<node-kind>/<name>`, plain, matching the registry's `(kind, name)` convention exactly.
+The verbs are shared deliberately: the readiness SEMANTICS are identical (a pre-resolve check, a
+post-resolve check). What differs between an instance and a node is walked-vs-composed, a
+graph-participation difference that lives correctly in the TYPE (the presence of `key`/`deps`), not
+in a renamed verb. So a reader who sees `GitHubCredentialProvider.preflight` sees a `Readiness`, not
+a `Node`, and the question "why is this not walked?" answers itself: its holder composes it.
 
-| node                           | key shape                   | example               |
-| ------------------------------ | --------------------------- | --------------------- |
-| live/pending VM                | `vm/<name>`                 | `vm/box`              |
-| live/pending workspace         | `workspace/<name>`          | `workspace/ws1`       |
-| live/pending agent             | `agent/<name>`              | `agent/dev`           |
-| live/pending session           | `session/<name>`            | `session/s1`          |
-| capability instance            | `<owner-kind>/<owner-name>` | `vm-site/px`          |
-| resolved template              | `<template-kind>/<name>`    | `vm-template/default` |
-| harness instance (per session) | `harness/<session>`         | `harness/s1`          |
+A node's `preflight`/`runup` COMPOSES its held instances' (a thin wrapper like `git-credential/gh`
+gets a framework default that just fans in to its one instance; a rich resource overrides to add its
+own checks). Either readiness stage may be a no-op. Ops stay domain-specific and un-unified, on the
+instances and the node kinds, never on `Readiness`.
+
+**Key convention** (spike finding 3; fixes the spike's own `vm/s1` session collision): `Node`s key
+as `<node-kind>/<name>`, plain, matching the registry's `(kind, name)` exactly. Because only
+consuming and live resources are nodes, every key is a NATURAL, globally-unique name, no
+owner-qualification anywhere (the reason capability instances are off the graph: their inline
+occurrences, an agent template's feature map, have no globally-unique name of their own).
+
+| node                   | key shape                | example                           |
+| ---------------------- | ------------------------ | --------------------------------- |
+| live/pending VM        | `vm/<name>`              | `vm/box`                          |
+| live/pending workspace | `workspace/<name>`       | `workspace/ws1`                   |
+| live/pending agent     | `agent/<name>`           | `agent/dev`                       |
+| live/pending session   | `session/<name>`         | `session/s1`                      |
+| consuming resource     | `<kind>/<name>`          | `vm-site/px`, `git-credential/gh` |
+| resolved template      | `<template-kind>/<name>` | `vm-template/default`             |
+
+Held-not-keyed (NOT nodes): the platform instance a `vm-site` holds, the provider instance a
+`git-credential` holds, the harness and feature instances a `session`/`agent-template` holds. They
+have no graph key; their holder's key covers them.
 
 No VM qualification: agent, workspace, and session names are GLOBALLY unique in the current model
 (`workspaces.name` is the table's primary key; agent and session lookups are by bare name;
@@ -110,20 +144,28 @@ these strings.
 The load-bearing unknown after the spike (its edges were hand-wired; the walk was proven over a
 GIVEN graph). The rule, stated once and implemented per node kind in each kind's `deps()`:
 
-1. **Registry references translate by kind.** A node backed by a declared resource reads that
-   resource's references (`referenced_resources()` / `validate_config` implied refs) and maps:
+1. **Registry references translate by what they point AT.** A node backed by a declared resource
+   reads that resource's references (`referenced_resources()` / `validate_config` implied refs) and
+   maps each by its referent:
    - `secret`-kind references -> `secret_refs()` entries (secrets are NOT nodes; they are inputs the
      orchestrator resolves);
-   - capability references -> a dependency edge to that capability's INSTANCE node, constructed from
-     the reference site's config blob (the capability collapse), memoized per command by key (one
-     `vm-site/px` node no matter how many consumers: the spike's `bind_platforms` dedup);
-   - other resource references -> an edge to that resource's node.
+   - a reference to another DECLARED RESOURCE (one with its own registry identity: a
+     `git-credential` decl, another template) -> a dependency EDGE to that resource's node, memoized
+     per command by key (one `git-credential/gh` node no matter how many consumers: the spike's
+     `bind_platforms` dedup);
+   - a reference to a CAPABILITY with config at the reference site (the vm-platform behind a
+     `vm-site`, the harness behind a `session`, an agent-feature in a template's map) -> the
+     referencing node CONSTRUCTS and HOLDS the instance; no node, no edge. The held instance's
+     readiness is composed by the holder's `preflight`/`runup`, and its declared secrets fold into
+     the holder's `secret_refs`.
 2. **Row fields translate to live edges.** A live node derives edges from its DB row: a live VM's
-   `site` field -> the site's platform instance node; a live agent's row -> its VM node. Live nodes
-   have no registry resource of their own; the row IS the backing data.
+   `site` field -> an edge to the `vm-site` node (which HOLDS the platform instance); a live agent's
+   row -> its VM node. Live nodes have no registry resource of their own; the row IS the backing
+   data.
 3. **Pending nodes are constructed with their edges** by the orchestrator, from the resolved
    templates and rows it planned with: a pending agent depends on its agent-template node (whose
-   references pull in the git-credential instances) and its VM node.
+   git-credential references become edges to the `git-credential` nodes that each hold a provider
+   instance) and its VM node.
 
 Nodes declare only their OWN edges; assembly is the walk's job. The tracer bullet's defining
 obligation (FRD R8) is to run this rule end to end for one real command, deriving the graph from
@@ -400,10 +442,10 @@ Two walkthroughs make it concrete.
 **Use: `session restart`** (everything exists; no realization record at all):
 
 1. BUILD: the session row names its agent, workspace, and VM; the domain factories construct live
-   nodes from those rows (the VM's `site` field pulling in the vm-site instance node per the
-   derivation rule); session-template re-resolution by the stored name yields
-   `(harness, harness_config)`, and the session factory constructs the harness node with the session
-   name and the live agent node as target.
+   nodes from those rows (the VM's `site` field -> an edge to the `vm-site` node, which HOLDS the
+   platform instance, per the derivation rule); session-template re-resolution by the stored name
+   yields `(harness, harness_config)`, and the session NODE holds a harness INSTANCE (not a node),
+   constructed with the session name and the live agent node as its target.
 2. OPEN THE ACTIVATION GATE (a span held through the command): converge the VM's power state
    (maintenance; refuse if operator-stopped; just-in-time gate secrets if a start or rejoin is
    needed; hold active for platforms that require it) so the probes that follow query a live target.
@@ -419,12 +461,12 @@ Two walkthroughs make it concrete.
 **Create: `session create --new-agent`** (target nodes pending; realization drives the middle):
 
 1. BUILD: live VM node from its row; PENDING workspace node; PENDING agent node (deps: its
-   agent-template node, whose declared references pull in the git-credential instance nodes, plus
-   the VM node); the harness node constructed by the session factory with the CHOSEN session name
-   and the pending agent as target; PENDING session node (deps: harness, agent, workspace, VM, and
-   its resolved session-template node, exactly as the vm-template hangs off a pending VM). Names are
-   chosen up front, so every node's identity is complete while it is still pending. The walk roots
-   at the pending session node, the command's one target.
+   agent-template node, whose git-credential references become edges to the `git-credential` nodes
+   that each HOLD a provider instance, plus the VM node); PENDING session node holding its harness
+   INSTANCE (constructed with the CHOSEN session name and the pending agent node as target), with
+   deps on agent, workspace, VM, and its resolved session-template node (exactly as the vm-template
+   hangs off a pending VM). Names are chosen up front, so every node's identity is complete while it
+   is still pending. The walk roots at the pending session node, the command's one target.
 2. OPEN THE ACTIVATION GATE (span, held through the command): converge the existing VM's power state
    (maintenance; refuse if operator-stopped; just-in-time gate secrets if needed; hold active for
    platforms that require it), so preflight probes a live target.
@@ -466,10 +508,11 @@ walk, so both a command's union and doctor's all-resources sweep are callers of 
 
 **Tracer bullet: `agw vm add-git-credential`.** Chosen because it is the smallest command with a
 real graph and it exercises the two remaining unknowns: end-to-end edge derivation (live VM row ->
-site -> platform instance; credential name -> provider instance node, all from rows and declared
-references, zero hand-wired edges) and a real runup with the FATAL policy, plus a real op (materials
-write) reading scoped secrets. It has no pending nodes, which is fine: unwind landed in the spike
-and gets its production proof in the next step.
+edge to the `vm-site` node holding the platform instance; credential name -> edge to the
+`git-credential` node holding the provider instance; all from rows and declared references, zero
+hand-wired edges) and a real runup with the FATAL policy, plus a real op (materials write) reading
+scoped secrets. It has no pending nodes, which is fine: unwind landed in the spike and gets its
+production proof in the next step.
 
 Order after the tracer (FRD R8's double duty: de-risk AND crystallize helpers):
 
@@ -477,7 +520,8 @@ Order after the tracer (FRD R8's double duty: de-risk AND crystallize helpers):
 2. `vm create` / `vm reinit` (pending nodes, unwind, skip-and-degrade policy, multi-capability
    graph)
 3. `session create` including `--new-agent` (EARLY, the harness SDD's landing pad: the nested
-   fan-out, the harness node, restart's command-shaped ordering follows with `session restart`)
+   fan-out, the session node's held harness, restart's command-shaped ordering follows with
+   `session restart`)
 4. `agent create` / `agent reinit`
 5. remaining commands opportunistically (`vm delete`, `vm start/stop`, shell/exec roots), each a
    green, shippable unit
@@ -509,8 +553,16 @@ Interim seams (an orchestrated command calling not-yet-migrated machinery) are d
 
 ## Design decisions (recap of rulings, with the HLA's additions)
 
-- **Protocol, not hierarchy; composition as edges** (FRD R1). The HLA adds: `Capability` satisfies
-  the protocol directly; no adapter layer in production.
+- **Protocol, not hierarchy; composition as edges** (FRD R1).
+- **Readiness vs Node; capability instances are NOT nodes** (maintainer ruling, 2026-07-17,
+  correcting an earlier HLA drift). Only consuming and live resources are nodes, so every graph key
+  is a natural globally-unique name; a capability instance is a `Readiness`-only object HELD by a
+  node and composed by that node's `preflight`/`runup`, never walked. This was forced by identity:
+  an inline capability instance (an agent template's feature map) has no unique name of its own, so
+  putting it on the graph would demand owner-qualified keys, the exact ugliness rejected for live
+  resources. The shared `preflight`/`runup` verbs are kept (the readiness semantics are identical);
+  the walked-vs-composed difference lives in the type (`Node` = `Readiness` + `key`/`deps`), which
+  is what makes "why isn't this instance walked?" self-answering.
 - **Bespoke orchestrators; helpers emerge** (FRD, 2026-07-17 ruling). The HLA adds: the
   `orchestration/` package is created lazily, tracer-first.
 - **Secrets central; nodes declare and receive** (FRD R5). The HLA adds: the retirement sequencing

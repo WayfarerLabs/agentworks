@@ -11,13 +11,21 @@ harness), a memoized walker, and the orchestrator-side helpers, against a REAL c
 with expected values read off the imperative managers at HEAD (cited in the tests); executing real
 provisioning is impossible in a spike, so the oracle is code-derived, not a live diff.
 
-## Bet 1: one thin protocol fits dissimilar nodes. HOLDS
+## Bet 1: one thin readiness contract fits dissimilar nodes. HOLDS
 
-The protocol landed as exactly the FRD R1 surface, and nothing fought it:
+The readiness contract landed cleanly on real types.
+
+> Post-spike revision (2026-07-17): the design later SPLIT this into `Readiness`
+> (`preflight`/`runup` only) and `Node` (`Readiness` + `key`/`deps`), because capability instances
+> turned out NOT to belong on the graph, an inline instance has no unique key (FRD R1/R2). The
+> spike's `Node` protocol below, with `key`/`deps`/`preflight`/`runup` all on one object, conflated
+> the consuming resource and its held instance in the thin case. The finding that the readiness
+> CONTRACT fits dissimilar things survives verbatim; it just resolves as "the consuming-resource
+> node has the contract and composes its held instance," not "the instance is a node."
 
 ```python
 @runtime_checkable
-class Node(Protocol):
+class Node(Protocol):  # spike's shape; later split into Readiness + Node
     @property
     def key(self) -> str: ...
     def deps(self) -> tuple[Node, ...]: ...
@@ -26,10 +34,11 @@ class Node(Protocol):
     def runup(self, ctx: RunContext) -> None: ...
 ```
 
-- **Capability instances are nodes for free.** The adapter is ~20 lines: key from
-  `owner_kind/owner_name`, secret refs from re-running the pure `validate_config`, readiness
-  delegated. Today's lifecycle IS the node lifecycle (FRD observation 1 confirmed from the other
-  side).
+- **Capability readiness adapted in ~20 lines.** The spike's `CapabilityInstanceNode` keyed from
+  `owner_kind/owner_name`, took secret refs from re-running the pure `validate_config`, and
+  delegated readiness. In the shipped model this is the CONSUMING-RESOURCE node's job (it holds the
+  instance and composes its readiness); the instance itself keeps only `Readiness`. Either way the
+  contract fit with almost no code.
 - **The free-function readiness absorbed cleanly.** `preflight_vm_template` became the vm-template
   node's `preflight` verbatim. One seam: the node holds a resolver because today's function predicts
   through one; under R5's central prediction that constructor argument disappears. Recorded for the
