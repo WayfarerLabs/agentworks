@@ -222,7 +222,26 @@ build the SAME graph shapes; the difference is which nodes are pending, and ther
 roll-forward realizes anything. Realization itself is bespoke mutation plus a recorded flag flip:
 the mutation choreography is the command's authored code (ops stay un-unified, FRD R1), and
 `log.realize(node)` records the pending-to-realized transition that readiness queries and unwind
-reads backwards. `teardown()` is the node's own inverse. Two walkthroughs make it concrete.
+reads backwards. `teardown()` is the node's own inverse. Three mechanics, pinned explicitly:
+
+- **The walk ROOTS at the command's target node(s).** The orchestrator constructs the node for what
+  the command is about (the pending session; for batch commands, each target: the walk is
+  multi-root) and everything else enters through declared edges. This is how FRD R4's "commands name
+  only their direct resources" cashes out: naming a resource means constructing (or rooting at) its
+  node; the transitive world is the graph's job.
+- **Pending-to-realized is a mutation OF the node, by design.** The same object flips (one-way,
+  `realized` false to true) and absorbs its realization artifacts (the created DB row), so every
+  edge holder sees the transition without rewiring: the harness's target reference IS the agent node
+  that just got realized. The node graph is the model's one deliberately mutable runtime record,
+  with a single writer (the orchestrator, via `log.realize` immediately after the bespoke mutation
+  succeeds); a node's key, identity, and edges stay immutable. Contexts, by contrast, stay frozen
+  snapshots (R6): mutable graph, immutable views.
+- **`log` is a command-local `RealizationLog`**, instantiated by the orchestrator at the top of its
+  mutation phase (`log = RealizationLog()`, the `unwind.py` helper). It lives on no context, no
+  node, and no global; it is the productionized version of the closure locals today's
+  `_rollback_ephemerals` captures, and it is the ONLY materialized plan-state in the model.
+
+Two walkthroughs make it concrete.
 
 **Use: `session restart`** (everything exists; no realization record at all):
 
@@ -231,9 +250,9 @@ reads backwards. `teardown()` is the node's own inverse. Two walkthroughs make i
    derivation rule); session-template re-resolution by the stored name yields
    `(harness, harness_config)`, and the session factory constructs the harness node with the session
    name and the live agent node as target.
-2. PREFLIGHT-ALL, one scope-free command-start context: the harness's target is realized, so
-   required-commands probes NOW, pre-resolve and pre-kill; any failure aborts with the old session
-   still running.
+2. PREFLIGHT-ALL over the walk rooted at the live session node: one scope-free command-start
+   context; the harness's target is realized, so required-commands probes NOW, pre-resolve and
+   pre-kill; any failure aborts with the old session still running.
 3. Command-shaped middle, exactly today's proven order: the BROKEN/confirm gates, then the resolve
    (restart's env-chain pass sits after its gates), then env composition.
 4. OPS: kill (a session-node domain op), `harness.restart(ctx)` returns the pane command, tmux
@@ -245,18 +264,21 @@ reads backwards. `teardown()` is the node's own inverse. Two walkthroughs make i
 1. BUILD: live VM node from its row; PENDING workspace node; PENDING agent node (deps: its
    agent-template node, whose declared references pull in the git-credential instance nodes, plus
    the VM node); the harness node constructed by the session factory with the CHOSEN session name
-   and the pending agent as target; PENDING session node (deps: harness, agent, workspace, VM).
-   Names are chosen up front, so every node's identity is complete while it is still pending.
+   and the pending agent as target; PENDING session node (deps: harness, agent, workspace, VM, and
+   its resolved session-template node, exactly as the vm-template hangs off a pending VM). Names are
+   chosen up front, so every node's identity is complete while it is still pending. The walk roots
+   at the pending session node, the command's one target.
 2. PREFLIGHT-ALL, same one scope-free context: predictions run for every declared secret; the
    harness sees its target pending and defers. Dependency-blindness is structural, not special-
    cased.
 3. SECRETS: union from the walk, central prediction, the single resolve. The walk-away point.
-4. ROLL-FORWARD, orchestrator-authored in dependency order: ensure the VM is active; run the
-   workspace mutation (today's `create_workspace` body) and `log.realize(workspace)`; run the agent
-   mutation (today's `create_agent` body, its git-credential runups firing just before the materials
-   write under the skip-and-degrade policy) and `log.realize(agent)`; `harness.runup` now probes
-   (target realized, fires once); `harness.start(ctx)` returns the pane command; tmux create plus
-   the session row, `log.realize(session)`.
+4. ROLL-FORWARD, orchestrator-authored in dependency order, opening with `log = RealizationLog()`:
+   ensure the VM is active; run the workspace mutation (today's `create_workspace` body) and
+   `log.realize(workspace)`; run the agent mutation (today's `create_agent` body, its git-credential
+   runups firing just before the materials write under the skip-and-degrade policy) and
+   `log.realize(agent)`; `harness.runup` now probes (target realized, fires once);
+   `harness.start(ctx)` returns the pane command; tmux create plus the session row,
+   `log.realize(session)`.
 5. FAILURE anywhere post-resolve: `log.unwind()` tears down whatever realized, in reverse (session,
    then agent, then workspace, as far as realization got), with today's discipline.
 
