@@ -173,9 +173,9 @@ over node ops, and `ensure_active` / `keep_active` become an `activation.py` orc
 could plausibly become an optional protocol stage (an `ensure_available`-style hook that most node
 kinds no-op), and the case for keeping it as domain ops now is only that power state is meaningful
 for so few node kinds that a protocol slot would sit empty on nearly all of them. If driving it
-through domain ops turns awkward as commands migrate (for example, a second node kind grows a
-real "make yourself available" step, or the gate helper starts special-casing node types), that is
-the signal to fold it into the protocol. The tracer bullet and `vm create` will exercise it first;
+through domain ops turns awkward as commands migrate (for example, a second node kind grows a real
+"make yourself available" step, or the gate helper starts special-casing node types), that is the
+signal to fold it into the protocol. The tracer bullet and `vm create` will exercise it first;
 revisit then if it chafes.
 
 Five properties keep it crisp:
