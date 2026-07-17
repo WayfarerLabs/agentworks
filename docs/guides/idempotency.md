@@ -11,18 +11,21 @@ failures produce warnings and a `partial` status.
 
 ### Fully idempotent
 
-| Step                  | Notes                                                                        |
-| --------------------- | ---------------------------------------------------------------------------- |
-| Apt sources           | Key downloaded if missing, source list overwritten                           |
-| SSH host key preserve | cloud-init drop-in written so host keys survive stop/start (repairs old VMs) |
-| Shell                 | Overwritten from config                                                      |
-| SSH authorized keys   | Overwritten from config                                                      |
-| Git credentials       | Overwritten from config                                                      |
-| Dotfiles (git source) | `git pull` if already cloned, fresh clone if not                             |
-| Mise packages         | Installed if missing, pruned if removed (when `mise_prune_on_reinit = true`) |
-| Mise activation       | Overwritten from config (disabled comment written when off)                  |
-| PATH additions        | Overwritten from config                                                      |
-| Tailscale DNS         | Startup-ordering drop-in rewritten only when content differs                 |
+| Step                   | Notes                                                                        |
+| ---------------------- | ---------------------------------------------------------------------------- |
+| Apt sources            | Key downloaded if missing, source list overwritten                           |
+| SSH host key preserve  | cloud-init drop-in written so host keys survive stop/start (repairs old VMs) |
+| Shell                  | Overwritten from config                                                      |
+| SSH authorized keys    | Overwritten from config                                                      |
+| Git credentials        | Overwritten from config                                                      |
+| Dotfiles (git source)  | `git pull` if already cloned, fresh clone if not                             |
+| Mise packages          | Installed if missing, pruned if removed (when `mise_prune_on_reinit = true`) |
+| Mise activation        | Overwritten from config (disabled comment written when off)                  |
+| PATH additions         | Overwritten from config                                                      |
+| Tailscale DNS          | Startup-ordering drop-in rewritten only when content differs                 |
+| sshd AcceptEnv         | Drop-in overwritten; sshd reloaded                                           |
+| sudoers env_keep       | Fragment overwritten, staged and `visudo -cf` validated before promotion     |
+| sudoers console setenv | Same; scoped to the VM's admin user (repairs old VMs, see ADR 0017)          |
 
 ### Additive only
 

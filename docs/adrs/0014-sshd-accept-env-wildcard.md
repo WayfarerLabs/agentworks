@@ -5,7 +5,10 @@ Date: 2026-06-13
 ## Status
 
 Accepted. Where this document describes how the CLI sources secret values, that mechanism is
-superseded by ADR 0016's backend-chain model; the transport decision itself stands.
+superseded by ADR 0016's backend-chain model; the transport decision itself stands. The sudoers
+`env_keep` decision below (only `AGENTWORKS_* AW_*` survive a sudo boundary) is refined by ADR 0017
+for the console agent-pane case, where composed operator env and secrets also cross via
+`--preserve-env`.
 
 ## Context
 

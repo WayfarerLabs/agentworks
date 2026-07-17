@@ -16,11 +16,13 @@ from agentworks.vms.initializer import (
     AGENTWORKS_PROFILE,
     AGENTWORKS_RC,
     AGENTWORKS_SSHD_ACCEPT_ENV_PATH,
+    AGENTWORKS_SUDOERS_CONSOLE_SETENV_PATH,
     AGENTWORKS_SUDOERS_ENV_KEEP_PATH,
     _ensure_agentworks_files_sourced,
     _write_agentworks_identity_profile,
     _write_agentworks_profile,
     _write_sshd_accept_env,
+    _write_sudoers_console_setenv,
     _write_sudoers_env_keep,
 )
 
@@ -317,10 +319,12 @@ def test_sudoers_env_keep_rejects_on_visudo_failure() -> None:
     commands = [r for r, _ in target.runs]
     # The staging file got removed; the real path was NOT mv-ed.
     assert any("rm -f" in c and "50-agentworks-env-keep" in c for c in commands)
-    assert not any(
-        f"mv '{AGENTWORKS_SUDOERS_ENV_KEEP_PATH}.tmp' '{AGENTWORKS_SUDOERS_ENV_KEEP_PATH}'" in c
-        for c in commands
-    )
+    # Matched on the mv verb alone, not on a reconstructed command string:
+    # shlex.quote leaves these paths bare, so spelling the quotes out here
+    # would never match and the assertion would hold even if the promote did
+    # happen. Promoting a fragment visudo rejected can lock the operator out
+    # of sudo, so this must fail loudly rather than vacuously pass.
+    assert not any("mv" in c and "50-agentworks-env-keep" in c for c in commands)
     # The helper warned (non-fatal).
     assert any("visudo" in w for w in logger.warnings)
 
@@ -330,6 +334,52 @@ def test_sudoers_env_keep_includes_agentworks_and_aw_patterns() -> None:
     _write_sudoers_env_keep(target, _SpyLogger())
     tee_cmd = next(r for r, _ in target.runs if "tee" in r and "50-agentworks-env-keep" in r)
     assert 'env_keep += "AGENTWORKS_* AW_*"' in tee_cmd
+
+
+# ---------------------------------------------------------------------------
+# sudoers console setenv
+# ---------------------------------------------------------------------------
+
+
+def test_sudoers_console_setenv_writes_and_validates() -> None:
+    target = _SpyTarget()
+    _write_sudoers_console_setenv(target, _SpyLogger(), "agentworks")
+    commands = [r for r, _ in target.runs]
+    staging = AGENTWORKS_SUDOERS_CONSOLE_SETENV_PATH + ".tmp"
+    assert any(f"tee {staging}" in c for c in commands)
+    assert any(f"visudo -cf '{staging}'" in c or f"visudo -cf {staging}" in c for c in commands)
+    # mv promotes staging to the real path AFTER validation.
+    mv_idx = next(
+        i for i, c in enumerate(commands)
+        if "mv" in c and "51-agentworks-console-setenv" in c
+    )
+    validate_idx = next(i for i, c in enumerate(commands) if "visudo -cf" in c)
+    assert validate_idx < mv_idx
+
+
+def test_sudoers_console_setenv_scopes_to_admin_user() -> None:
+    target = _SpyTarget()
+    _write_sudoers_console_setenv(target, _SpyLogger(), "custom-admin")
+    tee_cmd = next(
+        r for r, _ in target.runs if "tee" in r and "51-agentworks-console-setenv" in r
+    )
+    # User-scoped Defaults, not a global toggle.
+    assert "Defaults:custom-admin setenv" in tee_cmd
+    assert "Defaults setenv" not in tee_cmd.replace("Defaults:custom-admin setenv", "")
+
+
+def test_sudoers_console_setenv_rejects_on_visudo_failure() -> None:
+    """If visudo -cf rejects the fragment, the staging file is removed and
+    the helper warns; the real sudoers.d/ file is not touched."""
+    target = _SpyTarget(validate_ok=False)
+    logger = _SpyLogger()
+    _write_sudoers_console_setenv(target, logger, "agentworks")
+    commands = [r for r, _ in target.runs]
+    assert any("rm -f" in c and "51-agentworks-console-setenv" in c for c in commands)
+    # Matched on the mv verb alone; see the env_keep sibling for why spelling
+    # out the quoted paths here would make this assertion vacuous.
+    assert not any("mv" in c and "51-agentworks-console-setenv" in c for c in commands)
+    assert any("visudo" in w for w in logger.warnings)
 
 
 # ---------------------------------------------------------------------------

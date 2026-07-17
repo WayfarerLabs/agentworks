@@ -42,7 +42,8 @@ updates this lockfile with a dated entry.
   (`env_keep += "AGENTWORKS_* AW_*"`, validated with visudo via staging),
   `/etc/profile.d/agentworks-identity.sh` for VM-stable static identity, `~/.agentworks-profile.sh`
   for per-user static identity (`AGENTWORKS_AGENT` for agent users) + login-shell PATH additions.
-  Idempotent on reinit.
+  Idempotent on reinit. A third fragment, `/etc/sudoers.d/51-agentworks-console-setenv`, landed
+  later; see the 2026-07-15 follow-up entry below.
 
 ### Eager prompting (Phase 6)
 
@@ -154,3 +155,26 @@ updates this lockfile with a dated entry.
 - [HLA](hla.md): high-level architecture, including the SetEnv-pivot rationale and the env-transport
   diagram.
 - [plan](plan.md): phased implementation plan with all checkboxes ticked.
+
+## Follow-up changes
+
+### 2026-07-15: composed env survives the console agent-pane sudo boundary
+
+Refines the Phase 4 sudoers behavior. As shipped, the console add-shell **agent**-pane path relied
+solely on `env_keep += "AGENTWORKS_* AW_*"`, so only agentworks-managed vars survived the pane's
+`sudo --login` crossing to the agent user. Arbitrarily-named operator env and `agent`-scope secrets
+(which `_resolve_pane_env` composes) were stripped, so a secret present in the agent's main session
+was absent in an agent companion shell in a console.
+
+The pane now names the composed keys on `sudo --login --preserve-env=<keys>`, so sudo takes the
+values from its inherited environment and only the names land on the sudo argv (the values are on
+the `tmux -e` argv regardless, as before), permitted by a new user-scoped sudoers fragment
+`/etc/sudoers.d/51-agentworks-console-setenv` (`Defaults:<admin> setenv`) deployed at VM init
+alongside the existing `env_keep` fragment. Scope is unchanged otherwise: the pane still gets
+`vm + workspace + agent` (not `session`) env; extending companion shells to `session` scope remains
+future work. Rationale and alternatives in [ADR 0017](../../adrs/0017-console-pane-preserve-env.md).
+
+Existing VMs need `agw vm reinit` to deploy the new fragment. Until then the pane comes up degraded
+rather than failing: without the fragment sudo refuses the whole `--preserve-env` command instead of
+dropping the vars, so the service layer probes the capability first, omits the flag, keeps the
+`env_keep`-only behavior, and warns naming the missing directive and the reinit command.

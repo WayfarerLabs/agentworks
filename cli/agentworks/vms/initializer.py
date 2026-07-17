@@ -190,12 +190,28 @@ def _write_agentworks_profile(
 #     `Defaults env_keep += "AGENTWORKS_* AW_*"`. Lets agentworks-managed
 #     vars survive the sudo boundary in console add-shell agent panes
 #     (where the tmux server runs as admin and a pane sudo's to the agent).
-#     Validated with `visudo -c` before install.
+#     Validated with `visudo -cf` on a staging path before install.
+#
+#   /etc/sudoers.d/51-agentworks-console-setenv
+#     `Defaults:<admin> setenv`. Permits the admin user to use
+#     `sudo --preserve-env=<keys>` so arbitrarily-named operator env and
+#     secrets (not just AGENTWORKS_*/AW_*) survive the same sudo boundary
+#     in console add-shell agent panes. See
+#     docs/adrs/0017-console-pane-preserve-env.md. Validated with
+#     `visudo -cf` on a staging path before install.
 
 AGENTWORKS_IDENTITY_PROFILE_PATH = "/etc/profile.d/agentworks-identity.sh"
 AGENTWORKS_ZPROFILE_PATH = "/etc/zsh/zprofile"
 AGENTWORKS_SSHD_ACCEPT_ENV_PATH = "/etc/ssh/sshd_config.d/50-agentworks-accept-env.conf"
 AGENTWORKS_SUDOERS_ENV_KEEP_PATH = "/etc/sudoers.d/50-agentworks-env-keep"
+
+# The env_keep allowlist, as sudoers glob patterns. Vars matching these cross a
+# sudo boundary without needing `--preserve-env`; everything else in a console
+# agent pane's composed env rides the setenv fragment instead (ADR 0017). The
+# console pane's capability probe picks a var no pattern here covers, so this
+# is the shared source of truth for both.
+AGENTWORKS_SUDOERS_ENV_KEEP_PATTERNS = ("AGENTWORKS_*", "AW_*")
+AGENTWORKS_SUDOERS_CONSOLE_SETENV_PATH = "/etc/sudoers.d/51-agentworks-console-setenv"
 
 # Marker comment used to find and replace the identity block in
 # /etc/zsh/zprofile across reinit cycles.
@@ -423,17 +439,63 @@ def _write_sshd_accept_env(
         output.warn(msg)
 
 
+def _install_sudoers_fragment(
+    target: Transport,
+    *,
+    path: str,
+    body: str,
+    label: str,
+) -> None:
+    """Install one sudoers.d/ fragment via stage -> validate -> promote.
+
+    ``label`` names the fragment in the error message (e.g. "env_keep").
+    A broken sudoers fragment can lock the operator out of sudo entirely,
+    so the ``visudo -cf`` validate step is load-bearing: the body is
+    written to a ``.tmp`` staging path, validated, and only then moved
+    onto the real path. Raises ``SSHError`` if validation fails; callers
+    decide whether that is fatal.
+
+    The staging path uses a ``.tmp`` suffix; sudo's /etc/sudoers.d/ loader
+    only picks up files whose names don't contain a literal '.' AND match
+    the no-tilde rule, so ``.tmp`` files are safely ignored even if cleanup
+    races mid-init.
+    """
+    q_body = shlex.quote(body)
+    q_path = shlex.quote(path)
+    staging = path + ".tmp"
+    q_staging = shlex.quote(staging)
+    try:
+        target.run(
+            f"printf '%s' {q_body} | sudo tee {q_staging} > /dev/null",
+        )
+        target.run(f"sudo chmod 0440 {q_staging}")
+        validate = target.run(f"sudo visudo -cf {q_staging}", check=False)
+        if not validate.ok:
+            raise SSHError(
+                f"visudo -cf rejected the {label} fragment: "
+                f"{validate.stderr.strip()}"
+            )
+        target.run(f"sudo mv {q_staging} {q_path}")
+    finally:
+        # Always best-effort-remove the staging path. On the success path
+        # the mv above already moved the file, so rm is a no-op; on any
+        # failure path we don't want orphaned .tmp files accumulating
+        # under /etc/sudoers.d/.
+        target.run(f"sudo rm -f {q_staging}", check=False)
+
+
 def _write_sudoers_env_keep(
     target: Transport,
     logger: SSHLogger,
 ) -> None:
     """Deploy ``env_keep += "AGENTWORKS_* AW_*"`` to sudoers.d/.
 
-    Without this, sudo strips agentworks-managed env vars across the user
-    switch in console add-shell agent panes (the tmux server runs as
-    admin; the pane sudo's to the agent). Validated with ``visudo -c``
-    before install; on validation failure the file is removed so the
-    sudoers DB stays consistent.
+    Preserves agentworks-managed vars (``AGENTWORKS_*`` / ``AW_*``) across
+    the user switch in console add-shell agent panes (the tmux server runs
+    as admin; the pane sudo's to the agent). Arbitrarily-named operator env
+    and secrets ride a separate mechanism (``--preserve-env`` + the console
+    setenv fragment); see ``_write_sudoers_console_setenv`` and
+    docs/adrs/0017-console-pane-preserve-env.md.
     """
     logger.step("sudoers env_keep")
     output.detail(f"Writing {AGENTWORKS_SUDOERS_ENV_KEEP_PATH}...")
@@ -443,46 +505,64 @@ def _write_sudoers_env_keep(
         "# Preserves agentworks-managed env vars across sudo for the\n"
         "# console add-shell agent-pane path; see\n"
         "# docs/adrs/0014-sshd-accept-env-wildcard.md.\n"
-        'Defaults env_keep += "AGENTWORKS_* AW_*"\n'
+        f'Defaults env_keep += "{" ".join(AGENTWORKS_SUDOERS_ENV_KEEP_PATTERNS)}"\n'
     )
-    q_body = shlex.quote(body)
-    q_path = shlex.quote(AGENTWORKS_SUDOERS_ENV_KEEP_PATH)
-
-    # Write to a staging file, validate with visudo -cf, only then
-    # promote to the real path. A broken sudoers fragment can lock
-    # the operator out of sudo entirely, so the validate step is
-    # load-bearing.
-    #
-    # The staging path uses a .tmp suffix; sudo's /etc/sudoers.d/ loader
-    # only picks up files whose names don't contain a literal '.' AND
-    # match the no-tilde rule, so .tmp files are safely ignored even if
-    # cleanup races mid-init.
-    staging = AGENTWORKS_SUDOERS_ENV_KEEP_PATH + ".tmp"
-    q_staging = shlex.quote(staging)
     try:
-        try:
-            target.run(
-                f"printf '%s' {q_body} | sudo tee {q_staging} > /dev/null",
-            )
-            target.run(f"sudo chmod 0440 {q_staging}")
-            validate = target.run(
-                f"sudo visudo -cf {q_staging}", check=False,
-            )
-            if not validate.ok:
-                raise SSHError(
-                    f"visudo -cf rejected the env_keep fragment: "
-                    f"{validate.stderr.strip()}"
-                )
-            target.run(f"sudo mv {q_staging} {q_path}")
-        finally:
-            # Always best-effort-remove the staging path. On the success
-            # path the mv above already moved the file, so rm is a no-op;
-            # on any failure path we don't want orphaned .tmp files
-            # accumulating under /etc/sudoers.d/.
-            target.run(f"sudo rm -f {q_staging}", check=False)
+        _install_sudoers_fragment(
+            target,
+            path=AGENTWORKS_SUDOERS_ENV_KEEP_PATH,
+            body=body,
+            label="env_keep",
+        )
     except SSHError as e:
         msg = (
             f"sudoers env_keep install failed: {e}. "
+            "Re-run `agw vm reinit` to retry."
+        )
+        logger.warning(msg)
+        output.warn(msg)
+
+
+def _write_sudoers_console_setenv(
+    target: Transport,
+    logger: SSHLogger,
+    admin_user: str,
+) -> None:
+    """Deploy ``Defaults:<admin> setenv`` to sudoers.d/.
+
+    Lets the admin user carry arbitrarily-named operator env and secrets
+    across the sudo boundary in console add-shell agent panes via
+    ``sudo --preserve-env=<keys>`` (see ``_split_shell_pane``). Without
+    ``setenv``, sudo refuses ``--preserve-env`` for any var outside the
+    ``env_keep`` allowlist, so only ``AGENTWORKS_*`` / ``AW_*`` would
+    survive. Scoped to the admin user (``Defaults:<user>``), not global.
+
+    The admin already holds ``ALL=(ALL) NOPASSWD:ALL``, so granting it
+    ``setenv`` is no meaningful privilege change: it only permits
+    command-line env preservation, which a full-root user could already
+    achieve. See docs/adrs/0017-console-pane-preserve-env.md.
+    """
+    logger.step("sudoers console setenv")
+    output.detail(f"Writing {AGENTWORKS_SUDOERS_CONSOLE_SETENV_PATH}...")
+
+    body = (
+        "# Managed by agentworks -- do not edit.\n"
+        "# Permits `sudo --preserve-env=<keys>` for the admin user so\n"
+        "# composed operator env and secrets survive the sudo boundary in\n"
+        "# console add-shell agent panes; see\n"
+        "# docs/adrs/0017-console-pane-preserve-env.md.\n"
+        f"Defaults:{admin_user} setenv\n"
+    )
+    try:
+        _install_sudoers_fragment(
+            target,
+            path=AGENTWORKS_SUDOERS_CONSOLE_SETENV_PATH,
+            body=body,
+            label="console setenv",
+        )
+    except SSHError as e:
+        msg = (
+            f"sudoers console setenv install failed: {e}. "
             "Re-run `agw vm reinit` to retry."
         )
         logger.warning(msg)
@@ -1713,6 +1793,8 @@ def _phase_b_setup(
     # so dpkg conffile handling doesn't apply.
     _write_sshd_accept_env(ts_target, logger)
     _write_sudoers_env_keep(ts_target, logger)
+    # Pairs with the --preserve-env in _split_shell_pane's agent-pane branch.
+    _write_sudoers_console_setenv(ts_target, logger, admin_username)
     vm_row = db.get_vm(vm_name)
     # Init runs against a VM that exists in the DB (initialize_vm fetches the
     # row up front). A None here is an internal invariant violation, not a
