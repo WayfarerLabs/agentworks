@@ -152,6 +152,32 @@ The skip-and-degrade pattern is the first `readiness.py` helper (today's
 `git_credentials.runup_and_filter` generalized); the fatal case is a plain uncaught raise. This is
 the runup analog of the rollback ruling: mechanism on the node, meaning in the orchestrator.
 
+## The activation gate
+
+Commands that touch an EXISTING VM converge its power state first: the activation gate (today's
+`ensure_active` / `keep_active`) runs after BUILD and BEFORE preflight-all, so every readiness probe
+that reaches the target (the harness's required-commands, any tool-state check) queries a real, live
+environment instead of failing against a stopped VM (maintainer ruling, 2026-07-17). Our model
+created this ordering question by giving preflight a real environment (today's preflights never
+SSH), so the model owns the answer. Three properties keep it crisp:
+
+- **It is MAINTENANCE, not plan mutation.** Power-state convergence is idempotent declared-state
+  maintenance (the carve the harness SDD already made, kept here): it is never rollback-tracked (a
+  VM auto-started for a command that later fails stays up), and it does not bend "preflight-all
+  before any mutation," which governs the command's PLAN.
+- **Its secret needs are narrow, known, and resolved JUST-IN-TIME, outside the boundary pass.** The
+  COMMON case is the platform's API credential (observing and starting a stopped proxmox VM needs
+  `proxmox-token`); the REPAIR case is the Tailscale auth key (a VM whose tailnet registration
+  lapsed must rejoin before it is reachable at all). Both resolve through the normal backend chain,
+  orchestrator-owned, at the gate; this is the one sanctioned resolution outside the boundary pass.
+  It is pre-walk-away interactivity in the same bucket as the confirm gates and the first-create
+  system-slug prompt, so R7's "no prompt after the resolve boundary" assertion is untouched, and
+  env-backed setups see no interaction at all. Gate-resolved values SEED the boundary pass so the
+  same secret never resolves or prompts twice in one command.
+- **The rejoin path carries messaging.** When the gate must rejoin tailscale, the surface encourages
+  REUSABLE auth keys (a non-reusable key turns every restart into a rejoin problem); a failed rejoin
+  is a typed error raised before preflight, with the VM left as maintenance put it.
+
 ## Secrets
 
 The path, end to end, replacing the resolver's three entangled jobs:
@@ -208,12 +234,12 @@ and admin-mode sessions never trip the anti-silent-skip error.
 
 ## Unwind
 
-`RealizationLog` as spiked: an ordered list appended on realize, read backwards on unwind, calling
-each creatable node's `teardown()` with today's discipline (best-effort, a failed teardown warns and
-never masks the original error, `UserAbort` re-raised). The teardown bodies are today's rollback
-code relocated onto the nodes (`_rollback_ephemerals`' per-entity blocks, `create_vm`'s row delete);
-the log is the minimal shared state the FRD's R12 promised to pin, and it is a list, not a `Plan`
-class. Non-rollbackable windows stay pinned per command by its orchestrator.
+`RealizationLog` as spiked: an ordered list appended on `mark_realized`, read backwards on unwind,
+calling each creatable node's `teardown()` with today's discipline (best-effort, a failed teardown
+warns and never masks the original error, `UserAbort` re-raised). The teardown bodies are today's
+rollback code relocated onto the nodes (`_rollback_ephemerals`' per-entity blocks, `create_vm`'s row
+delete); the log is the minimal shared state the FRD's R12 promised to pin, and it is a list, not a
+`Plan` class. Non-rollbackable windows stay pinned per command by its orchestrator.
 
 ## Create vs use: the same graph, different pending sets
 
@@ -221,8 +247,8 @@ There is no separate "create mode" in this model. Creating a resource and using 
 build the SAME graph shapes; the difference is which nodes are pending, and therefore whether the
 roll-forward realizes anything. Realization itself is bespoke mutation plus a recorded flag flip:
 the mutation choreography is the command's authored code (ops stay un-unified, FRD R1), and
-`log.realize(node)` records the pending-to-realized transition that readiness queries and unwind
-reads backwards. `teardown()` is the node's own inverse. Four mechanics, pinned explicitly:
+`log.mark_realized(node)` records the pending-to-realized transition that readiness queries and
+unwind reads backwards. `teardown()` is the node's own inverse. Four mechanics, pinned explicitly:
 
 - **The walk ROOTS at the command's target node(s).** The orchestrator constructs the node for what
   the command is about (the pending session; for batch commands, each target: the walk is
@@ -233,26 +259,26 @@ reads backwards. `teardown()` is the node's own inverse. Four mechanics, pinned 
   `realized` false to true) and absorbs its realization artifacts (the created DB row), so every
   edge holder sees the transition without rewiring: the harness's target reference IS the agent node
   that just got realized. The node graph is the model's one deliberately mutable runtime record,
-  with a single writer (the orchestrator, via `log.realize` immediately after the bespoke mutation
-  succeeds); a node's key, identity, and edges stay immutable. Contexts, by contrast, stay frozen
-  snapshots (R6): mutable graph, immutable views.
+  with a single writer (the orchestrator, via `log.mark_realized` immediately after the bespoke
+  mutation succeeds); a node's key, identity, and edges stay immutable. Contexts, by contrast, stay
+  frozen snapshots (R6): mutable graph, immutable views.
 - **`log` is a command-local `RealizationLog`**, instantiated by the orchestrator at the top of its
   mutation phase (`log = RealizationLog()`, the `unwind.py` helper). It lives on no context, no
   node, and no global; it is the production form of the closure locals today's
   `_rollback_ephemerals` captures, and it is the ONLY materialized plan-state in the model.
-- **Realizing a resource is ORCHESTRATOR choreography composed of node ops; `log.realize` is only
-  the bookkeeping at its end.** No node's realize drives its dependencies (a realize that
-  orchestrates would be the resource-driven fan-out R4 rejects): creating the agent is agent-node
-  ops (user, home, store) plus the git-credential nodes' materials ops, sequenced by whichever
-  orchestrator is running; the session node's own realizing slice is just tmux plus its row. The
-  reusable unit is therefore the PHASE-FREE realization choreography per creatable kind, factored as
-  domain code and called by any orchestrator that creates that kind: `agent create` wraps it in its
-  own phases, `session create --new-agent` calls the same body inside its phases. This is what
-  dissolves today's nesting hack, where the nested `create_agent` is a full command root that must
-  be handed `git_tokens` and phase suppression to stop it re-running resolve and banners: a body
-  never resolves and never frames phases, by construction. (LLD note: the spike's
-  `PendingNode.realize()` flag-flip wants a name like `mark_realized` so it cannot be read as doing
-  the work.)
+- **Realizing a resource is ORCHESTRATOR choreography composed of node ops; `log.mark_realized` is
+  only the bookkeeping at its end.** No node drives its dependencies' creation (that would be the
+  resource-driven fan-out R4 rejects): creating the agent is agent-node ops (user, home, store) plus
+  the git-credential nodes' materials ops, sequenced by whichever orchestrator is running; the
+  session node's own realizing slice is just tmux plus its row. The reusable unit is therefore the
+  PHASE-FREE realization choreography per creatable kind, factored as domain code and called by any
+  orchestrator that creates that kind: `agent create` wraps it in its own phases,
+  `session create --new-agent` calls the same body inside its phases. This is what dissolves today's
+  nesting hack, where the nested `create_agent` is a full command root that must be handed
+  `git_tokens` and phase suppression to stop it re-running resolve and banners: a body never
+  resolves and never frames phases, by construction. The flag-flip is NAMED `mark_realized`
+  (settled, maintainer ruling 2026-07-17; the spike's `realize()` spelling dies with the spike)
+  precisely so it cannot be read as doing the work.
 
 Two walkthroughs make it concrete.
 
@@ -263,12 +289,14 @@ Two walkthroughs make it concrete.
    derivation rule); session-template re-resolution by the stored name yields
    `(harness, harness_config)`, and the session factory constructs the harness node with the session
    name and the live agent node as target.
-2. PREFLIGHT-ALL over the walk rooted at the live session node: one scope-free command-start
+2. ACTIVATION GATE: converge the VM's power state (maintenance; the gate's just-in-time secrets if a
+   start or rejoin is needed) so the probes that follow query a live target.
+3. PREFLIGHT-ALL over the walk rooted at the live session node: one scope-free command-start
    context; the harness's target is realized, so required-commands probes NOW, pre-resolve and
    pre-kill; any failure aborts with the old session still running.
-3. Command-shaped middle, exactly today's proven order: the BROKEN/confirm gates, then the resolve
+4. Command-shaped middle, exactly today's proven order: the BROKEN/confirm gates, then the resolve
    (restart's env-chain pass sits after its gates), then env composition.
-4. OPS: kill (a session-node domain op), `harness.restart(ctx)` returns the pane command, tmux
+5. OPS: kill (a session-node domain op), `harness.restart(ctx)` returns the pane command, tmux
    re-create. No `RealizationLog` exists because nothing is pending; there is nothing to unwind, and
    the post-kill non-rollbackable window stays pinned per command exactly as today.
 
@@ -281,18 +309,20 @@ Two walkthroughs make it concrete.
    its resolved session-template node, exactly as the vm-template hangs off a pending VM). Names are
    chosen up front, so every node's identity is complete while it is still pending. The walk roots
    at the pending session node, the command's one target.
-2. PREFLIGHT-ALL, same one scope-free context: predictions run for every declared secret; the
+2. ACTIVATION GATE: converge the existing VM's power state (maintenance, just-in-time gate secrets
+   if needed), so preflight probes a live target.
+3. PREFLIGHT-ALL, same one scope-free context: predictions run for every declared secret; the
    harness sees its target pending and defers. Dependency-blindness is structural, not special-
    cased.
-3. SECRETS: union from the walk, central prediction, the single resolve. The walk-away point.
-4. ROLL-FORWARD, orchestrator-authored in dependency order, opening with `log = RealizationLog()`:
-   ensure the VM is active; run the workspace mutation (today's `create_workspace` body) and
-   `log.realize(workspace)`; run the agent mutation (today's `create_agent` body, its git-credential
-   runups firing just before the materials write under the skip-and-degrade policy) and
-   `log.realize(agent)`; `harness.runup` now probes (target realized, fires once);
-   `harness.start(ctx)` returns the pane command; tmux create plus the session row,
-   `log.realize(session)`.
-5. FAILURE anywhere post-resolve: `log.unwind()` tears down whatever realized, in reverse (session,
+4. SECRETS: union from the walk, central prediction, the single resolve (seeded with any
+   gate-resolved values). The walk-away point.
+5. ROLL-FORWARD, orchestrator-authored in dependency order, opening with `log = RealizationLog()`:
+   run the workspace mutation (today's `create_workspace` body) and `log.mark_realized(workspace)`;
+   run the agent mutation (today's `create_agent` body, its git-credential runups firing just before
+   the materials write under the skip-and-degrade policy) and `log.mark_realized(agent)`;
+   `harness.runup` now probes (target realized, fires once); `harness.start(ctx)` returns the pane
+   command; tmux create plus the session row, `log.mark_realized(session)`.
+6. FAILURE anywhere post-resolve: `log.unwind()` tears down whatever realized, in reverse (session,
    then agent, then workspace, as far as realization got), with today's discipline.
 
 `vm create` is the same shape as the second walkthrough with the pending VM as the target node, and
@@ -356,6 +386,9 @@ machinery) are documented in `plan.md` per FRD R8.
   order of the proxmox op-client bridge removal relative to it.
 - Node construction factories per domain (who builds `vm/box` from a row: a `vms/nodes.py` factory
   is assumed; confirm against `bind_platform`'s current callers).
+- The gate-to-boundary cache seeding path: `Resolver.resolve` deliberately refuses post-pass
+  registration today, so the LLD pins how the activation gate's just-in-time values pre-seed the
+  boundary pass without weakening that guard.
 - Console nodes: no migrated command needs one until late; introduce lazily (R8).
 - Whether `readiness.py`'s policy helpers stay two functions (sweep, skip-and-degrade) or the tracer
   reveals a third shape.

@@ -195,7 +195,11 @@ behavior. This SDD re-homes the composition around them; it does not redesign th
   (mutation order, runup timing against "just before first use", interleavings like restart's
   env-chain resolution after its confirm gates) is command-shaped, authored in that command's
   orchestrator; the invariant is a discipline the shared helpers make easy, not an engine-enforced
-  template.
+  template. Power-state convergence by the ACTIVATION GATE (an existing VM auto-started after build
+  and before the sweep, so readiness probes a live target) is MAINTENANCE, idempotent declared-state
+  convergence that is never rollback-tracked, not a plan mutation; it does not bend "before any
+  mutation," and its narrow just-in-time secrets are R5's sanctioned exception (maintainer ruling,
+  2026-07-17).
 - Roll-BACK is the orchestrator's too (maintainer ruling, 2026-07-17): the orchestrator knows what
   it has realized, and unwind is that record read backwards (tear down the realized nodes, reverse
   realization order), invoked with today's discipline (best-effort, a failed teardown warns and
@@ -229,6 +233,15 @@ behavior. This SDD re-homes the composition around them; it does not redesign th
 - Delivery may be scoped: a node receives the secrets it declared, not the command-wide mapping.
   (Exact filtering semantics are an HLA decision; the requirement is that nothing about delivery
   reintroduces node-side resolution.)
+- The ACTIVATION GATE is the one sanctioned resolution outside the boundary pass (maintainer ruling,
+  2026-07-17): converging an existing VM's power state before preflight may need the platform's API
+  credential (the common case: observing and starting a stopped VM) or the Tailscale auth key (the
+  repair case: a lapsed tailnet registration must rejoin before the VM is reachable). Both resolve
+  just-in-time through the same backend chain, orchestrator-owned, before the boundary;
+  gate-resolved values SEED the boundary pass so no secret resolves or prompts twice in one command;
+  the interactivity precedes the walk-away point (R7's assertion is untouched); and the rejoin path
+  carries messaging encouraging REUSABLE auth keys, since a non-reusable key turns every restart
+  into a rejoin problem.
 
 ### R6: The context is rich, orchestrator-assembled, and stage-accurate
 
