@@ -1,4 +1,4 @@
-"""`agentworks version` -- print the installed CLI version.
+"""`agentworks version`: print the installed CLI version.
 
 Like `doctor`, this is a top-level command registered directly on the root
 `app` rather than its own Typer subapp.
