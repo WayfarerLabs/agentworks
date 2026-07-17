@@ -73,7 +73,10 @@ def test_sve_sentinel_triggers_one_host_restart(
     platform = LimaPlatform("lima", {})
     ran = _wire(monkeypatch, platform, sentinel_present=True)
     platform.create(_request())
-    assert any("limactl restart myvm" in cmd for cmd in ran)
+    # Exactly one restart: a regression to a restart loop must fail here, not
+    # slip through an at-least-once assertion (the whole point is one restart).
+    restarts = [cmd for cmd in ran if "limactl restart myvm" in cmd]
+    assert len(restarts) == 1, restarts
 
 
 def test_no_restart_when_sentinel_absent(
