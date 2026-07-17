@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from agentworks.capabilities.vm_platform.bootstrap_script import (
+    REBOOT_SENTINEL_PATH,
     generate_bootstrap_script,
     parse_bootstrap_output,
 )
@@ -26,11 +27,75 @@ def test_generate_bootstrap_script_all_steps() -> None:
     assert "##STEP## SSH public key" in script
     assert "##STEP## Swap file" in script
     assert "##STEP## Hostname" in script
+    assert "##STEP## Mask SVE" in script
     assert "##STEP## Tailscale install" in script
     assert "##STEP## Tailscale join" in script
     assert "tskey-auth-test123" in script
     assert "SWAP_GB=4" in script
     assert "lima--myvm" in script
+
+
+def test_generate_bootstrap_script_masks_sve_gated_on_apple() -> None:
+    """The SVE mask is gated on Apple Virtualization + SVE, writes a grub
+    drop-in with arm64.nosve, and drops a restart sentinel."""
+    script = generate_bootstrap_script(
+        admin_username="testuser",
+        ssh_public_key="ssh-ed25519 AAAA testkey",
+        provisioning_packages=["curl"],
+        tailscale_auth_key="tskey-auth-test123",
+        hostname="lima--myvm",
+    )
+
+    # Self-gated: only Apple Virtualization guests advertising SVE act.
+    assert "apple virtualization" in script
+    assert "/sys/class/dmi/id/product_name" in script
+    assert "/proc/cpuinfo" in script
+    # The fix and its host-side restart signal.
+    assert "arm64.nosve" in script
+    assert "/etc/default/grub.d/99-agentworks-nosve.cfg" in script
+    assert "update-grub" in script
+    assert f"touch {REBOOT_SENTINEL_PATH}" in script
+
+
+def test_sve_gate_matches_sve_and_sve2_as_whole_words() -> None:
+    """The cpuinfo half of the SVE gate fires on SVE or SVE2, words only.
+
+    SVE2 implies SVE, so a guest advertising SVE without SVE2 hits the same
+    unusable-HWCAP trap and must mask too. The SVE2-only sub-features
+    (sveaes, svesha3, ...) must not trigger it on their own.
+
+    Asserting on the grep's spelling would only restate the source, so pull
+    the real pattern out of the generated script and run grep with it.
+    """
+    import re
+    import subprocess
+
+    script = generate_bootstrap_script(
+        admin_username="testuser",
+        ssh_public_key="ssh-ed25519 AAAA testkey",
+        provisioning_packages=["curl"],
+        tailscale_auth_key="tskey-auth-test123",
+        hostname="lima--myvm",
+    )
+
+    match = re.search(r"grep (-\S+) '([^']+)' /proc/cpuinfo", script)
+    assert match, "SVE gate's /proc/cpuinfo probe not found in generated script"
+    flags, pattern = match.group(1), match.group(2)
+
+    def fires(features: str) -> bool:
+        proc = subprocess.run(
+            ["grep", flags, pattern], input=features, text=True, capture_output=True
+        )
+        return proc.returncode == 0
+
+    # Apple vz advertising the full SVE2 set, and SVE without SVE2.
+    assert fires("Features\t: fp asimd sve sve2 sveaes svesha3 bti")
+    assert fires("Features\t: fp asimd sve asimdfhm bf16 bti")
+    # Post-mask (arm64.nosve strips SVE from HWCAP): must not re-fire, which
+    # is what stops the create flow from restarting the VM in a loop.
+    assert not fires("Features\t: fp asimd aes pmull crc32 atomics bti")
+    # Sub-features alone are not the SVE HWCAP.
+    assert not fires("Features\t: fp asimd sveaes svepmull bti")
 
 
 def test_generate_bootstrap_script_preserves_ssh_host_keys() -> None:

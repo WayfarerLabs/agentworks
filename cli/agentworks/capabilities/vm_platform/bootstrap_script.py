@@ -28,6 +28,34 @@ SSH_PRESERVE_KEYS_PATH = "/etc/cloud/cloud.cfg.d/99-preserve-ssh-keys.cfg"
 SSH_PRESERVE_KEYS_LINES = ("ssh_deletekeys: false", "ssh_genkeytypes: []")
 SSH_PRESERVE_KEYS_CONTENT = "".join(f"{line}\n" for line in SSH_PRESERVE_KEYS_LINES)
 
+# Generic "a bootstrap step needs a reboot to take effect" sentinel. A step
+# that cannot finish without a restart touches this path; the lima platform
+# probes it after create and restarts the instance once (see
+# LimaPlatform._restart_sentinel_present), why-agnostically. Currently only
+# the Apple-vz SVE mask writes it. It lives on tmpfs, so the restart clears
+# it. Shared so the writers and the probe cannot drift apart.
+REBOOT_SENTINEL_PATH = "/run/agentworks-reboot-required"
+
+# grub drop-in that disables SVE at the kernel cmdline on Apple Virtualization
+# guests (see the "Mask SVE" step below for the why). Shared by the Phase A
+# bootstrap step and the Phase B reconcile step (initializer._apply_sve_mask),
+# which repairs VMs provisioned before the mask existed, so the two writers
+# cannot drift. The GRUB_CMDLINE_LINUX line references the shell var by name;
+# both writers keep it literal (quoted heredoc in bash, shlex.quote over SSH).
+SVE_NOSVE_GRUB_PATH = "/etc/default/grub.d/99-agentworks-nosve.cfg"
+SVE_NOSVE_GRUB_LINES = (
+    "# agentworks: Apple Virtualization advertises SVE the guest cannot run.",
+    'GRUB_CMDLINE_LINUX="$GRUB_CMDLINE_LINUX arm64.nosve"',
+)
+SVE_NOSVE_GRUB_CONTENT = "".join(f"{line}\n" for line in SVE_NOSVE_GRUB_LINES)
+
+# The cpuinfo half of the Apple-vz SVE gate, shared by both writers. Matches
+# SVE or SVE2 as whole words: SVE2 implies SVE, so a guest advertising SVE
+# alone is the same unusable-HWCAP trap; -w keeps the SVE2-only sub-features
+# (sveaes, svesha3, ...) from matching on their own.
+SVE_CPUINFO_GREP = "grep -qiwE 'sve|sve2' /proc/cpuinfo"
+SVE_APPLE_VZ_GREP = "grep -qi 'apple virtualization' /sys/class/dmi/id/product_name"
+
 SCRIPT_TEMPLATE = """\
 #!/bin/bash
 set -euo pipefail
@@ -119,6 +147,40 @@ echo "##STEP## Hostname"
 hostnamectl set-hostname "$VM_HOSTNAME" 2>/dev/null || hostname "$VM_HOSTNAME"
 echo "##SUCCESS## hostname set to $VM_HOSTNAME"
 
+# -- Step 5b: Mask broken SVE on Apple Virtualization guests --
+# Apple's Virtualization.framework advertises SVE/SVE2 in the guest HWCAP
+# that the guest cannot actually execute; the first SVE instruction traps
+# as SIGILL (seen in OpenSSL, and therefore git-over-https and Python
+# cryptography). Match either feature as a whole word: SVE2 implies SVE, so
+# a guest advertising SVE alone is the same trap and must mask too, while
+# -w keeps the SVE2-only sub-features (sveaes, svesha3, ...) from matching
+# on their own. Disable SVE at the kernel cmdline via a grub drop-in so
+# no library selects an SVE routine. This needs a reboot to take effect,
+# and rebooting inside a provision step is unreliable (lima-vm/lima#4867),
+# so the platform restarts the instance from the host when it sees the
+# sentinel dropped below. Self-gated: a no-op on every non-Apple host.
+# The same drop-in is reconciled during Phase B (initializer._apply_sve_mask)
+# so VMs provisioned before this step existed get repaired on `vm reinit`.
+echo "##STEP## Mask SVE"
+if {sve_apple_vz_grep} 2>/dev/null \
+    && {sve_cpuinfo_grep} 2>/dev/null; then
+    mkdir -p /etc/default/grub.d
+    cat > {sve_grub_path} <<'AGW_NOSVE_EOF'
+{sve_grub_content}AGW_NOSVE_EOF
+    if update-grub >/dev/null 2>&1; then
+        if grep -qw arm64.nosve /proc/cmdline; then
+            echo "##SUCCESS## SVE already masked (arm64.nosve active)"
+        else
+            touch {reboot_sentinel}
+            echo "##SUCCESS## SVE masked via arm64.nosve (restart pending)"
+        fi
+    else
+        echo "##WARN## update-grub failed; SVE not masked"
+    fi
+else
+    echo "##SUCCESS## SVE mask not needed"
+fi
+
 # -- Step 6: Install Tailscale --
 # tailscaled is configured by its Debian package's systemd unit, which reads
 # /etc/default/tailscaled for the FLAGS env var. We leave both at their
@@ -168,6 +230,11 @@ def generate_bootstrap_script(
         swap=swap,
         ssh_preserve_path=SSH_PRESERVE_KEYS_PATH,
         ssh_preserve_content=SSH_PRESERVE_KEYS_CONTENT,
+        reboot_sentinel=REBOOT_SENTINEL_PATH,
+        sve_apple_vz_grep=SVE_APPLE_VZ_GREP,
+        sve_cpuinfo_grep=SVE_CPUINFO_GREP,
+        sve_grub_path=SVE_NOSVE_GRUB_PATH,
+        sve_grub_content=SVE_NOSVE_GRUB_CONTENT,
         bashrc_content=BASHRC,
         zshrc_content=ZSHRC,
     )

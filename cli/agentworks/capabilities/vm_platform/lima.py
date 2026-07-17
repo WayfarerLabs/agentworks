@@ -12,7 +12,11 @@ from typing import TYPE_CHECKING, Any, ClassVar
 
 from agentworks import output
 from agentworks.capabilities.vm_platform.base import ProvisionRequest, ProvisionResult, VMPlatform
-from agentworks.capabilities.vm_platform.bootstrap_script import generate_bootstrap_script, parse_bootstrap_output
+from agentworks.capabilities.vm_platform.bootstrap_script import (
+    REBOOT_SENTINEL_PATH,
+    generate_bootstrap_script,
+    parse_bootstrap_output,
+)
 from agentworks.capabilities.vm_platform.cloud_init import PROVISIONING_PACKAGES
 from agentworks.db import VMStatus
 from agentworks.errors import ConfigError, StateError
@@ -28,6 +32,11 @@ if TYPE_CHECKING:
     from agentworks.db import VMRow
     from agentworks.resources.reference import ConfigReference
     from agentworks.transports import Transport
+
+# Markers the restart-sentinel probe echoes on stdout. The probe exits 0
+# either way, so an absent sentinel stays a normal result, not an exception.
+_REBOOT_PENDING_MARKER = "AGW_REBOOT_PENDING"
+_REBOOT_CLEAR_MARKER = "AGW_REBOOT_CLEAR"
 
 # Lima template for Debian cloud VMs (values substituted at create time).
 # The provision block runs the full bootstrap script (user, packages, swap,
@@ -238,7 +247,10 @@ class LimaPlatform(VMPlatform):
         # Indent the provision script for YAML embedding (6 spaces)
         indented_script = textwrap.indent(provision_script, "      ")
         rendered = LIMA_TEMPLATE.format(
-            cpus=cpus, memory=memory, disk=disk, provision_script=indented_script
+            cpus=cpus,
+            memory=memory,
+            disk=disk,
+            provision_script=indented_script,
         )
 
         if self.is_remote:
@@ -247,6 +259,30 @@ class LimaPlatform(VMPlatform):
             self._create_local(instance_name, rendered)
 
         output.detail(f"Lima VM '{instance_name}' created.")
+
+        # Some bootstrap steps (currently the Apple-vz SVE mask, see
+        # bootstrap_script) only take effect after a reboot, and rebooting
+        # mid-provision is unreliable (lima-vm/lima#4867). Such steps drop a
+        # restart sentinel; restart the instance from the host when we see it.
+        # The probe stays generic: the host cannot cheaply tell which guest
+        # shape it is, so a bare failure is phrased for what it does know.
+        try:
+            restart_pending = self._restart_sentinel_present(instance_name)
+        except SSHError as e:
+            output.warn(
+                f"could not check whether '{instance_name}' needs a restart to "
+                f"finish provisioning: {e}"
+            )
+            output.warn(
+                f"if the VM misbehaves, 'limactl restart {instance_name}' "
+                "reapplies any deferred bootstrap step."
+            )
+            restart_pending = False
+        if restart_pending:
+            output.detail(
+                f"A bootstrap step needs a reboot; restarting '{instance_name}'..."
+            )
+            self._run_lima(f"limactl restart {instance_name}")
 
         # If Tailscale was provisioned via the provision block, extract the IP
         tailscale_ip = None
@@ -270,6 +306,31 @@ class LimaPlatform(VMPlatform):
             bootstrap_complete=bootstrap_complete,
             tailscale_ip=tailscale_ip,
         )
+
+    def _restart_sentinel_present(self, instance_name: str) -> bool:
+        """True if a bootstrap step left the restart sentinel in the guest.
+
+        A bootstrap step that needs a reboot to take effect touches
+        ``REBOOT_SENTINEL_PATH`` (see ``bootstrap_script``); currently only
+        the Apple-vz SVE mask does. The sentinel lives on tmpfs, so it clears
+        itself on the restart. The probe stays deliberately why-agnostic: the
+        host restarts on the sentinel without needing to know which step set
+        it.
+
+        The probe reports its answer on stdout and exits 0 whether or not the
+        sentinel is there, so a raised ``SSHError`` means a genuine shell or
+        transport failure and never a merely absent sentinel.
+        """
+        probe = self._run_lima(
+            f"limactl shell {instance_name} sh -c "
+            f"'test -f {REBOOT_SENTINEL_PATH} "
+            f"&& echo {_REBOOT_PENDING_MARKER} || echo {_REBOOT_CLEAR_MARKER}'"
+        )
+        if _REBOOT_PENDING_MARKER in probe:
+            return True
+        if _REBOOT_CLEAR_MARKER in probe:
+            return False
+        raise SSHError(f"unrecognized restart-sentinel probe output: {probe.strip()!r}")
 
     def _instance_exists(self, instance_name: str) -> bool:
         """Pre-flight: does a Lima instance with this name exist?"""

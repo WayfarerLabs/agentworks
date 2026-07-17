@@ -907,6 +907,80 @@ def _preserve_ssh_host_keys(
         output.warn(msg)
 
 
+def _apply_sve_mask(target: Transport, logger: SSHLogger) -> None:
+    """Repair the Apple-vz SVE trap on VMs provisioned before the mask existed.
+
+    Apple's Virtualization.framework advertises SVE the guest cannot execute,
+    so the first SVE instruction traps as SIGILL, surfacing in OpenSSL and thus
+    apt-over-https, git, and Python cryptography. Phase A masks this at create
+    via an ``arm64.nosve`` grub drop-in; this reconcile step installs the same
+    drop-in on an already-running VM so ``vm reinit`` repairs one provisioned
+    before the mask existed. The drop-in path and content are shared with the
+    Phase A step so the two writers cannot drift.
+
+    Gated to Apple Virtualization guests that still advertise SVE, so it is a
+    silent no-op everywhere else and on VMs already masked (``arm64.nosve``
+    strips SVE from the HWCAP, closing the gate). Non-fatal: failure warns and
+    continues, matching the rest of Phase B.
+
+    The mask takes effect only after a reboot, and Phase B runs over the
+    tailnet, so this does not restart the VM: doing so would drop us mid-init,
+    and the remaining crypto-dependent steps would still run on the unmasked
+    kernel. It installs the fix and tells the operator to restart, then reinit
+    again (matching ``apply_tailscaled_dns_fix``, which likewise defers to the
+    next boot).
+    """
+    from pathlib import PurePosixPath
+
+    from agentworks.capabilities.vm_platform.bootstrap_script import (
+        SVE_APPLE_VZ_GREP,
+        SVE_CPUINFO_GREP,
+        SVE_NOSVE_GRUB_LINES,
+        SVE_NOSVE_GRUB_PATH,
+    )
+
+    logger.step("Mask SVE")
+
+    # Gate: an Apple Virtualization guest still advertising SVE. Both greps
+    # read /sys and /proc (no sudo); either one failing (non-Apple host, or a
+    # VM already masked and rebooted) makes this a silent no-op.
+    gate = target.run(f"{SVE_APPLE_VZ_GREP} && {SVE_CPUINFO_GREP}", check=False)
+    if not gate.ok:
+        return
+
+    output.detail("Masking unusable SVE (arm64.nosve)...")
+    parent = str(PurePosixPath(SVE_NOSVE_GRUB_PATH).parent)
+    printf_args = " ".join(shlex.quote(line) for line in SVE_NOSVE_GRUB_LINES)
+    try:
+        target.run(
+            f"mkdir -p {shlex.quote(parent)} && printf '%s\\n' {printf_args} "
+            f"> {shlex.quote(SVE_NOSVE_GRUB_PATH)}",
+            sudo=True,
+        )
+        update = target.run("update-grub", sudo=True, check=False)
+        if not update.ok:
+            msg = "SVE mask: update-grub failed; VM may crash on SVE (SIGILL)."
+            logger.warning(msg)
+            output.warn(msg)
+            return
+    except SSHError as e:
+        msg = f"SVE mask failed: {e}"
+        logger.warning(msg)
+        output.warn(msg)
+        return
+
+    # The drop-in is installed but the running kernel picked it up only if
+    # arm64.nosve is already on the cmdline (i.e. the VM was rebooted since).
+    # We cannot reboot from here without dropping the tailnet mid-init, so tell
+    # the operator; a restart plus one more reinit converges the VM.
+    active = target.run("grep -qw arm64.nosve /proc/cmdline", check=False)
+    if not active.ok:
+        output.warn(
+            "Masked unusable SVE (arm64.nosve). Restart the VM and reinit "
+            "again to apply it; until then, OpenSSL/git/apt may crash (SIGILL)."
+        )
+
+
 def _configure_apt_sources(
     target: Transport,
     vm_template: ResolvedVMTemplate,
@@ -1755,6 +1829,13 @@ def _phase_b_setup(
     # even if a later step warns. Idempotent overwrite with identical
     # content.
     _preserve_ssh_host_keys(ts_target, logger)
+
+    # Non-fatal: repair the Apple-vz SVE trap (arm64.nosve grub drop-in) on
+    # VMs provisioned before the Phase A mask existed. Runs early, before the
+    # crypto-dependent apt/source steps, so a broken VM at least gets the fix
+    # installed this pass; it needs a restart plus one more reinit to converge.
+    # A silent no-op on every non-Apple host and on already-masked VMs.
+    _apply_sve_mask(ts_target, logger)
 
     # Non-fatal: VM hardening (sysctl baseline + /proc hidepid>=1).
     # Runs before the rest of init so subsequent steps execute under the
