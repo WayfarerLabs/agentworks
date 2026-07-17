@@ -290,17 +290,18 @@ spec:
     harness would own (a first interactive step at launch, or a provision-time credential the
     harness consumes). It interacts with the walk-away invariant (any interactivity must precede the
     walk-away point) and with the secret model, so it is deferred until its shape is pinned.
-  - **Remote-control enablement, and its default.** Claude Code can expose a running session to be
-    attached-to and driven from a remote surface (the Claude app or web). Enabling that when the
-    harness launches a session is a natural fit for the walk-away model: the operator starts an
-    agent, walks away, and steers or unblocks it remotely later. So it is a candidate
-    `harness_config` field (whether a launched session is remote-controllable, and how it is
-    reached). But driving an agent remotely is a high-power capability, so it carries the same
-    authorization dimension as user-level MCP inheritance: WHO may attach and drive a launched agent
-    is a security decision the harness is the control point for, and the SAFE DEFAULT is off (or
-    scoped to the operator who launched it), with remote control an explicit, visible opt-in rather
-    than silently on. Deferred, and pinned to a safe default now for the same reason the MCP item
-    is: so v1 does not accidentally ship an open remote-drive channel.
+  - **Remote-control enablement.** Claude Code has a well-defined remote-control feature (a running
+    session can be attached-to and driven from a remote surface, the Claude app or web). It fits the
+    walk-away model, so exposing it is a candidate `harness_config` field: whether a launched
+    session enables remote control. Unlike the MCP item above, this carries NO special harness
+    responsibility. It is off unless the operator turns it on, which is the obvious right default
+    and already how the harness behaves (it enables nothing it is not told to), and anyone who
+    enables it knows what the feature is. Securing the remote-control channel itself is Anthropic's,
+    not the harness's; the harness's whole job here is to expose the toggle with the off default. It
+    is a plain config field, called out only so the vocabulary is complete, not a footgun the
+    harness has to defend against. (The contrast with MCP inheritance is the point: that one is a
+    SILENT side effect of authentication, which is why it is the harness's to fix; this one is an
+    explicit, understood feature the operator opts into.)
 
 ### R5: Inheritance, the pair travels together
 
