@@ -199,7 +199,13 @@ behavior. This SDD re-homes the composition around them; it does not redesign th
   and before the sweep, so readiness probes a live target) is MAINTENANCE, idempotent declared-state
   convergence that is never rollback-tracked, not a plan mutation; it does not bend "before any
   mutation," and its narrow just-in-time secrets are R5's sanctioned exception (maintainer ruling,
-  2026-07-17).
+  2026-07-17). The gate is the orchestrator driving the live VM node's own power-state ops (`status`
+  / `start` / a held-active span), NOT a new protocol stage and NOT a preflight side effect
+  (preflight is read-only). It is a SPAN held through the command and closed at the end (some
+  platforms, WSL2 today, must be HELD active, not merely started), and the VM node is the authority
+  on whether it may auto-start: auto-start applies only to an auto-stopped VM, and a manually
+  stopped one (`operator_stopped`, set by `vm stop`, cleared by `vm start`) refuses with a typed
+  error at the gate.
 - Roll-BACK is the orchestrator's too (maintainer ruling, 2026-07-17): the orchestrator knows what
   it has realized, and unwind is that record read backwards (tear down the realized nodes, reverse
   realization order), invoked with today's discipline (best-effort, a failed teardown warns and

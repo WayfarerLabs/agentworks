@@ -46,6 +46,7 @@ cli/agentworks/orchestration/
   walk.py        # memoized multi-root walk over declared edges
   secrets.py     # secret union, central prediction, the scoped delivery reader
   readiness.py   # preflight sweep + the runup policy helpers (skip-and-degrade)
+  activation.py  # the activation gate: ensure_active + the held-active span
   unwind.py      # RealizationLog
 ```
 
@@ -155,25 +156,49 @@ the runup analog of the rollback ruling: mechanism on the node, meaning in the o
 ## The activation gate
 
 Commands that touch an EXISTING VM converge its power state first: the activation gate (today's
-`ensure_active` / `keep_active`) runs after BUILD and BEFORE preflight-all, so every readiness probe
-that reaches the target (the harness's required-commands, any tool-state check) queries a real, live
-environment instead of failing against a stopped VM (maintainer ruling, 2026-07-17). Our model
-created this ordering question by giving preflight a real environment (today's preflights never
-SSH), so the model owns the answer. Three properties keep it crisp:
+`ensure_active` / `keep_active`) OPENS after BUILD and BEFORE preflight-all, so every readiness
+probe that reaches the target (the harness's required-commands, any tool-state check) queries a
+real, live environment instead of failing against a stopped VM (maintainer ruling, 2026-07-17). Our
+model created this ordering question by giving preflight a real environment (today's preflights
+never SSH), so the model owns the answer.
 
+**It is not a new protocol stage, and not a preflight side effect.** Preflight is read-only, so it
+cannot start a VM; the gate is the ORCHESTRATOR driving the live VM node's own power-state OPS
+(`status`, `start`, and the hold-active span below), exactly the domain ops today's `ensure_active`
+calls. Power state is VM-node vocabulary, not a shared-protocol method, so nothing about it touches
+the thin `Node` surface (readiness plus deps); it is one more piece of orchestrator choreography
+over node ops, and `ensure_active` / `keep_active` become an `activation.py` orchestration helper.
+Five properties keep it crisp:
+
+- **It is a SPAN, not a point** (WSL2, and any future platform that must be HELD active rather than
+  merely started). The gate opens before preflight and stays open through the whole command, closing
+  at the end: `keep_active` today is `ensure_active` plus `with platform.vm_active(vm)`, and WSL2's
+  `vm_active` spawns a keepalive subprocess that must live for the operation's duration. So the
+  orchestrator wraps the command body in the active span (`vm_active`, the VM node's span-op); a
+  platform with nothing to hold gets a no-op context. The span closes on both success and failure,
+  after any unwind.
+- **The node is the authority on whether it MAY auto-start.** Agentworks distinguishes auto-stopped
+  from operator-stopped (`vms.operator_stopped`, set by `vm stop`, cleared by `vm start`).
+  Auto-start happens ONLY for an auto-stopped VM; a manually stopped one refuses, and the gate is
+  exactly where the live VM node says so: a typed `StateError` ("manually stopped so it will not be
+  auto-started", with the `agw vm start` hint), raised within the node's own scope before any secret
+  is touched. Explicit `agw vm start` is the operator's own mutation (it clears the flag and
+  starts); the gate's auto-start respects it. The re-read-the-flag race guard today's
+  `ensure_active` does is preserved.
 - **It is MAINTENANCE, not plan mutation.** Power-state convergence is idempotent declared-state
   maintenance (the carve the harness SDD already made, kept here): it is never rollback-tracked (a
-  VM auto-started for a command that later fails stays up), and it does not bend "preflight-all
-  before any mutation," which governs the command's PLAN.
+  VM auto-started for a command that later fails stays up, the span just closes), and it does not
+  bend "preflight-all before any mutation," which governs the command's PLAN.
 - **Its secret needs are narrow, known, and resolved JUST-IN-TIME, outside the boundary pass.** The
-  COMMON case is the platform's API credential (observing and starting a stopped proxmox VM needs
-  `proxmox-token`); the REPAIR case is the Tailscale auth key (a VM whose tailnet registration
-  lapsed must rejoin before it is reachable at all). Both resolve through the normal backend chain,
-  orchestrator-owned, at the gate; this is the one sanctioned resolution outside the boundary pass.
-  It is pre-walk-away interactivity in the same bucket as the confirm gates and the first-create
-  system-slug prompt, so R7's "no prompt after the resolve boundary" assertion is untouched, and
-  env-backed setups see no interaction at all. Gate-resolved values SEED the boundary pass so the
-  same secret never resolves or prompts twice in one command.
+  COMMON case is the platform's API credential (observing and starting a stopped VM needs it:
+  `proxmox-token` for proxmox, the Azure credential for a deallocated azure VM); the REPAIR case is
+  the Tailscale auth key (a VM whose tailnet registration lapsed must rejoin before it is reachable
+  at all). Both resolve through the normal backend chain, orchestrator-owned, at the gate; this is
+  the one sanctioned resolution outside the boundary pass. It is pre-walk-away interactivity in the
+  same bucket as the confirm gates and the first-create system-slug prompt, so R7's "no prompt after
+  the resolve boundary" assertion is untouched, and env-backed setups see no interaction at all.
+  Gate-resolved values SEED the boundary pass so the same secret never resolves or prompts twice in
+  one command.
 - **The rejoin path carries messaging.** When the gate must rejoin tailscale, the surface encourages
   REUSABLE auth keys (a non-reusable key turns every restart into a rejoin problem); a failed rejoin
   is a typed error raised before preflight, with the VM left as maintenance put it.
@@ -289,8 +314,9 @@ Two walkthroughs make it concrete.
    derivation rule); session-template re-resolution by the stored name yields
    `(harness, harness_config)`, and the session factory constructs the harness node with the session
    name and the live agent node as target.
-2. ACTIVATION GATE: converge the VM's power state (maintenance; the gate's just-in-time secrets if a
-   start or rejoin is needed) so the probes that follow query a live target.
+2. OPEN THE ACTIVATION GATE (a span held through the command): converge the VM's power state
+   (maintenance; refuse if operator-stopped; just-in-time gate secrets if a start or rejoin is
+   needed; hold active for platforms that require it) so the probes that follow query a live target.
 3. PREFLIGHT-ALL over the walk rooted at the live session node: one scope-free command-start
    context; the harness's target is realized, so required-commands probes NOW, pre-resolve and
    pre-kill; any failure aborts with the old session still running.
@@ -309,8 +335,9 @@ Two walkthroughs make it concrete.
    its resolved session-template node, exactly as the vm-template hangs off a pending VM). Names are
    chosen up front, so every node's identity is complete while it is still pending. The walk roots
    at the pending session node, the command's one target.
-2. ACTIVATION GATE: converge the existing VM's power state (maintenance, just-in-time gate secrets
-   if needed), so preflight probes a live target.
+2. OPEN THE ACTIVATION GATE (span, held through the command): converge the existing VM's power state
+   (maintenance; refuse if operator-stopped; just-in-time gate secrets if needed; hold active for
+   platforms that require it), so preflight probes a live target.
 3. PREFLIGHT-ALL, same one scope-free context: predictions run for every declared secret; the
    harness sees its target pending and defers. Dependency-blindness is structural, not special-
    cased.
@@ -323,7 +350,8 @@ Two walkthroughs make it concrete.
    `harness.runup` now probes (target realized, fires once); `harness.start(ctx)` returns the pane
    command; tmux create plus the session row, `log.mark_realized(session)`.
 6. FAILURE anywhere post-resolve: `log.unwind()` tears down whatever realized, in reverse (session,
-   then agent, then workspace, as far as realization got), with today's discipline.
+   then agent, then workspace, as far as realization got), with today's discipline. The activation
+   span closes last, on success or failure, releasing any keepalive.
 
 `vm create` is the same shape as the second walkthrough with the pending VM as the target node, and
 every other command sits somewhere on the same spectrum. The layers hold throughout: the
@@ -376,6 +404,15 @@ machinery) are documented in `plan.md` per FRD R8.
 - **Identity intrinsic, traveling by construction** (FRD R3). The HLA adds: the scope-free-context
   argument (pass-as-is holds BECAUSE identity is off the context) and the key convention that makes
   node identity operational (memoization, cycles, unwind).
+- **Preflight gets a LIVE target, at the cost of a narrow just-in-time prompt** (maintainer ruling,
+  2026-07-17). The considered alternative, denying preflight active targets so it never needs a gate
+  secret, was rejected: it re-imposes the exact limitation the model exists to remove (a readiness
+  check that cannot see the world until after the prompt), it demotes preflight to little more than
+  the resolvability-prediction pass, and it does not even save the operator a prompt, since the
+  platform credential is needed to provision regardless, just later. The gate's exception is bounded
+  (narrow known secrets, pre-walk-away, seeded into the boundary pass, zero interaction for
+  env-backed setups, exercised only when a VM is actually stopped), so it is a small, contained
+  price for a preflight that can actually probe. Accepted deliberately.
 
 ## Open questions (for plan.md / LLDs)
 
