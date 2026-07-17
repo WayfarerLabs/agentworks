@@ -352,6 +352,8 @@ def _check_tailscale() -> HealthGroup:
 
 def _check_config() -> tuple[HealthGroup, Config | None, Registry | None]:
     """Returns (group, config_or_none, registry_or_none)."""
+    import os
+
     from agentworks.config import CONFIG_PATH, ConfigError
 
     g = HealthGroup("Configuration")
@@ -361,7 +363,10 @@ def _check_config() -> tuple[HealthGroup, Config | None, Registry | None]:
         g.fail("Config file", f"not found: {CONFIG_PATH}. Run 'agw config init' to create one.")
         return g, None, None
 
-    g.ok("Config file", str(CONFIG_PATH))
+    # Surface AW_CONFIG_DIR so an operator inheriting a shared machine sees
+    # at a glance that state is going somewhere non-default.
+    suffix = " (AW_CONFIG_DIR override)" if os.environ.get("AW_CONFIG_DIR", "").strip() else ""
+    g.ok("Config file", f"{CONFIG_PATH}{suffix}")
 
     try:
         from agentworks.config import load_config

@@ -9,6 +9,11 @@
 User config lives at `~/.config/agentworks/config.toml`. All paths support `~` expansion. The config
 is read-only at runtime -- Agentworks never writes back to it.
 
+Setting `AW_CONFIG_DIR` in the environment relocates the whole tree (config.toml, DB, backups, logs,
+resource manifests). Intended for running multiple agentworks installs side-by-side under one user
+without sharing DB migration state; not a production knob. Per k8s convention, env vars only answer
+"where is the config" here; individual values inside the config are not env-overridable.
+
 ### Full Schema
 
 ```toml

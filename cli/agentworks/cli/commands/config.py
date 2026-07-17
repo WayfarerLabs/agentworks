@@ -17,7 +17,7 @@ app.add_typer(config_app)
 
 @config_app.command("init")
 def config_init() -> None:
-    """Create a sample config file at ~/.config/agentworks/config.toml."""
+    """Create a sample config file at ~/.config/agentworks/config.toml (or under AW_CONFIG_DIR)."""
     import shutil
     from importlib.resources import files
 

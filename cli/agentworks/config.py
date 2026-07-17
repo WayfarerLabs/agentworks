@@ -1,6 +1,8 @@
 """Agentworks configuration loading and validation.
 
-Config lives at ~/.config/agentworks/config.toml. It is read-only at runtime.
+Config lives at ~/.config/agentworks/config.toml by default (override the
+whole tree with the ``AW_CONFIG_DIR`` env var; see ``_resolve_config_dir``).
+It is read-only at runtime.
 
 Post-move contract (resource-manifests SDD): this module holds the
 settings dataclasses plus the legacy TOML resource loaders/publisher
@@ -15,6 +17,7 @@ there. Kind definitions live in the domain packages too (see
 
 from __future__ import annotations
 
+import os
 import re
 import sys
 import tomllib
@@ -47,7 +50,24 @@ if TYPE_CHECKING:
     from agentworks.resources.registry import Registry
     from agentworks.vms.sites import VMSiteDecl
 
-CONFIG_DIR = Path.home() / ".config" / "agentworks"
+def _resolve_config_dir() -> Path:
+    # AW_CONFIG_DIR relocates the whole config tree (config.toml, DB, backups,
+    # logs, resource manifests). Intended for running multiple agentworks
+    # installs side-by-side under one user without stepping on a shared DB.
+    # Empty / whitespace-only values collapse to unset so a stray
+    # `export AW_CONFIG_DIR=` (or `= ` ) does not silently redirect writes
+    # into cwd via Path("") or a bogus relative dir.
+    override = os.environ.get("AW_CONFIG_DIR", "").strip()
+    if override:
+        return Path(override).expanduser()
+    return Path.home() / ".config" / "agentworks"
+
+
+# Resolved once at import time. Subsequent env mutation (including tests
+# using monkeypatch.setenv after this module has been imported) does not
+# rebind CONFIG_DIR / CONFIG_PATH / DB_PATH. Tests that need to exercise
+# override behavior should call _resolve_config_dir() directly.
+CONFIG_DIR = _resolve_config_dir()
 CONFIG_PATH = CONFIG_DIR / "config.toml"
 
 NAME_RE = re.compile(r"^[a-z0-9]([a-z0-9_-]*[a-z0-9])?$")
