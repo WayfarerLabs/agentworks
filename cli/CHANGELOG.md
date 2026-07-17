@@ -1,5 +1,182 @@
 # Changelog
 
+## [0.11.0](https://github.com/WayfarerLabs/agentworks/compare/v0.10.0...v0.11.0) (2026-07-17)
+
+
+### ⚠ BREAKING CHANGES
+
+* **vms:** name the proxmox secret proxmox-token
+* **vms:** name the azure platform azure-vm
+* **vms:** sites register unconditionally and self-disable
+* **vms:** platforms self-report host support; rename lima-local
+* **capabilities:** adopt the capability lifecycle for vm-platform
+* **vms:** --site flag, vm-host removal, completions, doctor, migrate
+* **vms:** system slug, R11 hostname, ssh-config naming, identity env
+* **vms:** manager rewiring onto bound platforms (phase 3)
+* **vms:** db migration to sites schema (phase 2)
+* **vms:** vm-site/vm-platform kinds, protocol, registry, dispatch
+* **secrets:** capability collapse -- backends ARE the capability
+* **resources:** resource sample requires a kind or --all
+* **resources:** unify kind/name display syntax on '/'
+* **migrate:** require --all; summary-first dry-run
+* **resources:** ban '/' in names; registry-proven, honest samples
+* **secrets:** backends are the door (runtime-model LLD)
+
+### Features
+
+* **agents:** apply git-cred lifecycle + phases to agent init ([25bf9e6](https://github.com/WayfarerLabs/agentworks/commit/25bf9e69a97c8c7923c319511f94f742f83d2555))
+* **capabilities:** add post-resolve verify() readiness stage ([84cb017](https://github.com/WayfarerLabs/agentworks/commit/84cb01787f5141c24cc2139b31d729dab5415e5e))
+* **capabilities:** adopt the capability lifecycle for vm-platform ([aa767fc](https://github.com/WayfarerLabs/agentworks/commit/aa767fcb4a33098c148b8976cedd8c748474b3a9))
+* **capabilities:** thread RunContext through preflight and runup ([decefa9](https://github.com/WayfarerLabs/agentworks/commit/decefa9a84949e2f0df5321bf5d5b91ff134740a))
+* **catalog:** add ngrok apt source and package ([3f25469](https://github.com/WayfarerLabs/agentworks/commit/3f2546999324f175b472e753017bf1bbbaf82027))
+* **catalog:** add ngrok apt source and package ([904dfff](https://github.com/WayfarerLabs/agentworks/commit/904dfff3c24dd0a7e98af5183a4c44438bd2ac48))
+* **cli:** add `agw version` command ([6417f28](https://github.com/WayfarerLabs/agentworks/commit/6417f28f31e7473a75e5bef31788eb166bc89bbb))
+* **cli:** add `agw version` command ([a011865](https://github.com/WayfarerLabs/agentworks/commit/a0118659678be90eb7665b39f0818ccbc1b84b84))
+* **completion:** doctor shell relevance and completion uninstall ([f165b8f](https://github.com/WayfarerLabs/agentworks/commit/f165b8f84b13f4603c62e7daf3d50130fc949574))
+* **config:** aggregate deprecation warnings; add --no-deprecations ([914e4f0](https://github.com/WayfarerLabs/agentworks/commit/914e4f07f3bcfc06f8aa0ae69f87cb70364e84cc))
+* **config:** settings-only load_config; remediation commands don't nag ([8aa9a50](https://github.com/WayfarerLabs/agentworks/commit/8aa9a501675ada4bbb25dd5edf3bea846a95d557))
+* **console:** carry agent-scope env and secrets across the add-shell sudo boundary ([86a8f68](https://github.com/WayfarerLabs/agentworks/commit/86a8f6892d474e3417fdfceb9466842af73060d5))
+* **console:** carry agent-scope env/secrets across the add-shell sudo boundary ([3806f46](https://github.com/WayfarerLabs/agentworks/commit/3806f463935d69047cc7a23621234ced909a024b))
+* **doctor:** skip stale warnings for shells not on this machine ([de49392](https://github.com/WayfarerLabs/agentworks/commit/de493925e653d0065ec05604740883b133ff4657))
+* **git-credentials:** adopt the capability lifecycle ([0c8930b](https://github.com/WayfarerLabs/agentworks/commit/0c8930ba01f95f806a393579634e3ed27c3a576b))
+* **git-credentials:** defer git runup to the write step ([fd142e3](https://github.com/WayfarerLabs/agentworks/commit/fd142e331e75776822ec39f09b74fae30179faf2))
+* **git-credentials:** fine-grained PATs selected per repo ([22450c5](https://github.com/WayfarerLabs/agentworks/commit/22450c514b3d4cc30f55949cf3fe02d9f70126e6))
+* **git-credentials:** helper owns get and survives rejection ([1d56f6f](https://github.com/WayfarerLabs/agentworks/commit/1d56f6f94cc182662d81f2108e63399a548ff513))
+* **git-credentials:** provider-owned repo remote review ([ca8542b](https://github.com/WayfarerLabs/agentworks/commit/ca8542b7007b1d8a640ca84032c42b67106a66c6))
+* **git-credentials:** repos scope field is a list ([8ffd250](https://github.com/WayfarerLabs/agentworks/commit/8ffd2501f5d29e780ae17bdacbcbad728bf9676f))
+* **git-credentials:** verify tokens at provisioning entry and doctor ([e9626ec](https://github.com/WayfarerLabs/agentworks/commit/e9626ec78322c4bd0da7cb8f4ec8594c4d6c77b6))
+* **lima:** mask broken SVE on Apple vz, add nested-virt opt-in ([caafb83](https://github.com/WayfarerLabs/agentworks/commit/caafb83c349a2c4c13ca3394040e0ac8553b7479))
+* **manifests:** YAML resource manifests loader and publisher ([1216573](https://github.com/WayfarerLabs/agentworks/commit/1216573e283d66d5745f534fdc0e80e0e378db63))
+* **migrate:** require --all; summary-first dry-run ([5ca8568](https://github.com/WayfarerLabs/agentworks/commit/5ca856802c356b806a4f464654e08b8def8b9ac2))
+* **resources:** agw resource edit KIND/NAME opens the manifest ([c08113c](https://github.com/WayfarerLabs/agentworks/commit/c08113c2dad786a43eadcc7a1e3b5f7fb9f042a1))
+* **resources:** agw resource migrate and agw resource sample (Phase 4) ([81c1280](https://github.com/WayfarerLabs/agentworks/commit/81c1280e99f5a240994af49f3f233748f6e74023))
+* **resources:** ban '/' in names; registry-proven, honest samples ([c85f985](https://github.com/WayfarerLabs/agentworks/commit/c85f985bc1e191a1e64a4fe459abb03d69a6f321))
+* **resources:** capability config-validation contract ([111af11](https://github.com/WayfarerLabs/agentworks/commit/111af115011d0e4a7ded6e8e3e39706884b6be9c))
+* **resources:** git-credential adopts provider_config nesting too ([4f048b2](https://github.com/WayfarerLabs/agentworks/commit/4f048b2e6eb5d12f536809420e73367c0fdb6179))
+* **resources:** per-kind category field and agw resource kinds ([043ab6b](https://github.com/WayfarerLabs/agentworks/commit/043ab6b3bbc6492ea063ec672802392c99764b3b))
+* **resources:** Phase 5 -- deprecation warnings and doc promotions ([5409677](https://github.com/WayfarerLabs/agentworks/commit/540967713e142a180f3450773dbe4d755b4e010b))
+* **resources:** resource edit works when the config is broken ([9213702](https://github.com/WayfarerLabs/agentworks/commit/9213702633a9b444e49e9aadf9899d4ed609d7f9))
+* **resources:** resource sample requires a kind or --all ([4caf402](https://github.com/WayfarerLabs/agentworks/commit/4caf4025545e6c8efdeae6a44b31dbfa326d691e))
+* **resources:** unify kind/name display syntax on '/' ([cd89245](https://github.com/WayfarerLabs/agentworks/commit/cd89245d98bc879a7cce01111cb2d00aec1a8562))
+* **secrets:** capability collapse -- backends ARE the capability ([f4f754d](https://github.com/WayfarerLabs/agentworks/commit/f4f754d682a39e9603d7d4e0d99131bdd4211916))
+* **secrets:** fold the env-chain resolve into the boundary pass ([96f0929](https://github.com/WayfarerLabs/agentworks/commit/96f0929ea377239a7938c16c191660d41d3a199b))
+* **secrets:** nest provider-owned config under spec.provider_config ([f4885b5](https://github.com/WayfarerLabs/agentworks/commit/f4885b5676eda251c7756d1ed4ccbab6643bf38f))
+* **secrets:** provider/backend split and registry-derived resolver ([df8dc06](https://github.com/WayfarerLabs/agentworks/commit/df8dc063614be802b1ccbcf300d0ec1cc2dea440))
+* **vm-platform:** proxmox runup authenticates the API token ([8a72f98](https://github.com/WayfarerLabs/agentworks/commit/8a72f98a1f625cf1c47d00737eabb791fbcdfcbc))
+* **vm:** delineate create/reinit into named lifecycle phases ([c33503d](https://github.com/WayfarerLabs/agentworks/commit/c33503dfee5591077c41beabd3ff727f7264e0a4))
+* **vm:** drive vm create from templates; size Azure by spec ([cc056de](https://github.com/WayfarerLabs/agentworks/commit/cc056deb18eb1e13c70170c0190a9ddb137f170d))
+* **vm:** drive vm create from templates; size Azure by spec ([91e695d](https://github.com/WayfarerLabs/agentworks/commit/91e695dd144007016179f9910fd89f3634e8844e))
+* **vm:** run the platform provisioning runup before create ([262f9b6](https://github.com/WayfarerLabs/agentworks/commit/262f9b6fbf9a68077ccd75254baa5ff225c4a997))
+* **vms:** --site flag, vm-host removal, completions, doctor, migrate ([7860625](https://github.com/WayfarerLabs/agentworks/commit/7860625c8fb08dafc7aba53c6b2b3a7105bfa273))
+* **vms:** db migration to sites schema (phase 2) ([1fd300a](https://github.com/WayfarerLabs/agentworks/commit/1fd300a103702f5d4d32f0d8a4432d2d08b238b9))
+* **vms:** manager rewiring onto bound platforms (phase 3) ([8902a2a](https://github.com/WayfarerLabs/agentworks/commit/8902a2abdc3f1f46455e430a2ba06fd01ca9bffa))
+* **vms:** name the azure platform azure-vm ([7163379](https://github.com/WayfarerLabs/agentworks/commit/7163379e7f40c59fe7e664c077e3f5a8dc9ed391))
+* **vms:** platforms self-report host support; rename lima-local ([dab4585](https://github.com/WayfarerLabs/agentworks/commit/dab4585ac91e40af426c4cd25722576ff89639bd))
+* **vms:** reconcile the Apple-vz SVE mask on vm reinit ([41fe86a](https://github.com/WayfarerLabs/agentworks/commit/41fe86a2fbf823d6bfa5791d19a0ae5332d607d9))
+* **vms:** sites register unconditionally and self-disable ([5e39456](https://github.com/WayfarerLabs/agentworks/commit/5e3945693512f0c2dd4d9f7beffeb39a46b50695))
+* **vms:** system slug, R11 hostname, ssh-config naming, identity env ([50d248a](https://github.com/WayfarerLabs/agentworks/commit/50d248a93ed2f0962445f67283d2eaf3c80ccf2d))
+* **vms:** vm-site/vm-platform kinds, protocol, registry, dispatch ([fd69f8a](https://github.com/WayfarerLabs/agentworks/commit/fd69f8a083a3bc3dfd571fc17e8a1d4dccccf5ba))
+* YAML resource manifests and the config/resource/capability split ([f9f80bc](https://github.com/WayfarerLabs/agentworks/commit/f9f80bc2e2c1b1256fa3f6fd344bcd5070abbcf9))
+
+
+### Bug Fixes
+
+* address final whole-branch review findings ([78bc22c](https://github.com/WayfarerLabs/agentworks/commit/78bc22c1645552d37a19aec0624f772786bda8b0))
+* address reviewer findings on the capability model branch ([61bf40b](https://github.com/WayfarerLabs/agentworks/commit/61bf40be585abbd8fcc88363fb106c42984a71bb))
+* address the PR review's ruled items ([c66062b](https://github.com/WayfarerLabs/agentworks/commit/c66062bc44d5f98352edd4fbc8df0488e07d46db))
+* **agents:** bind before the env resolve in shell/exec; guard all ops ([681c51d](https://github.com/WayfarerLabs/agentworks/commit/681c51d73df9a6b5fbd2a1979bb36428f07dc5ea))
+* **agents:** one Initialization phase, no agent 'bootstrap' ([6a870e0](https://github.com/WayfarerLabs/agentworks/commit/6a870e09b05853bd112dff8a41699477f495637d))
+* avoid assert for runtime contract enforcement ([5acf33d](https://github.com/WayfarerLabs/agentworks/commit/5acf33da7057e39504bc29faf47689efb4418cae))
+* avoid unused var issue in tests ([435371a](https://github.com/WayfarerLabs/agentworks/commit/435371ac849d07cad7f98f68aedad814bfd894e5))
+* **azure:** drop the credential probe; pin preflight's ceiling ([dfa58ec](https://github.com/WayfarerLabs/agentworks/commit/dfa58ec8365f691827a0884fa46eae2c38fee09a))
+* close the final review's minors ([aba6d2a](https://github.com/WayfarerLabs/agentworks/commit/aba6d2ad0cc4483726e46916d5fb7d9f17624496))
+* **completions:** unwrap typer's FuncParamType so Choices complete ([fd88180](https://github.com/WayfarerLabs/agentworks/commit/fd88180f3908ee15226e5c1c99dc9396f15aabd1))
+* **config:** sharpen the deprecation warning's closing sentence ([923142a](https://github.com/WayfarerLabs/agentworks/commit/923142af9b5ad97dea308b113af744202e5a038e))
+* **config:** suggest resource migrate before resource sample ([af0d4ad](https://github.com/WayfarerLabs/agentworks/commit/af0d4ad036eec7bdaaa077030f4c1544d90a7a14))
+* **console:** probe sudo setenv before preserving pane env ([dc0573a](https://github.com/WayfarerLabs/agentworks/commit/dc0573ac983265707fb031b43cb144a31ab8d156))
+* **docs,config:** address the Phase 5 review ([34e3610](https://github.com/WayfarerLabs/agentworks/commit/34e36103d91359dabd2bedf0bdc15383d20f0441))
+* **doctor:** deprecation row reads as a sentence ([02361ef](https://github.com/WayfarerLabs/agentworks/commit/02361efc9ea37ef53c311505422941a4a8833308))
+* **doctor:** manifest load failure no longer short-circuits report ([7dbe9b3](https://github.com/WayfarerLabs/agentworks/commit/7dbe9b34fd73fff21632e89f96bbb9e3c4c439dc))
+* **doctor:** render Tailscale above the VM groups ([66dec06](https://github.com/WayfarerLabs/agentworks/commit/66dec06247d4bb170198effe4215a220736e7169))
+* **doctor:** reorder groups, add a System header, colon-separate rows ([3cf175a](https://github.com/WayfarerLabs/agentworks/commit/3cf175abb7b4fe6c986ee13cf583cde0a1c6c42f))
+* **doctor:** report every registry secret; drop vestigial groups ([ee6248d](https://github.com/WayfarerLabs/agentworks/commit/ee6248dc5c47b905cc624a9d8c3a881dd9485fb1))
+* **doctor:** surface manifest issues as rows, not ambient warnings ([0b2c787](https://github.com/WayfarerLabs/agentworks/commit/0b2c787dd094123959f5cb4791d65f9f9d57906b))
+* **doctor:** tidy one-line deprecation row; facts split from messages ([39a4cf2](https://github.com/WayfarerLabs/agentworks/commit/39a4cf244ebfac85f408a775374261fd463571ef))
+* fix toml ignored github scope warnings ([c7de338](https://github.com/WayfarerLabs/agentworks/commit/c7de338540810a893cad1c9bc5109d2e34044018))
+* **git-credentials:** address reviewer findings on the adoption ([1b6454d](https://github.com/WayfarerLabs/agentworks/commit/1b6454ddfaabc175c366ea5a2cae0cb448cd5056))
+* **git-credentials:** close reviewer findings on the helper stack ([676fc3a](https://github.com/WayfarerLabs/agentworks/commit/676fc3a89df580d0bfbd7ccbe678d1e596a088aa))
+* **git-credentials:** cover all materialization sites; warn helpers ([6383ee1](https://github.com/WayfarerLabs/agentworks/commit/6383ee19f687b9b8d685889750ec47297fbb5787))
+* **git-credentials:** stop scoped credentials leaking out of scope ([5668810](https://github.com/WayfarerLabs/agentworks/commit/5668810037c4e82ad5ba012f66853d1d15bf8dda))
+* **git-credentials:** warn helper needs the ! prefix git requires ([eee98af](https://github.com/WayfarerLabs/agentworks/commit/eee98afe33b53f6b92be65a2cc265c9a63cc3ede))
+* **lima:** gate the SVE mask on SVE or SVE2, matched as whole words ([59ae963](https://github.com/WayfarerLabs/agentworks/commit/59ae963ff351f1f770e1c284bce6932e09a50d65))
+* **lima:** probe the SVE sentinel without exceptions as control flow ([dc30357](https://github.com/WayfarerLabs/agentworks/commit/dc303577912c6e5c1372792d732e493589316d20))
+* **manifests:** address Phase 2 reviewer findings ([84cdf8d](https://github.com/WayfarerLabs/agentworks/commit/84cdf8d1d013e1aff3819be0ae2c23d3cfd4da5a))
+* **manifests:** clean error for unhashable YAML mapping keys ([9fee447](https://github.com/WayfarerLabs/agentworks/commit/9fee4472736677f3f297f0438ecd09fe8f506707))
+* **manifests:** reject merge keys; pin files-first walk order ([9ec126e](https://github.com/WayfarerLabs/agentworks/commit/9ec126e1b1a764906a79e44674679c10850e2ce1))
+* **migrate:** address the Phase 4 implementation review ([b56d4b0](https://github.com/WayfarerLabs/agentworks/commit/b56d4b0775f63ae43aa36bd56899e285db427fb9))
+* **migrate:** anchor assignment-pattern location scan to column zero ([dafc9b2](https://github.com/WayfarerLabs/agentworks/commit/dafc9b2d712c79ef1a7cf593306eaae03ecbd257))
+* **migrate:** point the secret-backend hint at --all ([1c5b813](https://github.com/WayfarerLabs/agentworks/commit/1c5b8130b7676602cea35a1b04ec08034517d780))
+* **resources:** address Phase 0-1 reviewer findings ([89d16d4](https://github.com/WayfarerLabs/agentworks/commit/89d16d4a390b1e3b8c71e2ef102bcfe90632b514))
+* **resources:** address Phase 3.5 review findings ([64cefac](https://github.com/WayfarerLabs/agentworks/commit/64cefacca2d5cbf82b12a47c642b1de4344f7d18))
+* **resources:** final review fixes; provider_config cannot shadow spec ([fb97e04](https://github.com/WayfarerLabs/agentworks/commit/fb97e04ba44fab084220e63a24d45fe2f6af1883))
+* **resources:** Phase 5.7 review fixes -- loads-today and lint blockers ([cefa61f](https://github.com/WayfarerLabs/agentworks/commit/cefa61f376077b932e0fb82209943deafccb988e))
+* **sdd,secrets:** address broad whole-branch review findings ([b35e41c](https://github.com/WayfarerLabs/agentworks/commit/b35e41c2472889029b58e81c26b3e3ff718fe97f))
+* **secrets:** address Phase 3 review findings ([aa497c2](https://github.com/WayfarerLabs/agentworks/commit/aa497c2b14580e862a81f19b015e5f20f917ff7f))
+* **secrets:** address runtime-model review findings ([4dc6f84](https://github.com/WayfarerLabs/agentworks/commit/4dc6f84b2f012456dda6507579c248283e7cecfb))
+* **secrets:** collapse review fixes -- doc-sync residue ([fe977d6](https://github.com/WayfarerLabs/agentworks/commit/fe977d68a3f95b470cb8e5ecc0460950af8ef7a5))
+* **secrets:** finish import canonicalization; fix comment indent ([8fa7c2a](https://github.com/WayfarerLabs/agentworks/commit/8fa7c2a86424d4068ea8025abe9def651149cac3))
+* **secrets:** prompt rejects any backend mapping ([7a53395](https://github.com/WayfarerLabs/agentworks/commit/7a53395860f76d8c0578291eaf9169a3024dcb1d))
+* **tests:** make the sudoers promote-on-reject assertions non-vacuous ([9b37c68](https://github.com/WayfarerLabs/agentworks/commit/9b37c6878cc7a592ca9bea7a5e9cdf2a2d5fc194))
+* **tests:** pre-import gate modules before stubbing bind_platform ([ccf4fca](https://github.com/WayfarerLabs/agentworks/commit/ccf4fca549375b39929822856e3b46ad2d14cfed))
+* **vms:** a blank slug answer is final; the shared-backend nudge is gone ([5289e0b](https://github.com/WayfarerLabs/agentworks/commit/5289e0b78b2cb7c267af50fc738137697768c157))
+* **vms:** bind before any prompt; degrade describe on preflight errors ([6088f0e](https://github.com/WayfarerLabs/agentworks/commit/6088f0e66122ad674a8068a0857dd5a9102da8a2))
+* **vms:** close Copilot's three remaining substantive findings ([8b8a5b7](https://github.com/WayfarerLabs/agentworks/commit/8b8a5b7436ea3494720b74b81c5b865b95b63844))
+* **vms:** close the azure-vm rename review round's findings ([34537e0](https://github.com/WayfarerLabs/agentworks/commit/34537e0a5307f94d57a4d55e9a04fa223ed7c06f))
+* **vms:** close the disabled-model PR review round's findings ([726788d](https://github.com/WayfarerLabs/agentworks/commit/726788d6fb338e5ed3694f29d1a62a994d161c67))
+* **vms:** close the disabled-model review round's minors ([cf605dc](https://github.com/WayfarerLabs/agentworks/commit/cf605dc8ef4159ce8a7e190a57d7a20bb7c4734e))
+* **vms:** close the host-support review round's findings ([2073f61](https://github.com/WayfarerLabs/agentworks/commit/2073f61d027f620cf976889b43b7bfdc85ae453b))
+* **vms:** describe skips the live SSH read on an observed-stopped VM ([accad3f](https://github.com/WayfarerLabs/agentworks/commit/accad3f9d6ecf1dd29f14c4427885404851341b8))
+* **vms:** exact R11 hostname check in describe; pin blank-slug nudge ([b467f03](https://github.com/WayfarerLabs/agentworks/commit/b467f03cba98b54b908e8af47751f5f7aff2b260))
+* **vms:** freeze v27 platform validation; correct reserved-name comment ([2cb7d6a](https://github.com/WayfarerLabs/agentworks/commit/2cb7d6adbc59281a05f5d58c18f5d8dc960da0bf))
+* **vms:** guard custom-site creates; commit phase 1 SDD artifact edits ([e7e395d](https://github.com/WayfarerLabs/agentworks/commit/e7e395d1db6e8d8a803d69ff0d3486e2455e66c1))
+* **vms:** manual-stop gate skips the ping and says what it means ([f74246a](https://github.com/WayfarerLabs/agentworks/commit/f74246ac523e1eae06e47fd97088765a5760e83e))
+* **vms:** name the proxmox secret proxmox-token ([9d2f0c2](https://github.com/WayfarerLabs/agentworks/commit/9d2f0c244ccfc62bdc92e0946e39a5d5efd565f9))
+* **vms:** phase 1 review round: R2 name rules, typed bridge, tests ([5b45dc9](https://github.com/WayfarerLabs/agentworks/commit/5b45dc9b94b29ca186e3ca97a7b879314f5ff876))
+* **vms:** phase 2 review round: pre-DDL validation, stderr snippets ([f5d2f7c](https://github.com/WayfarerLabs/agentworks/commit/f5d2f7c910b317e4e0bcea96abe5b2a54db68326))
+* **vms:** phase 3 review round: structural bind-once, gate fixes ([8d6417d](https://github.com/WayfarerLabs/agentworks/commit/8d6417dc05ee7226536022dde5ce7c808f27b2bd))
+* **vms:** phase 3 round 2: delete hardening, one-pass nested creates ([c2db7bb](https://github.com/WayfarerLabs/agentworks/commit/c2db7bbaf1b07b355d12ceb6434392c13979c5dd))
+* **vms:** phase 4 review round: prompt fidelity, nudge shape, rulings ([eb4aa18](https://github.com/WayfarerLabs/agentworks/commit/eb4aa18d957a97229d58a429462f7b9db9d8dca0))
+* **vms:** phase 5 review round: pre-write guards, noun sweep ([a94eb20](https://github.com/WayfarerLabs/agentworks/commit/a94eb203365a87d10a09d09c3111c2029e46bd52))
+* **vms:** surface remote limactl failures; never consume stale results ([fd22016](https://github.com/WayfarerLabs/agentworks/commit/fd220164a916e3e9e301338caa5cc21359e36966))
+
+
+### Documentation
+
+* **adr-0017:** scope the argv claim to the sudo argv, not the process table ([302fd05](https://github.com/WayfarerLabs/agentworks/commit/302fd05d36fb51a9563904a4db62ba7440e65833))
+* **adr:** a resource is any registry entry; capabilities ARE resources ([95ef81a](https://github.com/WayfarerLabs/agentworks/commit/95ef81aa8f1f2b7f7e978f0e2b6fdef745aa284c))
+* **azure-vm:** say "minimum by (cpus, memory)" not "sorts" ([62b02e8](https://github.com/WayfarerLabs/agentworks/commit/62b02e8178888dcfff9c218218f9155fae624569))
+* **capabilities:** frame preflight/verify by intent, not template ([ca1534d](https://github.com/WayfarerLabs/agentworks/commit/ca1534d6fa42a3176b60c045334922c05bf8cc5f))
+* **capabilities:** pin the preflight-early/runup-deferred model ([2b3ea8c](https://github.com/WayfarerLabs/agentworks/commit/2b3ea8cf88442cd9dcff7c2225b91869c769ea34))
+* **capabilities:** promote capability model to capabilities/README.md ([f97d561](https://github.com/WayfarerLabs/agentworks/commit/f97d5610a07394ba99acf53577ff3e7c9bd2ae14))
+* **capabilities:** record secret-backend open questions ([a4a65f0](https://github.com/WayfarerLabs/agentworks/commit/a4a65f0053e4cab7fe4d4f34793e3c81902cfe77))
+* **capabilities:** runup-failure recommendation (retry vs rollback) ([d48bdbe](https://github.com/WayfarerLabs/agentworks/commit/d48bdbe63d8b88bed055f2353fd4ec82e169d6c4))
+* conciseness pass -- dedupe, and general principles over specific ([e394601](https://github.com/WayfarerLabs/agentworks/commit/e39460137edd3a3476c2e4aec21a168c178f76af))
+* correct git-cred selection narrative to match the helper ([dbcf7f1](https://github.com/WayfarerLabs/agentworks/commit/dbcf7f110bbede48e2462b1e5fb9e00ba9602abd))
+* describe the destination; flatten inline capability selection ([e03ac56](https://github.com/WayfarerLabs/agentworks/commit/e03ac5617fee136643136b1c280c26bb1f8a612f))
+* final-review polish -- locked.md accuracy, one docstring colon ([d14eee7](https://github.com/WayfarerLabs/agentworks/commit/d14eee79d57e260ef1d56c769968ca689b6715a9))
+* fix staleness left by the same-day corrections ([3be566a](https://github.com/WayfarerLabs/agentworks/commit/3be566a58f40769fc6e5fee069316c881009fcdc))
+* post-collapse batch review fixes ([5df388f](https://github.com/WayfarerLabs/agentworks/commit/5df388f8691867877c3d93c23c69d16e903f4f94))
+* **resources:** polish kind descriptions ([0443261](https://github.com/WayfarerLabs/agentworks/commit/044326138d425ac81a82516ba6c8a0fcfb0dd53b))
+* **sdd:** record phase 2 review round; complete collision hint ([d3290e1](https://github.com/WayfarerLabs/agentworks/commit/d3290e153eaa037b9685f5ccf12c4b8102d3e560))
+* **tests:** sweep slash grammar into three test docstrings ([c65197f](https://github.com/WayfarerLabs/agentworks/commit/c65197f307daa43bd93f850a9fbecab6529fdc8c))
+* **vms:** close the final review round's findings ([e4c8323](https://github.com/WayfarerLabs/agentworks/commit/e4c832389433ba436d0c974ebe1b245a7387cac6))
+* **vms:** permanent docs, migration checkpoints, rollback carve-out ([0acf0b6](https://github.com/WayfarerLabs/agentworks/commit/0acf0b6a0a3ea9cf75fb5bef6d20c184188ee595))
+
+
+### Code Refactoring
+
+* **secrets:** backends are the door (runtime-model LLD) ([7f2c5a5](https://github.com/WayfarerLabs/agentworks/commit/7f2c5a57e64d8a3dc76a52397a77a68ab4aa2e81))
+
 ## [0.10.0](https://github.com/WayfarerLabs/agentworks/compare/v0.9.0...v0.10.0) (2026-07-02)
 
 
