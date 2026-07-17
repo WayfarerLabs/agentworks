@@ -22,3 +22,4 @@ from . import secret  # noqa: F401
 from . import resource  # noqa: F401
 from . import completion  # noqa: F401
 from . import doctor  # noqa: F401
+from . import version  # noqa: F401
