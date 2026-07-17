@@ -290,6 +290,17 @@ spec:
     harness would own (a first interactive step at launch, or a provision-time credential the
     harness consumes). It interacts with the walk-away invariant (any interactivity must precede the
     walk-away point) and with the secret model, so it is deferred until its shape is pinned.
+  - **Remote-control enablement, and its default.** Claude Code can expose a running session to be
+    attached-to and driven from a remote surface (the Claude app or web). Enabling that when the
+    harness launches a session is a natural fit for the walk-away model: the operator starts an
+    agent, walks away, and steers or unblocks it remotely later. So it is a candidate
+    `harness_config` field (whether a launched session is remote-controllable, and how it is
+    reached). But driving an agent remotely is a high-power capability, so it carries the same
+    authorization dimension as user-level MCP inheritance: WHO may attach and drive a launched agent
+    is a security decision the harness is the control point for, and the SAFE DEFAULT is off (or
+    scoped to the operator who launched it), with remote control an explicit, visible opt-in rather
+    than silently on. Deferred, and pinned to a safe default now for the same reason the MCP item
+    is: so v1 does not accidentally ship an open remote-drive channel.
 
 ### R5: Inheritance, the pair travels together
 
@@ -558,9 +569,9 @@ The model change (Background) lands in the permanent docs, not just in code and 
   dimension (a launched agent silently inheriting the operator's user-level MCP servers) is recorded
   in R4's reserved future directions, with the safe default (non-inheritance) pinned now so v1 does
   not build in the footgun.
-- **claude-code auth modes, question-timeout control, and MCP-inheritance policy**: recorded as R4
-  reserved future directions, not built in v1. The v1 `claude-code` config vocabulary is the pinned
-  `permission_mode` / `model` / `extra_args` set.
+- **claude-code auth modes, question-timeout control, MCP-inheritance policy, and remote-control
+  enablement**: recorded as R4 reserved future directions, not built in v1. The v1 `claude-code`
+  config vocabulary is the pinned `permission_mode` / `model` / `extra_args` set.
 - **Liveness probing behind the harness**: today's boot-id/PID probe is tool-agnostic and stays
   core; a harness-owned probe can be added to the contract when a harness actually needs one.
 - **Alternatives to tmux**: possibly introduced someday, but that would be an orthogonal effort; the

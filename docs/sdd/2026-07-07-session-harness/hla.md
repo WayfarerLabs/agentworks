@@ -700,14 +700,18 @@ the FRD's robustness posture, neither variant aims to be race-proof. Either way 
 
 ### claude-code config vocabulary: pinned v1, reserved future
 
-v1 is `permission_mode` / `model` / `extra_args` (FRD R4). The harness is the natural owner of three
+v1 is `permission_mode` / `model` / `extra_args` (FRD R4). The harness is the natural owner of four
 further concerns the FRD records as reserved (not built here), and the config surface is where they
 would land: a flag governing whether the launched session inherits the operator's user-level MCP
 servers (default non-inheritance, the safe posture against silent tool escalation); a
-question-timeout field for unattended sessions; and a Claude-subscription OAuth auth mode. The OAuth
-mode is the one that would touch the contract rather than just the vocabulary, since any auth
-interactivity must precede the walk-away point; it is deferred until its shape is pinned.
-`extra_args` is the escape hatch that keeps v1 from needing a field per flag in the meantime.
+question-timeout field for unattended sessions; a Claude-subscription OAuth auth mode; and
+remote-control enablement (whether a launched session can be attached-to and driven from a remote
+surface). Two of these carry a security default the FRD pins now rather than later: MCP inheritance
+(default off) and remote control (default off or operator-scoped), because both would otherwise be
+silent grants of high-power access to a launched agent. The OAuth mode is the one that would touch
+the contract rather than just the vocabulary, since any auth interactivity must precede the
+walk-away point; it is deferred until its shape is pinned. `extra_args` is the escape hatch that
+keeps v1 from needing a field per flag in the meantime.
 
 ### Same-harness blobs merge; the capability owns the merge
 
