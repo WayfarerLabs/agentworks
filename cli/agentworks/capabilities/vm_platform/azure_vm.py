@@ -136,8 +136,9 @@ class _VMSize(NamedTuple):
 # memory like every other platform instead of an Azure-specific SKU. The
 # ratios are fixed by Azure (a template asking for an off-ratio shape, e.g.
 # 4 vCPU / 8 GiB, rounds UP to the nearest fitting SKU and warns). Ordered
-# small to large for readability; selection sorts defensively so an operator
-# override in platform_config.vm_sizes need not be pre-sorted.
+# small to large for readability; selection takes the minimum by
+# (cpus, memory), so an operator override in platform_config.vm_sizes
+# need not be pre-sorted.
 _DEFAULT_VM_SIZES: tuple[_VMSize, ...] = (
     _VMSize(1, 2, "Standard_B1ms"),
     _VMSize(2, 4, "Standard_B2s"),
@@ -193,10 +194,10 @@ def _parse_size_catalog(
 def _select_vm_size(
     catalog: tuple[_VMSize, ...], *, cpus: int, memory_gib: int
 ) -> _VMSize:
-    """The smallest catalog entry whose cpus and memory both satisfy the
-    request, sorted by (cpus, memory). Raises ``ConfigError`` when the
-    request exceeds every entry (the template is bigger than anything on
-    offer)."""
+    """The catalog entry that both satisfies the request and is smallest
+    by (cpus, memory), chosen with ``min`` so the result is independent
+    of catalog order. Raises ``ConfigError`` when the request exceeds
+    every entry (the template is bigger than anything on offer)."""
     fits = [s for s in catalog if s.cpus >= cpus and s.memory_gib >= memory_gib]
     if not fits:
         largest = max(catalog, key=lambda s: (s.cpus, s.memory_gib))

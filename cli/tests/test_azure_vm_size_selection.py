@@ -45,8 +45,9 @@ class TestSelectVMSize:
         assert exc.value.hint is not None
 
     def test_selection_independent_of_catalog_order(self) -> None:
-        """Selection sorts, so an unsorted (operator) catalog still
-        yields the true smallest fit."""
+        """Selection is order-independent (the minimum by (cpus, memory)),
+        so an unsorted (operator) catalog still yields the true smallest
+        fit."""
         from agentworks.capabilities.vm_platform.azure_vm import _VMSize
 
         unsorted = (
