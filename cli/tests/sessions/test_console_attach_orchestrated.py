@@ -309,3 +309,69 @@ def test_named_console_no_tailscale_fails_with_zero_resolves_and_zero_gate(
         multi_console.attach_console(db, config, name="c1")
 
     assert resolve_counter == []
+
+
+class _FakeRestoreTarget:
+    """Transport double for the restore path: the console tmux session
+    exists, the session window is present, and the window carries only
+    its session pane (no shell panes), so a zero-shell member is
+    already intact."""
+
+    def __init__(self) -> None:
+        self.commands: list[str] = []
+
+    def run(self, cmd: str, **kwargs: object) -> SimpleNamespace:
+        self.commands.append(cmd)
+        if "list-windows" in cmd:
+            return SimpleNamespace(ok=True, returncode=0, stdout="s1\n", stderr="")
+        if "list-panes" in cmd:
+            # Pane 0 is the session pane; no tagged shell panes.
+            return SimpleNamespace(ok=True, returncode=0, stdout="%0|0|\n", stderr="")
+        return SimpleNamespace(ok=True, returncode=0, stdout="", stderr="")
+
+
+def test_restore_session_stopped_vm_drives_the_real_gated_composition(
+    db: Database,
+    make_config,  # noqa: ANN001
+    resolve_counter: list[list[str]],
+    monkeypatch: pytest.MonkeyPatch,
+    captured_output,  # noqa: ANN001
+) -> None:
+    """restore_session end to end through the real orchestrated helper
+    on a stopped VM: the gate's just-in-time token resolve fully seeds
+    the union (one backend pass total), the gate starts the VM, and
+    the tmux reconciliation (probe, window check, pane check, landing
+    focus) runs inside the gate span; the already-intact member is a
+    reported no-op."""
+    config = make_config()
+    _seed_vm(db)
+    _seed_named_console(db)
+    db._conn.execute(
+        "INSERT INTO workspaces (name, vm_name, workspace_path, linux_group) "
+        "VALUES ('ws1', 'box', '/srv/ws1', 'ws-ws1')"
+    )
+    db._conn.execute(
+        "INSERT INTO sessions (name, workspace_name, template, mode, socket_path) "
+        "VALUES ('s1', 'ws1', 'default', 'admin', '/tmp/s1.sock')"
+    )
+    db._conn.execute(
+        "INSERT INTO console_sessions (console_name, session_name, shells, position) "
+        "VALUES ('c1', 's1', '[]', 0)"
+    )
+    db._conn.commit()
+    events: list[str] = []
+    _stop_the_vm(monkeypatch, events)
+    fake = _FakeRestoreTarget()
+    monkeypatch.setattr(
+        "agentworks.transports.transport", lambda vm, config, **kwargs: fake
+    )
+
+    multi_console.restore_session(db, config, console_name="c1", session_name="s1")
+
+    assert events == ["status", "start", "tailscale"]  # the gate ran
+    assert resolve_counter == [["proxmox-token"]]
+    assert any("has-session -t aw-console-c1" in c for c in fake.commands)
+    assert any("list-windows -t aw-console-c1" in c for c in fake.commands)
+    # The no-op landing focus still fires (post-restore focus parity).
+    assert any("select-pane -t aw-console-c1:s1.0" in c for c in fake.commands)
+    assert any("already matches config" in m for m in captured_output.info)

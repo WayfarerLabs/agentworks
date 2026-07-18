@@ -268,6 +268,50 @@ def test_missing_grant_fails_with_zero_resolves_and_zero_gate(
     assert target.streaming_calls == []
 
 
+# -- the held-active span -----------------------------------------------------
+
+
+def test_shell_interactive_runs_inside_the_held_active_span(
+    db: Database,
+    make_config,  # noqa: ANN001
+    target: _FakeAgentTarget,
+    monkeypatch: pytest.MonkeyPatch,
+    captured_output,  # noqa: ANN001
+) -> None:
+    """keep_active parity: the interactive session runs INSIDE the
+    gate's held-active span (the WSL2 keepalive anchor), which closes
+    after it. The mirror of the vm-domain pin in
+    tests/vms/test_shell_exec_orchestrated.py."""
+    import contextlib as _contextlib
+
+    config = make_config()
+    _seed(db)
+    _reachable(monkeypatch, True)
+    events: list[str] = []
+
+    @_contextlib.contextmanager
+    def _recording_hold(self: ProxmoxPlatform, row: object, *, config: object = None):  # noqa: ANN202
+        events.append("hold-open")
+        try:
+            yield
+        finally:
+            events.append("hold-close")
+
+    monkeypatch.setattr(ProxmoxPlatform, "vm_active", _recording_hold)
+    interactive = target.interactive
+
+    def _tracking(cmd: str, *, env: dict[str, str] | None = None) -> int:
+        events.append("interactive")
+        return interactive(cmd, env=env)
+
+    target.interactive = _tracking  # type: ignore[method-assign]
+
+    with pytest.raises(SystemExit):
+        agent_manager.shell_agent(db, config, name="a1")
+
+    assert events == ["hold-open", "interactive", "hold-close"]
+
+
 # -- the operation scope reaches readiness ------------------------------------
 
 
