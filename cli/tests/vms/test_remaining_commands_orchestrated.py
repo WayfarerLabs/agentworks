@@ -533,3 +533,118 @@ def test_port_forward_scope_reaches_node_readiness(
     assert scope is not None
     assert scope.level is ScopeLevel.VM
     assert scope.vm == "box"
+
+
+# == backup_vm: a gated command ===============================================
+
+
+@pytest.fixture
+def backup_env(
+    tmp_path,  # noqa: ANN001
+    make_config,  # noqa: ANN001
+    monkeypatch: pytest.MonkeyPatch,
+):  # noqa: ANN201
+    """A config whose backups land under tmp, the SSH log dir isolated,
+    and the admin transport faked (an SSHTransport whose run is a
+    stub: the body asserts the SSH-specific type)."""
+    from types import SimpleNamespace
+
+    from agentworks.transports import SSHTransport
+
+    monkeypatch.setattr("agentworks.ssh.LOG_DIR", tmp_path / "logs")
+    target = SSHTransport(host="100.64.0.9")
+    target.run = lambda *a, **k: SimpleNamespace(stdout="", ok=True)  # type: ignore[method-assign, assignment]
+    monkeypatch.setattr(
+        "agentworks.transports.transport", lambda vm, config, **kwargs: target
+    )
+    return make_config(f'[paths]\nbackups = "{tmp_path}/backups"\n')
+
+
+def test_backup_reachable_vm_is_one_boundary_burst(
+    db: Database,
+    backup_env,  # noqa: ANN001
+    resolve_counter: list[list[str]],
+    monkeypatch: pytest.MonkeyPatch,
+    captured_output,  # noqa: ANN001
+) -> None:
+    """backup on a reachable VM: the gate's fast path costs nothing,
+    the site secret rides ONE boundary burst, and the metadata backup
+    completes end to end (manifest written, completion event logged)."""
+    import json
+
+    from agentworks.vms import backup as vm_backup
+
+    _seed_vm(db)
+    _reachable(monkeypatch, True)
+
+    backup_dir = vm_backup.backup_vm(db, backup_env, "box")
+
+    assert resolve_counter == [["proxmox-token"]]
+    manifest = json.loads((backup_dir / "manifest.json").read_text())
+    assert manifest["vm_name"] == "box"
+    events = [e.event for e in db.list_vm_events("box")]
+    assert "backup_started" in events and "backup_completed" in events
+
+
+def test_backup_stopped_vm_gates_then_backs_up(
+    db: Database,
+    backup_env,  # noqa: ANN001
+    resolve_counter: list[list[str]],
+    monkeypatch: pytest.MonkeyPatch,
+    captured_output,  # noqa: ANN001
+) -> None:
+    """The gate-prompt parity mirror on a stopped VM: the gate's
+    just-in-time token resolve seeds the boundary (nothing resolves
+    twice), the VM starts, and the backup still completes."""
+    from agentworks.vms import backup as vm_backup
+
+    _seed_vm(db)
+    gate_events: list[str] = []
+    _reachable(monkeypatch, False)
+    monkeypatch.setattr(
+        ProxmoxPlatform,
+        "status",
+        lambda self, row: gate_events.append("status") or VMStatus.STOPPED,
+    )
+    monkeypatch.setattr(
+        ProxmoxPlatform, "start", lambda self, row: gate_events.append("start")
+    )
+    monkeypatch.setattr(
+        vm_manager,
+        "_ensure_tailscale",
+        lambda *a, **k: gate_events.append("tailscale"),
+    )
+
+    backup_dir = vm_backup.backup_vm(db, backup_env, "box")
+
+    assert gate_events == ["status", "start", "tailscale"]  # the gate ran
+    assert resolve_counter == [["proxmox-token"]]
+    assert (backup_dir / "manifest.json").exists()
+
+
+def test_backup_scope_reaches_node_readiness(
+    db: Database,
+    backup_env,  # noqa: ANN001
+    monkeypatch: pytest.MonkeyPatch,
+    captured_output,  # noqa: ANN001
+) -> None:
+    from agentworks.capabilities.base import ScopeLevel
+    from agentworks.vms import backup as vm_backup
+
+    _seed_vm(db)
+    _reachable(monkeypatch, True)
+    scopes: list[OperationScope | None] = []
+    real = ProxmoxPlatform.preflight
+
+    def _recording(self: ProxmoxPlatform, ctx: RunContext) -> None:
+        scopes.append(ctx.operation_scope)
+        real(self, ctx)
+
+    monkeypatch.setattr(ProxmoxPlatform, "preflight", _recording)
+
+    vm_backup.backup_vm(db, backup_env, "box")
+
+    (scope,) = scopes
+    assert scope is not None
+    assert scope.level is ScopeLevel.VM
+    assert scope.vm == "box"

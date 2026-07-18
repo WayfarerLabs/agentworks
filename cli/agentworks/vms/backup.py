@@ -1,4 +1,4 @@
-"""VM backup -- export all metadata and workspace files to a local archive."""
+"""VM backup: export all metadata and workspace files to a local archive."""
 
 from __future__ import annotations
 
@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING
 
 from agentworks import output
 from agentworks.errors import BackupError, NotFoundError, StateError
-from agentworks.vms.manager import bind_platform, keep_active
+from agentworks.vms.manager import gated_vm_boundary
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -30,7 +30,14 @@ def backup_vm(
     """Create a full backup of a VM: metadata + workspace files.
 
     Returns the path to the backup archive.
+
+    Orchestrated (``vms.manager.gated_vm_boundary``): the graph derives
+    from the VM's row, the activation gate replaces this command's
+    ``keep_active`` use (opening BEFORE the preflight sweep; its
+    just-in-time values seed the boundary resolver), and the
+    held-active span covers the whole snapshot-archive-transfer body.
     """
+    from agentworks.bootstrap import build_registry
     from agentworks.ssh import SSHError, SSHLogger
     from agentworks.transports import SSHTransport, transport
 
@@ -41,19 +48,19 @@ def backup_vm(
             entity_kind="vm",
             entity_name=vm_name,
         )
-    # Deterministic fatal checks BEFORE the bind: bind_platform runs
-    # preflight and the boundary resolve pass, which can prompt for
-    # site secrets; the operator must never answer a prompt for a
-    # backup this row already sank.
+    # Deterministic fatal checks BEFORE the boundary: the composition
+    # root runs the preflight sweep and the boundary resolve pass,
+    # which can prompt for site secrets; the operator must never
+    # answer a prompt for a backup this row already sank.
     if vm.tailscale_host is None:
         raise StateError(
             f"VM '{vm_name}' has no Tailscale address",
             entity_kind="vm",
             entity_name=vm_name,
         )
-    platform = bind_platform(config, vm)
+    registry = build_registry(config)
 
-    with keep_active(db, config, vm, platform):
+    with gated_vm_boundary(db, config, registry, vm):
         # Create backup directory first so the log goes inside it
         timestamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
         backup_name = f"{vm_name}-{timestamp}"
