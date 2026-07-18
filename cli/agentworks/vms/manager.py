@@ -30,7 +30,6 @@ from agentworks.vms.initializer import (
     announce_git_credentials,
     initialize_vm,
     rejoin_tailscale,
-    resolve_git_credential_providers,
     run_initialization,
     verify_tailscale_available,
 )
@@ -436,15 +435,33 @@ def create_vm(
     validate_admin_username(resolved_admin_username)
 
     verify_tailscale_available()
+    from agentworks.capabilities.base import OperationScope, ScopeLevel
+    from agentworks.orchestration.readiness import preflight_all
+    from agentworks.orchestration.secrets import ScopedSecrets, secret_union
+    from agentworks.orchestration.unwind import RealizationLog
+    from agentworks.orchestration.walk import walk
     from agentworks.secrets.resolver import Resolver
-
-    # Construct the git-credential providers against the operation's
-    # resolver up front, so their token secrets join the one boundary
-    # resolve below (and each can runup() its token afterward).
-    resolver = Resolver(config, registry)
-    providers = resolve_git_credential_providers(
-        registry, admin.git_credentials, resolver
+    from agentworks.vms.nodes import (
+        git_credential_node,
+        pending_vm_node,
+        vm_site_node,
+        vm_template_node,
     )
+
+    resolver = Resolver(config, registry)
+
+    # BUILD: the command names its direct resources (the resolved
+    # template, the chosen site, the admin template's declared
+    # credentials) and constructs the PENDING VM node up front with
+    # those edges attached; the walk assembles the graph. Provider and
+    # platform construction is cheap and registers the declared secrets
+    # on the resolver (the construct-registration seam beside the
+    # walk-derived union below); nothing resolves yet.
+    cred_nodes = tuple(
+        git_credential_node(registry, cred_name, resolver)
+        for cred_name in admin.git_credentials
+    )
+    providers = {node.provider.owner_name: node.provider for node in cred_nodes}
 
     # System slug: first interactive create prompts once (a blank
     # answer is final; see _resolve_system_slug). Runs before any
@@ -452,31 +469,34 @@ def create_vm(
     # leaves nothing behind.
     slug = _resolve_system_slug(db)
 
-    # The capability composition root: construct the site's platform
-    # against the operation's resolver (cheap; the site's config secrets
-    # register, nothing resolves yet), preflight every participating
-    # resource: the vm-template predicts its Tailscale key can resolve
-    # (the key is the template's responsibility, not the site's) and the
-    # platform checks its world; then run the operation's ONE resolve
-    # pass at the preflight boundary: tailscale auth, git-credential
-    # tokens, and the site's config secrets (proxmox's API token) in a
-    # single prompt session. Provisioning is hermetic: operator
-    # [admin.env] / [vm_templates.*.env] secrets are NOT prompted here:
-    # they're not used until runtime shells, which perform their own
-    # resolve at their composition root.
-    from agentworks.vms.sites import resolve_site
-    from agentworks.vms.templates import preflight_vm_template
+    template_node = vm_template_node(vm_tmpl, resolver)
+    site_node = vm_site_node(registry, site, resolver)
+    pending_vm = pending_vm_node(db, vm_name, template_node, site_node, cred_nodes)
+    nodes = walk(pending_vm)
+    for secret_name in secret_union(nodes):
+        resolver.register_name(secret_name)
 
-    platform_obj = resolve_site(site, registry, resolver=resolver)
+    scope = OperationScope(level=ScopeLevel.VM, system_slug=slug, vm=vm_name)
 
+    def scoped_ctx(secret_names: tuple[str, ...]) -> RunContext:
+        return RunContext(
+            config=config,
+            operation_scope=scope,
+            secrets=ScopedSecrets(resolver.values, secret_names),
+        )
+
+    # PREFLIGHT-ALL, then the one boundary resolve: tailscale auth,
+    # git-credential tokens, and the site's config secrets (proxmox's
+    # API token) in a single prompt session. Provisioning is hermetic:
+    # operator [admin.env] / [vm_templates.*.env] secrets are NOT
+    # prompted here (they are runtime inputs, resolved at the shells'
+    # own composition roots), which is why the template node's
+    # secret_refs carry only the Tailscale key.
     output.phase("Preflight")
     output.detail(f"Checking vm-site/{site}...")
     output.detail(f"Checking vm-template/{vm_tmpl.name}...")
     announce_git_credentials(providers)
-    preflight_vm_template(vm_tmpl, resolver)
-    platform_obj.preflight(RunContext(config=config))
-    for provider in providers.values():
-        provider.preflight(RunContext(config=config))
+    preflight_all(nodes, RunContext(config=config, operation_scope=scope))
 
     output.phase("Resolving Secrets")
     resolver.resolve()
@@ -485,12 +505,22 @@ def create_vm(
     # Provisioning-phase runup: authenticate the platform's own
     # credential (proxmox API token) before create() mutates anything. A
     # definitive rejection aborts here, before the DB row or any backend
-    # resource exists. Runup is deferred and announced inline (no phase
-    # of its own); lima/wsl2/azure have no token, so this is a silent
-    # no-op for them.
-    platform_obj.runup(RunContext(config=config, secrets=resolver))
-    tailscale_auth_key = resolver.get(vm_tmpl.tailscale_auth_key)
-    git_tokens = _resolve_git_tokens(providers, resolver)
+    # resource exists (the FATAL policy: nothing realized, nothing to
+    # unwind). Runup is deferred and announced inline (no phase of its
+    # own); lima/wsl2/azure have no token, so this is a silent no-op for
+    # them. The credentials' write-step runup stays deferred into
+    # initialization, under the skip-and-degrade policy.
+    site_node.runup(scoped_ctx(site_node.secret_refs()))
+    tailscale_auth_key = scoped_ctx(template_node.secret_refs()).secret(
+        vm_tmpl.tailscale_auth_key
+    )
+    # Each credential's token, read through its node's SCOPED delivery.
+    git_tokens = {
+        node.provider.owner_name: scoped_ctx(node.secret_refs()).secret(
+            node.provider.secret_name
+        )
+        for node in cred_nodes
+    }
 
     # The VM's OS hostname, computed once at create time and recorded on the
     # row: {slug}-{name} with a slug, the bare name without. Bounded by
@@ -498,7 +528,12 @@ def create_vm(
     # inside the 63-char hostname-label and Azure 64-char limits.
     hostname = f"{slug}-{vm_name}" if slug else vm_name
 
-    # Create DB record with as-provisioned resource values.
+    # Create DB record with as-provisioned resource values. This is the
+    # pending VM's realization artifact (what teardown deletes), so the
+    # log records it the moment the row exists: a provisioning failure
+    # below unwinds exactly the row (today's rollback, relocated onto
+    # the node), and nothing past provisioning is rollback-tracked (an
+    # initialized-but-partial VM is kept, debuggable, reinit-able).
     db.insert_vm(
         vm_name,
         site=site,
@@ -510,23 +545,12 @@ def create_vm(
         swap_gib=vm_tmpl.swap,
         admin_username=resolved_admin_username,
     )
-
-    # -- Provisioning --
-    # If this fails, nothing was created on the remote host (or the remote
-    # couldn't be reached), so we clean up the DB record.
-    def _safe_delete_vm_row() -> None:
-        # Best-effort rollback: a DB error here (e.g. lock contention) must
-        # not mask the KeyboardInterrupt / provisioning exception that
-        # triggered the rollback.
-        try:
-            db.delete_vm(vm_name)
-        except Exception as cleanup_err:
-            output.warn(
-                f"rollback: failed to delete DB record for vm '{vm_name}': {cleanup_err}"
-            )
+    log = RealizationLog()
+    log.mark_realized(pending_vm)
 
     # The platform instance was bound (and preflighted, and its secrets
     # resolved) at the composition root above; dispatch is just ops now.
+    platform_obj = site_node.platform
     from agentworks.capabilities.vm_platform import ProvisionRequest
 
     request = ProvisionRequest(
@@ -548,22 +572,25 @@ def create_vm(
         result = platform_obj.create(request)
     except KeyboardInterrupt:
         output.warn(f"Cancelling vm create '{vm_name}'... rolling back.")
-        _safe_delete_vm_row()
+        log.unwind()
         raise
     except UserAbort:
         # No prompt lives in this span today (the boundary resolve ran
         # at the composition root above), but an operator abort must
         # never downgrade to a ProvisioningError; roll back like the
         # KeyboardInterrupt twin above.
-        _safe_delete_vm_row()
+        log.unwind()
         raise
     except Exception as e:
-        _safe_delete_vm_row()
+        log.unwind()
         raise ProvisioningError(
             f"provisioning failed: {e}",
             entity_kind="vm",
             entity_name=vm_name,
         ) from e
+    # The unwind window closes here: provisioning succeeded, the VM
+    # exists, and initialization failures keep it (with recovery
+    # guidance), exactly as before.
 
     # Persist the platform's opaque identifiers verbatim; the owning
     # platform is the column's only reader.
@@ -1062,6 +1089,30 @@ def exec_vm(
         return target.call_streaming(remote_cmd, env=env)
 
 
+def _gate_secret_resolver(
+    config: Config, registry: Registry, resolver: Resolver
+) -> Callable[[str], str]:
+    """The activation gate's just-in-time resolve callback, shared by
+    the orchestrated VM commands: resolve through the normal backend
+    chain and SEED the boundary resolver as each value lands, so the
+    platform's power ops (which read the bound resolver, the interim
+    op-client bridge) see it immediately and the boundary pass never
+    resolves or prompts it again (``Resolver.seed``)."""
+
+    def resolve_gate_secret(secret_name: str) -> str:
+        from agentworks.orchestration.secrets import secret_declarations
+        from agentworks.secrets.resolve import active_backends, resolve_secrets
+
+        (decl,) = secret_declarations([secret_name], registry)
+        value = resolve_secrets([decl], active_backends(config, registry))[
+            secret_name
+        ]
+        resolver.seed({secret_name: value})
+        return value
+
+    return resolve_gate_secret
+
+
 def add_git_credential(db: Database, config: Config, name: str, credential_name: str) -> None:
     """Add or update a git credential on a VM.
 
@@ -1092,11 +1143,7 @@ def add_git_credential(db: Database, config: Config, name: str, credential_name:
     from agentworks.capabilities.base import OperationScope, ScopeLevel
     from agentworks.orchestration.activation import activation_gate
     from agentworks.orchestration.readiness import preflight_all
-    from agentworks.orchestration.secrets import (
-        ScopedSecrets,
-        secret_declarations,
-        secret_union,
-    )
+    from agentworks.orchestration.secrets import ScopedSecrets, secret_union
     from agentworks.orchestration.walk import walk
     from agentworks.transports import transport
     from agentworks.vms.nodes import git_credential_node, live_vm_node
@@ -1154,22 +1201,7 @@ def add_git_credential(db: Database, config: Config, name: str, credential_name:
         vm=name,
     )
 
-    def resolve_gate_secret(secret_name: str) -> str:
-        # The gate's just-in-time resolution, through the normal
-        # backend chain, seeding the boundary resolver: the platform's
-        # status/start ops (which read the bound resolver, the seam
-        # above) see the value immediately, and the boundary pass
-        # excludes it, so nothing resolves or prompts twice.
-        from agentworks.secrets.resolve import active_backends, resolve_secrets
-
-        (decl,) = secret_declarations([secret_name], registry)
-        value = resolve_secrets([decl], active_backends(config, registry))[
-            secret_name
-        ]
-        resolver.seed({secret_name: value})
-        return value
-
-    with activation_gate(vm_node, resolve_gate_secret):
+    with activation_gate(vm_node, _gate_secret_resolver(config, registry, resolver)):
         # PREFLIGHT-ALL against the one command-start context, then the
         # boundary resolve: the walk-away point.
         preflight_all(nodes, RunContext(config=config, operation_scope=scope))
@@ -1579,7 +1611,15 @@ def reinit_vm(
 ) -> None:
     """Re-run initialization on a VM that has already been provisioned.
 
-    Requires provisioning_status == complete and a valid Tailscale connection.
+    Requires provisioning_status == complete and a valid Tailscale
+    connection. Orchestrated: the graph derives from the VM's row and
+    the admin template's declared credentials; the activation gate
+    replaces this command's ``keep_active`` use, opening BEFORE the
+    preflight sweep (its just-in-time values seed the boundary
+    resolver); tokens are delivered scoped to each node's declared
+    names. Nothing here is created, so there is no realization log and
+    nothing to unwind; a failed init leaves the VM re-runnable, as
+    before.
     """
     from agentworks.bootstrap import build_registry
     from agentworks.transports import transport
@@ -1590,16 +1630,21 @@ def reinit_vm(
 
     vm = _require_vm(db, name)
 
-    # Construct before any secret collection: a stranded site fails
-    # here with the manifest hint instead of after git-token prompts.
-    # prepare=False: the boundary (preflight + the one resolve pass)
-    # runs below, once the git-token declarations have joined the set.
+    from agentworks.capabilities.base import OperationScope, ScopeLevel
+    from agentworks.orchestration.activation import activation_gate
+    from agentworks.orchestration.readiness import preflight_all
+    from agentworks.orchestration.secrets import ScopedSecrets, secret_union
+    from agentworks.orchestration.walk import walk
     from agentworks.secrets.resolver import Resolver
+    from agentworks.vms.nodes import git_credential_node, live_vm_node
 
     resolver = Resolver(config, registry)
-    platform = bind_platform(
-        config, vm, registry=registry, resolver=resolver, prepare=False
-    )
+
+    # BUILD before any secret collection: a stranded site fails here
+    # (inside the live node's site edge) with the manifest hint instead
+    # of after git-token prompts. Construction is cheap; the declared
+    # secrets register on the resolver, nothing resolves yet.
+    vm_node = live_vm_node(db, config, registry, vm, resolver)
 
     # Resolve the VM's template so init uses the right values
     from agentworks.resources.access import admin_template
@@ -1624,53 +1669,76 @@ def reinit_vm(
 
     verify_tailscale_available()
     admin = admin_template(registry)
-    # Construct against the operation's resolver so the token secrets
-    # join the one boundary resolve below.
-    providers = resolve_git_credential_providers(
-        registry, admin.git_credentials, resolver
+    cred_nodes = tuple(
+        git_credential_node(registry, cred_name, resolver)
+        for cred_name in admin.git_credentials
+    )
+    providers = {node.provider.owner_name: node.provider for node in cred_nodes}
+
+    # The reinit graph: the live VM (whose row's site field is its edge
+    # to the vm-site node) plus each declared credential as its own
+    # root. The vm-template is deliberately NOT a node here: its
+    # Tailscale key is not part of reinit's planned ops (a broken
+    # node's rejoin resolves it on the gate's own conditional repair
+    # path), so it must not join the boundary union.
+    nodes = walk(vm_node, *cred_nodes)
+    for secret_name in secret_union(nodes):
+        resolver.register_name(secret_name)
+
+    scope = OperationScope(
+        level=ScopeLevel.VM,
+        system_slug=db.get_setting(SYSTEM_SLUG_KEY) or None,
+        vm=name,
     )
 
-    # The preflight boundary: git tokens and any site config secret
-    # (proxmox's API token) resolve in one prompt session. The
-    # vm-template's Tailscale key is NOT part of reinit's planned ops
-    # (a broken node's rejoin resolves it on its own conditional path),
-    # so the template preflight doesn't run here.
-    output.phase("Preflight")
-    output.detail(f"Checking vm-site/{vm.site}...")
-    announce_git_credentials(providers)
-    platform.preflight(RunContext(config=config))
-    for provider in providers.values():
-        provider.preflight(RunContext(config=config))
+    def scoped_ctx(secret_names: tuple[str, ...]) -> RunContext:
+        return RunContext(
+            config=config,
+            operation_scope=scope,
+            secrets=ScopedSecrets(resolver.values, secret_names),
+        )
 
-    output.phase("Resolving Secrets")
-    resolver.resolve()
+    with activation_gate(vm_node, _gate_secret_resolver(config, registry, resolver)):
+        # The preflight boundary: git tokens and any site config secret
+        # (proxmox's API token) resolve in one prompt session.
+        # Provisioning is hermetic: no operator-env secrets are
+        # prompted at reinit; they get prompted at the use site (vm
+        # shell, session create, etc.).
+        output.phase("Preflight")
+        output.detail(f"Checking vm-site/{vm.site}...")
+        announce_git_credentials(providers)
+        preflight_all(nodes, RunContext(config=config, operation_scope=scope))
 
-    # No command-root runup at reinit: reinit reaches the VM over
-    # Tailscale SSH and never calls the platform API (so its token is not
-    # used here), and the git-credential runup is deferred into the
-    # Initialization phase (runup_and_filter at the write step). So the
-    # next banner the operator sees is Initialization.
-    git_tokens = _resolve_git_tokens(providers, resolver)
+        output.phase("Resolving Secrets")
+        resolver.resolve()
 
-    # Provisioning is hermetic: no operator-env secrets are prompted at
-    # reinit. They get prompted at the use site (vm shell, session
-    # create, etc.) once provisioning completes.
+        # No command-root runup at reinit: reinit reaches the VM over
+        # Tailscale SSH and never calls the platform API in its planned
+        # ops, and the git-credential runup is deferred into the
+        # Initialization phase (the skip-and-degrade policy at the
+        # write step). So the next banner the operator sees is
+        # Initialization.
+        git_tokens = {
+            node.provider.owner_name: scoped_ctx(node.secret_refs()).secret(
+                node.provider.secret_name
+            )
+            for node in cred_nodes
+        }
 
-    # Build Tailscale SSH target with logging
-    from agentworks.ssh import SSHLogger
+        # Build Tailscale SSH target with logging
+        from agentworks.ssh import SSHLogger
 
-    logger = SSHLogger(name, "vm-reinit")
-    for token in git_tokens.values():
-        logger.add_redaction(token)
-    ts_target = transport(vm, config, default_timeout=60, logger=logger)
+        logger = SSHLogger(name, "vm-reinit")
+        for token in git_tokens.values():
+            logger.add_redaction(token)
+        ts_target = transport(vm, config, default_timeout=60, logger=logger)
 
-    home = f"/home/{vm.admin_username}"
+        home = f"/home/{vm.admin_username}"
 
-    # Outer try/finally ensures the SSH logger is closed exactly once, AFTER
-    # any warning output. Matches the pattern used by agent create / reinit
-    # and workspace create / rehome.
-    try:
-        with keep_active(db, config, vm, platform):
+        # try/finally ensures the SSH logger is closed exactly once,
+        # AFTER any warning output. Matches the pattern used by agent
+        # create / reinit and workspace create / rehome.
+        try:
             try:
                 run_initialization(
                     db,
@@ -1695,8 +1763,8 @@ def reinit_vm(
             except Exception:
                 output.warn(f"Log: {logger.path}")
                 raise
-    finally:
-        logger.close()
+        finally:
+            logger.close()
 
     refreshed_vm = db.get_vm(name)
     assert refreshed_vm is not None
