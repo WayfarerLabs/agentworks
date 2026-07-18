@@ -24,6 +24,7 @@ if TYPE_CHECKING:
     from agentworks.config import Config
     from agentworks.db import Database, VMRow
     from agentworks.resources.registry import Registry
+    from agentworks.secrets.resolver import Resolver
 
 
 class _GatePlatform:
@@ -276,3 +277,107 @@ def test_rejoin_auth_key_reads_lazily_through_the_gate_reader(
     assert source() == "ts-key"  # the rejoin's first need resolves it
     assert resolved == ["tailscale-auth-key"]
     assert values == {"tailscale-auth-key": "ts-key"}
+
+
+# -- the vm-template node ----------------------------------------------------
+
+
+class _PredictResolver:
+    """The two-verb slice VMTemplateNode reads: register + predict."""
+
+    def __init__(self, *, resolvable: bool) -> None:
+        self._resolvable = resolvable
+        self.registered: list[str] = []
+
+    def register_name(self, name: str):  # noqa: ANN201 - stub
+        from agentworks.secrets.base import SecretDecl
+
+        self.registered.append(name)
+        return SecretDecl(name=name, description="")
+
+    def predict(self, decl: object) -> str | None:
+        return "env-var" if self._resolvable else None
+
+
+def test_template_node_declares_only_the_tailscale_key() -> None:
+    """Hermetic provisioning: the template's env-block secrets are
+    runtime inputs, so they must NOT fold into the node's secret_refs
+    (they would otherwise join a provisioning command's boundary
+    resolve and prompt)."""
+    from agentworks.env.entry import EnvEntry
+    from agentworks.vms.nodes import vm_template_node
+    from agentworks.vms.templates import ResolvedVMTemplate
+
+    tmpl = ResolvedVMTemplate(
+        name="default",
+        env={"API_KEY": EnvEntry(key="API_KEY", secret="api-key")},
+    )
+    node = vm_template_node(tmpl, cast("Resolver", _PredictResolver(resolvable=True)))
+    assert node.key == "vm-template/default"
+    assert node.secret_refs() == ("tailscale-auth-key",)
+    assert node.deps() == ()
+
+
+def test_template_node_preflight_predicts_the_key() -> None:
+    from agentworks.capabilities.base import RunContext
+    from agentworks.errors import ConfigError
+    from agentworks.vms.nodes import vm_template_node
+    from agentworks.vms.templates import ResolvedVMTemplate
+
+    ok = _PredictResolver(resolvable=True)
+    vm_template_node(ResolvedVMTemplate(name="default"), cast("Resolver", ok)).preflight(
+        RunContext()
+    )
+    assert ok.registered == ["tailscale-auth-key"]
+
+    bad = _PredictResolver(resolvable=False)
+    with pytest.raises(ConfigError, match="not resolvable"):
+        vm_template_node(
+            ResolvedVMTemplate(name="default"), cast("Resolver", bad)
+        ).preflight(RunContext())
+
+
+# -- the pending VM node -----------------------------------------------------
+
+
+def _pending(db: Database):
+    from agentworks.vms.nodes import pending_vm_node, vm_template_node
+    from agentworks.vms.templates import ResolvedVMTemplate
+
+    template = vm_template_node(
+        ResolvedVMTemplate(name="default"),
+        cast("Resolver", _PredictResolver(resolvable=True)),
+    )
+    site = VMSiteNode("stub", cast("VMPlatform", _GatePlatform()), ())
+    return pending_vm_node(db, "nvm", template, site, ()), template, site
+
+
+def test_pending_vm_node_shape_and_edges(db: Database) -> None:
+    from agentworks.orchestration.node import CreatableNode, Node
+
+    node, template, site = _pending(db)
+    assert node.key == "vm/nvm"
+    assert isinstance(node, Node)
+    assert isinstance(node, CreatableNode)
+    # Edges attached at construction, same objects the orchestrator
+    # planned with (one object per node).
+    assert node.deps() == (template, site)
+    assert not node.realized
+
+
+def test_pending_vm_realization_is_one_way(db: Database) -> None:
+    node, _, _ = _pending(db)
+    node.mark_realized()
+    assert node.realized
+    with pytest.raises(StateError, match="one-way"):
+        node.mark_realized()
+
+
+def test_pending_vm_teardown_deletes_the_row(db: Database) -> None:
+    """The relocated rollback body: exactly today's create_vm rollback
+    (delete the DB record), now the node's own teardown op."""
+    db.insert_vm("nvm", site="stub", hostname="nvm")
+    node, _, _ = _pending(db)
+    node.mark_realized()
+    node.teardown()
+    assert db.get_vm("nvm") is None

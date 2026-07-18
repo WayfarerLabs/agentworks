@@ -132,31 +132,20 @@ def resolve_template(registry: Registry, template_name: str | None = None) -> Re
 
 
 def preflight_vm_template(tmpl: ResolvedVMTemplate, resolver: Resolver) -> None:
-    """The vm-template's readiness check: its Tailscale auth key must be
-    predicted resolvable, without prompting. The key is the template's
-    responsibility, not the site's, so this runs beside (in either
-    order with) the platform's preflight, before the operation's one
-    resolve pass at the preflight boundary. Registers the declaration on
-    the resolver so that pass covers it.
+    """The vm-template's readiness check: its Tailscale auth key must
+    be predicted resolvable, without prompting. Registers the
+    declaration on the resolver so the operation's one resolve pass
+    covers it.
 
-    The declaration lookup rides ``Resolver.register_name``'s
-    lookup-or-synthesize fallback: an operator who omits every
-    ``[vm_templates.*]`` and ``[secrets.*]`` section leaves the registry
-    empty under the ``secret`` kind, but the resolved template always
-    exists (built-in defaults apply), so a bare declaration keeps the
-    backend chain callable.
+    The check's body lives on the vm-template NODE
+    (``vms.nodes.VMTemplateNode.preflight``), where every readiness
+    check now has its one home; this thin delegate serves the
+    not-yet-migrated callers (``rekey_vm``) and retires with them.
     """
-    decl = resolver.register_name(tmpl.tailscale_auth_key)
-    if resolver.predict(decl) is None:
-        raise ConfigError(
-            f"vm-template '{tmpl.name}': the Tailscale auth key secret "
-            f"'{decl.name}' is not resolvable by any active backend",
-            hint=(
-                f"`agw secret describe {decl.name}` shows how each backend "
-                "looks the secret up; set the env var, add a backend "
-                "mapping, or extend [secret_config].backends."
-            ),
-        )
+    from agentworks.capabilities.base import RunContext
+    from agentworks.vms.nodes import vm_template_node
+
+    vm_template_node(tmpl, resolver).preflight(RunContext())
 
 
 def _append_dedupe(target: list[str], source: list[str]) -> list[str]:

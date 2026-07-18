@@ -4,8 +4,8 @@ Nodes are the runtime objects an orchestrator constructs and walks:
 ``Readiness`` plus graph identity (see ``orchestration/node.py``).
 Domains implement their own nodes; this module holds the VM domain's,
 each built by a factory that applies the reference-graph-to-node-graph
-TRANSLATION RULE to real declared resources
-and DB rows, so a command's graph is DERIVED, never hand-wired:
+TRANSLATION RULE to real declared resources and DB rows, so a
+command's graph is DERIVED, never hand-wired:
 
 - a registry reference to a CAPABILITY with config at the reference
   site (the platform behind a ``vm-site``, the provider behind a
@@ -15,7 +15,10 @@ and DB rows, so a command's graph is DERIVED, never hand-wired:
 - ``secret``-kind references become ``secret_refs()`` entries (secrets
   are inputs the orchestrator resolves, never nodes);
 - a live node's row fields become live edges: a VM row's ``site``
-  field is an edge to the ``vm-site`` node.
+  field is an edge to the ``vm-site`` node;
+- a PENDING node is constructed with its edges by the orchestrator,
+  from the resolved templates and selections it planned with (names
+  chosen up front, so identity is complete while still pending).
 
 The held-instance composition here is the thin case: a one-line
 per-kind fan-in (``git-credential`` and ``vm-site`` each hold exactly
@@ -42,6 +45,7 @@ if TYPE_CHECKING:
     from agentworks.orchestration.node import Node
     from agentworks.resources.registry import Registry
     from agentworks.secrets.resolver import Resolver
+    from agentworks.vms.templates import ResolvedVMTemplate
 
 
 class GitCredentialNode:
@@ -274,6 +278,126 @@ class LiveVMNode:
         return self._site.platform.vm_active(self._row, config=self._config)
 
 
+class VMTemplateNode:
+    """The resolved ``vm-template`` node: the template's readiness,
+    formerly the free function ``preflight_vm_template``, relocated
+    here so it has the same home every other readiness check has.
+    Built by :func:`vm_template_node`.
+
+    Holds the operation's resolver because the relocated check
+    predicts through one (the recorded seam; it closes when prediction
+    goes central with the per-instance resolver retirement).
+    """
+
+    def __init__(self, tmpl: ResolvedVMTemplate, resolver: Resolver) -> None:
+        self._tmpl = tmpl
+        self._resolver = resolver
+
+    @property
+    def key(self) -> str:
+        return f"vm-template/{self._tmpl.name}"
+
+    @property
+    def tmpl(self) -> ResolvedVMTemplate:
+        """The resolved template, for the orchestrator's domain ops
+        (hardware values, the init recipe)."""
+        return self._tmpl
+
+    def deps(self) -> tuple[Node, ...]:
+        return ()
+
+    def secret_refs(self) -> tuple[str, ...]:
+        # ONLY the Tailscale auth key: provisioning is hermetic. The
+        # template's env-block secret references are runtime inputs,
+        # resolved at their own use sites (shell / session composition
+        # roots), never in a provisioning command's boundary pass.
+        return (self._tmpl.tailscale_auth_key,)
+
+    def preflight(self, ctx: RunContext) -> None:
+        """The template's readiness: its Tailscale auth key must be
+        predicted resolvable, without prompting. The key is the
+        template's responsibility, not the site's; the declaration
+        lookup rides ``Resolver.register_name``'s lookup-or-synthesize
+        fallback (an operator with no ``[secrets.*]`` sections still
+        gets a callable backend chain)."""
+        decl = self._resolver.register_name(self._tmpl.tailscale_auth_key)
+        if self._resolver.predict(decl) is None:
+            from agentworks.errors import ConfigError
+
+            raise ConfigError(
+                f"vm-template '{self._tmpl.name}': the Tailscale auth key "
+                f"secret '{decl.name}' is not resolvable by any active "
+                f"backend",
+                hint=(
+                    f"`agw secret describe {decl.name}` shows how each "
+                    "backend looks the secret up; set the env var, add a "
+                    "backend mapping, or extend [secret_config].backends."
+                ),
+            )
+
+    def runup(self, ctx: RunContext) -> None: ...
+
+
+class PendingVMNode:
+    """The VM a create command will make: the first creatable node.
+
+    Constructed up front with its name and its edges (the template,
+    the chosen site, the admin template's git credentials), so its
+    identity is complete while it is still pending; the orchestrator
+    flips it through ``RealizationLog.mark_realized`` once its row
+    exists, and ``teardown`` is today's rollback body (delete the row)
+    relocated onto the node. The row is the only artifact this node
+    unwinds: a provisioning failure means nothing usable was created
+    remotely (or the remote was unreachable), today's stance, and
+    initialization failures are deliberately NOT unwound (the VM
+    exists and is debuggable; reinit retries).
+    """
+
+    def __init__(
+        self,
+        db: Database,
+        name: str,
+        template: VMTemplateNode,
+        site: VMSiteNode,
+        credentials: tuple[GitCredentialNode, ...],
+    ) -> None:
+        self._db = db
+        self._name = name
+        self._template = template
+        self._site = site
+        self._credentials = credentials
+        self._realized = False
+
+    @property
+    def key(self) -> str:
+        return f"vm/{self._name}"
+
+    def deps(self) -> tuple[Node, ...]:
+        return (self._template, self._site, *self._credentials)
+
+    def secret_refs(self) -> tuple[str, ...]:
+        return ()
+
+    def preflight(self, ctx: RunContext) -> None: ...
+
+    def runup(self, ctx: RunContext) -> None: ...
+
+    @property
+    def realized(self) -> bool:
+        return self._realized
+
+    def mark_realized(self) -> None:
+        if self._realized:
+            raise StateError(
+                f"{self.key} was already marked realized; the "
+                f"pending-to-realized flip is one-way and once."
+            )
+        self._realized = True
+
+    def teardown(self) -> None:
+        self._db.delete_vm(self._name)
+
+
 # -- Factories: the translation rule applied to real declared resources ----
 
 
@@ -342,3 +466,25 @@ def live_vm_node(
     return LiveVMNode(
         db, config, registry, row, vm_site_node(registry, row.site, resolver)
     )
+
+
+def vm_template_node(tmpl: ResolvedVMTemplate, resolver: Resolver) -> VMTemplateNode:
+    """Build the ``vm-template/<name>`` node from the RESOLVED template
+    (inheritance already applied; the resolved object is the backing
+    data, the way a row backs a live node)."""
+    return VMTemplateNode(tmpl, resolver)
+
+
+def pending_vm_node(
+    db: Database,
+    name: str,
+    template: VMTemplateNode,
+    site: VMSiteNode,
+    credentials: tuple[GitCredentialNode, ...],
+) -> PendingVMNode:
+    """Build the pending ``vm/<name>`` node with its edges attached:
+    the orchestrator hands in the nodes for the resources it planned
+    with (the resolved template, the chosen site, the admin template's
+    declared credentials), and every edge holder shares those same
+    objects (one object per node)."""
+    return PendingVMNode(db, name, template, site, credentials)
