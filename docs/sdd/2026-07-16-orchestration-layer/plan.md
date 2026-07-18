@@ -657,65 +657,66 @@ Goal: migrate the rest opportunistically, then remove the now-dead per-instance 
       accepted because HEAD had no scope there at all, the dest-side work is the same command, and
       the scope is descriptive). The recorded scoping rule, stated in the root's docstring: pass the
       level of the entity the command is ABOUT, not of what it walks; the agent-op callers still
-      ride the VM default and owe an AGENT-level lift under that rule (rider on the
-      remaining-commands box below). PER-COMMAND: reinit keeps `build_registry` FIRST (miss-policies
-      before business logic), then the not-found checks, then the boundary with the whole SSH
-      convergence inside the span (the transport now constructed inside it, behavior identical);
-      rehome keeps everything before `_rehome_vm` untouched, including the sessions-stopped guard
-      that still rides the imperative `ensure_pids_batch` / `batch_check_all_sessions` machinery
-      (EXPLICITLY out of scope here; a recorded rider the sessions batch seam absorbs), and
-      `_rehome_vm` keeps the directory existence checks and the CONFIRM PROMPT inside the span
-      exactly where they were (inherently post-gate: the checks need SSH and the confirm renders
-      their results; the reinit corollary of the bail-early ruling covers exactly this), KI /
-      exception handlers and `_rehome_partial_state_hint` verbatim; delete follows the
-      `delete_agent` two-path precedent (standalone `platform=None`, the command root and
-      `delete_session`'s cleanup call, composes its own boundary; a handed-in bound platform from
-      `PendingWorkspaceNode.teardown`, running INSIDE the caller's held gate span, keeps the
-      `keep_active` hold verbatim, never rebuilding a boundary: the same INTERIM nested-teardown
-      seam, closing with the session-create unwind), session-count guard and confirm pre-boundary,
-      the vm-row-None (DB-only, no gate) and no-tailscale-host (skip the SSH kill block) special
-      cases preserved, the boundary NOT wrapped best-effort (as at HEAD), no invented child
-      cascades. The earlier remaining-commands note that delete's composition would "absorb" the
-      nested `revoke_workspace_grants` helper resolved to nothing to absorb (review round): the
-      helper is transport-only and simply rides delete's held span; the older delete-workspace
-      suites carry that in-span path's coverage. COPY RULING, the first two-VM command: SEQUENTIAL
-      per-VM composition, not a coalesced multi-root single-boundary graph, because HEAD ran two
-      separate binds (two prompt sessions, one per site, when source and dest differ) and the dest
-      VM is only known mid-command (`_resolve_vm` may interactively prompt), so coalescing would
-      merge prompt sessions AND hoist the chooser, both beyond parity; source boundary (source
-      workspace scope) on the ExitStack, then after the pack a SECOND boundary (dest workspace
-      scope) nested on the same stack when the VMs differ (both held concurrently), the same-VM case
-      reusing the source composition with no second boundary; the multi-root walk stays available
-      for the sessions batch seam, where HEAD already coalesces (`bind_platforms`). The two
-      compositions build distinct nodes with distinct keys (one-object-per-node holds per
-      composition). R7 records, the one sanctioned shift only, the same pre-walk-away bucket as
-      every prior gated seam: each gate opens BEFORE its preflight sweep and boundary resolve where
-      HEAD bound first and gated after; for copy that is TWO gate+boundary pairs in sequence,
-      exactly as HEAD had two bind+gate pairs, and the second pair's prompts still happen
-      mid-command (after the pack), as at HEAD, so the pre-walk-away framing applies per
-      composition. No other shifts. `bind_platform` leaves `workspaces/manager.py` entirely;
-      `keep_active` remains only for delete's nested path. STILL-OPEN CATALOG entries CLOSED from
-      the vm-lifecycle box: `workspaces/manager.py` `reinit_workspace`, `rehome_workspace` via
-      `_rehome_vm`, `delete_workspace` (its nested-platform path still rides `keep_active` until the
-      session unwind seam), `copy_workspace`, and the deprecated pair, closed BY DELETION.
-      REMAINING: `describe_vm` (decide-or-record), `rekey_vm`, `port_forward_vm`, `backup_vm`,
-      `initialize_vm`'s share-wait, `sessions/manager.py` `_prepare_vm` and the `bind_platforms` /
-      `keep_actives` batch ops. Where proven: `tests/workspaces/test_lifecycle_orchestrated.py` (the
-      shared live-VM-alone graph and union with the no-workspace-node pin, gate-prompt parity for
-      ALL FOUR commands (corrected 2026-07-18, review round: the first-landed entry claimed only
-      reinit and standalone delete, and rehome's order test initially lacked its burst assertion:
-      reinit and standalone delete on reachable and stopped VMs in the tracer's mirror shape,
-      rehome's stopped-VM burst pinned on its order test, copy's on its two-burst and
-      single-boundary pins), the WORKSPACE scope reaching node readiness, the pre-gate refusal pins
-      with zero resolves and zero gate events (delete session-guard and declined confirm, rehome
-      overlap, reinit unknown workspace, copy source-NotFound and dest-AlreadyExists), delete's
-      nested zero-extra-resolves / no-second-boundary and vm-row-None DB-only pins, rehome's
-      gate-then-dir-checks-then-confirm order pin with the declined UserAbort leaving the DB path
-      unchanged, copy's cross-VM two-burst + nested-hold pins and same-VM single-boundary pin);
-      `tests/test_completions.py` (the retired-subcommands pin); existing suites needed no re-seam
-      (`test_consoles.py` delete-workspace path already rides `stub_vm_gates`'s resolve_site +
-      reachability stubs; the session-nodes and ephemeral-rollback suites patch `delete_workspace`
-      itself).
+      ride the VM default and owe an AGENT-level lift under that rule (rider carried on the
+      resolver-retirement box below; pointer corrected 2026-07-18, a sanctioned fix: the phrase
+      originally named the remaining-commands box, whose referent the straggler seam deleted).
+      PER-COMMAND: reinit keeps `build_registry` FIRST (miss-policies before business logic), then
+      the not-found checks, then the boundary with the whole SSH convergence inside the span (the
+      transport now constructed inside it, behavior identical); rehome keeps everything before
+      `_rehome_vm` untouched, including the sessions-stopped guard that still rides the imperative
+      `ensure_pids_batch` / `batch_check_all_sessions` machinery (EXPLICITLY out of scope here; a
+      recorded rider the sessions batch seam absorbs), and `_rehome_vm` keeps the directory
+      existence checks and the CONFIRM PROMPT inside the span exactly where they were (inherently
+      post-gate: the checks need SSH and the confirm renders their results; the reinit corollary of
+      the bail-early ruling covers exactly this), KI / exception handlers and
+      `_rehome_partial_state_hint` verbatim; delete follows the `delete_agent` two-path precedent
+      (standalone `platform=None`, the command root and `delete_session`'s cleanup call, composes
+      its own boundary; a handed-in bound platform from `PendingWorkspaceNode.teardown`, running
+      INSIDE the caller's held gate span, keeps the `keep_active` hold verbatim, never rebuilding a
+      boundary: the same INTERIM nested-teardown seam, closing with the session-create unwind),
+      session-count guard and confirm pre-boundary, the vm-row-None (DB-only, no gate) and
+      no-tailscale-host (skip the SSH kill block) special cases preserved, the boundary NOT wrapped
+      best-effort (as at HEAD), no invented child cascades. The earlier remaining-commands note that
+      delete's composition would "absorb" the nested `revoke_workspace_grants` helper resolved to
+      nothing to absorb (review round): the helper is transport-only and simply rides delete's held
+      span; the older delete-workspace suites carry that in-span path's coverage. COPY RULING, the
+      first two-VM command: SEQUENTIAL per-VM composition, not a coalesced multi-root
+      single-boundary graph, because HEAD ran two separate binds (two prompt sessions, one per site,
+      when source and dest differ) and the dest VM is only known mid-command (`_resolve_vm` may
+      interactively prompt), so coalescing would merge prompt sessions AND hoist the chooser, both
+      beyond parity; source boundary (source workspace scope) on the ExitStack, then after the pack
+      a SECOND boundary (dest workspace scope) nested on the same stack when the VMs differ (both
+      held concurrently), the same-VM case reusing the source composition with no second boundary;
+      the multi-root walk stays available for the sessions batch seam, where HEAD already coalesces
+      (`bind_platforms`). The two compositions build distinct nodes with distinct keys
+      (one-object-per-node holds per composition). R7 records, the one sanctioned shift only, the
+      same pre-walk-away bucket as every prior gated seam: each gate opens BEFORE its preflight
+      sweep and boundary resolve where HEAD bound first and gated after; for copy that is TWO
+      gate+boundary pairs in sequence, exactly as HEAD had two bind+gate pairs, and the second
+      pair's prompts still happen mid-command (after the pack), as at HEAD, so the pre-walk-away
+      framing applies per composition. No other shifts. `bind_platform` leaves
+      `workspaces/manager.py` entirely; `keep_active` remains only for delete's nested path.
+      STILL-OPEN CATALOG entries CLOSED from the vm-lifecycle box: `workspaces/manager.py`
+      `reinit_workspace`, `rehome_workspace` via `_rehome_vm`, `delete_workspace` (its
+      nested-platform path still rides `keep_active` until the session unwind seam),
+      `copy_workspace`, and the deprecated pair, closed BY DELETION. REMAINING: `describe_vm`
+      (decide-or-record), `rekey_vm`, `port_forward_vm`, `backup_vm`, `initialize_vm`'s share-wait,
+      `sessions/manager.py` `_prepare_vm` and the `bind_platforms` / `keep_actives` batch ops. Where
+      proven: `tests/workspaces/test_lifecycle_orchestrated.py` (the shared live-VM-alone graph and
+      union with the no-workspace-node pin, gate-prompt parity for ALL FOUR commands (corrected
+      2026-07-18, review round: the first-landed entry claimed only reinit and standalone delete,
+      and rehome's order test initially lacked its burst assertion: reinit and standalone delete on
+      reachable and stopped VMs in the tracer's mirror shape, rehome's stopped-VM burst pinned on
+      its order test, copy's on its two-burst and single-boundary pins), the WORKSPACE scope
+      reaching node readiness, the pre-gate refusal pins with zero resolves and zero gate events
+      (delete session-guard and declined confirm, rehome overlap, reinit unknown workspace, copy
+      source-NotFound and dest-AlreadyExists), delete's nested zero-extra-resolves /
+      no-second-boundary and vm-row-None DB-only pins, rehome's gate-then-dir-checks-then-confirm
+      order pin with the declined UserAbort leaving the DB path unchanged, copy's cross-VM
+      two-burst + nested-hold pins and same-VM single-boundary pin); `tests/test_completions.py`
+      (the retired-subcommands pin); existing suites needed no re-seam (`test_consoles.py`
+      delete-workspace path already rides `stub_vm_gates`'s resolve_site + reachability stubs; the
+      session-nodes and ephemeral-rollback suites patch `delete_workspace` itself).
 - [x] The sessions machinery orchestrated (2026-07-18), two green shippable units: the
       `bind_platforms` / `keep_actives` batch ops (`stop_all_sessions`, `restart_all_sessions`,
       `list_sessions`' status pass) and `_prepare_vm` serving the singular ops (`stop_session`,
@@ -857,19 +858,77 @@ Goal: migrate the rest opportunistically, then remove the now-dead per-instance 
       hermeticity source walk now inspects `VMTemplateNode`), `tests/test_vm_shell_provisioner.py`
       (stub platforms handed straight to `native_transport`), `tests/vms/test_sites_dispatch.py`
       (the dispatch pin re-pointed to `resolve_site`).
-- [ ] RESOLVER RETIREMENT once no migrated command depends on the bound resolver: drop the
-      `resolver` constructor parameter from `Capability`; close the `VMTemplateNode` held-resolver
-      prediction seam (prediction is central now; the `preflight_vm_template` delegate itself is
-      already deleted); kill proxmox's op-client bridge so `_api` reads the token from the context
-      (`ctx.secret`) rather than the bound resolver, completing PR #182's direction. The
-      caller-inventory drain is DONE: the still-open catalog above is EMPTY, and the only imperative
-      gate use left is `keep_active`'s three recorded interim holds (the delete_agent /
-      delete_workspace nested-teardown paths and `initialize_vm`'s share-wait hold), which are not
-      resolver seams and retire on their own recorded schedules. RIDER carried from the straggler
-      seam: the agent-op callers of `gated_vm_boundary` (agent shell / exec / delete / grant /
-      revoke) still ride its VM-level default; under the recorded
-      pass-the-level-of-the-entity-the-command-is-about rule they owe an AGENT-level lift, landing
-      with this sweep.
+- [x] RESOLVER RETIREMENT (2026-07-18), landed as five green shippable units (seam-7 minors, the
+      AGENT lift, prediction-central, the op-ctx convergence with the bridge kill, the constructor
+      drop) plus the docs lockstep and this record. WHAT DIED: the `resolver` constructor parameter
+      off `Capability` and every subclass and construction site (`resolve_site`,
+      `resolve_git_credential_providers`, the node factories; construction binds `(name, config)`
+      and touches no secret machinery); construct-time registration (the walk union over declared
+      `secret_refs` was verified per composition root as the boundary's source and is now the ONLY
+      one); proxmox's op-client bridge (`_api` is a per-call client accessor reading the token via
+      `ctx.secret`; the instance holds only the derived client); the `VMTemplateNode` held-resolver
+      prediction seam (the node holds the registry). OP-SIGNATURE CONVERGENCE, completing PR #182's
+      direction: `VMPlatform.create/start/stop/delete/status` take the op-start `RunContext`;
+      gate-driven ops read the gate's scoped reader wrapped per call (`LiveVMNode._gate_ops_ctx`,
+      the reader that refuses outside-the-declared-set names); orchestrator-driven ops read
+      `ScopedSecrets` over the site's declared names (`_live_vm_boundary` returns `(node, ops_ctx)`;
+      create/rekey build theirs at their boundaries). The three recorded `keep_active` interim holds
+      keep their shapes but thread the context: `initialize_vm` gains `platform_ctx` from create's
+      composition, and the nested-teardown paths pass `platform_ctx` beside `platform`, sourced by
+      the pending nodes from an orchestrator-supplied callable built at teardown time
+      (post-boundary; rides the nested-teardown seam and retires with it). PREDICTION CENTRAL:
+      `orchestration.secrets.predict_resolution` gained its production callers: the vm-site and
+      git-credential node preflights (via the new `require_predicted_refs`, whose `owner` is the
+      node key, which IS the instance's owner display, so the owner/usage error shapes are preserved
+      verbatim) and `VMTemplateNode.preflight` (message and hint verbatim); the base
+      `Capability.preflight` is a documented no-op and `Resolver.predict` retired with its callers.
+      DOCTOR PARITY: the per-site row re-seams onto `vm_site_node(...).preflight`, the same
+      computation with the same framing; doctor stays preflight-only; suites green. SEED
+      DISPOSITION: `Resolver.seed` is KEPT for the no-double-resolve property (gate-resolved names
+      are excluded from the boundary loop) and its docstring rewritten honestly; the
+      serve-the-bridge-pre-boundary rationale died with the bridge. AGENT LIFT (the carried rider):
+      `agents.manager.agent_scope` (public; `agents.grants` shares it, the split's
+      cross-module-visibility precedent) puts agent shell / exec / delete (standalone) / grant /
+      revoke at AGENT level; the suites' scope-reaches-readiness pins re-seam VM to AGENT with the
+      agent name now asserted. R7: ONE named shift, justified: the single boundary prompt session's
+      INTERNAL order now follows the walk's deterministic first-encounter order rather than
+      construct-registration order (agent create resolves `git-token-gh` before `proxmox-token` in
+      its one burst); the set, the session count, and the walk-away point are unchanged, and no
+      other behavior shifts. NEVER-AGAIN SWEEP at the constructor-drop commit
+      (`grep -rn "self\.resolver\|self\._resolver\|resolver\.get\|resolver\.values"     cli/agentworks`):
+      every survivor is orchestrator-owned at a composition root (`ScopedSecrets` assembly and
+      `compose_env` values at the shell/exec/provisioning roots; rekey's op-secret read and its gate
+      callback serving the boundary cache; the sessions batch gate callback;
+      `gate_secret_resolver`'s seed) plus README prose fixed in the lockstep commit; ZERO
+      capability-instance reads. `ctx.secret` scoped delivery is the only way an instance sees a
+      secret, pinned by: the construction-touches-no-secret-machinery pin (`test_capability_base`),
+      the instance-reads-context pin with the served / secret-less / undeclared-refused cases
+      (`test_sites_dispatch`), and the tracer's stopped-VM pin re-seamed onto the ctx read path and
+      STRENGTHENED (the boundary-only credential token is refused at the gate-driven op). Tests
+      retired WITH their machinery, each stated in its commit: the base prediction pair, the
+      preflight-without-resolver pin, the `Resolver.predict` pin, and the construct-registration
+      pins (capability base and sites dispatch); everything else re-seamed mechanically with
+      assertions preserved (op stubs gain the ctx; graph suites register the walk union where
+      construct-registration used to feed the resolver; runup suites hand explicit readers to the
+      context). MINORS folded where stated: (a) rekey's `register_name` cache-hit comment at the
+      decl fetch; (b) the `_vm_scope` helper folded four inline VM-scope copies (create_vm keeps its
+      inline construction: it scopes with the slug it just resolved); (c) `port_forward_vm`'s
+      `build_registry` import hoisted to the function-body top; (d) the workspace-lifecycle box's
+      stale rider pointer corrected above (sanctioned); (e) RIDER: `port_forward_vm`'s service-layer
+      `sys.exit` (pre-existing, now test-entrenched) belongs to whichever effort next touches
+      port-forward. Docs lockstep: `capabilities/README.md` reflects HEAD (construction binds config
+      alone, central prediction, ops on `RunContext`, the landing-command-by-command prose replaced
+      by LANDED, the bridge paragraph replaced by the never-hold-a-value-source rule);
+      `secrets/resolver.py`'s module prose is rewritten as orchestrator-owned boundary machinery;
+      `docs/guides/resources.md` does not speak to the resolver. Where proven:
+      `tests/vms/test_add_git_credential_orchestrated.py` (ctx read pre-boundary, scoped refusal at
+      the op, seeding and burst parity), `tests/vms/test_sites_dispatch.py` (the
+      instance-reads-context pin), `tests/test_capability_base.py` (the construction pin),
+      `tests/vms/test_vm_nodes.py` (central template prediction against a real registry and backend
+      chain), `tests/vms/test_live_vm_boundary.py` (the returned ops context serves the site's
+      declared names), `tests/test_doctor.py` / `tests/test_doctor_env_and_secrets.py` (parity), the
+      agent orchestrated suites plus `tests/test_operation_scope.py` (the AGENT lift), and the whole
+      suite as the oracle.
 
 Definition of done: every command orchestrated; `Capability` constructs without a resolver; proxmox
 ops read the context; the full suite green.
