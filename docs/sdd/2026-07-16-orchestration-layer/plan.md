@@ -513,6 +513,62 @@ Goal: migrate the rest opportunistically, then remove the now-dead per-instance 
       no-gate boundary-burst pin, the stranded-site degrade with the manifest hint, both UserAbort
       pins, now driven through the orchestrated composition against the real registry/resolver and
       backend loop).
+- [x] The shell / exec roots and the console attach paths orchestrated (2026-07-18), three green
+      shippable units draining the next box further: `shell_vm` / `exec_vm`, `shell_agent` /
+      `exec_agent`, and the console attach pair (`sessions/console.attach_console`,
+      `sessions/multi_console._prepare_vm_target_for_attach` serving named-console attach and
+      restore). SEAM SCOPE RULING (handing-off dev): the Phase 5 remaining-commands grouping "shell
+      / exec roots and console commands" is exactly these six paths. EXPLICITLY LEFT imperative: the
+      deprecated `shell_workspace` / `console_workspace` (dying code retires by deletion, not
+      migration), `describe_vm` (read-only, do-not-over-orchestrate), `rekey_vm` (its migration is
+      what retires `preflight_vm_template`; both untouched here), `port_forward_vm`, `backup_vm`,
+      the initializer share-wait, workspace reinit/rehome/delete/copy, agent delete/grant/revoke
+      (the later seam that also splits `agents/manager.py`), and all session singular/batch ops.
+      GATE RULING: all six paths DO open the activation gate (HEAD: `keep_active` on shell/exec,
+      `ensure_active` + caller-opened `vm_active` holds on the console paths). COMPOSITION: one
+      shared gate-command root, `vms.manager.gated_vm_boundary` (public; agents and sessions import
+      it like `bind_platform` before it), deliberately separate from the no-gate
+      `_live_vm_boundary`: live VM node from the row, walk union AND the command's env-chain
+      SecretTarget on the ONE resolver (`register_targets`, exactly the targets HEAD passed to
+      `bind_platform`), VM-level scope for all six (the graph carries no agent or console node;
+      agent shell/exec provision nothing agent-shaped), then
+      `activation_gate(vm_node, gate_secret_resolver(...))` wrapping preflight-all, the one boundary
+      resolve, env composition (`compose_env` still reads `resolver.values`), and the interactive /
+      streaming span. ENV-TARGET SEAM: env secrets join the boundary via target registration, never
+      the walk union (the hermeticity counterpart of the provisioning pins; union = site config
+      secrets only, pinned per domain). CONSOLE RULINGS: NO console node (the plan said lazily;
+      attach provisions nothing console-shaped, so the graph is the live VM alone and introducing
+      one would over-orchestrate); no env-chain target registers on attach (HEAD passed none; the
+      build panes keep their documented conditional-need late resolve);
+      `_prepare_vm_target_for_attach` becomes a context manager yielding `(vm, target)` inside the
+      gate span, and the gate's held-active span replaces the callers' own `vm_active` holds
+      (keep-active parity across the SSH-heavy bodies and interactive attaches). Validation
+      precedence preserved verbatim (exec's dash rejection, workspace resolution incl. the agent
+      authz chain, `_guard_failed_vm` with `allow_failed_init` on shell/exec, tailscale guards) with
+      ONE deliberate hoist: the console paths' no-Tailscale row guard moves PRE-GATE (HEAD checked
+      it after `ensure_active`; the gate cannot populate the already-loaded row, so the hoist only
+      removes a wasted prompt-and-start, the same bail-early direction as this phase's
+      workspace-create ruling; hoists later would be the unsanctioned direction). R7 records, all in
+      the sanctioned pre-walk-away bucket: (1) the gate opens BEFORE preflight/resolve where HEAD
+      bound (preflight + resolve) first and gated after, so a stopped VM sees two prompt bursts,
+      gate then boundary, nothing resolved or prompted twice, contiguity not promised (the recorded
+      prompt-session ruling); (2) the consoles' hold now also spans the preflight/resolve boundary
+      and pre-attach body (a superset of HEAD's hold, the gate-span property every gated seam
+      carries). STILL-OPEN CATALOG entries CLOSED from the vm-lifecycle box: `vms/manager.py`
+      `shell_vm` + `exec_vm`; `agents/manager.py` `shell_agent` + `exec_agent`;
+      `sessions/console.py` `attach_console`; `sessions/multi_console.py`
+      `_prepare_vm_target_for_attach`. REMAINING: `describe_vm`, `rekey_vm`, `port_forward_vm`,
+      `backup_vm`, `initialize_vm`'s share-wait, `reinit_workspace`, `rehome_workspace`,
+      `delete_workspace`, `copy_workspace`, the deprecated pair, `delete_agent`, `grant_workspaces`,
+      `revoke_workspaces`, `sessions/manager.py` `_prepare_vm` and the `bind_platforms` /
+      `keep_actives` batch ops. Where proven: `tests/vms/test_shell_exec_orchestrated.py`,
+      `tests/agents/test_shell_exec_orchestrated.py`,
+      `tests/sessions/test_console_attach_orchestrated.py` (per-domain: graph + union with the
+      env-target distinction pin, gate-prompt parity on reachable and stopped VMs in the tracer's
+      mirror shape, pre-gate validation with zero resolves and zero gate events, the held-span order
+      pin, VM scope reaching readiness); existing oracle suites mechanically re-seamed, assertions
+      preserved (`test_vm_shell_provisioner.py`, `test_workspace_rooted_shells.py`,
+      `test_secrets_eager_resolve.py`, `test_session_transport.py`).
 - [ ] `vm delete`, `vm start` / `vm stop`, the shell / exec roots, and console commands (console
       nodes introduced lazily here), each a green shippable unit. The agent delete/grant/revoke
       migration in this phase also splits the overgrown `agents/manager.py` at that natural seam
