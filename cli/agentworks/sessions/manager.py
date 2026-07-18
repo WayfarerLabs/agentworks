@@ -1807,7 +1807,7 @@ def create_session(
             # operator sees the failure context first, not after a stream of
             # 'Agent deleted' / 'Workspace deleted' lines. The CLI's
             # exception handler still prints the canonical 'Error: ...' line
-            # with the typed hint at the very end -- this warn just bridges
+            # with the typed hint at the very end; this warn just bridges
             # the silence between "thing X created" and the rollback output.
             output.warn(f"Session create '{name}' failed; rolling back. Reason: {e}")
             log.unwind()
@@ -2173,9 +2173,9 @@ def restart_session(
         # --force) or declines the confirm (OK + interactive 'no').
         # Eager-resolve of the env chain runs AFTER these checks so we
         # don't ask for secrets the command was about to discard.
-        # UNKNOWN is impossible here -- _ensure_pid raises on unresolvable
-        # sessions. Legacy sessions short-circuit at ``status =
-        # SessionStatus.STOPPED`` above, so neither gate fires for them --
+        # UNKNOWN is impossible here (_ensure_pid raises on unresolvable
+        # sessions). Legacy sessions short-circuit at ``status =
+        # SessionStatus.STOPPED`` above, so neither gate fires for them;
         # migration is implicit in the operator's restart opt-in.
         if status == SessionStatus.BROKEN and not force:
             raise BrokenStateError(
