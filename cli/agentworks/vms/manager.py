@@ -1036,7 +1036,6 @@ def add_git_credential(db: Database, config: Config, name: str, credential_name:
     seams close with the per-instance resolver retirement.
     """
     from agentworks.bootstrap import build_registry
-    from agentworks.capabilities.base import OperationScope, ScopeLevel
     from agentworks.git_credentials.nodes import git_credential_node
     from agentworks.orchestration.activation import (
         activation_gate,
@@ -1095,11 +1094,7 @@ def add_git_credential(db: Database, config: Config, name: str, credential_name:
     for secret_name in secret_union(nodes):
         resolver.register_name(secret_name)
 
-    scope = OperationScope(
-        level=ScopeLevel.VM,
-        system_slug=db.get_setting(SYSTEM_SLUG_KEY) or None,
-        vm=name,
-    )
+    scope = _vm_scope(db, name)
 
     with activation_gate(vm_node, gate_secret_resolver(config, registry, resolver)):
         # PREFLIGHT-ALL against the one command-start context, then the
@@ -1183,6 +1178,21 @@ def _credential_line_key(line: str) -> tuple[str, str] | None:
     return (userinfo.split(":", 1)[0], line.split("@", 1)[1])
 
 
+def _vm_scope(db: Database, vm_name: str) -> OperationScope:
+    """The VM commands' shared VM-level operation scope: the operation
+    is about the VM itself (the ``_workspace_scope`` /
+    ``_session_scope`` siblings' shape at this level). The VM level's
+    field rules (required vm; forbidden workspace, agent, session) are
+    enforced by the scope's own constructor."""
+    from agentworks.capabilities.base import OperationScope, ScopeLevel
+
+    return OperationScope(
+        level=ScopeLevel.VM,
+        system_slug=db.get_setting(SYSTEM_SLUG_KEY) or None,
+        vm=vm_name,
+    )
+
+
 @contextlib.contextmanager
 def gated_vm_boundary(
     db: Database,
@@ -1230,7 +1240,6 @@ def gated_vm_boundary(
     resolve callback seeds it). Both close with the per-instance
     resolver retirement.
     """
-    from agentworks.capabilities.base import OperationScope, ScopeLevel
     from agentworks.orchestration.activation import (
         activation_gate,
         gate_secret_resolver,
@@ -1249,11 +1258,7 @@ def gated_vm_boundary(
     if targets:
         resolver.register_targets(targets)
     if scope is None:
-        scope = OperationScope(
-            level=ScopeLevel.VM,
-            system_slug=db.get_setting(SYSTEM_SLUG_KEY) or None,
-            vm=vm.name,
-        )
+        scope = _vm_scope(db, vm.name)
     with activation_gate(vm_node, gate_secret_resolver(config, registry, resolver)):
         preflight_all(nodes, RunContext(config=config, operation_scope=scope))
         resolver.resolve()
@@ -1292,7 +1297,6 @@ def _live_vm_boundary(
     the per-instance resolver retirement.
     """
     from agentworks.bootstrap import build_registry
-    from agentworks.capabilities.base import OperationScope, ScopeLevel
     from agentworks.orchestration.readiness import preflight_all
     from agentworks.orchestration.secrets import secret_union
     from agentworks.orchestration.walk import walk
@@ -1306,11 +1310,7 @@ def _live_vm_boundary(
     nodes = walk(vm_node)
     for secret_name in secret_union(nodes):
         resolver.register_name(secret_name)
-    scope = OperationScope(
-        level=ScopeLevel.VM,
-        system_slug=db.get_setting(SYSTEM_SLUG_KEY) or None,
-        vm=vm.name,
-    )
+    scope = _vm_scope(db, vm.name)
     preflight_all(nodes, RunContext(config=config, operation_scope=scope))
     resolver.resolve()
     return vm_node
@@ -1431,7 +1431,6 @@ def rekey_vm(
     import time
 
     from agentworks.bootstrap import build_registry
-    from agentworks.capabilities.base import OperationScope, ScopeLevel
     from agentworks.orchestration.activation import activation_gate
     from agentworks.orchestration.readiness import preflight_all
     from agentworks.orchestration.secrets import secret_union
@@ -1466,12 +1465,11 @@ def rekey_vm(
     nodes = walk(tmpl_node, vm_node)
     for secret_name in secret_union(nodes):
         resolver.register_name(secret_name)
+    # Cache hit by design: the auth key is already in the union (the
+    # template node's secret_refs); this call only fetches the DECL,
+    # which the --ignore-env env-var mask below needs.
     ts_decl = resolver.register_name(rekey_vm_tmpl.tailscale_auth_key)
-    scope = OperationScope(
-        level=ScopeLevel.VM,
-        system_slug=db.get_setting(SYSTEM_SLUG_KEY) or None,
-        vm=name,
-    )
+    scope = _vm_scope(db, name)
     with _mask_env_var_backend_for(ts_decl, masked=ignore_env):
         preflight_all(nodes, RunContext(config=config, operation_scope=scope))
         resolver.resolve()
@@ -2148,6 +2146,8 @@ def port_forward_vm(
     import subprocess
     import sys
 
+    from agentworks.bootstrap import build_registry
+
     vm = _require_vm(db, name)
     _guard_failed_vm(vm)
     if vm.tailscale_host is None:
@@ -2217,8 +2217,6 @@ def port_forward_vm(
         output.info("Use --verbose for detailed SSH output.")
 
     # Run in foreground until interrupted
-    from agentworks.bootstrap import build_registry
-
     registry = build_registry(config)
     with gated_vm_boundary(db, config, registry, vm):
         try:
