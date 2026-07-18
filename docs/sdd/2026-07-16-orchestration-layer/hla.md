@@ -504,7 +504,13 @@ Two walkthroughs make it concrete.
    command; tmux create plus the session row, `log.mark_realized(session)`.
 6. FAILURE anywhere post-resolve: `log.unwind()` tears down whatever realized, in reverse (session,
    then agent, then workspace, as far as realization got), with today's discipline. The activation
-   span closes last, on success or failure, releasing any keepalive.
+   span closes last, on success or failure, releasing any keepalive. (As landed, 2026-07-17, one
+   R7-driven divergence from this sketch: the SESSION is not log-tracked. The imperative command
+   never rolled back a COMPLETED session (a post-tmux failure unwound only the ephemerals and left
+   the row and server standing), so the pending session node's `teardown` is a partial-state cleaner
+   driven by the realizing slice's own failure path, `mark_realized` flips the session node directly
+   outside the log once the slice completes, and the unwind covers agent-then-workspace exactly as
+   at HEAD. Parity over the sketch; the plan's Phase 3 orchestrator note records the full ruling.)
 
 `vm create` is the same shape as the second walkthrough with the pending VM as the target node, and
 every other command sits somewhere on the same spectrum. The layers hold throughout: the

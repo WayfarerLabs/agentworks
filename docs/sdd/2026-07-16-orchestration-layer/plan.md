@@ -262,32 +262,102 @@ realization choreography and the two orchestrators.
       site) may do so only while single-consumer; the first graph that reaches one such node from
       two factories moves construction up to the orchestrator, because handed-in nodes ARE the
       memo.)
-- [ ] Push two parity carries (review round 2026-07-17):
-  - [ ] restart parity asserts the required-commands probe fired AT PREFLIGHT, before the kill
-        (matching HEAD's pre-kill guard), not merely "fired once";
-  - [ ] an explicit session-teardown parity test lands with the orchestrators, so the pending
+- [x] Push two parity carries (review round 2026-07-17):
+  - [x] restart parity asserts the required-commands probe fired AT PREFLIGHT, before the kill
+        (matching HEAD's pre-kill guard), not merely "fired once"; (Where:
+        `tests/sessions/test_create_restart_orchestrated.py` asserts the strict order, probe index
+        before kill index, plus the missing-binary abort with the old session's row untouched.)
+  - [x] an explicit session-teardown parity test lands with the orchestrators, so the pending
         session node's `NotImplementedError` placeholder cannot survive them (the unwind's
-        warn-and-continue would otherwise swallow it silently);
-  - [ ] when the imperative `_assert_required_commands` retires, its docstring knowledge (the no-PTY
+        warn-and-continue would otherwise swallow it silently); (Where: unit tests on the teardown
+        body in `tests/sessions/test_session_nodes.py` (row delete, implicit-grant revoke, group
+        removal only when no grant remains, admin mode, warn-never-raise) and the end-to-end order
+        test in `tests/sessions/test_create_restart_orchestrated.py`: session slice cleans first,
+        then agent, then workspace.)
+  - [x] when the imperative `_assert_required_commands` retires, its docstring knowledge (the no-PTY
         "no job control" stderr note and the TTY-gated-PATH residual gap) migrates onto the check's
-        probe documentation.
-- [ ] The PHASE-FREE realization choreography per creatable kind (the agent-realization body: agent
+        probe documentation. (Done on `RequiredCommandsCheck._probe`; with the imperative copy gone
+        the check is the only probe, so its result access hardened from
+        `getattr(probe, "ok",     False)` to typed `.ok` at the same time, one shape, one copy.)
+- [x] The PHASE-FREE realization choreography per creatable kind (the agent-realization body: agent
       ops plus the git-credential nodes' materials ops), factored as domain code with no phases and
-      no resolve of its own, replacing the `git_tokens` + `own_root` nesting hack.
-- [ ] The `session create` / `session restart` orchestrators: build; gate; preflight-all (harness
+      no resolve of its own, replacing the `git_tokens` + `own_root` nesting hack. (Implementation
+      note: landed as `workspaces/realize.py` / `agents/realize.py`, the nested-call slices of
+      `create_workspace` / `create_agent` at HEAD verbatim (messages, error wrapping, internal
+      partial-state cleanup, the workspace body's grant-all reconciliation), minus the nested
+      command roots' registry rebuild, re-validation, and re-gate. `git_tokens` arrive pre-resolved
+      (the orchestrator reads each credential node's token through scoped delivery) and the
+      materials ops keep running inside `_create_agent_on_vm` via `runup_and_filter`, the write-step
+      skip-and-degrade seam Phase 2 recorded; `show_phases` is pinned False inside the body, so a
+      body never resolves and never frames phases. The SESSION path's nesting hack is fully gone.
+      The STANDALONE `agent create` / `agent reinit` / `workspace create` keep their imperative
+      slices untouched (the sanctioned no-touch option), so the choreography is duplicated between
+      each body and its standalone command until Phase 4 (agents) / Phase 5 (workspaces) retire the
+      copies; `create_agent`'s now-caller-less `platform` / `git_tokens` parameters are likewise
+      left for Phase 4 to remove with that migration, recorded here rather than half-migrated now.)
+- [x] The `session create` / `session restart` orchestrators: build; gate; preflight-all (harness
       defers on its pending target); resolve; dependency-ordered roll-forward with
       `log.mark_realized` after each bespoke mutation; the command-shaped restart ordering (kill
-      before the `restart` op) and its pinned non-rollbackable window.
+      before the `restart` op) and its pinned non-rollbackable window. (Implementation notes.
+      FLAG/PROMPT flow untouched; only the composition moved. BUILD: one shared `LiveVMNode`;
+      live-or-pending workspace/agent via the push-one factories; the pending session factory now
+      takes db/config (its teardown addresses through them) and wires the SAME agent object as dep
+      and check target. The walk union and the pre-create `SecretTarget` both register on the ONE
+      resolver, so what prompts at create is unchanged (no R7 note needed for hermeticity); restart
+      keeps its recorded post-confirm `resolve_for_command` env resolve. GATE: `activation_gate` on
+      the VM node replaces `ensure_active` plus BOTH `vm_active` holds; create preserves the
+      reloaded-row semantics after the gate (rejoin may update `tailscale_host`), restart
+      deliberately does not reload, matching HEAD. R7 exception records, all the same sanctioned
+      pre-walk-away bucket as reinit's: (1) the gate now opens BEFORE the boundary resolve (HEAD
+      resolved at bind, then gated), with just-in-time values seeding the resolver so nothing
+      resolves or prompts twice; (2) the required-commands probe moves to PREFLIGHT for realized
+      targets, where HEAD probed post-resolve and post-mutation-start; the corollary at restart is
+      that a missing binary or a pre-rollout agent's SSH refusal now surfaces BEFORE the
+      BROKEN/--force and confirm gates (error-precedence shift, bail-earlier), and at create the
+      existing-agent SSH probe now precedes the workspace realization (less to unwind on failure);
+      (3) the nested creates' second gate probes are consolidated into the one held gate.
+      ROLL-FORWARD: `RealizationLog`; workspace body, mark; agent body, mark; `log.unwind()`
+      replaces `_rollback_ephemerals` (reverse order reproduces agent-then-workspace, proven end to
+      end; the rollback-failure warning is now the log's generic teardown line, the Phase 2-accepted
+      message shift). SESSION SLICE RULING: the completed session is deliberately NOT log-tracked.
+      At HEAD nothing ever rolled back a completed session (a post-tmux failure unwound only the
+      ephemerals and left the row and server standing), so the pending session node's `teardown` is
+      a PARTIAL-state cleaner (the imperative session-internal rollback body: best-effort, warns,
+      never raises) driven by the slice's own failure path, and `mark_realized` flips the node
+      directly after the slice, outside the log, pinning the completed-session window as
+      non-rollbackable; restart's post-kill window is pinned by no log existing at all. Seam catalog
+      for these commands: (1) the harness seam is `_build_session_command` +
+      `sessions.tmux.create_session` (the pane command string; the harness SDD's instance replaces
+      both with `start`/`restart` ops, no orchestrator change); (2) the realize bodies duplicate the
+      standalone command slices (previous box); (3) construct-time registration coexists with the
+      walk union, as in the vm commands; (4) the session-template node stays deferred, nothing
+      forced it (env secrets ride the target seam, readiness lives on the held check); (5)
+      `_prepare_vm` and the imperative gate keep serving the un-migrated session commands (stop,
+      delete, attach, batch ops). Oracle set: the existing session suites
+      (`test_session_create_ephemeral`, `test_session_transport`, `test_error_wrapper`,
+      `test_secrets_eager_resolve`, `test_sessions_tmux_create`) now drive the orchestrated path,
+      with their stubs mechanically moved to the orchestrated seams (`resolve_site`, the
+      reachability probe, the realize bodies, the resolver boundary); new proof tests live in
+      `tests/sessions/test_create_restart_orchestrated.py`.)
 - [x] The level-driven SKIP branch's first real exercise: a doctor scan reaching a harness (or a
       harness-like required-commands node) at SYSTEM level, asserting it NO-OPS rather than erroring
       (the branch the spike structurally could not prove). (Proven in `tests/test_session_nodes.py`:
       a SYSTEM-level context reaching the session node's required-commands check no-ops, even with
       no target at all, while the same check at SESSION level defers on pending, probes on realized,
       fires once, and is loud on an absent target.)
-- [ ] Coordinate with the re-scoped harness SDD: this pad drops the threaded `OperationIdentity` and
+- [x] Coordinate with the re-scoped harness SDD: this pad drops the threaded `OperationIdentity` and
       `to_create` in favor of intrinsic layer-1 identity, the per-command operation scope, and
       pending nodes; the harness instance reads only the LEVEL off the operation scope and addresses
-      via its own `session_name`.
+      via its own `session_name`. (Implementation note: the landing pad is live and the coordination
+      contract is satisfied structurally: the orchestrators address the harness seam ONLY through
+      the session node's own construction-time name and the scope's LEVEL. The held
+      `RequiredCommandsCheck` (the harness-like machinery) is built with `session_name` and the
+      target node, probes through `ctx.agent_target()` / `ctx.admin_target()`, and reads nothing off
+      the scope but `level`; no `OperationIdentity` and no `to_create` exist anywhere in the path.
+      What the harness SDD replaces: the held check becomes the harness instance's own readiness
+      (fork semantics unchanged, same held slot on the session node), and `_build_session_command`'s
+      command string becomes the instance's `start` / `restart` ops returning the pane command; the
+      orchestrators themselves need no change.)
 
 Definition of done: session create/restart orchestrated (against the real harness instance when the
 harness SDD has landed, else the documented interim seam to today's imperative harness path); the
