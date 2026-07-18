@@ -165,18 +165,48 @@ Goal: pending nodes, unwind, and the skip-and-degrade runup policy, on a multi-c
 (vm-template node + platform + git-credential providers). `vm reinit` is the existing-VM case (the
 gate applies); `vm create` provisions.
 
-- [ ] `orchestration/unwind.py`: `RealizationLog` (append on `mark_realized`, read backwards on
+- [x] `orchestration/unwind.py`: `RealizationLog` (append on `mark_realized`, read backwards on
       `unwind`); creatable node `teardown` implementations relocate today's rollback bodies
-      (`create_vm`'s row delete) onto the nodes.
-- [ ] `readiness.py` gains the skip-and-degrade POLICY helper (today's
+      (`create_vm`'s row delete) onto the nodes. (Implementation note: `CreatableNode` gained the
+      `realized` / `mark_realized` surface Phase 0 deliberately deferred here;
+      `PendingVMNode.mark_realized` enforces the one-way flip loudly. The rollback-failure warning
+      is now the log's generic "rollback: teardown of <key> failed" line rather than create's
+      bespoke delete-record wording, an accepted message-shape shift on a failure-of-the-rollback
+      path.)
+- [x] `readiness.py` gains the skip-and-degrade POLICY helper (today's
       `git_credentials.runup_and_filter` generalized): a rejected credential skips its materials op,
-      logs, and degrades the command to PARTIAL.
-- [ ] The pending VM node and `vms/templates.py`'s `preflight_vm_template` relocated onto the
-      vm-template node's `preflight`.
-- [ ] The `vm create` / `vm reinit` orchestrators, expressing today's proven phase order and
-      rollback semantics.
-- [ ] Parity assertions: UNWIND set and order reproduce `create_vm`'s rollback; SKIP-AND-DEGRADE
-      reproduces `runup_and_filter`'s partial-degradation behavior.
+      logs, and degrades the command to PARTIAL. (Implementation note: `runup_skip_and_degrade` is
+      `Readiness`-typed, so instances and nodes both fit; `runup_and_filter` is now its
+      git-credential-messaging face and keeps serving the write-step call sites, agents included,
+      unchanged. The write-step runup stays INSIDE the shared initializer machinery, an interim
+      seam: both orchestrators call `initialize_vm` / `run_initialization`, which invoke the policy
+      at the materials write; the policy MEANING now lives in the shared helper even though the call
+      site has not moved.)
+- [x] The pending VM node and `vms/templates.py`'s `preflight_vm_template` relocated onto the
+      vm-template node's `preflight`. (Implementation note: `preflight_vm_template` remains as a
+      thin delegate constructing the node, for the not-yet-migrated `rekey_vm` and direct tests; it
+      retires with that command's migration. The template node's `secret_refs` carry ONLY the
+      Tailscale key: the template's env-block secret references are runtime inputs, so folding them
+      in would break provisioning's hermeticity; pinned by test.)
+- [x] The `vm create` / `vm reinit` orchestrators, expressing today's proven phase order and
+      rollback semantics. (Implementation notes: reinit's gate opens BEFORE the preflight sweep, the
+      same sanctioned timing shift as the tracer, where HEAD's `keep_active` wrapped only the init;
+      reinit's graph deliberately has NO vm-template node, since the Tailscale key is not part of
+      its planned ops and must not join the boundary union; the rejoin stays on the gate's
+      conditional repair path. `vm create` has no gate (nothing exists to converge). The realization
+      point is the DB row, the artifact `teardown` deletes: `mark_realized` fires when the row
+      exists, the unwind window covers exactly the provisioning span, and initialization failures
+      keep the VM, as at HEAD. Neither graph shares a node between two consumers yet, so the
+      cross-factory memo the Phase 1 notes reserved is STILL not built; the first true
+      multi-consumer graph owns it.)
+- [x] Parity assertions: UNWIND set and order reproduce `create_vm`'s rollback; SKIP-AND-DEGRADE
+      reproduces `runup_and_filter`'s partial-degradation behavior. (Where:
+      `tests/orchestration/test_unwind.py` (order, best-effort, `UserAbort`),
+      `tests/vms/test_create_reinit_orchestrated.py` (row unwound on provisioning failure and
+      interrupt, kept on init failure, teardown failure warns without masking),
+      `tests/orchestration/test_readiness.py` plus the unchanged
+      `tests/test_git_token_verification.py` `runup_and_filter` suite (partial-degradation behavior,
+      now through the shared helper).)
 
 Definition of done: both commands orchestrated; the full suite green; unwind and skip-and-degrade
 parity asserted against HEAD behavior.
