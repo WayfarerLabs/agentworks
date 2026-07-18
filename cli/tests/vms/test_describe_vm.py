@@ -37,6 +37,9 @@ class _Platform:
     def __init__(self, status: VMStatus) -> None:
         self._status = status
 
+    def preflight(self, ctx: object) -> None:
+        return None
+
     def display_backend_name(self, vm: VMRow) -> str:
         return vm.name
 
@@ -55,10 +58,11 @@ def _describe(
     live-resource query was invoked for."""
     db.insert_vm("dvm", site="lima-local", hostname="dvm")
     db.update_vm_tailscale("dvm", "100.64.0.9")
+    # The orchestrated root reaches the platform through the node's
+    # site edge, whose only constructor is resolve_site.
     monkeypatch.setattr(
-        vm_manager,
-        "bind_platform",
-        lambda cfg, vm, registry=None: _Platform(status),
+        "agentworks.vms.sites.resolve_site",
+        lambda name, registry, *, resolver=None: _Platform(status),
     )
     calls: list[str] = []
 

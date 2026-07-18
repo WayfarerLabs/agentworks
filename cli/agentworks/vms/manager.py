@@ -671,12 +671,19 @@ def list_vms(db: Database, *, names_only: bool = False) -> None:
 
 
 def describe_vm(db: Database, config: Config, name: str) -> None:
-    """Show detailed information about a VM."""
+    """Show detailed information about a VM.
+
+    Orchestrated, composition only (:func:`_live_vm_boundary`): the
+    graph derives from the VM's row and the backend reads drive
+    through the node's held platform. NO activation gate ever opens:
+    describe reads state (one status probe is its op) and inspecting
+    a stopped VM must render "(manual)" / "(idle)", never start it.
+    """
     vm = _require_vm(db, name)
 
-    # Bind through the site so the platform (the site's capability) and
-    # the backend-side identity render polymorphically. Describe is an
-    # inspection command and a stranded row is exactly the one an
+    # Compose through the site so the platform (the site's capability)
+    # and the backend-side identity render polymorphically. Describe is
+    # an inspection command and a stranded row is exactly the one an
     # operator wants to look at, so a stranded site degrades to a
     # warning (with the manifest hint) rather than erroring: the row's
     # own fields still render.
@@ -691,23 +698,23 @@ def describe_vm(db: Database, config: Config, name: str) -> None:
     try:
         site_decl = lookup_site(vm.site, registry)
         # Known as soon as the declaration resolves: keep it alive even
-        # if the bind below degrades.
+        # if the boundary below degrades.
         site_platform = site_decl.platform
-        platform = bind_platform(config, vm, registry=registry)
+        platform = _live_vm_boundary(db, config, vm, registry=registry).site.platform
     except UserAbort:
         # Ctrl-C at the boundary's secret prompt aborts describe too;
         # a half-report would read as the command having succeeded.
         raise
     except AgentworksError as e:
-        # Inspection degrades on ANY typed bind/preflight failure (a
-        # stranded site's ConfigError, a missing tool's
+        # Inspection degrades on ANY typed build/preflight/resolve
+        # failure (a stranded site's ConfigError, a missing tool's
         # ConnectivityError, an unresolvable secret): describe is the
         # command an operator reaches for on exactly such a row, so the
         # row's own fields must still render.
         output.warn(f"{e}" + (f"\n{e.hint}" if e.hint else ""))
     else:
         # The backend reads degrade under the same discipline as the
-        # bind above: a live backend flake (API hiccup, SSH timeout)
+        # boundary above: a live backend flake (API hiccup, SSH timeout)
         # must not crash the report: a flaky backend is exactly when
         # an operator reaches for describe, and the row's static fields
         # still render with '-' placeholders.
@@ -1290,20 +1297,30 @@ def gated_vm_boundary(
         yield vm_node, resolver
 
 
-def _live_vm_boundary(db: Database, config: Config, vm: VMRow) -> LiveVMNode:
-    """The lifecycle commands' shared composition root (``start_vm`` /
-    ``stop_vm`` / ``delete_vm``, whose graphs are identical): build the
-    live VM node from its row (the site edge holds the bound platform;
-    construction registers the site's declared config secrets), register
-    the walk union on the resolver, sweep preflight at VM scope, and run
-    the one boundary resolve. Returns the node; callers drive the power
-    ops through its held platform (``node.site.platform``).
+def _live_vm_boundary(
+    db: Database,
+    config: Config,
+    vm: VMRow,
+    *,
+    registry: Registry | None = None,
+) -> LiveVMNode:
+    """The no-gate commands' shared composition root (``start_vm`` /
+    ``stop_vm`` / ``delete_vm`` / ``describe_vm``, whose graphs are
+    identical): build the live VM node from its row (the site edge
+    holds the bound platform; construction registers the site's
+    declared config secrets), register the walk union on the resolver,
+    sweep preflight at VM scope, and run the one boundary resolve.
+    Returns the node; callers drive the power ops through its held
+    platform (``node.site.platform``). ``registry`` reuses a
+    caller-built registry (describe builds one early for its
+    degrade-friendly site lookup); ``None`` builds one here.
 
     Deliberately NO activation gate: for start and stop the power op IS
     the command's operation (a command whose op is the state change
-    does not converge state first), and delete must not gate at all (an
+    does not converge state first), delete must not gate at all (an
     operator-stopped VM would refuse; broken states are what delete
-    exists to clean up).
+    exists to clean up), and describe only READS state (a status
+    probe is its op; inspecting a stopped VM must never start it).
 
     Interim seams, the same pair every migrated command records:
     construct-time registration coexists with the walk-derived union,
@@ -1319,7 +1336,8 @@ def _live_vm_boundary(db: Database, config: Config, vm: VMRow) -> LiveVMNode:
     from agentworks.secrets.resolver import Resolver
     from agentworks.vms.nodes import live_vm_node
 
-    registry = build_registry(config)
+    if registry is None:
+        registry = build_registry(config)
     resolver = Resolver(config, registry)
     vm_node = live_vm_node(db, config, registry, vm, resolver)
     nodes = walk(vm_node)
