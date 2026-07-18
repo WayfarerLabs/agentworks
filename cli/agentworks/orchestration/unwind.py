@@ -54,8 +54,11 @@ class RealizationLog:
         teardown WARNS and the unwind continues (it must never mask
         the original error the caller is about to re-raise);
         ``UserAbort`` is the exception to the exception, re-raised and
-        never swallowed. Unwound nodes are dropped from the record, so
-        a second call retries only what is still standing.
+        never swallowed. Every ATTEMPTED node is dropped from the
+        record whether or not its teardown succeeded: a failed
+        teardown is warned about (the warning names what survived),
+        never retried. Only a ``UserAbort``-interrupted node, and
+        whatever realized beneath it, stays recorded for a later call.
         """
         while self._realized:
             node = self._realized[-1]

@@ -136,5 +136,7 @@ class CreatableNode(Node, Protocol):
     def teardown(self) -> None:
         """Delete what this node's realizing mutation made. Invoked
         only by the orchestrator's unwind, only after this node
-        realized."""
+        realized. A raised teardown error must NAME the artifact left
+        standing: the unwind's warning surfaces the message verbatim,
+        and "teardown failed" without the what is not actionable."""
         ...

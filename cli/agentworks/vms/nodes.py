@@ -395,7 +395,17 @@ class PendingVMNode:
         self._realized = True
 
     def teardown(self) -> None:
-        self._db.delete_vm(self._name)
+        try:
+            self._db.delete_vm(self._name)
+        except Exception as exc:
+            # The teardown contract: a raised error names the artifact
+            # left standing (the unwind warning surfaces it verbatim).
+            raise StateError(
+                f"the DB record for VM '{self._name}' could not be "
+                f"deleted and is left standing: {exc}",
+                entity_kind="vm",
+                entity_name=self._name,
+            ) from exc
 
 
 # -- Factories: the translation rule applied to real declared resources ----

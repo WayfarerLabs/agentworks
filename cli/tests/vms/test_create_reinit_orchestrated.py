@@ -152,13 +152,35 @@ def test_create_rollback_on_keyboard_interrupt_unwinds_the_row(
     assert any("rolling back" in w for w in captured_output.warnings)
 
 
+def test_create_rollback_on_user_abort_unwinds_the_row(
+    make_config,
+    db: Database,
+    monkeypatch: pytest.MonkeyPatch,
+    captured_output,
+) -> None:
+    """The unwind oracle, abort flavor: an operator abort during
+    provisioning deletes the row and re-raises as itself, never
+    downgraded to a ProvisioningError."""
+    from agentworks.capabilities.vm_platform.lima import LimaPlatform
+    from agentworks.errors import UserAbort
+
+    def _abort(self: LimaPlatform, request: object) -> ProvisionResult:
+        raise UserAbort("operator said stop")
+
+    monkeypatch.setattr(LimaPlatform, "create", _abort)
+    with pytest.raises(UserAbort):
+        vm_manager.create_vm(db, make_config(), name="avm")
+    assert db.get_vm("avm") is None
+
+
 def test_create_rollback_failure_warns_and_never_masks(
     make_config,
     db: Database,
     monkeypatch: pytest.MonkeyPatch,
     captured_output,
 ) -> None:
-    """Best-effort unwind: a teardown failure (DB trouble) warns and
+    """Best-effort unwind: a teardown failure (DB trouble) warns,
+    NAMING the artifact left standing per the teardown contract, and
     the original provisioning error still propagates."""
     from agentworks.capabilities.vm_platform.lima import LimaPlatform
     from agentworks.db import Database as _Db
@@ -173,10 +195,10 @@ def test_create_rollback_failure_warns_and_never_masks(
     )
     with pytest.raises(ProvisioningError, match="backend exploded"):
         vm_manager.create_vm(db, make_config(), name="wvm")
-    assert any(
-        "rollback: teardown of vm/wvm failed: db locked" in w
-        for w in captured_output.warnings
-    )
+    (warning,) = [w for w in captured_output.warnings if "rollback" in w]
+    assert warning.startswith("rollback: teardown of vm/wvm failed:")
+    assert "the DB record for VM 'wvm'" in warning  # names what survived
+    assert "db locked" in warning  # chains the cause
 
 
 def test_create_init_failure_keeps_the_row(

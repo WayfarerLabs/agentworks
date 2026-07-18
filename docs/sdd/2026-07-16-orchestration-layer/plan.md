@@ -190,15 +190,20 @@ gate applies); `vm create` provisions.
       in would break provisioning's hermeticity; pinned by test.)
 - [x] The `vm create` / `vm reinit` orchestrators, expressing today's proven phase order and
       rollback semantics. (Implementation notes: reinit's gate opens BEFORE the preflight sweep, the
-      same sanctioned timing shift as the tracer, where HEAD's `keep_active` wrapped only the init;
-      reinit's graph deliberately has NO vm-template node, since the Tailscale key is not part of
-      its planned ops and must not join the boundary union; the rejoin stays on the gate's
-      conditional repair path. `vm create` has no gate (nothing exists to converge). The realization
-      point is the DB row, the artifact `teardown` deletes: `mark_realized` fires when the row
-      exists, the unwind window covers exactly the provisioning span, and initialization failures
-      keep the VM, as at HEAD. Neither graph shares a node between two consumers yet, so the
-      cross-factory memo the Phase 1 notes reserved is STILL not built; the first true
-      multi-consumer graph owns it.)
+      same sanctioned timing shift as the tracer, where HEAD's `keep_active` wrapped only the init.
+      The complete R7-exception record for that shift: the operator-stopped refusal now fires before
+      any init work (HEAD refused mid-command, post-resolve), and its corollary, an auto-stopped VM
+      now auto-starts BEFORE a preflight or resolve failure would surface, where HEAD failed those
+      without starting it; the start is idempotent declared-state maintenance, never
+      rollback-tracked (the "maintenance, not plan mutation" stance recorded in `activation.py`), so
+      the VM staying up after such a failure is accepted, not a leak. Reinit's graph deliberately
+      has NO vm-template node, since the Tailscale key is not part of its planned ops and must not
+      join the boundary union; the rejoin stays on the gate's conditional repair path. `vm create`
+      has no gate (nothing exists to converge). The realization point is the DB row, the artifact
+      `teardown` deletes: `mark_realized` fires when the row exists, the unwind window covers
+      exactly the provisioning span, and initialization failures keep the VM, as at HEAD. Neither
+      graph shares a node between two consumers yet, so the cross-factory memo the Phase 1 notes
+      reserved is STILL not built; the first true multi-consumer graph owns it.)
 - [x] Parity assertions: UNWIND set and order reproduce `create_vm`'s rollback; SKIP-AND-DEGRADE
       reproduces `runup_and_filter`'s partial-degradation behavior. (Where:
       `tests/orchestration/test_unwind.py` (order, best-effort, `UserAbort`),
