@@ -199,7 +199,11 @@ class RunContext:
         # private names while their public surface is the accessor
         # methods below (a generated __init__ would force callers to
         # spell the private names). Frozen dataclass, so assignment
-        # goes through object.__setattr__.
+        # goes through object.__setattr__. One consequence: never use
+        # dataclasses.replace() on a RunContext (it would hand the
+        # PRIVATE field names back to this __init__ and fail
+        # confusingly); construct a fresh context instead, which is the
+        # per-stage re-assembly rule anyway.
         object.__setattr__(self, "config", config)
         object.__setattr__(self, "operation_scope", operation_scope)
         object.__setattr__(self, "_admin_target", admin_target)
@@ -221,7 +225,11 @@ class RunContext:
         resolve pass (delivery may be scoped to the reader's declared
         names). Raises :class:`~agentworks.errors.ConfigError` when the
         context carries no resolved secrets at all: post-resolve code
-        reached with a pre-boundary (or inspection-only) context."""
+        reached with a pre-boundary (or inspection-only) context. That
+        error names the secret, not the requesting capability (the old
+        per-capability guards carried owner framing); requester framing
+        returns when a later permission model binds the requester to
+        the context."""
         if self._secrets is None:
             raise ConfigError(
                 f"secret {name!r} requested from a run context with no "

@@ -58,7 +58,12 @@ def walk(*roots: Node) -> tuple[Node, ...]:
         in_progress = visiting.get(node.key)
         if in_progress is not None:
             check_identity(node, in_progress)
-            chain = " -> ".join((*visiting, node.key))
+            # Report only the cycle itself, trimmed to start at the
+            # repeated key, not any acyclic prefix the walk entered it
+            # through.
+            keys = list(visiting)
+            cycle = keys[keys.index(node.key) :]
+            chain = " -> ".join((*cycle, node.key))
             raise StateError(f"node dependency cycle: {chain}")
         visiting[node.key] = node
         for dep in node.deps():

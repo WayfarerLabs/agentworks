@@ -109,6 +109,9 @@ unwind.
       walk-away point, and no secret resolved or prompted twice", NOT literal timing parity. The
       tracer genuinely exercises the just-in-time gate resolve plus boundary seed (proxmox's
       `status` needs the API token before the boundary), which must demonstrably not double-prompt.
+      The gate parity assertion also covers the operator-stopped RE-READ race guard: the VM node's
+      `auto_start` must re-read the intent flag at start time, as HEAD's `ensure_active` does
+      (reviewer carry, 2026-07-17).
 - [ ] The imperative `add_git_credential` is retired (or reduced to a thin call into the
       orchestrator); the interim seam to any not-yet-migrated machinery is documented here.
 - [ ] `capabilities/README.md` (lockstep, R9): the first consuming-resource node (`git-credential`,

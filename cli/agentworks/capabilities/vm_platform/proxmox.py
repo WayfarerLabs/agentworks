@@ -161,8 +161,12 @@ class ProxmoxPlatform(VMPlatform):
         from agentworks.errors import TokenRejectedError
 
         token_secret = str(self._cfg("token_secret", DEFAULT_TOKEN_SECRET))
+        # Read the token before announcing the check, so a context with
+        # no resolved secrets fails before the banner (the old guard's
+        # error-path ordering).
+        token = ctx.secret(token_secret)
         output.detail(f"Performing runup test for vm-site/{self.site_name}...")
-        api = self._build_api(ctx.secret(token_secret))
+        api = self._build_api(token)
         try:
             api.next_id()
         except ProxmoxAPIError as e:

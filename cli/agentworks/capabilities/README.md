@@ -141,7 +141,7 @@ power-granting world behind plain accessor methods: the execution targets (`ctx.
 (`ctx.secret(name)`). Everything is optional, and the timing is what populates it: **preflight gets
 it as of command start** (targets that _already_ exist, no resolved secrets), **runup gets it as of
 op start** (current targets, resolved secrets). It is the same object minus the secrets, differing
-only by when it is built -- which is exactly why the dependency-blindness above is structural rather
+only by when it is built, which is exactly why the dependency-blindness above is structural rather
 than a rule to remember: a `vm create` preflight is simply handed a context with no VM target, so it
 _cannot_ reach the thing the command has not created yet. (A future permission model omits fields
 the same way: a capability not granted a target or a secret just finds it absent.) The rule that

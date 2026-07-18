@@ -94,6 +94,19 @@ def test_self_cycle_is_a_loud_error() -> None:
         walk(a)
 
 
+def test_cycle_report_trims_the_acyclic_prefix() -> None:
+    """A cycle entered through a non-cycle prefix reports only the
+    cycle, not the path the walk happened to reach it through."""
+    a = _N("workspace/ws1")
+    b = _N("agent/dev", (a,))
+    a._deps = (b,)
+    root = _N("session/s1", (b,))
+    with pytest.raises(
+        StateError, match=r"cycle: agent/dev -> workspace/ws1 -> agent/dev$"
+    ):
+        walk(root)
+
+
 def test_two_objects_sharing_a_key_is_a_loud_error() -> None:
     """One-object-per-key is the node-construction contract: a
     duplicate construction of 'the same' node would leave edge holders
