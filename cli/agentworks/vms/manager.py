@@ -226,9 +226,9 @@ def bind_platform(
 
     ``prepare=False`` returns the constructed instance without the
     preflight + resolve boundary, for the roots that interleave other
-    participating resources' preflights first (``create_vm`` and
-    ``rekey_vm`` add the vm-template's Tailscale-key prediction before
-    the one resolve pass). Those callers own running the boundary.
+    participating resources' preflights first (``rekey_vm`` adds the
+    vm-template's Tailscale-key prediction before the one resolve
+    pass). Those callers own running the boundary.
     """
     from agentworks.bootstrap import build_registry
     from agentworks.secrets.resolver import Resolver
@@ -295,6 +295,11 @@ def ensure_active(
     db: Database, config: Config, vm: VMRow, platform: VMPlatform
 ) -> None:
     """Respect a manual stop; otherwise start on demand.
+
+    With :func:`keep_active` this is the imperative activation-gate
+    pair: it serves the commands not yet migrated onto the orchestrated
+    gate (``orchestration.activation``) and retires with them as they
+    migrate.
 
     Fast path: a Tailscale reachability probe (cheap, no cloud API)
     short-circuits the common case, keeping backend round trips off the

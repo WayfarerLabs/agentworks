@@ -1,8 +1,8 @@
 """Gate semantics of the imperative ``ensure_active`` / ``keep_active``
-pair (still serving the un-migrated commands: batch ops, shell / exec
-roots, consoles, rekey). The operator_stopped flag writes of the
-orchestrated ``start_vm`` / ``stop_vm`` are pinned in
-``test_lifecycle_orchestrated.py``.
+pair, which still serves the commands not yet migrated onto the
+orchestrated activation gate (see the pair's docstrings). The
+operator_stopped flag writes of the orchestrated ``start_vm`` /
+``stop_vm`` are pinned in ``test_lifecycle_orchestrated.py``.
 """
 
 from __future__ import annotations
