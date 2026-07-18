@@ -67,7 +67,7 @@ class ScopeLevel(Enum):
     SYSTEM = "system"  # the whole installation, no VM
     VM = "vm"  # a VM
     WORKSPACE = "workspace"  # a workspace on a VM
-    AGENT = "agent"  # an agent user in a workspace on a VM
+    AGENT = "agent"  # an agent user on a VM (workspace access is a grant)
     SESSION = "session"  # a harness as agent-or-admin, in a workspace, on a VM
 
 
@@ -75,13 +75,17 @@ class ScopeLevel(Enum):
 # name fields, forbidden name fields). ``system_slug`` is the anchor,
 # allowed at every level; ``admin`` is SESSION vocabulary and is
 # enforced separately (a SESSION scope requires exactly one of
-# agent/admin; every other level forbids both). WORKSPACE / AGENT rules
-# land with the commands that operate at those levels; until then those
-# levels are loudly non-constructible, so no scope with an unenforced
-# invariant can exist.
+# agent/admin; every other level forbids both). WORKSPACE rules land
+# with the command that operates at that level; until then it stays
+# loudly non-constructible, so no scope with an unenforced invariant
+# can exist. AGENT forbids ``workspace`` because agents are VM-scoped
+# in the current model (a workspace relationship is a grant, never
+# identity); a future workspace-rooted agent operation re-rules that
+# field when it migrates.
 _SCOPE_LEVEL_RULES: dict[ScopeLevel, tuple[tuple[str, ...], tuple[str, ...]]] = {
     ScopeLevel.SYSTEM: ((), ("vm", "workspace", "agent", "session")),
     ScopeLevel.VM: (("vm",), ("workspace", "agent", "session")),
+    ScopeLevel.AGENT: (("vm", "agent"), ("workspace", "session")),
     ScopeLevel.SESSION: (("vm", "workspace", "session"), ()),
 }
 

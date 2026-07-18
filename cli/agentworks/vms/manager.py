@@ -35,9 +35,8 @@ from agentworks.vms.initializer import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
+    from collections.abc import Callable, Iterable, Iterator, Sequence
 
-    from agentworks.capabilities.git_credential.base import GitCredentialProvider
     from agentworks.capabilities.vm_platform import VMPlatform
     from agentworks.config import Config
     from agentworks.db import Database, VMRow, WorkspaceRow
@@ -1876,27 +1875,6 @@ def _mask_env_var_backend_for(
         yield
     finally:
         os.environ.update(saved)
-
-
-def _resolve_git_tokens(
-    providers: Mapping[str, GitCredentialProvider],
-    resolver: Resolver,
-) -> dict[str, str]:
-    """Read each provider's resolved token from the operation's resolver
-    cache into a ``{credential_name: value}`` dict.
-
-    The providers must have been constructed against ``resolver`` (so
-    their token secrets joined the boundary resolve) and the pass must
-    already have run. This does NOT run the git-credential runup: that is
-    deferred to the write step (Phase B for vm init, the credential-write
-    step for agent create), where a rejected token is skipped and the
-    operation continues to a partial result rather than failing before
-    the VM even exists. See ``runup_and_filter``.
-    """
-    return {
-        name: resolver.get(provider.secret_name)
-        for name, provider in providers.items()
-    }
 
 
 def _lookup_or_synthesize_secret(registry: Registry, name: str) -> SecretDecl:

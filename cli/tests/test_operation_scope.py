@@ -56,16 +56,49 @@ def test_error_names_every_violation_at_once() -> None:
         OperationScope(level=ScopeLevel.VM, session="s1")
 
 
-@pytest.mark.parametrize("level", [ScopeLevel.WORKSPACE, ScopeLevel.AGENT])
-def test_deeper_levels_are_loudly_not_constructible_yet(level: ScopeLevel) -> None:
+def test_workspace_level_is_loudly_not_constructible_yet() -> None:
     """The full five-level enum is a cheap contract defined up front,
     but a level's field rules land with the commands that operate at
     it; until then no scope with an unenforced invariant can exist.
-    (SESSION landed with the session commands' migration.)"""
+    (SESSION landed with the session commands' migration, AGENT with
+    the agent commands'.)"""
     with pytest.raises(StateError, match="cannot be constructed"):
         OperationScope(
-            level=level, vm="box", workspace="ws1", agent="dev", session="s1"
+            level=ScopeLevel.WORKSPACE, vm="box", workspace="ws1"
         )
+
+
+# -- the AGENT level (landed with the agent commands) ------------------------
+
+
+def test_agent_scope_constructs_with_its_chain() -> None:
+    scope = OperationScope(level=ScopeLevel.AGENT, vm="box", agent="dev")
+    assert scope.vm == "box" and scope.agent == "dev"
+    assert scope.workspace is None and not scope.admin
+
+
+@pytest.mark.parametrize("field", ["vm", "agent"])
+def test_agent_scope_requires_its_chain(field: str) -> None:
+    kwargs = {"vm": "box", "agent": "dev"}
+    del kwargs[field]
+    with pytest.raises(StateError, match=f"requires '{field}'"):
+        OperationScope(level=ScopeLevel.AGENT, **kwargs)  # type: ignore[arg-type]
+
+
+@pytest.mark.parametrize("field", ["workspace", "session"])
+def test_agent_scope_forbids_deeper_and_sideways_names(field: str) -> None:
+    """Agents are VM-scoped in the current model: a workspace
+    relationship is a grant, never identity, so the AGENT chain is
+    vm -> agent and a workspace name on it is mis-leveled."""
+    with pytest.raises(StateError, match=f"forbids '{field}'"):
+        OperationScope(
+            level=ScopeLevel.AGENT, vm="box", agent="dev", **{field: "x"}  # type: ignore[arg-type]
+        )
+
+
+def test_agent_scope_forbids_admin() -> None:
+    with pytest.raises(StateError, match="admin"):
+        OperationScope(level=ScopeLevel.AGENT, vm="box", agent="dev", admin=True)
 
 
 # -- the SESSION level (landed with the session commands) --------------------

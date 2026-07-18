@@ -18,18 +18,26 @@ from agentworks.config import load_config
 
 
 def _resolve_tokens(config: object, registry: object, names: list[str]) -> dict[str, str]:
-    """Resolve git tokens for the named credentials via the agent
-    composition helper (which supersedes the removed _collect_git_tokens:
-    same construct -> preflight -> resolve, plus phase banners)."""
-    from types import SimpleNamespace
+    """Resolve git tokens for the named credentials the way the
+    orchestrated commands do: construct the credential nodes, register
+    the walk-derived union on the operation's resolver, run the one
+    boundary pass, and read each token through the node's SCOPED
+    delivery."""
+    from agentworks.git_credentials.nodes import git_credential_node
+    from agentworks.orchestration.secrets import ScopedSecrets, secret_union
+    from agentworks.secrets.resolver import Resolver
 
-    from agentworks.agents.manager import _preflight_resolve_agent_git
-
-    return _preflight_resolve_agent_git(
-        config,  # type: ignore[arg-type]
-        registry,  # type: ignore[arg-type]
-        SimpleNamespace(name="t", git_credentials=names),  # type: ignore[arg-type]
-    )
+    resolver = Resolver(config, registry)  # type: ignore[arg-type]
+    nodes = [git_credential_node(registry, n, resolver) for n in names]  # type: ignore[arg-type]
+    for secret_name in secret_union(nodes):
+        resolver.register_name(secret_name)
+    resolver.resolve()
+    return {
+        node.provider.owner_name: ScopedSecrets(
+            resolver.values, node.secret_refs()
+        ).get(node.provider.secret_name)
+        for node in nodes
+    }
 
 
 @pytest.fixture()

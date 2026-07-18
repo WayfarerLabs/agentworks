@@ -207,14 +207,19 @@ def test_collect_git_tokens_does_not_probe(
     config = _config_with_github_cred(tmp_path)
     registry = build_registry(config)
 
-    from types import SimpleNamespace
+    from agentworks.git_credentials.nodes import git_credential_node
+    from agentworks.orchestration.secrets import ScopedSecrets, secret_union
+    from agentworks.secrets.resolver import Resolver
 
-    from agentworks.agents.manager import _preflight_resolve_agent_git
-
-    tmpl = SimpleNamespace(name="t", git_credentials=["gh"])
-    assert _preflight_resolve_agent_git(config, registry, tmpl) == {  # type: ignore[arg-type]
-        "gh": "goodtok"
-    }
+    resolver = Resolver(config, registry)
+    node = git_credential_node(registry, "gh", resolver)
+    for secret_name in secret_union([node]):
+        resolver.register_name(secret_name)
+    resolver.resolve()
+    token = ScopedSecrets(resolver.values, node.secret_refs()).get(
+        node.provider.secret_name
+    )
+    assert token == "goodtok"
 
 
 # -- runup_and_filter (the deferred runup at the write step) ----------------

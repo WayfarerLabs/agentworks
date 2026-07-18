@@ -25,11 +25,13 @@ Parity oracle: the mutation slice of ``agents.manager.create_agent``,
 exactly as ``session create --new-agent`` invoked it nested at the
 time this body was factored out (same messages, same error wrapping,
 same rollback, minus the nested command root's own registry build,
-re-validation, and re-gate; ``grant_all`` stays with the standalone
-command, which is the only caller that offers it). The standalone
-``agent create`` / ``agent reinit`` commands still run their own
-composition; they wrap this body in their own phases when they migrate
-onto the orchestrated model.
+re-validation, and re-gate). ``grant_all_workspaces`` rides the body
+so the grant reconciliation keeps its place between the row insert and
+the SSH-config refresh, exactly the imperative order; only the
+standalone command offers the flag. Both ``agent create`` and the
+session orchestrator call this body; ``agent reinit`` shares the
+underlying mutation but not the insert, so it drives
+``_create_agent_on_vm`` directly.
 """
 
 from __future__ import annotations
@@ -56,6 +58,7 @@ def realize_agent(
     vm: VMRow,
     template: ResolvedAgentTemplate,
     git_tokens: dict[str, str],
+    grant_all_workspaces: bool = False,
 ) -> AgentRow:
     """Make agent ``name`` real on ``vm``: create and configure the
     Linux user (including the git-credential materials, their write-step
@@ -97,7 +100,6 @@ def realize_agent(
                 vm, config, registry, template, linux_user,
                 agent_name=name,
                 git_tokens=git_tokens,
-                show_phases=False,
                 logger=ssh_logger,
             )
         except KeyboardInterrupt:
@@ -120,8 +122,16 @@ def realize_agent(
         vm.name,
         linux_user,
         template=template.name,
-        grant_all=False,
+        grant_all=grant_all_workspaces,
     )
+
+    # If grant_all, add to all existing workspace groups
+    if grant_all_workspaces:
+        from agentworks.agents.manager import _add_to_workspace_group
+
+        for ws in db.list_workspaces(vm_name=vm.name):
+            _add_to_workspace_group(vm, config, db, linux_user, ws.name, logger=None)
+            db.insert_agent_grant(name, ws.name, "explicit")
 
     # Refresh operator SSH config so `ssh <prefix><vm>--<agent>` works.
     # Declarative rebuild from DB state picks up the new agent row.
