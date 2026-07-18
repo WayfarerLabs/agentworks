@@ -59,8 +59,9 @@ def test_diamond_is_visited_once() -> None:
 
 def test_multi_root_shares_memoization() -> None:
     """Batch commands root at many nodes (``walk(*roots)`` from day
-    one): a platform shared by two VMs is visited
-    once across roots, reproducing ``bind_platforms``' by-site dedup."""
+    one): a site shared by two VMs is visited once across roots (the
+    by-site dedup the sessions batch composition relies on, with the
+    ``live_vm_node`` site-node memo supplying the shared object)."""
     site = _N("vm-site/px")
     vm1 = _N("vm/box1", (site,))
     vm2 = _N("vm/box2", (site,))
