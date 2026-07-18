@@ -283,20 +283,44 @@ def test_reinit_converges_git_identity_on_the_checkout(
     )
 
 
+class _RevParseFailingTarget(_FakeAdminTarget):
+    """Admin target whose `git rev-parse` fails with a chosen stderr, so
+    the reinit identity probe can exercise its no-repo vs error branches."""
+
+    def __init__(self, *, rev_parse_stderr: str) -> None:
+        super().__init__()
+        self._rev_parse_stderr = rev_parse_stderr
+
+    def run(self, cmd: str, **kwargs: object) -> SimpleNamespace:
+        self.commands.append(cmd)
+        if "rev-parse" in cmd:
+            return SimpleNamespace(
+                ok=False, returncode=128, stdout="", stderr=self._rev_parse_stderr
+            )
+        return SimpleNamespace(ok=True, returncode=0, stdout="", stderr="")
+
+
+def _wire_target(monkeypatch: pytest.MonkeyPatch, fake: _FakeAdminTarget) -> None:
+    import agentworks.workspaces.backends.vm  # noqa: F401
+
+    factory = lambda vm, config, **kwargs: fake  # noqa: E731
+    monkeypatch.setattr("agentworks.transports.transport", factory)
+    monkeypatch.setattr("agentworks.workspaces.backends.vm.transport", factory)
+
+
 def test_reinit_skips_git_identity_when_not_a_repo(
     db: Database,
     make_config,  # noqa: ANN001
     monkeypatch: pytest.MonkeyPatch,
-    captured_output,  # noqa: ANN001
+    captured_output: CapturedOutput,
 ) -> None:
     """Identity declared on a workspace that is not a git checkout is a
-    no-op: the rev-parse probe fails, so no git config write runs."""
-    import agentworks.workspaces.backends.vm  # noqa: F401
-
-    fake = _FakeAdminTarget(failing=("rev-parse",))
-    factory = lambda vm, config, **kwargs: fake  # noqa: E731
-    monkeypatch.setattr("agentworks.transports.transport", factory)
-    monkeypatch.setattr("agentworks.workspaces.backends.vm.transport", factory)
+    quiet no-op: the rev-parse probe reports 'not a git repository', so no
+    git config runs and no warning fires."""
+    fake = _RevParseFailingTarget(
+        rev_parse_stderr="fatal: not a git repository (or any of the parent directories): .git"
+    )
+    _wire_target(monkeypatch, fake)
 
     config = make_config(
         '[workspace_templates.default]\ngit_user_name = "Ada Lovelace"\n'
@@ -306,8 +330,32 @@ def test_reinit_skips_git_identity_when_not_a_repo(
 
     workspace_manager.reinit_workspace(db, config, "ws1")
 
-    # rev-parse fails, so neither the --local read nor the --local write runs.
     assert not any("config" in c for c in fake.commands)
+    assert not any("git identity" in w for w in captured_output.warnings)
+
+
+def test_reinit_git_identity_warns_on_unexpected_probe_failure(
+    db: Database,
+    make_config,  # noqa: ANN001
+    monkeypatch: pytest.MonkeyPatch,
+    captured_output: CapturedOutput,
+) -> None:
+    """A probe failure that is NOT 'not a git repository' (git missing, a
+    broken checkout) warns rather than reporting a misleading OK, and still
+    skips the config write."""
+    fake = _RevParseFailingTarget(rev_parse_stderr="git: command not found")
+    _wire_target(monkeypatch, fake)
+
+    config = make_config(
+        '[workspace_templates.default]\ngit_user_name = "Ada Lovelace"\n'
+    )
+    _seed(db)
+    _reachable(monkeypatch, True)
+
+    workspace_manager.reinit_workspace(db, config, "ws1")
+
+    assert not any("config" in c for c in fake.commands)
+    assert any("git identity skipped" in w for w in captured_output.warnings)
 
 
 def test_reinit_default_template_stamps_no_identity(

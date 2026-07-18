@@ -511,7 +511,18 @@ def _reinit_git_identity(
     try:
         is_repo = target.run(f"git -C {quoted_path} rev-parse --git-dir", check=False)
         if not is_repo.ok:
-            output.detail("OK: git identity (workspace has no repo)")
+            # "not a git repository" is the expected, quiet no-op (a
+            # workspace created without a repo). Any other probe failure
+            # (git missing, a broken checkout, permissions) is a real
+            # problem the operator should see, not a silent OK.
+            stderr = (is_repo.stderr or "").strip()
+            if "not a git repository" in stderr.lower():
+                output.detail("OK: git identity (workspace has no repo)")
+            else:
+                output.warn(
+                    f"git identity skipped: could not probe {ws.workspace_path} "
+                    f"as a git repo ({stderr or 'unknown error'})"
+                )
             return 0
 
         fixed = 0
