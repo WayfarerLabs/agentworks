@@ -56,15 +56,35 @@ def test_error_names_every_violation_at_once() -> None:
         OperationScope(level=ScopeLevel.VM, session="s1")
 
 
-def test_workspace_level_is_loudly_not_constructible_yet() -> None:
-    """The full five-level enum is a cheap contract defined up front,
-    but a level's field rules land with the commands that operate at
-    it; until then no scope with an unenforced invariant can exist.
-    (SESSION landed with the session commands' migration, AGENT with
-    the agent commands'.)"""
-    with pytest.raises(StateError, match="cannot be constructed"):
+# -- the WORKSPACE level (landed with the workspace commands) ----------------
+
+
+def test_workspace_scope_constructs_with_its_chain() -> None:
+    scope = OperationScope(level=ScopeLevel.WORKSPACE, vm="box", workspace="ws1")
+    assert scope.vm == "box" and scope.workspace == "ws1"
+    assert scope.agent is None and not scope.admin
+
+
+@pytest.mark.parametrize("field", ["vm", "workspace"])
+def test_workspace_scope_requires_its_chain(field: str) -> None:
+    kwargs = {"vm": "box", "workspace": "ws1"}
+    del kwargs[field]
+    with pytest.raises(StateError, match=f"requires '{field}'"):
+        OperationScope(level=ScopeLevel.WORKSPACE, **kwargs)  # type: ignore[arg-type]
+
+
+@pytest.mark.parametrize("field", ["agent", "session"])
+def test_workspace_scope_forbids_deeper_names(field: str) -> None:
+    with pytest.raises(StateError, match=f"forbids '{field}'"):
         OperationScope(
-            level=ScopeLevel.WORKSPACE, vm="box", workspace="ws1"
+            level=ScopeLevel.WORKSPACE, vm="box", workspace="ws1", **{field: "x"}  # type: ignore[arg-type]
+        )
+
+
+def test_workspace_scope_forbids_admin() -> None:
+    with pytest.raises(StateError, match="admin"):
+        OperationScope(
+            level=ScopeLevel.WORKSPACE, vm="box", workspace="ws1", admin=True
         )
 
 
