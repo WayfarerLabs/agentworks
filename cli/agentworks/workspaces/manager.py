@@ -18,9 +18,10 @@ from agentworks.errors import (
     UserAbort,
     ValidationError,
 )
-from agentworks.vms.manager import bind_platform, keep_active
+from agentworks.vms.manager import bind_platform, gated_vm_boundary, keep_active
 
 if TYPE_CHECKING:
+    from agentworks.capabilities.base import OperationScope
     from agentworks.capabilities.vm_platform import VMPlatform
     from agentworks.config import Config
     from agentworks.db import Database, VMRow, WorkspaceRow
@@ -96,12 +97,7 @@ def create_workspace(
     # Construction is cheap and registers the site's declared secrets
     # on the resolver (the construct-time registration seam beside the
     # walk-derived union below); nothing resolves yet.
-    from agentworks.capabilities.base import (
-        OperationScope,
-        RunContext,
-        ScopeLevel,
-    )
-    from agentworks.db import SYSTEM_SLUG_KEY
+    from agentworks.capabilities.base import RunContext
     from agentworks.orchestration.activation import (
         activation_gate,
         gate_secret_resolver,
@@ -127,12 +123,7 @@ def create_workspace(
     for secret_name in secret_union(nodes):
         resolver.register_name(secret_name)
 
-    scope = OperationScope(
-        level=ScopeLevel.WORKSPACE,
-        system_slug=db.get_setting(SYSTEM_SLUG_KEY) or None,
-        vm=vm.name,
-        workspace=ws_name,
-    )
+    scope = _workspace_scope(db, vm, ws_name)
 
     with activation_gate(vm_node, gate_secret_resolver(config, registry, resolver)):
         # The preflight boundary: the sweep covers every participating
@@ -270,6 +261,16 @@ def reinit_workspace(
     Same semantic as `vm reinit` and `agent reinit`: the declared state in
     the DB is the source of truth; this reinit converges live state to
     match.
+
+    Orchestrated (``vms.manager.gated_vm_boundary``, WORKSPACE scope):
+    the graph is the live VM alone (the workspace has no capability
+    instances and nothing realization-shaped; convergence mutates
+    through the VM transport), the activation gate replaces this
+    command's ``keep_active``, opening BEFORE the preflight sweep with
+    its just-in-time values seeding the boundary resolver, and the
+    whole SSH convergence body runs inside the held-active span. The
+    not-found checks stay pre-boundary: a refusal costs zero prompts,
+    zero resolves, and zero gate events.
     """
     from agentworks.agents.manager import AGENT_PREFIX
     from agentworks.bootstrap import build_registry
@@ -278,7 +279,7 @@ def reinit_workspace(
 
     # build_registry runs first so framework miss-policies fire before
     # any DB / VM business logic.
-    build_registry(config)
+    registry = build_registry(config)
 
     ws = db.get_workspace(name)
     if ws is None:
@@ -296,8 +297,10 @@ def reinit_workspace(
             entity_name=ws.vm_name,
         )
 
-    target = transport(vm, config)
-    with keep_active(db, config, vm, bind_platform(config, vm)):
+    with gated_vm_boundary(
+        db, config, registry, vm, scope=_workspace_scope(db, vm, name)
+    ):
+        target = transport(vm, config)
         ws_group = ws.linux_group
         fixes = 0
 
@@ -557,8 +560,20 @@ def _rehome_vm(
     remove_old: bool,
     yes: bool,
 ) -> None:
-    """Rehome a VM workspace."""
+    """Rehome a VM workspace.
 
+    Orchestrated (``vms.manager.gated_vm_boundary``, WORKSPACE scope):
+    the graph is the live VM alone, the activation gate replaces this
+    command's ``keep_active``, and the whole move runs inside the
+    held-active span. The not-found check and the VM-status guard stay
+    pre-boundary; the source / target directory existence checks and
+    the confirm prompt stay INSIDE the span exactly where they were:
+    the checks need SSH (inherently post-gate) and the confirm renders
+    their results, so they cannot move earlier without changing what
+    the operator confirms.
+    """
+
+    from agentworks.bootstrap import build_registry
     from agentworks.ssh import SSHError, SSHLogger
     from agentworks.transports import transport
     from agentworks.workspaces.backends.vm import generate_vscode_workspace
@@ -576,7 +591,10 @@ def _rehome_vm(
         )
 
     _guard_vm_status(vm)
-    with keep_active(db, config, vm, bind_platform(config, vm)):
+    registry = build_registry(config)
+    with gated_vm_boundary(
+        db, config, registry, vm, scope=_workspace_scope(db, vm, ws_name)
+    ):
 
         target = transport(vm, config)
 
@@ -752,10 +770,26 @@ def delete_workspace(
 ) -> None:
     """Delete a workspace.
 
+    Orchestrated on the standalone path (``platform=None``, the
+    command root and ``delete_session``'s workspace-cleanup call):
+    ``vms.manager.gated_vm_boundary`` composes the live-VM graph at
+    WORKSPACE scope, the activation gate replaces this command's
+    ``keep_active``, and the held-active span covers the session-kill
+    and on-VM removal work. The sessions guard, the confirm gate, and
+    the not-found check stay pre-boundary: a refusal costs zero
+    prompts, zero resolves, and zero gate events. A missing VM row
+    skips the boundary entirely (DB-only cleanup), and a VM without a
+    Tailscale address skips only the SSH session-kill block, exactly
+    the imperative shape.
+
     ``platform`` accepts the caller's already-bound platform (session
-    create's ephemeral ROLLBACK path) so a failed create on a
-    secret-bearing site doesn't re-run the resolve pass mid-rollback;
-    when None this function is its own composition root and binds once.
+    create's ephemeral ROLLBACK path, where
+    ``PendingWorkspaceNode.teardown`` runs INSIDE the caller's held
+    gate span): that path must not rebuild a boundary or re-run the
+    resolve pass mid-rollback, so it keeps the imperative
+    ``keep_active`` hold on the handed-in platform. This is the
+    INTERIM nested-teardown seam; it closes when the session-create
+    unwind hands a node instead of a platform.
     """
 
     ws = db.get_workspace(name)
@@ -799,10 +833,24 @@ def delete_workspace(
     with contextlib.ExitStack() as _keepalive_stack:
         if vm is not None:
             if platform is None:
-                platform = bind_platform(config, vm)
-            _keepalive_stack.enter_context(
-                keep_active(db, config, vm, platform)
-            )
+                # The standalone composition root: build the boundary here.
+                from agentworks.bootstrap import build_registry
+
+                registry = build_registry(config)
+                _keepalive_stack.enter_context(
+                    gated_vm_boundary(
+                        db, config, registry, vm,
+                        scope=_workspace_scope(db, vm, name),
+                    )
+                )
+            else:
+                # The nested-teardown path: the caller's composition
+                # already resolved and holds its gate open, so only the
+                # hold is re-entered (never a second boundary or
+                # resolve).
+                _keepalive_stack.enter_context(
+                    keep_active(db, config, vm, platform)
+                )
 
         if vm is not None and vm.tailscale_host is not None:
             from agentworks.db import SessionStatus
@@ -1040,6 +1088,23 @@ def copy_workspace(
         tmp_path.unlink(missing_ok=True)
 
     output.info(f"Workspace '{source_name}' copied to '{dest_name}'")
+
+
+def _workspace_scope(db: Database, vm: VMRow, ws_name: str) -> OperationScope:
+    """The workspace commands' shared WORKSPACE-level operation scope:
+    the operation is about the workspace (on this VM), even when the
+    composed graph is the live VM alone. The WORKSPACE level's field
+    rules (required vm + workspace; forbidden agent, session) are
+    enforced by the scope's own constructor."""
+    from agentworks.capabilities.base import OperationScope, ScopeLevel
+    from agentworks.db import SYSTEM_SLUG_KEY
+
+    return OperationScope(
+        level=ScopeLevel.WORKSPACE,
+        system_slug=db.get_setting(SYSTEM_SLUG_KEY) or None,
+        vm=vm.name,
+        workspace=ws_name,
+    )
 
 
 def _guard_vm_status(vm: VMRow) -> None:

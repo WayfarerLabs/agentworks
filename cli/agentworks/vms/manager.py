@@ -37,6 +37,7 @@ from agentworks.vms.initializer import (
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterable, Iterator, Sequence
 
+    from agentworks.capabilities.base import OperationScope
     from agentworks.capabilities.vm_platform import VMPlatform
     from agentworks.config import Config
     from agentworks.db import Database, VMRow, WorkspaceRow
@@ -1281,20 +1282,28 @@ def gated_vm_boundary(
     vm: VMRow,
     *,
     targets: Sequence[SecretTarget] = (),
+    scope: OperationScope | None = None,
 ) -> Iterator[tuple[LiveVMNode, Resolver]]:
     """The gate-opening commands' shared composition root (vm/agent
-    shell and exec, console attach): commands that operate
-    interactively on one existing VM. Build the live VM node from its
-    row (the site edge holds the bound platform; construction
-    registers the site's declared config secrets), register the walk
-    union AND the command's env-chain ``targets`` on the one resolver
-    (site config secrets and runtime env secrets are ONE prompt
-    session), then open the ACTIVATION GATE before the preflight sweep
-    (its just-in-time values seed the boundary resolver) and run the
-    one boundary resolve inside it. Yields ``(vm_node, resolver)``
-    within the held-active span: the body's interactive or streaming
-    work stays anchored (WSL2's keepalive) for the command's duration,
-    and callers read ``resolver.values`` for env composition.
+    shell and exec, console attach, the workspace lifecycle ops):
+    commands that operate interactively on one existing VM. Build the
+    live VM node from its row (the site edge holds the bound platform;
+    construction registers the site's declared config secrets),
+    register the walk union AND the command's env-chain ``targets`` on
+    the one resolver (site config secrets and runtime env secrets are
+    ONE prompt session), then open the ACTIVATION GATE before the
+    preflight sweep (its just-in-time values seed the boundary
+    resolver) and run the one boundary resolve inside it. Yields
+    ``(vm_node, resolver)`` within the held-active span: the body's
+    interactive or streaming work stays anchored (WSL2's keepalive)
+    for the command's duration, and callers read ``resolver.values``
+    for env composition.
+
+    ``scope`` is the command's :class:`OperationScope`; when None the
+    default VM-level scope for this VM is built. The workspace
+    lifecycle callers pass a WORKSPACE-level scope: their graph is
+    still the live VM alone, but the operation is about the workspace,
+    and the scope names WHY the operation runs, not what it walks.
 
     Deliberately NOT :func:`_live_vm_boundary` (the no-gate lifecycle
     trio): these commands converge power state first, and the gate
@@ -1326,11 +1335,12 @@ def gated_vm_boundary(
         resolver.register_name(secret_name)
     if targets:
         resolver.register_targets(targets)
-    scope = OperationScope(
-        level=ScopeLevel.VM,
-        system_slug=db.get_setting(SYSTEM_SLUG_KEY) or None,
-        vm=vm.name,
-    )
+    if scope is None:
+        scope = OperationScope(
+            level=ScopeLevel.VM,
+            system_slug=db.get_setting(SYSTEM_SLUG_KEY) or None,
+            vm=vm.name,
+        )
     with activation_gate(vm_node, gate_secret_resolver(config, registry, resolver)):
         preflight_all(nodes, RunContext(config=config, operation_scope=scope))
         resolver.resolve()
