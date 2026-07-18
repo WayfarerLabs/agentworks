@@ -474,9 +474,14 @@ def _reinit_git_identity(
     ``workspaces.backends.vm.create_vm_workspace``: the identity lives in
     the checkout's own ``.git/config`` (actor-agnostic), so re-applying it
     is idempotent. Detection-based, so an already-correct value reports
-    ``OK`` and only a real change counts as a fix. A no-op when the
-    template declares no identity or the workspace is not a git repo (a
-    template whose repo was removed, or a workspace created without one).
+    ``OK`` and only a real change counts as a fix.
+
+    Three no-op cases: the template (or its resolution) is gone, the
+    template declares no identity, or the on-disk workspace path is not a
+    git checkout (probed with ``git rev-parse``). Note the last check is on
+    the checkout, not the template's ``repo`` field: a workspace whose repo
+    was later dropped from the template keeps its existing checkout, so its
+    identity still converges.
 
     Returns the number of identity fields it actually changed.
     """

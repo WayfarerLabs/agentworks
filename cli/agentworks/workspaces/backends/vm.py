@@ -65,7 +65,12 @@ def create_vm_workspace(
         try:
             import shlex
 
-            target.run(f"git clone {template.repo} {workspace_path}", timeout=300)
+            # `--` stops option parsing so a repo URL beginning with `-` can
+            # never be read as a git flag; both operands are quoted for spaces.
+            target.run(
+                f"git clone -- {shlex.quote(template.repo)} {shlex.quote(workspace_path)}",
+                timeout=300,
+            )
 
             # Stamp the checkout with its configured git identity so commits
             # made here are attributed correctly. This is repo-local config
@@ -85,7 +90,7 @@ def create_vm_workspace(
 
             # Ensure cloned files inherit the workspace group and subdirectories
             # have SGID so new files (including atomic writes) get the right group
-            target.run(f"chgrp -R {ws_group} {workspace_path}", sudo=True)
+            target.run(f"chgrp -R {ws_group} {shlex.quote(workspace_path)}", sudo=True)
             sgid_cmd = f"find {shlex.quote(workspace_path)} -type d -exec chmod g+s {{}} +"
             target.run(sgid_cmd, sudo=True, timeout=120)
         except Exception:
