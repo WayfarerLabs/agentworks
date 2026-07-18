@@ -368,6 +368,12 @@ level):
 | AGENT     | vm, workspace, agent                                  | session                       | `agent create` / reinit              |
 | SESSION   | vm, workspace, session; exactly one of (agent, admin) | (none)                        | `session create` / restart           |
 
+(As landed, 2026-07-17: the AGENT row's rules landed as vm + agent required and workspace FORBIDDEN,
+correcting this table's sketch. Agents are VM-scoped in the current model (`agents.vm_name`; a
+workspace relationship is a grant, never identity), so `agent create` / `reinit` have no workspace
+to put in the chain; a future workspace-rooted agent operation re-rules the field when it migrates.
+WORKSPACE remains non-constructible until its command lands.)
+
 The level is the operation's, one per command, NOT per node (my repeated mistake; corrected). Its
 DEPTH varies by command, so a batch `keep_actives` over N VMs is only SYSTEM level with each VM's
 identity coming from layer 1, and it is what a node reads to distinguish absences that a bare `None`

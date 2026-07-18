@@ -373,10 +373,51 @@ it); the skip branch is proven; the full suite green.
 Goal: the standalone agent orchestrator wraps the Phase 3 realization body in its own phases,
 retiring the last of the nesting hack.
 
-- [ ] The `agent create` / `agent reinit` orchestrators calling the shared realization body inside
-      their own build/preflight/resolve/unwind.
-- [ ] Confirm the `git_tokens` / `show_phases` special-casing is fully gone (a body never resolves
-      and never frames phases).
+- [x] The `agent create` / `agent reinit` orchestrators calling the shared realization body inside
+      their own build/preflight/resolve/unwind. (Implementation notes. BUILD: create roots at the
+      pending agent node (template edge carrying the credential nodes, VM edge from the row); reinit
+      is the live-agent path with the template node as a second walk root, since the live row
+      carries no template edge but the materials rewrite needs the tokens in the boundary union.
+      Both gate on the VM via the shared `orchestration.activation.gate_secret_resolver`, frame the
+      same Preflight / Resolving Secrets / Agent Initialization banners the imperative roots did,
+      and read each token through scoped delivery. The AGENT `OperationScope` level rules landed
+      with this box: required vm + agent, workspace FORBIDDEN, a deliberate correction to the HLA
+      table's "vm, workspace, agent" sketch, because agents are VM-scoped in the current model (a
+      workspace relationship is a grant, never identity); the HLA carries the matching as-landed
+      note, WORKSPACE stays non-constructible, and a future workspace-rooted agent operation
+      re-rules the field when it migrates. UNWIND RULING, from the imperative oracle: this command
+      never unwinds a REALIZED agent (the body cleans its own half-configured user and re-raises
+      before the row exists; failures after the row keep the agent, exactly as at HEAD), so no
+      `RealizationLog` exists and the orchestrator flips `mark_realized` directly, the same
+      completed-artifact pin the session slice recorded. `reinit` calls `_create_agent_on_vm`
+      directly rather than the body: the body's row insert makes it create-shaped, and reinit shares
+      the mutation beneath it, not the insert. SEAM CLOSURES from the Phase 3 catalog: the
+      realize-body vs standalone duplication is CLOSED for agents (the standalone create now calls
+      `realize_agent`, which gained the `grant_all_workspaces` parameter so the grant reconciliation
+      keeps its imperative place between the row insert and the SSH-config refresh; the Phase 3
+      note's "grant_all stays with the standalone command" is superseded by this box);
+      `create_agent`'s dead `platform` / `git_tokens` parameters are removed as recorded;
+      `_preflight_resolve_agent_git` and `vms.manager._resolve_git_tokens` retire with no callers
+      (their behavior pins moved onto the node-based token fold in
+      `tests/test_git_credentials_token_resolve.py` and the orchestrated suite). R7 exception
+      records, the same sanctioned pre-walk-away bucket: the gate now opens before ANY resolve (HEAD
+      create bound the site first and resolved tokens second; HEAD reinit resolved tokens first and
+      site config second, two resolver instances), so both commands now run ONE boundary pass plus
+      the gate's seeded just-in-time values, and a stranded site fails at BUILD, before any token
+      prompt, where HEAD's reinit failed after them. Where proven:
+      `tests/agents/test_create_reinit_orchestrated.py` (derived graph and union, per-command
+      gate-prompt parity in the tracer's mirror shape, banner parity, mutation-failure cleanup with
+      no row, reinit keeps the agent, AGENT scope reaching provider readiness, grant-all riding the
+      body); `tests/test_operation_scope.py` carries the AGENT level's both-direction violation
+      tests.)
+- [x] Confirm the `git_tokens` / `show_phases` special-casing is fully gone (a body never resolves
+      and never frames phases). (Confirmed structurally: `create_agent` lost the `git_tokens` /
+      `platform` parameters and the `own_root` fork entirely; `_create_agent_on_vm` lost
+      `show_phases` (the Agent Initialization banner is the orchestrators' framing now) and its
+      `git_tokens` parameter is required, never Optional, so a caller that has not resolved cannot
+      exist. The realization-body seam-contract test
+      (`test_realize_bodies_take_domain_shaped_kwargs_only`) and the hermeticity inspection tests
+      (`test_agent_create_does_not_eager_resolve_operator_env` and its reinit mirror) pin it.)
 
 Definition of done: both commands orchestrated; the nesting hack removed; the full suite green.
 
