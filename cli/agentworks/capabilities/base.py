@@ -74,13 +74,15 @@ class ScopeLevel(Enum):
 # The level-to-fields invariant, per constructible level: (required
 # name fields, forbidden name fields). ``system_slug`` is the anchor,
 # allowed at every level; ``admin`` is SESSION vocabulary and is
-# enforced separately. WORKSPACE / AGENT / SESSION rules land with the
-# commands that operate at those levels (orchestration-layer plan,
-# phases 3-4); until then those levels are loudly non-constructible,
-# so no scope with an unenforced invariant can exist.
+# enforced separately (a SESSION scope requires exactly one of
+# agent/admin; every other level forbids both). WORKSPACE / AGENT rules
+# land with the commands that operate at those levels; until then those
+# levels are loudly non-constructible, so no scope with an unenforced
+# invariant can exist.
 _SCOPE_LEVEL_RULES: dict[ScopeLevel, tuple[tuple[str, ...], tuple[str, ...]]] = {
     ScopeLevel.SYSTEM: ((), ("vm", "workspace", "agent", "session")),
     ScopeLevel.VM: (("vm",), ("workspace", "agent", "session")),
+    ScopeLevel.SESSION: (("vm", "workspace", "session"), ()),
 }
 
 
@@ -130,7 +132,12 @@ class OperationScope:
             for field in forbidden
             if getattr(self, field) is not None
         ]
-        if self.admin:
+        if self.level is ScopeLevel.SESSION:
+            # A session runs as its agent OR as the admin, never both,
+            # never neither; the flag and the name are one choice.
+            if (self.agent is not None) == self.admin:
+                problems.append("requires exactly one of 'agent' or 'admin'")
+        elif self.admin:
             problems.append(
                 "forbids 'admin' (SESSION vocabulary: exactly one of "
                 "agent/admin, at SESSION level only)"

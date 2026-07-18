@@ -56,16 +56,65 @@ def test_error_names_every_violation_at_once() -> None:
         OperationScope(level=ScopeLevel.VM, session="s1")
 
 
-@pytest.mark.parametrize(
-    "level", [ScopeLevel.WORKSPACE, ScopeLevel.AGENT, ScopeLevel.SESSION]
-)
+@pytest.mark.parametrize("level", [ScopeLevel.WORKSPACE, ScopeLevel.AGENT])
 def test_deeper_levels_are_loudly_not_constructible_yet(level: ScopeLevel) -> None:
     """The full five-level enum is a cheap contract defined up front,
     but a level's field rules land with the commands that operate at
-    it; until then no scope with an unenforced invariant can exist."""
+    it; until then no scope with an unenforced invariant can exist.
+    (SESSION landed with the session commands' migration.)"""
     with pytest.raises(StateError, match="cannot be constructed"):
         OperationScope(
             level=level, vm="box", workspace="ws1", agent="dev", session="s1"
+        )
+
+
+# -- the SESSION level (landed with the session commands) --------------------
+
+
+def test_session_scope_agent_mode() -> None:
+    scope = OperationScope(
+        level=ScopeLevel.SESSION,
+        vm="box",
+        workspace="ws1",
+        session="s1",
+        agent="dev",
+    )
+    assert scope.agent == "dev" and not scope.admin
+
+
+def test_session_scope_admin_mode() -> None:
+    scope = OperationScope(
+        level=ScopeLevel.SESSION,
+        vm="box",
+        workspace="ws1",
+        session="s1",
+        admin=True,
+    )
+    assert scope.agent is None and scope.admin
+
+
+@pytest.mark.parametrize("field", ["vm", "workspace", "session"])
+def test_session_scope_requires_its_chain(field: str) -> None:
+    kwargs = {"vm": "box", "workspace": "ws1", "session": "s1", "agent": "dev"}
+    del kwargs[field]
+    with pytest.raises(StateError, match=f"requires '{field}'"):
+        OperationScope(level=ScopeLevel.SESSION, **kwargs)  # type: ignore[arg-type]
+
+
+@pytest.mark.parametrize("agent,admin", [("dev", True), (None, False)])
+def test_session_scope_requires_exactly_one_launch_identity(
+    agent: str | None, admin: bool
+) -> None:
+    """A session runs as its agent OR as the admin: both and neither
+    are equally mis-leveled."""
+    with pytest.raises(StateError, match="exactly one of 'agent' or 'admin'"):
+        OperationScope(
+            level=ScopeLevel.SESSION,
+            vm="box",
+            workspace="ws1",
+            session="s1",
+            agent=agent,
+            admin=admin,
         )
 
 
