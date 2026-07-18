@@ -1,4 +1,4 @@
-"""Shared orchestration helpers (the orchestration-layer SDD).
+"""Shared orchestration helpers.
 
 A command is a plan over a graph of nodes, and each command's
 orchestrator (the bespoke service-layer root) owns its plan. This
@@ -14,8 +14,8 @@ implement their own nodes; orchestrators drive both. This mirrors the
 capability layering rule and keeps a helper-imports-domain violation
 as visible as a capability-imports-domain one.
 
-The package grows lazily as migrated commands force each helper (FRD:
-helpers emerge, no up-front framework):
+The package grows lazily, each helper forced by the first migrated
+command that needs it; there is no up-front framework:
 
 - ``node``: the ``Readiness`` / ``Node`` protocols, the key
   convention, and the creatable-node ``teardown`` surface.
@@ -28,6 +28,4 @@ helpers emerge, no up-front framework):
   held-active span).
 - ``unwind`` (future): the ``RealizationLog``, first forced by
   ``vm create``'s pending nodes.
-
-Design authority: ``docs/sdd/2026-07-16-orchestration-layer/``.
 """

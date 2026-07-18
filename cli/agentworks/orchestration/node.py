@@ -42,8 +42,9 @@ object (``walk`` enforces this loudly).
 Ops stay domain-specific and deliberately un-unified, on the instances
 and the node kinds, never on these protocols.
 
-Design authority: the orchestration-layer SDD's HLA ("Readiness and
-Node: two complementary contracts").
+The split is the model's fixed surface: helpers and node kinds may
+evolve, but walked-vs-composed stays a TYPE distinction (the presence
+of ``key`` / ``deps``), never a renamed verb.
 """
 
 from __future__ import annotations

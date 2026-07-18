@@ -1,6 +1,6 @@
 """The memoized multi-root walk over declared edges.
 
-The one traversal mechanism every orchestrator uses (FRD R4): which
+The one traversal mechanism every orchestrator uses: which
 nodes to root the walk at, and when, is each orchestrator's call; HOW
 the graph is traversed is decided once, here.
 """
@@ -19,15 +19,15 @@ def walk(*roots: Node) -> tuple[Node, ...]:
     """Post-order walk of the declared dependency graph under ``roots``:
     dependencies before dependents, each node exactly once.
 
-    Multi-root from day one (batch commands root at many nodes; spike
-    finding 2): memoization is shared across roots, so a node reached
+    Multi-root from day one (batch commands root the walk at many
+    nodes): memoization is shared across roots, so a node reached
     from several roots, or by several paths under one root (a shared
     ``git-credential`` under two consumers), is visited once. Order is
     deterministic: depth-first in ``roots`` order, each node's declared
     ``deps()`` order.
 
-    Loud errors, never silent repair (spike finding 3: keys do real
-    work, so key bugs must not be absorbed):
+    Loud errors, never silent repair (keys drive memoization, cycle
+    reporting, and the unwind log, so key bugs must not be absorbed):
 
     - a dependency CYCLE raises :class:`StateError` naming the chain;
     - two DISTINCT objects sharing one key raise :class:`StateError`.

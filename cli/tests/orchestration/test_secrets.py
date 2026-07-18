@@ -155,7 +155,7 @@ def test_prediction_none_when_nothing_would_resolve() -> None:
 
 def test_interactive_backend_is_optimistic_without_probing() -> None:
     """``preview_resolution``'s exact semantics survive
-    centralization (spike surprise 1): a prompt backend reports
+    centralization: a prompt backend reports
     resolvable without probing, because probing would BE the prompt."""
     prompt = _FakeBackend("prompt", interactive=True)
     assert predict_resolution([_decl("a")], _chain(prompt)) == {"a": "prompt"}

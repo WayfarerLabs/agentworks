@@ -1,9 +1,10 @@
-"""The tracer bullet: ``vm add-git-credential`` through the
-orchestrator (orchestration-layer SDD, Phase 1).
+"""The tracer bullet: ``vm add-git-credential``, the first command
+migrated onto the orchestrated model.
 
 Real config, registry, resolver, and backend loop (env-var backend);
 the platform's backend API, the network probes, and the SSH transport
-are the only fakes. The proof points the plan pins:
+are the only fakes. The proof points pinned for the first migrated
+command:
 
 (a) the DERIVED graph reproduces the imperative preflight set and
     secret union, with zero hand-wired edges;
@@ -179,7 +180,9 @@ def test_scoped_credential_refused_before_any_resolve_or_gate(
 ) -> None:
     """Oracle guard preserved: a scoped credential is refused toward
     reinit (the single-line merge cannot rebuild the helper's selection
-    map) before any prompt, secret, or VM start."""
+    map) before any prompt, secret, or VM start. The VM deliberately
+    sits on an UNDECLARED site: at HEAD the site bound only after this
+    guard, so the scoped refusal must still win over the site error."""
     resources = tmp_path / "resources"
     resources.mkdir()
     (resources / "creds.yaml").write_text(
@@ -193,14 +196,15 @@ def test_scoped_credential_refused_before_any_resolve_or_gate(
         "    repos: [acme/widgets]\n"
     )
     config = make_config(PROXMOX_SECTION)
-    vm = _seed_vm(db)
+    db.insert_vm("box", site="ghost-site", hostname="box")
+    db.update_vm_tailscale("box", "100.64.0.9")
 
     def _no_status(self: object, row: object) -> VMStatus:
         raise AssertionError("gate ran for a refused scoped credential")
 
     monkeypatch.setattr(ProxmoxPlatform, "status", _no_status)
     with pytest.raises(ValidationError, match="scoped"):
-        vm_manager.add_git_credential(db, config, vm.name, "widgets-bot")
+        vm_manager.add_git_credential(db, config, "box", "widgets-bot")
     assert resolve_counter == []
     assert target.writes == []
 

@@ -50,8 +50,8 @@ Three properties are load-bearing:
   resolution stays orchestrator-owned. Everything resolved, eager or
   lazy, lands in the values the gate returns, so the orchestrator can
   SEED the boundary pass and no secret resolves or prompts twice in
-  one command (the seeding path itself is designed with the first
-  migrated caller; see the plan, Phase 1).
+  one command (``Resolver.seed`` is that path: the orchestrator's
+  resolve callback seeds the boundary resolver as it resolves).
 """
 
 from __future__ import annotations

@@ -4,7 +4,7 @@ Nodes are the runtime objects an orchestrator constructs and walks:
 ``Readiness`` plus graph identity (see ``orchestration/node.py``).
 Domains implement their own nodes; this module holds the VM domain's,
 each built by a factory that applies the reference-graph-to-node-graph
-TRANSLATION RULE (HLA "Deriving the graph") to real declared resources
+TRANSLATION RULE to real declared resources
 and DB rows, so a command's graph is DERIVED, never hand-wired:
 
 - a registry reference to a CAPABILITY with config at the reference
@@ -21,8 +21,7 @@ The held-instance composition here is the thin case: a one-line
 per-kind fan-in (``git-credential`` and ``vm-site`` each hold exactly
 one instance). Whether richer node kinds (an agent template over its
 feature map) want a shared held-instances hook instead of per-kind
-boilerplate is an explicit LLD decision deferred until they land (HLA
-open question).
+boilerplate is an explicit design decision deferred until they land.
 """
 
 from __future__ import annotations
@@ -152,6 +151,7 @@ class LiveVMNode:
         self._row = row
         self._site = site
         self._observed: VMStatus | None = None
+        self._repair_refs: tuple[str, ...] | None = None
 
     @property
     def key(self) -> str:
@@ -168,12 +168,12 @@ class LiveVMNode:
     def runup(self, ctx: RunContext) -> None: ...
 
     # -- GateTarget: the power-state surface the activation gate drives.
-    # Interim seam (documented in the plan, Phase 1): the platform's
-    # power ops still read their API token through the instance's BOUND
-    # resolver (proxmox's op-client bridge), so the orchestrator's
-    # gate resolve callback must seed that resolver (Resolver.seed)
-    # before these ops run; the gate_secrets reader becomes the ops'
-    # direct source when the bridge dies (plan, Phase 5).
+    # Interim seam: the platform's power ops still read their API token
+    # through the instance's BOUND resolver (proxmox's op-client
+    # bridge), so the orchestrator's gate resolve callback must seed
+    # that resolver (Resolver.seed) before these ops run; the
+    # gate_secrets reader becomes the ops' direct source when the
+    # op-client bridge dies with the per-instance resolver retirement.
 
     def gate_secret_refs(self) -> tuple[str, ...]:
         # The observe/start credentials are the site's declared config
@@ -183,17 +183,22 @@ class LiveVMNode:
 
     def repair_secret_refs(self) -> tuple[str, ...]:
         # The rejoin auth key comes from the VM's template row field.
-        # Resolved at CALL time, not construction: the gate asks only
-        # when the VM actually needs a start, which keeps the healthy
-        # path free of template resolution, exactly like the imperative
-        # repair path (_ensure_tailscale resolves the template only
-        # after a failed reconnect).
-        from agentworks.vms.templates import resolve_template
+        # Resolved on FIRST call, not construction: the gate consults
+        # this only when the repair path actually reads a name, which
+        # keeps the healthy path free of template resolution, exactly
+        # like the imperative repair path (_ensure_tailscale resolves
+        # the template only after a failed reconnect). Memoized so the
+        # gate reader's authorization check and the node's own read
+        # share one template resolution.
+        if self._repair_refs is None:
+            from agentworks.vms.templates import resolve_template
 
-        tmpl = resolve_template(self._registry, self._row.template)
-        if tmpl.tailscale_auth_key is None:
-            return ()
-        return (tmpl.tailscale_auth_key,)
+            tmpl = resolve_template(self._registry, self._row.template)
+            self._repair_refs = (
+                () if tmpl.tailscale_auth_key is None
+                else (tmpl.tailscale_auth_key,)
+            )
+        return self._repair_refs
 
     def confirmed_active(self) -> bool:
         from agentworks.vms.manager import _is_tailscale_reachable
@@ -202,10 +207,11 @@ class LiveVMNode:
         # A row already marked manually stopped skips the reachability
         # probe: pinging a stopped VM burns the probe's full timeout
         # just to reach the refusal (the backend answers directly).
-        return (
-            not row.operator_stopped
-            and row.tailscale_host is not None
-            and _is_tailscale_reachable(row.tailscale_host)
+        # Truthiness on the host, matching the oracle: an empty string
+        # takes the slow path, never a probe of "".
+        host = row.tailscale_host
+        return bool(
+            not row.operator_stopped and host and _is_tailscale_reachable(host)
         )
 
     def observed_stopped(self, gate_secrets: SecretReader) -> bool:

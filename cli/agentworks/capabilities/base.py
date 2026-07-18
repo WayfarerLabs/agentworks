@@ -117,8 +117,7 @@ class OperationScope:
             raise StateError(
                 f"OperationScope cannot be constructed at the "
                 f"{self.level.value} level yet: that level's field rules "
-                f"land with the commands that operate at it "
-                f"(orchestration-layer SDD)."
+                f"land with the commands that operate at it."
             )
         required, forbidden = rules
         problems = [

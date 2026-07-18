@@ -461,12 +461,11 @@ Holding this line is what keeps a capability **forward-compatible with the resol
 under it.** That model is the orchestration layer, now landing command by command: a migrated
 command's orchestrator derives the union of secrets from its node graph, resolves once, and hands
 each node's held instances their values through the context, scoped to the names they declared
-(`vm add-git-credential` is the first; see `docs/sdd/2026-07-16-orchestration-layer/`). The
-per-instance bound resolver retires in a dedicated cleanup once no command depends on it. A
-capability that only ever declares (rule 1) and receives (rule 2) does not change shape as this
-lands: the `RunContext` it reads is the stable surface, and only the framework plumbing behind it
-moves. One that reaches into `self.resolver` for values, or resolves at construct, has to be
-rewritten.
+(`vm add-git-credential` is the first migrated command). The per-instance bound resolver retires in
+a dedicated cleanup once no command depends on it. A capability that only ever declares (rule 1) and
+receives (rule 2) does not change shape as this lands: the `RunContext` it reads is the stable
+surface, and only the framework plumbing behind it moves. One that reaches into `self.resolver` for
+values, or resolves at construct, has to be rewritten.
 
 Both shipped capabilities are the reference: `git-credential-provider` (github, azdo) and
 `vm-platform/proxmox` read their tokens via `ctx.secret(name)` in `runup` and get its typed

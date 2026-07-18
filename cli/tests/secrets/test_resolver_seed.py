@@ -1,5 +1,4 @@
-"""``Resolver.seed``: the gate-to-boundary seam (orchestration-layer
-SDD, Phase 1).
+"""``Resolver.seed``: the gate-to-boundary seam.
 
 The activation gate resolves its narrow just-in-time secrets before
 the boundary pass; seeding hands those values to the operation's

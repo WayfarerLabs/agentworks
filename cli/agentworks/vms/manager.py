@@ -1065,25 +1065,28 @@ def exec_vm(
 def add_git_credential(db: Database, config: Config, name: str, credential_name: str) -> None:
     """Add or update a git credential on a VM.
 
-    This is the first ORCHESTRATED command (the orchestration-layer
-    SDD's tracer bullet): its graph is DERIVED from the DB row and the
-    declared references by the ``vms/nodes.py`` factories (zero
-    hand-wired edges), the activation gate replaces this command's
-    ``keep_active`` use (opening BEFORE the preflight sweep and seeding
-    the boundary resolver with its just-in-time values), secrets are
-    delivered scoped to each node's declared names, and a rejected
-    token is FATAL (a plain uncaught raise: the operator asked to add
-    exactly this one credential, unlike vm/agent provisioning's
-    skip-and-degrade).
+    This is the first ORCHESTRATED command: its graph is DERIVED from
+    the DB row and the declared references by the ``vms/nodes.py``
+    factories (zero hand-wired edges), the activation gate replaces
+    this command's ``keep_active`` use (opening BEFORE the preflight
+    sweep and seeding the boundary resolver with its just-in-time
+    values), secrets are delivered scoped to each node's declared
+    names, and a rejected token is FATAL (a plain uncaught raise: the
+    operator asked to add exactly this one credential, unlike vm/agent
+    provisioning's skip-and-degrade).
 
-    Interim seams while both models coexist (FRD R8): the capability
-    instances are still constructed against the operation's resolver
-    (construct-time registration; the walk-derived union is registered
-    alongside and asserted equal by the tracer tests), and the
-    platform's power ops read their API token through that bound
-    resolver, which is why the gate's resolve callback SEEDS it
-    (``Resolver.seed``). Both seams close with the resolver retirement
-    (plan, Phase 5).
+    Interim seams while the imperative and orchestrated models coexist:
+    the capability instances are still constructed against the
+    operation's resolver (construct-time registration; the walk-derived
+    union is registered alongside and asserted equal by the tracer
+    tests); the platform's power ops read their API token through that
+    bound resolver, which is why the gate's resolve callback SEEDS it
+    (``Resolver.seed``); and resolvability prediction still runs
+    through the instances' bound resolvers (the preflight sweep
+    composes the instances' own predictions, keeping their exact error
+    shapes; the central ``orchestration.secrets.predict_resolution``
+    gains its production caller when the resolver retires). All three
+    seams close with the per-instance resolver retirement.
     """
     from agentworks.bootstrap import build_registry
     from agentworks.capabilities.base import OperationScope, ScopeLevel
@@ -1121,21 +1124,24 @@ def add_git_credential(db: Database, config: Config, name: str, credential_name:
     # credential); everything else enters through the derived graph
     # (the row's site field, the decl's references).
     cred_node = git_credential_node(registry, credential_name, resolver)
-    vm_node = live_vm_node(db, config, registry, vm, resolver)
     provider = cred_node.provider
 
     entry = provider.helper_entry()
     if entry.repos or entry.owner:
         # Scoped credentials need the helper's embedded selection map
         # rebuilt: a single-line store merge can't provide that. The
-        # full-rebuild path (reinit) can. Guarded before the gate so a
-        # scoped credential never costs a prompt or a VM start.
+        # full-rebuild path (reinit) can. Guarded before the VM node is
+        # built and before the gate, preserving the imperative error
+        # precedence (at HEAD the site bound after this guard, so a bad
+        # site never preempted this error) and ensuring a scoped
+        # credential never costs a prompt or a VM start.
         raise ValidationError(
             f"git credential '{credential_name}' is scoped (fine-grained "
             f"PAT); add it to the admin or agent template and run "
             f"'agw vm reinit {name}' instead of add-git-credential"
         )
 
+    vm_node = live_vm_node(db, config, registry, vm, resolver)
     nodes = walk(vm_node, cred_node)
     # The walk supplies the boundary union (idempotent next to the
     # construct-time registration seam noted above).
@@ -2086,7 +2092,7 @@ def _ensure_tailscale(
 
     ``auth_key_source`` supplies the rejoin auth key when the caller
     owns its resolution: the orchestrated activation gate passes its
-    lazy gate-secrets reader (nodes never resolve, FRD R5), so the key
+    lazy gate-secrets reader (nodes receive, never resolve), so the key
     resolves on this function's first need, with the same
     conditional-need timing as the internal resolve below. ``None``
     keeps today's behavior for the imperative callers: this function

@@ -1,8 +1,8 @@
 """The orchestrator's secret path: union, central prediction, scoped
 delivery.
 
-Replaces the per-instance bound resolver's orchestration-shaped jobs
-(FRD R5): the union of a command's secrets comes from the plan's
+Replaces the per-instance bound resolver's orchestration-shaped jobs:
+the union of a command's secrets comes from the plan's
 declared ``secret_refs`` (not construct-time registration), and
 resolvability prediction is computed centrally over declarations (not
 by each instance). Prediction's MEANING is unchanged by
@@ -97,7 +97,7 @@ def predict_resolution(
 
 
 class ScopedSecrets:
-    """Scoped secret delivery (FRD R5): a read-only view over the
+    """Scoped secret delivery: a read-only view over the
     operation's resolved values, restricted to one node's declared
     names.
 

@@ -170,8 +170,7 @@ def test_flag_is_reread_before_auto_start(
     db: Database, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Oracle: a concurrent `vm stop` between the row load and the gate
-    must not be auto-undone (the re-read race guard, the Phase 1 gate
-    parity carry)."""
+    must not be auto-undone (the re-read race guard)."""
     vm = _seed(db)  # loaded with operator_stopped=False
     db.set_operator_stopped("gvm", True)  # another terminal stops it
     monkeypatch.setattr(vm_manager, "_is_tailscale_reachable", lambda host: False)

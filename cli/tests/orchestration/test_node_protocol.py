@@ -1,4 +1,4 @@
-"""The ``Readiness`` / ``Node`` split (orchestration-layer FRD R1).
+"""The ``Readiness`` / ``Node`` split.
 
 Capability instances satisfy ``Readiness`` ONLY: no ``key``, no
 ``deps``, so they are structurally not nodes and cannot be walked.
