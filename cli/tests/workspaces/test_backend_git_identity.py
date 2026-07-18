@@ -60,7 +60,7 @@ def _config() -> Any:
 
 
 def _git_config_cmds(target: _FakeTarget) -> list[str]:
-    return [c for c in target.commands if " config user." in c]
+    return [c for c in target.commands if " config --local user." in c]
 
 
 def test_git_identity_stamped_into_checkout(fake_target: _FakeTarget) -> None:
@@ -74,10 +74,10 @@ def test_git_identity_stamped_into_checkout(fake_target: _FakeTarget) -> None:
 
     cmds = _git_config_cmds(fake_target)
     # Name carries a space, so shlex quotes it; the plain email is left bare.
-    assert any("config user.name 'Ada Lovelace'" in c for c in cmds)
-    assert any("config user.email ada@example.com" in c for c in cmds)
+    assert any("config --local user.name 'Ada Lovelace'" in c for c in cmds)
+    assert any("config --local user.email ada@example.com" in c for c in cmds)
     # Applied repo-locally via -C on the checkout path (never --global).
-    assert cmds and all("git -C /srv/workspaces/proj config" in c for c in cmds)
+    assert cmds and all("git -C /srv/workspaces/proj config --local" in c for c in cmds)
 
 
 def test_git_identity_partial_only_sets_provided(fake_target: _FakeTarget) -> None:
@@ -89,8 +89,8 @@ def test_git_identity_partial_only_sets_provided(fake_target: _FakeTarget) -> No
     create_vm_workspace(_vm(), _config(), "proj", template)
 
     cmds = _git_config_cmds(fake_target)
-    assert any("config user.email" in c for c in cmds)
-    assert not any("config user.name" in c for c in cmds)
+    assert any("config --local user.email" in c for c in cmds)
+    assert not any("config --local user.name" in c for c in cmds)
 
 
 def test_git_identity_skipped_when_unset(fake_target: _FakeTarget) -> None:

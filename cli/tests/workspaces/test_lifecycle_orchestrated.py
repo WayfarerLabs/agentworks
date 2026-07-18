@@ -274,10 +274,11 @@ def test_reinit_converges_git_identity_on_the_checkout(
     workspace_manager.reinit_workspace(db, config, "ws1")
 
     assert any(
-        "git -C /srv/ws1 config user.name 'Ada Lovelace'" in c for c in target.commands
+        "git -C /srv/ws1 config --local user.name 'Ada Lovelace'" in c
+        for c in target.commands
     )
     assert any(
-        "git -C /srv/ws1 config user.email ada@example.com" in c
+        "git -C /srv/ws1 config --local user.email ada@example.com" in c
         for c in target.commands
     )
 
@@ -305,7 +306,8 @@ def test_reinit_skips_git_identity_when_not_a_repo(
 
     workspace_manager.reinit_workspace(db, config, "ws1")
 
-    assert not any("config user.name" in c for c in fake.commands)
+    # rev-parse fails, so neither the --local read nor the --local write runs.
+    assert not any("config" in c for c in fake.commands)
 
 
 def test_reinit_default_template_stamps_no_identity(

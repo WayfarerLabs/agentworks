@@ -83,8 +83,11 @@ def create_vm_workspace(
                 ("user.email", template.git_user_email),
             ):
                 if value:
+                    # --local is explicit so the write can only ever land in
+                    # the checkout's .git/config, never the admin's global
+                    # ~/.gitconfig (git config defaults to global outside a repo).
                     target.run(
-                        f"git -C {shlex.quote(workspace_path)} config "
+                        f"git -C {shlex.quote(workspace_path)} config --local "
                         f"{git_key} {shlex.quote(value)}"
                     )
 

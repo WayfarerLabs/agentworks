@@ -522,7 +522,9 @@ def _reinit_git_identity(
             if current.ok and current.stdout.strip() == value:
                 output.detail(f"OK: git {key}")
                 continue
-            target.run(f"git -C {quoted_path} config {key} {shlex.quote(value)}")
+            target.run(
+                f"git -C {quoted_path} config --local {key} {shlex.quote(value)}"
+            )
             output.detail(f"Fixed: git {key}")
             fixed += 1
         return fixed
