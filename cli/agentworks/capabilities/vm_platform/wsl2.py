@@ -516,7 +516,7 @@ class WSL2Platform(VMPlatform):
     ) -> AbstractContextManager[None]:
         return _keepalive(self._distro_name(vm), vm, config)
 
-    def create(self, request: ProvisionRequest) -> ProvisionResult:
+    def create(self, request: ProvisionRequest, ctx: RunContext) -> ProvisionResult:
         # The platform owns the backend-side name; distro
         # names are the primary identifier, so a collision is an error.
         distro_name = (
@@ -676,7 +676,7 @@ class WSL2Platform(VMPlatform):
             return False
         return any(line.strip() == distro_name for line in listing.splitlines())
 
-    def start(self, vm: VMRow) -> None:
+    def start(self, vm: VMRow, ctx: RunContext) -> None:
         # Idempotent by construction (the ABC flags start): running a
         # command boots a stopped distro and is a plain exec on a
         # running one; no guard needed.
@@ -684,17 +684,17 @@ class WSL2Platform(VMPlatform):
         _wsl(["--distribution", self._distro_name(vm), "--", "echo", "started"])
         output.info(f"WSL2 distro '{vm.name}' started")
 
-    def stop(self, vm: VMRow) -> None:
+    def stop(self, vm: VMRow, ctx: RunContext) -> None:
         # Idempotency guard (the ABC flags stop): `wsl --terminate` on
         # a stopped distro is not reliably a no-op across WSL versions.
-        if self.status(vm) == VMStatus.STOPPED:
+        if self.status(vm, ctx) == VMStatus.STOPPED:
             output.detail(f"WSL2 distro '{vm.name}' is already stopped")
             return
         output.info(f"Terminating WSL2 distro '{vm.name}'...")
         _wsl(["--terminate", self._distro_name(vm)])
         output.info(f"WSL2 distro '{vm.name}' terminated")
 
-    def delete(self, vm: VMRow) -> None:
+    def delete(self, vm: VMRow, ctx: RunContext) -> None:
         distro_name = self._distro_name(vm)
         output.info(f"Unregistering WSL2 distro '{vm.name}'...")
         _wsl(["--unregister", distro_name], check=False)
@@ -714,7 +714,7 @@ class WSL2Platform(VMPlatform):
     ) -> Transport | None:
         return WSL2Transport(distro_name=self._distro_name(vm), user=vm.admin_username)
 
-    def status(self, vm: VMRow) -> VMStatus:
+    def status(self, vm: VMRow, ctx: RunContext) -> VMStatus:
         distro_name = self._distro_name(vm)
         try:
             listing = _wsl(["--list", "--verbose"], check=False)

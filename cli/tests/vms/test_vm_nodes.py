@@ -40,12 +40,12 @@ class _GatePlatform:
         self.holds = 0
         self.events: list[str] = []
 
-    def status(self, vm: VMRow) -> VMStatus:
+    def status(self, vm: VMRow, ctx: object) -> VMStatus:
         self.status_calls += 1
         self.events.append("status")
         return self._status
 
-    def start(self, vm: VMRow) -> None:
+    def start(self, vm: VMRow, ctx: object) -> None:
         self.start_calls += 1
         self.events.append("start")
 

@@ -13,6 +13,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from agentworks.capabilities.base import RunContext
 from agentworks.capabilities.vm_platform import ProvisionRequest
 from agentworks.capabilities.vm_platform.bootstrap_script import (
     REBOOT_SENTINEL_PATH,
@@ -72,7 +73,7 @@ def test_sve_sentinel_triggers_one_host_restart(
 ) -> None:
     platform = LimaPlatform("lima", {})
     ran = _wire(monkeypatch, platform, sentinel_present=True)
-    platform.create(_request())
+    platform.create(_request(), RunContext())
     # Exactly one restart: a regression to a restart loop must fail here, not
     # slip through an at-least-once assertion (the whole point is one restart).
     restarts = [cmd for cmd in ran if "limactl restart myvm" in cmd]
@@ -84,7 +85,7 @@ def test_no_restart_when_sentinel_absent(
 ) -> None:
     platform = LimaPlatform("lima", {})
     ran = _wire(monkeypatch, platform, sentinel_present=False)
-    platform.create(_request())
+    platform.create(_request(), RunContext())
     assert not any("limactl restart" in cmd for cmd in ran)
 
 
@@ -115,7 +116,7 @@ def test_probe_failure_warns_and_does_not_restart(
 
     monkeypatch.setattr(LimaPlatform, "_run_lima", _fake_run)
 
-    platform.create(_request())
+    platform.create(_request(), RunContext())
 
     assert not any("limactl restart" in cmd for cmd in ran)
     warned = "\n".join(warnings)

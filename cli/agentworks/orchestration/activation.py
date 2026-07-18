@@ -198,11 +198,13 @@ def gate_secret_resolver(
     config: Config, registry: Registry, resolver: Resolver
 ) -> Callable[[str], str]:
     """The gate's just-in-time resolve callback, shared by every
-    migrated command that opens the gate: resolve through the normal
-    backend chain and SEED the boundary resolver as each value lands,
-    so the platform's power ops (which read the bound resolver, the
-    interim op-client bridge) see it immediately and the boundary pass
-    never resolves or prompts it again (``Resolver.seed``)."""
+    command whose gate opens BEFORE its boundary resolve: resolve
+    through the normal backend chain and SEED the boundary resolver as
+    each value lands (``Resolver.seed``), so the boundary pass skips
+    the gate-resolved names and no secret resolves or prompts twice in
+    one command. (The ops themselves read the gate's scoped reader,
+    not the resolver: seeding is purely the no-double-resolve
+    property.)"""
 
     def resolve_gate_secret(secret_name: str) -> str:
         from agentworks.orchestration.secrets import secret_declarations

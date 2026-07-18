@@ -79,12 +79,12 @@ def _stop_the_vms(monkeypatch: pytest.MonkeyPatch, events: list[str]) -> None:
     monkeypatch.setattr(
         ProxmoxPlatform,
         "status",
-        lambda self, row: events.append(f"status:{row.name}") or VMStatus.STOPPED,
+        lambda self, row, ctx: events.append(f"status:{row.name}") or VMStatus.STOPPED,
     )
     monkeypatch.setattr(
         ProxmoxPlatform,
         "start",
-        lambda self, row: events.append(f"start:{row.name}"),
+        lambda self, row, ctx: events.append(f"start:{row.name}"),
     )
     monkeypatch.setattr(
         vm_manager,
@@ -274,7 +274,7 @@ def test_batch_operator_stopped_vm_aborts_before_the_probes(
     db.set_operator_stopped("vm-a", True)
     _reachable(monkeypatch, False)
     monkeypatch.setattr(
-        ProxmoxPlatform, "status", lambda self, row: VMStatus.STOPPED
+        ProxmoxPlatform, "status", lambda self, row, ctx: VMStatus.STOPPED
     )
 
     def _no_transport(*a: object, **k: object) -> object:
@@ -400,9 +400,9 @@ def test_batch_repair_path_resolves_the_rejoin_key_late(
     _seed_session(db, "s1", "ws-box")
     _reachable(monkeypatch, False)
     monkeypatch.setattr(
-        ProxmoxPlatform, "status", lambda self, row: VMStatus.STOPPED
+        ProxmoxPlatform, "status", lambda self, row, ctx: VMStatus.STOPPED
     )
-    monkeypatch.setattr(ProxmoxPlatform, "start", lambda self, row: None)
+    monkeypatch.setattr(ProxmoxPlatform, "start", lambda self, row, ctx: None)
     keys: list[str] = []
 
     def _failing_reconnect(

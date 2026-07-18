@@ -40,6 +40,15 @@ class _Probe:
         return SimpleNamespace(ok=ok)
 
 
+def _stub_platform_ctx():  # noqa: ANN202 - test helper
+    """The teardown ctx source the orchestrator would hand in: these
+    nodes' teardown paths patch delete_agent / delete_workspace or run
+    against stub platforms, so an empty op-start context suffices."""
+    from agentworks.capabilities.base import RunContext
+
+    return RunContext()
+
+
 def _vm_node(db: Database, name: str = "box") -> LiveVMNode:
     db.insert_vm(name, site="stub", hostname=name)
     row = db.get_vm(name)
@@ -55,7 +64,9 @@ def _pending_agent(db: Database, vm: LiveVMNode, name: str = "dev"):
     from agentworks.agents.templates import ResolvedAgentTemplate
 
     template = AgentTemplateNode(ResolvedAgentTemplate(name="default"), ())
-    return pending_agent_node(db, cast("Config", object()), name, template, vm)
+    return pending_agent_node(
+        db, cast("Config", object()), name, template, vm, _stub_platform_ctx
+    )
 
 
 def _session(
@@ -70,7 +81,7 @@ def _session(
 
     vm_node = vm if vm is not None else _vm_node(db)
     workspace = pending_workspace_node(
-        db, cast("Config", object()), "ws1", vm_node, None
+        db, cast("Config", object()), "ws1", vm_node, None, _stub_platform_ctx
     )
     template = ResolvedSessionTemplate(
         name="claude", required_commands=list(required)
@@ -282,9 +293,11 @@ def test_session_create_graph_shares_one_vm_node(db: Database) -> None:
     template = AgentTemplateNode(
         ResolvedAgentTemplate(name="default", git_credentials=["gh"]), (cred,)
     )
-    agent = pending_agent_node(db, cast("Config", object()), "dev", template, vm)
+    agent = pending_agent_node(
+        db, cast("Config", object()), "dev", template, vm, _stub_platform_ctx
+    )
     workspace = pending_workspace_node(
-        db, cast("Config", object()), "ws1", vm, None
+        db, cast("Config", object()), "ws1", vm, None, _stub_platform_ctx
     )
     session = pending_session_node(
         db,
@@ -368,7 +381,7 @@ def test_pending_workspace_teardown_is_todays_rollback_body(
     )
     vm = _vm_node(db)
     workspace = pending_workspace_node(
-        db, cast("Config", object()), "ws1", vm, None
+        db, cast("Config", object()), "ws1", vm, None, _stub_platform_ctx
     )
     workspace.mark_realized()
     workspace.teardown()
@@ -519,7 +532,7 @@ def test_reverse_realization_order_reproduces_rollback_order(
     )
     vm = _vm_node(db)
     workspace = pending_workspace_node(
-        db, cast("Config", object()), "ws1", vm, None
+        db, cast("Config", object()), "ws1", vm, None, _stub_platform_ctx
     )
     agent = _pending_agent(db, vm)
     log = RealizationLog()

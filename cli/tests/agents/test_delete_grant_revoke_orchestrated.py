@@ -23,6 +23,7 @@ import pytest
 
 from agentworks.agents import grants as agent_grants
 from agentworks.agents import manager as agent_manager
+from agentworks.capabilities.base import RunContext
 from agentworks.capabilities.vm_platform.proxmox import ProxmoxPlatform
 from agentworks.db import VMStatus
 from agentworks.errors import (
@@ -75,10 +76,10 @@ def _stop_the_vm(monkeypatch: pytest.MonkeyPatch, events: list[str]) -> None:
     monkeypatch.setattr(
         ProxmoxPlatform,
         "status",
-        lambda self, row: events.append("status") or VMStatus.STOPPED,
+        lambda self, row, ctx: events.append("status") or VMStatus.STOPPED,
     )
     monkeypatch.setattr(
-        ProxmoxPlatform, "start", lambda self, row: events.append("start")
+        ProxmoxPlatform, "start", lambda self, row, ctx: events.append("start")
     )
     monkeypatch.setattr(
         vm_manager, "_ensure_tailscale", lambda *a, **k: events.append("tailscale")
@@ -488,7 +489,7 @@ def test_delete_nested_platform_path_reuses_the_callers_composition(
             self.holds += 1
             return contextlib.nullcontext()
 
-        def status(self, row: object) -> VMStatus:
+        def status(self, row: object, ctx: object) -> VMStatus:
             raise AssertionError("nested delete must not probe status")
 
     config = make_config()
@@ -504,6 +505,7 @@ def test_delete_nested_platform_path_reuses_the_callers_composition(
         force=True,
         yes=True,
         platform=bound,  # type: ignore[arg-type]
+        platform_ctx=RunContext(),
     )
 
     assert resolve_counter == []  # nothing resolved beyond the caller's pass

@@ -45,11 +45,11 @@ def _fake_backend(monkeypatch: pytest.MonkeyPatch) -> dict[str, int]:
     # The counter is the never-probes oracle (asserted zero where it
     # matters); a raise here would be swallowed by delete's best-effort
     # spans and could never signal anything.
-    def _status(self: ProxmoxPlatform, row: VMRow) -> VMStatus:
+    def _status(self: ProxmoxPlatform, row: VMRow, ctx: object) -> VMStatus:
         counts["status"] += 1
         return VMStatus.STOPPED
 
-    def _delete(self: ProxmoxPlatform, row: VMRow) -> None:
+    def _delete(self: ProxmoxPlatform, row: VMRow, ctx: object) -> None:
         counts["delete"] += 1
 
     monkeypatch.setattr(ProxmoxPlatform, "status", _status)
@@ -185,7 +185,9 @@ def test_user_abort_inside_an_op_span_aborts_the_delete(
     counts = _fake_backend(monkeypatch)
     monkeypatch.setattr(vm_manager, "_tailscale_logout", lambda *a, **k: None)
 
-    def _aborting_delete(self: ProxmoxPlatform, row: VMRow) -> None:
+    def _aborting_delete(
+        self: ProxmoxPlatform, row: VMRow, ctx: object
+    ) -> None:
         counts["delete"] += 1
         raise UserAbort("cancelled mid-op")
 

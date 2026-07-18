@@ -17,6 +17,7 @@ import pytest
 from agentworks.agents import grants as agent_grants
 from agentworks.agents import initializer as agent_initializer
 from agentworks.agents import manager as agent_manager
+from agentworks.capabilities.base import RunContext
 from agentworks.capabilities.vm_platform.proxmox import ProxmoxPlatform
 from agentworks.errors import ExternalError
 from agentworks.vms import manager as vm_manager
@@ -83,10 +84,10 @@ def _stop_the_vm(monkeypatch: pytest.MonkeyPatch, events: list[str]) -> None:
     monkeypatch.setattr(
         ProxmoxPlatform,
         "status",
-        lambda self, row: events.append("status") or _VMStatus.STOPPED,
+        lambda self, row, ctx: events.append("status") or _VMStatus.STOPPED,
     )
     monkeypatch.setattr(
-        ProxmoxPlatform, "start", lambda self, row: events.append("start")
+        ProxmoxPlatform, "start", lambda self, row, ctx: events.append("start")
     )
     monkeypatch.setattr(
         vm_manager, "_ensure_tailscale", lambda *a, **k: events.append("tailscale")
@@ -123,7 +124,9 @@ def test_create_graph_derives_from_template_and_row(
     tmpl_node = agent_template_node(
         registry, resolve_template(registry, None), resolver
     )
-    pending = pending_agent_node(db, config, "dev", tmpl_node, vm_node)
+    pending = pending_agent_node(
+        db, config, "dev", tmpl_node, vm_node, RunContext
+    )
     nodes = walk(pending)
 
     assert [n.key for n in nodes] == [

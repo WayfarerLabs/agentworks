@@ -322,19 +322,19 @@ def test_base_platform_vm_active_is_nullcontext() -> None:
         name = "stub"
         description = "stub"
 
-        def create(self, request: Any) -> Any:
+        def create(self, request: Any, ctx: Any) -> Any:
             raise NotImplementedError
 
-        def start(self, vm: Any) -> None:
+        def start(self, vm: Any, ctx: Any) -> None:
             raise NotImplementedError
 
-        def stop(self, vm: Any) -> None:
+        def stop(self, vm: Any, ctx: Any) -> None:
             raise NotImplementedError
 
-        def delete(self, vm: Any) -> None:
+        def delete(self, vm: Any, ctx: Any) -> None:
             raise NotImplementedError
 
-        def status(self, vm: Any) -> Any:
+        def status(self, vm: Any, ctx: Any) -> Any:
             raise NotImplementedError
 
         def display_backend_name(self, vm: Any) -> str:

@@ -53,7 +53,9 @@ def test_no_site_secrets_skips_the_resolve_pass(
     """A secret-free site's boundary resolve is a no-op: the backend
     loop never runs, so nothing can prompt."""
     config = make_config()
-    vm_node = vm_manager._live_vm_boundary(db, config, _seed_vm(db, "lima-local"))
+    vm_node, _ops_ctx = vm_manager._live_vm_boundary(
+        db, config, _seed_vm(db, "lima-local")
+    )
     assert vm_node.site.platform.name == "lima"
     assert resolve_counter == []
 
@@ -62,16 +64,16 @@ def test_secret_bearing_site_resolves_exactly_once(
     db: Database, make_config, resolve_counter: list[list[str]]  # noqa: ANN001
 ) -> None:
     """The bound platform's declared config secret resolves in the ONE
-    boundary pass and ops read it from the resolver's cache."""
+    boundary pass and ops read it through the returned op-start
+    context (scoped delivery over the boundary cache)."""
     from agentworks.capabilities.vm_platform.proxmox import ProxmoxPlatform
 
     config = make_config(PROXMOX_SECTION)
-    platform = vm_manager._live_vm_boundary(
+    vm_node, ops_ctx = vm_manager._live_vm_boundary(
         db, config, _seed_vm(db, "proxmox")
-    ).site.platform
-    assert isinstance(platform, ProxmoxPlatform)
-    assert platform.resolver is not None
-    assert platform.resolver.get("proxmox-token") == "pve-token"
+    )
+    assert isinstance(vm_node.site.platform, ProxmoxPlatform)
+    assert ops_ctx.secret("proxmox-token") == "pve-token"
     assert len(resolve_counter) == 1
 
 

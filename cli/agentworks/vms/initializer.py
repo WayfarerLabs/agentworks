@@ -36,6 +36,7 @@ from agentworks.transports import (
 if TYPE_CHECKING:
     from collections.abc import Mapping
 
+    from agentworks.capabilities.base import RunContext
     from agentworks.capabilities.git_credential.base import GitCredentialProvider
     from agentworks.capabilities.vm_platform import VMPlatform
     from agentworks.catalog import AptSourceEntry, SystemInstallCommandEntry, UserInstallCommandEntry
@@ -1422,6 +1423,7 @@ def initialize_vm(
     providers: dict[str, GitCredentialProvider],
     platform: VMPlatform,
     *,
+    platform_ctx: RunContext,
     admin_username: str = "agentworks",
     tailscale_auth_key: str,
     git_tokens: dict[str, str],
@@ -1439,7 +1441,9 @@ def initialize_vm(
     ``tailscale_auth_key`` and ``git_tokens`` are required; ``create_vm``
     resolves them via the framework at manager-entry and threads them in,
     along with the BOUND ``platform`` from its composition root (used
-    for the keepalive hold; the gates never bind).
+    for the keepalive hold; the gates never bind) and ``platform_ctx``,
+    that composition's op-start context for the platform's power ops
+    (secrets scoped to the site's declared names).
     """
     from agentworks.ssh import SSHLogger
     from agentworks.vms.manager import keep_active
@@ -1467,7 +1471,7 @@ def initialize_vm(
     # it retires when these internals orchestrate.
     vm_for_keepalive = db.get_vm(vm_name)
     assert vm_for_keepalive is not None, "create_vm inserts the row before init"
-    with keep_active(db, config, vm_for_keepalive, platform):
+    with keep_active(db, config, vm_for_keepalive, platform, platform_ctx):
         try:
             db.insert_vm_event(vm_name, "provisioning_started", transport)
             ts_target = _phase_a_bootstrap(

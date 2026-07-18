@@ -43,7 +43,7 @@ class _Platform:
     def display_backend_name(self, vm: VMRow) -> str:
         return vm.name
 
-    def status(self, vm: VMRow) -> VMStatus:
+    def status(self, vm: VMRow, ctx: object) -> VMStatus:
         return self._status
 
 

@@ -41,13 +41,13 @@ def _fake_power(monkeypatch: pytest.MonkeyPatch, status: VMStatus) -> list[str]:
     monkeypatch.setattr(
         ProxmoxPlatform,
         "status",
-        lambda self, row: events.append("status") or status,
+        lambda self, row, ctx: events.append("status") or status,
     )
     monkeypatch.setattr(
-        ProxmoxPlatform, "start", lambda self, row: events.append("start")
+        ProxmoxPlatform, "start", lambda self, row, ctx: events.append("start")
     )
     monkeypatch.setattr(
-        ProxmoxPlatform, "stop", lambda self, row: events.append("stop")
+        ProxmoxPlatform, "stop", lambda self, row, ctx: events.append("stop")
     )
     monkeypatch.setattr(
         vm_manager, "_ensure_tailscale", lambda *a, **k: events.append("tailscale")

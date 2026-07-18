@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING, Any
 
 import pytest
 
+from agentworks.capabilities.base import RunContext
 from agentworks.capabilities.vm_platform.proxmox import ProxmoxPlatform
 from agentworks.errors import ExternalError
 from agentworks.vms import manager as vm_manager
@@ -76,10 +77,10 @@ def _stop_the_vm(monkeypatch: pytest.MonkeyPatch, events: list[str]) -> None:
     monkeypatch.setattr(
         ProxmoxPlatform,
         "status",
-        lambda self, row: events.append("status") or _VMStatus.STOPPED,
+        lambda self, row, ctx: events.append("status") or _VMStatus.STOPPED,
     )
     monkeypatch.setattr(
-        ProxmoxPlatform, "start", lambda self, row: events.append("start")
+        ProxmoxPlatform, "start", lambda self, row, ctx: events.append("start")
     )
     monkeypatch.setattr(
         vm_manager, "_ensure_tailscale", lambda *a, **k: events.append("tailscale")
@@ -112,7 +113,7 @@ def test_create_graph_derives_from_row_and_pending_name(
     resolver = Resolver(config, registry)
 
     vm_node = live_vm_node(db, config, registry, vm, resolver)
-    pending = pending_workspace_node(db, config, "ws1", vm_node, None)
+    pending = pending_workspace_node(db, config, "ws1", vm_node, None, RunContext)
     nodes = walk(pending)
 
     assert [n.key for n in nodes] == ["vm-site/proxmox", "vm/box", "workspace/ws1"]

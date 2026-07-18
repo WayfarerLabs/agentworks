@@ -155,18 +155,24 @@ class LiveVMNode:
     def runup(self, ctx: RunContext) -> None: ...
 
     # -- GateTarget: the power-state surface the activation gate drives.
-    # Interim seam: the platform's power ops still read their API token
-    # through the instance's BOUND resolver (proxmox's op-client
-    # bridge), so the orchestrator's gate resolve callback must seed
-    # that resolver (Resolver.seed) before these ops run; the
-    # gate_secrets reader becomes the ops' direct source when the
-    # op-client bridge dies with the per-instance resolver retirement.
+    # The gate's scoped reader is the ops' direct source: each op call
+    # wraps ``gate_secrets`` in a RunContext, so the platform reads its
+    # API token via ctx.secret (scoped delivery), never from held
+    # state.
 
     def gate_secret_refs(self) -> tuple[str, ...]:
         # The observe/start credentials are the site's declared config
         # secrets (the platform API credential), already folded into
         # the site node's secret_refs by the translation rule.
         return self._site.secret_refs()
+
+    def _gate_ops_ctx(self, gate_secrets: SecretReader) -> RunContext:
+        """The op-start context for gate-driven power ops: the gate's
+        scoped reader (eager gate values, lazy repair values, anything
+        else refused) behind the standard ``ctx.secret`` surface."""
+        from agentworks.capabilities.base import RunContext
+
+        return RunContext(config=self._config, secrets=gate_secrets)
 
     def repair_secret_refs(self) -> tuple[str, ...]:
         # The rejoin auth key comes from the VM's template row field.
@@ -202,7 +208,9 @@ class LiveVMNode:
         )
 
     def observed_stopped(self, gate_secrets: SecretReader) -> bool:
-        observed = self._site.platform.status(self._row)
+        observed = self._site.platform.status(
+            self._row, self._gate_ops_ctx(gate_secrets)
+        )
         self._observed = observed
         # RUNNING or UNKNOWN proceeds: a transient status failure must
         # not trigger a spurious start; the real op surfaces the error.
@@ -231,7 +239,7 @@ class LiveVMNode:
         observed = self._observed.value if self._observed else "stopped"
         output.info(f"VM '{self._row.name}' is {observed}. Starting...")
         platform = self._site.platform
-        platform.start(self._row)
+        platform.start(self._row, self._gate_ops_ctx(gate_secrets))
         # Hold while tailscaled reattaches: a freshly booted WSL2
         # distro must not idle out during the handshake wait. The
         # rejoin auth key, needed only when the node fails to

@@ -29,7 +29,7 @@ from agentworks.vms.manager import gated_vm_boundary, keep_active
 if TYPE_CHECKING:
     from contextlib import AbstractContextManager
 
-    from agentworks.capabilities.base import OperationScope
+    from agentworks.capabilities.base import OperationScope, RunContext
     from agentworks.capabilities.vm_platform import VMPlatform
     from agentworks.config import Config
     from agentworks.db import AgentRow, Database, VMRow, WorkspaceRow
@@ -311,7 +311,21 @@ def create_agent(
 
     vm_node = live_vm_node(db, config, registry, vm, resolver)
     tmpl_node = agent_template_node(registry, agent_tmpl, resolver)
-    pending_agent = pending_agent_node(db, config, name, tmpl_node, vm_node)
+
+    def _teardown_platform_ctx() -> RunContext:
+        # The nested teardown's op-start context: built at teardown
+        # time (post-boundary, values resolved), scoped to the site's
+        # declared names.
+        return RunContext(
+            config=config,
+            secrets=ScopedSecrets(
+                resolver.values, vm_node.site.secret_refs()
+            ),
+        )
+
+    pending_agent = pending_agent_node(
+        db, config, name, tmpl_node, vm_node, _teardown_platform_ctx
+    )
     nodes = walk(pending_agent)
     # The walk supplies the boundary union (the credential tokens plus
     # the site's config secrets). Provisioning is hermetic: no
@@ -383,6 +397,7 @@ def delete_agent(
     force: bool = False,
     yes: bool = False,
     platform: VMPlatform | None = None,
+    platform_ctx: RunContext | None = None,
 ) -> None:
     """Delete an agent from a VM.
 
@@ -399,11 +414,13 @@ def delete_agent(
 
     ``platform`` accepts the caller's already-bound platform (session
     create's ephemeral ROLLBACK path, where teardown runs INSIDE the
-    caller's held gate span): that path must not rebuild a boundary
-    or re-run the resolve pass mid-rollback, so it keeps the
-    imperative ``keep_active`` hold on the handed-in platform. This
-    is the INTERIM nested-teardown seam; it closes when the
-    session-create unwind hands a node instead of a platform.
+    caller's held gate span), paired with ``platform_ctx``, that
+    composition's op-start context for the hold's power ops: that path
+    must not rebuild a boundary or re-run the resolve pass
+    mid-rollback, so it keeps the imperative ``keep_active`` hold on
+    the handed-in platform. This is the INTERIM nested-teardown seam;
+    it closes when the session-create unwind hands a node instead of
+    a platform.
     """
     agent = db.get_agent(name)
     if agent is None:
@@ -449,8 +466,15 @@ def delete_agent(
     else:
         # The nested-teardown path: the caller's composition already
         # resolved and holds its gate open, so only the hold is
-        # re-entered (never a second boundary or resolve).
-        boundary = keep_active(db, config, vm, platform)
+        # re-entered (never a second boundary or resolve); the
+        # handed-in ctx serves the hold's power ops.
+        if platform_ctx is None:
+            raise StateError(
+                f"delete_agent('{name}') was handed a bound platform "
+                f"without its op-start context; the nested-teardown "
+                f"path passes both or neither."
+            )
+        boundary = keep_active(db, config, vm, platform, platform_ctx)
     with boundary:
 
         # Kill running sessions for this agent (status-aware)

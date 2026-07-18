@@ -21,7 +21,7 @@ from agentworks.errors import (
 from agentworks.vms.manager import gated_vm_boundary, keep_active
 
 if TYPE_CHECKING:
-    from agentworks.capabilities.base import OperationScope
+    from agentworks.capabilities.base import OperationScope, RunContext
     from agentworks.capabilities.vm_platform import VMPlatform
     from agentworks.config import Config
     from agentworks.db import Database, VMRow, WorkspaceRow
@@ -103,7 +103,7 @@ def create_workspace(
         gate_secret_resolver,
     )
     from agentworks.orchestration.readiness import preflight_all
-    from agentworks.orchestration.secrets import secret_union
+    from agentworks.orchestration.secrets import ScopedSecrets, secret_union
     from agentworks.orchestration.walk import walk
     from agentworks.secrets.resolver import Resolver
     from agentworks.vms.nodes import live_vm_node
@@ -112,8 +112,22 @@ def create_workspace(
     resolver = Resolver(config, registry)
 
     vm_node = live_vm_node(db, config, registry, vm, resolver)
+
+    def _teardown_platform_ctx() -> RunContext:
+        # The nested teardown's op-start context: built at teardown
+        # time (post-boundary, values resolved), scoped to the site's
+        # declared names. (This command never unwinds a realized
+        # workspace, so the source exists for the node's contract, not
+        # for a path this command takes.)
+        return RunContext(
+            config=config,
+            secrets=ScopedSecrets(
+                resolver.values, vm_node.site.secret_refs()
+            ),
+        )
+
     pending_workspace = pending_workspace_node(
-        db, config, ws_name, vm_node, template_name
+        db, config, ws_name, vm_node, template_name, _teardown_platform_ctx
     )
     nodes = walk(pending_workspace)
     # The walk supplies the boundary union (the site's config secrets;
@@ -767,6 +781,7 @@ def delete_workspace(
     force: bool = False,
     yes: bool = False,
     platform: VMPlatform | None = None,
+    platform_ctx: RunContext | None = None,
 ) -> None:
     """Delete a workspace.
 
@@ -785,11 +800,13 @@ def delete_workspace(
     ``platform`` accepts the caller's already-bound platform (session
     create's ephemeral ROLLBACK path, where
     ``PendingWorkspaceNode.teardown`` runs INSIDE the caller's held
-    gate span): that path must not rebuild a boundary or re-run the
-    resolve pass mid-rollback, so it keeps the imperative
-    ``keep_active`` hold on the handed-in platform. This is the
-    INTERIM nested-teardown seam; it closes when the session-create
-    unwind hands a node instead of a platform.
+    gate span), paired with ``platform_ctx``, that composition's
+    op-start context for the hold's power ops: that path must not
+    rebuild a boundary or re-run the resolve pass mid-rollback, so it
+    keeps the imperative ``keep_active`` hold on the handed-in
+    platform. This is the INTERIM nested-teardown seam; it closes
+    when the session-create unwind hands a node instead of a
+    platform.
     """
 
     ws = db.get_workspace(name)
@@ -847,9 +864,16 @@ def delete_workspace(
                 # The nested-teardown path: the caller's composition
                 # already resolved and holds its gate open, so only the
                 # hold is re-entered (never a second boundary or
-                # resolve).
+                # resolve); the handed-in ctx serves the hold's power
+                # ops.
+                if platform_ctx is None:
+                    raise StateError(
+                        f"delete_workspace('{name}') was handed a bound "
+                        f"platform without its op-start context; the "
+                        f"nested-teardown path passes both or neither."
+                    )
                 _keepalive_stack.enter_context(
-                    keep_active(db, config, vm, platform)
+                    keep_active(db, config, vm, platform, platform_ctx)
                 )
 
         if vm is not None and vm.tailscale_host is not None:

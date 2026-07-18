@@ -1568,6 +1568,17 @@ def create_session(
 
     vm_node = live_vm_node(db, config, registry, vm, resolver)
 
+    def _teardown_platform_ctx() -> RunContext:
+        # The nested teardowns' op-start context (the ephemeral agent /
+        # workspace rollbacks): built at teardown time (post-boundary,
+        # values resolved), scoped to the site's declared names.
+        return RunContext(
+            config=config,
+            secrets=ScopedSecrets(
+                resolver.values, vm_node.site.secret_refs()
+            ),
+        )
+
     workspace_node: LiveWorkspaceNode | PendingWorkspaceNode
     pending_workspace: PendingWorkspaceNode | None = None
     workspace_tmpl: ResolvedWorkspaceTemplate | None = None
@@ -1590,7 +1601,8 @@ def create_session(
                 output.warn(advisory)
         _guard_vm_status(vm)
         pending_workspace = pending_workspace_node(
-            db, config, workspace_name, vm_node, workspace_template
+            db, config, workspace_name, vm_node, workspace_template,
+            _teardown_platform_ctx,
         )
         workspace_node = pending_workspace
     else:
@@ -1617,7 +1629,8 @@ def create_session(
         agent_tmpl = _resolve_agent_tmpl(registry, agent_template)
         agent_tmpl_node = agent_template_node(registry, agent_tmpl, resolver)
         pending_agent = pending_agent_node(
-            db, config, agent_name, agent_tmpl_node, vm_node
+            db, config, agent_name, agent_tmpl_node, vm_node,
+            _teardown_platform_ctx,
         )
         agent_node = pending_agent
     elif agent_name is not None:

@@ -50,10 +50,10 @@ def _fake_status(
     monkeypatch.setattr(
         ProxmoxPlatform,
         "status",
-        lambda self, row: events.append("status") or status,
+        lambda self, row, ctx: events.append("status") or status,
     )
     monkeypatch.setattr(
-        ProxmoxPlatform, "start", lambda self, row: events.append("start")
+        ProxmoxPlatform, "start", lambda self, row, ctx: events.append("start")
     )
     monkeypatch.setattr(
         vm_manager, "_ensure_tailscale", lambda *a, **k: events.append("tailscale")
@@ -227,7 +227,7 @@ def test_rekey_running_check_runs_after_the_resolve_boundary(
     monkeypatch.setattr(
         ProxmoxPlatform,
         "status",
-        lambda self, row: order.append("status") or VMStatus.STOPPED,
+        lambda self, row, ctx: order.append("status") or VMStatus.STOPPED,
     )
     real_resolve = Resolver.resolve
 
@@ -464,10 +464,10 @@ def test_port_forward_stopped_vm_gates_then_forwards(
     monkeypatch.setattr(
         ProxmoxPlatform,
         "status",
-        lambda self, row: events.append("status") or VMStatus.STOPPED,
+        lambda self, row, ctx: events.append("status") or VMStatus.STOPPED,
     )
     monkeypatch.setattr(
-        ProxmoxPlatform, "start", lambda self, row: events.append("start")
+        ProxmoxPlatform, "start", lambda self, row, ctx: events.append("start")
     )
     monkeypatch.setattr(
         vm_manager, "_ensure_tailscale", lambda *a, **k: events.append("tailscale")
@@ -604,10 +604,10 @@ def test_backup_stopped_vm_gates_then_backs_up(
     monkeypatch.setattr(
         ProxmoxPlatform,
         "status",
-        lambda self, row: gate_events.append("status") or VMStatus.STOPPED,
+        lambda self, row, ctx: gate_events.append("status") or VMStatus.STOPPED,
     )
     monkeypatch.setattr(
-        ProxmoxPlatform, "start", lambda self, row: gate_events.append("start")
+        ProxmoxPlatform, "start", lambda self, row, ctx: gate_events.append("start")
     )
     monkeypatch.setattr(
         vm_manager,

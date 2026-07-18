@@ -111,13 +111,14 @@ class Resolver:
         already resolved (the one sanctioned resolution outside the
         boundary pass; see ``orchestration/activation.py``).
 
-        Seeded names register on the operation's resolve set, become
-        readable via :meth:`get` immediately (the gate's power ops,
-        proxmox's ``status`` above all, read the bound resolver BEFORE
-        the boundary pass runs; serving them is the seed's whole
-        reason to exist), and are excluded from the boundary pass's
-        backend loop, so a gate-resolved secret never resolves or
-        prompts twice in one command.
+        The point is the NO-DOUBLE-RESOLVE property: seeded names
+        register on the operation's resolve set and are excluded from
+        the boundary pass's backend loop, so a gate-resolved secret
+        never resolves or prompts twice in one command. (Ops read the
+        gate's scoped reader while the gate runs, and scoped delivery
+        over the boundary cache after it; seeded values also stay
+        readable via :meth:`get` before the pass, part of the same
+        contract.)
 
         Seeding after the boundary pass is the same contract violation
         as registering after it (a value the pass never covered), so

@@ -132,6 +132,11 @@ class PendingAgentNode:
     BEFORE a created workspace's teardown in reverse realization order,
     which is what cleans the agent's workspace-group membership up
     before the group itself goes away, exactly today's ordering.
+    ``platform_ctx`` is the orchestrator's op-start-context source for
+    that handed-in platform (a callable because teardown runs
+    post-boundary, when the resolved values exist; the node itself
+    holds no secrets); it rides the same INTERIM nested-teardown seam
+    and retires with it.
     """
 
     def __init__(
@@ -141,12 +146,14 @@ class PendingAgentNode:
         name: str,
         template: AgentTemplateNode,
         vm: LiveVMNode,
+        platform_ctx: Callable[[], RunContext],
     ) -> None:
         self._db = db
         self._config = config
         self._name = name
         self._template = template
         self._vm = vm
+        self._platform_ctx = platform_ctx
         self._realized = False
 
     @property
@@ -210,6 +217,7 @@ class PendingAgentNode:
                 force=True,
                 yes=True,
                 platform=self._vm.site.platform,
+                platform_ctx=self._platform_ctx(),
             )
         except Exception as exc:
             # The teardown contract: name the artifact left standing.
@@ -272,11 +280,13 @@ def pending_agent_node(
     name: str,
     template: AgentTemplateNode,
     vm: LiveVMNode,
+    platform_ctx: Callable[[], RunContext],
 ) -> PendingAgentNode:
     """Build the pending ``agent/<name>`` node with its edges attached.
 
     The returned object is THE agent node: every holder (the session's
     dep, any readiness that watches the target) must receive this same
     object, so the orchestrator's ``mark_realized`` flip is observed by
-    all of them."""
-    return PendingAgentNode(db, config, name, template, vm)
+    all of them. ``platform_ctx`` is the teardown's op-start-context
+    source (see :class:`PendingAgentNode`)."""
+    return PendingAgentNode(db, config, name, template, vm, platform_ctx)

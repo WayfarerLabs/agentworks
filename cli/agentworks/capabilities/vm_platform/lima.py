@@ -183,7 +183,7 @@ class LimaPlatform(VMPlatform):
                 ),
             )
 
-    def create(self, request: ProvisionRequest) -> ProvisionResult:
+    def create(self, request: ProvisionRequest, ctx: RunContext) -> ProvisionResult:
         if not self.is_remote:
             # Preflight re-runs the same check at the composition root;
             # keeping it here too costs one PATH scan and keeps the op's
@@ -454,28 +454,28 @@ class LimaPlatform(VMPlatform):
         except SSHError:
             pass
 
-    def start(self, vm: VMRow) -> None:
+    def start(self, vm: VMRow, ctx: RunContext) -> None:
         # Idempotency guard (the ABC flags start): `limactl start` on a
         # running instance is not reliably a no-op, so land in the
         # running state ourselves.
-        if self.status(vm) == VMStatus.RUNNING:
+        if self.status(vm, ctx) == VMStatus.RUNNING:
             output.detail(f"Lima VM '{vm.name}' is already running")
             return
         output.info(f"Starting Lima VM '{vm.name}'...")
         self._run_lima(f"limactl start {self._instance_name(vm)}")
         output.info(f"Lima VM '{vm.name}' started")
 
-    def stop(self, vm: VMRow) -> None:
+    def stop(self, vm: VMRow, ctx: RunContext) -> None:
         # Idempotency guard (the ABC flags stop): `limactl stop` on a
         # stopped instance errors rather than no-ops.
-        if self.status(vm) == VMStatus.STOPPED:
+        if self.status(vm, ctx) == VMStatus.STOPPED:
             output.detail(f"Lima VM '{vm.name}' is already stopped")
             return
         output.info(f"Stopping Lima VM '{vm.name}'...")
         self._run_lima(f"limactl stop {self._instance_name(vm)}")
         output.info(f"Lima VM '{vm.name}' stopped")
 
-    def delete(self, vm: VMRow) -> None:
+    def delete(self, vm: VMRow, ctx: RunContext) -> None:
         output.info(f"Deleting Lima VM '{vm.name}'...")
         self._run_lima(
             f"limactl delete --force {self._instance_name(vm)}", check=False
@@ -493,7 +493,7 @@ class LimaPlatform(VMPlatform):
     ) -> Transport | None:
         return self._transport_for(self._instance_name(vm))
 
-    def status(self, vm: VMRow) -> VMStatus:
+    def status(self, vm: VMRow, ctx: RunContext) -> VMStatus:
         instance_name = self._instance_name(vm)
         try:
             listing = self._run_lima(

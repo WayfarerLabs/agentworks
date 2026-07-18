@@ -142,7 +142,7 @@ def test_create_rollback_on_keyboard_interrupt_unwinds_the_row(
     which for create is exactly the one VM node) and re-raises."""
     from agentworks.capabilities.vm_platform.lima import LimaPlatform
 
-    def _interrupt(self: LimaPlatform, request: object) -> ProvisionResult:
+    def _interrupt(self: LimaPlatform, request: object, ctx: object) -> ProvisionResult:
         raise KeyboardInterrupt
 
     monkeypatch.setattr(LimaPlatform, "create", _interrupt)
@@ -164,7 +164,7 @@ def test_create_rollback_on_user_abort_unwinds_the_row(
     from agentworks.capabilities.vm_platform.lima import LimaPlatform
     from agentworks.errors import UserAbort
 
-    def _abort(self: LimaPlatform, request: object) -> ProvisionResult:
+    def _abort(self: LimaPlatform, request: object, ctx: object) -> ProvisionResult:
         raise UserAbort("operator said stop")
 
     monkeypatch.setattr(LimaPlatform, "create", _abort)
@@ -186,7 +186,7 @@ def test_create_rollback_failure_warns_and_never_masks(
     from agentworks.db import Database as _Db
     from agentworks.errors import ProvisioningError
 
-    def _boom(self: LimaPlatform, request: object) -> ProvisionResult:
+    def _boom(self: LimaPlatform, request: object, ctx: object) -> ProvisionResult:
         raise RuntimeError("backend exploded")
 
     monkeypatch.setattr(LimaPlatform, "create", _boom)
@@ -213,7 +213,7 @@ def test_create_init_failure_keeps_the_row(
     from agentworks.capabilities.vm_platform.lima import LimaPlatform
     from agentworks.errors import ExternalError
 
-    def _fake_create(self: LimaPlatform, request: object) -> ProvisionResult:
+    def _fake_create(self: LimaPlatform, request: object, ctx: object) -> ProvisionResult:
         return ProvisionResult(
             native_transport=SimpleNamespace(),  # type: ignore[arg-type]
             platform_metadata={},
@@ -308,7 +308,7 @@ def test_reinit_refuses_an_operator_stopped_vm_at_the_gate(
     _seed_provisioned_vm(db)
     db.set_operator_stopped("rvm", True)
     monkeypatch.setattr(
-        LimaPlatform, "status", lambda self, vm: VMStatus.STOPPED
+        LimaPlatform, "status", lambda self, vm, ctx: VMStatus.STOPPED
     )
 
     def _no_init(*a: object, **k: object) -> None:

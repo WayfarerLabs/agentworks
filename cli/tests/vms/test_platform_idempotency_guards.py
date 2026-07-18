@@ -9,6 +9,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from agentworks.capabilities.base import RunContext
 from agentworks.db import VMStatus
 
 
@@ -23,52 +24,52 @@ def test_lima_start_skips_when_already_running(monkeypatch: pytest.MonkeyPatch, 
     from agentworks.capabilities.vm_platform.lima import LimaPlatform
 
     platform = LimaPlatform("lima", {})
-    monkeypatch.setattr(LimaPlatform, "status", lambda self, vm: VMStatus.RUNNING)
+    monkeypatch.setattr(LimaPlatform, "status", lambda self, vm, ctx: VMStatus.RUNNING)
     monkeypatch.setattr(
         LimaPlatform,
         "_run_lima",
         lambda self, cmd, **k: (_ for _ in ()).throw(AssertionError(f"must not run: {cmd}")),
     )
-    platform.start(_vm())  # type: ignore[arg-type]
+    platform.start(_vm(), RunContext())  # type: ignore[arg-type]
 
 
 def test_lima_stop_skips_when_already_stopped(monkeypatch: pytest.MonkeyPatch, captured_output: object) -> None:
     from agentworks.capabilities.vm_platform.lima import LimaPlatform
 
     platform = LimaPlatform("lima", {})
-    monkeypatch.setattr(LimaPlatform, "status", lambda self, vm: VMStatus.STOPPED)
+    monkeypatch.setattr(LimaPlatform, "status", lambda self, vm, ctx: VMStatus.STOPPED)
     monkeypatch.setattr(
         LimaPlatform,
         "_run_lima",
         lambda self, cmd, **k: (_ for _ in ()).throw(AssertionError(f"must not run: {cmd}")),
     )
-    platform.stop(_vm())  # type: ignore[arg-type]
+    platform.stop(_vm(), RunContext())  # type: ignore[arg-type]
 
 
 def test_lima_start_proceeds_when_stopped(monkeypatch: pytest.MonkeyPatch, captured_output: object) -> None:
     from agentworks.capabilities.vm_platform.lima import LimaPlatform
 
     platform = LimaPlatform("lima", {})
-    monkeypatch.setattr(LimaPlatform, "status", lambda self, vm: VMStatus.STOPPED)
+    monkeypatch.setattr(LimaPlatform, "status", lambda self, vm, ctx: VMStatus.STOPPED)
     ran: list[str] = []
     monkeypatch.setattr(
         LimaPlatform, "_run_lima", lambda self, cmd, **k: ran.append(cmd) or ""
     )
-    platform.start(_vm())  # type: ignore[arg-type]
+    platform.start(_vm(), RunContext())  # type: ignore[arg-type]
     assert ran and "limactl start" in ran[0]
 
 
 def test_proxmox_start_skips_when_already_running(monkeypatch: pytest.MonkeyPatch, captured_output: object) -> None:
-    """Constructed without a resolver, any `_api` access raises, so a
-    passing guard proves the API was never touched."""
+    """The empty context refuses any `ctx.secret` read, so a passing
+    guard proves the API client was never built."""
     from agentworks.capabilities.vm_platform.proxmox import ProxmoxPlatform
 
     platform = ProxmoxPlatform(
         "px",
         {"api_url": "https://pve:8006", "node": "n", "token_id": "t", "template_vmid": 1},
     )
-    monkeypatch.setattr(ProxmoxPlatform, "status", lambda self, vm: VMStatus.RUNNING)
-    platform.start(_vm())  # type: ignore[arg-type]
+    monkeypatch.setattr(ProxmoxPlatform, "status", lambda self, vm, ctx: VMStatus.RUNNING)
+    platform.start(_vm(), RunContext())  # type: ignore[arg-type]
 
 
 def test_proxmox_stop_skips_when_already_stopped(monkeypatch: pytest.MonkeyPatch, captured_output: object) -> None:
@@ -78,8 +79,8 @@ def test_proxmox_stop_skips_when_already_stopped(monkeypatch: pytest.MonkeyPatch
         "px",
         {"api_url": "https://pve:8006", "node": "n", "token_id": "t", "template_vmid": 1},
     )
-    monkeypatch.setattr(ProxmoxPlatform, "status", lambda self, vm: VMStatus.STOPPED)
-    platform.stop(_vm())  # type: ignore[arg-type]
+    monkeypatch.setattr(ProxmoxPlatform, "status", lambda self, vm, ctx: VMStatus.STOPPED)
+    platform.stop(_vm(), RunContext())  # type: ignore[arg-type]
 
 
 def test_wsl2_stop_skips_when_already_stopped(monkeypatch: pytest.MonkeyPatch, captured_output: object) -> None:
@@ -87,10 +88,10 @@ def test_wsl2_stop_skips_when_already_stopped(monkeypatch: pytest.MonkeyPatch, c
     from agentworks.capabilities.vm_platform.wsl2 import WSL2Platform
 
     platform = WSL2Platform("wsl2", {})
-    monkeypatch.setattr(WSL2Platform, "status", lambda self, vm: VMStatus.STOPPED)
+    monkeypatch.setattr(WSL2Platform, "status", lambda self, vm, ctx: VMStatus.STOPPED)
     monkeypatch.setattr(
         wsl2_mod,
         "_wsl",
         lambda *a, **k: (_ for _ in ()).throw(AssertionError("must not run wsl")),
     )
-    platform.stop(_vm())  # type: ignore[arg-type]
+    platform.stop(_vm(), RunContext())  # type: ignore[arg-type]

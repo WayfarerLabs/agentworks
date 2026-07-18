@@ -185,7 +185,7 @@ class _StubPlatform:
     def vm_active(self, vm: object, *, config: object | None = None) -> AbstractContextManager[None]:
         return contextlib.nullcontext()
 
-    def status(self, vm: object) -> object:
+    def status(self, vm: object, ctx: object) -> object:
         from agentworks.db import VMStatus
 
         return VMStatus.RUNNING

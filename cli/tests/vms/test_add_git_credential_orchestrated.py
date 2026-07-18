@@ -328,26 +328,29 @@ def test_stopped_vm_gate_resolves_once_and_seeds_the_boundary(
 ) -> None:
     """The seam the tracer exists to prove: a stopped VM's status probe
     needs the API token BEFORE the boundary. The gate resolves it
-    just-in-time, the platform's op (reading the bound resolver, the
-    documented interim bridge) sees it immediately, the boundary pass
-    covers only the remainder, and no secret resolves twice. Both
-    resolutions precede the walk-away point."""
+    just-in-time and the platform's op reads it through the CONTEXT
+    (``ctx.secret``, the gate's scoped reader: the op-client bridge is
+    dead), the boundary pass covers only the remainder, and no secret
+    resolves twice. Both resolutions precede the walk-away point. The
+    reader is SCOPED: an undeclared name (the credential's token,
+    which is boundary-only) is refused at the op."""
     config = make_config()
     vm = _seed_vm(db)
     _reachable(monkeypatch, False)
     events: list[str] = []
 
-    def _status(self: ProxmoxPlatform, row: VMRow) -> VMStatus:
-        # The real proxmox status builds its API client through the
-        # bound resolver; prove that read works pre-boundary.
-        assert self.resolver is not None
-        assert not self.resolver.resolved
-        events.append(f"status-token:{self.resolver.get('proxmox-token')}")
+    def _status(self: ProxmoxPlatform, row: VMRow, ctx: RunContext) -> VMStatus:
+        # The real proxmox status builds its API client via ctx.secret;
+        # prove that read works pre-boundary, and that delivery is
+        # scoped: a name outside the gate's declared set refuses.
+        with pytest.raises(StateError, match="not declared"):
+            ctx.secret("git-token-gh")
+        events.append(f"status-token:{ctx.secret('proxmox-token')}")
         return VMStatus.STOPPED
 
     monkeypatch.setattr(ProxmoxPlatform, "status", _status)
     monkeypatch.setattr(
-        ProxmoxPlatform, "start", lambda self, row: events.append("start")
+        ProxmoxPlatform, "start", lambda self, row, ctx: events.append("start")
     )
     monkeypatch.setattr(
         vm_manager, "_ensure_tailscale", lambda *a, **k: events.append("tailscale")
@@ -380,13 +383,13 @@ def test_operator_stopped_vm_refuses_via_the_reread_race_guard(
     _reachable(monkeypatch, False)
     started: list[str] = []
 
-    def _status(self: ProxmoxPlatform, row: VMRow) -> VMStatus:
+    def _status(self: ProxmoxPlatform, row: VMRow, ctx: RunContext) -> VMStatus:
         db.set_operator_stopped("box", True)  # the concurrent `vm stop`
         return VMStatus.STOPPED
 
     monkeypatch.setattr(ProxmoxPlatform, "status", _status)
     monkeypatch.setattr(
-        ProxmoxPlatform, "start", lambda self, row: started.append("start")
+        ProxmoxPlatform, "start", lambda self, row, ctx: started.append("start")
     )
 
     with pytest.raises(StateError, match="manually stopped") as exc:
