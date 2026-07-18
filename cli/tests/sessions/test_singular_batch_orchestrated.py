@@ -41,8 +41,10 @@ if TYPE_CHECKING:
     from agentworks.db import Database
 
 
-def _seed_vm(db: Database, name: str, host: str | None) -> None:
-    db.insert_vm(name, site="proxmox", hostname=name)
+def _seed_vm(
+    db: Database, name: str, host: str | None, *, site: str = "proxmox"
+) -> None:
+    db.insert_vm(name, site=site, hostname=name)
     if host is not None:
         db.update_vm_tailscale(name, host)
     db._conn.execute(
@@ -282,6 +284,183 @@ def test_batch_operator_stopped_vm_aborts_before_the_probes(
 
     with pytest.raises(StateError, match="manually stopped"):
         session_manager.stop_all_sessions(db, config)
+
+
+_SECOND_SITE_DOC = """\
+apiVersion: agentworks/v1
+kind: vm-site
+metadata:
+  name: proxmox-b
+  description: Second proxmox site with its own token secret
+spec:
+  platform: proxmox
+  platform_config:
+    api_url: "https://pve-b:8006"
+    node: pve1
+    token_id: "agw@pam!agw"
+    template_vmid: 9000
+    token_secret: proxmox-token-b
+"""
+
+
+def test_stop_all_mixed_site_batch_resolves_the_union_once(
+    db: Database,
+    make_config,  # noqa: ANN001
+    resolve_counter: list[list[str]],
+    target: _FakeTarget,
+    monkeypatch: pytest.MonkeyPatch,
+    captured_output,  # noqa: ANN001
+    tmp_path,  # noqa: ANN001
+) -> None:
+    """A mixed-site batch still resolves ONCE: the union of both sites'
+    declared secrets goes through a single boundary pass (the relocated
+    cross-site pin the deleted bind_platforms union test carried)."""
+    resources = tmp_path / "resources"
+    resources.mkdir()
+    (resources / "proxmox-b.yaml").write_text(_SECOND_SITE_DOC)
+    monkeypatch.setenv("AW_SECRET_PROXMOX_TOKEN_B", "pve-token-b")
+    config = make_config()
+    _seed_vm(db, "vm-a", "100.64.0.11")
+    _seed_vm(db, "vm-b", "100.64.0.12", site="proxmox-b")
+    _seed_session(db, "s-a", "ws-vm-a")
+    _seed_session(db, "s-b", "ws-vm-b")
+    _reachable(monkeypatch, True)
+
+    session_manager.stop_all_sessions(db, config)
+
+    assert len(resolve_counter) == 1
+    assert sorted(resolve_counter[0]) == ["proxmox-token", "proxmox-token-b"]
+    assert any("No running sessions to stop" in m for m in captured_output.info)
+
+
+def test_stop_all_two_sessions_one_vm_composes_one_node_one_gate(
+    db: Database,
+    make_config,  # noqa: ANN001
+    resolve_counter: list[list[str]],
+    target: _FakeTarget,
+    monkeypatch: pytest.MonkeyPatch,
+    captured_output,  # noqa: ANN001
+) -> None:
+    """The everyday shape: two sessions on ONE VM dedupe to one node
+    (a single walk entry for the VM), one gate sequence, one hold (the
+    relocated by-VM dedup pin the deleted bind_platforms test
+    carried)."""
+    from agentworks.orchestration import walk as walk_mod
+
+    config = make_config()
+    _seed_vm(db, "box", "100.64.0.9")
+    _seed_session(db, "s1", "ws-box")
+    _seed_session(db, "s2", "ws-box")
+    events: list[str] = []
+    _stop_the_vms(monkeypatch, events)
+    _record_holds(monkeypatch, events)
+
+    real_walk = walk_mod.walk
+    walks: list[list[str]] = []
+
+    def _spy(*roots):  # noqa: ANN002, ANN202
+        nodes = real_walk(*roots)
+        walks.append([n.key for n in nodes])
+        return nodes
+
+    monkeypatch.setattr(walk_mod, "walk", _spy)
+
+    session_manager.stop_all_sessions(db, config)
+
+    assert walks == [["vm-site/proxmox", "vm/box"]]
+    assert events == [
+        "status:box",
+        "start:box",
+        "hold-open:box",
+        "tailscale:box",
+        "hold-close:box",
+        "hold-open:box",
+        "hold-close:box",
+    ]
+    assert resolve_counter == [["proxmox-token"]]
+
+
+def test_batch_repair_path_resolves_the_rejoin_key_late(
+    db: Database,
+    make_config,  # noqa: ANN001
+    resolve_counter: list[list[str]],
+    target: _FakeTarget,
+    monkeypatch: pytest.MonkeyPatch,
+    captured_output,  # noqa: ANN001
+) -> None:
+    """The late-resolve branch of the batch gate callback, for real: a
+    started VM fails to reconnect and the repair path reads the
+    template's rejoin auth key through the gate reader, which resolves
+    it LATE through the backend chain (the boundary burst, then exactly
+    one repair burst) with no seed error; the heal the imperative
+    repair carried survives the batch composition."""
+    monkeypatch.setenv("AW_SECRET_TAILSCALE_AUTH_KEY", "tskey-late")
+    config = make_config()
+    _seed_vm(db, "box", "100.64.0.9")
+    _seed_session(db, "s1", "ws-box")
+    _reachable(monkeypatch, False)
+    monkeypatch.setattr(
+        ProxmoxPlatform, "status", lambda self, row: VMStatus.STOPPED
+    )
+    monkeypatch.setattr(ProxmoxPlatform, "start", lambda self, row: None)
+    keys: list[str] = []
+
+    def _failing_reconnect(
+        db_: object,
+        config_: object,
+        vm: object,
+        platform: object,
+        *,
+        auth_key_source=None,  # noqa: ANN001
+    ) -> None:
+        # The started VM fails to reconnect: the real repair reads the
+        # rejoin key through the caller-supplied source at exactly this
+        # point (see _ensure_tailscale), so the fake reads it the same
+        # way and lets the gate reader's lazy branch run for real.
+        assert auth_key_source is not None
+        keys.append(auth_key_source())
+
+    monkeypatch.setattr(vm_manager, "_ensure_tailscale", _failing_reconnect)
+
+    session_manager.stop_all_sessions(db, config)
+
+    assert keys == ["tskey-late"]
+    assert resolve_counter == [["proxmox-token"], ["tailscale-auth-key"]]
+
+
+def test_batch_gate_refuses_an_undeclared_outside_union_name(
+    db: Database,
+    make_config,  # noqa: ANN001
+    resolve_counter: list[list[str]],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The guard on the late-resolve branch: a gate target that asks
+    for a name outside the boundary union which it did NOT declare in
+    repair_secret_refs is refused with the declare/receive error and
+    nothing late-resolves. Driven through the real batch composition
+    with a node-level gate_secret_refs patch (the callback is a
+    closure of the composition root, so a synthetic handle would test
+    a copy, not the real thing)."""
+    from agentworks.vms.nodes import LiveVMNode
+
+    config = make_config()
+    _seed_vm(db, "box", "100.64.0.9")
+    _seed_session(db, "s1", "ws-box")
+    _reachable(monkeypatch, False)
+    monkeypatch.setattr(
+        LiveVMNode, "gate_secret_refs", lambda self: ("rogue-secret",)
+    )
+
+    def _no_status(self: ProxmoxPlatform, row: object) -> VMStatus:
+        raise AssertionError("observe must not run after the refused resolve")
+
+    monkeypatch.setattr(ProxmoxPlatform, "status", _no_status)
+
+    with pytest.raises(StateError, match="repair_secret_refs"):
+        session_manager.stop_all_sessions(db, config)
+
+    # The boundary burst only; the rogue name never resolved.
+    assert resolve_counter == [["proxmox-token"]]
 
 
 # -- the singular ops (_prepare_vm as a gate span) ----------------------------

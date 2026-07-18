@@ -35,7 +35,7 @@ _TEMPLATE_VAR_RE = re.compile(r"\{\{(\w+)\}\}")
 _KNOWN_TEMPLATE_VARS = {"session_name", "workspace_name"}
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator, Mapping, Sequence
+    from collections.abc import Callable, Iterator, Mapping, Sequence
 
     from agentworks.agents.nodes import (
         AgentTemplateNode,
@@ -53,6 +53,7 @@ if TYPE_CHECKING:
     from agentworks.sessions.tmux import RunCommand
     from agentworks.ssh import SSHLogger
     from agentworks.transports import Transport
+    from agentworks.vms.nodes import LiveVMNode
     from agentworks.workspaces.nodes import (
         LiveWorkspaceNode,
         PendingWorkspaceNode,
@@ -484,7 +485,11 @@ def _batch_vm_boundary(
     when a started VM fails to reconnect) and resolves late through
     the backend chain, the same documented conditional-need exception
     the imperative repair path carried; it cannot seed, because the
-    boundary has already resolved.
+    boundary has already resolved. The callback is built PER TARGET
+    and refuses any other outside-the-union name unless the target
+    declares it in ``repair_secret_refs`` (see the invariant comment
+    inline), so no future gate target can silently late-resolve per
+    VM.
 
     An empty VM set stays a complete no-op (no registry, no resolver,
     no gate), the imperative lazy-bind property: ``session list
@@ -528,21 +533,51 @@ def _batch_vm_boundary(
 
     covered = set(union)
 
-    def _serve_gate_secret(secret_name: str) -> str:
-        if secret_name in covered:
-            return resolver.get(secret_name)
-        # The rejoin repair key: resolve late, never seed (see above).
-        from agentworks.orchestration.secrets import secret_declarations
-        from agentworks.secrets.resolve import active_backends, resolve_secrets
+    def _gate_resolver(vm_node: LiveVMNode) -> Callable[[str], str]:
+        """Per-target gate callback: serve the boundary's cache; guard
+        the late-resolve branch against the target's own declaration."""
 
-        (decl,) = secret_declarations([secret_name], registry)
-        return resolve_secrets([decl], active_backends(config, registry))[
-            secret_name
-        ]
+        def _resolve(secret_name: str) -> str:
+            if secret_name in covered:
+                return resolver.get(secret_name)
+            # INVARIANT: the ONLY sanctioned post-boundary resolution
+            # is the repair path's rejoin key. Gate secrets ride the
+            # boundary union structurally (gate_secret_refs delegates
+            # to the site's declared secret_refs, which the walk
+            # unions), so a name outside the covered union must be one
+            # of THIS target's declared repair secrets; anything else
+            # refuses loudly (the declare/receive contract) rather
+            # than silently late-resolving per VM.
+            if secret_name not in vm_node.repair_secret_refs():
+                raise StateError(
+                    f"secret '{secret_name}' is outside the batch "
+                    f"boundary union and was not declared in this "
+                    f"activation target's repair_secret_refs, so the "
+                    f"batch gate will not resolve it late (the "
+                    f"declare/receive contract): gate secrets must "
+                    f"ride the boundary union; only the lazy rejoin "
+                    f"repair key resolves after it."
+                )
+            # The rejoin repair key: resolve late through the backend
+            # chain, never seed (the boundary already resolved).
+            from agentworks.orchestration.secrets import secret_declarations
+            from agentworks.secrets.resolve import (
+                active_backends,
+                resolve_secrets,
+            )
+
+            (decl,) = secret_declarations([secret_name], registry)
+            return resolve_secrets([decl], active_backends(config, registry))[
+                secret_name
+            ]
+
+        return _resolve
 
     with contextlib.ExitStack() as stack:
         for vm_node in vm_nodes:
-            stack.enter_context(activation_gate(vm_node, _serve_gate_secret))
+            stack.enter_context(
+                activation_gate(vm_node, _gate_resolver(vm_node))
+            )
         yield
 
 
