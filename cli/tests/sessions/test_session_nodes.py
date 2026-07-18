@@ -76,6 +76,8 @@ def _session(
         name="claude", required_commands=list(required)
     )
     return pending_session_node(
+        db,
+        cast("Config", object()),
         "s1",
         template,
         agent=agent,  # type: ignore[arg-type]
@@ -280,6 +282,8 @@ def test_session_create_graph_shares_one_vm_node(db: Database) -> None:
         db, cast("Config", object()), "ws1", vm, None
     )
     session = pending_session_node(
+        db,
+        cast("Config", object()),
         "s1",
         ResolvedSessionTemplate(name="claude"),
         agent=agent,
@@ -367,6 +371,123 @@ def test_pending_workspace_teardown_is_todays_rollback_body(
     assert call["name"] == "ws1"
     assert call["force"] is True and call["yes"] is True
     assert call["platform"] is vm.site.platform
+
+
+def _seed_session_partial_state(
+    db: Database, *, with_grant: bool = True
+) -> None:
+    """Seed the artifacts a mid-slice failure can leave behind: the
+    workspace row (pre-existing), the agent row, the implicit grant,
+    and the session row."""
+    from agentworks.db import SessionMode
+
+    db._conn.execute(
+        "INSERT INTO workspaces (name, vm_name, workspace_path, linux_group) "
+        "VALUES ('ws1', 'box', '/srv/ws1', 'ws-ws1')"
+    )
+    db._conn.commit()
+    db.insert_agent("dev", "box", "agt-dev")
+    if with_grant:
+        db.insert_agent_grant("dev", "ws1", "implicit", session_name="s1")
+    db.insert_session(
+        "s1", "ws1", "claude", SessionMode.AGENT,
+        agent_name="dev", socket_path="/tmp/s1.sock",
+    )
+
+
+def test_pending_session_teardown_is_todays_rollback_body(
+    db: Database, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The session's partial-state cleaner: delete the row, revoke the
+    implicit grant, and (no other grant remaining) remove the agent
+    from the workspace group, exactly the imperative session-internal
+    rollback."""
+    from agentworks.agents import manager as agents_manager
+
+    removed: list[tuple[str, str]] = []
+    monkeypatch.setattr(
+        agents_manager,
+        "_remove_from_workspace_group",
+        lambda vm, config, db_, linux_user, ws, **k: removed.append(
+            (linux_user, ws)
+        ),
+    )
+    vm = _vm_node(db)
+    agent = _pending_agent(db, vm)
+    session = _session(db, agent=agent, vm=vm)
+    _seed_session_partial_state(db)
+
+    session.teardown()
+
+    assert db.get_session("s1") is None
+    assert not db.has_any_grant("dev", "ws1")
+    assert removed == [("agt-dev", "ws1")]
+
+
+def test_pending_session_teardown_keeps_group_with_other_grants(
+    db: Database, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An explicit grant survives the implicit revoke, so the group
+    membership stays (it backs the remaining grant)."""
+    from agentworks.agents import manager as agents_manager
+
+    removed: list[tuple[str, str]] = []
+    monkeypatch.setattr(
+        agents_manager,
+        "_remove_from_workspace_group",
+        lambda *a, **k: removed.append(("called", "")),
+    )
+    vm = _vm_node(db)
+    agent = _pending_agent(db, vm)
+    session = _session(db, agent=agent, vm=vm)
+    _seed_session_partial_state(db)
+    db.insert_agent_grant("dev", "ws1", "explicit")
+
+    session.teardown()
+
+    assert db.get_session("s1") is None
+    assert db.has_any_grant("dev", "ws1")  # the explicit grant remains
+    assert removed == []
+
+
+def test_pending_session_teardown_admin_mode_deletes_only_the_row(
+    db: Database,
+) -> None:
+    from agentworks.db import SessionMode
+
+    session = _session(db, agent=None, admin=True)
+    db._conn.execute(
+        "INSERT INTO workspaces (name, vm_name, workspace_path, linux_group) "
+        "VALUES ('ws1', 'box', '/srv/ws1', 'ws-ws1')"
+    )
+    db._conn.commit()
+    db.insert_session("s1", "ws1", "claude", SessionMode.ADMIN)
+
+    session.teardown()
+
+    assert db.get_session("s1") is None
+
+
+def test_pending_session_teardown_warns_and_never_raises(
+    db: Database, monkeypatch: pytest.MonkeyPatch, captured_output
+) -> None:
+    """The cleaner runs inside an exception path on PARTIAL state, so a
+    failing step warns and the teardown continues; raising would mask
+    the original error."""
+    from agentworks.db import Database as _Db
+
+    monkeypatch.setattr(
+        _Db,
+        "delete_session",
+        lambda self, name: (_ for _ in ()).throw(RuntimeError("db locked")),
+    )
+    session = _session(db, agent=None, admin=True)
+
+    session.teardown()  # no raise
+
+    (warning,) = [w for w in captured_output.warnings if "rollback" in w]
+    assert "failed to delete session row 's1'" in warning
+    assert "db locked" in warning
 
 
 def test_reverse_realization_order_reproduces_rollback_order(

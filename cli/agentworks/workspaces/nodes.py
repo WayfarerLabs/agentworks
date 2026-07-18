@@ -37,6 +37,10 @@ class LiveWorkspaceNode:
         return f"workspace/{self._row.name}"
 
     @property
+    def name(self) -> str:
+        return self._row.name
+
+    @property
     def row(self) -> WorkspaceRow:
         return self._row
 

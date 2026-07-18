@@ -98,6 +98,11 @@ class LiveAgentNode:
         return self._row
 
     @property
+    def linux_user(self) -> str:
+        """The agent's Linux user, from its row (intrinsic identity)."""
+        return self._row.linux_user
+
+    @property
     def realized(self) -> bool:
         """A live node IS realized: it exists. Present so a consumer
         that watches a target's pending-ness (the required-commands
@@ -149,6 +154,15 @@ class PendingAgentNode:
     @property
     def name(self) -> str:
         return self._name
+
+    @property
+    def linux_user(self) -> str:
+        """The Linux user the realizing mutation creates, derived from
+        the chosen name exactly as the mutation derives it (complete
+        identity while still pending)."""
+        from agentworks.agents.manager import derive_linux_user
+
+        return derive_linux_user(self._name)
 
     @property
     def template(self) -> AgentTemplateNode:

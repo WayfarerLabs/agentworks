@@ -33,7 +33,8 @@ from agentworks.errors import StateError
 
 if TYPE_CHECKING:
     from agentworks.capabilities.base import RunContext
-    from agentworks.db import SessionRow
+    from agentworks.config import Config
+    from agentworks.db import Database, SessionRow
     from agentworks.orchestration.node import Node
     from agentworks.transports import Transport
     from agentworks.vms.nodes import LiveVMNode
@@ -221,12 +222,16 @@ class PendingSessionNode:
 
     def __init__(
         self,
+        db: Database,
+        config: Config,
         name: str,
         check: RequiredCommandsCheck,
         agent: AgentNode | None,
         workspace: WorkspaceNode,
         vm: LiveVMNode,
     ) -> None:
+        self._db = db
+        self._config = config
         self._name = name
         self._check = check
         self._agent = agent
@@ -270,16 +275,67 @@ class PendingSessionNode:
         self._realized = True
 
     def teardown(self) -> None:
-        # The session's own realized artifacts (tmux server, DB row)
-        # are torn down by the orchestrator's command-shaped cleanup;
-        # the realizing slice lands with the session orchestrators.
-        raise NotImplementedError(
-            "the pending session node's teardown lands with the session "
-            "orchestrators (its realizing slice defines the artifacts)"
-        )
+        """Clean up the session's PARTIAL realization artifacts: the
+        DB row, the implicit workspace grant, and (when no other grant
+        remains) the agent's workspace-group membership.
+
+        This is a partial-state cleaner by parity with the imperative
+        session-internal rollback: it runs when the realizing slice
+        fails mid-way (any of its artifacts may or may not exist yet),
+        so every step is best-effort, warns on failure, and never
+        raises; a raise here would mask the original error the caller
+        is unwinding for. A COMPLETED session (tmux server up) is
+        never torn down at all: session create's completed-session
+        window is deliberately non-rollbackable, matching the
+        imperative shape, so this method is only ever driven against
+        partial state.
+        """
+        from agentworks import output
+
+        try:
+            self._db.delete_session(self._name)
+        except Exception as e:
+            output.warn(f"rollback: failed to delete session row '{self._name}': {e}")
+        if self._agent is None:
+            return
+        agent_name = self._agent.name
+        workspace_name = self._workspace.name
+        try:
+            self._db.delete_agent_grant(
+                agent_name, workspace_name, "implicit", session_name=self._name
+            )
+            remaining = self._db.has_any_grant(agent_name, workspace_name)
+        except Exception as e:
+            output.warn(
+                f"rollback: failed to revoke implicit grant for agent "
+                f"'{agent_name}' on workspace '{workspace_name}': {e}"
+            )
+            return
+        if not remaining:
+            try:
+                from agentworks.agents.manager import _remove_from_workspace_group
+
+                # Re-read the VM row: the activation gate may have
+                # updated its Tailscale address since node construction.
+                vm_row = self._db.get_vm(self._vm.row.name) or self._vm.row
+                _remove_from_workspace_group(
+                    vm_row,
+                    self._config,
+                    self._db,
+                    self._agent.linux_user,
+                    workspace_name,
+                    logger=None,
+                )
+            except Exception as e:
+                output.warn(
+                    f"rollback: failed to remove agent '{agent_name}' from "
+                    f"workspace '{workspace_name}' group: {e}"
+                )
 
 
 def pending_session_node(
+    db: Database,
+    config: Config,
     name: str,
     template: ResolvedSessionTemplate,
     *,
@@ -308,7 +364,7 @@ def pending_session_node(
         admin=admin,
         vm_name=vm.row.name,
     )
-    return PendingSessionNode(name, check, agent, workspace, vm)
+    return PendingSessionNode(db, config, name, check, agent, workspace, vm)
 
 
 def live_session_node(
