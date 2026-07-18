@@ -253,6 +253,79 @@ def test_reinit_stopped_vm_gate_burst_seeds_the_whole_union(
     assert any("chmod 2770 /srv/ws1" in c for c in target.commands)
 
 
+def test_reinit_converges_git_identity_on_the_checkout(
+    db: Database,
+    make_config,  # noqa: ANN001
+    target: _FakeAdminTarget,
+    monkeypatch: pytest.MonkeyPatch,
+    captured_output,  # noqa: ANN001
+) -> None:
+    """A git identity declared on the template is stamped into the
+    checkout's repo-local config on reinit (the fake answers the rev-parse
+    repo probe ok, and the config --get probe empty, so both fields apply)."""
+    config = make_config(
+        '[workspace_templates.default]\n'
+        'git_user_name = "Ada Lovelace"\n'
+        'git_user_email = "ada@example.com"\n'
+    )
+    _seed(db)
+    _reachable(monkeypatch, True)
+
+    workspace_manager.reinit_workspace(db, config, "ws1")
+
+    assert any(
+        "git -C /srv/ws1 config user.name 'Ada Lovelace'" in c for c in target.commands
+    )
+    assert any(
+        "git -C /srv/ws1 config user.email ada@example.com" in c
+        for c in target.commands
+    )
+
+
+def test_reinit_skips_git_identity_when_not_a_repo(
+    db: Database,
+    make_config,  # noqa: ANN001
+    monkeypatch: pytest.MonkeyPatch,
+    captured_output,  # noqa: ANN001
+) -> None:
+    """Identity declared on a workspace that is not a git checkout is a
+    no-op: the rev-parse probe fails, so no git config write runs."""
+    import agentworks.workspaces.backends.vm  # noqa: F401
+
+    fake = _FakeAdminTarget(failing=("rev-parse",))
+    factory = lambda vm, config, **kwargs: fake  # noqa: E731
+    monkeypatch.setattr("agentworks.transports.transport", factory)
+    monkeypatch.setattr("agentworks.workspaces.backends.vm.transport", factory)
+
+    config = make_config(
+        '[workspace_templates.default]\ngit_user_name = "Ada Lovelace"\n'
+    )
+    _seed(db)
+    _reachable(monkeypatch, True)
+
+    workspace_manager.reinit_workspace(db, config, "ws1")
+
+    assert not any("config user.name" in c for c in fake.commands)
+
+
+def test_reinit_default_template_stamps_no_identity(
+    db: Database,
+    make_config,  # noqa: ANN001
+    target: _FakeAdminTarget,
+    monkeypatch: pytest.MonkeyPatch,
+    captured_output,  # noqa: ANN001
+) -> None:
+    """No identity declared (the bare default template): reinit emits no
+    git commands at all, not even the repo probe."""
+    config = make_config()
+    _seed(db)
+    _reachable(monkeypatch, True)
+
+    workspace_manager.reinit_workspace(db, config, "ws1")
+
+    assert not any(c.startswith("git ") for c in target.commands)
+
+
 def test_delete_reachable_vm_is_one_boundary_burst(
     db: Database,
     make_config,  # noqa: ANN001

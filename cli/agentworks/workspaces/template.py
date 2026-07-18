@@ -27,6 +27,8 @@ class WorkspaceTemplate:
     inherits: list[str] = field(default_factory=list)
     repo: str | None = None
     tmuxinator: bool | None = None  # None = not explicitly set (inherit/default to True)
+    git_user_name: str | None = None  # git user.name for commits in this workspace's repo
+    git_user_email: str | None = None  # git user.email for commits in this workspace's repo
     env: dict[str, EnvEntry] = field(default_factory=dict)
     declared_at: SourceLocation = field(default_factory=synthesized)
     origin: Origin | None = None

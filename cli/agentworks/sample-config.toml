@@ -315,6 +315,11 @@ ssh_private_key = "~/.ssh/id_ed25519"        # required: used for SSH connection
 #repo = "https://github.com/org/repo.git"  # git repo to clone into workspace
 #tmuxinator = true                          # generate tmuxinator config
 #inherits = []                              # list of parent template names
+# Optional git identity stamped into the cloned repo (repo-local config, so
+# it applies to any agent, the admin, or a human editing over VS Code Remote).
+# Only takes effect when `repo` is set. Omit to leave identity unset.
+#git_user_name = "Ada Lovelace"
+#git_user_email = "ada@example.com"
 
 #[workspace_templates.myproject]
 #repo = "https://github.com/org/myproject.git"
