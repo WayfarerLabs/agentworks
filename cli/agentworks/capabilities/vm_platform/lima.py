@@ -72,9 +72,14 @@ provision:
       set -eu
       for f in /etc/subuid /etc/subgid; do
         [ -e "$f" ] || continue
+        # Atomic replace: write the capped copy to a sibling temp with the
+        # same mode/owner, then rename over the original. A mid-stream awk
+        # failure leaves the original intact rather than truncated, and the
+        # rename is atomic within /etc (never a partially written subid file).
         awk -F: 'BEGIN{{OFS=":"}} $3+0>65536{{$3=65536}} {{print}}' "$f" >"$f.agw"
-        cat "$f.agw" >"$f"
-        rm -f "$f.agw"
+        chmod --reference="$f" "$f.agw"
+        chown --reference="$f" "$f.agw"
+        mv "$f.agw" "$f"
       done
   - mode: system
     script: |
