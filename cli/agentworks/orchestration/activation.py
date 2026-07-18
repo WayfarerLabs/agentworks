@@ -84,11 +84,15 @@ class GateTarget(Protocol):
 
     def repair_secret_refs(self) -> tuple[str, ...]:
         """The secret names only the post-start repair path needs (the
-        Tailscale rejoin auth key). Resolved LAZILY, on first read
-        inside ``auto_start``, never up front: whether repair is
-        needed is only knowable after the start, and today's oracle
-        (``vms.manager._ensure_tailscale``) deliberately does not
-        prompt every start for a key that is almost never used."""
+        Tailscale rejoin auth key). Everything about them is LAZY: the
+        gate consults this method, and resolves a name, only when the
+        repair path actually reads one inside ``auto_start``, never up
+        front. Whether repair is needed is only knowable after the
+        start, and today's oracle (``vms.manager._ensure_tailscale``)
+        deliberately does not prompt every start for a key that is
+        almost never used; the same laziness lets an implementation
+        derive the names from state (the VM's template) that the
+        healthy path never has to touch."""
         ...
 
     def confirmed_active(self) -> bool:
@@ -128,7 +132,10 @@ class _GateSecrets:
     from the gate's seed mapping, repair names resolved lazily on
     first read. Lazily-resolved values are recorded into the SAME
     mapping :func:`ensure_active` returns, so they reach the boundary
-    seed and nothing resolves or prompts twice.
+    seed and nothing resolves or prompts twice. Even the repair-name
+    DECLARATION is consulted lazily (on a read the eager set does not
+    cover), so an untaken repair path costs neither a resolve nor the
+    state lookup the declaration may need.
 
     Satisfies ``SecretReader``. Anything outside the declared gate and
     repair names is refused, same contract as
@@ -138,7 +145,7 @@ class _GateSecrets:
     def __init__(
         self,
         values: dict[str, str],
-        repair_names: frozenset[str],
+        repair_names: Callable[[], tuple[str, ...]],
         resolve_secret: Callable[[str], str],
     ) -> None:
         self._values = values
@@ -149,7 +156,7 @@ class _GateSecrets:
         existing = self._values.get(name)
         if existing is not None:
             return existing
-        if name in self._repair_names:
+        if name in self._repair_names():
             value = self._resolve_secret(name)
             self._values[name] = value
             return value
@@ -179,9 +186,7 @@ def ensure_active(
     values = {name: resolve_secret(name) for name in target.gate_secret_refs()}
     if target.observed_stopped(ScopedSecrets(values, values.keys())):
         target.auto_start(
-            _GateSecrets(
-                values, frozenset(target.repair_secret_refs()), resolve_secret
-            )
+            _GateSecrets(values, target.repair_secret_refs, resolve_secret)
         )
     return values
 
