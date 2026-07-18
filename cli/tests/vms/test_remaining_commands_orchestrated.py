@@ -152,3 +152,244 @@ def test_describe_scope_reaches_node_readiness(
     assert scope is not None
     assert scope.level is ScopeLevel.VM
     assert scope.vm == "box"
+
+
+# == rekey_vm: the template node beside the live VM; gate after boundary =====
+
+
+@pytest.fixture
+def _ts_key(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("AW_SECRET_TAILSCALE_AUTH_KEY", "tskey-new")
+
+
+def test_rekey_graph_roots_the_template_beside_the_live_vm(
+    db: Database, make_config, _ts_key: None  # noqa: ANN001
+) -> None:
+    """The rekey graph: the vm-template node roots FIRST (HEAD's
+    template-readiness-before-platform-preflight precedence), the live
+    VM beside it, and the union is the auth key plus the site's config
+    secret: the auth key IS this command's planned op, the contrast
+    with reinit's deliberate template exclusion."""
+    from agentworks.bootstrap import build_registry
+    from agentworks.orchestration.secrets import secret_union
+    from agentworks.orchestration.walk import walk
+    from agentworks.secrets.resolver import Resolver
+    from agentworks.vms.nodes import live_vm_node, vm_template_node
+    from agentworks.vms.templates import resolve_template
+
+    config = make_config()
+    _seed_vm(db)
+    vm = db.get_vm("box")
+    assert vm is not None
+    registry = build_registry(config)
+    resolver = Resolver(config, registry)
+
+    tmpl_node = vm_template_node(resolve_template(registry, vm.template), resolver)
+    vm_node = live_vm_node(db, config, registry, vm, resolver)
+    nodes = walk(tmpl_node, vm_node)
+
+    assert [n.key for n in nodes] == [
+        "vm-template/default",
+        "vm-site/proxmox",
+        "vm/box",
+    ]
+    assert secret_union(nodes) == ("tailscale-auth-key", "proxmox-token")
+
+
+def test_rekey_running_check_runs_after_the_resolve_boundary(
+    db: Database,
+    make_config,  # noqa: ANN001
+    _ts_key: None,
+    monkeypatch: pytest.MonkeyPatch,
+    captured_output,  # noqa: ANN001
+) -> None:
+    """The is-it-running check is an op (a backend status read; on
+    proxmox it needs the token), so it runs PAST the preflight
+    boundary: after the one resolve pass, never before. The trade (a
+    stopped-VM error lands after the prompt session) was ruled
+    preferable to a second prompt session, which the contract forbids.
+    A not-running VM errors HERE, before any gate: rekey never
+    auto-starts one."""
+    from agentworks.errors import StateError
+    from agentworks.secrets.resolver import Resolver
+
+    config = make_config()
+    _seed_vm(db)
+    order: list[str] = []
+
+    real_preflight = ProxmoxPlatform.preflight
+
+    def _spying_preflight(self: ProxmoxPlatform, ctx: RunContext) -> None:
+        order.append("preflight")
+        real_preflight(self, ctx)
+
+    monkeypatch.setattr(ProxmoxPlatform, "preflight", _spying_preflight)
+    monkeypatch.setattr(
+        ProxmoxPlatform,
+        "status",
+        lambda self, row: order.append("status") or VMStatus.STOPPED,
+    )
+    real_resolve = Resolver.resolve
+
+    def _spying_resolve(self: Resolver) -> None:
+        order.append("resolve")
+        real_resolve(self)
+
+    monkeypatch.setattr(Resolver, "resolve", _spying_resolve)
+
+    with pytest.raises(StateError, match="is not running"):
+        vm_manager.rekey_vm(db, config, "box")
+
+    # The boundary (preflight, then the one resolve pass) fully
+    # precedes the status op; nothing re-resolves afterwards.
+    assert order == ["preflight", "resolve", "status"]
+
+
+def test_rekey_unpredictable_key_fails_before_any_resolve_or_status(
+    db: Database,
+    make_config,  # noqa: ANN001
+    resolve_counter: list[list[str]],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The template node's relocated readiness check runs in the
+    preflight sweep: an unresolvable auth key bails BEFORE the resolve
+    pass and before any backend op (zero prompts, zero status reads),
+    exactly the delegate's old promise."""
+    from agentworks.errors import ConfigError
+
+    config = make_config('[secret_config]\nbackends = ["env-var"]\n')
+    _seed_vm(db)
+    monkeypatch.delenv("AW_SECRET_TAILSCALE_AUTH_KEY", raising=False)
+    events = _fake_status(monkeypatch, VMStatus.RUNNING)
+
+    with pytest.raises(ConfigError, match="not resolvable"):
+        vm_manager.rekey_vm(db, config, "box")
+
+    assert resolve_counter == []
+    assert events == []
+
+
+def _fake_rekey_transports(
+    monkeypatch: pytest.MonkeyPatch,
+) -> list[str]:
+    """Fake the rekey body's out-of-band transport work: the native
+    transport records the tailscale commands, the Tailscale-side
+    verification succeeds, and the per-step stabilization sleeps cost
+    nothing."""
+    from types import SimpleNamespace
+
+    from agentworks.transports import SSHTransport
+
+    commands: list[str] = []
+
+    def _run(cmd: str, **kwargs: object) -> object:
+        commands.append(cmd)
+        if cmd == "tailscale ip -4":
+            return SimpleNamespace(stdout="100.64.0.77\n", ok=True)
+        return SimpleNamespace(stdout="", ok=True)
+
+    native = SimpleNamespace(run=_run)
+    monkeypatch.setattr(
+        "agentworks.transports.native_transport",
+        lambda vm, platform, config, *, stack: native,
+    )
+    monkeypatch.setattr(
+        "agentworks.transports.transport",
+        lambda vm, config, **kwargs: SSHTransport(host="100.64.0.9"),
+    )
+    monkeypatch.setattr(
+        "agentworks.transports.wait_for_reconnect", lambda target: True
+    )
+    monkeypatch.setattr(
+        "agentworks.ssh_config.sync_ssh_config", lambda config, db: None
+    )
+    import time
+
+    monkeypatch.setattr(time, "sleep", lambda secs: None)
+    return commands
+
+
+def test_rekey_one_boundary_burst_covers_key_and_site_secret(
+    db: Database,
+    make_config,  # noqa: ANN001
+    _ts_key: None,
+    resolve_counter: list[list[str]],
+    monkeypatch: pytest.MonkeyPatch,
+    captured_output,  # noqa: ANN001
+) -> None:
+    """End to end on a running, reachable VM: ONE boundary burst covers
+    the new auth key AND the site's config secret (HEAD's single prompt
+    session), the gate's fast path costs nothing, the new key reaches
+    `tailscale up`, and the row records the new IP."""
+    config = make_config()
+    _seed_vm(db)
+    _reachable(monkeypatch, True)
+    events = _fake_status(monkeypatch, VMStatus.RUNNING)
+    commands = _fake_rekey_transports(monkeypatch)
+
+    vm_manager.rekey_vm(db, config, "box")
+
+    assert len(resolve_counter) == 1
+    assert sorted(resolve_counter[0]) == ["proxmox-token", "tailscale-auth-key"]
+    assert events == ["status"]
+    assert "tailscale up --auth-key tskey-new" in commands
+    row = db.get_vm("box")
+    assert row is not None and row.tailscale_host == "100.64.0.77"
+    assert any("rekeyed successfully" in m for m in captured_output.info)
+
+
+def test_rekey_gate_serves_the_boundary_cache(
+    db: Database,
+    make_config,  # noqa: ANN001
+    _ts_key: None,
+    resolve_counter: list[list[str]],
+    monkeypatch: pytest.MonkeyPatch,
+    captured_output,  # noqa: ANN001
+) -> None:
+    """Boundary-then-gate (HEAD's check-then-keep_active order): on a
+    running but unreachable VM the gate probes status again (as HEAD's
+    ensure_active did) but resolves NOTHING new: its callback serves
+    the boundary's cached values, so the whole command stays one
+    backend burst."""
+    config = make_config()
+    _seed_vm(db)
+    _reachable(monkeypatch, False)
+    events = _fake_status(monkeypatch, VMStatus.RUNNING)
+    _fake_rekey_transports(monkeypatch)
+
+    vm_manager.rekey_vm(db, config, "box")
+
+    assert len(resolve_counter) == 1
+    # The pre-gate running check, then the gate's own observation.
+    assert events == ["status", "status"]
+
+
+def test_rekey_scope_reaches_node_readiness(
+    db: Database,
+    make_config,  # noqa: ANN001
+    _ts_key: None,
+    monkeypatch: pytest.MonkeyPatch,
+    captured_output,  # noqa: ANN001
+) -> None:
+    from agentworks.capabilities.base import ScopeLevel
+
+    config = make_config()
+    _seed_vm(db)
+    _reachable(monkeypatch, True)
+    _fake_status(monkeypatch, VMStatus.RUNNING)
+    _fake_rekey_transports(monkeypatch)
+    scopes: list[OperationScope | None] = []
+    real = ProxmoxPlatform.preflight
+
+    def _recording(self: ProxmoxPlatform, ctx: RunContext) -> None:
+        scopes.append(ctx.operation_scope)
+        real(self, ctx)
+
+    monkeypatch.setattr(ProxmoxPlatform, "preflight", _recording)
+
+    vm_manager.rekey_vm(db, config, "box")
+
+    (scope,) = scopes
+    assert scope is not None
+    assert scope.level is ScopeLevel.VM
+    assert scope.vm == "box"

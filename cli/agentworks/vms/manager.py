@@ -1447,17 +1447,38 @@ def rekey_vm(
     expired ephemeral keys. Uses the platform's native transport
     (out-of-band) since Tailscale connectivity drops during
     the operation.
+
+    Orchestrated: the walk roots the VM-TEMPLATE node beside the live
+    VM node, because the new auth key IS this command's planned op
+    (the contrast with reinit, whose graph deliberately excludes the
+    template: there the key belongs only to the gate's conditional
+    repair path). The template's readiness (predict the key
+    resolvable) runs in the preflight sweep and the key joins the ONE
+    boundary resolve, mirroring HEAD's interleaved
+    preflight-then-single-resolve exactly; this migration is what
+    retired the ``preflight_vm_template`` delegate. The running check
+    stays past the boundary (a backend status read; on proxmox it
+    needs the token), and the activation gate opens AFTER it, exactly
+    where HEAD held ``keep_active``: a not-running VM errors before
+    any gate, so rekey never auto-starts one outside the same race
+    HEAD had.
     """
     import ipaddress
     import shlex
     import time
 
     from agentworks.bootstrap import build_registry
+    from agentworks.capabilities.base import OperationScope, ScopeLevel
+    from agentworks.orchestration.activation import activation_gate
+    from agentworks.orchestration.readiness import preflight_all
+    from agentworks.orchestration.secrets import secret_union
+    from agentworks.orchestration.walk import walk
     from agentworks.secrets.resolver import Resolver
     from agentworks.ssh import SSHError
     from agentworks.ssh_config import sync_ssh_config
     from agentworks.transports import native_transport, transport, wait_for_reconnect
-    from agentworks.vms.templates import preflight_vm_template, resolve_template
+    from agentworks.vms.nodes import live_vm_node, vm_template_node
+    from agentworks.vms.templates import resolve_template
 
     vm = _require_vm(db, name)
     _guard_failed_vm(vm)
@@ -1467,26 +1488,35 @@ def rekey_vm(
     # predicts the new auth key can resolve; the platform checks its
     # world), then the operation's one resolve pass: the new auth key
     # and any site secret (proxmox's API token) in a single prompt
-    # session. ``ignore_env`` is honored by temporarily masking the
-    # env-var backend for the auth-key secret (the env-var source reads
+    # session. The template node roots FIRST so the sweep keeps HEAD's
+    # precedence (template readiness before the platform preflight).
+    # ``ignore_env`` is honored by temporarily masking the env-var
+    # backend for the auth-key secret (the env-var source reads
     # ``os.environ`` at ``would_attempt`` time, so removing the var
     # skips it cleanly across BOTH the preflight prediction and the
     # resolve, and the prompt backend takes over).
     registry = build_registry(config)
     resolver = Resolver(config, registry)
-    platform = bind_platform(
-        config, vm, registry=registry, resolver=resolver, prepare=False
-    )
+    vm_node = live_vm_node(db, config, registry, vm, resolver)
     rekey_vm_tmpl = resolve_template(registry, vm.template)
+    tmpl_node = vm_template_node(rekey_vm_tmpl, resolver)
+    nodes = walk(tmpl_node, vm_node)
+    for secret_name in secret_union(nodes):
+        resolver.register_name(secret_name)
     ts_decl = resolver.register_name(rekey_vm_tmpl.tailscale_auth_key)
+    scope = OperationScope(
+        level=ScopeLevel.VM,
+        system_slug=db.get_setting(SYSTEM_SLUG_KEY) or None,
+        vm=name,
+    )
     with _mask_env_var_backend_for(ts_decl, masked=ignore_env):
-        preflight_vm_template(rekey_vm_tmpl, resolver)
-        platform.preflight(RunContext(config=config))
+        preflight_all(nodes, RunContext(config=config, operation_scope=scope))
         resolver.resolve()
     ts_auth_key = resolver.get(rekey_vm_tmpl.tailscale_auth_key)
 
     # The running check is an op (a backend status read), so it sits
     # past the boundary: on proxmox it needs the API token.
+    platform = vm_node.site.platform
     status = platform.status(vm)
     if status != VMStatus.RUNNING:
         raise StateError(
@@ -1498,10 +1528,18 @@ def rekey_vm(
     output.info(f"Rekeying '{name}'...")
 
     with contextlib.ExitStack() as _stack:
-        # Holds the VM in an active state for the duration of the rekey.
-        # No-op for Lima/Azure/Proxmox; WSL2 anchors the distro against
-        # vmIdleTimeout so per-step `time.sleep`s can't let it idle out.
-        _stack.enter_context(keep_active(db, config, vm, platform))
+        # The activation gate, opened AFTER the boundary at exactly the
+        # point HEAD held ``keep_active``: converge power state (a race
+        # from the running check above, as at HEAD), then hold for the
+        # rekey's duration (no-op for Lima/Azure/Proxmox; WSL2 anchors
+        # the distro against vmIdleTimeout so per-step `time.sleep`s
+        # can't let it idle out). Boundary-then-gate means the gate
+        # callback must SERVE the boundary's cached values, never
+        # resolve or seed (the batch-ops precedent): the union already
+        # covers the gate secrets AND the repair path's rejoin key (the
+        # auth key is this command's op secret), and ``Resolver.get``
+        # refuses anything outside it loudly.
+        _stack.enter_context(activation_gate(vm_node, resolver.get))
 
         # native_transport() composes transient_route (Azure attach /
         # detach via the polymorphic hook) with the platform-native
@@ -2005,17 +2043,15 @@ def _lookup_or_synthesize_secret(registry: Registry, name: str) -> SecretDecl:
     Registry, or synthesize a bare one matching the auto-declare shape
     if no Resource was published or auto-declared under that name.
 
-    Used by the Tailscale eager-resolve sites (``_collect_secrets`` for
-    ``vm create``, ``rekey_vm``, ``_ensure_tailscale``). All three need
-    the same fallback semantics: an operator who omits every
-    ``[vm_templates.*]`` section AND every ``[secrets.*]`` section
-    leaves the registry empty under the ``secret`` kind, so a strict
-    lookup raises ``KeyError``. Synthesizing a bare ``SecretDecl`` (the
-    same shape ``_SecretKind.synthesize`` would produce, minus
-    ``origin`` which resolution doesn't read) keeps the backend chain
-    callable. The Phase 2a ``VMTemplateKind`` will publish the default
-    template's references and make this fallback redundant for the
-    common case.
+    Used by ``_ensure_tailscale``'s imperative-caller late resolve (the
+    orchestrated callers moved onto ``Resolver.register_name``, which
+    carries the same fallback). The semantics: an operator who omits
+    every ``[vm_templates.*]`` section AND every ``[secrets.*]``
+    section leaves the registry empty under the ``secret`` kind, so a
+    strict lookup raises ``KeyError``. Synthesizing a bare
+    ``SecretDecl`` (the same shape ``_SecretKind.synthesize`` would
+    produce, minus ``origin`` which resolution doesn't read) keeps the
+    backend chain callable.
     """
     from agentworks.secrets.base import SecretDecl
     from agentworks.secrets.kinds import SECRET_KIND_NAME

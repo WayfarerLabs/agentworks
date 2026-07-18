@@ -16,7 +16,6 @@ if TYPE_CHECKING:
     from agentworks.env import EnvEntry
     from agentworks.resources.reference import ResourceReference
     from agentworks.resources.registry import Registry
-    from agentworks.secrets.resolver import Resolver
     from agentworks.vms.template import VMTemplate
 
 
@@ -129,23 +128,6 @@ def resolve_template(registry: Registry, template_name: str | None = None) -> Re
     from agentworks.resources.access import kind_dict
 
     return resolve_from_dict(kind_dict(registry, "vm-template"), template_name)
-
-
-def preflight_vm_template(tmpl: ResolvedVMTemplate, resolver: Resolver) -> None:
-    """The vm-template's readiness check: its Tailscale auth key must
-    be predicted resolvable, without prompting. Registers the
-    declaration on the resolver so the operation's one resolve pass
-    covers it.
-
-    The check's body lives on the vm-template NODE
-    (``vms.nodes.VMTemplateNode.preflight``), where every readiness
-    check now has its one home; this thin delegate serves the
-    not-yet-migrated callers (``rekey_vm``) and retires with them.
-    """
-    from agentworks.capabilities.base import RunContext
-    from agentworks.vms.nodes import vm_template_node
-
-    vm_template_node(tmpl, resolver).preflight(RunContext())
 
 
 def _append_dedupe(target: list[str], source: list[str]) -> list[str]:
