@@ -36,10 +36,22 @@ Three properties are load-bearing:
   boundary pass: narrow, known names, resolved through the normal
   backend chain, entirely pre-walk-away, and skipped altogether on the
   fast path (a confirmed-active VM costs no resolution and no
-  interaction). The resolved values are returned to the orchestrator
-  so they can SEED the boundary pass and no secret resolves or prompts
-  twice in one command (the seeding path itself is designed with the
-  first migrated caller; see the plan, Phase 1).
+  interaction). The two cases resolve at DIFFERENT moments, matching
+  HEAD (``vms.manager._ensure_tailscale``'s documented
+  conditional-need exception): the observe/start credentials
+  (:meth:`GateTarget.gate_secret_refs`) resolve eagerly once the fast
+  path fails, while the repair secrets
+  (:meth:`GateTarget.repair_secret_refs`) resolve LAZILY, on first
+  read by the repair path, because whether a rejoin (and therefore a
+  new key) is needed is only knowable after starting the VM and
+  watching it fail to reconnect; resolving eagerly would prompt every
+  start for a key that is almost never used. Either way the node only
+  reads from a reader the gate handed it (declare/receive holds) and
+  resolution stays orchestrator-owned. Everything resolved, eager or
+  lazy, lands in the values the gate returns, so the orchestrator can
+  SEED the boundary pass and no secret resolves or prompts twice in
+  one command (the seeding path itself is designed with the first
+  migrated caller; see the plan, Phase 1).
 """
 
 from __future__ import annotations
@@ -47,6 +59,7 @@ from __future__ import annotations
 import contextlib
 from typing import TYPE_CHECKING, Protocol
 
+from agentworks.errors import StateError
 from agentworks.orchestration.secrets import ScopedSecrets
 
 if TYPE_CHECKING:
@@ -64,9 +77,18 @@ class GateTarget(Protocol):
     """
 
     def gate_secret_refs(self) -> tuple[str, ...]:
-        """The narrow secret names this target's power-state ops need:
-        the platform API credential to observe/start, plus the rejoin
-        repair secret where applicable."""
+        """The secret names this target's observe/start ops need (the
+        platform API credential). Resolved EAGERLY, once, when the
+        fast path cannot confirm the target active."""
+        ...
+
+    def repair_secret_refs(self) -> tuple[str, ...]:
+        """The secret names only the post-start repair path needs (the
+        Tailscale rejoin auth key). Resolved LAZILY, on first read
+        inside ``auto_start``, never up front: whether repair is
+        needed is only knowable after the start, and today's oracle
+        (``vms.manager._ensure_tailscale``) deliberately does not
+        prompt every start for a key that is almost never used."""
         ...
 
     def confirmed_active(self) -> bool:
@@ -87,10 +109,11 @@ class GateTarget(Protocol):
     def auto_start(self, gate_secrets: SecretReader) -> None:
         """Start an auto-stopped target, including any post-start
         reachability repair (the Tailscale rejoin path, with its
-        reusable-key messaging). The node re-reads its
-        operator-stopped intent here and REFUSES a manually stopped
-        target with a typed error and the explicit-start hint: the
-        node, not the helper, is the authority."""
+        reusable-key messaging; its secrets arrive through
+        ``gate_secrets`` and resolve on first read). The node re-reads
+        its operator-stopped intent here and REFUSES a manually
+        stopped target with a typed error and the explicit-start hint:
+        the node, not the helper, is the authority."""
         ...
 
     def hold_active(self) -> contextlib.AbstractContextManager[None]:
@@ -98,6 +121,44 @@ class GateTarget(Protocol):
         mechanism (the ``vm_active`` span); a no-op context for
         platforms with nothing to hold."""
         ...
+
+
+class _GateSecrets:
+    """The reader ``auto_start`` receives: eager gate values served
+    from the gate's seed mapping, repair names resolved lazily on
+    first read. Lazily-resolved values are recorded into the SAME
+    mapping :func:`ensure_active` returns, so they reach the boundary
+    seed and nothing resolves or prompts twice.
+
+    Satisfies ``SecretReader``. Anything outside the declared gate and
+    repair names is refused, same contract as
+    :class:`~agentworks.orchestration.secrets.ScopedSecrets`.
+    """
+
+    def __init__(
+        self,
+        values: dict[str, str],
+        repair_names: frozenset[str],
+        resolve_secret: Callable[[str], str],
+    ) -> None:
+        self._values = values
+        self._repair_names = repair_names
+        self._resolve_secret = resolve_secret
+
+    def get(self, name: str) -> str:
+        existing = self._values.get(name)
+        if existing is not None:
+            return existing
+        if name in self._repair_names:
+            value = self._resolve_secret(name)
+            self._values[name] = value
+            return value
+        raise StateError(
+            f"secret {name!r} was not declared as a gate or repair "
+            f"secret by this activation target, so it is not delivered "
+            f"to it (the declare/receive contract); declare it in "
+            f"gate_secret_refs or repair_secret_refs."
+        )
 
 
 def ensure_active(
@@ -108,15 +169,20 @@ def ensure_active(
     Fast path first (no secret touched); otherwise resolve the
     target's gate secrets just-in-time and drive observe-then-start,
     with the operator-stopped refusal raised from the node's own
-    ``auto_start``. Returns the gate-resolved values (empty on the
-    fast path) for the orchestrator to seed the boundary pass with.
+    ``auto_start`` and the repair secrets resolving lazily only if the
+    repair path reads them. Returns every gate-resolved value, eager
+    and lazy alike (empty on the fast path), for the orchestrator to
+    seed the boundary pass with.
     """
     if target.confirmed_active():
         return {}
     values = {name: resolve_secret(name) for name in target.gate_secret_refs()}
-    reader = ScopedSecrets(values, values.keys())
-    if target.observed_stopped(reader):
-        target.auto_start(reader)
+    if target.observed_stopped(ScopedSecrets(values, values.keys())):
+        target.auto_start(
+            _GateSecrets(
+                values, frozenset(target.repair_secret_refs()), resolve_secret
+            )
+        )
     return values
 
 
