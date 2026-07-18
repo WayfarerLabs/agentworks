@@ -253,7 +253,24 @@ realization choreography and the two orchestrators.
       deletes through the VM's bound platform), with the reverse-order oracle test proving
       agent-before-workspace. The SESSION `OperationScope` level rules landed with this box
       (requires vm/workspace/session, exactly one of agent/admin); WORKSPACE and AGENT stay
-      non-constructible until their commands.)
+      non-constructible until their commands.) (Two further records, review round 2026-07-17: the
+      SESSION-TEMPLATE node the HLA walkthrough lists is DEFERRED, not built: its only candidate
+      readiness lives on the held required-commands check, and session env secrets ride the
+      SecretTarget seam the push-two orchestrator keeps, so the node would be inert; it emerges if
+      push two finds it forced, and the HLA carries the matching as-landed note. RULING: factories
+      that internally construct their deps (`agent_template_node`'s credentials, `live_vm_node`'s
+      site) may do so only while single-consumer; the first graph that reaches one such node from
+      two factories moves construction up to the orchestrator, because handed-in nodes ARE the
+      memo.)
+- [ ] Push two parity carries (review round 2026-07-17):
+  - [ ] restart parity asserts the required-commands probe fired AT PREFLIGHT, before the kill
+        (matching HEAD's pre-kill guard), not merely "fired once";
+  - [ ] an explicit session-teardown parity test lands with the orchestrators, so the pending
+        session node's `NotImplementedError` placeholder cannot survive them (the unwind's
+        warn-and-continue would otherwise swallow it silently);
+  - [ ] when the imperative `_assert_required_commands` retires, its docstring knowledge (the no-PTY
+        "no job control" stderr note and the TTY-gated-PATH residual gap) migrates onto the check's
+        probe documentation.
 - [ ] The PHASE-FREE realization choreography per creatable kind (the agent-realization body: agent
       ops plus the git-credential nodes' materials ops), factored as domain code with no phases and
       no resolve of its own, replacing the `git_tokens` + `own_root` nesting hack.

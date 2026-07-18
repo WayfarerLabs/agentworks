@@ -483,8 +483,11 @@ Two walkthroughs make it concrete.
    that each HOLD a provider instance, plus the VM node); PENDING session node holding its harness
    INSTANCE (constructed with the CHOSEN session name and the pending agent node as target), with
    deps on agent, workspace, VM, and its resolved session-template node (exactly as the vm-template
-   hangs off a pending VM). Names are chosen up front, so every node's identity is complete while it
-   is still pending. The walk roots at the pending session node, the command's one target.
+   hangs off a pending VM). (As landed, 2026-07-17: the session-template NODE is deferred; the
+   template's only readiness lives on the held required-commands check and its env secrets ride the
+   env-target seam, so the node would be inert. It emerges if the orchestrator push forces it.)
+   Names are chosen up front, so every node's identity is complete while it is still pending. The
+   walk roots at the pending session node, the command's one target.
 2. OPEN THE ACTIVATION GATE (span, held through the command): converge the existing VM's power state
    (maintenance; refuse if operator-stopped; just-in-time gate secrets if needed; hold active for
    platforms that require it), so preflight probes a live target.
