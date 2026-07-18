@@ -3,8 +3,8 @@ refusal, span open/close, the just-in-time gate-secret resolve, and
 the lazy repair-secret resolve.
 
 The fake target plays the live VM node's power-state surface
-(``GateTarget``); the oracle semantics are today's
-``vms.manager.ensure_active`` / ``keep_active``.
+(``GateTarget``); the oracle semantics are the ones the now-retired
+imperative ``vms.manager.ensure_active`` / ``keep_active`` pair carried.
 """
 
 from __future__ import annotations

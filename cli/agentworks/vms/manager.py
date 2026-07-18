@@ -197,104 +197,6 @@ def _resolve_system_slug(db: Database) -> str | None:
     return answer
 
 
-def ensure_active(
-    db: Database,
-    config: Config,
-    vm: VMRow,
-    platform: VMPlatform,
-    ctx: RunContext,
-) -> None:
-    """Respect a manual stop; otherwise start on demand.
-
-    With :func:`keep_active` this is the imperative activation-gate
-    pair. Every command root has migrated onto the orchestrated gate
-    (``orchestration.activation``); :func:`keep_active` is the pair's
-    only remaining caller (see its docstring for the recorded interim
-    holds), and both retire with those holds.
-
-    Fast path: a Tailscale reachability probe (cheap, no cloud API)
-    short-circuits the common case, keeping backend round trips off the
-    per-op hot path, EXCEPT when the row already says manually
-    stopped: pinging a stopped VM burns the probe's full timeout just
-    to reach the refusal, so the likely-stopped case asks the backend
-    directly (an out-of-band start still proceeds via the observed
-    RUNNING). ``platform`` is the BOUND platform from the caller's
-    already-run composition root, and ``ctx`` that composition's
-    op-start context (the platform's power ops read any op secret via
-    ``ctx.secret``, scoped delivery, the same as everywhere else).
-    """
-    if (
-        not vm.operator_stopped
-        and vm.tailscale_host
-        and _is_tailscale_reachable(vm.tailscale_host)
-    ):
-        return
-    observed = platform.status(vm, ctx)
-    if observed in (VMStatus.STOPPED, VMStatus.DEALLOCATED):
-        # Re-read the intent flag: the caller-loaded row may predate a
-        # concurrent `vm stop`/`vm start` in another terminal, and
-        # auto-restarting a VM the operator just stopped is the one
-        # mistake this flag exists to prevent. The slow path already
-        # paid a backend status() round trip; one DB read is cheap
-        # next to it.
-        current = db.get_vm(vm.name)
-        manually_stopped = (
-            current.operator_stopped if current else vm.operator_stopped
-        )
-        if manually_stopped:
-            raise StateError(
-                f"VM '{vm.name}' was manually stopped so it will not be "
-                f"auto-started",
-                entity_kind="vm",
-                entity_name=vm.name,
-                hint=f"start it with: agw vm start {vm.name}",
-            )
-        output.info(f"VM '{vm.name}' is {observed.value}. Starting...")
-        platform.start(vm, ctx)
-        # Hold while tailscaled reattaches: a freshly booted WSL2
-        # distro must not idle out during the handshake wait.
-        with platform.vm_active(vm, config=config):
-            _ensure_tailscale(db, config, vm, platform)
-    # RUNNING or UNKNOWN: proceed. A transient status failure must not
-    # trigger a spurious start; the op will surface the real error.
-
-
-@contextlib.contextmanager
-def keep_active(
-    db: Database,
-    config: Config,
-    vm: VMRow,
-    platform: VMPlatform,
-    ctx: RunContext,
-) -> Iterator[None]:
-    """Gate (:func:`ensure_active`), then hold (``vm_active``) for the
-    context's duration.
-
-    Takes the BOUND platform from the caller's already-run composition
-    root (binding may need resolved config secrets, which only that
-    root's single resolve pass has) plus that composition's op-start
-    ``ctx`` for the gate's power ops. WSL2's ``vm_active`` spawns a
-    keepalive subprocess anchoring the distro against
-    ``vmIdleTimeout``; the other platforms' default hold is a no-op.
-
-    The recorded INTERIM callers, each a handed-in-platform hold
-    inside an orchestrated caller's composition (rebuilding a boundary
-    there would re-resolve mid-command), and the reason this pair
-    outlives the resolver retirement's caller drain:
-
-    - the nested-teardown paths (``agents.manager.delete_agent`` /
-      ``workspaces.manager.delete_workspace`` with ``platform=`` from
-      a pending node's rollback), closing when the session-create
-      unwind hands a node instead of a platform;
-    - ``vms.initializer.initialize_vm``'s whole-init hold (the
-      platform handed in from ``create_vm``'s composition root; the
-      initializer internals are still imperative and hold no node).
-    """
-    ensure_active(db, config, vm, platform, ctx)
-    with platform.vm_active(vm, config=config):
-        yield
-
-
 def create_vm(
     db: Database,
     config: Config,
@@ -486,9 +388,8 @@ def create_vm(
         swap_gib=vm_tmpl.swap,
     )
 
-    # The op-start context for the platform's ops (create here; the
-    # initializer's keep_active hold below): secrets scoped to the
-    # site's declared names.
+    # The op-start context for the platform's create op: secrets scoped
+    # to the site's declared names.
     platform_ctx = scoped_ctx(site_node.secret_refs())
 
     output.detail(f"Creating VM '{vm_name}' on vm-site '{site}'...")
@@ -531,6 +432,15 @@ def create_vm(
         assert refreshed is not None
         platform_obj.post_tailscale_ready(refreshed)
 
+    # The keepalive hold for the whole init span, built at this
+    # composition root and handed down: WSL2 anchors its distro against
+    # idle shutdown between Phase A (wsl.exe transport) and Phase B
+    # (Tailscale SSH); the other platforms' hold is a no-op. The VM was
+    # just provisioned and is running, so no power-state convergence is
+    # threaded, only the hold-span.
+    init_row = db.get_vm(vm_name)
+    assert init_row is not None, "create_vm inserted the row before init"
+
     try:
         initialize_vm(
             db,
@@ -542,7 +452,7 @@ def create_vm(
             exec_target=result.native_transport,
             providers=providers,
             platform=platform_obj,
-            platform_ctx=platform_ctx,
+            hold_active=platform_obj.vm_active(init_row, config=config),
             admin_username=resolved_admin_username,
             tailscale_auth_key=tailscale_auth_key,
             git_tokens=git_tokens,

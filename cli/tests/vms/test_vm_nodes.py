@@ -1,7 +1,9 @@
-"""The live VM node's gate surface: parity with the imperative oracle
-(``vms.manager.ensure_active`` / ``keep_active``, whose semantics these
-tests mirror case for case; see ``test_ensure_active.py``), driven
-through the orchestration gate helper the migrated command uses.
+"""The live VM node's gate surface, driven through the orchestration
+gate helper every command uses. These cases mirror the power-state
+semantics the retired imperative ``vms.manager.ensure_active`` /
+``keep_active`` pair once carried (fast-path skip, auto-resume,
+operator-stopped refusal and its race re-read, out-of-band running,
+deallocated, unknown, and the held span).
 """
 
 from __future__ import annotations
@@ -28,8 +30,7 @@ if TYPE_CHECKING:
 
 
 class _GatePlatform:
-    """Recording platform double (same shape as the ensure_active
-    oracle tests')."""
+    """Recording platform double for the gate tests."""
 
     name = "stub"
 

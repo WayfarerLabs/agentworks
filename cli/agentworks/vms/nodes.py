@@ -103,8 +103,9 @@ class LiveVMNode:
     """A live VM, constructed from its DB row: a ``Node`` (its ``site``
     row field is its edge to the ``vm-site`` node) and the activation
     gate's ``GateTarget`` (the power-state ops the gate drives, exactly
-    the semantics of the imperative ``vms.manager.ensure_active``, the
-    parity oracle). Built by :func:`live_vm_node`.
+    the semantics the now-retired imperative ``vms.manager.ensure_active``
+    once carried, the migration's parity oracle). Built by
+    :func:`live_vm_node`.
 
     An already-existing VM has no pre- or post-resolve readiness of its
     own, so both stages are no-ops; its participation is its identity,
