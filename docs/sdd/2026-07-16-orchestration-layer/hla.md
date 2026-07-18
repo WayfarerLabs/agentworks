@@ -372,7 +372,8 @@ level):
 correcting this table's sketch. Agents are VM-scoped in the current model (`agents.vm_name`; a
 workspace relationship is a grant, never identity), so `agent create` / `reinit` have no workspace
 to put in the chain; a future workspace-rooted agent operation re-rules the field when it migrates.
-WORKSPACE remains non-constructible until its command lands.)
+The WORKSPACE row landed as sketched with `workspace create`'s migration (vm + workspace required;
+agent, session forbidden), needing no correction.)
 
 The level is the operation's, one per command, NOT per node (my repeated mistake; corrected). Its
 DEPTH varies by command, so a batch `keep_actives` over N VMs is only SYSTEM level with each VM's

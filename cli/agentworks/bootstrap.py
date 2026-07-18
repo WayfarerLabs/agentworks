@@ -10,12 +10,11 @@ them. Registry stays publisher-agnostic; Config stays unaware of the
 others.
 
 ``build_registry`` is a pure function: no memo, no cache. Each
-composition root calls it once and threads the registry down. Nested
-service entries are their own composition units -- ``session create
---new-workspace/--new-agent`` invokes ``create_workspace`` /
-``create_agent``, each of which builds its own registry (and the
-manifest warnings repeat accordingly; config-load-scale work, no
-backend calls). Tests and multi-source orchestration can assemble
+composition root calls it once and threads the registry down; the
+orchestrated ``session create --new-workspace/--new-agent`` realizes
+its ephemeral workspace and agent through the shared realize bodies
+against the one registry it built, so no nested root builds a second
+one. Tests and multi-source orchestration can assemble
 Registry by hand with ``Registry.empty()`` + explicit ``publish_to``
 calls + ``finalize``.
 """
