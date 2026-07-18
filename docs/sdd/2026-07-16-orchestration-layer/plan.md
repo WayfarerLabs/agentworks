@@ -793,20 +793,83 @@ Goal: migrate the rest opportunistically, then remove the now-dead per-instance 
       undeclared-outside-union refusal pin driven through the real composition with a node-level
       `gate_secret_refs` patch); `tests/test_secrets_eager_resolve.py` re-seamed to the
       context-manager stub shape, assertions preserved.
-- [ ] The remaining un-migrated commands, each a green shippable unit, drawn from the still-open
-      catalog above: `rekey_vm` (its migration retires `preflight_vm_template`), `port_forward_vm`,
-      `backup_vm`, `initialize_vm`'s share-wait hold, and `describe_vm` (decide-or-record:
-      read-only, may close as never-migrates under the no-over-orchestration ruling). RIDER: the
-      agent-op callers of `gated_vm_boundary` (agent shell / exec / delete / grant / revoke) still
-      ride its VM-level default; under the recorded
-      pass-the-level-of-the-entity-the-command-is-about rule they owe an AGENT-level lift, landing
-      with the resolver-retirement sweep (the sessions seam did not touch them).
+- [x] The last straggler commands orchestrated (2026-07-18), five green shippable units draining the
+      still-open catalog to EMPTY: `describe_vm`, `rekey_vm` (the seam that retires
+      `preflight_vm_template`), `port_forward_vm`, `backup_vm`, and the machinery drain. PER-COMMAND
+      RULINGS: `describe_vm` binds without gating at HEAD (site secrets resolved for read-only
+      platform API reads, never a power converge), so its decide-or-record option resolved to
+      MIGRATE onto the no-gate `_live_vm_boundary` (which gains keyword-only `registry` so
+      describe's early degrade-friendly site lookup shares one registry build; never-migrates would
+      have kept `bind_platform` alive for one caller and blocked the drain): behavior verbatim
+      (typed boundary failures degrade to the warn-and-render-row path, UserAbort still aborts, the
+      status read is the op, an operator-stopped VM renders "(manual)" and never starts).
+      `port_forward_vm` and `backup_vm` gate at HEAD (`keep_active` around the foreground tunnel /
+      the whole snapshot-archive-transfer body), so both join `gated_vm_boundary` at the VM-level
+      default scope with no env-chain targets; validation (port specs and ranges, backup's
+      deterministic fatal guards) stays pre-gate with zero prompts, zero resolves, zero gate events
+      on a refusal. REKEY: the walk roots the VM-TEMPLATE node FIRST beside the live VM node (root
+      order preserves HEAD's template-readiness-before-platform-preflight precedence), because the
+      new auth key IS this command's planned op, the deliberate contrast with reinit (whose graph
+      excludes the template: there the key belongs only to the gate's conditional repair path); the
+      relocated readiness check runs in the preflight sweep, the key joins the ONE boundary resolve
+      (HEAD's interleaved preflight-then-single-resolve exactly, with `--ignore-env` masking
+      wrapping sweep plus resolve as before), the running check stays past the boundary, and the
+      activation gate opens AFTER it, exactly where HEAD held `keep_active`; boundary-then-gate
+      means the gate callback SERVES the boundary cache (`Resolver.get`, the batch-ops precedent:
+      out-of-union names refuse loudly, and the repair key is IN this union because it is the op
+      secret), so nothing resolves or prompts twice. `preflight_vm_template` RETIRED: rekey was its
+      last production caller (grep confirmed; doctor is preflight-only against sites and tokens and
+      never called it), the delegate is deleted from `vms/templates.py`, and its test callers
+      re-seam onto `vm_template_node(...).preflight` / `VMTemplateNode`'s source. HOLD-ONLY RECORD:
+      `initialize_vm`'s whole-init (share-wait) hold STAYS the imperative `keep_active` on the
+      platform handed in from `create_vm`'s orchestrated composition root, the recorded honest
+      outcome: the initializer internals are still imperative and hold no node, and rebuilding a
+      boundary there would re-resolve mid-command; recorded inline at the hold and in
+      `keep_active`'s docstring, retiring when the initializer internals orchestrate. R7: NO shifts
+      for describe (no-gate: the boundary sits exactly where the imperative bind's
+      preflight-then-resolve sat, the sweep adding only the live node's no-op readiness) and NONE
+      for rekey (boundary, running check, and gate all sit at HEAD's own points; the sanctioned
+      gate-before-boundary shift does not occur because rekey's gate was already after its
+      boundary); port-forward and backup carry the one sanctioned pre-walk-away shift every gated
+      seam records (the gate opens before the sweep and resolve where HEAD bound first and gated
+      after; same single burst, the gate's values seeding the boundary). MACHINERY DRAIN:
+      `bind_platform` lost its last production caller and is DELETED, taking
+      `vms.sites.platform_for` (whose only production caller it was) with it; `ensure_active` /
+      `keep_active` REMAIN with exactly three recorded interim callers, the delete_agent /
+      delete_workspace nested-teardown paths (closing with the session-create unwind) and the
+      initializer hold above, with ensure_active surviving as keep_active's implementation;
+      `tests/conftest.py` `stub_vm_gates` drops the dead bind patch and the leak sentinel re-points
+      to `keep_active`. STILL-OPEN CATALOG entries CLOSED: `vms/manager.py` `describe_vm`,
+      `rekey_vm`, `port_forward_vm`; `vms/backup.py` `backup_vm`; `vms/initializer.py` the
+      share-wait hold (closed BY RECORD). The catalog is EMPTY: nothing remains before the resolver
+      retirement below. Where proven: `tests/vms/test_remaining_commands_orchestrated.py`
+      (describe's one-burst, never-gates, and "(manual)" pins; rekey's graph pin with the template
+      root and key-plus-token union, the relocated boundary-then-status order pin (formerly
+      `test_rekey_boundary.py`, assertion preserved), the unpredictable-key bail with zero resolves
+      and zero status reads, the end-to-end one-burst run, and the serves-the-cache gate pin;
+      port-forward and backup gate-prompt parity on reachable and stopped VMs with their pre-gate
+      refusals; every command's VM scope reaching readiness); `tests/vms/test_live_vm_boundary.py`
+      (the renamed `test_bind_platform.py`, re-seamed onto the orchestrated roots, all four
+      assertions preserved incl. the env-target one-pass pin now driven through
+      `gated_vm_boundary`); re-seamed with assertions preserved: `tests/vms/test_describe_vm.py`
+      (onto `resolve_site`), `tests/vms/test_backup_vm.py`,
+      `tests/test_vm_create_tailscale_eager_resolve.py`, `tests/test_secrets_eager_resolve.py` (the
+      hermeticity source walk now inspects `VMTemplateNode`), `tests/test_vm_shell_provisioner.py`
+      (stub platforms handed straight to `native_transport`), `tests/vms/test_sites_dispatch.py`
+      (the dispatch pin re-pointed to `resolve_site`).
 - [ ] RESOLVER RETIREMENT once no migrated command depends on the bound resolver: drop the
-      `resolver` constructor parameter from `Capability`; close the `preflight_vm_template` resolver
-      seam (prediction is central now); kill proxmox's op-client bridge so `_api` reads the token
-      from the context (`ctx.secret`) rather than the bound resolver, completing PR #182's
-      direction. The caller inventory to drain first is the vm-lifecycle seam box's still-open seam
-      catalog above.
+      `resolver` constructor parameter from `Capability`; close the `VMTemplateNode` held-resolver
+      prediction seam (prediction is central now; the `preflight_vm_template` delegate itself is
+      already deleted); kill proxmox's op-client bridge so `_api` reads the token from the context
+      (`ctx.secret`) rather than the bound resolver, completing PR #182's direction. The
+      caller-inventory drain is DONE: the still-open catalog above is EMPTY, and the only imperative
+      gate use left is `keep_active`'s three recorded interim holds (the delete_agent /
+      delete_workspace nested-teardown paths and `initialize_vm`'s share-wait hold), which are not
+      resolver seams and retire on their own recorded schedules. RIDER carried from the straggler
+      seam: the agent-op callers of `gated_vm_boundary` (agent shell / exec / delete / grant /
+      revoke) still ride its VM-level default; under the recorded
+      pass-the-level-of-the-entity-the-command-is-about rule they owe an AGENT-level lift, landing
+      with this sweep.
 
 Definition of done: every command orchestrated; `Capability` constructs without a resolver; proxmox
 ops read the context; the full suite green.
