@@ -4,6 +4,7 @@
   "words": [
     "abstractmethod",
     "alnum",
+    "checkpointing",
     "contextlib",
     "contextmanager",
     "declarable",
