@@ -24,9 +24,11 @@ from agentworks.errors import (
     ValidationError,
 )
 from agentworks.transports import transport
-from agentworks.vms.manager import bind_platform, gated_vm_boundary, keep_active
+from agentworks.vms.manager import gated_vm_boundary, keep_active
 
 if TYPE_CHECKING:
+    from contextlib import AbstractContextManager
+
     from agentworks.capabilities.vm_platform import VMPlatform
     from agentworks.config import Config
     from agentworks.db import AgentRow, Database, VMRow, WorkspaceRow
@@ -363,10 +365,24 @@ def delete_agent(
 ) -> None:
     """Delete an agent from a VM.
 
+    Orchestrated on the standalone path (``platform=None``, the
+    command root and ``delete_session``'s agent-cleanup call):
+    ``vms.manager.gated_vm_boundary`` composes the live-VM graph (no
+    env-chain targets; this command composes no runtime env), the
+    activation gate replaces this command's ``keep_active``, opening
+    BEFORE the preflight sweep with its just-in-time values seeding
+    the boundary resolver, and the held-active span covers the
+    session-kill and user-removal SSH work. The sessions guard, the
+    confirm gate, and the not-found check stay pre-boundary: a
+    refusal costs zero prompts, zero resolves, and zero gate events.
+
     ``platform`` accepts the caller's already-bound platform (session
-    create's ephemeral ROLLBACK path) so a failed create on a
-    secret-bearing site doesn't re-run the resolve pass mid-rollback;
-    when None this function is its own composition root and binds once.
+    create's ephemeral ROLLBACK path, where teardown runs INSIDE the
+    caller's held gate span): that path must not rebuild a boundary
+    or re-run the resolve pass mid-rollback, so it keeps the
+    imperative ``keep_active`` hold on the handed-in platform. This
+    is the INTERIM nested-teardown seam; it closes when the
+    session-create unwind hands a node instead of a platform.
     """
     agent = db.get_agent(name)
     if agent is None:
@@ -402,8 +418,19 @@ def delete_agent(
     ssh_logger = SSHLogger(vm.name, "agent-delete")
     output.info(f"Deleting agent '{name}' on VM '{vm.name}'...")
     if platform is None:
-        platform = bind_platform(config, vm)
-    with keep_active(db, config, vm, platform):
+        # The standalone composition root: build the boundary here.
+        from agentworks.bootstrap import build_registry
+
+        registry = build_registry(config)
+        boundary: AbstractContextManager[object] = gated_vm_boundary(
+            db, config, registry, vm
+        )
+    else:
+        # The nested-teardown path: the caller's composition already
+        # resolved and holds its gate open, so only the hold is
+        # re-entered (never a second boundary or resolve).
+        boundary = keep_active(db, config, vm, platform)
+    with boundary:
 
         # Kill running sessions for this agent (status-aware)
         if agent_sessions:

@@ -205,7 +205,6 @@ _GATE_MODULES = (
     "agentworks.vms.backup",
     "agentworks.workspaces.manager",
     "agentworks.agents.manager",
-    "agentworks.agents.grants",
     "agentworks.sessions.manager",
     "agentworks.sessions.multi_console",
     "agentworks.sessions.console",

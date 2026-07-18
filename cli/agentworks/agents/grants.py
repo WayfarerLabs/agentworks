@@ -18,7 +18,7 @@ from typing import TYPE_CHECKING
 from agentworks import output
 from agentworks.errors import NotFoundError, ValidationError
 from agentworks.transports import transport
-from agentworks.vms.manager import bind_platform, keep_active
+from agentworks.vms.manager import gated_vm_boundary
 
 if TYPE_CHECKING:
     from agentworks.config import Config
@@ -47,7 +47,17 @@ def grant_workspaces(
     workspace_names: list[str],
     grant_all: bool = False,
 ) -> None:
-    """Grant an agent explicit access to workspaces."""
+    """Grant an agent explicit access to workspaces.
+
+    Orchestrated (``vms.manager.gated_vm_boundary``): the graph is the
+    live VM alone, no env-chain targets register (this command
+    composes no runtime env), the activation gate replaces this
+    command's ``keep_active`` (opening BEFORE the preflight sweep; its
+    just-in-time values seed the boundary resolver), and the
+    held-active span covers the group-membership SSH work. The
+    empty-request and unknown-agent validations stay pre-gate: they
+    fail with zero prompts and zero VM starts.
+    """
     if not grant_all and not workspace_names:
         raise ValidationError(
             f"grant for '{agent_name}' needs at least one workspace name "
@@ -65,7 +75,11 @@ def grant_workspaces(
         )
 
     vm = _require_vm(db, agent.vm_name)
-    with keep_active(db, config, vm, bind_platform(config, vm)):
+
+    from agentworks.bootstrap import build_registry
+
+    registry = build_registry(config)
+    with gated_vm_boundary(db, config, registry, vm):
 
         if grant_all:
             db.update_agent_grant_all(agent_name, True)
@@ -94,7 +108,14 @@ def revoke_workspaces(
     workspace_names: list[str],
     revoke_all: bool = False,
 ) -> None:
-    """Revoke explicit workspace grants from an agent."""
+    """Revoke explicit workspace grants from an agent.
+
+    Orchestrated (``vms.manager.gated_vm_boundary``), mirroring
+    :func:`grant_workspaces`: live-VM graph, no env-chain targets, the
+    gate open before the preflight sweep, the held-active span
+    covering the group-membership SSH work, and the empty-request /
+    unknown-agent validations pre-gate.
+    """
     if not revoke_all and not workspace_names:
         raise ValidationError(
             f"revoke for '{agent_name}' needs at least one workspace name "
@@ -112,7 +133,11 @@ def revoke_workspaces(
         )
 
     vm = _require_vm(db, agent.vm_name)
-    with keep_active(db, config, vm, bind_platform(config, vm)):
+
+    from agentworks.bootstrap import build_registry
+
+    registry = build_registry(config)
+    with gated_vm_boundary(db, config, registry, vm):
 
         if revoke_all:
             db.update_agent_grant_all(agent_name, False)
