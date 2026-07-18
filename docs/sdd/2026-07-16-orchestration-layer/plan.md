@@ -310,30 +310,34 @@ realization choreography and the two orchestrators.
       deliberately does not reload, matching HEAD. R7 exception records, all the same sanctioned
       pre-walk-away bucket as reinit's: (1) the gate now opens BEFORE the boundary resolve (HEAD
       resolved at bind, then gated), with just-in-time values seeding the resolver so nothing
-      resolves or prompts twice; (2) the required-commands probe moves to PREFLIGHT for realized
-      targets, where HEAD probed post-resolve and post-mutation-start; the corollary at restart is
-      that a missing binary or a pre-rollout agent's SSH refusal now surfaces BEFORE the
-      BROKEN/--force and confirm gates (error-precedence shift, bail-earlier), and at create the
-      existing-agent SSH probe now precedes the workspace realization (less to unwind on failure);
-      (3) the nested creates' second gate probes are consolidated into the one held gate.
-      ROLL-FORWARD: `RealizationLog`; workspace body, mark; agent body, mark; `log.unwind()`
-      replaces `_rollback_ephemerals` (reverse order reproduces agent-then-workspace, proven end to
-      end; the rollback-failure warning is now the log's generic teardown line, the Phase 2-accepted
-      message shift). SESSION SLICE RULING: the completed session is deliberately NOT log-tracked.
-      At HEAD nothing ever rolled back a completed session (a post-tmux failure unwound only the
-      ephemerals and left the row and server standing), so the pending session node's `teardown` is
-      a PARTIAL-state cleaner (the imperative session-internal rollback body: best-effort, warns,
-      never raises) driven by the slice's own failure path, and `mark_realized` flips the node
-      directly after the slice, outside the log, pinning the completed-session window as
-      non-rollbackable; restart's post-kill window is pinned by no log existing at all. Seam catalog
-      for these commands: (1) the harness seam is `_build_session_command` +
-      `sessions.tmux.create_session` (the pane command string; the harness SDD's instance replaces
-      both with `start`/`restart` ops, no orchestrator change); (2) the realize bodies duplicate the
-      standalone command slices (previous box); (3) construct-time registration coexists with the
-      walk union, as in the vm commands; (4) the session-template node stays deferred, nothing
-      forced it (env secrets ride the target seam, readiness lives on the held check); (5)
-      `_prepare_vm` and the imperative gate keep serving the un-migrated session commands (stop,
-      delete, attach, batch ops). Oracle set: the existing session suites
+      resolves or prompts twice (RULING, 2026-07-17: on a stopped VM this yields TWO prompt bursts,
+      the gate's then a boundary or env-chain pass, which shares the Phase 1 prompt-session ruling:
+      the invariant is all interactivity strictly pre-walk-away and nothing resolved or prompted
+      twice; contiguity is not promised; pinned per command by the gate-prompt parity tests in
+      `tests/sessions/test_create_restart_orchestrated.py`, mirroring the tracer's); (2) the
+      required-commands probe moves to PREFLIGHT for realized targets, where HEAD probed
+      post-resolve and post-mutation-start; the corollary at restart is that a missing binary or a
+      pre-rollout agent's SSH refusal now surfaces BEFORE the BROKEN/--force and confirm gates
+      (error-precedence shift, bail-earlier), and at create the existing-agent SSH probe now
+      precedes the workspace realization (less to unwind on failure); (3) the nested creates' second
+      gate probes are consolidated into the one held gate. ROLL-FORWARD: `RealizationLog`; workspace
+      body, mark; agent body, mark; `log.unwind()` replaces `_rollback_ephemerals` (reverse order
+      reproduces agent-then-workspace, proven end to end; the rollback-failure warning is now the
+      log's generic teardown line, the Phase 2-accepted message shift). SESSION SLICE RULING: the
+      completed session is deliberately NOT log-tracked. At HEAD nothing ever rolled back a
+      completed session (a post-tmux failure unwound only the ephemerals and left the row and server
+      standing), so the pending session node's `teardown` is a PARTIAL-state cleaner (the imperative
+      session-internal rollback body: best-effort, warns, never raises) driven by the slice's own
+      failure path, and `mark_realized` flips the node directly after the slice, outside the log,
+      pinning the completed-session window as non-rollbackable; restart's post-kill window is pinned
+      by no log existing at all. Seam catalog for these commands: (1) the harness seam is
+      `_build_session_command` + `sessions.tmux.create_session` (the pane command string; the
+      harness SDD's instance replaces both with `start`/`restart` ops, no orchestrator change); (2)
+      the realize bodies duplicate the standalone command slices (previous box); (3) construct-time
+      registration coexists with the walk union, as in the vm commands; (4) the session-template
+      node stays deferred, nothing forced it (env secrets ride the target seam, readiness lives on
+      the held check); (5) `_prepare_vm` and the imperative gate keep serving the un-migrated
+      session commands (stop, delete, attach, batch ops). Oracle set: the existing session suites
       (`test_session_create_ephemeral`, `test_session_transport`, `test_error_wrapper`,
       `test_secrets_eager_resolve`, `test_sessions_tmux_create`) now drive the orchestrated path,
       with their stubs mechanically moved to the orchestrated seams (`resolve_site`, the
