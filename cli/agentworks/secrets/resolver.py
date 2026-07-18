@@ -24,7 +24,7 @@ from typing import TYPE_CHECKING
 from agentworks.errors import StateError
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable, Sequence
+    from collections.abc import Iterable, Mapping, Sequence
 
     from agentworks.config import Config
     from agentworks.resources.registry import Registry
@@ -55,6 +55,7 @@ class Resolver:
         self._config = config
         self._registry = registry
         self._decls: dict[str, SecretDecl] = {}
+        self._seeded: dict[str, str] = {}
         self._values: dict[str, str] | None = None
 
     # -- registration --------------------------------------------------
@@ -106,6 +107,34 @@ class Resolver:
             return SecretDecl(name=name, description="")
         return found
 
+    def seed(self, values: Mapping[str, str]) -> None:
+        """Pre-seed the boundary pass with values the ACTIVATION GATE
+        already resolved (the one sanctioned resolution outside the
+        boundary pass; see ``orchestration/activation.py``).
+
+        Seeded names register on the operation's resolve set, become
+        readable via :meth:`get` immediately (the gate's power ops,
+        proxmox's ``status`` above all, read the bound resolver BEFORE
+        the boundary pass runs; serving them is the seed's whole
+        reason to exist), and are excluded from the boundary pass's
+        backend loop, so a gate-resolved secret never resolves or
+        prompts twice in one command.
+
+        Seeding after the boundary pass is the same contract violation
+        as registering after it (a value the pass never covered), so
+        it raises instead of quietly widening the cache.
+        """
+        if self._values is not None:
+            raise StateError(
+                "secret values were seeded after the operation's resolve "
+                f"pass: {', '.join(sorted(values))}. The activation gate "
+                "resolves and seeds before the boundary; reaching here "
+                "means a caller seeded too late."
+            )
+        for name, value in values.items():
+            self.register_name(name)
+            self._seeded[name] = value
+
     # -- the lifecycle verbs -------------------------------------------
 
     def predict(self, decl: SecretDecl) -> str | None:
@@ -144,17 +173,31 @@ class Resolver:
             return
         from agentworks.secrets.resolve import active_backends, resolve_secrets
 
-        if not self._decls:
-            self._values = {}
+        # Gate-seeded values are already resolved (by the gate's own
+        # backend-chain pass); the boundary loop covers only the rest.
+        missing = [
+            decl
+            for name, decl in self._decls.items()
+            if name not in self._seeded
+        ]
+        if not missing:
+            self._values = dict(self._seeded)
             return
-        self._values = resolve_secrets(
-            list(self._decls.values()),
-            active_backends(self._config, self._registry),
-        )
+        self._values = {
+            **self._seeded,
+            **resolve_secrets(
+                missing,
+                active_backends(self._config, self._registry),
+            ),
+        }
 
     def get(self, name: str) -> str:
-        """A resolved value, from the boundary pass's cache."""
+        """A resolved value, from the boundary pass's cache (or, before
+        the pass, from the activation gate's seed; see :meth:`seed`)."""
         if self._values is None:
+            seeded = self._seeded.get(name)
+            if seeded is not None:
+                return seeded
             raise StateError(
                 f"secret '{name}' requested before the operation's resolve "
                 "pass ran. The composition root resolves once at the "
