@@ -1460,7 +1460,11 @@ def initialize_vm(
     # Anchor the VM in an active state for the full init span. No-op for
     # Lima/Azure/Proxmox; WSL2 holds a wsl.exe subprocess open so the distro
     # doesn't idle-shut between Phase A (wsl.exe transport) and Phase B
-    # (Tailscale SSH).
+    # (Tailscale SSH). This is a recorded INTERIM keep_active hold on the
+    # handed-in platform from create_vm's orchestrated composition root
+    # (rebuilding a boundary here would re-resolve mid-command, and the
+    # imperative initializer internals hold no node to hold_active on);
+    # it retires when these internals orchestrate.
     vm_for_keepalive = db.get_vm(vm_name)
     assert vm_for_keepalive is not None, "create_vm inserts the row before init"
     with keep_active(db, config, vm_for_keepalive, platform):

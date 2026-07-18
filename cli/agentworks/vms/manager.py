@@ -197,66 +197,16 @@ def _resolve_system_slug(db: Database) -> str | None:
     return answer
 
 
-def bind_platform(
-    config: Config,
-    vm: VMRow,
-    *,
-    registry: Registry | None = None,
-    resolver: Resolver | None = None,
-    prepare: bool = True,
-    targets: Sequence[SecretTarget] = (),
-) -> VMPlatform:
-    """Composition-root helper: bind a VM's platform through its site.
-
-    Runs the capability lifecycle's composition-root ordering once:
-    registry (built here unless the caller already has one) -> construct
-    (cheap; the site's declared config secrets register on the
-    operation's resolver, nothing resolves) -> preflight -> the
-    operation's one resolve pass at the preflight boundary (one prompt
-    session covering the union of everything registered). Call ONCE at
-    a VM-touching command's entry and thread the bound platform down;
-    the gates (:func:`ensure_active` / :func:`keep_active`) take it as
-    a parameter and never resolve or bind anything themselves.
-
-    ``targets`` folds the command's runtime env chain into the same
-    pass: every secret the targets' merged env references (the shell /
-    exec / session-create roots) registers before the boundary, so the
-    workload's env secrets and the site's config secrets are ONE prompt
-    session. Callers read the mapping back via the resolver they passed
-    in (``resolver.values`` feeds ``compose_env``).
-
-    ``prepare=False`` returns the constructed instance without the
-    preflight + resolve boundary, for the roots that interleave other
-    participating resources' preflights first (``rekey_vm`` adds the
-    vm-template's Tailscale-key prediction before the one resolve
-    pass). Those callers own running the boundary.
-    """
-    from agentworks.bootstrap import build_registry
-    from agentworks.secrets.resolver import Resolver
-    from agentworks.vms.sites import platform_for
-
-    if registry is None:
-        registry = build_registry(config)
-    if resolver is None:
-        resolver = Resolver(config, registry)
-    platform = platform_for(vm, registry, resolver=resolver)
-    if targets:
-        resolver.register_targets(targets)
-    if prepare:
-        platform.preflight(RunContext(config=config))
-        resolver.resolve()
-    return platform
-
-
 def ensure_active(
     db: Database, config: Config, vm: VMRow, platform: VMPlatform
 ) -> None:
     """Respect a manual stop; otherwise start on demand.
 
     With :func:`keep_active` this is the imperative activation-gate
-    pair: it serves the commands not yet migrated onto the orchestrated
-    gate (``orchestration.activation``) and retires with them as they
-    migrate.
+    pair. Every command root has migrated onto the orchestrated gate
+    (``orchestration.activation``); :func:`keep_active` is the pair's
+    only remaining caller (see its docstring for the recorded interim
+    holds), and both retire with those holds.
 
     Fast path: a Tailscale reachability probe (cheap, no cloud API)
     short-circuits the common case, keeping backend round trips off the
@@ -265,7 +215,7 @@ def ensure_active(
     to reach the refusal, so the likely-stopped case asks the backend
     directly (an out-of-band start still proceeds via the observed
     RUNNING). ``platform`` is the BOUND platform from the caller's
-    composition root (:func:`bind_platform`).
+    already-run composition root.
     """
     if (
         not vm.operator_stopped
@@ -310,11 +260,24 @@ def keep_active(
     """Gate (:func:`ensure_active`), then hold (``vm_active``) for the
     context's duration.
 
-    Takes the BOUND platform from the composition root: binding may
-    need resolved config secrets, which only the composition root's
-    single resolve pass has. WSL2's ``vm_active`` spawns a keepalive
-    subprocess anchoring the distro against ``vmIdleTimeout``; the
-    other platforms' default hold is a no-op.
+    Takes the BOUND platform from the caller's already-run composition
+    root: binding may need resolved config secrets, which only that
+    root's single resolve pass has. WSL2's ``vm_active`` spawns a
+    keepalive subprocess anchoring the distro against
+    ``vmIdleTimeout``; the other platforms' default hold is a no-op.
+
+    The recorded INTERIM callers, each a handed-in-platform hold
+    inside an orchestrated caller's composition (rebuilding a boundary
+    there would re-resolve mid-command), and the reason this pair
+    outlives the resolver retirement's caller drain:
+
+    - the nested-teardown paths (``agents.manager.delete_agent`` /
+      ``workspaces.manager.delete_workspace`` with ``platform=`` from
+      a pending node's rollback), closing when the session-create
+      unwind hands a node instead of a platform;
+    - ``vms.initializer.initialize_vm``'s whole-init hold (the
+      platform handed in from ``create_vm``'s composition root; the
+      initializer internals are still imperative and hold no node).
     """
     ensure_active(db, config, vm, platform)
     with platform.vm_active(vm, config=config):

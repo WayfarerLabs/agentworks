@@ -13,7 +13,6 @@ interactive SSH layer so the tests stay hermetic.
 
 from __future__ import annotations
 
-from collections.abc import Callable
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
 from typing import TYPE_CHECKING
@@ -89,24 +88,6 @@ def _make_config() -> object:
         vm=SimpleNamespace(env={}),
         admin=SimpleNamespace(env={}),
     )
-
-
-def _marking_bind(platform_factory: Callable[[], object]) -> Callable[..., object]:
-    """``bind_platform`` stand-in: run the resolver's public boundary
-    verb (the stub registered no declarations, so the empty-set
-    short-circuit never touches real backends, same shape as
-    conftest's ``stub_vm_gates``) so ``resolver.values`` serves the
-    compose_env plumbing, and return the test's stub platform."""
-    from agentworks.secrets.resolver import Resolver
-
-    def _bind(
-        config: object, vm: object, *, resolver: Resolver | None = None, **k: object
-    ) -> object:
-        if resolver is not None and not resolver.resolved:
-            resolver.resolve()  # empty set: never touches real backends
-        return platform_factory()
-
-    return _bind
 
 
 def _patch_common(
@@ -295,15 +276,12 @@ def test_provisioner_shell_target_wraps_missing_native_transport(
         def transient_route(self, vm: object):  # type: ignore[no-untyped-def]
             yield
 
-    monkeypatch.setattr(
-        vm_manager, "bind_platform",
-        _marking_bind(_UnsupportedProvisioner),
-    )
-
+    # The platform arrives already bound from the caller's composition
+    # root (the orchestrated node's site edge); hand the stub directly.
     vm = vm_manager._require_vm(db, "vm1")
     with contextlib.ExitStack() as stack, pytest.raises(StateError) as exc_info:
         _native_transport(
-            vm, vm_manager.bind_platform(_make_config(), vm), _make_config(), stack=stack,
+            vm, _UnsupportedProvisioner(), _make_config(), stack=stack,
         )  # type: ignore[arg-type]
 
     err = exc_info.value
@@ -341,15 +319,10 @@ def test_provisioner_shell_target_proxmox_hint_points_at_web_console(
         def transient_route(self, vm: object):  # type: ignore[no-untyped-def]
             yield
 
-    monkeypatch.setattr(
-        vm_manager, "bind_platform",
-        _marking_bind(_ProxmoxProvisioner),
-    )
-
     vm = vm_manager._require_vm(db, "vm1")
     with contextlib.ExitStack() as stack, pytest.raises(StateError) as exc_info:
         _native_transport(
-            vm, vm_manager.bind_platform(_make_config(), vm), _make_config(), stack=stack,
+            vm, _ProxmoxProvisioner(), _make_config(), stack=stack,
         )  # type: ignore[arg-type]
 
     err = exc_info.value
@@ -405,15 +378,10 @@ def test_provisioner_shell_target_attaches_and_registers_detach_for_azure(
             )
             return t
 
-    monkeypatch.setattr(
-        vm_manager, "bind_platform",
-        _marking_bind(_FakeAzureProvisioner),
-    )
-
     vm = vm_manager._require_vm(db, "vm1")
     with contextlib.ExitStack() as stack:
         target = _native_transport(
-            vm, vm_manager.bind_platform(_make_config(), vm), _make_config(), stack=stack,
+            vm, _FakeAzureProvisioner(), _make_config(), stack=stack,
         )  # type: ignore[arg-type]
         # Attach must have run inside the stack scope.
         assert attach_calls == ["vm1"]
@@ -462,16 +430,11 @@ def test_provisioner_shell_target_detaches_on_exception_for_azure(
         def native_transport(self, vm: object, *, config: object | None = None) -> Transport:
             raise RuntimeError("simulated post-attach failure")
 
-    monkeypatch.setattr(
-        vm_manager, "bind_platform",
-        _marking_bind(_AzureRaisesAfterAttach),
-    )
-
     vm = vm_manager._require_vm(db, "vm1")
     with contextlib.ExitStack() as stack:
         with pytest.raises(RuntimeError, match="simulated post-attach failure"):
             _native_transport(
-                vm, vm_manager.bind_platform(_make_config(), vm), _make_config(), stack=stack,
+                vm, _AzureRaisesAfterAttach(), _make_config(), stack=stack,
             )  # type: ignore[arg-type]
         # ExitStack still open; detach fires on stack exit, not before.
         assert detach_calls == []
@@ -527,15 +490,10 @@ def test_provisioner_shell_target_retries_reachability_probe(
         def transient_route(self, vm: object):  # type: ignore[no-untyped-def]
             yield
 
-    monkeypatch.setattr(
-        vm_manager, "bind_platform",
-        _marking_bind(_FlakyProvisioner),
-    )
-
     vm = vm_manager._require_vm(db, "vm1")
     with contextlib.ExitStack() as stack:
         target = _native_transport(
-            vm, vm_manager.bind_platform(_make_config(), vm), _make_config(), stack=stack,
+            vm, _FlakyProvisioner(), _make_config(), stack=stack,
         )  # type: ignore[arg-type]
 
     # The probe retried until the 4th attempt succeeded; the function
@@ -574,15 +532,10 @@ def test_provisioner_shell_target_raises_defensively_on_empty_host(
         def transient_route(self, vm: object):  # type: ignore[no-untyped-def]
             yield
 
-    monkeypatch.setattr(
-        vm_manager, "bind_platform",
-        _marking_bind(_BrokenProvisioner),
-    )
-
     vm = vm_manager._require_vm(db, "vm1")
     with contextlib.ExitStack() as stack, pytest.raises(StateError) as exc_info:
         _native_transport(
-            vm, vm_manager.bind_platform(_make_config(), vm), _make_config(), stack=stack,
+            vm, _BrokenProvisioner(), _make_config(), stack=stack,
         )  # type: ignore[arg-type]
 
     err = exc_info.value

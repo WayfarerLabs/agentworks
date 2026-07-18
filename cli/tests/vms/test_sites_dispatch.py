@@ -15,7 +15,6 @@ from agentworks.manifests import builtin as builtin_manifests
 from agentworks.resources import Origin, Registry
 from agentworks.vms.sites import (
     VMSiteDecl,
-    platform_for,
     resolve_site,
     site_manifest_hint,
     validate_sites,
@@ -74,10 +73,13 @@ def test_resolve_site_unknown_raises_the_stranded_error() -> None:
     assert "name: gpu-box" in (exc.value.hint or "")
 
 
-def test_platform_for_resolves_through_the_vm_site() -> None:
+def test_vm_row_site_field_resolves_through_the_vm_site() -> None:
+    """A VM row's site field resolves to its bound platform through
+    ``resolve_site`` (the shape the node factories use; the old
+    ``platform_for`` delegate retired with ``bind_platform``)."""
     registry = _registry()
     vm = SimpleNamespace(site="wsl2")
-    platform = platform_for(vm, registry)
+    platform = resolve_site(vm.site, registry)
     assert platform.name == "wsl2"
 
 

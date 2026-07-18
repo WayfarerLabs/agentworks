@@ -152,7 +152,7 @@ def native_transport(
     via the explicit ``vm shell --platform`` opt-in.
 
     ``platform`` is the VM's bound platform, resolved at the caller's
-    composition root (``agentworks.vms.sites.platform_for``). ``stack``
+    composition root (the node factories via ``resolve_site``). ``stack``
     bounds the lifetime of any transient network state the platform
     needs (Azure attaches a public IP on enter and detaches on exit):
     the platform's :meth:`VMPlatform.transient_route` runs first; once

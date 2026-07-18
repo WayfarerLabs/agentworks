@@ -31,7 +31,6 @@ from agentworks.source_location import SourceLocation, synthesized
 if TYPE_CHECKING:
     from agentworks.capabilities.vm_platform import VMPlatform
     from agentworks.config import Config
-    from agentworks.db import VMRow
     from agentworks.resources.origin import Origin
     from agentworks.resources.reference import ReferenceEntry, ResourceReference
     from agentworks.resources.registry import Registry
@@ -278,16 +277,6 @@ def ensure_site_enabled(decl: VMSiteDecl) -> None:
                 "requirement or use an enabled site"
             ),
         )
-
-
-def platform_for(
-    vm: VMRow,
-    registry: Registry,
-    *,
-    resolver: Resolver | None = None,
-) -> VMPlatform:
-    """The bound platform for a VM, resolved through its site."""
-    return resolve_site(vm.site, registry, resolver=resolver)
 
 
 def validate_sites(config: Config, registry: Registry) -> None:

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import contextlib
-from collections.abc import Generator, Iterator, Sequence
+from collections.abc import Generator, Iterator
 from contextlib import AbstractContextManager
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -198,7 +198,7 @@ class _StubPlatform:
 
 
 # Every module that imports the vm-sites gates by name; patched
-# per-module because ``from ... import bind_platform`` captures the
+# per-module because ``from ... import keep_active`` captures the
 # binding at module load.
 _GATE_MODULES = (
     "agentworks.vms.manager",
@@ -217,7 +217,7 @@ def _gate_stub_leak_sentinel() -> Generator[None, None, None]:
 
     ``stub_vm_gates`` once poisoned later tests when a gate module was
     first-imported MID-PATCH-LOOP: its module-level ``from vms.manager
-    import bind_platform`` captured the already-patched stub, which
+    import keep_active`` captured the already-patched stub, which
     monkeypatch then saved as the "original" and re-installed forever
     at teardown. The pre-import in ``stub_vm_gates`` fixes that class;
     this sentinel makes any regression of it a loud session-end failure
@@ -230,9 +230,9 @@ def _gate_stub_leak_sentinel() -> Generator[None, None, None]:
 
     for mod_name in _GATE_MODULES:
         mod = importlib.import_module(mod_name)
-        captured = getattr(mod, "bind_platform", vms_manager.bind_platform)
-        assert captured is vms_manager.bind_platform, (
-            f"{mod_name}.bind_platform is a leaked test stub ({captured!r}); "
+        captured = getattr(mod, "keep_active", vms_manager.keep_active)
+        assert captured is vms_manager.keep_active, (
+            f"{mod_name}.keep_active is a leaked test stub ({captured!r}); "
             "a gate-stubbing helper failed to restore the real function"
         )
 
@@ -276,7 +276,7 @@ def stub_platform_support(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def stub_vm_gates(monkeypatch: pytest.MonkeyPatch) -> _StubPlatform:
-    """Stub ``bind_platform`` / ``ensure_active`` / ``keep_active`` in
+    """Stub the imperative ``ensure_active`` / ``keep_active`` holds in
     every gate-consuming module.
 
     Tests that exercise transport / rollback / env plumbing don't want
@@ -287,7 +287,7 @@ def stub_vm_gates(monkeypatch: pytest.MonkeyPatch) -> _StubPlatform:
 
     # Pre-import every gate module BEFORE patching: a string-form
     # setattr that first-imports a module mid-loop would let its
-    # module-level ``from vms.manager import bind_platform`` capture an
+    # module-level ``from vms.manager import keep_active`` capture an
     # ALREADY-PATCHED stub, which monkeypatch then saves as the
     # "original": teardown would install the stub permanently and
     # poison every later test in the session (import-order dependent,
@@ -301,27 +301,7 @@ def stub_vm_gates(monkeypatch: pytest.MonkeyPatch) -> _StubPlatform:
     def _null_hold(*args: object, **kwargs: object) -> Iterator[None]:
         yield
 
-    def _fake_bind(
-        config: object,
-        vm: object,
-        *,
-        registry: object = None,
-        resolver: Resolver | None = None,
-        prepare: bool = True,
-        targets: Sequence[object] = (),
-    ) -> _StubPlatform:
-        # Mirror the real boundary just enough for the roots: record
-        # the env targets for assertions and run the resolver's public
-        # boundary verb (the stub registered no declarations, so the
-        # empty-set short-circuit never touches real backends) so
-        # ``resolver.values`` serves the compose_env plumbing.
-        platform.bound_targets = list(targets)  # type: ignore[attr-defined]
-        if resolver is not None and prepare and not resolver.resolved:
-            resolver.resolve()
-        return platform
-
     for mod in _GATE_MODULES:
-        monkeypatch.setattr(f"{mod}.bind_platform", _fake_bind, raising=False)
         monkeypatch.setattr(
             f"{mod}.ensure_active", lambda *a, **k: None, raising=False
         )
@@ -497,7 +477,7 @@ class _StubRegistry:
             console = getattr(self._config, "named_console", None)
             return console if console is not None else NamedConsoleConfig()
         if kind == "vm-site":
-            # Serve the built-in same-named sites so bind_platform /
+            # Serve the built-in same-named sites so resolve_site /
             # lookup_site work against namespace configs (a stubbed
             # test VM's site is one of the four platform names).
             from agentworks.capabilities.vm_platform import VM_PLATFORM_REGISTRY
