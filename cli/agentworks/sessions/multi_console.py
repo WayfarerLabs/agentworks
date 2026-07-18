@@ -40,12 +40,11 @@ from agentworks.sessions.multi_console_layout import (
     _reorder_shell_panes,
 )
 from agentworks.sessions.tmux import tmux_cmd
-from agentworks.vms.manager import bind_platform, ensure_active
+from agentworks.vms.manager import gated_vm_boundary
 
 if TYPE_CHECKING:
     from collections.abc import Iterator, Mapping
 
-    from agentworks.capabilities.vm_platform import VMPlatform
     from agentworks.config import Config
     from agentworks.db import (
         ConsoleRow,
@@ -741,15 +740,14 @@ def restore_session(
             entity_name=session_name,
         )
 
-    vm, target, vm_platform = _prepare_vm_target_for_attach(
-        db, config, console.vm_name, registry=registry
-    )
     # restore_session raises StateError/ExternalError on failure, so it's
     # not a best-effort op (those are exempted from the keepalive sweep by
-    # base.VMPlatform.vm_active's docstring). Wrap the SSH-heavy body
-    # so a freshly booted WSL2 distro doesn't idle out between the window
-    # probe and the pane reconciliation. Already gated above; hold only.
-    with vm_platform.vm_active(vm, config=config):
+    # base.VMPlatform.vm_active's docstring). The gate's held-active span
+    # wraps the SSH-heavy body so a freshly booted WSL2 distro doesn't
+    # idle out between the window probe and the pane reconciliation.
+    with _prepare_vm_target_for_attach(
+        db, config, console.vm_name, registry=registry
+    ) as (vm, target):
         if not _console_tmux_exists(target, console_name):
             raise StateError(
                 f"console '{console_name}' has no live tmux session on VM "
@@ -1910,16 +1908,24 @@ def _build_console_tmux(
         )
 
 
+@contextlib.contextmanager
 def _prepare_vm_target_for_attach(
-    db: Database, config: Config, vm_name: str, *, registry: Registry | None = None
-) -> tuple[VMRow, Transport, VMPlatform]:
-    """Ensure the VM is running (starting it if needed) and return
-    (vm, target, platform).
+    db: Database, config: Config, vm_name: str, *, registry: Registry
+) -> Iterator[tuple[VMRow, Transport]]:
+    """Ensure the VM is running (starting it if needed) and yield
+    ``(vm, target)`` inside the activation gate's held-active span.
 
     Use this only for explicit user-driven attach flows where booting a
-    stopped VM is acceptable. Raises on failure. The bound platform is
-    returned so callers hold it for subsequent ``vm_active`` spans:
-    re-binding would re-run the site's secret resolve pass.
+    stopped VM is acceptable. Raises on failure. Orchestrated
+    (``vms.manager.gated_vm_boundary``): the gate replaces the
+    imperative ``bind_platform`` + ``ensure_active`` pair (opening
+    BEFORE the preflight sweep), and the span it yields within is the
+    ``vm_active`` hold the callers used to open themselves, covering
+    their SSH-heavy bodies and interactive attaches. The console is
+    not a node: attaching provisions nothing, so the graph is the live
+    VM alone, and no env-chain target registers (console build panes
+    resolve their own targets on the documented conditional-need
+    path).
     """
     from agentworks.transports import transport
 
@@ -1930,15 +1936,19 @@ def _prepare_vm_target_for_attach(
             entity_kind="vm",
             entity_name=vm_name,
         )
-    platform = bind_platform(config, vm, registry=registry)
-    ensure_active(db, config, vm, platform)
+    # Cheap row validation stays pre-gate: a VM with no Tailscale
+    # address can never be attached to, so it must fail with zero
+    # prompts and zero VM starts. (The imperative body checked this
+    # after its gate; the gate cannot populate the address on the row
+    # already loaded, so hoisting only removes the wasted start.)
     if vm.tailscale_host is None:
         raise StateError(
             f"VM '{vm.name}' has no Tailscale address",
             entity_kind="vm",
             entity_name=vm.name,
         )
-    return vm, transport(vm, config), platform
+    with gated_vm_boundary(db, config, registry, vm):
+        yield vm, transport(vm, config)
 
 
 def _live_target(
@@ -2004,12 +2014,11 @@ def attach_console(
 
     console = _require_console(db, name)
     registry = build_registry(config)
-    vm, target, vm_platform = _prepare_vm_target_for_attach(
+    # The gate's held-active span covers the build and the interactive
+    # attach (the hold this caller used to open itself).
+    with _prepare_vm_target_for_attach(
         db, config, console.vm_name, registry=registry
-    )
-
-    # Already gated by _prepare_vm_target_for_attach; hold only.
-    with vm_platform.vm_active(vm, config=config):
+    ) as (vm, target):
         exists = _console_tmux_exists(target, name)
         layout = named_console_template(registry).tmux_layout
 
@@ -2022,11 +2031,12 @@ def attach_console(
         # attach joins existing shells, consumes no secrets."
         # Conditional-need exception to the one-boundary-resolve
         # contract: whether a build is needed is only knowable from live
-        # tmux state, post-bind (the bind + its boundary already ran in
-        # _prepare_vm_target_for_attach above). The --recreate half of
-        # the guard IS knowable pre-bind; it deliberately shares this
-        # late resolve so both build paths stay one code shape rather
-        # than forking the target computation across the boundary.
+        # tmux state, post-boundary (the gate and its boundary resolve
+        # already ran inside _prepare_vm_target_for_attach above). The
+        # --recreate half of the guard IS knowable pre-boundary; it
+        # deliberately shares this late resolve so both build paths stay
+        # one code shape rather than forking the target computation
+        # across the boundary.
         if recreate or not exists:
             from agentworks.secrets import resolve_for_command
 

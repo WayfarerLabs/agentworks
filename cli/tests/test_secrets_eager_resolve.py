@@ -7,14 +7,16 @@ the failure surfaces as ``SecretUnavailableError`` with no DB or VM
 side-effects.
 
 The tests work by patching the boundary (``resolve_for_command`` for
-the paths that still call it directly, ``bind_platform`` or
-``Resolver.resolve`` for the roots whose env chain rides the bind's one
-resolve pass) to raise; if the manager reaches it AFTER mutating
-state, the DB inspection at the end of the test catches the leak.
+the paths that still call it directly, ``Resolver.resolve`` or
+``Resolver.register_targets`` for the roots whose env chain rides the
+operation's one resolve pass) to raise; if the manager reaches it
+AFTER mutating state, the DB inspection at the end of the test catches
+the leak.
 """
 
 from __future__ import annotations
 
+import contextlib
 from pathlib import Path
 from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any
@@ -833,15 +835,19 @@ def test_attach_console_build_path_eager_resolves_before_tmux(
     db._conn.execute("INSERT INTO consoles (name, vm_name) VALUES ('c1', 'vm1')")
     db._conn.commit()
 
-    gate_platform = stub_vm_gates(monkeypatch)
-    monkeypatch.setattr(
-        multi_console,
-        "_prepare_vm_target_for_attach",
-        lambda *a, **k: (
+    stub_vm_gates(monkeypatch)
+
+    @contextlib.contextmanager
+    def _fake_prepare(*a: object, **k: object):  # noqa: ANN202
+        # The orchestrated helper yields (vm, target) inside the gate's
+        # held-active span.
+        yield (
             SimpleNamespace(name="vm1", admin_username="admin"),
             SimpleNamespace(run=lambda *a, **k: None),
-            gate_platform,
-        ),
+        )
+
+    monkeypatch.setattr(
+        multi_console, "_prepare_vm_target_for_attach", _fake_prepare
     )
     monkeypatch.setattr(
         multi_console, "_console_tmux_exists", lambda *a, **k: False,
@@ -953,18 +959,20 @@ def test_attach_console_existing_tmux_session_skips_eager_resolve(
     db._conn.execute("INSERT INTO consoles (name, vm_name) VALUES ('c1', 'vm1')")
     db._conn.commit()
 
-    gate_platform = stub_vm_gates(monkeypatch)
-    monkeypatch.setattr(
-        multi_console,
-        "_prepare_vm_target_for_attach",
-        lambda *a, **k: (
+    stub_vm_gates(monkeypatch)
+
+    @contextlib.contextmanager
+    def _fake_prepare(*a: object, **k: object):  # noqa: ANN202
+        yield (
             SimpleNamespace(name="vm1", admin_username="admin"),
             SimpleNamespace(
                 run=lambda *a, **k: None,
                 interactive=lambda *a, **k: 0,
             ),
-            gate_platform,
-        ),
+        )
+
+    monkeypatch.setattr(
+        multi_console, "_prepare_vm_target_for_attach", _fake_prepare
     )
     monkeypatch.setattr(
         multi_console, "_console_tmux_exists", lambda *a, **k: True,
@@ -1453,10 +1461,14 @@ def test_restore_session_window_missing_branch_eager_resolves(
     fake_target = SimpleNamespace(
         run=lambda *a, **k: SimpleNamespace(ok=True, returncode=0, stdout="other-window", stderr=""),
     )
-    gate_platform = stub_vm_gates(monkeypatch)
+    stub_vm_gates(monkeypatch)
+
+    @contextlib.contextmanager
+    def _fake_prepare(*a: object, **k: object):  # noqa: ANN202
+        yield (fake_vm, fake_target)
+
     monkeypatch.setattr(
-        multi_console, "_prepare_vm_target_for_attach",
-        lambda *a, **k: (fake_vm, fake_target, gate_platform),
+        multi_console, "_prepare_vm_target_for_attach", _fake_prepare
     )
     monkeypatch.setattr(
         multi_console, "_console_tmux_exists", lambda *a, **k: True,
