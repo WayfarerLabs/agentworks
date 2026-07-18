@@ -194,17 +194,15 @@ as the equivalent escape hatch.
 
 Manage workspaces on VMs.
 
-| Command                              | Description                                                           |
-| ------------------------------------ | --------------------------------------------------------------------- |
-| `agw workspace create <name>`        | Create a workspace on a VM                                            |
-| `agw workspace describe <name>`      | Show workspace details and sessions                                   |
-| `agw workspace list`                 | List workspaces                                                       |
-| `agw workspace copy <source> <name>` | Copy a workspace to a new VM                                          |
-| `agw workspace rehome <name>`        | Move workspace to a new path                                          |
-| `agw workspace reinit <name>`        | Reinit workspace infrastructure                                       |
-| `agw workspace delete <name>`        | Delete a workspace                                                    |
-| `agw workspace shell <name>`         | _Deprecated_: use `vm shell --workspace` or `agent shell --workspace` |
-| `agw workspace console <name>`       | _Deprecated_: use `agw console`                                       |
+| Command                              | Description                         |
+| ------------------------------------ | ----------------------------------- |
+| `agw workspace create <name>`        | Create a workspace on a VM          |
+| `agw workspace describe <name>`      | Show workspace details and sessions |
+| `agw workspace list`                 | List workspaces                     |
+| `agw workspace copy <source> <name>` | Copy a workspace to a new VM        |
+| `agw workspace rehome <name>`        | Move workspace to a new path        |
+| `agw workspace reinit <name>`        | Reinit workspace infrastructure     |
+| `agw workspace delete <name>`        | Delete a workspace                  |
 
 `workspace create <name>` takes the workspace name as a required positional. Optional flags: `--vm`,
 `--template`, and `--open-vscode`.
@@ -215,8 +213,8 @@ and destination can be the same VM (a clone) or different VMs.
 `workspace delete` requires `--force` if the workspace has sessions. Running sessions are killed
 during deletion. Pass `--yes` to skip the confirmation prompt.
 
-`workspace shell` and `workspace console` are deprecated: a shell rooted in a workspace is always
-_somebody's_ shell. Use `agw vm shell <vm> --workspace <ws>` for an admin shell or
+There is deliberately no `workspace shell`: a shell rooted in a workspace is always _somebody's_
+shell. Use `agw vm shell <vm> --workspace <ws>` for an admin shell or
 `agw agent shell <agent> --workspace <ws>` for an agent shell. For curated tmux views over a
 workspace's sessions, use `agw console create` + `agw console attach`.
 
@@ -408,12 +406,11 @@ on next attach.
 Each session runs in its own locked-down tmux session on the VM. There are several ways to interact
 with sessions, at different scopes:
 
-| Method                           | Scope                            | tmux session name        | Entry point                 |
-| -------------------------------- | -------------------------------- | ------------------------ | --------------------------- |
-| `session attach`                 | One session                      | `<session-name>`         | Operator's machine          |
-| `console`                        | Curated subset across workspaces | `aw-console-<name>`      | Operator's machine          |
-| `workspace console` (deprecated) | One workspace                    | `ws-<workspace>-console` | On-VM or operator's machine |
-| `vm console` (deprecated)        | All sessions on the VM           | `vm-console`             | Operator's machine          |
+| Method                    | Scope                            | tmux session name   | Entry point        |
+| ------------------------- | -------------------------------- | ------------------- | ------------------ |
+| `session attach`          | One session                      | `<session-name>`    | Operator's machine |
+| `console`                 | Curated subset across workspaces | `aw-console-<name>` | Operator's machine |
+| `vm console` (deprecated) | All sessions on the VM           | `vm-console`        | Operator's machine |
 
 #### Session tmux sessions
 
@@ -429,9 +426,9 @@ tmux pane PTY. The socket path is persisted in the database.
 
 `console attach <name>` creates or attaches to the `aw-console-<name>` tmux session. Membership and
 per-session shell layout are stored in the database. Each member session becomes a window running
-the same wrapper used by the workspace and VM consoles, plus a configurable number of extra shell
-panes (default user = session's agent user, default cwd = workspace root; override per pane with
-`--cwd` / `--admin` on `console add-shell`).
+the same wrapper used by the VM console, plus a configurable number of extra shell panes (default
+user = session's agent user, default cwd = workspace root; override per pane with `--cwd` /
+`--admin` on `console add-shell`).
 
 ```text
 aw-console-backend
@@ -447,21 +444,14 @@ the DB is touched and changes appear on next attach. The mutation commands (`add
 attach/repair commands (`attach`, `restore-session`) do start a stopped VM, since their job is to
 bring live state up.
 
-#### Workspace console (deprecated)
+#### Workspace tmuxinator config
 
-`workspace console` uses tmuxinator to create or attach to a `ws-<name>-console` session. The
-tmuxinator config (`.tmuxinator.yml` in the workspace root) is regenerated whenever sessions change,
-so the console always reflects the current set of sessions. Best for in-VM work scoped to a single
-workspace (e.g. inside VS Code's integrated terminal). Predates the multi-console design and lacks
-env-and-secrets integration; superseded by named consoles (`console attach <name>`). Will be removed
-in a future release.
-
-```text
-ws-myproject-console (tmuxinator, full tmux)
-  Window 1: admin-shell                login shell for the admin user
-  Window 2: myproject-claude           attached to session
-  Window 3: myproject-debug            attached to session
-```
+Each workspace carries a tmuxinator config (`.tmuxinator.yml` in the workspace root, symlinked as
+`~/.config/tmuxinator/ws-<name>-console.yml`) describing a `ws-<name>-console` session: an
+admin-shell window plus one window per session. It is regenerated whenever sessions change. The
+`agw workspace console` command that attached to it was removed (superseded by named consoles); the
+config remains usable directly on the VM via `tmuxinator start ws-<name>-console` (e.g. inside VS
+Code's integrated terminal).
 
 #### VM console (deprecated)
 
@@ -479,11 +469,11 @@ via `--workspace <ws>`). Use these when you just need a terminal without the con
 
 - **Direct attach** (`session attach`): the user's prefix key, detach, copy mode, and scroll all
   work normally. Status bar is hidden since there is only one pane.
-- **Consoles** (`workspace console`, `vm console`): the console's prefix key eclipses the inner
-  session's prefix, so window switching, detach, etc. all operate at the console level. Session
-  windows use a wrapper that re-attaches if the inner session disconnects and shows a message when
-  the session ends.
-- **Nesting protection**: both console commands refuse to run inside an existing tmux session to
+- **Consoles** (`console`, `vm console`): the console's prefix key eclipses the inner session's
+  prefix, so window switching, detach, etc. all operate at the console level. Session windows use a
+  wrapper that re-attaches if the inner session disconnects and shows a message when the session
+  ends.
+- **Nesting protection**: the console commands refuse to run inside an existing tmux session to
   avoid prefix key conflicts. Pass `--allow-nesting` to override.
 - **Console lifecycle**: consoles are independent of sessions. Killing or detaching a console does
   not affect running sessions. `--recreate` rebuilds from scratch.

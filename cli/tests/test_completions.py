@@ -68,6 +68,20 @@ class TestTopLevelGroups:
         )
 
 
+class TestRetiredCommandsAbsent:
+    """The deprecated ``workspace shell`` / ``workspace console`` pair
+    was retired by deletion (replaced by ``vm shell --workspace`` /
+    ``agent shell --workspace`` and the named consoles). Pin their
+    absence so a stray re-registration surfaces as a failure instead of
+    silently resurrecting a retired surface."""
+
+    def test_workspace_group_carries_no_shell_or_console(self) -> None:
+        spec = build_spec(app)
+        workspace = spec.subcommands["workspace"]
+        assert "shell" not in workspace.subcommands
+        assert "console" not in workspace.subcommands
+
+
 class TestDynamicCompletionsMapping:
     """Verify DYNAMIC_COMPLETIONS keys match real Typer commands and params."""
 

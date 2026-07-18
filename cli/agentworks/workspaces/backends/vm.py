@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import sys
 from typing import TYPE_CHECKING
 
 from agentworks import output
@@ -98,33 +97,6 @@ def create_vm_workspace(
         )
 
     return workspace_path
-
-
-def shell_vm_workspace(
-    vm: VMRow,
-    config: Config,
-    workspace_path: str,
-) -> None:
-    """Open a plain shell into a VM workspace."""
-    target = transport(vm, config)
-    sys.exit(target.interactive(f"cd {workspace_path} && exec $SHELL -l"))
-
-
-def console_vm_workspace(
-    vm: VMRow,
-    config: Config,
-    ws_name: str,
-    *,
-    recreate: bool = False,
-) -> None:
-    """Open the workspace console (tmuxinator) on a VM."""
-    session = console_session_name(ws_name)
-    target = transport(vm, config)
-
-    if recreate:
-        target.run(f"tmux kill-session -t {session}", check=False, timeout=10)
-
-    sys.exit(target.interactive(f"tmuxinator start {session}"))
 
 
 def delete_vm_workspace(

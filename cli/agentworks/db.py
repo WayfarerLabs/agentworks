@@ -1029,13 +1029,6 @@ class Database:
         )
         self._conn.commit()
 
-    def update_workspace_last_seen(self, name: str) -> None:
-        self._conn.execute(
-            "UPDATE workspaces SET last_seen_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now') WHERE name = ?",
-            (name,),
-        )
-        self._conn.commit()
-
     def delete_workspace(self, name: str) -> None:
         self._conn.execute("DELETE FROM sessions WHERE workspace_name = ?", (name,))
         # Grants cascade via FK; agents are VM-scoped so not deleted with workspaces

@@ -249,8 +249,8 @@ standard SSH tools (scp, ssh, VS Code Remote) work seamlessly.
 ### Tailscale
 
 VMs join a [Tailscale](https://tailscale.com/) tailnet during provisioning. All subsequent SSH
-access (workspace shell, VM shell, initialization) goes over Tailscale, providing secure
-connectivity without exposing SSH ports to the public internet.
+access (VM and agent shells, initialization) goes over Tailscale, providing secure connectivity
+without exposing SSH ports to the public internet.
 
 During `vm create` (and `vm start` when re-joining), the Tailscale auth key is resolved as the
 `tailscale-auth-key` secret via the framework's backend chain (see
@@ -266,10 +266,9 @@ gracefully on `vm start` by re-resolving the same secret through the chain.
 
 [tmux](https://github.com/tmux/tmux) provides the persistence layer. Every Agentworks session maps
 1:1 to a tmux session on the VM with the same lifecycle, and agent sessions run on per-agent sockets
-for isolation. A small set of console abstractions (`console`, `workspace console`) layers over
-individual sessions to support multitasking across workspaces. See
-[tmux Architecture](cli/README.md#tmux-architecture) for the full picture (per-agent sockets,
-console comparisons, key behaviors).
+for isolation. A console abstraction (`console`) layers over individual sessions to support
+multitasking across workspaces. See [tmux Architecture](cli/README.md#tmux-architecture) for the
+full picture (per-agent sockets, console comparisons, key behaviors).
 
 ### Additional Tools
 
