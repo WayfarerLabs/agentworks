@@ -4,29 +4,42 @@
 
 ## Background
 
-The resource-manifests SDD (`docs/sdd/2026-07-01-resource-manifests`, PR #156) landed the
-config/resource/capability model this SDD builds on: resources are `(kind, name)` registry rows;
-kinds split into declarable kinds (data) and capability kinds (read-only rows backed by a per-domain
-code registry); resources reference capabilities directly, many-to-one, carrying capability-owned
-config at the reference site (ADR 0016, the 2026-07-07 capability collapse). Its companion doc
-`capability-consumers.md` (row 5) sketched the first NEW capability to be built on that model: the
-**harness**, selected inline on the session template.
+Two landed foundations set the stage for this SDD.
 
-Since that SDD, the capability model has grown a full runtime contract, documented in
-`cli/agentworks/capabilities/README.md` and proven on two consuming-side capabilities (`vm-platform`
-via the vm-sites work, `git-credential-provider` via the fine-grained-PAT work; PRs #169 and #167).
-A capability is now an instance-scoped class extending `capabilities.base.Capability`, living in the
-`capabilities/` subtree, and it moves through a five-stage lifecycle: `validate_config` (pure,
-declares references) -> construct (binds `(name, config, resolver)`) -> `preflight` (pre-resolve,
-dependency-blind, read-only readiness) -> `runup` (post-resolve, authenticated, read-only readiness)
--> ops (the mutation phase). A shared `RunContext` carries the resolved runtime world (global
-config, the `admin_target` / `agent_target` transports, resolved `secrets`) to the stages that run
-against it, and the boundary that splits the two readiness stages is the single secret-resolve pass.
-**This SDD builds the harness as a capability of that shape**, so the harness inherits the model's
-lifecycle, its secret handling, and its `doctor` integration rather than inventing its own. The
-carried FRD/HLA below predate the lifecycle and are being realigned to it; where an earlier draft
-said the harness "preflights the real environment," that post-provision check is the model's `runup`
-stage (see R7).
+**The capability model** (resource-manifests SDD, `docs/sdd/2026-07-01-resource-manifests`, PR #156,
+ADR 0016). Resources are `(kind, name)` registry rows; kinds split into declarable kinds (data) and
+capability kinds (read-only rows backed by a per-domain code registry); resources reference
+capabilities directly, carrying capability-owned config at the reference site (the capability
+collapse). Its companion `capability-consumers.md` (row 5) sketched the first NEW capability to
+build on that model: the **harness**, selected inline on the session template.
+
+**The orchestration layer** (`docs/sdd/2026-07-16-orchestration-layer`, MERGED and locked). This is
+the load-bearing change for this SDD, because it built, as general machinery, almost everything an
+earlier draft of this harness SDD had tried to invent harness-side. It split composition from
+resources:
+
+- Two contracts (`orchestration/node.py`): `Readiness` (`preflight` + `runup`) and `Node`
+  (`Readiness` + `key` + `deps` + `secret_refs`). A capability instance is a `Readiness`, HELD by a
+  node and composed by that node's `preflight`/`runup`, never walked. Only consuming resources and
+  live resources are nodes.
+- Per-command orchestrators walk the node graph, run preflight-all, resolve secrets once at the
+  boundary, drive runups and ops, and own unwind. Nodes declare; they never walk or resolve.
+- Pending nodes carry a `realized` flag the orchestrator flips (`mark_realized`); readiness checks
+  defer on a pending target and probe on a realized one.
+- `OperationScope` + `ScopeLevel` (`capabilities/base.py`): the command's static identity chain,
+  keyed by level (`system` / `vm` / `workspace` / `agent` / `session`), one per command, on the
+  context; a node reads the LEVEL off it (the readiness fork) and treats its names as descriptive.
+- `RunContext`: `config` and `operation_scope` as plain fields; execution targets and secrets
+  through accessor methods (`ctx.admin_target()` / `ctx.agent_target()` / `ctx.secret(name)`,
+  pass-through in v1). `Capability` constructs `(owner_name, config)`, no bound resolver; runup and
+  ops read `ctx.secret`.
+
+Crucially, the merged session node (`sessions/nodes.py`) already holds a `Readiness` stand-in,
+`RequiredCommandsCheck`, described in its own code as "the harness-LIKE stand-in the harness
+capability replaces when it lands," plus the interim imperative pane-command path
+(`_build_session_command`). **This SDD delivers the real harness and swaps it in for both.** The
+harness is not new orchestration machinery; it is one `Readiness` capability the session node holds,
+so this SDD is now small: the capability kind, two built-ins, the template surface, and the swap.
 
 Today a session template expresses "what runs in this session" as opaque strings: `command`,
 `restart_command`, and `required_commands` are top-level template fields, and the core knows nothing
@@ -68,13 +81,12 @@ the model is rewritten to teach it this way (R10).
 
 The scope of the harness CONTRACT in this SDD is deliberately narrow (maintainer ruling,
 2026-07-07): **command lifecycle only**, session start, session restart, and the target-environment
-readiness check (today: required commands), the responsibilities the three template fields express
-today. In the capability model's stage vocabulary that is: `start` and `restart` as the harness's
-ops (each returns the pane command for its case), and the required-commands check as the harness's
-`preflight` when the target already exists (with a `runup` fallback for the ephemeral-create case;
-see R7). Narrow does not mean string-valued: within that lifecycle a harness may execute arbitrary
-code on the launch target as the target user (R7), which is what lets it be smarter than the strings
-it replaces (R4). Liveness probing of the running session stays core (tmux boot-id/PID machinery,
+readiness check (today: required commands). In the merged model's vocabulary that is a `Readiness`
+capability (its `preflight`/`runup` are the readiness check) with two ops, `start` and `restart`,
+each returning the pane command for its case. Narrow does not mean string-valued: within that
+lifecycle a harness may execute code on the launch target as the target user (R7, through
+`ctx.agent_target()` / `ctx.admin_target()`), which is what lets it be smarter than the strings it
+replaces (R4). Liveness probing of the running session stays core (tmux boot-id/PID machinery,
 tool-agnostic), and asset placement (skills, rules, allow/deny lists) is deferred with the plugin
 SDD, which owns the operator-declared asset model it requires. The narrow contract does not narrow
 the model change: the delegation seam is the point, and the contract grows behind it without the
@@ -97,22 +109,23 @@ where the policy lives, and the safe default is non-inheritance (see R4's future
 In scope: the `harness` capability kind and code registry (in the `capabilities/` subtree, extending
 the `Capability` base); the built-in `shell` and `claude-code` harnesses; the
 `session-template.spec.harness` / `spec.harness_config` consumer surface (YAML and TOML); the
-inheritance semantics of the pair; the runtime delegation in the sessions manager, including
-constructing and holding the harness instance and composing its lifecycle stages (the session is the
-model's first RICH consuming resource); the required `RunContext.identity` invariant
-(`OperationIdentity`) and its threading through every existing capability composition root (R7); the
+inheritance semantics of the pair; swapping the real harness into the merged session node in place
+of the interim `RequiredCommandsCheck` (readiness) and `_build_session_command` (ops); the
 migration-tool and sample updates the surface change requires; the top-level documentation rewrite
 that promotes the new model (R10).
 
-Already handled upstream, so NOT in scope (was in the pre-realignment draft): the single up-front
-secret resolve for a `session create --new-agent` nested ephemeral agent. Main's `create_session`
-already folds the ephemeral agent's git-token secrets into one boundary resolve and threads the
-resolved values through `create_agent` (which skips its own resolve when tokens are supplied), so
-the walk-away invariant is already exact for nested creates and this SDD adds nothing there.
+Provided by the merged orchestration layer, so NOT in scope here: the readiness lifecycle
+(`preflight`/`runup`) and the boundary-resolve/walk-away machinery; the operation scope and its
+level (the harness READS the level, does not define it); pending nodes and the realized/defer signal
+(the harness reads a target node's `realized`, it does not carry a `to_create` field); the session
+node itself, its edges, and unwind; the single up-front secret resolve for a `--new-agent` ephemeral
+agent. Everything an earlier draft of this SDD proposed to add to `RunContext` (a required identity
+object, a `to_create` set) is superseded: it now lives in the orchestration layer, and the harness
+simply consumes it.
 
 Out of scope: plugin-registered harnesses, asset placement, session liveness probing, agent-level
 Claude fields (`claude_marketplaces` / `claude_plugins` on agent/admin templates are provision-time
-surface, untouched here), and any change to the other capability domains.
+surface, untouched here), and any change to the other capability domains or the orchestration layer.
 
 ## Terminology
 
@@ -120,18 +133,16 @@ surface, untouched here), and any change to the other capability domains.
   tool is started and restarted, and what executables that requires. A capability kind per ADR 0016:
   read-only registry rows, error miss policy, implementation in a per-domain code registry
   (`HARNESS_REGISTRY`). A consuming-side capability like `git-credential-provider`: its
-  implementations extend `capabilities.base.Capability` and move through the model's lifecycle
-  (`validate_config` -> construct -> `preflight` -> `runup` -> ops). Named by
-  `session-template.spec.harness`. The kind takes the domain's natural noun with no `-provider`
-  suffix (ADR 0016's naming rule: a disambiguating suffix only on collision, and nothing else here
-  is called a harness).
-- **The lifecycle stages, for the harness**: `validate_config` validates the `harness_config` blob's
-  shape (both built-ins return no references); construct binds `(name, merged_config, resolver)`;
-  `preflight` is the base's pre-resolve, dependency-blind readiness (near-empty for the built-ins,
-  which declare no secrets); `runup` is the post-resolve, real-environment required-commands check
-  (R3/R7); the ops are `start` and `restart`, each returning the pane command for its case. A shared
-  `RunContext` (`capabilities/base.py`) carries the resolved runtime world (global config, the
-  `admin_target` / `agent_target` transports, resolved `secrets`) to `runup` and the ops.
+  implementations extend `capabilities.base.Capability` (so they satisfy `Readiness`), and the
+  session node HOLDS one and composes it. Named by `session-template.spec.harness`. The kind takes
+  the domain's natural noun with no `-provider` suffix (ADR 0016's naming rule: a disambiguating
+  suffix only on collision, and nothing else here is called a harness).
+- **The harness's lifecycle**: `validate_config` validates the `harness_config` blob's shape (both
+  built-ins return no references); construct binds `(name, merged_config)`; `preflight` and `runup`
+  are the readiness (the required-commands check, which floats between the two stages by the target
+  node's pending-ness exactly as the merged `RequiredCommandsCheck` does today); the ops are `start`
+  and `restart`, each returning the pane command for its case. A `RunContext` carries `config`,
+  `operation_scope`, and the `ctx.agent_target()` / `ctx.admin_target()` / `ctx.secret()` accessors.
 - **Harness config**: the capability-owned blob at the reference site
   (`session-template.spec.harness_config`), validated by the selected harness. The inline form of
   reference+blob (capability-consumers.md rule 2): the template is the only consumer, so the FIELD
@@ -141,6 +152,8 @@ surface, untouched here), and any change to the other capability domains.
 - **`claude-code` harness**: the built-in harness owning the Claude Code session conventions, launch
   vs resume (chosen by inspecting tool state, R4), required executable, so templates stop spelling
   them as strings.
+- **Node, Readiness, operation scope, pending/realized**: as defined by the orchestration-layer SDD;
+  the harness consumes them.
 - **Session template, registry, capability, origin**: as defined by the resource-registry and
   resource-manifests SDDs.
 
@@ -150,7 +163,7 @@ surface, untouched here), and any change to the other capability domains.
 
 - New capability kind `harness`: `category = "capability"`, error miss policy, not
   manifest-declarable (a `kind: harness` document gets the standard capability-kind envelope error),
-  `builtin_override = "reserved"`. Same shape as `git-credential-provider`, the kind strategy
+  `builtin_override = "reserved"`. Same shape as `git-credential-provider`; the kind strategy
   (`capabilities/harness/kinds.py`) mirrors `_GitCredentialProviderKind` and self-registers into
   `KIND_REGISTRY` via the `resources/kinds/__init__.py` index line.
 - Implementations live in the `capabilities/harness/` package (the capability subtree, alongside
@@ -163,8 +176,9 @@ surface, untouched here), and any change to the other capability domains.
   `agw resource describe harness/<name>` like every other resource.
 - Built-in members: `shell` (R3) and `claude-code` (R4). Plugin registration is the plugin SDD's.
 - The capability layering rule holds: `capabilities/harness/` depends only on the framework and
-  never imports the `sessions/` domain (the consuming resource depends on the capability, not the
-  reverse).
+  never imports the `sessions/` domain (the consuming node depends on the capability, not the
+  reverse); the harness never imports the `orchestration/` package either, only the `Readiness`
+  contract it satisfies structurally.
 
 ### R2: Template surface, `harness` and `harness_config`
 
@@ -201,11 +215,12 @@ spec:
   checks); completeness rules, required fields, cross-field constraints, apply to the MERGED blob at
   use (R5, R7), because a child restating the harness may legitimately declare a partial blob.
   Validation is capability-owned: the core never learns any harness's field vocabulary. It uses the
-  capability config-validation contract the resource-manifests SDD shipped (its Phase 5.7, the
-  `GitCredentialProvider.validate_config` precedent): `validate_config(owner, config)` returns the
-  resource references the blob implies (none, for both built-in harnesses), and the session template
-  emits them as itself at finalize, alongside the selector edge. A future harness whose blob names a
-  secret gets auto-declaration, reachability, and doctor coverage with zero new machinery.
+  capability config-validation contract (`Capability.validate_config(owner, config)`): it returns
+  the resource references the blob implies (none, for both built-in harnesses), and the session
+  template emits them as itself at finalize, alongside the selector edge. A future harness whose
+  blob names a secret gets auto-declaration, reachability, and doctor coverage with zero new
+  machinery, and those secrets fold into the session node's `secret_refs` (the merged model: a held
+  instance's declared secrets surface through its holder).
 
 **The YAML spec is clean** (maintainer ruling, 2026-07-07): `command`, `restart_command`, and
 `required_commands` are NOT session-template spec fields in manifests. They are `shell`'s config
@@ -228,10 +243,11 @@ spec:
   strings), exactly today's fields, exactly today's semantics. All optional; an empty config is a
   plain login shell, exactly like today's field-less `default` template.
 - Behavior: the `start` op returns `command` (empty means login shell only); the `restart` op
-  returns `restart_command` when set, else `command`; the `preflight` stage probes
-  `required_commands` on the target when it exists at command entry (with a `runup` fallback for the
-  ephemeral-create case, R7). Template-variable substitution (`{{session_name}}`,
-  `{{workspace_name}}`) stays core and applies to the returned command string, as today.
+  returns `restart_command` when set, else `command`; readiness probes `required_commands` on the
+  launch target, floating between `preflight` and `runup` by the target node's pending-ness (R7),
+  which is exactly the four-way fork the merged `RequiredCommandsCheck` already implements.
+  Template-variable substitution (`{{session_name}}`, `{{workspace_name}}`) stays core and applies
+  to the returned command string, as today.
 - Every existing template resolves to `shell` and behaves identically; the golden rule for this SDD
   is behavior parity for any config that loads today, with exactly one documented divergence in
   multi-parent inheritance (R5's divergence note).
@@ -250,10 +266,11 @@ spec:
   - a RESTART after Claude Code discarded the session (it does not save sessions that did no work,
     so killing an empty session leaves nothing to resume) launches fresh instead of failing on a
     blind `--resume`.
-- HOW the existence check runs (a probe as the session user via `ctx.agent_target` before the pane
-  command is built, runtime shell logic in the pane command, or some combination) is the HLA's call,
-  on the execution surface R7 requires. Note the timing: this detection is an op-time concern (it
-  runs when `start` / `restart` build the pane command, post-provision), not a preflight concern.
+- HOW the existence check runs (a probe as the session user via `ctx.agent_target()` before the pane
+  command is built, runtime shell logic in the pane command, or some combination) is the HLA's call.
+  It addresses the tool session by its own `session_name` (given at construction, per the merged
+  identity model), not through the operation scope's names. The detection is an op-time concern (it
+  runs when `start` / `restart` build the pane command), not a readiness concern.
 - Config vocabulary (owned by the harness, snake_case per project convention; the FIELD SET is
   pinned at LLD, with all flag spellings and the detection mechanism verified against the latest
   stable Claude Code CLI at implementation):
@@ -289,7 +306,7 @@ spec:
     via a Claude subscription OAuth flow, as an alternative to an API key, is a future auth mode the
     harness would own (a first interactive step at launch, or a provision-time credential the
     harness consumes). It interacts with the walk-away invariant (any interactivity must precede the
-    walk-away point) and with the secret model, so it is deferred until its shape is pinned.
+    boundary resolve) and with the secret model, so it is deferred until its shape is pinned.
   - **Remote-control enablement.** Claude Code has a well-defined remote-control feature (a running
     session can be attached-to and driven from a remote surface, the Claude app or web). It fits the
     walk-away model, so exposing it is a candidate `harness_config` field: whether a launched
@@ -351,157 +368,65 @@ harness surface is expressible there so TOML-declared templates are not locked o
   remains the documented default TOML shape until the TOML resource path retires (Phase 6 of the
   resource-manifests plan).
 
-### R7: Runtime delegation and the harness execution surface
+### R7: The harness is a `Readiness` capability the session node holds
 
-What a harness is FOR: extracting maximum value from the specific tool it wraps. A harness exists
-because it knows its tool deeply, so it can resume the right named session, forward the flags that
-matter, check that the tool's executables are present, and generally do the smart thing an opaque
-command string cannot. That tool knowledge is the whole payoff, and the execution surface below
-exists to serve it.
+The merged model gives the harness its home: the session node (`sessions/nodes.py`) holds a
+`Readiness` instance and composes it, and today that instance is the interim
+`RequiredCommandsCheck`. This SDD replaces that instance with the real harness and replaces the
+interim `_build_session_command` pane-command path with the harness's `start` / `restart` ops. What
+a harness is FOR is unchanged: extracting maximum value from the specific tool it wraps (resume the
+right named session, forward the flags that matter, check the required executables). What it is NOT
+responsible for, the operator's walk-away experience and the system's consistency, is delivered by
+the orchestration and isolation machinery around it; the harness's whole obligation to that
+machinery is to stay non-interactive.
 
-What a harness is NOT responsible for: the operator's walk-away experience and the system's
-consistency guarantees. Those are Agentworks-wide properties delivered by the ISOLATION machinery
-(secret resolution, ephemeral agents and workspaces, git-token handling, rollback), not by the
-harness. The harness's entire obligation to that machinery is a negative one: stay non-interactive
-so it never reopens a prompt after the operator has walked away. The requirements below describe the
-execution surface and that one obligation; they are careful not to recast the harness as the thing
-that provides walk-away.
-
-- The sessions manager stops reading command strings off the resolved template and delegates to a
-  resolved harness INSTANCE instead. It constructs the harness
-  (`harness_for(name)(owner_name, merged_config, resolver)`), holds it, and drives its lifecycle:
-  `preflight` (pre-resolve), then, after the single resolve pass and ephemeral provisioning, `runup`
-  (the target-environment check, today the required-commands probe; shaped to grow into file,
-  tool-state, and vm / workspace / agent state checks without a contract change), then the `start` /
-  `restart` op for the pane command. The session is the model's first RICH consuming resource (it
-  has its own lifecycle, panes, env, tmux, AND composes the harness instance's stages); the
-  composition is done imperatively in the manager root, consistent with how `create_vm` and agent
-  init drive their capabilities today.
-- **A harness is not limited to returning a static string.** The contract gives it the ability to
-  execute arbitrary code on the launch target as the TARGET USER (the user the session runs as: the
-  selected agent, or the admin user in admin mode), including multiple commands (state probes, tool
-  interrogation) in the course of deciding what the session runs. The `shell` harness uses none of
-  this; `claude-code` needs it (R4); future harnesses get it for free. This surface is the
-  `RunContext`'s execution targets (`ctx.agent_target` in normal mode, `ctx.admin_target` in admin
-  mode): the harness is the FIRST capability whose readiness and ops actually run ON the VM as the
-  target user (git-credential and vm-platform runups probe from the CLI host over HTTP/API), so it
-  is the first real consumer of those RunContext transport fields, which the composition root
-  populates for the harness's `runup` / op stages.
-- **Room reserved for a permission model.** The execution surface is shaped so that running as the
-  target user is the default grant, and the always-admin channel (`ctx.admin_target`, admin
-  regardless of mode) is gated by an explicit grant, the trust knob for third-party harnesses when
-  the plugin SDD arrives. This falls out of the model for free: `RunContext` already carries both
-  transports as optional fields present only when the operation supplies them and (in a future
-  permission model) when the capability is granted them. Only the target-user channel is used by the
-  built-ins; nothing here needs more. Stated plainly so the model is honest: a harness is in-process
-  code, so neither the context's contents nor a grant CONFINES a malicious one; the trust boundary
-  for third-party harnesses is plugin installation and enablement (distribution trust, per the
-  plugin SDD's framing). The permission model and the context's deliberate minimalism buy
-  misuse-resistance and auditability for cooperating code, which is their whole claim.
-- **`preflight` and `runup` are general readiness hooks; the required-commands check floats between
-  them by target existence.** Both hooks are open to whatever readiness a harness needs (target-
-  independent or secret-free checks in `preflight`; authenticated or post-provision checks in
-  `runup`); the built-ins fill only the required-commands slice today, and the contract is not
-  limited to it. That check should fail as early as possible, before the operator is prompted, which
-  means `preflight`, pre-resolve. Preflight is dependency-blind (it may not check state a later step
-  of the command creates), so it can only probe a target that already exists. The harness learns
-  which entities exist from an EXPLICIT context signal, `to_create` (the set of named entities this
-  command will make that do not exist yet at this stage), NOT from a missing target. So the harness
-  probes `required_commands` when its target user is not in `to_create` (an EXISTING
-  agent/workspace, and every `session restart`), pre-resolve, bailing before any prompt; for a
-  `--new-agent` / `--new-workspace` create (the entity is in `to_create`, made later this command,
-  the analog of a git-credential preflight not checking a VM `vm create` has not made yet) it defers
-  to `runup`, post-provision, once the entity has left `to_create`. Gating on the explicit
-  `to_create` rather than on `agent_target is None` is a safety property: a target missing for any
-  OTHER reason (admin-mode, a permission gap, a bug) then raises a loud error instead of silently
-  SKIPPING the readiness check. (Probing the ephemeral target as admin at preflight was also
-  rejected: it false-aborts on agent-template user-level tooling. The check runs as the real target
-  user, or is deferred, never faked.)
-- **The harness slots into the existing ordering; it does not own it.** The command's order is the
-  capability model's own: preflight-all (before any prompt or mutation) -> the single secret resolve
-  at the preflight boundary (the one prompt session) -> ephemeral provisioning under rollback
-  protection -> the harness `runup` in the real environment -> the `start` op -> tmux. The
-  operator-facing consistency of that order (prompts up front, then non-interactive to success or a
-  clean rollback with clear errors) is produced by the secret and isolation machinery, and the
-  harness simply fits into it. Its one contribution to the failure story is small and uniform with
-  every other stage: a `runup` failure tears down the just-created ephemerals via the same rollback
-  path any later failure already exercises; when nothing ephemeral was requested there are no
-  mutations before `runup`, so it still naturally precedes any change.
-- **Harness code never prompts, and that is its whole obligation to the walk-away property.**
-  `validate_config`, `preflight`, `runup`, `start`, and `restart` are non-interactive by contract;
-  all operator interaction happens before dispatch. This is the one place the harness could break
-  the system's walk-away guarantee, and forbidding it is the entire ask: the harness does not
-  otherwise deliver walk-away, it just must not reopen a prompt once the interactive phase is done.
-  The contract binds every harness, plugin-registered ones included, so it is part of the capability
-  contract, not a convention of the built-ins.
-- **The nested-create secret hoist is already handled upstream.** The pre-realignment draft carried
-  a requirement to fold a `--new-agent` ephemeral agent's git-token secrets into the single up-front
-  resolve (the nested `create_agent` used to resolve them inside the mutation block). Main's
-  `create_session` already does this: it constructs the ephemeral agent's providers against the same
-  resolver, folds their tokens into the one boundary resolve, and passes the resolved values to
-  `create_agent` (which skips its own resolve when given them). So the walk-away point is already
-  exact for nested creates, and this SDD adds nothing there. (An in-code comment near that path
-  still claims `create_agent` re-resolves; it is stale relative to the current behavior and worth a
-  cleanup commit, but that is not this SDD's surface.)
-- **Restart's post-kill end state is pinned, not wished away.** Failures after the destructive kill
-  (the `restart` op or tmux creation) cannot restore the old session; "rolls back to a consistent
-  state" for that window means: the session row survives, the old tmux is gone,
-  `agw session restart` is cleanly retryable, and the error says exactly which step failed. No
-  resurrection is attempted. On restart the target already exists, so the required-commands check is
-  a plain `preflight` and runs BEFORE the resolve (and before the kill): this preserves today's
-  discipline that a declined or doomed restart never prompts for secrets it would discard, and a
-  missing binary aborts before any prompt, with the old session still running. (Main's
-  `restart_session` already resolves the session ENV chain via `resolve_for_command` only after its
-  BROKEN/confirm gates; the harness preflight sits ahead of that.)
-- **The `RunContext` gains the model's identity chain as a REQUIRED invariant, and this SDD adds
-  it** (maintainer ruling, 2026-07-16). `RunContext` today carries global config, the execution
-  targets, and resolved secrets, but no identity: no vm / workspace / agent / session NAMES. A
-  harness needs them, at minimum the session name to address the tool session
-  (`claude --name <session>`, distinct from the template name it is constructed under), plus the
-  chain for probe context and error labels. This SDD adds a self-validating `OperationIdentity`
-  value keyed by a `level` (the scope of the specific capability invocation: `system`, `vm`,
-  `workspace`, `admin`, `agent`, or `session`) and makes it a REQUIRED field on `RunContext`, not an
-  optional extra. A level is what THAT call concerns, not the ambient command: in one `vm create`
-  the platform readiness concerns the VM (VM level) while each git-credential readiness call
-  concerns a system-global credential (SYSTEM level). Each level carries its own name plus its
-  ancestors up to the system slug (a session identity is the vm, workspace, agent-or-admin, and
-  session names; a vm op is just the vm; the system-global capabilities `secret-backend` and
-  `git-credential-provider` run at SYSTEM with identity being only the slug, as do cross-system
-  scans like doctor's vm-site check). The object validates that the identity matches its level
-  exactly, so it is always consistent and valid. The full hierarchy is enumerated, but only the
-  levels a call site constructs today (`system`, `vm`, `session`) have their rules implemented;
-  `workspace` / `admin` / `agent` raise `NotImplementedError` until a real call site needs them
-  (their name fields still exist and are validated within a session). A context without an identity
-  is an incomplete object, so the object enforces its presence and every construction site supplies
-  one at the right level. Identity can be required where the timing-populated fields (targets,
-  secrets) cannot, because the invocation's names and level are fixed at command entry (the one
-  caveat: the system slug can be prompted once on a first-ever create, before any context is built).
-  It is names-only for now, with room reserved for fuller representations (the HLA pins the shape).
-- **Threading identity through the existing capability roots is in scope.** Because identity is now
-  required on the shared `RunContext`, this SDD updates every current construction site (in
-  `vms/manager.py`, `agents/manager.py`, `git_credentials/__init__.py`, and `doctor.py`) to pass the
-  `OperationIdentity` appropriate to its operation, and carves out the capability README's "every
-  field is optional" line for identity. This widens the SDD's blast radius beyond harness-local
-  code, deliberately: the alternative (ship identity optional now, tighten later) would launch a
-  non-final API, which the model should not do.
-- **Getting the rest of this API surface right is a big part of the HLA**: what the core hands the
-  harness (the `RunContext`: execution targets, resolved secrets, identity chain, bound config, and
-  the explicit `to_create` existence signal) and what the harness returns to the tmux layer are
-  pinned there, not here. The requirement is the capability boundary, not its signature.
-- **Best-effort robustness, not race-proof.** Harnesses should aim to be as robust as practical, but
-  there is no expectation that they are perfect against race conditions and similar challenges. The
-  canonical example is R4's existence check: the tool session changing state between the check and
-  the launch may be problematic, and that is understood and accepted. Where an easy strengthening
-  exists (e.g. moving the check into the launch script/command so check and launch are one
-  invocation), take it; it is not worth overengineering beyond that. These are operator-interactive
-  sessions, and a retry is an acceptable outcome for a window this small.
-- **The role of tmux is unchanged by this effort.** Every session, regardless of harness, is
-  launched by tmux and has its tty owned by tmux. Even a harness whose process has zero need for
-  stdin/stdout/stderr still runs under tmux; it is how Agentworks manages the harness process
-  (lifecycle, attach/detach, persistence), not just how the operator watches it. Harnesses decide
-  WHAT runs in the pane, never HOW the pane is hosted.
-- Template-variable substitution, `exec` wrapping, env composition, tmux mechanics, liveness probing
-  of the running session, and every other session behavior stay core and unchanged.
+- **The session node holds the harness instance and composes its readiness.** The session factory
+  constructs `harness_for(name)(session_template_name, merged_harness_config)` from the resolved
+  template's `(harness, harness_config)` pair and hands it to the session node, replacing the
+  `RequiredCommandsCheck` the node holds today. The session node's `preflight` / `runup` delegate to
+  the harness's, exactly as they delegate to the check today (`self._harness.preflight(ctx)`), and
+  the session orchestrator calls the harness's `start` / `restart` op where it calls
+  `_build_session_command` today. The harness is a `Readiness`, never a graph node: it has no `key`
+  and no `deps`, and the orchestrator never walks it.
+- **Readiness is the required-commands check, and it keeps the merged fork.** The four-way readiness
+  fork the merged `RequiredCommandsCheck` implements moves into the harness unchanged: out of scope
+  for the operation's LEVEL (a system-scoped doctor scan reaching a session) SKIPS; in scope with a
+  pending target DEFERS to runup; in scope with a realized target PROBES now (the earlier-failure
+  win for existing agents and every restart); in scope with the target absent for another reason is
+  a LOUD error, never a silent skip. The harness reads the LEVEL off `ctx.operation_scope` and the
+  target's `realized` off the agent-or-admin node it is constructed with; `to_create` does not exist
+  in this model (pending-ness lives on the node). `preflight` and `runup` are general hooks (a
+  future harness may add target-independent checks to preflight or authenticated checks to runup);
+  the built-ins fill only the required-commands slice.
+- **The harness executes on the launch target as the target user**, through `ctx.agent_target()`
+  (normal mode) or `ctx.admin_target()` (admin mode), the accessor methods the merged `RunContext`
+  exposes. The `shell` harness uses none of this (its ops return a static string); `claude-code`
+  needs it for the resume-vs-launch detection (R4); future harnesses get it for free. Harness logic
+  runs CLI-side; only the commands it issues run on the target.
+- **The one-object target contract (merged, restated for the swap).** The agent-or-admin node the
+  session node depends on and the same node the harness is constructed with as its `target` MUST be
+  the same object, so when the orchestrator flips the target `realized` the harness sees it. The
+  merged `pending_session_node` / `live_session_node` factories already enforce this for the interim
+  check; the harness swap preserves it (the factory hands the one node to both the session's dep and
+  the harness's target).
+- **Harness code never prompts.** `validate_config`, `preflight`, `runup`, `start`, and `restart`
+  are non-interactive by contract; all operator interaction happens before the boundary resolve,
+  which the orchestrator owns. This is the harness's only obligation to the walk-away property; it
+  does not otherwise deliver it. The contract binds every harness, plugin-registered ones included.
+- **Restart's post-kill end state is pinned** (parity with today, preserved by the orchestrator): a
+  failure after the destructive kill cannot restore the old session, so the session row survives,
+  the old tmux is gone, `agw session restart` is cleanly retryable, and the error names the failed
+  step. On restart the target already exists, so readiness probes at `preflight`, pre-resolve and
+  pre-kill, so a missing binary aborts with the old session still running.
+- **Best-effort robustness, not race-proof.** Harnesses aim to be as robust as practical; there is
+  no expectation of perfection against races. R4's existence check is the canonical example: the
+  tool session changing state between check and launch is understood and accepted; where an easy
+  strengthening exists (folding the check into the launch snippet so check and launch are one
+  invocation) take it, and do not overengineer beyond that.
+- **The role of tmux is unchanged.** Every session, regardless of harness, is launched by tmux and
+  has its tty owned by tmux. Harnesses decide WHAT runs in the pane (the returned string), never HOW
+  the pane is hosted. Template-variable substitution, `exec` wrapping, env composition, tmux
+  mechanics, and liveness probing stay core and unchanged.
 - The resolved pair is validated at use exactly as declared blobs are validated at load; a resolved
   harness name always came from some declared (and therefore reference-validated) value or the
   built-in default, so no new failure mode exists at session-create time beyond today's.
@@ -513,7 +438,9 @@ that provides walk-away.
   description, and `Referenced by:` (the session templates that declare it).
 - `agw resource describe session-template/<name>` renders `harness` / `harness_config` like any
   other spec fields, and the reference appears in its references list when declared.
-- No doctor changes beyond what the registry surfaces provide for free.
+- No doctor changes beyond what the registry surfaces provide for free. (Doctor already reaches
+  session readiness at SYSTEM scope in the merged model; the harness's readiness SKIPS there, per
+  the fork above, so no doctor-specific branch is needed.)
 
 ### R9: Migration tool and samples
 
@@ -548,14 +475,15 @@ The model change (Background) lands in the permanent docs, not just in code and 
 - `docs/guides/resources.md` gains the harness in its capability story (it already carries
   `secret-backend` and `git-credential-provider`), with worked session-template examples in the new
   shape.
+- `capabilities/README.md` gains the harness as a worked example of a capability HELD by a rich
+  consuming node (the session), the case its thin-vs-rich guidance describes.
 - The decision to introduce the harness is its own ADR covering: the model formulation, the inline
   reference+blob consumer shape as shipped, and the pair-inheritance rule. Per the SDD style, the
   ADR is DRAFTED in this feature directory (`adr-session-harness.md`, unnumbered) and moves into
-  `docs/adrs/`, receiving its number then, only at the very end of the effort, so the number is
-  assigned once against the directory as it exists at merge time. ADR 0016 is untouched; the new ADR
-  references it for the capability collapse and `capabilities/README.md` for the lifecycle contract
-  the harness adopts (it is the first RICH consuming resource of that model, and the first to use
-  the `RunContext` execution targets, worth calling out in the ADR's consequences).
+  `docs/adrs/`, receiving its number then, only at the very end of the effort. ADR 0016 is
+  untouched; the new ADR references it for the capability collapse and the orchestration-layer ADR
+  for the node/readiness model the harness plugs into (the harness is a `Readiness` held by the
+  session node, not a graph node, worth stating in the consequences).
 - Per the SDD lifecycle rules, each doc change rides the commits that make its claims true; nothing
   here waits for a closeout pass, and nothing permanent cites this SDD's path.
 
@@ -573,6 +501,9 @@ The model change (Background) lands in the permanent docs, not just in code and 
 - **claude-code auth modes, question-timeout control, MCP-inheritance policy, and remote-control
   enablement**: recorded as R4 reserved future directions, not built in v1. The v1 `claude-code`
   config vocabulary is the pinned `permission_mode` / `model` / `extra_args` set.
+- **Any change to the orchestration layer**: it is merged and locked; the harness consumes it as-is.
+  If the swap reveals a genuine gap in the node/readiness contract, that is an orchestration-layer
+  follow-up, raised separately, not folded in here.
 - **Liveness probing behind the harness**: today's boot-id/PID probe is tool-agnostic and stays
   core; a harness-owned probe can be added to the contract when a harness actually needs one.
 - **Alternatives to tmux**: possibly introduced someday, but that would be an orthogonal effort; the
@@ -598,3 +529,5 @@ Operators upgrading across this SDD see:
 - `agw resource list` gains two `harness` rows; `agw resource kinds` gains the `harness` kind.
 - Newly migrated or sampled session templates spell commands under `harness_config`.
 - Templates can now say `harness: claude-code` instead of restating the Claude Code command strings.
+- Session behavior is otherwise unchanged: the same commands run, the same prompts at the same times
+  (the orchestration layer already governs that), and existing sessions restart identically.
