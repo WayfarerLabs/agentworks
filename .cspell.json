@@ -115,6 +115,7 @@
     "reinit",
     "reprovisioning",
     "reqs",
+    "rollbackable",
     "RLIMITs",
     "rootfs",
     "rsynced",

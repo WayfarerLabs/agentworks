@@ -947,12 +947,20 @@ are NOT here; they ride their phases per the lockstep rule.)
       narrative reflect HEAD (the node protocol, orchestrator ownership of traversal/secrets, the
       completed declare/receive contract, the two-layer identity + operation scope), each having
       landed with its phase.
-- [ ] Promote and NUMBER the ADR from this feature directory into `docs/adrs/` (it references ADR
+- [x] Promote and NUMBER the ADR from this feature directory into `docs/adrs/` (it references ADR
       0016, `0016-yaml-resource-manifests.md`, for the capability collapse and
       `capabilities/README.md` for the lifecycle contract; its own number is assigned at promotion,
       0019+ given 0018 is current). The ADR notes in one line that best-effort reverse-order unwind,
       rather than Terraform-style taint-and-leave, is a conscious PARITY-driven choice (preserving
       today's rollback behavior under R7), not a fresh design decision (reviewer note, 2026-07-17).
+      LANDED (2026-07-18) as `docs/adrs/0019-orchestration-layer-command-plans-over-node-graphs.md`
+      (0018 was still the highest number at promotion). No draft ADR file existed in this directory,
+      so promotion meant writing the decision record fresh from the landed design (the FRD/HLA
+      rulings and the phases' as-landed records), standalone per the SDD-ephemerality rule: no SDD
+      paths, every concept stated in full, referencing only ADR 0016 and `capabilities/README.md` as
+      this box specifies. The parity-driven unwind note rides its Unwind decision and Alternatives
+      Considered. The one SDD-scoped word the ADR needed (rollbackable) moved from this directory's
+      `.cspell.json` to the root dictionary per the dictionary promotion rule.
 - [ ] Write `locked.md` summarizing the final state.
 
 Definition of done: the ADR is numbered and promoted; permanent docs are accurate at HEAD; the
