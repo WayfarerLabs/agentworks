@@ -393,3 +393,143 @@ def test_rekey_scope_reaches_node_readiness(
     assert scope is not None
     assert scope.level is ScopeLevel.VM
     assert scope.vm == "box"
+
+
+# == port_forward_vm: a gated command =========================================
+
+
+class _FakeTunnel:
+    def __init__(self) -> None:
+        self.argv: list[list[str]] = []
+        self.terminated = False
+
+    def __call__(self, cmd: list[str]) -> _FakeTunnel:
+        self.argv.append(cmd)
+        return self
+
+    def wait(self) -> int:
+        return 0
+
+    def terminate(self) -> None:
+        self.terminated = True
+
+
+@pytest.fixture
+def tunnel(monkeypatch: pytest.MonkeyPatch) -> _FakeTunnel:
+    fake = _FakeTunnel()
+    monkeypatch.setattr("subprocess.Popen", fake)
+    return fake
+
+
+def test_port_forward_reachable_vm_is_one_boundary_burst(
+    db: Database,
+    make_config,  # noqa: ANN001
+    resolve_counter: list[list[str]],
+    tunnel: _FakeTunnel,
+    monkeypatch: pytest.MonkeyPatch,
+    captured_output,  # noqa: ANN001
+) -> None:
+    """port-forward on a reachable VM: the gate's fast path costs
+    nothing, the site secret rides ONE boundary burst, and the SSH
+    tunnel carries the -L specs inside the held span."""
+    config = make_config()
+    _seed_vm(db)
+    _reachable(monkeypatch, True)
+
+    with pytest.raises(SystemExit) as exc:
+        vm_manager.port_forward_vm(db, config, "box", ["8080", "9000:3000"])
+    assert exc.value.code == 0
+
+    assert resolve_counter == [["proxmox-token"]]
+    (argv,) = tunnel.argv
+    assert "localhost:8080:localhost:8080" in " ".join(argv)
+    assert "localhost:9000:localhost:3000" in " ".join(argv)
+
+
+def test_port_forward_stopped_vm_gates_then_forwards(
+    db: Database,
+    make_config,  # noqa: ANN001
+    resolve_counter: list[list[str]],
+    tunnel: _FakeTunnel,
+    monkeypatch: pytest.MonkeyPatch,
+    captured_output,  # noqa: ANN001
+) -> None:
+    """The gate-prompt parity mirror on a stopped VM: the gate's
+    just-in-time token resolve seeds the boundary (nothing resolves
+    twice), the VM starts, and the tunnel still opens."""
+    config = make_config()
+    _seed_vm(db)
+    events: list[str] = []
+    _reachable(monkeypatch, False)
+    monkeypatch.setattr(
+        ProxmoxPlatform,
+        "status",
+        lambda self, row: events.append("status") or VMStatus.STOPPED,
+    )
+    monkeypatch.setattr(
+        ProxmoxPlatform, "start", lambda self, row: events.append("start")
+    )
+    monkeypatch.setattr(
+        vm_manager, "_ensure_tailscale", lambda *a, **k: events.append("tailscale")
+    )
+
+    with pytest.raises(SystemExit):
+        vm_manager.port_forward_vm(db, config, "box", ["8080"])
+
+    assert events == ["status", "start", "tailscale"]  # the gate ran
+    assert resolve_counter == [["proxmox-token"]]
+    assert len(tunnel.argv) == 1
+
+
+def test_port_forward_bad_spec_fails_with_zero_resolves_and_zero_gate(
+    db: Database,
+    make_config,  # noqa: ANN001
+    resolve_counter: list[list[str]],
+    tunnel: _FakeTunnel,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agentworks.errors import ValidationError
+
+    config = make_config()
+    _seed_vm(db)
+    events = _fake_status(monkeypatch, VMStatus.RUNNING)
+    _reachable(monkeypatch, False)
+
+    with pytest.raises(ValidationError, match="invalid port"):
+        vm_manager.port_forward_vm(db, config, "box", ["nope"])
+    with pytest.raises(ValidationError, match="out of range"):
+        vm_manager.port_forward_vm(db, config, "box", ["70000"])
+
+    assert resolve_counter == []
+    assert events == []
+    assert tunnel.argv == []
+
+
+def test_port_forward_scope_reaches_node_readiness(
+    db: Database,
+    make_config,  # noqa: ANN001
+    tunnel: _FakeTunnel,
+    monkeypatch: pytest.MonkeyPatch,
+    captured_output,  # noqa: ANN001
+) -> None:
+    from agentworks.capabilities.base import ScopeLevel
+
+    config = make_config()
+    _seed_vm(db)
+    _reachable(monkeypatch, True)
+    scopes: list[OperationScope | None] = []
+    real = ProxmoxPlatform.preflight
+
+    def _recording(self: ProxmoxPlatform, ctx: RunContext) -> None:
+        scopes.append(ctx.operation_scope)
+        real(self, ctx)
+
+    monkeypatch.setattr(ProxmoxPlatform, "preflight", _recording)
+
+    with pytest.raises(SystemExit):
+        vm_manager.port_forward_vm(db, config, "box", ["8080"])
+
+    (scope,) = scopes
+    assert scope is not None
+    assert scope.level is ScopeLevel.VM
+    assert scope.vm == "box"

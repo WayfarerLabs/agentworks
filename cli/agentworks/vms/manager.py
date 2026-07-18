@@ -2172,6 +2172,14 @@ def port_forward_vm(
 
     Each port spec is either REMOTE_PORT (local defaults to same) or
     LOCAL_PORT:REMOTE_PORT, matching kubectl port-forward syntax.
+
+    Orchestrated (:func:`gated_vm_boundary`): the graph derives from
+    the VM's row, the activation gate replaces this command's
+    ``keep_active`` use (opening BEFORE the preflight sweep; its
+    just-in-time values seed the boundary resolver), and the
+    held-active span covers the foreground SSH tunnel. The port-spec
+    validation and the no-Tailscale guard stay pre-gate: a refused
+    forward costs zero prompts, zero resolves, and zero gate events.
     """
     import signal
     import subprocess
@@ -2246,7 +2254,10 @@ def port_forward_vm(
         output.info("Use --verbose for detailed SSH output.")
 
     # Run in foreground until interrupted
-    with keep_active(db, config, vm, bind_platform(config, vm)):
+    from agentworks.bootstrap import build_registry
+
+    registry = build_registry(config)
+    with gated_vm_boundary(db, config, registry, vm):
         try:
             proc = subprocess.Popen(ssh_cmd)
 
