@@ -16,7 +16,7 @@ from agentworks.errors import (
     ValidationError,
 )
 from agentworks.transports import transport
-from agentworks.vms.manager import bind_platform, keep_active
+from agentworks.vms.manager import bind_platform, gated_vm_boundary, keep_active
 
 if TYPE_CHECKING:
     from agentworks.agents.templates import ResolvedAgentTemplate
@@ -751,7 +751,14 @@ def shell_agent(
     name: str,
     workspace_name: str | None = None,
 ) -> None:
-    """Open a shell as an agent user on a VM."""
+    """Open a shell as an agent user on a VM.
+
+    Orchestrated (``vms.manager.gated_vm_boundary``): the graph
+    derives from the VM's row, the activation gate replaces this
+    command's ``keep_active`` use (opening BEFORE the preflight sweep;
+    its just-in-time values seed the boundary resolver), and the
+    held-active span covers the whole interactive session.
+    """
     agent = db.get_agent(name)
     if agent is None:
         raise NotFoundError(
@@ -772,47 +779,45 @@ def shell_agent(
     # errors and the eager-resolve below sees the right scope chain.
     ws = _resolve_workspace_for_agent(db, vm, agent, workspace_name)
 
-    # The composition root: the agent shell's env-chain secrets join
-    # the bind's ONE boundary resolve (site secrets + env secrets, one
-    # prompt session), after the platform's preflight. The same scope
-    # dicts feed both the SecretTarget and compose_env below so the two
-    # consumers can't drift.
+    # The orchestrated composition root (gated_vm_boundary): the agent
+    # shell's env-chain secrets join the ONE boundary resolve (site
+    # secrets + env secrets, one prompt session), after every node's
+    # preflight; the activation gate opens before the sweep and its
+    # held-active span covers the whole interactive session. The same
+    # scope dicts feed both the SecretTarget and compose_env below so
+    # the two consumers can't drift.
     from agentworks.bootstrap import build_registry
-    from agentworks.secrets.resolver import Resolver
 
     registry = build_registry(config)
     scopes = _resolve_agent_direct_env_scopes(registry, vm, agent, ws=ws)
-    resolver = Resolver(config, registry)
-    bound = bind_platform(
-        config, vm, registry=registry, resolver=resolver,
+
+    with gated_vm_boundary(
+        db, config, registry, vm,
         targets=[_agent_direct_secret_target(scopes, label=f"agent-shell={agent.name}")],
-    )
-    values = resolver.values
+    ) as (_vm_node, resolver):
+        from agentworks.vms.sites import site_platform_name
 
-    from agentworks.vms.sites import site_platform_name
+        ctx = ResourceContext(
+            vm_name=vm.name,
+            platform=site_platform_name(vm.site, registry),
+            site=vm.site,
+            user=agent.linux_user,
+            workspace_name=ws.name if ws else None,
+            workspace_dir=ws.workspace_path if ws else None,
+            agent_name=agent.name,
+        )
+        env = compose_env(
+            values=resolver.values,
+            ctx=ctx,
+            vm=scopes.vm,
+            workspace=scopes.workspace,
+            agent=scopes.agent,
+        )
 
-    ctx = ResourceContext(
-        vm_name=vm.name,
-        platform=site_platform_name(vm.site, registry),
-        site=vm.site,
-        user=agent.linux_user,
-        workspace_name=ws.name if ws else None,
-        workspace_dir=ws.workspace_path if ws else None,
-        agent_name=agent.name,
-    )
-    env = compose_env(
-        values=values,
-        ctx=ctx,
-        vm=scopes.vm,
-        workspace=scopes.workspace,
-        agent=scopes.agent,
-    )
+        # Direct agent SSH (FRD R1): no admin+sudo detour. The agent's
+        # authorized_keys (Phase 3) accepts the operator's key set.
+        target = agent_transport(vm, config, agent)
 
-    # Direct agent SSH (FRD R1): no admin+sudo detour. The agent's
-    # authorized_keys (Phase 3) accepts the operator's key set.
-    target = agent_transport(vm, config, agent)
-
-    with keep_active(db, config, vm, bound):
         # Probe direct agent SSH first so pre-rollout agents (whose
         # authorized_keys was never populated) get an actionable error
         # rather than dropping into a remote shell that immediately exits
@@ -851,6 +856,10 @@ def exec_agent(
     directory and the workspace template's env joins the env chain. The
     workspace must belong to the agent's VM and the agent must have
     access.
+
+    Orchestrated (``vms.manager.gated_vm_boundary``), mirroring
+    :func:`shell_agent`: the gate opens before the preflight sweep and
+    the held-active span covers the streamed remote command.
     """
     import shlex
 
@@ -875,45 +884,42 @@ def exec_agent(
     # sees the right scope chain.
     ws = _resolve_workspace_for_agent(db, vm, agent, workspace_name)
 
-    # The composition root: the agent exec env-chain secrets join the
-    # bind's ONE boundary resolve (site secrets + env secrets, one
-    # prompt session), after the platform's preflight. The same scope
-    # dicts feed both the SecretTarget and compose_env below so the two
-    # consumers can't drift.
+    # The orchestrated composition root (gated_vm_boundary): the agent
+    # exec env-chain secrets join the ONE boundary resolve (site
+    # secrets + env secrets, one prompt session), after every node's
+    # preflight; the gate's held-active span covers the streamed
+    # remote command. The same scope dicts feed both the SecretTarget
+    # and compose_env below so the two consumers can't drift.
     from agentworks.bootstrap import build_registry
-    from agentworks.secrets.resolver import Resolver
 
     registry = build_registry(config)
     scopes = _resolve_agent_direct_env_scopes(registry, vm, agent, ws=ws)
-    resolver = Resolver(config, registry)
-    bound = bind_platform(
-        config, vm, registry=registry, resolver=resolver,
+
+    with gated_vm_boundary(
+        db, config, registry, vm,
         targets=[_agent_direct_secret_target(scopes, label=f"agent-exec={agent.name}")],
-    )
-    values = resolver.values
+    ) as (_vm_node, resolver):
+        from agentworks.vms.sites import site_platform_name
 
-    from agentworks.vms.sites import site_platform_name
+        ctx = ResourceContext(
+            vm_name=vm.name,
+            platform=site_platform_name(vm.site, registry),
+            site=vm.site,
+            user=agent.linux_user,
+            workspace_name=ws.name if ws else None,
+            workspace_dir=ws.workspace_path if ws else None,
+            agent_name=agent.name,
+        )
+        env = compose_env(
+            values=resolver.values,
+            ctx=ctx,
+            vm=scopes.vm,
+            workspace=scopes.workspace,
+            agent=scopes.agent,
+        )
 
-    ctx = ResourceContext(
-        vm_name=vm.name,
-        platform=site_platform_name(vm.site, registry),
-        site=vm.site,
-        user=agent.linux_user,
-        workspace_name=ws.name if ws else None,
-        workspace_dir=ws.workspace_path if ws else None,
-        agent_name=agent.name,
-    )
-    env = compose_env(
-        values=values,
-        ctx=ctx,
-        vm=scopes.vm,
-        workspace=scopes.workspace,
-        agent=scopes.agent,
-    )
+        target = agent_transport(vm, config, agent)
 
-    target = agent_transport(vm, config, agent)
-
-    with keep_active(db, config, vm, bound):
         # Probe direct agent SSH first so pre-rollout agents (whose
         # authorized_keys was never populated) get an actionable error.
         _assert_agent_ssh_works(target, agent)

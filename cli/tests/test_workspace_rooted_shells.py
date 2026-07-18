@@ -107,8 +107,13 @@ def _patch_agent_common(monkeypatch: pytest.MonkeyPatch) -> None:
             vm={}, workspace=None, agent={}
         ),
     )
+    # A real, empty SecretTarget: the orchestrated roots register the
+    # env target on the operation's REAL resolver, so a bare object()
+    # sentinel no longer survives the seam.
     monkeypatch.setattr(
-        agent_manager, "_agent_direct_secret_target", lambda *a, **k: object()
+        agent_manager,
+        "_agent_direct_secret_target",
+        lambda *a, **k: empty_secret_target(),
     )
     monkeypatch.setattr("agentworks.secrets.resolve_for_command", lambda *a, **k: None)
     monkeypatch.setattr("agentworks.env.compose_env", lambda **k: {})

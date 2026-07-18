@@ -21,7 +21,12 @@ import pytest
 
 from agentworks.db import Database
 
-from .conftest import stub_build_registry, stub_session_resolvers, stub_vm_gates
+from .conftest import (
+    empty_secret_target,
+    stub_build_registry,
+    stub_session_resolvers,
+    stub_vm_gates,
+)
 
 
 @pytest.fixture(autouse=True)
@@ -392,7 +397,14 @@ def test_exec_agent_uses_direct_agent_ssh(
         agent_mgr, "_resolve_agent_direct_env_scopes",
         lambda *a, **k: agent_mgr._AgentDirectEnvScopes(vm={}, workspace=None, agent={}),
     )
-    monkeypatch.setattr(agent_mgr, "_agent_direct_secret_target", lambda *a, **k: object())
+    # A real, empty SecretTarget: the orchestrated root registers the
+    # env target on the operation's REAL resolver, so a bare object()
+    # sentinel no longer survives the seam.
+    monkeypatch.setattr(
+        agent_mgr,
+        "_agent_direct_secret_target",
+        lambda *a, **k: empty_secret_target(),
+    )
     monkeypatch.setattr("agentworks.secrets.resolve_for_command", lambda *a, **k: {})
     monkeypatch.setattr("agentworks.env.compose_env", lambda **k: {})
 

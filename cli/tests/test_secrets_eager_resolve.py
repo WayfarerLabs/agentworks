@@ -661,9 +661,14 @@ def test_agent_exec_eager_resolve_fires_before_ssh(
 
     db = _seed_basic_db(tmp_path)
 
-    # The root now binds (and preflights) the platform before the env
-    # resolve; make the lima tool check deterministic on any host.
+    # The root preflights the platform before the env resolve; make
+    # the lima tool check deterministic on any host. The activation
+    # gate opens (fast path) before the boundary; keep its
+    # reachability probe off the network.
     monkeypatch.setattr("shutil.which", lambda name: f"/usr/bin/{name}")
+    monkeypatch.setattr(
+        "agentworks.vms.manager._is_tailscale_reachable", lambda host: True
+    )
     db.insert_agent("a1", "vm1", "agt-a1", template="default")
 
     monkeypatch.setattr(
@@ -708,9 +713,9 @@ def test_agent_exec_env_target_joins_the_bind_boundary(
 ) -> None:
     """The one-prompt-session pin for the agent roots (the Phase 7
     round-2 ordering bug lived here, not in the vm twins): exec_agent
-    hands its env-chain SecretTarget to bind_platform, so the env
-    secrets ride the SAME boundary resolve as the site's config
-    secrets."""
+    registers its env-chain SecretTarget on the operation's ONE
+    resolver (``register_targets``), so the env secrets ride the SAME
+    boundary resolve as the site's config secrets."""
     from agentworks.agents import manager as agent_manager
 
     db = _seed_basic_db(tmp_path)
@@ -724,17 +729,26 @@ def test_agent_exec_env_target_joins_the_bind_boundary(
     monkeypatch.setattr(
         agent_manager, "_agent_direct_secret_target", lambda *a, **k: sentinel_target
     )
+    # Node construction binds the site's platform before the target
+    # registration this test spies on; keep it host-independent (the
+    # real lima site is disabled where limactl isn't installed).
+    monkeypatch.setattr(
+        "agentworks.vms.sites.resolve_site",
+        lambda name, registry, *, resolver=None: SimpleNamespace(),
+    )
 
     class _Stop(Exception):
         pass
 
     bound_targets: list[list[object]] = []
 
-    def _bind_spy(config: object, vm: object, **kwargs: Any) -> object:
-        bound_targets.append(list(kwargs.get("targets") or ()))
+    from agentworks.secrets.resolver import Resolver
+
+    def _register_spy(self: Resolver, targets: object) -> None:
+        bound_targets.append(list(targets))  # type: ignore[call-overload]
         raise _Stop
 
-    monkeypatch.setattr(agent_manager, "bind_platform", _bind_spy)
+    monkeypatch.setattr(Resolver, "register_targets", _register_spy)
 
     with pytest.raises(_Stop):
         agent_manager.exec_agent(
@@ -778,13 +792,16 @@ def test_shell_agent_passes_workspace_scope_to_secret_target(
     stub_vm_gates(monkeypatch)
 
     class _Sentinel(Exception):
-        """Raised from the bind (which now hosts the env resolve) so the
-        test stops before SSH; the scopes are captured before it."""
+        """Raised from the target registration (the seam that hosts the
+        env chain now) so the test stops before SSH; the scopes are
+        captured before it."""
 
     def _explode(*args: object, **kwargs: object) -> None:
         raise _Sentinel
 
-    monkeypatch.setattr(agent_manager, "bind_platform", _explode)
+    from agentworks.secrets.resolver import Resolver
+
+    monkeypatch.setattr(Resolver, "register_targets", _explode)
 
     config = SimpleNamespace()
 
