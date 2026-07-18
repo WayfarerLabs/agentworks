@@ -36,7 +36,7 @@ from agentworks.vms.initializer import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable, Iterator, Mapping, Sequence
+    from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
 
     from agentworks.capabilities.git_credential.base import GitCredentialProvider
     from agentworks.capabilities.vm_platform import VMPlatform
@@ -1063,9 +1063,40 @@ def exec_vm(
 
 
 def add_git_credential(db: Database, config: Config, name: str, credential_name: str) -> None:
-    """Add or update a git credential on a VM."""
+    """Add or update a git credential on a VM.
+
+    This is the first ORCHESTRATED command (the orchestration-layer
+    SDD's tracer bullet): its graph is DERIVED from the DB row and the
+    declared references by the ``vms/nodes.py`` factories (zero
+    hand-wired edges), the activation gate replaces this command's
+    ``keep_active`` use (opening BEFORE the preflight sweep and seeding
+    the boundary resolver with its just-in-time values), secrets are
+    delivered scoped to each node's declared names, and a rejected
+    token is FATAL (a plain uncaught raise: the operator asked to add
+    exactly this one credential, unlike vm/agent provisioning's
+    skip-and-degrade).
+
+    Interim seams while both models coexist (FRD R8): the capability
+    instances are still constructed against the operation's resolver
+    (construct-time registration; the walk-derived union is registered
+    alongside and asserted equal by the tracer tests), and the
+    platform's power ops read their API token through that bound
+    resolver, which is why the gate's resolve callback SEEDS it
+    (``Resolver.seed``). Both seams close with the resolver retirement
+    (plan, Phase 5).
+    """
     from agentworks.bootstrap import build_registry
+    from agentworks.capabilities.base import OperationScope, ScopeLevel
+    from agentworks.orchestration.activation import activation_gate
+    from agentworks.orchestration.readiness import preflight_all
+    from agentworks.orchestration.secrets import (
+        ScopedSecrets,
+        secret_declarations,
+        secret_union,
+    )
+    from agentworks.orchestration.walk import walk
     from agentworks.transports import transport
+    from agentworks.vms.nodes import git_credential_node, live_vm_node
 
     # build_registry runs first so framework miss-policies (e.g.
     # GitCredentialKind's error policy on a typo'd credential name)
@@ -1082,56 +1113,83 @@ def add_git_credential(db: Database, config: Config, name: str, credential_name:
             hint="VM init may not be complete. Check 'vm describe' for status.",
         )
 
-    from agentworks.resources.access import git_credential
-
-    cred_config = git_credential(registry, credential_name)
-    if cred_config is None:
-        raise NotFoundError(
-            f"git credential '{credential_name}' not found in config",
-            entity_kind="git-credential",
-            entity_name=credential_name,
-        )
-
     from agentworks.secrets.resolver import Resolver
 
     resolver = Resolver(config, registry)
-    providers = resolve_git_credential_providers(
-        registry, [credential_name], resolver
-    )
-    provider = providers[credential_name]
+
+    # BUILD: the command names its direct resources (this VM, this
+    # credential); everything else enters through the derived graph
+    # (the row's site field, the decl's references).
+    cred_node = git_credential_node(registry, credential_name, resolver)
+    vm_node = live_vm_node(db, config, registry, vm, resolver)
+    provider = cred_node.provider
 
     entry = provider.helper_entry()
     if entry.repos or entry.owner:
         # Scoped credentials need the helper's embedded selection map
         # rebuilt: a single-line store merge can't provide that. The
-        # full-rebuild path (reinit) can.
+        # full-rebuild path (reinit) can. Guarded before the gate so a
+        # scoped credential never costs a prompt or a VM start.
         raise ValidationError(
             f"git credential '{credential_name}' is scoped (fine-grained "
             f"PAT); add it to the admin or agent template and run "
             f"'agw vm reinit {name}' instead of add-git-credential"
         )
 
-    # The composition root: the credential's token secret (registered on
-    # the resolver at construct) joins the bind's boundary resolve, so
-    # the platform preflight runs before any prompt and the operation
-    # stays one prompt session; runup() confirms the token afterward.
-    bound = bind_platform(
-        config, vm, registry=registry, resolver=resolver, prepare=False
-    )
-    bound.preflight(RunContext(config=config))
-    resolver.resolve()
-    # add-git-credential is a single explicit add, so a rejected token is
-    # fatal here (unlike vm/agent provisioning, which skips and continues
-    # to partial): the operator asked to add exactly this one credential.
-    if config.defaults.runup_git_credentials:
-        output.detail(
-            f"Performing runup test for git-credential/{credential_name}..."
-        )
-        provider.runup(RunContext(config=config, secrets=resolver))
-    token = _resolve_git_tokens(providers, resolver)[credential_name]
-    new_lines = provider.credential_lines(token)
+    nodes = walk(vm_node, cred_node)
+    # The walk supplies the boundary union (idempotent next to the
+    # construct-time registration seam noted above).
+    for secret_name in secret_union(nodes):
+        resolver.register_name(secret_name)
 
-    with keep_active(db, config, vm, bound):
+    scope = OperationScope(
+        level=ScopeLevel.VM,
+        system_slug=db.get_setting(SYSTEM_SLUG_KEY) or None,
+        vm=name,
+    )
+
+    def resolve_gate_secret(secret_name: str) -> str:
+        # The gate's just-in-time resolution, through the normal
+        # backend chain, seeding the boundary resolver: the platform's
+        # status/start ops (which read the bound resolver, the seam
+        # above) see the value immediately, and the boundary pass
+        # excludes it, so nothing resolves or prompts twice.
+        from agentworks.secrets.resolve import active_backends, resolve_secrets
+
+        (decl,) = secret_declarations([secret_name], registry)
+        value = resolve_secrets([decl], active_backends(config, registry))[
+            secret_name
+        ]
+        resolver.seed({secret_name: value})
+        return value
+
+    with activation_gate(vm_node, resolve_gate_secret):
+        # PREFLIGHT-ALL against the one command-start context, then the
+        # boundary resolve: the walk-away point.
+        preflight_all(nodes, RunContext(config=config, operation_scope=scope))
+        resolver.resolve()
+
+        def scoped_ctx(node_secret_refs: tuple[str, ...]) -> RunContext:
+            return RunContext(
+                config=config,
+                operation_scope=scope,
+                secrets=ScopedSecrets(resolver.values, node_secret_refs),
+            )
+
+        # add-git-credential is a single explicit add, so a rejected
+        # token is fatal here (unlike vm/agent provisioning, which
+        # skips and continues to partial): the operator asked to add
+        # exactly this one credential.
+        if config.defaults.runup_git_credentials:
+            output.detail(
+                f"Performing runup test for git-credential/{credential_name}..."
+            )
+            cred_node.runup(scoped_ctx(cred_node.secret_refs()))
+        # The materials-write op reads its token through the node's
+        # SCOPED delivery: only the credential's declared secret names.
+        token = scoped_ctx(cred_node.secret_refs()).secret(provider.secret_name)
+        new_lines = provider.credential_lines(token)
+
         target = transport(vm, config)
 
         # Read existing credentials, filter out entries this credential
@@ -2019,10 +2077,20 @@ def _ensure_tailscale(
     config: Config,
     vm: VMRow,
     platform: VMPlatform,
+    *,
+    auth_key_source: Callable[[], str] | None = None,
 ) -> None:
     """After starting a VM, verify Tailscale connectivity and rejoin if
     needed. ``platform`` is the caller's bound platform (the gates never
     bind, and a re-bind here would re-run the resolve pass).
+
+    ``auth_key_source`` supplies the rejoin auth key when the caller
+    owns its resolution: the orchestrated activation gate passes its
+    lazy gate-secrets reader (nodes never resolve, FRD R5), so the key
+    resolves on this function's first need, with the same
+    conditional-need timing as the internal resolve below. ``None``
+    keeps today's behavior for the imperative callers: this function
+    resolves the key itself, late.
     """
     from agentworks.transports import native_transport, transport, wait_for_reconnect
 
@@ -2039,25 +2107,28 @@ def _ensure_tailscale(
         output.info(f"Tailscale node {vm.tailscale_host} did not reconnect, rejoining...")
         db.clear_vm_tailscale(vm.name)
 
-    # Resolve a fresh Tailscale auth key via the framework before
-    # entering the native-transport block; the backend chain handles
-    # env-var lookup with prompt fallback. This is the documented
-    # conditional-need exception to the resolve-at-the-preflight-boundary
-    # contract: whether a rejoin (and therefore a NEW key) is needed is
-    # only knowable after starting the VM and watching the node fail to
-    # reconnect, so it gets its own late resolve rather than prompting
-    # every start for a key that is almost never used.
-    from agentworks.bootstrap import build_registry
-    from agentworks.secrets import resolve_for_command
-    from agentworks.vms.templates import resolve_template
+    if auth_key_source is not None:
+        auth_key = auth_key_source()
+    else:
+        # Resolve a fresh Tailscale auth key via the framework before
+        # entering the native-transport block; the backend chain handles
+        # env-var lookup with prompt fallback. This is the documented
+        # conditional-need exception to the resolve-at-the-preflight-boundary
+        # contract: whether a rejoin (and therefore a NEW key) is needed is
+        # only knowable after starting the VM and watching the node fail to
+        # reconnect, so it gets its own late resolve rather than prompting
+        # every start for a key that is almost never used.
+        from agentworks.bootstrap import build_registry
+        from agentworks.secrets import resolve_for_command
+        from agentworks.vms.templates import resolve_template
 
-    registry = build_registry(config)
-    rejoin_vm_tmpl = resolve_template(registry, vm.template)
-    ts_decl = _lookup_or_synthesize_secret(
-        registry, rejoin_vm_tmpl.tailscale_auth_key
-    )
-    resolved = resolve_for_command([], config, registry, extra_decls=[ts_decl])
-    auth_key = resolved[rejoin_vm_tmpl.tailscale_auth_key]
+        registry = build_registry(config)
+        rejoin_vm_tmpl = resolve_template(registry, vm.template)
+        ts_decl = _lookup_or_synthesize_secret(
+            registry, rejoin_vm_tmpl.tailscale_auth_key
+        )
+        resolved = resolve_for_command([], config, registry, extra_decls=[ts_decl])
+        auth_key = resolved[rejoin_vm_tmpl.tailscale_auth_key]
 
     # native_transport() composes Azure's attach/detach via
     # transient_route polymorphism with the reachability probe. Other

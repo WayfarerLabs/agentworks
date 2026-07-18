@@ -70,14 +70,31 @@ capability with rich ops, like a credential provider that mints tokens):
 
 The rule this produces, and the one to hold onto: **the base capability class is instance-scoped,
 not resource-scoped.** Capability implementations extend it; the consuming resources, decls and
-sessions alike, do not. Preflight and ops live on the instance. A rich consuming resource has its
-_own_ preflight (its own API, not the base's) that _composes_ the preflights of the instances it
-holds. Do not grow a `preflight` on a consuming resource; construct the instance and call the
-instance's.
+sessions alike, do not. The readiness verbs and ops live on the instance; what a consuming resource
+adds is described by the orchestration layer's two contracts (`orchestration/node.py`):
+
+- **`Readiness`** is just the two verbs, `preflight` and `runup`. A capability instance satisfies it
+  and nothing more: no graph key, no dependency declaration, so it is structurally NOT a node and
+  the orchestrator never walks or invokes it directly.
+- **`Node`** is `Readiness` plus graph identity (`key`, declared `deps`, declared `secret_refs`).
+  Consuming resources and live resources are nodes. A consuming-resource node HOLDS its capability
+  instance(s) and its `preflight` / `runup` COMPOSE the held instances' (a thin wrapper's is the
+  one-line fan-in `self._instance.preflight(ctx)`; a rich node also adds its own checks), and the
+  instances' declared secrets fold into the node's `secret_refs`.
+
+So EVERY consuming-resource node grows a composing `preflight`, trivially in the thin case: the
+`git-credential` and `vm-site` nodes (`vms/nodes.py`) are the references. (This REVERSES an earlier
+edition of this doc, which said not to grow a preflight on a consuming resource and to call the
+instance's directly; that guidance predated the node model, where the orchestrator drives nodes and
+only nodes, so the composing wrapper is now exactly where readiness belongs.) The shared verbs are
+deliberate: the readiness semantics are identical, and walked-vs-composed lives in the TYPE (the
+presence of `key` / `deps`), not in a renamed verb.
 
 Keep the instance a distinct object even in the thin case. It is tempting to collapse a one-to-one
 consuming resource and instance into a single class; resisting that is what lets thin and rich cases
-share one model instead of forking.
+share one model instead of forking (and it is what keeps instances off the graph: an inline
+instance, like one entry of an agent template's feature map, has no globally-unique name to key a
+node by, while its holder does).
 
 ### Multiplicity
 
@@ -441,12 +458,15 @@ only when the context was assembled without a resolve pass (inspection), and tha
 state to tolerate.
 
 Holding this line is what keeps a capability **forward-compatible with the resolution model moving
-under it.** The direction of travel is an orchestration layer that resolves the whole reference
-graph once and hands each capability its values through the context, retiring the per-instance bound
-resolver. A capability that only ever declares (rule 1) and receives (rule 2) does not change shape
-when that lands: the `RunContext` it reads is the stable surface, and only the framework plumbing
-behind it moves. One that reaches into `self.resolver` for values, or resolves at construct, has to
-be rewritten.
+under it.** That model is the orchestration layer, now landing command by command: a migrated
+command's orchestrator derives the union of secrets from its node graph, resolves once, and hands
+each node's held instances their values through the context, scoped to the names they declared
+(`vm add-git-credential` is the first; see `docs/sdd/2026-07-16-orchestration-layer/`). The
+per-instance bound resolver retires in a dedicated cleanup once no command depends on it. A
+capability that only ever declares (rule 1) and receives (rule 2) does not change shape as this
+lands: the `RunContext` it reads is the stable surface, and only the framework plumbing behind it
+moves. One that reaches into `self.resolver` for values, or resolves at construct, has to be
+rewritten.
 
 Both shipped capabilities are the reference: `git-credential-provider` (github, azdo) and
 `vm-platform/proxmox` read their tokens via `ctx.secret(name)` in `runup` and get its typed
