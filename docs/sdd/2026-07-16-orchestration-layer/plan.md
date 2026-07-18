@@ -83,22 +83,28 @@ could not (FRD R8 + the reviewer's proof points). This command touches an EXISTI
 runup and no pending nodes, so it exercises derivation, the gate, and scoped delivery without
 unwind.
 
-- [ ] `vms/nodes.py`: the live VM node factory (from `VMRow`); the `vm-site` node (holding the
+- [x] `vms/nodes.py`: the live VM node factory (from `VMRow`); the `vm-site` node (holding the
       platform instance) and the `git-credential` node (holding the provider instance) enter as its
       declared dependency edges.
-- [ ] The reference-graph-to-node-graph TRANSLATION RULE implemented in each node kind's `deps()`
+- [x] The reference-graph-to-node-graph TRANSLATION RULE implemented in each node kind's `deps()`
       (registry references by kind, secrets as inputs not nodes, row fields to live edges), and the
       tracer's graph DERIVED from real declared references and the DB row with ZERO hand-wired edges
       (the tracer's defining obligation).
-- [ ] The gate-to-boundary SEED (moved from Phase 0): designed here against the tracer's real
+- [x] The gate-to-boundary SEED (moved from Phase 0): designed here against the tracer's real
       caller, proxmox's gate `status` needs the API token before the boundary, so the token resolved
       at the gate must pre-seed the boundary `Resolver` (which refuses post-pass registration)
-      rather than resolve again. This is the likely LLD spin-out.
-- [ ] The `add-git-credential` orchestrator: build graph -> open the activation gate (resolving its
+      rather than resolve again. This is the likely LLD spin-out. (Implementation note: landed as
+      `Resolver.seed(values)`, small enough that no LLD was spun out. Seeded names register on the
+      resolve set, serve through `get` immediately, pre-pass, which is what lets proxmox's `status`
+      read the bound resolver at the gate, and are excluded from the boundary pass's backend loop;
+      seeding after the pass raises, mirroring the post-pass registration refusal. The
+      orchestrator's gate resolve callback resolves through the normal backend chain and seeds as it
+      goes.)
+- [x] The `add-git-credential` orchestrator: build graph -> open the activation gate (resolving its
       just-in-time credential, which seeds the boundary) -> preflight sweep at VM level -> resolve
       -> git-credential `runup` under the FATAL policy -> the materials-write op reading its scoped
       secret.
-- [ ] Proof-point assertions (reviewer carry): (a) the derived graph reproduces the imperative
+- [x] Proof-point assertions (reviewer carry): (a) the derived graph reproduces the imperative
       preflight set and secret union; (b) the runup rejection is fatal, matching HEAD; (c) a
       SCOPED-DELIVERY test that the materials node receives ONLY its declared secret names (guarding
       the whole-cache fallback from becoming permanent); (d) the operation scope reaches the node's
@@ -112,9 +118,20 @@ unwind.
       The gate parity assertion also covers the operator-stopped RE-READ race guard: the VM node's
       `auto_start` must re-read the intent flag at start time, as HEAD's `ensure_active` does
       (reviewer carry, 2026-07-17).
-- [ ] The imperative `add_git_credential` is retired (or reduced to a thin call into the
-      orchestrator); the interim seam to any not-yet-migrated machinery is documented here.
-- [ ] `capabilities/README.md` (lockstep, R9): the first consuming-resource node (`git-credential`,
+- [x] The imperative `add_git_credential` is retired (or reduced to a thin call into the
+      orchestrator); the interim seam to any not-yet-migrated machinery is documented here. (Seam
+      catalog for this command, also stated in the orchestrator's docstring: (1) capability
+      instances are still constructed against the operation's resolver, so construct-time
+      registration coexists with the walk-derived union, which the orchestrator registers alongside
+      and the tracer tests assert equal; (2) the platform's power ops still read their API token
+      through the bound resolver, proxmox's op-client bridge, which is why the gate seeds it; both
+      close with the resolver retirement in Phase 5. (3) The node's auto-start reuses the imperative
+      repair machinery via `_ensure_tailscale(auth_key_source=...)`: the key still arrives through
+      the gate's lazy reader (nodes never resolve), and the parameter's default keeps today's
+      internal late resolve for the imperative callers. The imperative `ensure_active` /
+      `keep_active` pair keeps serving un-migrated commands; the VM node's gate surface mirrors it
+      case for case in `tests/vms/test_vm_nodes.py`, the oracle-vs-gate parity assertion.)
+- [x] `capabilities/README.md` (lockstep, R9): the first consuming-resource node (`git-credential`,
       `vm-site`) with a composing `preflight` makes the README's thin-case guidance "do not grow a
       preflight on a consuming resource; construct the instance and call the instance's" false, so
       REVERSE it here and introduce the `Readiness`/`Node` split, rather than letting the README
