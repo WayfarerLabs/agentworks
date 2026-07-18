@@ -44,9 +44,9 @@ ladder from type to running object:
   concrete implementation of a capability kind, registered as a read-only resource:
   `vm-platform/lima`, `git-credential-provider/github`. It is what `agw resource list` shows under
   the capability category. The app registers the built-ins; plugins register more.
-- A **capability instance** is a capability bound to config and a resolver, the runtime object that
-  actually runs, carrying the lifecycle below. It is _not_ a registry resource. A consuming resource
-  holds one instance per capability it uses, and may hold many (see multiplicity below).
+- A **capability instance** is a capability bound to config, the runtime object that actually runs,
+  carrying the lifecycle below. It is _not_ a registry resource. A consuming resource holds one
+  instance per capability it uses, and may hold many (see multiplicity below).
 - A **consuming resource** is a declarable resource that references a capability, supplies its
   config, and owns the instances built from it. It lives in the registry as data.
 
@@ -162,8 +162,8 @@ only by when it is built, which is exactly why the dependency-blindness above is
 than a rule to remember: a `vm create` preflight is simply handed a context with no VM target, so it
 _cannot_ reach the thing the command has not created yet. (A future permission model omits fields
 the same way: a capability not granted a target or a secret just finds it absent.) The rule that
-pairs with it: pre-resolve concerns read `self` (config bound at construct, `self.resolver` for
-prediction); runup and ops read the context.
+pairs with it: pre-resolve concerns read `self` (config bound at construct); runup and ops read the
+context.
 
 ### 1. `validate_config` (declare; pure, classmethod)
 
@@ -188,25 +188,26 @@ The references it returns are sourceless. The consuming resource attaches itself
 it emits them, in its `referenced_resources()` at finalize ("whoever hosts the config that names the
 secret emits the reference"). The framework consumes those references two ways: statically, they
 feed the registry's reference graph and doctor's resolvability prediction; at runtime, their
-_values_ are fetched only through the resolver, in one batched pass as soon as preflight passes
-(described under ops). References are never value-resolved at command entry.
+_values_ are fetched only by the framework's one batched resolve pass as soon as preflight passes
+(described under ops), and delivered through the context. References are never value-resolved at
+command entry.
 
 ### 2. construct (bind; cheap, config-valid by construction)
 
-The instance is constructed bound to its `(name, config, resolver)`: its config plus a
-framework-provided _resolver_ it will use to fetch secrets later, _not_ resolved secret values.
-Construction re-runs `validate_config` and **fails on an invalid config shape**: you do not build an
-instance around an invalid blob, so a shape error dies here, at construction, never later in
-preflight. (Errors that need the world to detect, an unreachable API, a missing tool, are
-preflight's job, not this.) Construction is otherwise cheap: no network, no secret resolution, no
-prompt.
+The instance is constructed bound to its `(name, config)`: its config, _not_ resolved secret values,
+and no secret machinery at all (the operation's boundary union comes from the plan's declared
+references; values arrive later through the context). Construction re-runs `validate_config` and
+**fails on an invalid config shape**: you do not build an instance around an invalid blob, so a
+shape error dies here, at construction, never later in preflight. (Errors that need the world to
+detect, an unreachable API, a missing tool, are preflight's job, not this.) Construction is
+otherwise cheap: no network, no secret resolution, no prompt.
 
 This is uniform across hosting shapes. Whether a consuming resource is dedicated to one capability
 (`vm-site`) or holds it as one field among many (a `session` with a harness), the instance is
-constructed and held the same way, bound to its config and resolver. What preflight and ops take per
-call is _runtime_ execution context (a harness's command channel, a platform's provision target),
-which every capability needs as it runs; that is not a hosting difference. Config binds at
-construction for all of them; runtime context passes per call for all of them.
+constructed and held the same way, bound to its config. What preflight and ops take per call is
+_runtime_ execution context (a harness's command channel, a platform's provision target), which
+every capability needs as it runs; that is not a hosting difference. Config binds at construction
+for all of them; runtime context passes per call for all of them.
 
 ### 3. `preflight` (predict readiness; pre-resolve, read-only)
 
@@ -215,13 +216,15 @@ already-config-valid instance (config validity is construct's job, not preflight
 is knowable _before_ any secret is resolved. Its aim is to spend the operator's prompt only on ops
 that can actually run. What it checks toward that is the author's call; the list below is the common
 toolkit, not a checklist, and a capability with nothing cheap to catch before the prompt has a
-trivial preflight beyond the base's resolvability prediction. Its defining property is that it is
-**read-only and side-effect-free**:
+trivial (empty) preflight. Its defining property is that it is **read-only and side-effect-free**:
 
-- It **predicts secret resolvability without prompting.** A declared secret with no mapping at all
-  is fatal and knowable here, without prompting for the others. Value checks defer to the op,
-  uniformly. (An earlier draft let preflight read-and-verify "non-interactively resolvable" values;
-  that was ruled out: it forks readiness on where a secret happens to come from.)
+- **Secret resolvability is predicted without prompting** at this stage, but centrally, not by the
+  instance: the node holding the instance predicts over its declared references
+  (`orchestration.secrets`), so a declared secret with no mapping at all is fatal and knowable here,
+  without prompting for the others, and the instance never touches the secret machinery. Value
+  checks defer to the op, uniformly. (An earlier draft let preflight read-and-verify
+  "non-interactively resolvable" values; that was ruled out: it forks readiness on where a secret
+  happens to come from.)
 - It checks the rest of the world that needs **no credentials**: required tools present on the
   target, an unauthenticated endpoint reachable.
 - It does **not** mutate. In particular it does **not** mint or create anything.
@@ -335,16 +338,17 @@ expiry clock), and runup is read-only, so for a minting provider runup _reads an
 current token and the op mints when that check says it must.
 
 Secret resolution rides the same seam, and its timing is pinned to the preflight boundary: **resolve
-as soon as preflight passes.** Once the operation's preflight checks clear, the resolver resolves
+as soon as preflight passes.** Once the operation's preflight checks clear, the framework resolves
 the union of secrets needed across all planned ops across all participating resources (the
 template's Tailscale key and the site's API token join the same pass) in one batch, one prompt
 session, values cached; runup then runs on those resolved values, and ops draw from the same cache
-(a minting provider produces its token here, guarded by check-then-mint). Resolution is deliberately
-neither of the two extremes: not eager at command entry (a prompt could precede a fatal check that
-would have sunk the op), and not deferred to first op-need (prompts would land mid-operation,
-scattered across the run). The operator is prompted exactly once, at a predictable moment, after the
-work is confirmed able to proceed and before it starts. In one line: preflight passing is the
-trigger, the command's declared set is the scope. Wait for preflight, then do it all.
+through the context (a minting provider produces its token here, guarded by check-then-mint).
+Resolution is deliberately neither of the two extremes: not eager at command entry (a prompt could
+precede a fatal check that would have sunk the op), and not deferred to first op-need (prompts would
+land mid-operation, scattered across the run). The operator is prompted exactly once, at a
+predictable moment, after the work is confirmed able to proceed and before it starts. In one line:
+preflight passing is the trigger, the command's declared set is the scope. Wait for preflight, then
+do it all.
 
 Prompting now happens inside the service-layer operation (at the preflight boundary rather than at
 bind), so the operator's abort point moves with it, and the error discipline moves too. A Ctrl-C at
@@ -384,9 +388,9 @@ Distinct from the lifecycle and cheaper than all of it: any resource (capability
 declared resource) may answer **"do you have what you need to run on this host?"** via a generic
 `disabled_reason() -> str | None` (`None` = enabled). The contract is _cheap, offline,
 host-introspection only_: OS, tool presence, the shape of the bound config; never network, secrets,
-or prompting. Readiness that needs a resolver or a remote read is preflight's job at the op
-boundary; `disabled_reason` runs on inspection and selection surfaces (doctor, `resource list`, site
-selection) where preflight would be too heavy.
+or prompting. Readiness that needs the secret machinery or a remote read is preflight's job at the
+op boundary; `disabled_reason` runs on inspection and selection surfaces (doctor, `resource list`,
+site selection) where preflight would be too heavy.
 
 For most declared resources the answer is a no-op (a vm-template always has what it needs); the
 resource layer treats absent-on-kind as "never disabled" (the same structural-hook pattern as
@@ -413,9 +417,9 @@ The shared surface is real (it is a lifecycle, not a boilerplate default), so it
 - the `validate_config` classmethod, with a sensible default (accepts no config) and the standing
   NOTE that this invoked-validation API may later be superseded by capabilities declaring their
   config schema at registration time;
-- the construct, `preflight`, and `runup` instance contract (`preflight` predicting resolvability by
-  default, `runup` a no-op by default: the capabilities with nothing to authenticate get the right
-  behavior for free);
+- the construct, `preflight`, and `runup` instance contract (both readiness stages no-op by default:
+  resolvability prediction is the holding node's, central, and the capabilities with nothing to
+  check or authenticate get the right behavior for free);
 - the capability's identity (`name`, `description`) as the registry sees it.
 
 Subclasses add their ops. `GitHubCredentialProvider`, `VMPlatform`, `Harness` extend it. Consuming
@@ -428,13 +432,13 @@ machinery, not framework machinery.
 
 A capability's config may name secrets (a Proxmox API token, a git PAT, an AWS client secret).
 Nothing special happens: the secret is an ordinary `ConfigReference` returned by `validate_config`.
-The framework owns resolution; the instance never implements it. The instance holds a framework
-_resolver_ and uses it two ways: non-prompting _prediction_ in preflight (is this resolvable at
-all?), and _resolution_ at the preflight boundary (everything the command declared, one batched
-prompt session, cached; ops and runup draw from the cache). The default secret name is the
-capability's to choose: a per-consumer default (`git-token-<name>`, derived from `owner`) where
-credentials are many, a shared well-known name (`proxmox-token`) where one is typical. Either way
-the capability owns the default; the framework only resolves what was declared.
+The framework owns everything after the declaration: non-prompting _prediction_ in preflight (is
+this resolvable at all?, computed centrally over the declarations by the node holding the instance),
+_resolution_ at the preflight boundary (everything the command declared, one batched prompt session,
+cached), and _delivery_ through the context, scoped to the declared names. The default secret name
+is the capability's to choose: a per-consumer default (`git-token-<name>`, derived from `owner`)
+where credentials are many, a shared well-known name (`proxmox-token`) where one is typical. Either
+way the capability owns the default; the framework only resolves what was declared.
 
 ### Declare, then receive: the contract that keeps a capability forward-compatible
 
@@ -446,10 +450,9 @@ framework owning everything in between:
    reads those references to build the resolvability prediction preflight uses and to scope the one
    batched resolve pass.
 2. **Receive, from the context.** Read resolved secret values only via `ctx.secret(name)`, in
-   `runup` (and in ops as their signatures converge on `RunContext`). Never fetch a value through
-   `self.resolver`: the bound resolver is a _prediction_ tool for preflight (`register_name` /
-   `predict`, which never returns a value), not a value source. And construct only _binds_ (config
-   plus resolver); it never resolves.
+   `runup` and in ops (their signatures converged on `RunContext`; a VM platform's power ops take
+   the op-start context beside the row). There is no other value source: the instance holds no
+   resolver and no reader, and construct only _binds_ (name plus config); it never resolves.
 
 The rule that ties the two together is the self-vs-context split stated with `RunContext` above:
 pre-resolve concerns read `self`, post-resolve concerns read the context. `ctx.secret(name)` raises
@@ -458,20 +461,19 @@ only when the context was assembled without a resolve pass (inspection), and tha
 state to tolerate.
 
 Holding this line is what keeps a capability **forward-compatible with the resolution model moving
-under it.** That model is the orchestration layer, now landing command by command: a migrated
-command's orchestrator derives the union of secrets from its node graph, resolves once, and hands
-each node's held instances their values through the context, scoped to the names they declared
-(`vm add-git-credential` is the first migrated command). The per-instance bound resolver retires in
-a dedicated cleanup once no command depends on it. A capability that only ever declares (rule 1) and
-receives (rule 2) does not change shape as this lands: the `RunContext` it reads is the stable
-surface, and only the framework plumbing behind it moves. One that reaches into `self.resolver` for
-values, or resolves at construct, has to be rewritten.
+under it.** That model is the orchestration layer, and it is LANDED: every command's orchestrator
+derives the union of secrets from its node graph, resolves once, and hands each node's held
+instances their values through the context, scoped to the names they declared. The per-instance
+bound resolver is retired; construction takes none, and `ctx.secret(name)` scoped delivery is the
+only way an instance ever sees a secret value. A capability that only ever declares (rule 1) and
+receives (rule 2) does not change shape as the framework evolves: the `RunContext` it reads is the
+stable surface, and only the framework plumbing behind it moves.
 
-Both shipped capabilities are the reference: `git-credential-provider` (github, azdo) and
-`vm-platform/proxmox` read their tokens via `ctx.secret(name)` in `runup` and get its typed
-`ConfigError` when the context carries none. Proxmox's op client is the one remaining bridge (its
-`_api` still reads the token through the bound resolver, pending the op-signature convergence noted
-with `RunContext`); a new capability should not add a second.
+Both shipped capabilities are the reference: `git-credential-provider` (github, azdo) reads its
+token via `ctx.secret(name)` in `runup`, and `vm-platform/proxmox` reads its API token the same way
+in `runup` and in its ops (the op client is built per call from the delivered value); both get the
+accessor's typed `ConfigError` when the context carries none. A new capability should never hold a
+value source of its own.
 
 ## Where capabilities live
 
@@ -506,11 +508,11 @@ in ways worth recording before that change, because it is a different animal:
   many-resources-one-instance shape is not yet modeled.
 
 - **Provider-side vs consuming-side base.** The `Capability` base is shaped for the _consuming_
-  side: register the secrets your config declares on the resolver, read them back at runup. A
-  backend has no declared secrets; it is the thing that _serves_ them. Its contract is different:
-  preflight = am I installed/configured, runup = can I reach/authenticate, op = resolve. Adopting it
-  will likely reveal that today's base is really the _consuming-capability_ base, and a backend
-  needs a sibling base or a deliberately looser one.
+  side: declare the secrets your config names, read them back from the context at runup. A backend
+  has no declared secrets; it is the thing that _serves_ them. Its contract is different: preflight
+  = am I installed/configured, runup = can I reach/authenticate, op = resolve. Adopting it will
+  likely reveal that today's base is really the _consuming-capability_ base, and a backend needs a
+  sibling base or a deliberately looser one.
 
 - **Where its runup lands.** A backend's op _is_ resolution, so "runup right before its op" puts its
   runup at the resolve-pass boundary: authenticate/reach the vault once, before serving any value,
