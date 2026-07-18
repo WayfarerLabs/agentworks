@@ -29,6 +29,7 @@ from agentworks.vms.manager import gated_vm_boundary, keep_active
 if TYPE_CHECKING:
     from contextlib import AbstractContextManager
 
+    from agentworks.capabilities.base import OperationScope
     from agentworks.capabilities.vm_platform import VMPlatform
     from agentworks.config import Config
     from agentworks.db import AgentRow, Database, VMRow, WorkspaceRow
@@ -38,6 +39,26 @@ if TYPE_CHECKING:
     from agentworks.transports import Transport
 
 AGENT_PREFIX = "agt-"
+
+
+def agent_scope(db: Database, vm_name: str, agent_name: str) -> OperationScope:
+    """The agent commands' shared AGENT-level operation scope (public:
+    ``agents.grants`` shares it): the operation is about the agent (on
+    its VM), even though the composed graph is the live VM alone; pass
+    the level of the entity the command is ABOUT, not of what it
+    walks. The AGENT level's field rules (required vm + agent;
+    forbidden workspace, session: agents are VM-scoped, a workspace
+    relationship is a grant, never identity) are enforced by the
+    scope's own constructor."""
+    from agentworks.capabilities.base import OperationScope, ScopeLevel
+    from agentworks.db import SYSTEM_SLUG_KEY
+
+    return OperationScope(
+        level=ScopeLevel.AGENT,
+        system_slug=db.get_setting(SYSTEM_SLUG_KEY) or None,
+        vm=vm_name,
+        agent=agent_name,
+    )
 
 
 def derive_linux_user(agent_name: str) -> str:
@@ -423,7 +444,7 @@ def delete_agent(
 
         registry = build_registry(config)
         boundary: AbstractContextManager[object] = gated_vm_boundary(
-            db, config, registry, vm
+            db, config, registry, vm, scope=agent_scope(db, vm.name, name)
         )
     else:
         # The nested-teardown path: the caller's composition already
@@ -795,6 +816,7 @@ def shell_agent(
     with gated_vm_boundary(
         db, config, registry, vm,
         targets=[_agent_direct_secret_target(scopes, label=f"agent-shell={agent.name}")],
+        scope=agent_scope(db, vm.name, agent.name),
     ) as (_vm_node, resolver):
         from agentworks.vms.sites import site_platform_name
 
@@ -899,6 +921,7 @@ def exec_agent(
     with gated_vm_boundary(
         db, config, registry, vm,
         targets=[_agent_direct_secret_target(scopes, label=f"agent-exec={agent.name}")],
+        scope=agent_scope(db, vm.name, agent.name),
     ) as (_vm_node, resolver):
         from agentworks.vms.sites import site_platform_name
 

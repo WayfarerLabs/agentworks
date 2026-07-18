@@ -16,6 +16,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from agentworks import output
+from agentworks.agents.manager import agent_scope
 from agentworks.errors import NotFoundError, ValidationError
 from agentworks.transports import transport
 from agentworks.vms.manager import gated_vm_boundary
@@ -79,7 +80,9 @@ def grant_workspaces(
     from agentworks.bootstrap import build_registry
 
     registry = build_registry(config)
-    with gated_vm_boundary(db, config, registry, vm):
+    with gated_vm_boundary(
+        db, config, registry, vm, scope=agent_scope(db, vm.name, agent_name)
+    ):
 
         if grant_all:
             db.update_agent_grant_all(agent_name, True)
@@ -137,7 +140,9 @@ def revoke_workspaces(
     from agentworks.bootstrap import build_registry
 
     registry = build_registry(config)
-    with gated_vm_boundary(db, config, registry, vm):
+    with gated_vm_boundary(
+        db, config, registry, vm, scope=agent_scope(db, vm.name, agent_name)
+    ):
 
         if revoke_all:
             db.update_agent_grant_all(agent_name, False)

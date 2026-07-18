@@ -315,7 +315,7 @@ def test_shell_interactive_runs_inside_the_held_active_span(
 # -- the operation scope reaches readiness ------------------------------------
 
 
-def test_vm_scope_reaches_node_readiness(
+def test_agent_scope_reaches_node_readiness(
     db: Database,
     make_config,  # noqa: ANN001
     target: _FakeAgentTarget,
@@ -340,6 +340,7 @@ def test_vm_scope_reaches_node_readiness(
 
     (scope,) = scopes
     assert scope is not None
-    assert scope.level is ScopeLevel.VM
+    assert scope.level is ScopeLevel.AGENT
     assert scope.vm == "box"
-    assert scope.workspace is None and scope.agent is None and scope.session is None
+    assert scope.agent == "a1"
+    assert scope.workspace is None and scope.session is None
