@@ -161,6 +161,18 @@ class LiveVMNode:
     def key(self) -> str:
         return f"vm/{self._row.name}"
 
+    @property
+    def row(self) -> VMRow:
+        """The backing DB row (a live node's data is its row)."""
+        return self._row
+
+    @property
+    def site(self) -> VMSiteNode:
+        """The vm-site node this VM's row points at; dependents reach
+        the held platform instance through it (the site HOLDS the
+        platform, the VM's edge points at the site)."""
+        return self._site
+
     def deps(self) -> tuple[Node, ...]:
         return (self._site,)
 
