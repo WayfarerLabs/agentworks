@@ -1,11 +1,17 @@
-"""Eager-prompting orchestration for secret-consuming commands.
+"""Env-chain secret collection for the boundary resolve.
 
-Per FRD R4 and HLA "Eager prompting flow": every command that opens new
-shells resolves all needed secrets up front (within the first few
-seconds), before any state mutation. ``resolve_for_command`` is the
-command's ONE resolve call; the returned values dict travels down the
-call chain to every ``compose_env`` site, so nothing re-prompts by
-construction (no cache exists to hit or miss).
+A command resolves all the secrets its plan needs in one boundary pass
+per composition root, before any state mutation. This module supplies
+the env-chain half of that union: ``SecretTarget`` describes a
+workload's merged per-scope env dicts, ``compute_needed_secrets`` walks
+them for secret references, and the orchestrated composition roots
+register the result on the operation's boundary resolver
+(``Resolver.register_targets``) so runtime env secrets join the same
+pass as the graph's config and token secrets. ``resolve_for_command``
+is the standalone form (collect and resolve in one call) for callers
+outside an orchestrated root; the returned values dict travels down to
+every ``compose_env`` site, so nothing re-prompts by construction (no
+cache exists to hit or miss).
 
 Usage at a manager entry point:
 

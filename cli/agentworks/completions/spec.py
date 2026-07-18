@@ -157,8 +157,6 @@ DYNAMIC_COMPLETIONS: dict[tuple[str, str], str] = {
     ("vm.port-forward", "name"): "vms",
     ("vm.create", "template"): "vm_templates",
     ("vm.create", "site"): "sites",
-    ("workspace.shell", "name"): "workspaces",
-    ("workspace.console", "name"): "workspaces",
     ("workspace.copy", "source"): "workspaces",
     ("workspace.copy", "vm"): "vms",
     ("workspace.describe", "name"): "workspaces",

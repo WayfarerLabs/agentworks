@@ -7,14 +7,16 @@ the failure surfaces as ``SecretUnavailableError`` with no DB or VM
 side-effects.
 
 The tests work by patching the boundary (``resolve_for_command`` for
-the paths that still call it directly, ``bind_platform`` or
-``Resolver.resolve`` for the roots whose env chain rides the bind's one
-resolve pass) to raise; if the manager reaches it AFTER mutating
-state, the DB inspection at the end of the test catches the leak.
+the paths that still call it directly, ``Resolver.resolve`` or
+``Resolver.register_targets`` for the roots whose env chain rides the
+operation's one resolve pass) to raise; if the manager reaches it
+AFTER mutating state, the DB inspection at the end of the test catches
+the leak.
 """
 
 from __future__ import annotations
 
+import contextlib
 from pathlib import Path
 from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any
@@ -111,21 +113,24 @@ def test_session_create_eager_resolve_fires_before_db_insert(
     monkeypatch.setattr(session_manager, "_resolve_template", lambda *a, **k: _Tmpl())
     # _session_secret_target_pre_create reads config.vm_templates /
     # agent_templates which the SimpleNamespace below doesn't have; stub
-    # it to a sentinel so the root still builds its bind targets.
-    sentinel_target = object()
+    # it to an empty target so the root still registers its env seam.
+    from tests.conftest import empty_secret_target
+
     monkeypatch.setattr(
-        session_manager, "_session_secret_target_pre_create", lambda *a, **k: sentinel_target
+        session_manager,
+        "_session_secret_target_pre_create",
+        lambda *a, **k: empty_secret_target(),
     )
 
-    # The env chain now resolves inside the bind's boundary pass, so an
-    # unresolvable secret surfaces from bind_platform itself.
+    # The env chain resolves in the orchestrator's one boundary pass, so
+    # an unresolvable secret surfaces from the resolver's resolve().
     def _explode(*args: object, **kwargs: object) -> None:
         raise SecretUnavailableError(
             "no active backend could resolve secret(s): api-key",
             hint="api-key: tried env-var",
         )
 
-    monkeypatch.setattr("agentworks.sessions.manager.bind_platform", _explode)
+    monkeypatch.setattr("agentworks.secrets.resolver.Resolver.resolve", _explode)
 
     config = SimpleNamespace(session=SimpleNamespace(history_limit=50000))
 
@@ -148,11 +153,13 @@ def test_session_create_eager_resolve_fires_before_db_insert(
 def test_session_create_calls_resolve_with_session_target(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """create_session passes a single SecretTarget (the one returned by
-    ``_session_secret_target_pre_create``) into the bind's boundary
-    resolve. Verifies the glue that turns a session command into a
-    candidate set."""
+    """create_session registers a single SecretTarget (the one returned
+    by ``_session_secret_target_pre_create``) on the operation's
+    resolver, joining the one boundary resolve. Verifies the glue that
+    turns a session command into a candidate set."""
+    from agentworks.secrets.resolver import Resolver as _RealResolver
     from agentworks.sessions import manager as session_manager
+    from tests.conftest import empty_secret_target
 
     db = _seed_basic_db(tmp_path)
     _stub_session_prep(monkeypatch)
@@ -166,22 +173,28 @@ def test_session_create_calls_resolve_with_session_target(
 
     monkeypatch.setattr(session_manager, "_resolve_template", lambda *a, **k: _Tmpl())
 
-    sentinel_target = object()
+    sentinel_target = empty_secret_target(label="sentinel")
     monkeypatch.setattr(
-        session_manager, "_session_secret_target_pre_create", lambda *a, **k: sentinel_target
+        session_manager,
+        "_session_secret_target_pre_create",
+        lambda *a, **k: sentinel_target,
     )
 
     class _Sentinel(Exception):
-        """Raised from the bind spy so we can stop the test before the
+        """Raised from the resolve spy so we can stop the test before the
         long-running SSH-driven part of create_session runs."""
 
     calls: list[list[object]] = []
+    real_register = _RealResolver.register_targets
 
-    def _bind_spy(config: object, vm: object, **kwargs: Any) -> object:
-        calls.append(list(kwargs.get("targets") or ()))
-        raise _Sentinel
+    def _register_spy(self: _RealResolver, targets: Any) -> None:
+        calls.append(list(targets))
+        real_register(self, targets)
 
-    monkeypatch.setattr("agentworks.sessions.manager.bind_platform", _bind_spy)
+    monkeypatch.setattr(_RealResolver, "register_targets", _register_spy)
+    monkeypatch.setattr(
+        _RealResolver, "resolve", lambda self: (_ for _ in ()).throw(_Sentinel())
+    )
 
     config = SimpleNamespace(session=SimpleNamespace(history_limit=50000))
 
@@ -196,7 +209,7 @@ def test_session_create_calls_resolve_with_session_target(
             admin=True,
         )
 
-    assert len(calls) == 1, f"expected exactly one boundary bind, got {len(calls)}"
+    assert len(calls) == 1, f"expected exactly one target registration, got {len(calls)}"
     assert calls[0] == [sentinel_target], "session target list should contain one target"
     db.close()
 
@@ -419,14 +432,13 @@ def test_vm_create_does_not_eager_resolve_operator_env() -> None:
     from agentworks.secrets import resolver as secrets_resolver
     from agentworks.vms import initializer as vm_initializer
     from agentworks.vms import manager as vm_manager
-    from agentworks.vms import templates as vm_templates
+    from agentworks.vms import nodes as vm_nodes
 
     # Walk the call chain explicitly so the check survives refactors.
     sources = [
         inspect.getsource(vm_manager.create_vm),
         inspect.getsource(vm_initializer.resolve_git_credential_providers),
-        inspect.getsource(vm_manager._resolve_git_tokens),
-        inspect.getsource(vm_templates.preflight_vm_template),
+        inspect.getsource(vm_nodes.VMTemplateNode),
         inspect.getsource(secrets_resolver.Resolver),
     ]
     joined = "\n".join(sources)
@@ -486,11 +498,11 @@ def test_agent_reinit_does_not_eager_resolve_operator_env() -> None:
 def test_vm_shell_env_target_joins_the_bind_boundary(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """The one-prompt-session pin for the runtime roots: shell_vm hands
-    its env-chain SecretTarget to bind_platform, so the env secrets ride
-    the SAME boundary resolve as the site's config secrets; there is
-    no separate env prompt session, and no prompt can precede the
-    platform preflight (the boundary runs inside the bind)."""
+    """The one-prompt-session pin for the runtime roots: shell_vm
+    registers its env-chain SecretTarget on the operation's ONE
+    resolver (``register_targets``), so the env secrets ride the SAME
+    boundary resolve as the site's config secrets; there is no
+    separate env prompt session."""
     from agentworks.vms import manager as vm_manager
 
     db = _seed_basic_db(tmp_path)
@@ -501,17 +513,26 @@ def test_vm_shell_env_target_joins_the_bind_boundary(
         lambda *a, **k: vm_manager._VmAdminEnvScopes(vm={}, workspace=None, admin={}),
     )
     monkeypatch.setattr(vm_manager, "_vm_secret_target", lambda *a, **k: sentinel_target)
+    # Node construction binds the site's platform before the target
+    # registration this test spies on; keep it host-independent (the
+    # real lima site is disabled where limactl isn't installed).
+    monkeypatch.setattr(
+        "agentworks.vms.sites.resolve_site",
+        lambda name, registry: SimpleNamespace(),
+    )
 
     class _Stop(Exception):
         pass
 
     bound_targets: list[list[object]] = []
 
-    def _bind_spy(config: object, vm: object, **kwargs: Any) -> object:
-        bound_targets.append(list(kwargs.get("targets") or ()))
+    from agentworks.secrets.resolver import Resolver
+
+    def _register_spy(self: Resolver, targets: object) -> None:
+        bound_targets.append(list(targets))  # type: ignore[call-overload]
         raise _Stop
 
-    monkeypatch.setattr(vm_manager, "bind_platform", _bind_spy)
+    monkeypatch.setattr(Resolver, "register_targets", _register_spy)
 
     config = SimpleNamespace(
         vm=SimpleNamespace(env={}),
@@ -533,9 +554,12 @@ def test_vm_shell_eager_resolve_fires_before_ssh(
 
     db = _seed_basic_db(tmp_path)
 
-    # The root now binds (and preflights) the platform before the env
-    # resolve; make the lima tool check deterministic on any host.
+    # The root preflights the platform before the env resolve; make
+    # the lima tool check deterministic on any host. The activation
+    # gate opens (fast path) before the boundary; keep its
+    # reachability probe off the network.
     monkeypatch.setattr("shutil.which", lambda name: f"/usr/bin/{name}")
+    monkeypatch.setattr(vm_manager, "_is_tailscale_reachable", lambda host: True)
 
     monkeypatch.setattr(
         vm_manager, "_resolve_vm_admin_env_scopes",
@@ -585,9 +609,12 @@ def test_vm_exec_eager_resolve_fires_before_ssh(
 
     db = _seed_basic_db(tmp_path)
 
-    # The root now binds (and preflights) the platform before the env
-    # resolve; make the lima tool check deterministic on any host.
+    # The root preflights the platform before the env resolve; make
+    # the lima tool check deterministic on any host. The activation
+    # gate opens (fast path) before the boundary; keep its
+    # reachability probe off the network.
     monkeypatch.setattr("shutil.which", lambda name: f"/usr/bin/{name}")
+    monkeypatch.setattr(vm_manager, "_is_tailscale_reachable", lambda host: True)
 
     monkeypatch.setattr(
         vm_manager, "_resolve_vm_admin_env_scopes",
@@ -636,9 +663,14 @@ def test_agent_exec_eager_resolve_fires_before_ssh(
 
     db = _seed_basic_db(tmp_path)
 
-    # The root now binds (and preflights) the platform before the env
-    # resolve; make the lima tool check deterministic on any host.
+    # The root preflights the platform before the env resolve; make
+    # the lima tool check deterministic on any host. The activation
+    # gate opens (fast path) before the boundary; keep its
+    # reachability probe off the network.
     monkeypatch.setattr("shutil.which", lambda name: f"/usr/bin/{name}")
+    monkeypatch.setattr(
+        "agentworks.vms.manager._is_tailscale_reachable", lambda host: True
+    )
     db.insert_agent("a1", "vm1", "agt-a1", template="default")
 
     monkeypatch.setattr(
@@ -683,9 +715,9 @@ def test_agent_exec_env_target_joins_the_bind_boundary(
 ) -> None:
     """The one-prompt-session pin for the agent roots (the Phase 7
     round-2 ordering bug lived here, not in the vm twins): exec_agent
-    hands its env-chain SecretTarget to bind_platform, so the env
-    secrets ride the SAME boundary resolve as the site's config
-    secrets."""
+    registers its env-chain SecretTarget on the operation's ONE
+    resolver (``register_targets``), so the env secrets ride the SAME
+    boundary resolve as the site's config secrets."""
     from agentworks.agents import manager as agent_manager
 
     db = _seed_basic_db(tmp_path)
@@ -699,17 +731,26 @@ def test_agent_exec_env_target_joins_the_bind_boundary(
     monkeypatch.setattr(
         agent_manager, "_agent_direct_secret_target", lambda *a, **k: sentinel_target
     )
+    # Node construction binds the site's platform before the target
+    # registration this test spies on; keep it host-independent (the
+    # real lima site is disabled where limactl isn't installed).
+    monkeypatch.setattr(
+        "agentworks.vms.sites.resolve_site",
+        lambda name, registry: SimpleNamespace(),
+    )
 
     class _Stop(Exception):
         pass
 
     bound_targets: list[list[object]] = []
 
-    def _bind_spy(config: object, vm: object, **kwargs: Any) -> object:
-        bound_targets.append(list(kwargs.get("targets") or ()))
+    from agentworks.secrets.resolver import Resolver
+
+    def _register_spy(self: Resolver, targets: object) -> None:
+        bound_targets.append(list(targets))  # type: ignore[call-overload]
         raise _Stop
 
-    monkeypatch.setattr(agent_manager, "bind_platform", _bind_spy)
+    monkeypatch.setattr(Resolver, "register_targets", _register_spy)
 
     with pytest.raises(_Stop):
         agent_manager.exec_agent(
@@ -753,13 +794,16 @@ def test_shell_agent_passes_workspace_scope_to_secret_target(
     stub_vm_gates(monkeypatch)
 
     class _Sentinel(Exception):
-        """Raised from the bind (which now hosts the env resolve) so the
-        test stops before SSH; the scopes are captured before it."""
+        """Raised from the target registration (the seam that hosts the
+        env chain now) so the test stops before SSH; the scopes are
+        captured before it."""
 
     def _explode(*args: object, **kwargs: object) -> None:
         raise _Sentinel
 
-    monkeypatch.setattr(agent_manager, "bind_platform", _explode)
+    from agentworks.secrets.resolver import Resolver
+
+    monkeypatch.setattr(Resolver, "register_targets", _explode)
 
     config = SimpleNamespace()
 
@@ -791,15 +835,19 @@ def test_attach_console_build_path_eager_resolves_before_tmux(
     db._conn.execute("INSERT INTO consoles (name, vm_name) VALUES ('c1', 'vm1')")
     db._conn.commit()
 
-    gate_platform = stub_vm_gates(monkeypatch)
-    monkeypatch.setattr(
-        multi_console,
-        "_prepare_vm_target_for_attach",
-        lambda *a, **k: (
+    stub_vm_gates(monkeypatch)
+
+    @contextlib.contextmanager
+    def _fake_prepare(*a: object, **k: object):  # noqa: ANN202
+        # The orchestrated helper yields (vm, target) inside the gate's
+        # held-active span.
+        yield (
             SimpleNamespace(name="vm1", admin_username="admin"),
             SimpleNamespace(run=lambda *a, **k: None),
-            gate_platform,
-        ),
+        )
+
+    monkeypatch.setattr(
+        multi_console, "_prepare_vm_target_for_attach", _fake_prepare
     )
     monkeypatch.setattr(
         multi_console, "_console_tmux_exists", lambda *a, **k: False,
@@ -911,18 +959,20 @@ def test_attach_console_existing_tmux_session_skips_eager_resolve(
     db._conn.execute("INSERT INTO consoles (name, vm_name) VALUES ('c1', 'vm1')")
     db._conn.commit()
 
-    gate_platform = stub_vm_gates(monkeypatch)
-    monkeypatch.setattr(
-        multi_console,
-        "_prepare_vm_target_for_attach",
-        lambda *a, **k: (
+    stub_vm_gates(monkeypatch)
+
+    @contextlib.contextmanager
+    def _fake_prepare(*a: object, **k: object):  # noqa: ANN202
+        yield (
             SimpleNamespace(name="vm1", admin_username="admin"),
             SimpleNamespace(
                 run=lambda *a, **k: None,
                 interactive=lambda *a, **k: 0,
             ),
-            gate_platform,
-        ),
+        )
+
+    monkeypatch.setattr(
+        multi_console, "_prepare_vm_target_for_attach", _fake_prepare
     )
     monkeypatch.setattr(
         multi_console, "_console_tmux_exists", lambda *a, **k: True,
@@ -991,11 +1041,15 @@ def test_session_attach_does_not_eager_resolve(
     ws_row = db.get_workspace("ws1")
     vm_row = db.get_vm("vm1")
     assert ws_row is not None and vm_row is not None
-    gate_platform = stub_vm_gates(monkeypatch)
-    monkeypatch.setattr(
-        session_manager, "_prepare_vm",
-        lambda *a, **k: (ws_row, vm_row, fake_target.run, None, fake_target, gate_platform),
-    )
+    stub_vm_gates(monkeypatch)
+
+    # _prepare_vm is a gate-span context manager now; the stub yields
+    # the same 5-tuple shape inside a trivial span.
+    @contextlib.contextmanager
+    def _fake_prepare_vm(*a: object, **k: object):  # noqa: ANN202
+        yield (ws_row, vm_row, fake_target.run, None, fake_target)
+
+    monkeypatch.setattr(session_manager, "_prepare_vm", _fake_prepare_vm)
     monkeypatch.setattr(
         session_manager, "_ensure_pid", lambda session, **kwargs: session,
     )
@@ -1003,8 +1057,6 @@ def test_session_attach_does_not_eager_resolve(
         session_manager, "check_session_status",
         lambda *a, **k: SessionStatus.OK,
     )
-
-    import contextlib
 
     config = SimpleNamespace(operator=SimpleNamespace(ssh_private_key=None))
     # interactive() returns int and the manager doesn't sys.exit here,
@@ -1080,20 +1132,23 @@ def test_session_describe_does_not_eager_resolve(
         return {}
 
     monkeypatch.setattr("agentworks.secrets.resolve_for_command", _track_resolve)
-    # describe_session calls _prepare_vm which probes SSH connectivity.
-    # Stub it and the downstream status helpers; the contract under test
-    # is whether resolve_for_command fires, not the probe path.
+    # describe_session enters _prepare_vm's gate span, which probes SSH
+    # connectivity. Stub it (a context manager yielding the 5-tuple)
+    # and the downstream status helpers; the contract under test is
+    # whether resolve_for_command fires, not the probe path.
     ws_row = db.get_workspace("ws1")
     vm_row = db.get_vm("vm1")
     assert ws_row is not None and vm_row is not None
     fake_target = SimpleNamespace(
         run=lambda *a, **k: SimpleNamespace(ok=True, returncode=0, stdout="", stderr=""),
     )
-    gate_platform = stub_vm_gates(monkeypatch)
-    monkeypatch.setattr(
-        session_manager, "_prepare_vm",
-        lambda *a, **k: (ws_row, vm_row, fake_target.run, None, fake_target, gate_platform),
-    )
+    stub_vm_gates(monkeypatch)
+
+    @contextlib.contextmanager
+    def _fake_prepare_vm(*a: object, **k: object):  # noqa: ANN202
+        yield (ws_row, vm_row, fake_target.run, None, fake_target)
+
+    monkeypatch.setattr(session_manager, "_prepare_vm", _fake_prepare_vm)
     monkeypatch.setattr(
         session_manager, "_ensure_pid", lambda session, **kwargs: session,
     )
@@ -1217,16 +1272,16 @@ def test_agent_setup_runners_have_no_env_injection() -> None:
     runner re-introduces the coupling this rule exists to prevent."""
     import inspect
 
-    from agentworks.agents import manager as agent_mgr
+    from agentworks.agents import initializer as agent_init
 
-    src = inspect.getsource(agent_mgr._create_agent_on_vm)
+    src = inspect.getsource(agent_init.create_agent_on_vm)
     assert "env=agent_env" not in src, (
-        "found 'env=agent_env' in _create_agent_on_vm; provisioning runners "
+        "found 'env=agent_env' in create_agent_on_vm; provisioning runners "
         "must not inject operator env. Identity comes via the per-user "
         "profile fragment, not SetEnv."
     )
     assert "agent_env = compose_env" not in src, (
-        "found 'agent_env = compose_env' in _create_agent_on_vm; the "
+        "found 'agent_env = compose_env' in create_agent_on_vm; the "
         "operator-env composition was removed because no provisioning "
         "runner consumes it."
     )
@@ -1285,12 +1340,12 @@ def test_create_agent_on_vm_ends_with_ensure_files_sourced() -> None:
     source lines."""
     import inspect
 
-    from agentworks.agents import manager as agent_mgr
+    from agentworks.agents import initializer as agent_init
 
-    src = inspect.getsource(agent_mgr._create_agent_on_vm)
+    src = inspect.getsource(agent_init.create_agent_on_vm)
     assert "_ensure_agentworks_files_sourced" in src, (
         "expected _ensure_agentworks_files_sourced call in "
-        "_create_agent_on_vm; without it, dotfiles install can leave "
+        "create_agent_on_vm; without it, dotfiles install can leave "
         "AGENTWORKS_AGENT and mise activation unreachable for the agent."
     )
 
@@ -1411,10 +1466,14 @@ def test_restore_session_window_missing_branch_eager_resolves(
     fake_target = SimpleNamespace(
         run=lambda *a, **k: SimpleNamespace(ok=True, returncode=0, stdout="other-window", stderr=""),
     )
-    gate_platform = stub_vm_gates(monkeypatch)
+    stub_vm_gates(monkeypatch)
+
+    @contextlib.contextmanager
+    def _fake_prepare(*a: object, **k: object):  # noqa: ANN202
+        yield (fake_vm, fake_target)
+
     monkeypatch.setattr(
-        multi_console, "_prepare_vm_target_for_attach",
-        lambda *a, **k: (fake_vm, fake_target, gate_platform),
+        multi_console, "_prepare_vm_target_for_attach", _fake_prepare
     )
     monkeypatch.setattr(
         multi_console, "_console_tmux_exists", lambda *a, **k: True,

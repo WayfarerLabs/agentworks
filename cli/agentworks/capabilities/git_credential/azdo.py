@@ -21,7 +21,6 @@ if TYPE_CHECKING:
     from collections.abc import Mapping
 
     from agentworks.resources.reference import ConfigReference
-    from agentworks.secrets.resolver import Resolver
 
 
 _ORG_RE = re.compile(r"^[A-Za-z0-9._-]+$")
@@ -56,13 +55,10 @@ class AzDOCredentialProvider(GitCredentialProvider):
         self,
         owner_name: str,
         config: Mapping[str, object] | None = None,
-        resolver: Resolver | None = None,
         *,
         description: str | None = None,
     ) -> None:
-        super().__init__(
-            owner_name, config or {}, resolver, description=description
-        )
+        super().__init__(owner_name, config or {}, description=description)
         # validate_config ran at construct and guarantees a str org.
         org = self.config.get("org")
         assert isinstance(org, str)

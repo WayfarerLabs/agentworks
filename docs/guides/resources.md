@@ -183,10 +183,12 @@ Two layers, one rule each:
   in precedence order (default `["env-var", "prompt"]`). Registered backends absent from the chain
   are dormant.
 
-Resolution is one pass over the chain per command: the first backend that produces a value wins, and
-interactive prompts are asked at most once per command. `agw secret list` shows how each active
-backend would look up each secret; `agw secret describe <name>` shows one secret in full;
-`agw doctor` reports one row per secret with the runtime outcome.
+Resolution is a pass over the chain in precedence order: the first backend that produces a value
+wins. You are never prompted for the same secret twice in one command, and all prompting happens up
+front, before the command starts changing anything. A secret no active backend can resolve fails at
+preflight with a hint, before any prompt and before anything changes. `agw secret list` shows how
+each active backend would look up each secret; `agw secret describe <name>` shows one secret in
+full; `agw doctor` reports one row per secret with the runtime outcome.
 
 ## Inspecting the whole picture
 

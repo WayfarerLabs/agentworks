@@ -29,7 +29,6 @@ if TYPE_CHECKING:
     from collections.abc import Mapping
 
     from agentworks.resources.reference import ConfigReference
-    from agentworks.secrets.resolver import Resolver
 
 _SCOPE_FIELDS = {"repos", "owner", "token"}
 
@@ -129,13 +128,10 @@ class GitHubCredentialProvider(GitCredentialProvider):
         self,
         owner_name: str,
         config: Mapping[str, object] | None = None,
-        resolver: Resolver | None = None,
         *,
         description: str | None = None,
     ) -> None:
-        super().__init__(
-            owner_name, config or {}, resolver, description=description
-        )
+        super().__init__(owner_name, config or {}, description=description)
         # Scope shape re-parsed from the bound config (validate_config
         # already ran at construct, so this cannot raise).
         self._repos, self._owner = _validated_scope(

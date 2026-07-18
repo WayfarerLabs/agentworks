@@ -127,9 +127,8 @@ class SSHLogger:
         self._write(f"--- [{ts}] {name} ---\n")
 
     def output(self, text: str) -> None:
-        """Log general output (with redaction)."""
+        """Log general output."""
         if text:
-            text = self._sanitize(text)
             self._write(text if text.endswith("\n") else text + "\n")
 
     def log_command(self, command: str, result: SSHResult) -> None:
@@ -137,11 +136,11 @@ class SSHLogger:
         from datetime import UTC, datetime
 
         ts = datetime.now(tz=UTC).strftime("%H:%M:%S")
-        lines = [f"[{ts}] $ {self._sanitize(command)}  (exit {result.returncode})"]
+        lines = [f"[{ts}] $ {command}  (exit {result.returncode})"]
         if result.stdout:
-            lines.append(self._sanitize(result.stdout.rstrip()))
+            lines.append(result.stdout.rstrip())
         if result.stderr:
-            lines.append(f"STDERR: {self._sanitize(result.stderr.rstrip())}")
+            lines.append(f"STDERR: {result.stderr.rstrip()}")
         lines.append("")
         self._write("\n".join(lines) + "\n")
 
@@ -150,19 +149,19 @@ class SSHLogger:
         from datetime import UTC, datetime
 
         ts = datetime.now(tz=UTC).strftime("%H:%M:%S")
-        self._write(f"[{ts}] TIMEOUT (attempt {attempt}/{retries}): {self._sanitize(command)}\n")
+        self._write(f"[{ts}] TIMEOUT (attempt {attempt}/{retries}): {command}\n")
 
     def warning(self, msg: str) -> None:
         """Record a warning (also written to the log)."""
         self._warnings.append(msg)
-        self._write(f"WARNING: {self._sanitize(msg)}\n")
+        self._write(f"WARNING: {msg}\n")
 
     def log_error(self, msg: str) -> None:
         """Log an error message."""
         from datetime import UTC, datetime
 
         ts = datetime.now(tz=UTC).strftime("%H:%M:%S")
-        self._write(f"[{ts}] ERROR: {self._sanitize(msg)}\n")
+        self._write(f"[{ts}] ERROR: {msg}\n")
 
     @property
     def warnings(self) -> list[str]:
@@ -191,7 +190,7 @@ class SSHLogger:
         if exc is not None:
             ts_exc = datetime.now(tz=UTC).strftime("%H:%M:%S")
             tb_text = "".join(traceback.format_exception(exc_type, exc, exc_tb))
-            self._write(f"[{ts_exc}] EXCEPTION:\n{self._sanitize(tb_text)}\n")
+            self._write(f"[{ts_exc}] EXCEPTION:\n{tb_text}\n")
 
         ts = datetime.now(tz=UTC).strftime("%Y-%m-%d %H:%M:%S UTC")
         lines = [f"\n# Finished: {ts}"]
@@ -202,8 +201,14 @@ class SSHLogger:
         self._write("\n".join(lines) + "\n")
 
     def _write(self, text: str) -> None:
+        # The single sanitizing choke point: every byte that reaches the
+        # log file passes through redaction HERE, so the no-secrets-in-
+        # logs property holds regardless of caller discipline (a caller
+        # composing a message from raw values cannot bypass it, and
+        # redactions registered mid-operation cover everything written
+        # afterwards). Callers therefore never pre-sanitize.
         with open(self.path, "a", encoding="utf-8", errors="replace") as f:
-            f.write(text)
+            f.write(self._sanitize(text))
 
 
 SSH_CONNECT_TIMEOUT = 30

@@ -51,7 +51,7 @@ def remote_advisories(registry: Registry, url: str) -> list[str]:
     return the deduped advisories.
 
     Config-only and wiring-blind by design: each declared credential is
-    constructed from its config (no resolver, no token) and judges the
+    constructed from its config (no token) and judges the
     URL by its own host and scope semantics (see
     ``GitCredentialProvider.review_remote``). Whether a given credential
     is actually wired to the user who will clone is deliberately not
@@ -73,7 +73,7 @@ def remote_advisories(registry: Registry, url: str) -> list[str]:
         if provider_cls is None:
             continue
         provider = provider_cls(
-            name, cred.provider_config, None, description=cred.description
+            name, cred.provider_config, description=cred.description
         )
         for msg in provider.review_remote(url):
             if msg not in seen:
@@ -103,32 +103,44 @@ def runup_and_filter(
 
     ``logger`` (an ``SSHLogger``, when the caller has one) records the
     skip as a warning so a VM initialization degrades to PARTIAL.
+
+    This is the domain face of the shared skip-and-degrade runup
+    policy (``orchestration.readiness.runup_skip_and_degrade``): the
+    policy mechanics live there, the git-credential messaging here.
     """
     if not config.defaults.runup_git_credentials:
         return providers
 
     from agentworks.capabilities.base import RunContext
     from agentworks.errors import TokenRejectedError
+    from agentworks.orchestration.readiness import runup_skip_and_degrade
 
     by_secret = {p.secret_name: git_tokens[name] for name, p in providers.items()}
+    # Deliberately scope-less: this write-step context predates the
+    # orchestrated model and carries no operation scope until the write
+    # step itself migrates (the providers' runup reads only its token,
+    # never the scope, so nothing is lost meanwhile).
     ctx = RunContext(config=config, secrets=_MappedSecrets(by_secret))
-    passed: dict[str, GitCredentialProvider] = {}
-    for name, provider in providers.items():
-        try:
-            output.detail(
-                f"Performing runup test for git-credential/{name}...", indent=2
-            )
-            provider.runup(ctx)
-            passed[name] = provider
-        except TokenRejectedError as e:
-            msg = (
-                f"git credential '{name}' rejected; skipping it "
-                f"(fix the token and reinit): {e}"
-            )
-            output.warn(msg)
-            if logger is not None:
-                logger.warning(msg)
-    return passed
+
+    def announce(provider: GitCredentialProvider) -> None:
+        output.detail(
+            f"Performing runup test for git-credential/{provider.owner_name}...",
+            indent=2,
+        )
+
+    def on_reject(provider: GitCredentialProvider, exc: TokenRejectedError) -> None:
+        msg = (
+            f"git credential '{provider.owner_name}' rejected; skipping it "
+            f"(fix the token and reinit): {exc}"
+        )
+        output.warn(msg)
+        if logger is not None:
+            logger.warning(msg)
+
+    passed = runup_skip_and_degrade(
+        providers.values(), ctx, announce=announce, on_reject=on_reject
+    )
+    return {provider.owner_name: provider for provider in passed}
 
 
 @dataclass(frozen=True)

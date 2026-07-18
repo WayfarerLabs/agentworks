@@ -1,20 +1,20 @@
-"""The per-operation secret resolver: the handle a capability instance
-is constructed against.
+"""The per-operation secret resolver: ORCHESTRATOR-OWNED boundary
+machinery (no capability instance ever holds one).
 
-One ``Resolver`` per service-layer operation. Participating resources
-register the secrets they declare (a capability instance's config
-secrets register at construct; a vm-template's Tailscale key registers
-at its preflight), preflights *predict* resolvability without prompting,
-and the operation runs ONE :meth:`resolve` pass at the preflight
-boundary (as soon as every participating resource's preflight passes),
-covering the union of everything registered, one prompt session. Ops
-then draw values from the cache via :meth:`get`.
+One ``Resolver`` per service-layer operation, living at the
+composition root. The orchestrator registers the plan's secret union
+on it (the walk's declared ``secret_refs``, plus any env-chain
+targets), runs ONE :meth:`resolve` pass at the preflight boundary (as
+soon as every participating node's preflight passes), one prompt
+session, and then delivers values downstream through scoped readers
+(``orchestration.secrets.ScopedSecrets`` over :meth:`values`); the
+activation gate's just-in-time values enter through :meth:`seed`.
 
 This does not change the no-cross-invocation-cache stance (ADR 0016):
 the cache lives and dies with the operation, exactly like the resolved
 mapping the composition roots used to thread down as a dict; the
-resolver just reifies "resolve once per command and pass the values
-down" into an object a capability instance can hold.
+resolver just reifies "resolve once per command and hand the values
+down" into one object per operation.
 """
 
 from __future__ import annotations
@@ -24,7 +24,7 @@ from typing import TYPE_CHECKING
 from agentworks.errors import StateError
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable, Sequence
+    from collections.abc import Iterable, Mapping, Sequence
 
     from agentworks.config import Config
     from agentworks.resources.registry import Registry
@@ -33,18 +33,17 @@ if TYPE_CHECKING:
 
 
 class Resolver:
-    """Accumulate an operation's secret declarations; predict, resolve
-    once, then serve cached values.
+    """Accumulate an operation's secret declarations; resolve once,
+    then serve cached values.
 
-    The three verbs map onto the capability lifecycle:
+    The two verbs map onto the operation's lifecycle:
 
-    - :meth:`predict` (preflight): the name of the first active backend
-      that would resolve the secret, or ``None`` when nothing would;
-      never prompts (an interactive backend is reported without
-      probing; probing would BE the prompt).
     - :meth:`resolve` (the preflight boundary): one batched pass over
       the active backends for every registered declaration: one
       prompt session. Idempotent when nothing new was registered.
+      (Resolvability PREDICTION is not this object's job: it is
+      central, over declarations, via
+      ``orchestration.secrets.predict_resolution``.)
     - :meth:`get` (ops): a cached value. Raises a typed error if the
       boundary resolve has not run; an op must never trigger
       resolution (a prompt mid-op is exactly what the boundary
@@ -55,6 +54,7 @@ class Resolver:
         self._config = config
         self._registry = registry
         self._decls: dict[str, SecretDecl] = {}
+        self._seeded: dict[str, str] = {}
         self._values: dict[str, str] | None = None
 
     # -- registration --------------------------------------------------
@@ -106,20 +106,36 @@ class Resolver:
             return SecretDecl(name=name, description="")
         return found
 
-    # -- the lifecycle verbs -------------------------------------------
+    def seed(self, values: Mapping[str, str]) -> None:
+        """Pre-seed the boundary pass with values the ACTIVATION GATE
+        already resolved (the one sanctioned resolution outside the
+        boundary pass; see ``orchestration/activation.py``).
 
-    def predict(self, decl: SecretDecl) -> str | None:
-        """Non-prompting resolvability prediction for preflights: the
-        first active backend that would resolve ``decl``, or ``None``.
-        A non-interactive backend must actually produce a value to be
-        reported (an unset env var does not count as resolvable); the
-        interactive prompt backend is reported without probing.
+        The point is the NO-DOUBLE-RESOLVE property: seeded names
+        register on the operation's resolve set and are excluded from
+        the boundary pass's backend loop, so a gate-resolved secret
+        never resolves or prompts twice in one command. (Ops read the
+        gate's scoped reader while the gate runs, and scoped delivery
+        over the boundary cache after it; seeded values also stay
+        readable via :meth:`get` before the pass, part of the same
+        contract.)
+
+        Seeding after the boundary pass is the same contract violation
+        as registering after it (a value the pass never covered), so
+        it raises instead of quietly widening the cache.
         """
-        from agentworks.secrets.resolve import active_backends, preview_resolution
+        if self._values is not None:
+            raise StateError(
+                "secret values were seeded after the operation's resolve "
+                f"pass: {', '.join(sorted(values))}. The activation gate "
+                "resolves and seeds before the boundary; reaching here "
+                "means a caller seeded too late."
+            )
+        for name, value in values.items():
+            self.register_name(name)
+            self._seeded[name] = value
 
-        return preview_resolution(
-            decl, active_backends(self._config, self._registry)
-        )
+    # -- the lifecycle verbs -------------------------------------------
 
     def resolve(self) -> None:
         """THE operation's one resolve pass, run at the preflight
@@ -144,17 +160,31 @@ class Resolver:
             return
         from agentworks.secrets.resolve import active_backends, resolve_secrets
 
-        if not self._decls:
-            self._values = {}
+        # Gate-seeded values are already resolved (by the gate's own
+        # backend-chain pass); the boundary loop covers only the rest.
+        missing = [
+            decl
+            for name, decl in self._decls.items()
+            if name not in self._seeded
+        ]
+        if not missing:
+            self._values = dict(self._seeded)
             return
-        self._values = resolve_secrets(
-            list(self._decls.values()),
-            active_backends(self._config, self._registry),
-        )
+        self._values = {
+            **self._seeded,
+            **resolve_secrets(
+                missing,
+                active_backends(self._config, self._registry),
+            ),
+        }
 
     def get(self, name: str) -> str:
-        """A resolved value, from the boundary pass's cache."""
+        """A resolved value, from the boundary pass's cache (or, before
+        the pass, from the activation gate's seed; see :meth:`seed`)."""
         if self._values is None:
+            seeded = self._seeded.get(name)
+            if seeded is not None:
+                return seeded
             raise StateError(
                 f"secret '{name}' requested before the operation's resolve "
                 "pass ran. The composition root resolves once at the "

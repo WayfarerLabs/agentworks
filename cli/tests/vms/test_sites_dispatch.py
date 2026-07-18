@@ -15,7 +15,6 @@ from agentworks.manifests import builtin as builtin_manifests
 from agentworks.resources import Origin, Registry
 from agentworks.vms.sites import (
     VMSiteDecl,
-    platform_for,
     resolve_site,
     site_manifest_hint,
     validate_sites,
@@ -74,24 +73,18 @@ def test_resolve_site_unknown_raises_the_stranded_error() -> None:
     assert "name: gpu-box" in (exc.value.hint or "")
 
 
-def test_platform_for_resolves_through_the_vm_site() -> None:
+def test_vm_row_site_field_resolves_through_the_vm_site() -> None:
+    """A VM row's site field resolves to its bound platform through
+    ``resolve_site`` (the shape the node factories use; the old
+    ``platform_for`` delegate retired with ``bind_platform``)."""
     registry = _registry()
     vm = SimpleNamespace(site="wsl2")
-    platform = platform_for(vm, registry)
+    platform = resolve_site(vm.site, registry)
     assert platform.name == "wsl2"
 
 
-def test_resolver_threads_to_the_bound_platform() -> None:
-    """Construction registers the site's declared config secret on the
-    operation's resolver and ops read the value from its cache; a
-    platform constructed WITHOUT a resolver (direct/inspection use)
-    fails ops with a typed error rather than resolving anything."""
-    from typing import cast
-
-    from agentworks.secrets.base import SecretDecl
-    from agentworks.secrets.resolver import Resolver
-
-    registry = _registry(
+def _px_registry() -> Registry:
+    return _registry(
         VMSiteDecl(
             name="px",
             platform="proxmox",
@@ -104,30 +97,32 @@ def test_resolver_threads_to_the_bound_platform() -> None:
         )
     )
 
-    class _StubResolver:
-        def __init__(self) -> None:
-            self.registered: list[str] = []
 
-        def register_name(self, name: str) -> SecretDecl:
-            self.registered.append(name)
-            return SecretDecl(name=name, description="")
+def test_ops_read_the_token_through_the_context() -> None:
+    """The instance-reads-context pin: the op client reads its token
+    only via ``ctx.secret`` (scoped delivery). A context scoped to the
+    site's declared names serves it; a context with NO resolved
+    secrets fails with the accessor's typed ``ConfigError``; an
+    UNDECLARED name is scoped delivery's typed refusal. The instance
+    holds no resolver-shaped value source."""
+    from agentworks.capabilities.base import RunContext
+    from agentworks.orchestration.secrets import ScopedSecrets
 
-        def get(self, name: str) -> str:
-            assert name == "proxmox-token"
-            return "s3cret"
+    registry = _px_registry()
+    platform = resolve_site("px", registry)
+    assert isinstance(platform, ProxmoxPlatform)
 
-    stub = _StubResolver()
-    bound = resolve_site("px", registry, resolver=cast(Resolver, stub))
-    assert isinstance(bound, ProxmoxPlatform)
-    # Construction registered the declared token secret for the
-    # operation's boundary resolve.
-    assert stub.registered == ["proxmox-token"]
-    assert bound._api is not None
+    served = RunContext(
+        secrets=ScopedSecrets({"proxmox-token": "s3cret"}, ("proxmox-token",))
+    )
+    assert platform._api(served) is not None
 
-    unbound = resolve_site("px", registry)
-    assert isinstance(unbound, ProxmoxPlatform)
-    with pytest.raises(StateError, match="proxmox-token"):
-        _ = unbound._api
+    bare = resolve_site("px", registry)
+    assert isinstance(bare, ProxmoxPlatform)
+    with pytest.raises(ConfigError, match=r"no\s+resolved secrets"):
+        bare._api(RunContext())
+    with pytest.raises(StateError, match="not declared"):
+        bare._api(RunContext(secrets=ScopedSecrets({}, ("other-name",))))
 
 
 def test_validate_sites_accepts_declared_and_absent() -> None:

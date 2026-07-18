@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import contextlib
-from collections.abc import Generator, Iterator, Sequence
+from collections.abc import Generator, Iterator
 from contextlib import AbstractContextManager
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -11,7 +11,11 @@ from pathlib import Path
 import pytest
 
 from agentworks.db import Database
-from agentworks.secrets.resolver import Resolver
+
+# The orchestrated-command suites' shared fixture trio (proxmox
+# section, make_config, resolve_counter) lives in its own module so it
+# reads as the suites' vocabulary rather than universal machinery.
+pytest_plugins = ["tests.orchestrated_fixtures"]
 
 
 @pytest.fixture
@@ -171,10 +175,16 @@ class _StubPlatform:
 
     name = "stub"
 
+    def preflight(self, ctx: object) -> None:
+        return None
+
+    def runup(self, ctx: object) -> None:
+        return None
+
     def vm_active(self, vm: object, *, config: object | None = None) -> AbstractContextManager[None]:
         return contextlib.nullcontext()
 
-    def status(self, vm: object) -> object:
+    def status(self, vm: object, ctx: object) -> object:
         from agentworks.db import VMStatus
 
         return VMStatus.RUNNING
@@ -187,7 +197,7 @@ class _StubPlatform:
 
 
 # Every module that imports the vm-sites gates by name; patched
-# per-module because ``from ... import bind_platform`` captures the
+# per-module because ``from ... import keep_active`` captures the
 # binding at module load.
 _GATE_MODULES = (
     "agentworks.vms.manager",
@@ -206,7 +216,7 @@ def _gate_stub_leak_sentinel() -> Generator[None, None, None]:
 
     ``stub_vm_gates`` once poisoned later tests when a gate module was
     first-imported MID-PATCH-LOOP: its module-level ``from vms.manager
-    import bind_platform`` captured the already-patched stub, which
+    import keep_active`` captured the already-patched stub, which
     monkeypatch then saved as the "original" and re-installed forever
     at teardown. The pre-import in ``stub_vm_gates`` fixes that class;
     this sentinel makes any regression of it a loud session-end failure
@@ -219,9 +229,9 @@ def _gate_stub_leak_sentinel() -> Generator[None, None, None]:
 
     for mod_name in _GATE_MODULES:
         mod = importlib.import_module(mod_name)
-        captured = getattr(mod, "bind_platform", vms_manager.bind_platform)
-        assert captured is vms_manager.bind_platform, (
-            f"{mod_name}.bind_platform is a leaked test stub ({captured!r}); "
+        captured = getattr(mod, "keep_active", vms_manager.keep_active)
+        assert captured is vms_manager.keep_active, (
+            f"{mod_name}.keep_active is a leaked test stub ({captured!r}); "
             "a gate-stubbing helper failed to restore the real function"
         )
 
@@ -265,8 +275,8 @@ def stub_platform_support(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def stub_vm_gates(monkeypatch: pytest.MonkeyPatch) -> _StubPlatform:
-    """Stub ``bind_platform`` / ``ensure_active`` / ``keep_active`` (and
-    the multi-VM variants) in every gate-consuming module.
+    """Stub the imperative ``ensure_active`` / ``keep_active`` holds in
+    every gate-consuming module.
 
     Tests that exercise transport / rollback / env plumbing don't want
     the gates building registries, resolving site secrets, or probing
@@ -276,7 +286,7 @@ def stub_vm_gates(monkeypatch: pytest.MonkeyPatch) -> _StubPlatform:
 
     # Pre-import every gate module BEFORE patching: a string-form
     # setattr that first-imports a module mid-loop would let its
-    # module-level ``from vms.manager import bind_platform`` capture an
+    # module-level ``from vms.manager import keep_active`` capture an
     # ALREADY-PATCHED stub, which monkeypatch then saves as the
     # "original": teardown would install the stub permanently and
     # poison every later test in the session (import-order dependent,
@@ -290,37 +300,27 @@ def stub_vm_gates(monkeypatch: pytest.MonkeyPatch) -> _StubPlatform:
     def _null_hold(*args: object, **kwargs: object) -> Iterator[None]:
         yield
 
-    def _fake_bind(
-        config: object,
-        vm: object,
-        *,
-        registry: object = None,
-        resolver: Resolver | None = None,
-        prepare: bool = True,
-        targets: Sequence[object] = (),
-    ) -> _StubPlatform:
-        # Mirror the real boundary just enough for the roots: record
-        # the env targets for assertions and run the resolver's public
-        # boundary verb (the stub registered no declarations, so the
-        # empty-set short-circuit never touches real backends) so
-        # ``resolver.values`` serves the compose_env plumbing.
-        platform.bound_targets = list(targets)  # type: ignore[attr-defined]
-        if resolver is not None and prepare and not resolver.resolved:
-            resolver.resolve()
-        return platform
-
     for mod in _GATE_MODULES:
-        monkeypatch.setattr(f"{mod}.bind_platform", _fake_bind, raising=False)
         monkeypatch.setattr(
             f"{mod}.ensure_active", lambda *a, **k: None, raising=False
         )
         monkeypatch.setattr(f"{mod}.keep_active", _null_hold, raising=False)
-        monkeypatch.setattr(
-            f"{mod}.bind_platforms",
-            lambda config, vms, *, registry=None: [(vm, platform) for vm in vms],
-            raising=False,
-        )
-        monkeypatch.setattr(f"{mod}.keep_actives", _null_hold, raising=False)
+
+    # The orchestrated commands' equivalents of the same two seams: the
+    # node factories bind their platform through ``resolve_site`` (the
+    # only constructor of platform instances), and the activation gate's
+    # fast path probes Tailscale reachability. Stub both so orchestrated
+    # commands neither construct real platforms nor shell out to
+    # ``tailscale ping``; the gate then fast-paths (the stub's job, same
+    # scope as the imperative ensure_active stub above) and holds via
+    # the stub platform's no-op ``vm_active``.
+    def _fake_resolve_site(name: object, registry: object) -> _StubPlatform:
+        return platform
+
+    monkeypatch.setattr("agentworks.vms.sites.resolve_site", _fake_resolve_site)
+    monkeypatch.setattr(
+        "agentworks.vms.manager._is_tailscale_reachable", lambda host: True
+    )
     return platform
 
 
@@ -333,14 +333,20 @@ def fake_target(monkeypatch: pytest.MonkeyPatch) -> _FakeTarget:
     # eager top-level import (used by batch_check_all_sessions and friends).
     fake_factory = lambda vm, config, **kwargs: target  # noqa: E731
     monkeypatch.setattr("agentworks.transports.transport", fake_factory)
-    # ``sessions.manager`` and ``agents.manager`` import ``transport`` at module
-    # load (eager), so the agentworks.transports-side patch alone wouldn't take
-    # effect for callers that already captured the binding.
+    # ``sessions.manager`` and the agents modules import ``transport`` at
+    # module load (eager), so the agentworks.transports-side patch alone
+    # wouldn't take effect for callers that already captured the binding.
     monkeypatch.setattr(
         "agentworks.sessions.manager.transport", fake_factory
     )
     monkeypatch.setattr(
         "agentworks.agents.manager.transport", fake_factory
+    )
+    monkeypatch.setattr(
+        "agentworks.agents.grants.transport", fake_factory
+    )
+    monkeypatch.setattr(
+        "agentworks.agents.initializer.transport", fake_factory
     )
     stub_vm_gates(monkeypatch)
     # The interactive code path now lives on the transport itself; the
@@ -357,6 +363,19 @@ class _StubSessionTemplate:
     restart_command = None
     required_commands: list[str] = []  # noqa: RUF012 - mutable class attr is fine for a stub
     env: dict[str, str] = {}  # noqa: RUF012 - mutable class attr is fine for a stub
+
+
+def empty_secret_target(label: str = "test"):  # noqa: ANN201 - test helper
+    """A real, empty ``SecretTarget``: the stub for the env-chain seam.
+
+    The orchestrated session commands register their env target on the
+    operation's REAL resolver (``register_targets``), so a bare ``None``
+    or sentinel object no longer survives the seam; an empty target
+    walks the same code with zero referenced secrets.
+    """
+    from agentworks.secrets import SecretTarget
+
+    return SecretTarget(vm={}, label=label)
 
 
 def stub_session_resolvers(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -384,10 +403,12 @@ def stub_session_resolvers(monkeypatch: pytest.MonkeyPatch) -> None:
         session_manager, "_resolve_session_env", lambda *a, **k: {}
     )
     monkeypatch.setattr(
-        session_manager, "_session_secret_target", lambda *a, **k: None
+        session_manager, "_session_secret_target", lambda *a, **k: empty_secret_target()
     )
     monkeypatch.setattr(
-        session_manager, "_session_secret_target_pre_create", lambda *a, **k: None
+        session_manager,
+        "_session_secret_target_pre_create",
+        lambda *a, **k: empty_secret_target(),
     )
     # ``resolve_for_command`` is imported locally inside create_session /
     # restart_session, so patch its module-level home; the import inside
@@ -453,7 +474,7 @@ class _StubRegistry:
             console = getattr(self._config, "named_console", None)
             return console if console is not None else NamedConsoleConfig()
         if kind == "vm-site":
-            # Serve the built-in same-named sites so bind_platform /
+            # Serve the built-in same-named sites so resolve_site /
             # lookup_site work against namespace configs (a stubbed
             # test VM's site is one of the four platform names).
             from agentworks.capabilities.vm_platform import VM_PLATFORM_REGISTRY

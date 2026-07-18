@@ -18,10 +18,10 @@ from agentworks.errors import (
     UserAbort,
     ValidationError,
 )
-from agentworks.vms.manager import bind_platform, keep_active
-from agentworks.workspaces.templates import resolve_template
+from agentworks.vms.manager import gated_vm_boundary, keep_active
 
 if TYPE_CHECKING:
+    from agentworks.capabilities.base import OperationScope, RunContext
     from agentworks.capabilities.vm_platform import VMPlatform
     from agentworks.config import Config
     from agentworks.db import Database, VMRow, WorkspaceRow
@@ -36,23 +36,23 @@ def create_workspace(
     vm_name: str | None = None,
     template_name: str | None = None,
     open_vscode: bool = False,
-    platform: VMPlatform | None = None,
 ) -> None:
     """Create a workspace on a VM.
 
-    ``platform`` accepts the caller's already-bound platform (session
-    create's ephemeral-workspace path) so the nested create doesn't
-    re-run the site's secret resolve pass; when None this function is
-    its own composition root and binds once.
+    Orchestrated: the graph derives from the VM's row (its site field
+    is the edge to the vm-site node) and the pending workspace node's
+    VM edge; the activation gate replaces this command's
+    ``keep_active``, opening BEFORE the preflight sweep with its
+    just-in-time values seeding the boundary resolver; the mutation is
+    the phase-free realization body
+    (:func:`agentworks.workspaces.realize.realize_workspace`), the
+    single copy shared with the orchestrated session create. The
+    completed workspace is never rollback-tracked (the body cleans its
+    own partial files, and a failure after the row exists keeps the
+    workspace, exactly the imperative shape), so no realization log
+    exists here.
     """
-    from agentworks.agents.manager import workspace_group
     from agentworks.bootstrap import build_registry
-    from agentworks.ssh import SSHLogger
-    from agentworks.workspaces.backends.vm import (
-        create_vm_workspace,
-        delete_vm_workspace,
-        generate_vscode_workspace,
-    )
 
     # build_registry runs first so framework miss-policies fire before
     # any template / DB / VM business logic.
@@ -68,12 +68,18 @@ def create_workspace(
             entity_name=ws_name,
         )
 
-    template = resolve_template(registry, template_name)
-    template_resolved_name = template.name
+    # Cheap validation FIRST, before the gate and before any secret is
+    # touched: template resolution, the repo advisories (config-only,
+    # no tokens), and the VM init-status guard all fail with zero
+    # prompts and zero VM starts, the same bail-early precedence every
+    # migrated sibling keeps.
+    from agentworks.workspaces.templates import resolve_template
 
-    # Preflight: advise if the resolved template's repo remote will not
-    # resolve cleanly against the declared git credentials (config-only,
-    # no tokens). Each credential judges the URL by its own host/scope
+    template = resolve_template(registry, template_name)
+
+    # Advise if the resolved template's repo remote will not resolve
+    # cleanly against the declared git credentials (config-only, no
+    # tokens). Each credential judges the URL by its own host/scope
     # semantics; see git_credentials.remote_advisories. Only the single
     # template actually being used is checked, and only here at use time.
     if template.repo:
@@ -84,257 +90,82 @@ def create_workspace(
 
     vm = _resolve_vm(db, vm_name)
     _guard_vm_status(vm)
-    if platform is None:
-        platform = bind_platform(config, vm, registry=registry)
-    with keep_active(db, config, vm, platform):
 
-        workspace_path: str | None = None
-        vscode_path: str | None = None
+    # BUILD: the command names its direct resources (this VM, the
+    # chosen workspace name) and constructs the pending workspace node
+    # with its VM edge attached; the walk assembles the graph.
+    # Construction is cheap and touches no secret machinery; the walk
+    # union below is the boundary's source. Nothing resolves yet.
+    from agentworks.capabilities.base import RunContext
+    from agentworks.orchestration.activation import (
+        activation_gate,
+        gate_secret_resolver,
+    )
+    from agentworks.orchestration.readiness import preflight_all
+    from agentworks.orchestration.secrets import ScopedSecrets, secret_union
+    from agentworks.orchestration.walk import walk
+    from agentworks.secrets.resolver import Resolver
+    from agentworks.vms.nodes import live_vm_node
+    from agentworks.workspaces.nodes import pending_workspace_node
 
-        ssh_logger = SSHLogger(vm.name, "workspace-create")
+    resolver = Resolver(config, registry)
 
-        def _cleanup() -> None:
-            if workspace_path:
-                delete_vm_workspace(vm, config, ws_name, workspace_path, logger=ssh_logger)
-            if vscode_path:
-                from pathlib import Path
+    vm_node = live_vm_node(db, config, registry, vm)
 
-                Path(vscode_path).unlink(missing_ok=True)
+    def _teardown_platform_ctx() -> RunContext:
+        # The nested teardown's op-start context: built at teardown
+        # time (post-boundary, values resolved), scoped to the site's
+        # declared names. (This command never unwinds a realized
+        # workspace, so the source exists for the node's contract, not
+        # for a path this command takes.)
+        return RunContext(
+            config=config,
+            secrets=ScopedSecrets(
+                resolver.values, vm_node.site.secret_refs()
+            ),
+        )
 
-        def _safe_cleanup() -> None:
-            # Rollback failures must not mask the original KI/exception. Surface
-            # them as a warning (with workspace name and SSH log path for the
-            # user to follow up on) and continue propagating the original error.
-            try:
-                _cleanup()
-            except Exception as cleanup_err:
-                output.warn(
-                    f"rollback during workspace create '{ws_name}' failed: {cleanup_err}. "
-                    f"VM may have residual files or VS Code workspace file. "
-                    f"SSH log: {ssh_logger.path}"
-                )
+    pending_workspace = pending_workspace_node(
+        db, config, ws_name, vm_node, template_name, _teardown_platform_ctx
+    )
+    nodes = walk(pending_workspace)
+    # The walk supplies the boundary union (the site's config secrets;
+    # a workspace template's env secrets are runtime inputs, delivered
+    # where sessions run, so they stay out of it: hermetic
+    # provisioning, the same pin the vm-template node carries).
+    for secret_name in secret_union(nodes):
+        resolver.register_name(secret_name)
 
-        # Outer try/finally ensures the SSH logger is closed exactly once, AFTER
-        # any rollback commands have been logged. Closing earlier would write the
-        # "Finished" footer before the rollback section, making the log misleading.
-        try:
-            try:
-                output.info(
-                    f"Creating workspace '{ws_name}' on VM '{vm.name}' (template: {template_resolved_name})..."
-                )
-                workspace_path = create_vm_workspace(vm, config, ws_name, template, logger=ssh_logger)
+    scope = _workspace_scope(db, vm, ws_name)
 
-                vscode_path = generate_vscode_workspace(vm, config, ws_name, workspace_path)
-                output.detail(f"VS Code workspace: {vscode_path}")
+    with activation_gate(vm_node, gate_secret_resolver(config, registry, resolver)):
+        # The preflight boundary: the sweep covers every participating
+        # node, then the site's config secrets resolve in one pass (or
+        # arrive pre-seeded from the gate). This command has never
+        # framed phases, so no banners here; the realize body never
+        # frames either.
+        preflight_all(nodes, RunContext(config=config, operation_scope=scope))
+        resolver.resolve()
 
-                db.insert_workspace(
-                    ws_name,
-                    workspace_path=workspace_path,
-                    vm_name=vm.name,
-                    template=template_resolved_name,
-                    linux_group=workspace_group(ws_name),
-                )
-            except KeyboardInterrupt:
-                output.warn(f"Cancelling workspace create '{ws_name}'... rolling back.")
-                _safe_cleanup()
-                raise
-            except AgentworksError:
-                _safe_cleanup()
-                raise
-            except Exception as e:
-                _safe_cleanup()
-                raise ExternalError(
-                    f"creating workspace: {e}",
-                    entity_kind="workspace",
-                    entity_name=ws_name,
-                    hint=f"SSH log: {ssh_logger.path}",
-                ) from e
+        from agentworks.workspaces.realize import realize_workspace
 
-            # Add grant_all agents to the new workspace group. Best-effort: the
-            # workspace itself was already created and inserted above, so a
-            # per-agent failure (DB error, SSH hiccup) should not abort the
-            # whole command. Surface failures as warnings and report accurate
-            # counts so the user can re-grant manually with
-            # 'agent grant-workspaces'.
-            #
-            # DB grant is inserted BEFORE the on-VM group add. If the order were
-            # reversed and the DB write failed after the group add, the agent
-            # would have VM-side membership with no DB grant backing it (a
-            # silent authorization drift). With this ordering, a group-add
-            # failure can be cleanly compensated by deleting the just-inserted
-            # grant row.
-            grant_all_agents = db.list_agents_on_vm_with_grant_all(vm.name)
-            if grant_all_agents:
-                from agentworks.agents.manager import _add_to_workspace_group
-
-                added = 0
-                failed: list[str] = []
-                for agent in grant_all_agents:
-                    try:
-                        db.insert_agent_grant(agent.name, ws_name, "explicit")
-                    except KeyboardInterrupt:
-                        # sqlite commits inside a C call; KI can surface after
-                        # the commit but before we move on, leaving an inserted
-                        # row. Best-effort revert and re-raise to preserve the
-                        # SIGINT contract.
-                        output.warn(
-                            f"Cancelled while inserting grant for agent '{agent.name}' on "
-                            f"workspace '{ws_name}'. Reverting in case the insert committed."
-                        )
-                        _revert_grant_on_failure(db, agent.name, ws_name)
-                        raise
-                    except Exception as e:
-                        failed.append(agent.name)
-                        output.warn(
-                            f"Failed to insert grant for agent '{agent.name}' on workspace "
-                            f"'{ws_name}': {e}"
-                        )
-                        continue
-                    try:
-                        _add_to_workspace_group(vm, config, db, agent.linux_user, ws_name, logger=ssh_logger)
-                        added += 1
-                    except KeyboardInterrupt:
-                        # KI is a BaseException and slips past `except Exception`,
-                        # so it needs its own branch. Without this, Ctrl-C during
-                        # the SSH call would leave a committed grant row with no
-                        # VM-side group membership (silent authorization drift).
-                        output.warn(
-                            f"Cancelled while adding agent '{agent.name}' to workspace "
-                            f"'{ws_name}' group. Reverting just-inserted DB grant."
-                        )
-                        _revert_grant_on_failure(db, agent.name, ws_name)
-                        raise
-                    except Exception as e:
-                        failed.append(agent.name)
-                        output.warn(
-                            f"Failed to add agent '{agent.name}' to workspace '{ws_name}' "
-                            f"group: {e}. Reverting DB grant to keep state consistent."
-                        )
-                        _revert_grant_on_failure(db, agent.name, ws_name)
-                if added:
-                    output.detail(f"Added {added} grant-all agent(s) to workspace")
-                if failed:
-                    output.warn(
-                        f"Grant-all agents not added: {', '.join(failed)}. "
-                        f"Re-grant manually with 'agent grant-workspaces <name> {ws_name}'."
-                    )
-        finally:
-            ssh_logger.close()
+        vscode_path = realize_workspace(
+            db,
+            config,
+            registry,
+            name=ws_name,
+            vm=vm,
+            template=template,
+        )
+        # Bookkeeping only, deliberately not via a realization log:
+        # this command never unwinds a realized workspace (a failure
+        # after the row exists keeps the workspace, as the imperative
+        # command did), and the body already cleaned up its own
+        # partial files before re-raising.
+        pending_workspace.mark_realized()
 
         if open_vscode:
-            # vscode_path was assigned inside the inner try before any rollback
-            # could occur; reaching here means the try block completed without
-            # raising, so vscode_path is set. Assert for the type-checker.
-            assert vscode_path is not None
             subprocess.run(["code", vscode_path], check=False)
-
-        output.info(f"Workspace '{ws_name}' created")
-
-
-def shell_workspace(
-    db: Database,
-    config: Config,
-    name: str,
-) -> None:
-    """Open a plain shell into a workspace.
-
-    .. deprecated::
-        A shell is always somebody's shell; the workspace is just where
-        it's rooted. Use :func:`agentworks.vms.manager.shell_vm` with
-        ``workspace_name=`` (admin) or
-        :func:`agentworks.agents.manager.shell_agent` with
-        ``workspace_name=`` (agent) instead. This function will be
-        removed in a future release.
-    """
-    import warnings
-
-    from agentworks.workspaces.backends.vm import shell_vm_workspace
-
-    warnings.warn(
-        "shell_workspace is deprecated; use shell_vm(..., workspace_name=...) "
-        "or shell_agent(..., workspace_name=...) instead.",
-        DeprecationWarning,
-        stacklevel=2,
-    )
-
-    ws = db.get_workspace(name)
-    if ws is None:
-        raise NotFoundError(
-            f"workspace '{name}' not found",
-            entity_kind="workspace",
-            entity_name=name,
-        )
-
-    vm = db.get_vm(ws.vm_name)
-    if vm is None:
-        raise NotFoundError(
-            f"VM '{ws.vm_name}' not found",
-            entity_kind="vm",
-            entity_name=ws.vm_name,
-        )
-
-    _guard_vm_status(vm)
-    db.update_workspace_last_seen(name)
-    with keep_active(db, config, vm, bind_platform(config, vm)):
-        shell_vm_workspace(vm, config, ws.workspace_path)
-
-
-def console_workspace(
-    db: Database,
-    config: Config,
-    name: str,
-    *,
-    allow_nesting: bool = False,
-    recreate: bool = False,
-) -> None:
-    """Open the workspace console (tmuxinator session with sessions).
-
-    .. deprecated::
-        Predates the multi-console design and lacks env-and-secrets
-        integration. Use named consoles via
-        :mod:`agentworks.sessions.console` (``console create`` +
-        ``console attach``) instead. This function will be removed in a
-        future release.
-    """
-    import os
-    import warnings
-
-    from agentworks.workspaces.backends.vm import console_vm_workspace
-
-    warnings.warn(
-        "console_workspace is deprecated; use the named-console API "
-        "(console create / console attach) instead.",
-        DeprecationWarning,
-        stacklevel=2,
-    )
-
-    if os.environ.get("TMUX") and not allow_nesting:
-        raise StateError(
-            "already inside a tmux session. Nesting is not recommended "
-            "(prefix key conflicts, confusing detach behavior).",
-            hint="Pass --allow-nesting to override.",
-        )
-
-    ws = db.get_workspace(name)
-    if ws is None:
-        raise NotFoundError(
-            f"workspace '{name}' not found",
-            entity_kind="workspace",
-            entity_name=name,
-        )
-
-    vm = db.get_vm(ws.vm_name)
-    if vm is None:
-        raise NotFoundError(
-            f"VM '{ws.vm_name}' not found",
-            entity_kind="vm",
-            entity_name=ws.vm_name,
-        )
-
-    _guard_vm_status(vm)
-    db.update_workspace_last_seen(name)
-    with keep_active(db, config, vm, bind_platform(config, vm)):
-        console_vm_workspace(vm, config, name, recreate=recreate)
 
 
 def describe_workspace(
@@ -443,6 +274,16 @@ def reinit_workspace(
     Same semantic as `vm reinit` and `agent reinit`: the declared state in
     the DB is the source of truth; this reinit converges live state to
     match.
+
+    Orchestrated (``vms.manager.gated_vm_boundary``, WORKSPACE scope):
+    the graph is the live VM alone (the workspace has no capability
+    instances and nothing realization-shaped; convergence mutates
+    through the VM transport), the activation gate replaces this
+    command's ``keep_active``, opening BEFORE the preflight sweep with
+    its just-in-time values seeding the boundary resolver, and the
+    whole SSH convergence body runs inside the held-active span. The
+    not-found checks stay pre-boundary: a refusal costs zero prompts,
+    zero resolves, and zero gate events.
     """
     from agentworks.agents.manager import AGENT_PREFIX
     from agentworks.bootstrap import build_registry
@@ -451,7 +292,7 @@ def reinit_workspace(
 
     # build_registry runs first so framework miss-policies fire before
     # any DB / VM business logic.
-    build_registry(config)
+    registry = build_registry(config)
 
     ws = db.get_workspace(name)
     if ws is None:
@@ -469,8 +310,10 @@ def reinit_workspace(
             entity_name=ws.vm_name,
         )
 
-    target = transport(vm, config)
-    with keep_active(db, config, vm, bind_platform(config, vm)):
+    with gated_vm_boundary(
+        db, config, registry, vm, scope=_workspace_scope(db, vm, name)
+    ):
+        target = transport(vm, config)
         ws_group = ws.linux_group
         fixes = 0
 
@@ -730,8 +573,20 @@ def _rehome_vm(
     remove_old: bool,
     yes: bool,
 ) -> None:
-    """Rehome a VM workspace."""
+    """Rehome a VM workspace.
 
+    Orchestrated (``vms.manager.gated_vm_boundary``, WORKSPACE scope):
+    the graph is the live VM alone, the activation gate replaces this
+    command's ``keep_active``, and the whole move runs inside the
+    held-active span. The not-found check and the VM-status guard stay
+    pre-boundary; the source / target directory existence checks and
+    the confirm prompt stay INSIDE the span exactly where they were:
+    the checks need SSH (inherently post-gate) and the confirm renders
+    their results, so they cannot move earlier without changing what
+    the operator confirms.
+    """
+
+    from agentworks.bootstrap import build_registry
     from agentworks.ssh import SSHError, SSHLogger
     from agentworks.transports import transport
     from agentworks.workspaces.backends.vm import generate_vscode_workspace
@@ -749,7 +604,10 @@ def _rehome_vm(
         )
 
     _guard_vm_status(vm)
-    with keep_active(db, config, vm, bind_platform(config, vm)):
+    registry = build_registry(config)
+    with gated_vm_boundary(
+        db, config, registry, vm, scope=_workspace_scope(db, vm, ws_name)
+    ):
 
         target = transport(vm, config)
 
@@ -922,13 +780,32 @@ def delete_workspace(
     force: bool = False,
     yes: bool = False,
     platform: VMPlatform | None = None,
+    platform_ctx: RunContext | None = None,
 ) -> None:
     """Delete a workspace.
 
+    Orchestrated on the standalone path (``platform=None``, the
+    command root and ``delete_session``'s workspace-cleanup call):
+    ``vms.manager.gated_vm_boundary`` composes the live-VM graph at
+    WORKSPACE scope, the activation gate replaces this command's
+    ``keep_active``, and the held-active span covers the session-kill
+    and on-VM removal work. The sessions guard, the confirm gate, and
+    the not-found check stay pre-boundary: a refusal costs zero
+    prompts, zero resolves, and zero gate events. A missing VM row
+    skips the boundary entirely (DB-only cleanup), and a VM without a
+    Tailscale address skips only the SSH session-kill block, exactly
+    the imperative shape.
+
     ``platform`` accepts the caller's already-bound platform (session
-    create's ephemeral ROLLBACK path) so a failed create on a
-    secret-bearing site doesn't re-run the resolve pass mid-rollback;
-    when None this function is its own composition root and binds once.
+    create's ephemeral ROLLBACK path, where
+    ``PendingWorkspaceNode.teardown`` runs INSIDE the caller's held
+    gate span), paired with ``platform_ctx``, that composition's
+    op-start context for the hold's power ops: that path must not
+    rebuild a boundary or re-run the resolve pass mid-rollback, so it
+    keeps the imperative ``keep_active`` hold on the handed-in
+    platform. This is the INTERIM nested-teardown seam; it closes
+    when the session-create unwind hands a node instead of a
+    platform.
     """
 
     ws = db.get_workspace(name)
@@ -972,10 +849,31 @@ def delete_workspace(
     with contextlib.ExitStack() as _keepalive_stack:
         if vm is not None:
             if platform is None:
-                platform = bind_platform(config, vm)
-            _keepalive_stack.enter_context(
-                keep_active(db, config, vm, platform)
-            )
+                # The standalone composition root: build the boundary here.
+                from agentworks.bootstrap import build_registry
+
+                registry = build_registry(config)
+                _keepalive_stack.enter_context(
+                    gated_vm_boundary(
+                        db, config, registry, vm,
+                        scope=_workspace_scope(db, vm, name),
+                    )
+                )
+            else:
+                # The nested-teardown path: the caller's composition
+                # already resolved and holds its gate open, so only the
+                # hold is re-entered (never a second boundary or
+                # resolve); the handed-in ctx serves the hold's power
+                # ops.
+                if platform_ctx is None:
+                    raise StateError(
+                        f"delete_workspace('{name}') was handed a bound "
+                        f"platform without its op-start context; the "
+                        f"nested-teardown path passes both or neither."
+                    )
+                _keepalive_stack.enter_context(
+                    keep_active(db, config, vm, platform, platform_ctx)
+                )
 
         if vm is not None and vm.tailscale_host is not None:
             from agentworks.db import SessionStatus
@@ -1034,7 +932,7 @@ def delete_workspace(
 
         # Revoke agent workspace grants (agents are VM-scoped, not deleted with workspaces)
         if vm is not None:
-            from agentworks.agents.manager import revoke_workspace_grants
+            from agentworks.agents.grants import revoke_workspace_grants
 
             revoke_workspace_grants(db, config, name, vm)
 
@@ -1061,12 +959,29 @@ def copy_workspace(
     dest_name: str,
     vm_name: str | None = None,
 ) -> None:
-    """Copy a workspace to a new VM workspace."""
+    """Copy a workspace to a new VM workspace.
+
+    Orchestrated (``vms.manager.gated_vm_boundary``, WORKSPACE scope),
+    the first two-VM command: the composition stays SEQUENTIAL per VM,
+    exactly the imperative shape, rather than a coalesced multi-root
+    single-boundary graph. The imperative command ran two separate
+    binds (two prompt sessions, one per site, when source and dest
+    differ), and the dest VM is only known mid-command
+    (``_resolve_vm`` may interactively prompt); coalescing would merge
+    prompt sessions AND hoist the interactive chooser, both behavior
+    changes beyond parity. The source boundary (source workspace's
+    scope) is entered on the ExitStack before the pack; when the dest
+    VM differs, a SECOND boundary (dest workspace's scope) nests on
+    the same stack so both VMs stay held; the same-VM case reuses the
+    source composition with no second boundary. The multi-root walk
+    stays available for the batch commands that already coalesce.
+    """
     import contextlib
     import tempfile
     from pathlib import Path
 
-    from agentworks.agents.manager import workspace_group
+    from agentworks.agents.grants import workspace_group
+    from agentworks.bootstrap import build_registry
     from agentworks.ssh import SSHLogger
     from agentworks.transports import SSHTransport, transport
     validate_name(dest_name)
@@ -1100,9 +1015,12 @@ def copy_workspace(
                     entity_name=src_ws.vm_name,
                 )
             _guard_vm_status(src_vm)
-            src_platform = bind_platform(config, src_vm)
+            registry = build_registry(config)
             _keepalive_stack.enter_context(
-                keep_active(db, config, src_vm, src_platform)
+                gated_vm_boundary(
+                    db, config, registry, src_vm,
+                    scope=_workspace_scope(db, src_vm, source_name),
+                )
             )
             if src_vm.tailscale_host is None:
                 raise StateError(
@@ -1138,12 +1056,15 @@ def copy_workspace(
             dest_vm = _resolve_vm(db, vm_name)
             _guard_vm_status(dest_vm)
             if dest_vm.name != src_vm.name:
-                dest_platform = bind_platform(config, dest_vm)
                 _keepalive_stack.enter_context(
-                    keep_active(db, config, dest_vm, dest_platform)
+                    gated_vm_boundary(
+                        db, config, registry, dest_vm,
+                        scope=_workspace_scope(db, dest_vm, dest_name),
+                    )
                 )
-            # Same VM: the src bind + keepalive above already gate and
-            # hold it; a second bind would re-run the resolve pass.
+            # Same VM: the source boundary and held span above already
+            # gate and hold it; a second boundary would re-run the
+            # resolve pass.
             if dest_vm.tailscale_host is None:
                 raise StateError(
                     f"VM '{dest_vm.name}' has no Tailscale address",
@@ -1213,6 +1134,23 @@ def copy_workspace(
         tmp_path.unlink(missing_ok=True)
 
     output.info(f"Workspace '{source_name}' copied to '{dest_name}'")
+
+
+def _workspace_scope(db: Database, vm: VMRow, ws_name: str) -> OperationScope:
+    """The workspace commands' shared WORKSPACE-level operation scope:
+    the operation is about the workspace (on this VM), even when the
+    composed graph is the live VM alone. The WORKSPACE level's field
+    rules (required vm + workspace; forbidden agent, session) are
+    enforced by the scope's own constructor."""
+    from agentworks.capabilities.base import OperationScope, ScopeLevel
+    from agentworks.db import SYSTEM_SLUG_KEY
+
+    return OperationScope(
+        level=ScopeLevel.WORKSPACE,
+        system_slug=db.get_setting(SYSTEM_SLUG_KEY) or None,
+        vm=vm.name,
+        workspace=ws_name,
+    )
 
 
 def _guard_vm_status(vm: VMRow) -> None:

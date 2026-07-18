@@ -21,6 +21,7 @@ if TYPE_CHECKING:
     from azure.mgmt.compute import ComputeManagementClient
     from azure.mgmt.network import NetworkManagementClient
 
+    from agentworks.capabilities.base import RunContext
     from agentworks.config import Config
     from agentworks.db import VMRow
     from agentworks.resources.reference import ConfigReference
@@ -260,7 +261,7 @@ class AzureVMPlatform(VMPlatform):
             return {"resource_id": str(row["azure_resource_id"])}
         return {}
 
-    def create(self, request: ProvisionRequest) -> ProvisionResult:
+    def create(self, request: ProvisionRequest, ctx: RunContext) -> ProvisionResult:
         from types import SimpleNamespace
 
         # The site's platform_config, shaped like the old AzureConfig so
@@ -544,7 +545,7 @@ class AzureVMPlatform(VMPlatform):
             output.warn(f"could not retrieve Tailscale IP: {e}")
             return None
 
-    def start(self, vm: VMRow) -> None:
+    def start(self, vm: VMRow, ctx: RunContext) -> None:
         # Idempotent by construction (the ABC flags start): the Azure
         # begin_start operation no-ops on an already-running VM.
         output.info(f"Starting Azure VM '{vm.name}'...")
@@ -556,7 +557,7 @@ class AzureVMPlatform(VMPlatform):
             raise _wrap_azure_error(exc) from exc
         output.info(f"Azure VM '{vm.name}' started")
 
-    def stop(self, vm: VMRow) -> None:
+    def stop(self, vm: VMRow, ctx: RunContext) -> None:
         # Idempotent by construction (the ABC flags stop): the Azure
         # begin_deallocate operation no-ops on a deallocated VM.
         output.info(f"Deallocating Azure VM '{vm.name}'...")
@@ -568,7 +569,7 @@ class AzureVMPlatform(VMPlatform):
             raise _wrap_azure_error(exc) from exc
         output.info(f"Azure VM '{vm.name}' deallocated")
 
-    def delete(self, vm: VMRow) -> None:
+    def delete(self, vm: VMRow, ctx: RunContext) -> None:
         output.info(f"Deleting Azure VM '{vm.name}'...")
         if not vm.platform_metadata.get("resource_id"):
             output.warn("no Azure resource ID, skipping Azure cleanup")
@@ -713,7 +714,7 @@ class AzureVMPlatform(VMPlatform):
         finally:
             self.detach_public_ip(vm)
 
-    def status(self, vm: VMRow) -> VMStatus:
+    def status(self, vm: VMRow, ctx: RunContext) -> VMStatus:
         if not vm.platform_metadata.get("resource_id"):
             return VMStatus.UNKNOWN
         rg, name, az_cfg = _parse_resource_id(_resource_id(vm))

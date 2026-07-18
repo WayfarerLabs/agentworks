@@ -230,17 +230,15 @@ def _check_vm_sites(config: Config, registry: Registry) -> HealthGroup:
     is not declared at all still FAILS with the paste-ready manifest
     snippet (the stranded remote-Lima case).
 
-    An enabled site's row IS the capability's ``preflight``: read-only
-    by contract, which is exactly what lets doctor call it.
-    Same check every service-layer operation runs before doing
-    anything real, so a failing row here is the error the next command
-    would hit.
+    An enabled site's row IS the site node's ``preflight`` (the same
+    central resolvability prediction plus the held platform instance's
+    world checks every service-layer operation sweeps): read-only by
+    contract, which is exactly what lets doctor call it. A failing row
+    here is the error the next command would hit.
     """
     from agentworks.db import Database
-    from agentworks.secrets.resolver import Resolver
     from agentworks.vms.sites import (
         VMSiteDecl,
-        resolve_site,
         site_disabled_reason,
         site_manifest_hint,
     )
@@ -261,9 +259,10 @@ def _check_vm_sites(config: Config, registry: Registry) -> HealthGroup:
             continue
         try:
             from agentworks.capabilities.base import RunContext
+            from agentworks.vms.nodes import vm_site_node
 
-            platform = resolve_site(name, registry, resolver=Resolver(config, registry))
-            platform.preflight(RunContext(config=config))
+            site_node = vm_site_node(registry, name)
+            site_node.preflight(RunContext(config=config))
         except Exception as e:
             # A failing preflight on an enabled site is the error the
             # operator's next command hits: warn.

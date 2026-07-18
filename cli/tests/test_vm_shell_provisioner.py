@@ -13,7 +13,6 @@ interactive SSH layer so the tests stay hermetic.
 
 from __future__ import annotations
 
-from collections.abc import Callable
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
 from typing import TYPE_CHECKING
@@ -22,7 +21,7 @@ import pytest
 
 from agentworks.db import Database
 from agentworks.errors import StateError
-from tests.conftest import stub_build_registry, stub_vm_gates
+from tests.conftest import empty_secret_target, stub_build_registry, stub_vm_gates
 
 if TYPE_CHECKING:
     pass
@@ -91,24 +90,6 @@ def _make_config() -> object:
     )
 
 
-def _marking_bind(platform_factory: Callable[[], object]) -> Callable[..., object]:
-    """``bind_platform`` stand-in: run the resolver's public boundary
-    verb (the stub registered no declarations, so the empty-set
-    short-circuit never touches real backends, same shape as
-    conftest's ``stub_vm_gates``) so ``resolver.values`` serves the
-    compose_env plumbing, and return the test's stub platform."""
-    from agentworks.secrets.resolver import Resolver
-
-    def _bind(
-        config: object, vm: object, *, resolver: Resolver | None = None, **k: object
-    ) -> object:
-        if resolver is not None and not resolver.resolved:
-            resolver.resolve()  # empty set: never touches real backends
-        return platform_factory()
-
-    return _bind
-
-
 def _patch_common(
     monkeypatch: pytest.MonkeyPatch, vm_manager: ModuleType, *, interactive_log: list[bool],
 ) -> None:
@@ -118,7 +99,12 @@ def _patch_common(
         vm_manager, "_resolve_vm_admin_env_scopes",
         lambda *a, **k: vm_manager._VmAdminEnvScopes(vm={}, workspace=None, admin={}),  # type: ignore[attr-defined]
     )
-    monkeypatch.setattr(vm_manager, "_vm_secret_target", lambda *a, **k: object())
+    # A real, empty SecretTarget: the orchestrated root registers the
+    # env target on the operation's REAL resolver, so a bare object()
+    # sentinel no longer survives the seam.
+    monkeypatch.setattr(
+        vm_manager, "_vm_secret_target", lambda *a, **k: empty_secret_target()
+    )
     monkeypatch.setattr("agentworks.secrets.resolve_for_command", lambda *a, **k: None)
     # compose_env normally calls into the secret resolver; stub out the
     # whole thing for tests that aren't exercising env composition.
@@ -218,6 +204,9 @@ def test_shell_vm_provisioner_uses_native_transport(
     class _StubProvisioner:
         name = "stub"
 
+        def preflight(self, ctx: object) -> None:
+            return None
+
         def native_transport(self, vm: object, *, config: object | None = None) -> object:
             provisioner_calls.append((getattr(vm, "name", "?"), config))
             return _stub_target()
@@ -226,9 +215,16 @@ def test_shell_vm_provisioner_uses_native_transport(
         def transient_route(self, vm: object):  # type: ignore[no-untyped-def]
             yield
 
+        def vm_active(self, vm: object, *, config: object | None = None):  # type: ignore[no-untyped-def]
+            return contextlib.nullcontext()
+
+    # The orchestrated root reaches the platform through the node's
+    # site edge, whose only constructor is resolve_site; override the
+    # conftest stub (installed by _patch_common) with this test's
+    # provisioner-shaped platform.
     monkeypatch.setattr(
-        vm_manager, "bind_platform",
-        _marking_bind(_StubProvisioner),
+        "agentworks.vms.sites.resolve_site",
+        lambda name, registry: _StubProvisioner(),
     )
 
     # Also pin the Tailscale path so it would explode if accidentally taken.
@@ -280,15 +276,12 @@ def test_provisioner_shell_target_wraps_missing_native_transport(
         def transient_route(self, vm: object):  # type: ignore[no-untyped-def]
             yield
 
-    monkeypatch.setattr(
-        vm_manager, "bind_platform",
-        _marking_bind(_UnsupportedProvisioner),
-    )
-
+    # The platform arrives already bound from the caller's composition
+    # root (the orchestrated node's site edge); hand the stub directly.
     vm = vm_manager._require_vm(db, "vm1")
     with contextlib.ExitStack() as stack, pytest.raises(StateError) as exc_info:
         _native_transport(
-            vm, vm_manager.bind_platform(_make_config(), vm), _make_config(), stack=stack,
+            vm, _UnsupportedProvisioner(), _make_config(), stack=stack,
         )  # type: ignore[arg-type]
 
     err = exc_info.value
@@ -326,15 +319,10 @@ def test_provisioner_shell_target_proxmox_hint_points_at_web_console(
         def transient_route(self, vm: object):  # type: ignore[no-untyped-def]
             yield
 
-    monkeypatch.setattr(
-        vm_manager, "bind_platform",
-        _marking_bind(_ProxmoxProvisioner),
-    )
-
     vm = vm_manager._require_vm(db, "vm1")
     with contextlib.ExitStack() as stack, pytest.raises(StateError) as exc_info:
         _native_transport(
-            vm, vm_manager.bind_platform(_make_config(), vm), _make_config(), stack=stack,
+            vm, _ProxmoxProvisioner(), _make_config(), stack=stack,
         )  # type: ignore[arg-type]
 
     err = exc_info.value
@@ -390,15 +378,10 @@ def test_provisioner_shell_target_attaches_and_registers_detach_for_azure(
             )
             return t
 
-    monkeypatch.setattr(
-        vm_manager, "bind_platform",
-        _marking_bind(_FakeAzureProvisioner),
-    )
-
     vm = vm_manager._require_vm(db, "vm1")
     with contextlib.ExitStack() as stack:
         target = _native_transport(
-            vm, vm_manager.bind_platform(_make_config(), vm), _make_config(), stack=stack,
+            vm, _FakeAzureProvisioner(), _make_config(), stack=stack,
         )  # type: ignore[arg-type]
         # Attach must have run inside the stack scope.
         assert attach_calls == ["vm1"]
@@ -447,16 +430,11 @@ def test_provisioner_shell_target_detaches_on_exception_for_azure(
         def native_transport(self, vm: object, *, config: object | None = None) -> Transport:
             raise RuntimeError("simulated post-attach failure")
 
-    monkeypatch.setattr(
-        vm_manager, "bind_platform",
-        _marking_bind(_AzureRaisesAfterAttach),
-    )
-
     vm = vm_manager._require_vm(db, "vm1")
     with contextlib.ExitStack() as stack:
         with pytest.raises(RuntimeError, match="simulated post-attach failure"):
             _native_transport(
-                vm, vm_manager.bind_platform(_make_config(), vm), _make_config(), stack=stack,
+                vm, _AzureRaisesAfterAttach(), _make_config(), stack=stack,
             )  # type: ignore[arg-type]
         # ExitStack still open; detach fires on stack exit, not before.
         assert detach_calls == []
@@ -512,15 +490,10 @@ def test_provisioner_shell_target_retries_reachability_probe(
         def transient_route(self, vm: object):  # type: ignore[no-untyped-def]
             yield
 
-    monkeypatch.setattr(
-        vm_manager, "bind_platform",
-        _marking_bind(_FlakyProvisioner),
-    )
-
     vm = vm_manager._require_vm(db, "vm1")
     with contextlib.ExitStack() as stack:
         target = _native_transport(
-            vm, vm_manager.bind_platform(_make_config(), vm), _make_config(), stack=stack,
+            vm, _FlakyProvisioner(), _make_config(), stack=stack,
         )  # type: ignore[arg-type]
 
     # The probe retried until the 4th attempt succeeded; the function
@@ -559,15 +532,10 @@ def test_provisioner_shell_target_raises_defensively_on_empty_host(
         def transient_route(self, vm: object):  # type: ignore[no-untyped-def]
             yield
 
-    monkeypatch.setattr(
-        vm_manager, "bind_platform",
-        _marking_bind(_BrokenProvisioner),
-    )
-
     vm = vm_manager._require_vm(db, "vm1")
     with contextlib.ExitStack() as stack, pytest.raises(StateError) as exc_info:
         _native_transport(
-            vm, vm_manager.bind_platform(_make_config(), vm), _make_config(), stack=stack,
+            vm, _BrokenProvisioner(), _make_config(), stack=stack,
         )  # type: ignore[arg-type]
 
     err = exc_info.value
@@ -644,7 +612,9 @@ def test_exec_vm_warns_but_continues_on_failed_init(
         vm_manager, "_resolve_vm_admin_env_scopes",
         lambda *a, **k: vm_manager._VmAdminEnvScopes(vm={}, workspace=None, admin={}),
     )
-    monkeypatch.setattr(vm_manager, "_vm_secret_target", lambda *a, **k: object())
+    monkeypatch.setattr(
+        vm_manager, "_vm_secret_target", lambda *a, **k: empty_secret_target()
+    )
     monkeypatch.setattr("agentworks.secrets.resolve_for_command", lambda *a, **k: None)
     monkeypatch.setattr("agentworks.env.compose_env", lambda **k: {})
     stub_vm_gates(monkeypatch)

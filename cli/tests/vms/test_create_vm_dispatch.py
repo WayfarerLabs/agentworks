@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
+from agentworks.capabilities.base import RunContext
 from agentworks.capabilities.vm_platform import ProvisionResult
 from agentworks.config import load_config
 from agentworks.errors import ProvisioningError
@@ -71,7 +72,7 @@ def test_create_vm_request_shape_and_row(
     captured_request: list[ProvisionRequest] = []
     captured_platform: list[LimaPlatform] = []
 
-    def _fake_create(self: LimaPlatform, request: ProvisionRequest) -> ProvisionResult:
+    def _fake_create(self: LimaPlatform, request: ProvisionRequest, ctx: object) -> ProvisionResult:
         captured_platform.append(self)
         captured_request.append(request)
         return ProvisionResult(
@@ -152,7 +153,7 @@ def test_create_vm_composes_r11_hostname_with_slug(
     db.set_setting("system_slug", "team-a")
     captured: list[ProvisionRequest] = []
 
-    def _fake_create(self: LimaPlatform, request: ProvisionRequest) -> ProvisionResult:
+    def _fake_create(self: LimaPlatform, request: ProvisionRequest, ctx: object) -> ProvisionResult:
         captured.append(request)
         return ProvisionResult(
             native_transport=SimpleNamespace(),  # type: ignore[arg-type]
@@ -242,9 +243,10 @@ def test_proxmox_token_resolves_end_to_end(
 
     captured: dict[str, object] = {}
 
-    def _fake_create(self: ProxmoxPlatform, request: object) -> ProvisionResult:
-        assert self.resolver is not None
-        captured["token"] = self.resolver.get("proxmox-token")
+    def _fake_create(
+        self: ProxmoxPlatform, request: object, ctx: RunContext
+    ) -> ProvisionResult:
+        captured["token"] = ctx.secret("proxmox-token")
         raise RuntimeError("halt after binding")
 
     monkeypatch.setattr(ProxmoxPlatform, "create", _fake_create)

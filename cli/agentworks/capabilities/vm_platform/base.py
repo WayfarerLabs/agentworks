@@ -23,6 +23,7 @@ if TYPE_CHECKING:
     from collections.abc import Mapping
     from pathlib import Path
 
+    from agentworks.capabilities.base import RunContext
     from agentworks.config import Config
     from agentworks.db import VMRow, VMStatus
     from agentworks.transports import Transport
@@ -80,12 +81,12 @@ class VMPlatform(Capability):
     Registered in ``VM_PLATFORM_REGISTRY`` and published as a read-only
     ``vm-platform`` capability resource; invoked only through site
     resolution (``agentworks.vms.sites``). Instances are constructed by
-    the site layer as ``cls(site_name, platform_config, resolver)``:
-    the platform bound to one declared site plus the operation's
-    resolver (never resolved secret values; see the ``Capability``
-    lifecycle). The declared config secrets register on the resolver at
-    construct and their values arrive via the operation's single
-    resolve pass at the preflight boundary.
+    the site layer as ``cls(site_name, platform_config)``: the platform
+    bound to one declared site, never resolved secret values (see the
+    ``Capability`` lifecycle). The declared config secrets join an
+    operation's boundary union through the holding node's
+    ``secret_refs`` and their values arrive per op call through the
+    context (``ctx.secret``).
 
     Class-level contract (consumed by the vm-site kind decoder, the
     capability publisher, and the DB migration): ``name``,
@@ -158,8 +159,17 @@ class VMPlatform(Capability):
         return {}
 
     @abstractmethod
-    def create(self, request: ProvisionRequest) -> ProvisionResult:
+    def create(self, request: ProvisionRequest, ctx: RunContext) -> ProvisionResult:
         """Create the backend-side VM.
+
+        ``ctx`` is the op-start :class:`RunContext`; an op that needs a
+        resolved config secret (proxmox's API token) reads it via
+        ``ctx.secret(name)``, the declare/receive contract's delivery
+        surface. Platforms without op secrets ignore it. The same
+        applies to every power op below: when the orchestrator drives
+        the op it hands a context scoped over the site's declared
+        names; when the activation gate drives it, the context wraps
+        the gate's own scoped reader.
 
         Responsibilities:
 
@@ -178,33 +188,38 @@ class VMPlatform(Capability):
 
     @idempotent_op
     @abstractmethod
-    def start(self, vm: VMRow) -> None:
-        """Start a stopped VM. Reads ``vm.platform_metadata``.
+    def start(self, vm: VMRow, ctx: RunContext) -> None:
+        """Start a stopped VM. Reads ``vm.platform_metadata`` (and any
+        op secret via ``ctx``; see :meth:`create`).
 
         Idempotent by contract: starting an already-running VM must
         land in the running state, not error."""
 
     @idempotent_op
     @abstractmethod
-    def stop(self, vm: VMRow) -> None:
-        """Stop a running VM. Reads ``vm.platform_metadata``.
+    def stop(self, vm: VMRow, ctx: RunContext) -> None:
+        """Stop a running VM. Reads ``vm.platform_metadata`` (and any
+        op secret via ``ctx``; see :meth:`create`).
 
         Idempotent by contract: stopping an already-stopped VM must
         land in the stopped state, not error."""
 
     @idempotent_op
     @abstractmethod
-    def delete(self, vm: VMRow) -> None:
+    def delete(self, vm: VMRow, ctx: RunContext) -> None:
         """Delete a VM and clean up backend resources. Reads
-        ``vm.platform_metadata``.
+        ``vm.platform_metadata`` (and any op secret via ``ctx``; see
+        :meth:`create`).
 
         Idempotent by contract: deleting resources that are already
         gone must succeed (``vm delete`` is retried against
         half-cleaned backends; a second run finishes the job)."""
 
     @abstractmethod
-    def status(self, vm: VMRow) -> VMStatus:
-        """Query the live observed status. Reads ``vm.platform_metadata``."""
+    def status(self, vm: VMRow, ctx: RunContext) -> VMStatus:
+        """Query the live observed status. Reads
+        ``vm.platform_metadata`` (and any op secret via ``ctx``; see
+        :meth:`create`)."""
 
     @abstractmethod
     def display_backend_name(self, vm: VMRow) -> str:
@@ -265,7 +280,8 @@ class VMPlatform(Capability):
         """Hold the VM against the backend's own idle-shutdown mechanism
         for the duration of the context.
 
-        Callers gate with the manager's ``ensure_active`` first, so on
+        Callers gate first (the orchestrated activation gate, or the
+        manager's interim ``keep_active`` holds), so on
         entry the VM is either running or was just started. Default
         no-op for platforms without an idle-shutdown mechanism (lima,
         azure, proxmox); wsl2 overrides to anchor the distro against

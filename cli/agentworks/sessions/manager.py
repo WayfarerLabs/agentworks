@@ -26,12 +26,7 @@ from agentworks.errors import (
 from agentworks.sessions.tmux import AGENT_SOCKET_ROOT
 from agentworks.ssh import SSH_TRANSPORT_ERROR
 from agentworks.transports import transport
-from agentworks.vms.manager import (
-    bind_platform,
-    bind_platforms,
-    ensure_active,
-    keep_actives,
-)
+from agentworks.vms.manager import gated_vm_boundary
 
 _ENV_KEY_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
@@ -40,10 +35,15 @@ _TEMPLATE_VAR_RE = re.compile(r"\{\{(\w+)\}\}")
 _KNOWN_TEMPLATE_VARS = {"session_name", "workspace_name"}
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping
+    from collections.abc import Callable, Iterator, Mapping, Sequence
 
-    from agentworks.capabilities.git_credential.base import GitCredentialProvider
-    from agentworks.capabilities.vm_platform import VMPlatform
+    from agentworks.agents.nodes import (
+        AgentTemplateNode,
+        LiveAgentNode,
+        PendingAgentNode,
+    )
+    from agentworks.agents.templates import ResolvedAgentTemplate
+    from agentworks.capabilities.base import OperationScope
     from agentworks.config import Config
     from agentworks.db import AgentRow, Database, SessionRow, VMRow, WorkspaceRow
     from agentworks.env import EnvEntry
@@ -53,6 +53,14 @@ if TYPE_CHECKING:
     from agentworks.sessions.tmux import RunCommand
     from agentworks.ssh import SSHLogger
     from agentworks.transports import Transport
+    from agentworks.vms.nodes import LiveVMNode
+    from agentworks.workspaces.nodes import (
+        LiveWorkspaceNode,
+        PendingWorkspaceNode,
+    )
+    from agentworks.workspaces.templates import (
+        ResolvedTemplate as ResolvedWorkspaceTemplate,
+    )
 
 
 # -- Helpers ---------------------------------------------------------------
@@ -294,33 +302,64 @@ def _require_vm_for_workspace(db: Database, ws: WorkspaceRow) -> VMRow:
     return vm
 
 
+def _session_scope(
+    db: Database, session: SessionRow, ws: WorkspaceRow, vm: VMRow
+) -> OperationScope:
+    """The singular session ops' SESSION-level operation scope: the
+    operation is about the session (running as its agent, or as the
+    admin), even though the composed graph is the live VM alone; pass
+    the level of the entity the command is ABOUT, not of what it
+    walks. The SESSION level's field rules (required vm + workspace +
+    session; exactly one of agent/admin) are enforced by the scope's
+    own constructor."""
+    from agentworks.capabilities.base import OperationScope, ScopeLevel
+    from agentworks.db import SYSTEM_SLUG_KEY
+
+    return OperationScope(
+        level=ScopeLevel.SESSION,
+        system_slug=db.get_setting(SYSTEM_SLUG_KEY) or None,
+        vm=vm.name,
+        workspace=ws.name,
+        session=session.name,
+        agent=session.agent_name,
+        admin=session.agent_name is None,
+    )
+
+
+@contextlib.contextmanager
 def _prepare_vm(
     db: Database,
     config: Config,
-    workspace_name: str,
+    session: SessionRow,
     *,
     operation: str | None = None,
-    platform: VMPlatform | None = None,
-) -> tuple[WorkspaceRow, VMRow, RunCommand, RunCommand, Transport, VMPlatform]:
-    """Validate workspace/VM, ensure running, and return
-    (ws, vm, run_command, run_as_root, target, platform).
-
-    This is the command's composition root for the VM gate: the
-    platform is bound ONCE here (or accepted pre-bound via
-    ``platform``) and returned so callers hold it for subsequent
-    ``keep_active`` spans: re-binding would re-run the site's secret
-    resolve pass. If operation is set, creates an SSHLogger and
-    attaches it to the Transport so all calls log automatically.
+) -> Iterator[tuple[WorkspaceRow, VMRow, RunCommand, RunCommand, Transport]]:
+    """The singular session ops' composition root (stop / delete /
+    describe / attach / logs): validate the session's workspace and VM
+    rows, then yield ``(ws, vm, run_command, run_as_root, target)``
+    INSIDE ``gated_vm_boundary``'s held-active span, which replaces
+    the imperative bind + point gate and the callers' own ``vm_active``
+    holds. The scope is SESSION-level, built here from the session row
+    once the vm/workspace rows it names are resolved: the ops are
+    about the session, not the VM they walk. If ``operation`` is set,
+    an SSHLogger attaches to the Transport so all calls log
+    automatically.
     """
+    from agentworks.bootstrap import build_registry
     from agentworks.ssh import SSHLogger
 
-    ws = _require_workspace(db, workspace_name)
+    ws = _require_workspace(db, session.workspace_name)
     vm = _require_vm_for_workspace(db, ws)
 
-    if platform is None:
-        platform = bind_platform(config, vm)
-    ensure_active(db, config, vm, platform)
-
+    # Cheap row validation stays pre-gate: a VM with no Tailscale
+    # address can never serve a session op, so it must fail with zero
+    # prompts and zero VM starts. (The imperative body checked this
+    # after its gate; the gate cannot populate the address on the
+    # already-loaded row, so the command's outcome is identical. The
+    # hoist does forgo one accidental heal: the post-gate order could
+    # start a stopped VM whose rejoin repopulated the row's address,
+    # letting a RETRY succeed; now the retry keeps failing until an
+    # explicit vm start or reinit.)
     if vm.tailscale_host is None:
         raise StateError(
             f"VM '{vm.name}' has no Tailscale address",
@@ -328,11 +367,15 @@ def _prepare_vm(
             entity_name=vm.name,
         )
 
-    logger = SSHLogger(vm.name, operation) if operation else None
-    target = transport(vm, config, logger=logger)
-    run_command: RunCommand = target.run
-    run_as_root: RunCommand = partial(target.run, sudo=True)
-    return ws, vm, run_command, run_as_root, target, platform
+    registry = build_registry(config)
+    with gated_vm_boundary(
+        db, config, registry, vm, scope=_session_scope(db, session, ws, vm)
+    ):
+        logger = SSHLogger(vm.name, operation) if operation else None
+        target = transport(vm, config, logger=logger)
+        run_command: RunCommand = target.run
+        run_as_root: RunCommand = partial(target.run, sudo=True)
+        yield ws, vm, run_command, run_as_root, target
 
 
 def _require_session(db: Database, name: str) -> SessionRow:
@@ -393,9 +436,9 @@ def _distinct_vms_for_sessions(db: Database, sessions: list[SessionRow]) -> list
     """Resolve the distinct set of VMs that host the given sessions.
 
     Used by the batch session operations (stop_all_sessions, restart_all_sessions,
-    list_sessions) to feed `keep_actives` with exactly the VMs whose SSH
+    list_sessions) to feed `_batch_vm_boundary` with exactly the VMs whose SSH
     transports will be touched. Order is insertion order keyed by VM name so
-    keepalive entry messages render in a stable order.
+    gate and keepalive entry messages render in a stable order.
     """
     distinct: list[VMRow] = []
     seen: set[str] = set()
@@ -409,6 +452,133 @@ def _distinct_vms_for_sessions(db: Database, sessions: list[SessionRow]) -> list
         distinct.append(vm)
         seen.add(ws.vm_name)
     return distinct
+
+
+@contextlib.contextmanager
+def _batch_vm_boundary(
+    db: Database, config: Config, vms: Sequence[VMRow]
+) -> Iterator[None]:
+    """The batch session ops' composition root (stop_all_sessions,
+    restart_all_sessions, list_sessions' status pass): ONE boundary
+    over the distinct VMs, then each VM's activation gate and
+    held-active span.
+
+    Mirrors the imperative batch order exactly (preflight + one
+    resolve covering the whole batch, THEN per-VM gate + hold),
+    orchestrated: one multi-root walk over the live VM nodes, with one
+    shared site node per distinct site via the factory's ``site_nodes``
+    memo (one held platform instance per site, the old by-site dedup),
+    the walk union registered once on ONE resolver, a SYSTEM-level
+    scope (one level per COMMAND, never per node; each VM's identity
+    comes from its own node), one preflight sweep, ONE boundary
+    resolve, and only then the gates in VM order on an ExitStack. A
+    failing gate (an operator-stopped VM) propagates and aborts the
+    whole batch, exactly as the imperative per-VM gate loop did.
+
+    The gate callback SERVES the boundary's cached values
+    (``resolver.get``): the union already covers every gate secret, so
+    two stopped VMs sharing a site cost exactly ONE backend pass
+    (a per-gate just-in-time resolve would re-resolve the shared
+    site's secret, and ``Resolver.seed`` after the boundary raises by
+    design). The one exception is the repair path's Tailscale rejoin
+    key: it is inherently outside the boundary union (lazy, read only
+    when a started VM fails to reconnect) and resolves late through
+    the backend chain, the same documented conditional-need exception
+    the imperative repair path carried; it cannot seed, because the
+    boundary has already resolved. The callback is built PER TARGET
+    and refuses any other outside-the-union name unless the target
+    declares it in ``repair_secret_refs`` (see the invariant comment
+    inline), so no future gate target can silently late-resolve per
+    VM.
+
+    An empty VM set stays a complete no-op (no registry, no resolver,
+    no gate), the imperative lazy-bind property: ``session list
+    --no-status`` and empty filter results must cost nothing here.
+    """
+    if not vms:
+        yield
+        return
+
+    from agentworks.bootstrap import build_registry
+    from agentworks.capabilities.base import (
+        OperationScope,
+        RunContext,
+        ScopeLevel,
+    )
+    from agentworks.db import SYSTEM_SLUG_KEY
+    from agentworks.orchestration.activation import activation_gate
+    from agentworks.orchestration.readiness import preflight_all
+    from agentworks.orchestration.secrets import secret_union
+    from agentworks.orchestration.walk import walk
+    from agentworks.secrets.resolver import Resolver
+    from agentworks.vms.nodes import VMSiteNode, live_vm_node
+
+    registry = build_registry(config)
+    resolver = Resolver(config, registry)
+    site_nodes: dict[str, VMSiteNode] = {}
+    vm_nodes = [
+        live_vm_node(db, config, registry, vm, site_nodes=site_nodes)
+        for vm in vms
+    ]
+    nodes = walk(*vm_nodes)
+    union = secret_union(nodes)
+    for secret_name in union:
+        resolver.register_name(secret_name)
+    scope = OperationScope(
+        level=ScopeLevel.SYSTEM,
+        system_slug=db.get_setting(SYSTEM_SLUG_KEY) or None,
+    )
+    preflight_all(nodes, RunContext(config=config, operation_scope=scope))
+    resolver.resolve()
+
+    covered = set(union)
+
+    def _gate_resolver(vm_node: LiveVMNode) -> Callable[[str], str]:
+        """Per-target gate callback: serve the boundary's cache; guard
+        the late-resolve branch against the target's own declaration."""
+
+        def _resolve(secret_name: str) -> str:
+            if secret_name in covered:
+                return resolver.get(secret_name)
+            # INVARIANT: the ONLY sanctioned post-boundary resolution
+            # is the repair path's rejoin key. Gate secrets ride the
+            # boundary union structurally (gate_secret_refs delegates
+            # to the site's declared secret_refs, which the walk
+            # unions), so a name outside the covered union must be one
+            # of THIS target's declared repair secrets; anything else
+            # refuses loudly (the declare/receive contract) rather
+            # than silently late-resolving per VM.
+            if secret_name not in vm_node.repair_secret_refs():
+                raise StateError(
+                    f"secret '{secret_name}' is outside the batch "
+                    f"boundary union and was not declared in this "
+                    f"activation target's repair_secret_refs, so the "
+                    f"batch gate will not resolve it late (the "
+                    f"declare/receive contract): gate secrets must "
+                    f"ride the boundary union; only the lazy rejoin "
+                    f"repair key resolves after it."
+                )
+            # The rejoin repair key: resolve late through the backend
+            # chain, never seed (the boundary already resolved).
+            from agentworks.orchestration.secrets import secret_declarations
+            from agentworks.secrets.resolve import (
+                active_backends,
+                resolve_secrets,
+            )
+
+            (decl,) = secret_declarations([secret_name], registry)
+            return resolve_secrets([decl], active_backends(config, registry))[
+                secret_name
+            ]
+
+        return _resolve
+
+    with contextlib.ExitStack() as stack:
+        for vm_node in vm_nodes:
+            stack.enter_context(
+                activation_gate(vm_node, _gate_resolver(vm_node))
+            )
+        yield
 
 
 def _resolve_template(registry: Registry, template_name: str | None) -> ResolvedSessionTemplate:
@@ -725,67 +895,6 @@ def _build_session_command(
 
     raw_command = template.restart_command if restart and template.restart_command else template.command
     return _substitute_template_vars(raw_command, variables)
-
-
-def _assert_required_commands(
-    run_command: RunCommand,
-    template: ResolvedSessionTemplate,
-    *,
-    session_name: str,
-    target_label: str,
-) -> None:
-    """Verify every command the template declares as required exists on the
-    session's launch target, before any tmux work happens.
-
-    A template lists the executables its command needs via ``required_commands``
-    (e.g. the ``claude`` template requires ``claude``). Without this check, a
-    missing binary surfaces only as a cryptic downstream failure: the pane
-    command dies instantly, the fresh per-session tmux server exits, and the
-    next ``server-access`` call fails against a now-dead socket (see
-    ``sessions/tmux._grant_server_access``). Checking up front turns that into
-    an actionable error with no partial state to roll back.
-
-    Probes with ``$SHELL -lic 'command -v <cmd>'`` -- the same shell flags
-    ``tmux._pane_command`` uses for the actual pane. Matters because PATH
-    additions can live in any of the dotfiles those flags source:
-
-    - ``-l`` (login): /etc/profile, ~/.profile, ~/.bash_profile -- where
-      mise activation and the agentworks profile fragments live.
-    - ``-i`` (interactive): ~/.bashrc, ~/.zshrc, and any user PATH addition
-      guarded by ``[[ $- == *i* ]]`` or ``[ -n "$PS1" ]``.
-    - ``-c``: run the probe and exit.
-
-    The probe runs over the SSH command channel without a PTY, so shells
-    may emit a "no job control in this shell" warning when started
-    interactive. The warning lands on stderr and doesn't change the exit
-    status; this call uses ``check=False`` so stderr is discarded.
-
-    One residual gap: tools that gate PATH on ``[[ -t 0 ]]`` (real TTY
-    check) won't be visible to the probe. Closing that would require
-    requesting a PTY for the probe, which has its own side effects. PATH
-    mutations gated on a real TTY are rare; leaving uncovered for now.
-    """
-    missing: list[str] = []
-    for cmd in template.required_commands:
-        inner = f"command -v {shlex.quote(cmd)} >/dev/null 2>&1"
-        probe = run_command(f'"$SHELL" -lic {shlex.quote(inner)}', check=False)
-        if not getattr(probe, "ok", False):
-            missing.append(cmd)
-    if not missing:
-        return
-
-    joined = ", ".join(repr(c) for c in missing)
-    verb = "is" if len(missing) == 1 else "are"
-    raise StateError(
-        f"template '{template.name}' requires {joined}, which {verb} not "
-        f"installed or not on PATH for {target_label}.",
-        entity_kind="session",
-        entity_name=session_name,
-        hint=(
-            f"Install the missing command(s) on {target_label}, or create the "
-            "session with a different template (--template)."
-        ),
-    )
 
 
 # -- Liveness checks -------------------------------------------------------
@@ -1416,43 +1525,140 @@ def create_session(
 
     template = _resolve_template(registry, template_name)
 
-    # ===== Bind + boundary resolve, then ensure VM running ==================
-
-    # The command's ONE platform bind AND its one resolve pass: the
-    # session's env-chain secrets (via the pre-create SecretTarget)
-    # join the site's config secrets in a single prompt session at the
-    # preflight boundary, before any op (``ensure_active`` may need the
-    # site secret (proxmox's status read), so the boundary must
-    # precede it). The bound platform threads through _prepare_vm and
-    # the session-internal hold below (re-binding re-runs the boundary).
+    # ===== Build: the derived node graph ====================================
+    #
+    # The orchestrated composition: the command names only its direct
+    # resources (this VM, the chosen workspace/agent, the session
+    # template) and constructs each node ONCE; everything else enters
+    # through declared edges (the VM row's site field, an ephemeral
+    # agent template's git_credentials), and every edge holder shares
+    # the same object (the walk enforces one-object-per-key loudly).
+    # Construction is cheap and touches no secret machinery; the
+    # walk union below is the boundary's source. Nothing resolves
+    # yet.
+    from agentworks.agents.nodes import (
+        agent_template_node,
+        credential_tokens,
+        live_agent_node,
+        pending_agent_node,
+    )
+    from agentworks.capabilities.base import (
+        OperationScope,
+        RunContext,
+        ScopeLevel,
+    )
+    from agentworks.db import SYSTEM_SLUG_KEY
+    from agentworks.orchestration.activation import (
+        activation_gate,
+        gate_secret_resolver,
+    )
+    from agentworks.orchestration.readiness import preflight_all
+    from agentworks.orchestration.secrets import ScopedSecrets, secret_union
+    from agentworks.orchestration.unwind import RealizationLog
+    from agentworks.orchestration.walk import walk
     from agentworks.secrets.resolver import Resolver
+    from agentworks.sessions.nodes import pending_session_node
+    from agentworks.vms.nodes import live_vm_node
+    from agentworks.workspaces.nodes import (
+        live_workspace_node,
+        pending_workspace_node,
+    )
 
     resolver = Resolver(config, registry)
 
-    # Fold a new ephemeral agent's git credentials into THIS boundary
-    # resolve so their token secrets join the one prompt session (rather
-    # than the nested create_agent running a second resolve). Construct the
-    # providers against this resolver and preflight them now; their tokens
-    # resolve in bind_platform's pass below and are handed to create_agent
-    # as an already-resolved map.
-    agent_git_providers: dict[str, GitCredentialProvider] = {}
+    vm_node = live_vm_node(db, config, registry, vm)
+
+    def _teardown_platform_ctx() -> RunContext:
+        # The nested teardowns' op-start context (the ephemeral agent /
+        # workspace rollbacks): built at teardown time (post-boundary,
+        # values resolved), scoped to the site's declared names.
+        return RunContext(
+            config=config,
+            secrets=ScopedSecrets(
+                resolver.values, vm_node.site.secret_refs()
+            ),
+        )
+
+    workspace_node: LiveWorkspaceNode | PendingWorkspaceNode
+    pending_workspace: PendingWorkspaceNode | None = None
+    workspace_tmpl: ResolvedWorkspaceTemplate | None = None
+    if new_workspace:
+        # Cheap validation now, before the gate and before any secret
+        # is touched: template resolution, the repo advisories
+        # (config-only, no tokens), and the VM init-status guard fail
+        # with zero prompts and zero VM starts, the bail-early
+        # precedence every migrated command keeps.
+        from agentworks.workspaces.manager import _guard_vm_status
+        from agentworks.workspaces.templates import (
+            resolve_template as _resolve_ws_tmpl,
+        )
+
+        workspace_tmpl = _resolve_ws_tmpl(registry, workspace_template)
+        if workspace_tmpl.repo:
+            from agentworks.git_credentials import remote_advisories
+
+            for advisory in remote_advisories(registry, workspace_tmpl.repo):
+                output.warn(advisory)
+        _guard_vm_status(vm)
+        pending_workspace = pending_workspace_node(
+            db, config, workspace_name, vm_node, workspace_template,
+            _teardown_platform_ctx,
+        )
+        workspace_node = pending_workspace
+    else:
+        assert existing_ws is not None  # loaded by the existing-workspace block
+        workspace_node = live_workspace_node(existing_ws, vm_node)
+
+    # The agent node: live (existing agent), pending (ephemeral), or
+    # none (admin mode). A pending agent's declared git credentials
+    # become edges through its template node: the graph replaces the
+    # hand-rolled ephemeral provider fold, and the SAME agent object is
+    # both the session's dep and the required-commands check's target
+    # (the one-object contract), so the realization flip below is
+    # observed without rewiring.
+    agent_node: LiveAgentNode | PendingAgentNode | None = None
+    pending_agent: PendingAgentNode | None = None
+    agent_tmpl: ResolvedAgentTemplate | None = None
+    agent_tmpl_node: AgentTemplateNode | None = None
     if new_agent:
         from agentworks.agents.templates import (
             resolve_template as _resolve_agent_tmpl,
         )
-        from agentworks.capabilities.base import RunContext
-        from agentworks.vms.initializer import resolve_git_credential_providers
 
-        _ephemeral_tmpl = _resolve_agent_tmpl(registry, agent_template)
-        agent_git_providers = resolve_git_credential_providers(
-            registry, _ephemeral_tmpl.git_credentials, resolver
+        assert agent_name is not None  # defaulted to ``name`` above
+        agent_tmpl = _resolve_agent_tmpl(registry, agent_template)
+        agent_tmpl_node = agent_template_node(registry, agent_tmpl)
+        pending_agent = pending_agent_node(
+            db, config, agent_name, agent_tmpl_node, vm_node,
+            _teardown_platform_ctx,
         )
-        for _provider in agent_git_providers.values():
-            _provider.preflight(RunContext(config=config))
+        agent_node = pending_agent
+    elif agent_name is not None:
+        assert existing_agent is not None  # loaded by the anchor / prompt blocks
+        agent_node = live_agent_node(existing_agent, vm_node)
 
-    vm_platform = bind_platform(
-        config, vm, registry=registry, resolver=resolver,
-        targets=[
+    session_node = pending_session_node(
+        db,
+        config,
+        name,
+        template,
+        agent=agent_node,
+        admin=agent_name is None,
+        workspace=workspace_node,
+        vm=vm_node,
+    )
+    nodes = walk(session_node)
+
+    # The walk supplies the boundary union, and the session's
+    # runtime env chain joins the SAME pass through the pre-create
+    # SecretTarget seam, so the env-chain secrets and the graph's
+    # config/token secrets stay ONE prompt session. Hermeticity is
+    # unchanged: exactly what the target's env references prompts here,
+    # and what rides the shells' own composition roots still does.
+    for secret_name in secret_union(nodes):
+        resolver.register_name(secret_name)
+    resolver.register_targets(
+        [
             _session_secret_target_pre_create(
                 registry,
                 name=name,
@@ -1467,112 +1673,143 @@ def create_session(
                 existing_agent=existing_agent,
                 is_admin_mode=(agent_name is None),
             ),
-        ],
+        ]
     )
-    ensure_active(db, config, vm, vm_platform)
-    # Reload the VM row: ``ensure_active`` may have rejoined Tailscale
-    # (only when the VM was stopped/deallocated) and updated
-    # ``vms.tailscale_host``. The in-memory ``vm`` from our pre-check would
-    # otherwise read stale and the check below could spuriously raise.
-    # (The SecretTarget above read only vm.template, which a refresh
-    # cannot change, so the pre-refresh row was safe to target.)
-    refreshed_vm = db.get_vm(target_vm_name)
-    assert refreshed_vm is not None  # existed two lines ago; ensure_active can't remove it
-    vm = refreshed_vm
-    if vm.tailscale_host is None:
-        raise StateError(
-            f"VM '{vm.name}' has no Tailscale address",
-            entity_kind="vm",
-            entity_name=vm.name,
-        )
 
-    secret_values = resolver.values
-    # Every secret the SESSION ENV references is resolved into
-    # secret_values (threaded to the compose site below). A downstream
-    # create_agent still performs its own git-token resolve; those
-    # secrets are disjoint from env references in practice (token names
-    # default to git-token-<name>).
+    scope = OperationScope(
+        level=ScopeLevel.SESSION,
+        system_slug=db.get_setting(SYSTEM_SLUG_KEY) or None,
+        vm=target_vm_name,
+        workspace=workspace_name,
+        session=name,
+        agent=agent_name,
+        admin=agent_name is None,
+    )
 
-    # ===== Atomic state mutations with rollback =============================
-
-    workspace_created = False
-    agent_created = False
-
-    def _rollback_ephemerals() -> None:
-        """Undo ephemeral resource creates on later failure. Order is
-        reverse-of-create (agent before workspace) so the agent's
-        workspace-group membership is cleaned up before the group
-        itself goes away. Each step wrapped so a rollback failure
-        doesn't mask the original exception."""
-        if agent_created:
-            assert agent_name is not None  # set when new_agent is not None
-            try:
-                from agentworks.agents.manager import delete_agent
-
-                delete_agent(
-                    db, config, name=agent_name, force=True, yes=True,
-                    platform=vm_platform,
-                )
-            except Exception as e:
-                output.warn(
-                    f"rollback: failed to delete ephemeral agent '{agent_name}': {e}. "
-                    f"Recover with 'agw agent delete --force {agent_name}'."
-                )
-        if workspace_created:
-            try:
-                from agentworks.workspaces.manager import delete_workspace
-
-                delete_workspace(
-                    db, config, name=workspace_name, force=True, yes=True,
-                    platform=vm_platform,
-                )
-            except Exception as e:
-                output.warn(
-                    f"rollback: failed to delete ephemeral workspace '{workspace_name}': {e}. "
-                    f"Recover with 'agw workspace delete --force {workspace_name}'."
-                )
-
-    try:
-        # ---- Ephemeral creates -------------------------------------------------
-        if new_workspace:
-            from agentworks.workspaces.manager import create_workspace
-
-            create_workspace(
-                db,
-                config,
-                name=workspace_name,
-                vm_name=vm.name,
-                template_name=workspace_template,
-                platform=vm_platform,
+    # The activation gate replaces this command's imperative
+    # ensure_active + vm_active holds: opened once, before the
+    # preflight sweep (so every probe reaches a live target), held
+    # through the whole command, with its just-in-time values seeding
+    # the boundary resolver so nothing resolves or prompts twice.
+    with activation_gate(vm_node, gate_secret_resolver(config, registry, resolver)):
+        # Reload the VM row: the gate may have rejoined Tailscale (only
+        # when the VM was stopped/deallocated) and updated
+        # ``vms.tailscale_host``. The in-memory ``vm`` from our pre-check
+        # would otherwise read stale and the check below could spuriously
+        # raise. (The SecretTarget above read only vm.template, which a
+        # refresh cannot change, so the pre-refresh row was safe to
+        # target; the nodes keep their construction row, whose identity
+        # fields a refresh cannot change either.)
+        refreshed_vm = db.get_vm(target_vm_name)
+        assert refreshed_vm is not None  # existed above; the gate cannot remove it
+        vm = refreshed_vm
+        if vm.tailscale_host is None:
+            raise StateError(
+                f"VM '{vm.name}' has no Tailscale address",
+                entity_kind="vm",
+                entity_name=vm.name,
             )
-            workspace_created = True
-        if new_agent:
-            assert agent_name is not None  # defaulted to ``name`` above
-            from agentworks.agents.manager import create_agent
-            from agentworks.vms.manager import _resolve_git_tokens
 
-            create_agent(
-                db,
-                config,
-                name=agent_name,
-                vm_name=vm.name,
-                template=agent_template,
-                platform=vm_platform,
-                # Git tokens already resolved in the boundary pass above.
-                git_tokens=_resolve_git_tokens(agent_git_providers, resolver),
-            )
-            agent_created = True
+        from agentworks.ssh import SSHLogger
 
-        # ---- Session-internal mutations ---------------------------------------
-        ws, vm_check, run_command, run_as_root, target, _ = _prepare_vm(
-            db, config, workspace_name, operation="session-create",
-            platform=vm_platform,
+        logger = SSHLogger(vm.name, "session-create")
+        target = transport(vm, config, logger=logger)
+        run_command: RunCommand = target.run
+
+        # Probe direct agent SSH for an EXISTING agent before any
+        # prompt or mutation: a pre-rollout agent surfaces as an
+        # actionable StateError with nothing to roll back (the
+        # orchestrated flow moves this probe, and the required-commands
+        # probe below, ahead of the resolve boundary: the
+        # earlier-failure win). An ephemeral agent's probe runs right
+        # after its realization below.
+        agent_target: Transport | None = None
+        if agent_node is not None and not new_agent:
+            from agentworks.agents.manager import _assert_agent_ssh_works
+            from agentworks.transports import agent_transport
+
+            assert existing_agent is not None
+            agent_target = agent_transport(vm, config, existing_agent)
+            _assert_agent_ssh_works(agent_target, existing_agent)
+
+        # PREFLIGHT-ALL against the one command-start context: the
+        # required-commands check probes a realized (existing) agent or
+        # the admin target NOW and defers on a pending one; each
+        # git-credential provider predicts its token's resolvability.
+        # Then the boundary resolve: the walk-away point.
+        preflight_all(
+            nodes,
+            RunContext(
+                config=config,
+                operation_scope=scope,
+                admin_target=target,
+                agent_target=agent_target,
+            ),
         )
-        # _prepare_vm just gated; hold only (no second gate probe).
-        with vm_platform.vm_active(vm_check, config=config):
-            # Resolve mode and linux user (no side effects; safe outside the try).
+        resolver.resolve()
+        secret_values = resolver.values
+
+        def scoped_ctx(secret_names: tuple[str, ...]) -> RunContext:
+            return RunContext(
+                config=config,
+                operation_scope=scope,
+                secrets=ScopedSecrets(secret_values, secret_names),
+            )
+
+        # ===== Dependency-ordered roll-forward ==============================
+        #
+        # Realize the pending nodes in dependency order, recording each
+        # completed realization; on any later failure the log unwinds
+        # them in reverse (agent before workspace, today's proven
+        # rollback order). The session's own partial state is cleaned by
+        # its node's teardown in the slice below, and a COMPLETED
+        # session (tmux up) is deliberately never rolled back.
+        log = RealizationLog()
+        try:
+            # ---- Ephemeral realizations ------------------------------------
+            if pending_workspace is not None:
+                from agentworks.workspaces.realize import realize_workspace
+
+                assert workspace_tmpl is not None  # resolved at build above
+                realize_workspace(
+                    db,
+                    config,
+                    registry,
+                    name=workspace_name,
+                    vm=vm,
+                    template=workspace_tmpl,
+                )
+                log.mark_realized(pending_workspace)
+            if pending_agent is not None:
+                from agentworks.agents.realize import realize_agent
+
+                assert agent_name is not None  # defaulted to ``name`` above
+                assert agent_tmpl is not None and agent_tmpl_node is not None
+                output.info(
+                    f"Creating agent '{agent_name}' on VM '{vm.name}' "
+                    f"(template: {agent_tmpl.name})..."
+                )
+                # Each credential's token, read through its node's
+                # SCOPED delivery (the boundary pass above covered
+                # them; the graph-derived fold replaces the nested
+                # create_agent's git_tokens hand-off).
+                git_tokens = credential_tokens(agent_tmpl_node, scoped_ctx)
+                realize_agent(
+                    db,
+                    config,
+                    registry,
+                    name=agent_name,
+                    vm=vm,
+                    template=agent_tmpl,
+                    git_tokens=git_tokens,
+                )
+                log.mark_realized(pending_agent)
+
+            # ---- The session's own realizing slice -------------------------
+            ws = _require_workspace(db, workspace_name)
+
             resolved_agent_name: str | None = None
-            agent_target = None
+            agent_row: AgentRow | None = None
             if agent_name is not None:
                 mode = SessionMode.AGENT
                 agent_row = db.get_agent(agent_name)
@@ -1588,55 +1825,45 @@ def create_session(
                 # a tripwire so a future refactor that reorders or drops the
                 # upfront check fails loudly rather than silently corrupting
                 # cross-VM state.
-                if agent_row.vm_name != vm_check.name:
+                if agent_row.vm_name != vm.name:
                     raise ValidationError(
                         f"agent '{agent_name}' is on VM '{agent_row.vm_name}', "
-                        f"but workspace '{workspace_name}' is on VM '{vm_check.name}'",
+                        f"but workspace '{workspace_name}' is on VM '{vm.name}'",
                         entity_kind="session",
                         entity_name=name,
                     )
                 linux_user = agent_row.linux_user
                 resolved_agent_name = agent_name
+                if agent_target is None:
+                    # The ephemeral agent just realized: probe its direct
+                    # SSH BEFORE any session mutation, same contract as
+                    # the existing-agent probe above.
+                    from agentworks.agents.manager import _assert_agent_ssh_works
+                    from agentworks.transports import agent_transport
 
-                # Probe direct agent SSH BEFORE any state mutation (group add,
-                # DB inserts, restricted-config write). A pre-rollout agent
-                # surfaces here as an actionable StateError; without this,
-                # the rollback path would unwind the mutations but the
-                # operator's view would just see "session create failed".
-                from agentworks.agents.manager import _assert_agent_ssh_works
-                from agentworks.transports import agent_transport
-
-                agent_target = agent_transport(vm_check, config, agent_row)
-                _assert_agent_ssh_works(agent_target, agent_row)
+                    agent_target = agent_transport(vm, config, agent_row)
+                    _assert_agent_ssh_works(agent_target, agent_row)
             else:
                 mode = SessionMode.ADMIN
-                linux_user = vm_check.admin_username
+                linux_user = vm.admin_username
 
-            # Pre-flight: verify the template's required commands exist on the
-            # launch target BEFORE any state mutation. A missing binary otherwise
-            # only surfaces as a cryptic tmux server-access failure downstream
-            # (see _assert_required_commands). For agent mode the probe runs over
-            # the agent's own SSH (already proven by _assert_agent_ssh_works);
-            # for admin mode over the admin connection.
-            if mode == SessionMode.AGENT:
-                assert agent_target is not None  # set in the agent_name branch above
-                _assert_required_commands(
-                    agent_target.run,
-                    template,
-                    session_name=name,
-                    target_label=f"agent '{resolved_agent_name}'",
+            # Op-start runup: the required-commands check probes a
+            # just-realized ephemeral agent here (it deferred at
+            # preflight; the log's flip above is what it observed). For
+            # targets that were realized at preflight the check already
+            # fired and this is a no-op.
+            session_node.runup(
+                RunContext(
+                    config=config,
+                    operation_scope=scope,
+                    admin_target=target,
+                    agent_target=agent_target,
                 )
-            else:
-                _assert_required_commands(
-                    run_command,
-                    template,
-                    session_name=name,
-                    target_label=f"VM '{vm_check.name}'",
-                )
+            )
 
-            # Compute socket path up front (deterministic from linux_user + session name).
-            # Needed for the DB insert since the CHECK constraint requires agent sessions
-            # to have a socket_path.
+            # Compute socket path up front (deterministic from linux_user +
+            # session name). Needed for the DB insert since the CHECK
+            # constraint requires agent sessions to have a socket_path.
             expected_socket: str | None = None
             if mode == SessionMode.AGENT:
                 from agentworks.sessions.tmux import agent_socket_path
@@ -1649,62 +1876,27 @@ def create_session(
                 f"({mode_label}, template: {template.name})..."
             )
 
-            def _rollback() -> None:
-                # Best-effort rollback for the session-internal mutations only;
-                # ephemeral resources (workspace / agent created above) are
-                # unwound by the outer ``_rollback_ephemerals``. Each step
-                # wrapped so a cleanup failure surfaces as a warning instead of
-                # masking the original exception.
-                try:
-                    db.delete_session(name)
-                except Exception as e:
-                    output.warn(f"rollback: failed to delete session row '{name}': {e}")
-                if not resolved_agent_name:
-                    return
-                try:
-                    db.delete_agent_grant(
-                        resolved_agent_name, workspace_name, "implicit", session_name=name
-                    )
-                    remaining = db.has_any_grant(resolved_agent_name, workspace_name)
-                except Exception as e:
-                    output.warn(
-                        f"rollback: failed to revoke implicit grant for agent "
-                        f"'{resolved_agent_name}' on workspace '{workspace_name}': {e}"
-                    )
-                    return
-                if not remaining:
-                    try:
-                        from agentworks.agents.manager import _remove_from_workspace_group
-
-                        _remove_from_workspace_group(
-                            vm_check, config, db, linux_user, workspace_name, logger=None
-                        )
-                    except Exception as e:
-                        output.warn(
-                            f"rollback: failed to remove agent '{resolved_agent_name}' from "
-                            f"workspace '{workspace_name}' group: {e}"
-                        )
-
             try:
                 # Everything that creates partial session state (on-VM group
                 # membership, implicit-grant row, session row, restricted-config
                 # write, tmux session) runs inside this block so a KI /
-                # exception anywhere here triggers ``_rollback()``.
+                # exception anywhere here triggers the session node's
+                # partial-state teardown.
                 if resolved_agent_name is not None:
                     # Auto-grant implicit workspace access if the agent has no
                     # existing grant on this workspace.
                     if not db.has_any_grant(resolved_agent_name, workspace_name):
-                        from agentworks.agents.manager import _add_to_workspace_group
+                        from agentworks.agents.grants import add_to_workspace_group
 
-                        _add_to_workspace_group(
-                            vm_check, config, db, linux_user, workspace_name
+                        add_to_workspace_group(
+                            vm, config, db, linux_user, workspace_name
                         )
                     db.insert_agent_grant(
                         resolved_agent_name, workspace_name, "implicit", session_name=name
                     )
 
                 # Insert DB record before any tmux work so a crash mid-create
-                # leaves a recoverable row (and ``_rollback`` can find it to
+                # leaves a recoverable row (and the teardown can find it to
                 # delete).
                 db.insert_session(
                     name,
@@ -1712,8 +1904,8 @@ def create_session(
                     template.name,
                     mode,
                     agent_name=resolved_agent_name,
-                    created_workspace=workspace_created,
-                    created_agent=agent_created,
+                    created_workspace=pending_workspace is not None,
+                    created_agent=pending_agent is not None,
                     socket_path=expected_socket,
                 )
 
@@ -1725,7 +1917,7 @@ def create_session(
                     registry,
                     values=secret_values,
                     db=db,
-                    vm=vm_check,
+                    vm=vm,
                     ws=ws,
                     session_name=name,
                     session_template=template,
@@ -1742,7 +1934,7 @@ def create_session(
                 #   requires root.
                 session_run_command: RunCommand
                 if mode == SessionMode.AGENT:
-                    assert agent_target is not None  # set in the agent_name branch above
+                    assert agent_target is not None  # built in the agent branches above
                     session_run_command = agent_target.run
                 else:
                     session_run_command = run_command
@@ -1753,18 +1945,26 @@ def create_session(
                     linux_user,
                     run_command=session_run_command,
                     target=target,
-                    admin_username=vm_check.admin_username,
+                    admin_username=vm.admin_username,
                     is_admin=(mode == SessionMode.ADMIN),
                     env=session_env,
                 )
             except (KeyboardInterrupt, Exception):
                 # Session-internal cleanup only (DB row, grant, group
-                # membership). The operator-visible warn lives on the
-                # outer handler so a failure anywhere in the function
-                # (not just here) prints one clean reason line before
-                # the rollback's delete messages start landing.
-                _rollback()
+                # membership: the node's partial-state teardown). The
+                # realized ephemerals are unwound by the outer handlers,
+                # whose warn prints one clean reason line before the
+                # rollback's delete messages start landing.
+                session_node.teardown()
                 raise
+
+            # The session's realizing slice is complete: flip the node.
+            # Deliberately NOT via the realization log: a completed
+            # session (tmux up, row written) is never rolled back, so
+            # failures past this point unwind only the ephemerals, and
+            # the session survives them. That pins the completed-session
+            # window as non-rollbackable.
+            session_node.mark_realized()
 
             # Persist socket path, PID, and boot ID
             if sock:
@@ -1784,24 +1984,24 @@ def create_session(
             output.info(f"Session '{name}' started ({mode_label}, template: {template.name})")
 
             # Update tmuxinator config and add to console if it exists
-            _regenerate_tmuxinator(db, config, vm_check, ws)
+            _regenerate_tmuxinator(db, config, vm, ws)
             from agentworks.sessions.console import add_session_to_console
 
             add_session_to_console(name, run_command=run_command, socket_path=sock)
-    except KeyboardInterrupt:
-        output.warn(f"Cancelling session create '{name}'... rolling back.")
-        _rollback_ephemerals()
-        raise
-    except Exception as e:
-        # Print the reason BEFORE the rollback's delete-* messages so the
-        # operator sees the failure context first, not after a stream of
-        # 'Agent deleted' / 'Workspace deleted' lines. The CLI's
-        # exception handler still prints the canonical 'Error: ...' line
-        # with the typed hint at the very end -- this warn just bridges
-        # the silence between "thing X created" and the rollback output.
-        output.warn(f"Session create '{name}' failed; rolling back. Reason: {e}")
-        _rollback_ephemerals()
-        raise
+        except KeyboardInterrupt:
+            output.warn(f"Cancelling session create '{name}'... rolling back.")
+            log.unwind()
+            raise
+        except Exception as e:
+            # Print the reason BEFORE the rollback's delete-* messages so the
+            # operator sees the failure context first, not after a stream of
+            # 'Agent deleted' / 'Workspace deleted' lines. The CLI's
+            # exception handler still prints the canonical 'Error: ...' line
+            # with the typed hint at the very end; this warn just bridges
+            # the silence between "thing X created" and the rollback output.
+            output.warn(f"Session create '{name}' failed; rolling back. Reason: {e}")
+            log.unwind()
+            raise
 
 
 def _execute_stop(
@@ -1926,11 +2126,13 @@ def stop_session(
     from agentworks.sessions.tmux import force_kill_tmux_server
 
     session = _require_session(db, name)
-    _ws, vm, _run_command, _, admin_target, vm_platform = _prepare_vm(
-        db, config, session.workspace_name, operation="session-stop"
-    )
-    # _prepare_vm just gated; hold only (no second gate probe).
-    with vm_platform.vm_active(vm, config=config):
+    with _prepare_vm(db, config, session, operation="session-stop") as (
+        _ws,
+        vm,
+        _run_command,
+        _run_as_root,
+        admin_target,
+    ):
         session = _ensure_pid(session, target=admin_target, db=db)
         status = check_session_status(session, target=admin_target)
 
@@ -1996,7 +2198,16 @@ def restart_session(
     force: bool = False,
     yes: bool = False,
 ) -> None:
-    """Restart a session. Prompts if running (--yes to skip). --force for BROKEN."""
+    """Restart a session. Prompts if running (--yes to skip). --force for BROKEN.
+
+    Orchestrated: the live graph derives from the session's rows, the
+    activation gate replaces the imperative ensure_active + hold, and
+    the preflight sweep fires the required-commands probe BEFORE the
+    kill (a missing binary aborts with the old session still running).
+    Nothing here is created, so no realization log exists; the window
+    after the kill is deliberately non-rollbackable (no unwind is
+    consulted there), exactly the imperative shape.
+    """
     from agentworks.bootstrap import build_registry
     from agentworks.sessions.tmux import (
         create_session as create_tmux_session,
@@ -2008,11 +2219,95 @@ def restart_session(
     registry = build_registry(config)
 
     session = _require_session(db, name)
-    ws, vm, run_command, _run_as_root, admin_target, vm_platform = _prepare_vm(
-        db, config, session.workspace_name, operation="session-restart",
+    ws = _require_workspace(db, session.workspace_name)
+    vm = _require_vm_for_workspace(db, ws)
+    template = _resolve_template(registry, session.template)
+
+    # ===== Build: the live node graph from the rows =========================
+    #
+    # Everything exists, so every node is live and nothing is realized
+    # or unwound: the session row names its agent, workspace, and VM,
+    # and the domain factories construct one node per row (the VM row's
+    # site field is its edge to the vm-site node, which holds the
+    # platform instance). Construction registers the site's declared
+    # secrets on the resolver; nothing resolves yet.
+    from agentworks.agents.nodes import live_agent_node
+    from agentworks.capabilities.base import (
+        OperationScope,
+        RunContext,
+        ScopeLevel,
     )
-    # _prepare_vm just gated; hold only (no second gate probe).
-    with vm_platform.vm_active(vm, config=config):
+    from agentworks.db import SYSTEM_SLUG_KEY
+    from agentworks.orchestration.activation import (
+        activation_gate,
+        gate_secret_resolver,
+    )
+    from agentworks.orchestration.readiness import preflight_all
+    from agentworks.orchestration.secrets import secret_union
+    from agentworks.orchestration.walk import walk
+    from agentworks.secrets.resolver import Resolver
+    from agentworks.sessions.nodes import live_session_node
+    from agentworks.vms.nodes import live_vm_node
+    from agentworks.workspaces.nodes import live_workspace_node
+
+    resolver = Resolver(config, registry)
+
+    vm_node = live_vm_node(db, config, registry, vm)
+    workspace_node = live_workspace_node(ws, vm_node)
+    agent_node: LiveAgentNode | None = None
+    if session.agent_name is not None:
+        agent_row = db.get_agent(session.agent_name)
+        if agent_row is None:
+            raise NotFoundError(
+                f"agent '{session.agent_name}' (referenced by session '{session.name}') not found",
+                entity_kind="agent",
+                entity_name=session.agent_name,
+            )
+        agent_node = live_agent_node(agent_row, vm_node)
+    session_node = live_session_node(
+        session,
+        template,
+        agent=agent_node,
+        workspace=workspace_node,
+        vm=vm_node,
+    )
+    nodes = walk(session_node)
+    # The walk supplies the boundary union (the site's config secrets;
+    # live nodes declare nothing else). The session's env chain is
+    # deliberately NOT part of this boundary: it resolves after the
+    # BROKEN/confirm gates below, the recorded bail-before-prompt
+    # exception.
+    for secret_name in secret_union(nodes):
+        resolver.register_name(secret_name)
+
+    scope = OperationScope(
+        level=ScopeLevel.SESSION,
+        system_slug=db.get_setting(SYSTEM_SLUG_KEY) or None,
+        vm=vm.name,
+        workspace=ws.name,
+        session=name,
+        agent=session.agent_name,
+        admin=session.agent_name is None,
+    )
+
+    # The activation gate replaces this command's imperative
+    # ensure_active + vm_active hold: opened once, before the preflight
+    # sweep, held through the whole command, its just-in-time values
+    # seeding the boundary resolver.
+    with activation_gate(vm_node, gate_secret_resolver(config, registry, resolver)):
+        if vm.tailscale_host is None:
+            raise StateError(
+                f"VM '{vm.name}' has no Tailscale address",
+                entity_kind="vm",
+                entity_name=vm.name,
+            )
+
+        from agentworks.ssh import SSHLogger
+
+        logger = SSHLogger(vm.name, "session-restart")
+        admin_target = transport(vm, config, logger=logger)
+        run_command: RunCommand = admin_target.run
+
         session = _ensure_pid(session, target=admin_target, db=db)
 
         # Legacy migration: sessions predating the per-session-socket model
@@ -2040,8 +2335,8 @@ def restart_session(
         # front rather than leaving us with a stopped session we can't
         # restart. Same transport is used for kill (above) and create
         # (below): every destructive step on an agent session goes via
-        # direct agent SSH (FRD R1, Phase 3). _build_session_target always
-        # returns a same-uid target, so no sudo is needed for kill.
+        # direct agent SSH. _build_session_target always returns a
+        # same-uid target, so no sudo is needed for kill.
         is_admin = session.mode == SessionMode.ADMIN.value
         session_target = _build_session_target(
             session, vm=vm, config=config, db=db, admin_target=admin_target
@@ -2049,14 +2344,32 @@ def restart_session(
         session_run_command: RunCommand = session_target.run
         kill_sudo = False
 
+        # PREFLIGHT-ALL over the walk rooted at the live session node,
+        # against the one command-start context: the required-commands
+        # check's target (an existing agent, or the admin) is realized,
+        # so it probes NOW, pre-resolve and PRE-KILL, and a missing
+        # binary aborts the restart with the old session still running.
+        # Then the boundary resolve for the graph's union (gate-resolved
+        # values are already seeded, so nothing resolves twice).
+        preflight_all(
+            nodes,
+            RunContext(
+                config=config,
+                operation_scope=scope,
+                admin_target=admin_target,
+                agent_target=None if is_admin else session_target,
+            ),
+        )
+        resolver.resolve()
+
         # Bail-before-prompt: refuse the operation up front in the cases
         # where the operator either lacks the right flag (BROKEN + no
         # --force) or declines the confirm (OK + interactive 'no').
-        # Eager-resolve runs AFTER these checks so we don't ask for
-        # secrets the command was about to discard.
-        # UNKNOWN is impossible here -- _ensure_pid raises on unresolvable
-        # sessions. Legacy sessions short-circuit at ``status =
-        # SessionStatus.STOPPED`` above, so neither gate fires for them --
+        # Eager-resolve of the env chain runs AFTER these checks so we
+        # don't ask for secrets the command was about to discard.
+        # UNKNOWN is impossible here (_ensure_pid raises on unresolvable
+        # sessions). Legacy sessions short-circuit at ``status =
+        # SessionStatus.STOPPED`` above, so neither gate fires for them;
         # migration is implicit in the operator's restart opt-in.
         if status == SessionStatus.BROKEN and not force:
             raise BrokenStateError(
@@ -2070,30 +2383,18 @@ def restart_session(
         ):
             raise UserAbort("restart cancelled")
 
-        # Eager-prompting orchestration (FRD R4 / Phase 6): resolve every
-        # secret referenced by this session's env chain BEFORE any kill /
-        # destructive step. Non-interactive failures surface as
-        # SecretUnavailableError with no partial state to clean up.
-        # This is the recorded bail-before-prompt exception to the
-        # one-boundary-resolve contract: the site's config secrets
-        # resolved at _prepare_vm's bind (before ensure_active's ops
-        # needed them), but the env chain deliberately resolves HERE
-        # (after the BROKEN/--force refusal and the "Restart?" confirm)
-        # so a declined restart never prompts for secrets it was about
-        # to discard. Folding it into the boundary would trade that
-        # operator protection for one fewer session on proxmox only.
-        template = _resolve_template(registry, session.template)
-
-        # Pre-flight the template's required commands before the destructive
-        # kill below, so a missing binary aborts the restart with a clear
-        # error instead of tearing down the old session and then failing to
-        # bring up the new one (see _assert_required_commands).
-        _assert_required_commands(
-            session_run_command,
-            template,
-            session_name=name,
-            target_label=(f"agent '{session.agent_name}'" if session.agent_name else f"VM '{vm.name}'"),
-        )
+        # Eager-prompting orchestration: resolve every secret referenced
+        # by this session's env chain BEFORE any kill / destructive step.
+        # Non-interactive failures surface as SecretUnavailableError with
+        # no partial state to clean up. This is the recorded
+        # bail-before-prompt exception to the one-boundary-resolve
+        # contract: the graph's union (the site's config secrets)
+        # resolved at the preflight boundary above, but the env chain
+        # deliberately resolves HERE (after the BROKEN/--force refusal
+        # and the "Restart?" confirm) so a declined restart never
+        # prompts for secrets it was about to discard. Folding it into
+        # the boundary would trade that operator protection for one
+        # fewer prompt session on proxmox only.
 
         from agentworks.secrets import resolve_for_command
 
@@ -2250,12 +2551,13 @@ def stop_all_sessions(
         admin_only=admin_only,
     )
 
-    # Resolve distinct VMs from the filtered session set and enter the
-    # keepalive BEFORE the SSH probes. The probes (ensure_pids_batch,
-    # batch_check_all_sessions) issue per-VM round-trips; on WSL2 they
-    # would race the idle timer without the anchor. No-op on non-WSL2.
+    # Resolve distinct VMs from the filtered session set and open the
+    # batch boundary + per-VM gates BEFORE the SSH probes. The probes
+    # (ensure_pids_batch, batch_check_all_sessions) issue per-VM
+    # round-trips; on WSL2 they would race the idle timer without the
+    # held-active anchor (a no-op hold on other platforms).
     distinct_vms = _distinct_vms_for_sessions(db, sessions)
-    with keep_actives(db, config, bind_platforms(config, distinct_vms)):
+    with _batch_vm_boundary(db, config, distinct_vms):
         # Auto-repair NULL-PID sessions, then batch check
         sessions = ensure_pids_batch(sessions, db=db, config=config)
         status_map = batch_check_all_sessions(sessions, db=db, config=config)
@@ -2346,13 +2648,13 @@ def restart_all_sessions(
     )
 
     # Resolve distinct VMs from the filtered set and anchor them BEFORE the
-    # SSH probes. Each restart_session call also enters its own keepalive;
-    # the redundant inner wrap is a no-op on already-active VMs and a cheap
+    # SSH probes. Each restart_session call also opens its own gate span;
+    # the redundant inner gate is a no-op on already-active VMs and a cheap
     # extra subprocess on WSL2 (accepted, see PR description).
     distinct_vms = _distinct_vms_for_sessions(db, sessions)
 
     failed: list[tuple[str, str]] = []
-    with keep_actives(db, config, bind_platforms(config, distinct_vms)):
+    with _batch_vm_boundary(db, config, distinct_vms):
         # Auto-repair NULL-PID sessions, then batch check
         sessions = ensure_pids_batch(sessions, db=db, config=config)
         status_map = batch_check_all_sessions(sessions, db=db, config=config)
@@ -2445,11 +2747,13 @@ def delete_session(
 ) -> None:
     """Delete a session. Prompts if running/unknown (--yes to skip). --force for BROKEN."""
     session = _require_session(db, name)
-    ws, vm, _run_command, _run_as_root, admin_target, vm_platform = _prepare_vm(
-        db, config, session.workspace_name, operation="session-delete"
-    )
-    # _prepare_vm just gated; hold only (no second gate probe).
-    with vm_platform.vm_active(vm, config=config):
+    with _prepare_vm(db, config, session, operation="session-delete") as (
+        ws,
+        vm,
+        _run_command,
+        _run_as_root,
+        admin_target,
+    ):
         session = _ensure_pid(session, target=admin_target, db=db)
         status = check_session_status(session, target=admin_target)
 
@@ -2529,11 +2833,11 @@ def delete_session(
             db.delete_agent_grant(session.agent_name, session.workspace_name, "implicit", session_name=name)
             # If no grants remain, remove from workspace group
             if not db.has_any_grant(session.agent_name, session.workspace_name):
-                from agentworks.agents.manager import _remove_from_workspace_group
+                from agentworks.agents.grants import remove_from_workspace_group
 
                 agent = db.get_agent(session.agent_name)
                 if agent:
-                    _remove_from_workspace_group(vm, config, db, agent.linux_user, session.workspace_name)
+                    remove_from_workspace_group(vm, config, db, agent.linux_user, session.workspace_name)
 
         _regenerate_tmuxinator(db, config, vm, ws)
 
@@ -2617,36 +2921,48 @@ def describe_session(
     *,
     name: str,
 ) -> None:
-    """Show session details."""
+    """Show session details.
+
+    Runs inside ``_prepare_vm``'s gate span: a hold the imperative
+    body did not take (it gated and discarded the platform). The
+    superset is a no-op everywhere but WSL2, where it anchors the
+    status probes against the idle timer.
+    """
     session = _require_session(db, name)
-    ws, vm, run_command, _, target, _vm_platform = _prepare_vm(db, config, session.workspace_name, operation=None)
-    session = _ensure_pid(session, target=target, db=db)
+    with _prepare_vm(db, config, session, operation=None) as (
+        _ws,
+        vm,
+        _run_command,
+        _run_as_root,
+        target,
+    ):
+        session = _ensure_pid(session, target=target, db=db)
 
-    status = check_session_status(session, target=target)
+        status = check_session_status(session, target=target)
 
-    # Build status label with PID if running and current boot
-    if status == SessionStatus.OK and session.pid and session.pid > 0:
-        status_label = f"running (PID {session.pid})"
-    elif status == SessionStatus.BROKEN and session.pid and session.pid > 0:
-        status_label = f"broken (PID {session.pid} alive, tmux unreachable)"
-    else:
-        status_label = {
-            SessionStatus.OK: "running",
-            SessionStatus.STOPPED: "stopped",
-            SessionStatus.BROKEN: "broken",
-            SessionStatus.UNKNOWN: "unknown",
-        }[status]
+        # Build status label with PID if running and current boot
+        if status == SessionStatus.OK and session.pid and session.pid > 0:
+            status_label = f"running (PID {session.pid})"
+        elif status == SessionStatus.BROKEN and session.pid and session.pid > 0:
+            status_label = f"broken (PID {session.pid} alive, tmux unreachable)"
+        else:
+            status_label = {
+                SessionStatus.OK: "running",
+                SessionStatus.STOPPED: "stopped",
+                SessionStatus.BROKEN: "broken",
+                SessionStatus.UNKNOWN: "unknown",
+            }[status]
 
-    mode_label = f"agent ({session.agent_name})" if session.agent_name else "admin"
+        mode_label = f"agent ({session.agent_name})" if session.agent_name else "admin"
 
-    output.info(f"Name:       {session.name}")
-    output.info(f"Workspace:  {session.workspace_name}")
-    output.info(f"VM:         {vm.name}")
-    output.info(f"Template:   {session.template}")
-    output.info(f"Mode:       {mode_label}")
-    output.info(f"Status:     {status_label}")
-    output.info(f"Created:    {session.created_at}")
-    output.info(f"Updated:    {session.updated_at}")
+        output.info(f"Name:       {session.name}")
+        output.info(f"Workspace:  {session.workspace_name}")
+        output.info(f"VM:         {vm.name}")
+        output.info(f"Template:   {session.template}")
+        output.info(f"Mode:       {mode_label}")
+        output.info(f"Status:     {status_label}")
+        output.info(f"Created:    {session.created_at}")
+        output.info(f"Updated:    {session.updated_at}")
 
 
 def batch_check_all_sessions(
@@ -2751,7 +3067,7 @@ def list_sessions(
     )
 
     status_map: dict[str, SessionStatus] = {}
-    with keep_actives(db, config, bind_platforms(config, status_keepalive_vms)):
+    with _batch_vm_boundary(db, config, status_keepalive_vms):
         if not no_status:
             sessions = ensure_pids_batch(sessions, db=db, config=config)
             status_map = batch_check_all_sessions(sessions, db=db, config=config)
@@ -2837,11 +3153,13 @@ def attach_session(
     from agentworks.sessions.tmux import tmux_cmd
 
     session = _require_session(db, name)
-    _ws, vm, _run_command, _, target, vm_platform = _prepare_vm(
-        db, config, session.workspace_name, operation="session-attach"
-    )
-    # _prepare_vm just gated; hold only (no second gate probe).
-    with vm_platform.vm_active(vm, config=config):
+    with _prepare_vm(db, config, session, operation="session-attach") as (
+        _ws,
+        _vm,
+        _run_command,
+        _run_as_root,
+        target,
+    ):
         session = _ensure_pid(session, target=target, db=db)
         status = check_session_status(session, target=target)
 
@@ -2873,11 +3191,13 @@ def session_logs(
     from agentworks.sessions.tmux import capture_output
 
     session = _require_session(db, name)
-    _ws, vm, run_command, _, target, vm_platform = _prepare_vm(
-        db, config, session.workspace_name, operation="session-logs"
-    )
-    # _prepare_vm just gated; hold only (no second gate probe).
-    with vm_platform.vm_active(vm, config=config):
+    with _prepare_vm(db, config, session, operation="session-logs") as (
+        _ws,
+        _vm,
+        run_command,
+        _run_as_root,
+        target,
+    ):
         session = _ensure_pid(session, target=target, db=db)
         status = check_session_status(session, target=target)
 

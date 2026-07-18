@@ -36,13 +36,13 @@ from agentworks.transports import (
 if TYPE_CHECKING:
     from collections.abc import Mapping
 
+    from agentworks.capabilities.base import RunContext
     from agentworks.capabilities.git_credential.base import GitCredentialProvider
     from agentworks.capabilities.vm_platform import VMPlatform
     from agentworks.catalog import AptSourceEntry, SystemInstallCommandEntry, UserInstallCommandEntry
     from agentworks.config import Config
     from agentworks.db import Database
     from agentworks.resources.registry import Registry
-    from agentworks.secrets.resolver import Resolver
     from agentworks.vms.admin import AdminConfig
     from agentworks.vms.templates import ResolvedVMTemplate
 
@@ -1275,7 +1275,6 @@ def verify_tailscale_available() -> None:
 def resolve_git_credential_providers(
     registry: Registry,
     names: list[str],
-    resolver: Resolver | None = None,
 ) -> dict[str, GitCredentialProvider]:
     """Construct git credential provider (capability) instances from the
     registry.
@@ -1284,11 +1283,9 @@ def resolve_git_credential_providers(
     row's or an agent template's ``git_credentials`` list). Each
     provider is built from its ``provider_config`` and re-validates that
     config at construct (so a bad scope value fails loudly here, never
-    silently WIDENING the credential). When ``resolver`` is passed, each
-    provider registers its token secret on it at construct, so the
-    operation's boundary resolve covers them and the provider can
-    ``runup()`` the token afterward; pass ``None`` for materials-only
-    or inspection construction.
+    silently WIDENING the credential). The declared token secrets join
+    an operation's boundary union through the holding node's
+    ``secret_refs``; construction touches no secret machinery.
     """
     from agentworks.capabilities.git_credential import (
         GIT_CREDENTIAL_PROVIDER_REGISTRY,
@@ -1321,7 +1318,6 @@ def resolve_git_credential_providers(
         providers[name] = provider_cls(
             name,
             cred_config.provider_config,
-            resolver,
             description=cred_config.description,
         )
     return providers
@@ -1422,6 +1418,7 @@ def initialize_vm(
     providers: dict[str, GitCredentialProvider],
     platform: VMPlatform,
     *,
+    platform_ctx: RunContext,
     admin_username: str = "agentworks",
     tailscale_auth_key: str,
     git_tokens: dict[str, str],
@@ -1439,7 +1436,9 @@ def initialize_vm(
     ``tailscale_auth_key`` and ``git_tokens`` are required; ``create_vm``
     resolves them via the framework at manager-entry and threads them in,
     along with the BOUND ``platform`` from its composition root (used
-    for the keepalive hold; the gates never bind).
+    for the keepalive hold; the gates never bind) and ``platform_ctx``,
+    that composition's op-start context for the platform's power ops
+    (secrets scoped to the site's declared names).
     """
     from agentworks.ssh import SSHLogger
     from agentworks.vms.manager import keep_active
@@ -1460,10 +1459,14 @@ def initialize_vm(
     # Anchor the VM in an active state for the full init span. No-op for
     # Lima/Azure/Proxmox; WSL2 holds a wsl.exe subprocess open so the distro
     # doesn't idle-shut between Phase A (wsl.exe transport) and Phase B
-    # (Tailscale SSH).
+    # (Tailscale SSH). This is a recorded INTERIM keep_active hold on the
+    # handed-in platform from create_vm's orchestrated composition root
+    # (rebuilding a boundary here would re-resolve mid-command, and the
+    # imperative initializer internals hold no node to hold_active on);
+    # it retires when these internals orchestrate.
     vm_for_keepalive = db.get_vm(vm_name)
     assert vm_for_keepalive is not None, "create_vm inserts the row before init"
-    with keep_active(db, config, vm_for_keepalive, platform):
+    with keep_active(db, config, vm_for_keepalive, platform, platform_ctx):
         try:
             db.insert_vm_event(vm_name, "provisioning_started", transport)
             ts_target = _phase_a_bootstrap(
@@ -2159,7 +2162,7 @@ def install_claude_plugins(
     invocation gets a non-login shell that sources neither ``.bashrc``
     nor ``.profile``, so ``command -v claude`` would falsely fail. Both
     the admin call site (``_phase_b_setup`` in this file) and the agent
-    call site (``_create_agent_on_vm`` in ``agents/manager.py``) wrap
+    call site (``create_agent_on_vm`` in ``agents/initializer.py``) wrap
     accordingly; the helper itself stays transport- and user-agnostic.
     """
     if not marketplaces and not plugins:

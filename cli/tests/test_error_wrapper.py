@@ -265,7 +265,7 @@ def test_create_session_releases_group_membership_on_keyboard_interrupt(
     the agent from the workspace's Linux group, so DB and on-VM authorization
     don't drift. Without this, a Ctrl-C during ``session create --agent`` would
     leave the agent with VM-side group membership but no DB grant backing it."""
-    from agentworks.agents import manager as agent_mgr
+    from agentworks.agents import grants as agent_grants
     from agentworks.db import Database
     from agentworks.sessions import manager as session_manager
     from agentworks.sessions import tmux as tmux_mod
@@ -306,14 +306,14 @@ def test_create_session_releases_group_membership_on_keyboard_interrupt(
         session_manager, "_build_session_command", lambda *args, **kwargs: "true"
     )
     monkeypatch.setattr(tmux_mod, "deploy_restricted_config", lambda *args, **kwargs: None)
-    monkeypatch.setattr(agent_mgr, "_add_to_workspace_group", lambda *a, **k: None)
+    monkeypatch.setattr(agent_grants, "add_to_workspace_group", lambda *a, **k: None)
 
     remove_calls: list[tuple[str, str]] = []
 
     def _track_remove(vm, config, db, linux_user, ws_name, **kwargs):  # type: ignore[no-untyped-def]
         remove_calls.append((linux_user, ws_name))
 
-    monkeypatch.setattr(agent_mgr, "_remove_from_workspace_group", _track_remove)
+    monkeypatch.setattr(agent_grants, "remove_from_workspace_group", _track_remove)
 
     def _explode(*args: object, **kwargs: object) -> tuple[None, None]:
         raise KeyboardInterrupt

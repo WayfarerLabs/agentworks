@@ -1,5 +1,8 @@
-"""Gate semantics: ``ensure_active`` / ``keep_active`` and the
-operator_stopped flag writes in ``start_vm`` / ``stop_vm``.
+"""Gate semantics of the imperative ``ensure_active`` / ``keep_active``
+pair, which still serves the commands not yet migrated onto the
+orchestrated activation gate (see the pair's docstrings). The
+operator_stopped flag writes of the orchestrated ``start_vm`` /
+``stop_vm`` are pinned in ``test_lifecycle_orchestrated.py``.
 """
 
 from __future__ import annotations
@@ -9,6 +12,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
+from agentworks.capabilities.base import RunContext
 from agentworks.db import VMStatus
 from agentworks.errors import StateError
 from agentworks.vms import manager as vm_manager
@@ -29,14 +33,14 @@ class _GatePlatform:
         self.stop_calls = 0
         self.holds = 0
 
-    def status(self, vm: VMRow) -> VMStatus:
+    def status(self, vm: VMRow, ctx: object) -> VMStatus:
         self.status_calls += 1
         return self._status
 
-    def start(self, vm: VMRow) -> None:
+    def start(self, vm: VMRow, ctx: object) -> None:
         self.start_calls += 1
 
-    def stop(self, vm: VMRow) -> None:
+    def stop(self, vm: VMRow, ctx: object) -> None:
         self.stop_calls += 1
 
     def vm_active(self, vm: VMRow, *, config: object | None = None) -> contextlib.AbstractContextManager[None]:
@@ -60,7 +64,7 @@ def test_fast_path_skips_status(db: Database, monkeypatch: pytest.MonkeyPatch) -
     monkeypatch.setattr(vm_manager, "_is_tailscale_reachable", lambda host: True)
     platform = _GatePlatform()
 
-    vm_manager.ensure_active(db, object(), vm, platform)  # type: ignore[arg-type]
+    vm_manager.ensure_active(db, object(), vm, platform, RunContext())  # type: ignore[arg-type]
 
     assert platform.status_calls == 0
     assert platform.start_calls == 0
@@ -81,7 +85,7 @@ def test_auto_resume_starts_and_holds_through_tailscale(
     )
     platform = _GatePlatform(status=VMStatus.STOPPED)
 
-    vm_manager.ensure_active(db, object(), vm, platform)  # type: ignore[arg-type]
+    vm_manager.ensure_active(db, object(), vm, platform, RunContext())  # type: ignore[arg-type]
 
     assert platform.start_calls == 1
     assert platform.holds == 1
@@ -106,7 +110,7 @@ def test_manually_stopped_raises_instead_of_resuming(
     platform = _GatePlatform(status=VMStatus.STOPPED)
 
     with pytest.raises(StateError, match="manually stopped") as exc:
-        vm_manager.ensure_active(db, object(), vm, platform)  # type: ignore[arg-type]
+        vm_manager.ensure_active(db, object(), vm, platform, RunContext())  # type: ignore[arg-type]
     assert "not be auto-started" in str(exc.value)
     assert "agw vm start gvm" in (exc.value.hint or "")
     assert platform.start_calls == 0
@@ -127,7 +131,7 @@ def test_manually_stopped_but_running_out_of_band_proceeds(
     )
     platform = _GatePlatform(status=VMStatus.RUNNING)
 
-    vm_manager.ensure_active(db, object(), vm, platform)  # type: ignore[arg-type]
+    vm_manager.ensure_active(db, object(), vm, platform, RunContext())  # type: ignore[arg-type]
 
     assert platform.start_calls == 0
 
@@ -147,7 +151,7 @@ def test_concurrent_start_clears_the_flag_and_resumes(
     monkeypatch.setattr(vm_manager, "_ensure_tailscale", lambda *a, **k: None)
     platform = _GatePlatform(status=VMStatus.STOPPED)
 
-    vm_manager.ensure_active(db, object(), vm, platform)  # type: ignore[arg-type]
+    vm_manager.ensure_active(db, object(), vm, platform, RunContext())  # type: ignore[arg-type]
 
     assert platform.start_calls == 1
 
@@ -162,7 +166,7 @@ def test_deallocated_auto_resumes_like_stopped(
     monkeypatch.setattr(vm_manager, "_ensure_tailscale", lambda *a, **k: None)
     platform = _GatePlatform(status=VMStatus.DEALLOCATED)
 
-    vm_manager.ensure_active(db, object(), vm, platform)  # type: ignore[arg-type]
+    vm_manager.ensure_active(db, object(), vm, platform, RunContext())  # type: ignore[arg-type]
 
     assert platform.start_calls == 1
 
@@ -178,7 +182,7 @@ def test_flag_is_reread_on_the_slow_path(
     platform = _GatePlatform(status=VMStatus.STOPPED)
 
     with pytest.raises(StateError, match="stopped"):
-        vm_manager.ensure_active(db, object(), vm, platform)  # type: ignore[arg-type]
+        vm_manager.ensure_active(db, object(), vm, platform, RunContext())  # type: ignore[arg-type]
     assert platform.start_calls == 0
 
 
@@ -191,7 +195,7 @@ def test_unknown_status_proceeds_without_start(
     monkeypatch.setattr(vm_manager, "_is_tailscale_reachable", lambda host: False)
     platform = _GatePlatform(status=VMStatus.UNKNOWN)
 
-    vm_manager.ensure_active(db, object(), vm, platform)  # type: ignore[arg-type]
+    vm_manager.ensure_active(db, object(), vm, platform, RunContext())  # type: ignore[arg-type]
 
     assert platform.start_calls == 0
 
@@ -203,67 +207,7 @@ def test_keep_active_gates_then_holds(
     monkeypatch.setattr(vm_manager, "_is_tailscale_reachable", lambda host: True)
     platform = _GatePlatform()
 
-    with vm_manager.keep_active(db, object(), vm, platform):  # type: ignore[arg-type]
+    with vm_manager.keep_active(db, object(), vm, platform, RunContext()):  # type: ignore[arg-type]
         pass
 
     assert platform.holds == 1
-
-
-def test_stop_sets_flag_before_already_stopped_shortcut(
-    db: Database, monkeypatch: pytest.MonkeyPatch, captured_output
-) -> None:
-    """Stopping an idle-stopped VM still records the intent, and the
-    message says so instead of the misleading bare 'already stopped'
-    (the command DID change something: auto-start is now off)."""
-    _seed(db)
-    platform = _GatePlatform(status=VMStatus.STOPPED)
-    monkeypatch.setattr(
-        vm_manager, "bind_platform", lambda config, vm, registry=None: platform
-    )
-
-    vm_manager.stop_vm(db, object(), "gvm")  # type: ignore[arg-type]
-
-    vm = db.get_vm("gvm")
-    assert vm is not None
-    assert vm.operator_stopped is True
-    assert platform.stop_calls == 0  # short-circuited, flag still set
-    (message,) = captured_output.info
-    assert "stopped on its own" in message
-    assert "will not be auto-started" in message
-
-
-def test_stop_of_a_manually_stopped_vm_is_a_true_noop(
-    db: Database, monkeypatch: pytest.MonkeyPatch, captured_output
-) -> None:
-    """Only when the intent was ALREADY recorded does 'already' apply,
-    and it names the manual state."""
-    _seed(db)
-    db.set_operator_stopped("gvm", True)
-    platform = _GatePlatform(status=VMStatus.STOPPED)
-    monkeypatch.setattr(
-        vm_manager, "bind_platform", lambda config, vm, registry=None: platform
-    )
-
-    vm_manager.stop_vm(db, object(), "gvm")  # type: ignore[arg-type]
-
-    (message,) = captured_output.info
-    assert message == "VM 'gvm' is already manually stopped"
-
-
-def test_start_clears_flag(
-    db: Database, monkeypatch: pytest.MonkeyPatch, captured_output: object
-) -> None:
-    _seed(db)
-    db.set_operator_stopped("gvm", True)
-    platform = _GatePlatform(status=VMStatus.STOPPED)
-    monkeypatch.setattr(
-        vm_manager, "bind_platform", lambda config, vm, registry=None: platform
-    )
-    monkeypatch.setattr(vm_manager, "_ensure_tailscale", lambda *a, **k: None)
-
-    vm_manager.start_vm(db, object(), "gvm")  # type: ignore[arg-type]
-
-    vm = db.get_vm("gvm")
-    assert vm is not None
-    assert vm.operator_stopped is False
-    assert platform.start_calls == 1

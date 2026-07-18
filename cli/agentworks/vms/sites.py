@@ -31,11 +31,9 @@ from agentworks.source_location import SourceLocation, synthesized
 if TYPE_CHECKING:
     from agentworks.capabilities.vm_platform import VMPlatform
     from agentworks.config import Config
-    from agentworks.db import VMRow
     from agentworks.resources.origin import Origin
     from agentworks.resources.reference import ReferenceEntry, ResourceReference
     from agentworks.resources.registry import Registry
-    from agentworks.secrets.resolver import Resolver
 
 
 @dataclass(frozen=True)
@@ -235,17 +233,15 @@ def site_platform_name(site: str, registry: Registry) -> str:
 def resolve_site(
     name: str,
     registry: Registry,
-    *,
-    resolver: Resolver | None = None,
 ) -> VMPlatform:
     """Resolve a site name to its constructed platform instance.
 
     Returns the platform class instantiated with the site's validated
-    ``platform_config`` and the operation's ``resolver`` (construction
-    is cheap and never resolves or prompts; the declared config secrets
-    register on the resolver for the operation's single resolve pass at
-    the preflight boundary). Manager code holds the bound platform and
-    never sees ``VM_PLATFORM_REGISTRY`` or platform classes.
+    ``platform_config`` (construction is cheap and never resolves or
+    prompts; the declared config secrets join the operation's boundary
+    union through the holding node's ``secret_refs``). Manager code
+    holds the bound platform and never sees ``VM_PLATFORM_REGISTRY``
+    or platform classes.
 
     This is the one chokepoint every operation passes through, so the
     disabled guard lives here: using a disabled site is a typed error
@@ -257,7 +253,7 @@ def resolve_site(
     ensure_site_enabled(decl)
     # Enabled implies the platform is installed and supported here.
     platform_cls = VM_PLATFORM_REGISTRY[decl.platform]
-    return platform_cls(decl.name, decl.platform_config, resolver)
+    return platform_cls(decl.name, decl.platform_config)
 
 
 def ensure_site_enabled(decl: VMSiteDecl) -> None:
@@ -278,16 +274,6 @@ def ensure_site_enabled(decl: VMSiteDecl) -> None:
                 "requirement or use an enabled site"
             ),
         )
-
-
-def platform_for(
-    vm: VMRow,
-    registry: Registry,
-    *,
-    resolver: Resolver | None = None,
-) -> VMPlatform:
-    """The bound platform for a VM, resolved through its site."""
-    return resolve_site(vm.site, registry, resolver=resolver)
 
 
 def validate_sites(config: Config, registry: Registry) -> None:

@@ -12,7 +12,7 @@ Three named factories plus one low-level helper:
 - :func:`transport_for_user` -- low-level helper used by the named
   factories. Direct use is reserved for the mid-create case where the
   agent row doesn't exist yet (today's only direct caller is
-  ``agents/manager.py``).
+  ``agents/initializer.py``).
 
 The named factories never fall back. If the canonical transport is
 unavailable, the canonical factory raises -- it does NOT silently switch
@@ -68,7 +68,7 @@ def transport_for_user(
     The two named factories (:func:`transport`, :func:`agent_transport`)
     call this. Direct use is reserved for the mid-create case where an
     agent row doesn't exist yet but the on-VM identity already accepts
-    the operator's key (see ``agents/manager.py``).
+    the operator's key (see ``agents/initializer.py``).
 
     Always uses ``config.operator.ssh_private_key`` as the SSH identity:
     that's the key the on-VM authorized_keys reconciler installs for
@@ -152,7 +152,7 @@ def native_transport(
     via the explicit ``vm shell --platform`` opt-in.
 
     ``platform`` is the VM's bound platform, resolved at the caller's
-    composition root (``agentworks.vms.sites.platform_for``). ``stack``
+    composition root (the node factories via ``resolve_site``). ``stack``
     bounds the lifetime of any transient network state the platform
     needs (Azure attaches a public IP on enter and detaches on exit):
     the platform's :meth:`VMPlatform.transient_route` runs first; once

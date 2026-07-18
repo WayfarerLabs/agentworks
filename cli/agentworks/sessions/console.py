@@ -15,7 +15,7 @@ from typing import TYPE_CHECKING
 from agentworks import output
 from agentworks.errors import NotFoundError, StateError
 from agentworks.sessions.tmux import tmux_cmd
-from agentworks.vms.manager import bind_platform, ensure_active
+from agentworks.vms.manager import gated_vm_boundary
 
 if TYPE_CHECKING:
     from agentworks.config import Config
@@ -143,7 +143,18 @@ def attach_console(
     recreate: bool = False,
     allow_nesting: bool = False,
 ) -> None:
-    """Attach to (or create) the VM console."""
+    """Attach to (or create) the VM console.
+
+    Orchestrated (``vms.manager.gated_vm_boundary``): the graph
+    derives from the VM's row, the activation gate replaces this
+    command's ``bind_platform`` + ``ensure_active`` pair (opening
+    BEFORE the preflight sweep), and the gate's held-active span
+    covers the console build and the interactive attach, exactly the
+    ``vm_active`` hold the imperative body opened. The console itself
+    is not a node: attaching provisions nothing, so the graph is the
+    live VM alone. No env-chain target registers: the attach joins an
+    existing tmux server and composes no env.
+    """
     import os
 
     if os.environ.get("TMUX") and not allow_nesting:
@@ -161,9 +172,15 @@ def attach_console(
             entity_name=vm_name,
         )
 
-    platform = bind_platform(config, vm)
-    ensure_active(db, config, vm, platform)
-
+    # Cheap row validation stays pre-gate: a VM with no Tailscale
+    # address can never be attached to, so it must fail with zero
+    # prompts and zero VM starts. (The imperative body checked this
+    # after its gate; the gate cannot populate the address on the
+    # already-loaded row, so this command's outcome is identical. The
+    # hoist does forgo one accidental heal: the post-gate order could
+    # start a stopped VM whose rejoin repopulated the row's address,
+    # letting a RETRY succeed; now the retry keeps failing until an
+    # explicit vm start or reinit.)
     if vm.tailscale_host is None:
         raise StateError(
             f"VM '{vm_name}' has no Tailscale address",
@@ -171,14 +188,18 @@ def attach_console(
             entity_name=vm_name,
         )
 
-    from agentworks.transports import transport
-    target = transport(vm, config)
+    from agentworks.bootstrap import build_registry
 
-    # Get sessions for this VM (console wrapper handles dead sessions)
-    vm_sessions = _get_sessions_for_vm(db, vm)
+    registry = build_registry(config)
 
-    # Already gated above; hold only (no second gate probe).
-    with platform.vm_active(vm, config=config):
+    with gated_vm_boundary(db, config, registry, vm):
+        from agentworks.transports import transport
+
+        target = transport(vm, config)
+
+        # Get sessions for this VM (console wrapper handles dead sessions)
+        vm_sessions = _get_sessions_for_vm(db, vm)
+
         if recreate or not console_exists(run_command=target.run):
             create_console(
                 vm_sessions,

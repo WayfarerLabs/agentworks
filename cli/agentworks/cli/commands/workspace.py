@@ -41,63 +41,6 @@ def workspace_create(
     )
 
 
-@workspace_app.command("shell")
-def workspace_shell(
-    name: Annotated[str, typer.Argument(help="Workspace name")],
-) -> None:
-    """[Deprecated] Open an admin shell rooted in a workspace.
-
-    Prefer 'agw vm shell <vm> --workspace <ws>' (admin shell) or
-    'agw agent shell <agent> --workspace <ws>' (agent shell). A shell is
-    always somebody's shell; the workspace is just where it's rooted.
-    """
-    from agentworks import output
-    from agentworks.config import load_config
-    from agentworks.workspaces.manager import shell_workspace
-
-    db = get_db()
-    ws = db.get_workspace(name)
-    vm_hint = ws.vm_name if ws else "<vm>"
-    output.warn(
-        f"'agw workspace shell' is deprecated; use 'agw vm shell {vm_hint} --workspace "
-        f"{name}' (admin) or 'agw agent shell <agent> --workspace {name}' (agent). "
-        "This command will be removed in a future release."
-    )
-
-    shell_workspace(db, load_config(), name)
-
-
-@workspace_app.command("console")
-def workspace_console(
-    name: Annotated[str, typer.Argument(help="Workspace name")],
-    recreate: Annotated[bool, typer.Option("--recreate", help="Kill and rebuild the console")] = False,
-    allow_nesting: Annotated[bool, typer.Option("--allow-nesting", help="Allow running inside tmux")] = False,
-) -> None:
-    """[Deprecated] Open the workspace tmuxinator console.
-
-    Predates the multi-console design and lacks env-and-secrets
-    integration. Prefer 'agw console create' + 'agw console attach'
-    (see 'agw console --help').
-    """
-    from agentworks import output
-    from agentworks.config import load_config
-    from agentworks.workspaces.manager import console_workspace
-
-    output.warn(
-        "'agw workspace console' is deprecated; use 'agw console create' "
-        "and 'agw console attach' (see 'agw console --help'). This command "
-        "will be removed in a future release."
-    )
-
-    console_workspace(
-        get_db(),
-        load_config(),
-        name,
-        allow_nesting=allow_nesting,
-        recreate=recreate,
-    )
-
-
 @workspace_app.command("list")
 def workspace_list(
     vm: Annotated[str | None, typer.Option("--vm", help="Filter by VM")] = None,

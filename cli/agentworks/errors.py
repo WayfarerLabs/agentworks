@@ -63,6 +63,11 @@ class StateError(AgentworksError):
 
     Examples: VM not running when attaching a session, session not running
     when sending input, console requires --force because a pane is locked.
+
+    Also covers violated internal runtime contracts surfaced across module
+    boundaries (a secret read before the resolve pass, a mis-leveled
+    operation scope): the code, not the operator, put things in the
+    unsupported state.
     """
 
 

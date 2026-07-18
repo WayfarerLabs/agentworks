@@ -47,6 +47,12 @@ class ProxmoxPlatform(VMPlatform):
         "escape hatch."
     )
 
+    def __init__(self, owner_name: str, config: Mapping[str, object]) -> None:
+        super().__init__(owner_name, config)
+        # The op client, built on FIRST need by :meth:`_api` and reused
+        # for the instance's remaining ops.
+        self._api_cached: ProxmoxAPI | None = None
+
     @classmethod
     def validate_config(
         cls, owner: str, config: Mapping[str, object]
@@ -108,10 +114,8 @@ class ProxmoxPlatform(VMPlatform):
 
     def _build_api(self, token_value: str) -> ProxmoxAPI:
         """Construct an API client for a resolved token. Shared by the op
-        client (which reads the token from the bound resolver) and
-        ``runup`` (which reads it from the context's resolved secrets), so
-        the two stages build the client the same way from the same
-        value."""
+        client and ``runup``, so the two stages build the client the same
+        way from the same value."""
         return ProxmoxAPI(
             api_url=str(self._cfg("api_url")),
             token_id=str(self._cfg("token_id")),
@@ -119,25 +123,19 @@ class ProxmoxPlatform(VMPlatform):
             verify_ssl=bool(self._cfg("verify_ssl", True)),
         )
 
-    @property
-    def _api(self) -> ProxmoxAPI:
-        api: ProxmoxAPI | None = getattr(self, "_api_cached", None)
+    def _api(self, ctx: RunContext) -> ProxmoxAPI:
+        """The op client, built on first need from the context's scoped
+        secret delivery (``ctx.secret``, the declare/receive contract:
+        the instance never holds a resolver or a raw reader, only the
+        client derived from the delivered value) and cached for the
+        instance's remaining ops. A context assembled without resolved
+        secrets (inspection?) is the accessor's typed ``ConfigError``;
+        an undeclared or unresolved name is scoped delivery's own typed
+        refusal."""
+        api = self._api_cached
         if api is None:
             token_secret = str(self._cfg("token_secret", DEFAULT_TOKEN_SECRET))
-            if self.resolver is None:
-                # The composition root constructs the platform against
-                # the operation's resolver; reaching here means a caller
-                # constructed directly (inspection?) and then invoked an
-                # op that needs the API token.
-                raise StateError(
-                    f"the Proxmox platform for site '{self.site_name}' was "
-                    f"constructed without a resolver; ops need the "
-                    f"'{token_secret}' API token"
-                )
-            # From the operation's boundary resolve pass; the resolver
-            # raises a typed error if the pass hasn't run (an op must
-            # never trigger a prompt).
-            api = self._build_api(self.resolver.get(token_secret))
+            api = self._build_api(ctx.secret(token_secret))
             self._api_cached = api
         return api
 
@@ -151,25 +149,22 @@ class ProxmoxPlatform(VMPlatform):
         outage never blocks work a valid token would have done.
 
         Post-resolve and read-only: the token comes from the context's
-        resolved secrets (``ctx.secrets``), the same value the op client
-        reads via the bound resolver. runup builds a throwaway client for
-        the check and leaves ``self`` untouched."""
+        resolved secrets (``ctx.secret(name)``), the same read the op
+        client makes at op time. runup builds a throwaway
+        client for the check and leaves ``self`` untouched. A context
+        with no resolved secrets at all (inspection only?) is the
+        accessor's typed ``ConfigError``, so every capability's runup
+        fails that case the same way."""
         from agentworks import output
         from agentworks.errors import TokenRejectedError
 
         token_secret = str(self._cfg("token_secret", DEFAULT_TOKEN_SECRET))
-        if ctx.secrets is None:
-            # ConfigError, not the op path's StateError, for parity with
-            # every capability's runup: the git-credential base runup raises
-            # the same type for this same "context assembled without a
-            # resolve pass" case, so all runups fail the same way.
-            raise ConfigError(
-                f"vm-site '{self.site_name}': cannot check the Proxmox API "
-                f"token without resolved secrets in the run context "
-                f"(inspection only?)"
-            )
+        # Read the token before announcing the check, so a context with
+        # no resolved secrets fails before the banner (the old guard's
+        # error-path ordering).
+        token = ctx.secret(token_secret)
         output.detail(f"Performing runup test for vm-site/{self.site_name}...")
-        api = self._build_api(ctx.secrets.get(token_secret))
+        api = self._build_api(token)
         try:
             api.next_id()
         except ProxmoxAPIError as e:
@@ -219,7 +214,7 @@ class ProxmoxPlatform(VMPlatform):
             )
         return int(vmid)
 
-    def create(self, request: ProvisionRequest) -> ProvisionResult:
+    def create(self, request: ProvisionRequest, ctx: RunContext) -> ProvisionResult:
         node = str(self._cfg("node"))
         template_vmid = int(str(self._cfg("template_vmid")))
         pool = str(self._cfg("pool", "agentworks"))
@@ -233,7 +228,7 @@ class ProxmoxPlatform(VMPlatform):
             if request.system_slug
             else request.vm_name
         )
-        if self._name_exists(node, backend_name):
+        if self._name_exists(node, backend_name, ctx):
             raise StateError(
                 f"a Proxmox VM named '{backend_name}' already exists on "
                 f"node {node}",
@@ -245,17 +240,17 @@ class ProxmoxPlatform(VMPlatform):
         output.info(f"Provisioning Proxmox VM '{backend_name}' on node {node}...")
 
         # 1. Get next VMID
-        newid = self._api.next_id()
+        newid = self._api(ctx).next_id()
         output.detail(f"Allocated VMID: {newid}")
 
         # 2. Clone template into the agentworks pool
         output.detail(f"Cloning template {template_vmid}...")
-        upid = self._api.clone_vm(
+        upid = self._api(ctx).clone_vm(
             node, template_vmid, newid, backend_name,
             storage=storage,
             pool=pool,
         )
-        self._api.wait_for_task(node, upid)
+        self._api(ctx).wait_for_task(node, upid)
         output.detail("Clone complete")
 
         # 3. Configure VM resources
@@ -277,26 +272,26 @@ class ProxmoxPlatform(VMPlatform):
         vm_config["cpu"] = "host"
 
         output.detail("Configuring VM...")
-        self._api.configure_vm(node, newid, **vm_config)
+        self._api(ctx).configure_vm(node, newid, **vm_config)
 
         # 4. Resize disk if requested
         if request.disk_gib is not None:
             output.detail(f"Resizing disk to {request.disk_gib}G...")
-            self._api.resize_disk(node, newid, "scsi0", f"{request.disk_gib}G")
+            self._api(ctx).resize_disk(node, newid, "scsi0", f"{request.disk_gib}G")
 
         # 5. Start VM
         output.detail("Starting VM...")
-        upid = self._api.start_vm(node, newid)
-        self._api.wait_for_task(node, upid)
+        upid = self._api(ctx).start_vm(node, newid)
+        self._api(ctx).wait_for_task(node, upid)
 
         # 6. Wait for guest agent and get VM IP
         output.detail("Waiting for guest agent...")
-        ip = self._wait_for_guest_ip(node, newid)
+        ip = self._wait_for_guest_ip(node, newid, ctx)
         output.detail(f"VM IP: {ip}")
 
         # 7. Wait for cloud-init to finish (releases apt lock)
         output.detail("Waiting for cloud-init...")
-        self._wait_for_cloud_init(node, newid)
+        self._wait_for_cloud_init(node, newid, ctx)
 
         # 8. Run bootstrap script via guest agent
         bootstrap_complete = False
@@ -311,7 +306,7 @@ class ProxmoxPlatform(VMPlatform):
                 hostname=request.hostname,
                 swap=request.swap_gib if request.swap_gib is not None else 0,
             )
-            tailscale_ip = self._run_bootstrap_via_agent(node, newid, bootstrap)
+            tailscale_ip = self._run_bootstrap_via_agent(node, newid, bootstrap, ctx)
             bootstrap_complete = tailscale_ip is not None
             if tailscale_ip:
                 output.detail(f"Tailscale IP: {tailscale_ip}")
@@ -330,57 +325,57 @@ class ProxmoxPlatform(VMPlatform):
             tailscale_ip=tailscale_ip,
         )
 
-    def _name_exists(self, node: str, backend_name: str) -> bool:
+    def _name_exists(self, node: str, backend_name: str, ctx: RunContext) -> bool:
         """Pre-flight: does a VM with this name exist on the node?"""
         try:
-            existing = self._api.list_vms(node)
+            existing = self._api(ctx).list_vms(node)
         except ProxmoxAPIError:
             return False
         return any(entry.get("name") == backend_name for entry in existing)
 
-    def start(self, vm: VMRow) -> None:
+    def start(self, vm: VMRow, ctx: RunContext) -> None:
         # Idempotency guard (the ABC flags start): the Proxmox
         # status/start endpoint errors on an already-running VM.
-        if self.status(vm) == VMStatus.RUNNING:
+        if self.status(vm, ctx) == VMStatus.RUNNING:
             output.detail(f"Proxmox VM '{vm.name}' is already running")
             return
         node = self._vm_node(vm)
-        upid = self._api.start_vm(node, self._vmid(vm))
-        self._api.wait_for_task(node, upid)
+        upid = self._api(ctx).start_vm(node, self._vmid(vm))
+        self._api(ctx).wait_for_task(node, upid)
 
-    def stop(self, vm: VMRow) -> None:
+    def stop(self, vm: VMRow, ctx: RunContext) -> None:
         # Idempotency guard (the ABC flags stop): stopping an
         # already-stopped VM must land in the stopped state, not error.
-        if self.status(vm) == VMStatus.STOPPED:
+        if self.status(vm, ctx) == VMStatus.STOPPED:
             output.detail(f"Proxmox VM '{vm.name}' is already stopped")
             return
         node = self._vm_node(vm)
-        upid = self._api.stop_vm(node, self._vmid(vm))
-        self._api.wait_for_task(node, upid)
+        upid = self._api(ctx).stop_vm(node, self._vmid(vm))
+        self._api(ctx).wait_for_task(node, upid)
 
-    def delete(self, vm: VMRow) -> None:
+    def delete(self, vm: VMRow, ctx: RunContext) -> None:
         vmid = self._vmid(vm)
         node = self._vm_node(vm)
 
         # Stop if running
         try:
-            status = self._api.vm_status(node, vmid)
+            status = self._api(ctx).vm_status(node, vmid)
             if status.get("status") == "running":
-                upid = self._api.stop_vm(node, vmid)
-                self._api.wait_for_task(node, upid)
+                upid = self._api(ctx).stop_vm(node, vmid)
+                self._api(ctx).wait_for_task(node, upid)
         except ProxmoxAPIError:
             pass  # VM may already be gone
 
         # Delete VM
         try:
-            upid = self._api.delete_vm(node, vmid)
-            self._api.wait_for_task(node, upid)
+            upid = self._api(ctx).delete_vm(node, vmid)
+            self._api(ctx).wait_for_task(node, upid)
         except ProxmoxAPIError:
             pass  # best-effort
 
-    def status(self, vm: VMRow) -> VMStatus:
+    def status(self, vm: VMRow, ctx: RunContext) -> VMStatus:
         try:
-            result = self._api.vm_status(self._vm_node(vm), self._vmid(vm))
+            result = self._api(ctx).vm_status(self._vm_node(vm), self._vmid(vm))
         except ProxmoxAPIError:
             return VMStatus.UNKNOWN
         pve_status = result.get("status", "")
@@ -402,13 +397,13 @@ class ProxmoxPlatform(VMPlatform):
     # -- Helpers ---------------------------------------------------------------
 
     def _wait_for_cloud_init(
-        self, node: str, vmid: int, *, timeout: int = 300
+        self, node: str, vmid: int, ctx: RunContext, *, timeout: int = 300
     ) -> None:
         """Wait for cloud-init to finish inside the VM."""
         deadline = time.monotonic() + timeout
         while time.monotonic() < deadline:
             try:
-                result = self._api.guest_agent_exec_wait(
+                result = self._api(ctx).guest_agent_exec_wait(
                     node, vmid, "/usr/bin/cloud-init", ["status", "--wait"],
                     timeout=60,
                 )
@@ -420,13 +415,13 @@ class ProxmoxPlatform(VMPlatform):
         # Don't fail: cloud-init may not be installed or may have already finished
 
     def _wait_for_guest_ip(
-        self, node: str, vmid: int, *, timeout: int = 120
+        self, node: str, vmid: int, ctx: RunContext, *, timeout: int = 120
     ) -> str:
         """Poll the guest agent until it reports a non-loopback IPv4 address."""
         deadline = time.monotonic() + timeout
         while time.monotonic() < deadline:
             try:
-                interfaces = self._api.guest_agent_network(node, vmid)
+                interfaces = self._api(ctx).guest_agent_network(node, vmid)
                 for iface in interfaces:
                     if iface.get("name") == "lo":
                         continue
@@ -443,7 +438,7 @@ class ProxmoxPlatform(VMPlatform):
         )
 
     def _run_bootstrap_via_agent(
-        self, node: str, vmid: int, script: str
+        self, node: str, vmid: int, script: str, ctx: RunContext
     ) -> str | None:
         """Write and run the bootstrap script via the guest agent.
 
@@ -452,13 +447,13 @@ class ProxmoxPlatform(VMPlatform):
         from agentworks.capabilities.vm_platform.bootstrap_script import parse_bootstrap_output
 
         # Write script to VM via guest agent file-write
-        self._api.guest_agent_file_write(
+        self._api(ctx).guest_agent_file_write(
             node, vmid, "/tmp/agentworks-bootstrap.sh", script
         )
 
         # Run bootstrap (long-running: installs packages, joins tailscale)
         # bash is invoked explicitly so the script doesn't need +x
-        result = self._api.guest_agent_exec_wait(
+        result = self._api(ctx).guest_agent_exec_wait(
             node, vmid, "/bin/bash", ["/tmp/agentworks-bootstrap.sh"],
             timeout=600,
         )

@@ -1,4 +1,4 @@
-"""VM lifecycle management -- create, list, start, stop, delete."""
+"""VM lifecycle management: create, list, start, stop, delete."""
 
 from __future__ import annotations
 
@@ -30,15 +30,14 @@ from agentworks.vms.initializer import (
     announce_git_credentials,
     initialize_vm,
     rejoin_tailscale,
-    resolve_git_credential_providers,
     run_initialization,
     verify_tailscale_available,
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable, Iterator, Mapping, Sequence
+    from collections.abc import Callable, Iterator, Sequence
 
-    from agentworks.capabilities.git_credential.base import GitCredentialProvider
+    from agentworks.capabilities.base import OperationScope
     from agentworks.capabilities.vm_platform import VMPlatform
     from agentworks.config import Config
     from agentworks.db import Database, VMRow, WorkspaceRow
@@ -47,6 +46,7 @@ if TYPE_CHECKING:
     from agentworks.secrets import SecretTarget
     from agentworks.secrets.base import SecretDecl
     from agentworks.secrets.resolver import Resolver
+    from agentworks.vms.nodes import LiveVMNode
 
 
 class _VmAdminEnvScopes(NamedTuple):
@@ -197,105 +197,20 @@ def _resolve_system_slug(db: Database) -> str | None:
     return answer
 
 
-def bind_platform(
+def ensure_active(
+    db: Database,
     config: Config,
     vm: VMRow,
-    *,
-    registry: Registry | None = None,
-    resolver: Resolver | None = None,
-    prepare: bool = True,
-    targets: Sequence[SecretTarget] = (),
-) -> VMPlatform:
-    """Composition-root helper: bind a VM's platform through its site.
-
-    Runs the capability lifecycle's composition-root ordering once:
-    registry (built here unless the caller already has one) -> construct
-    (cheap; the site's declared config secrets register on the
-    operation's resolver, nothing resolves) -> preflight -> the
-    operation's one resolve pass at the preflight boundary (one prompt
-    session covering the union of everything registered). Call ONCE at
-    a VM-touching command's entry and thread the bound platform down;
-    the gates (:func:`ensure_active` / :func:`keep_active`) take it as
-    a parameter and never resolve or bind anything themselves.
-
-    ``targets`` folds the command's runtime env chain into the same
-    pass: every secret the targets' merged env references (the shell /
-    exec / session-create roots) registers before the boundary, so the
-    workload's env secrets and the site's config secrets are ONE prompt
-    session. Callers read the mapping back via the resolver they passed
-    in (``resolver.values`` feeds ``compose_env``).
-
-    ``prepare=False`` returns the constructed instance without the
-    preflight + resolve boundary, for the roots that interleave other
-    participating resources' preflights first (``create_vm`` and
-    ``rekey_vm`` add the vm-template's Tailscale-key prediction before
-    the one resolve pass). Those callers own running the boundary.
-    """
-    from agentworks.bootstrap import build_registry
-    from agentworks.secrets.resolver import Resolver
-    from agentworks.vms.sites import platform_for
-
-    if registry is None:
-        registry = build_registry(config)
-    if resolver is None:
-        resolver = Resolver(config, registry)
-    platform = platform_for(vm, registry, resolver=resolver)
-    if targets:
-        resolver.register_targets(targets)
-    if prepare:
-        platform.preflight(RunContext(config=config))
-        resolver.resolve()
-    return platform
-
-
-def bind_platforms(
-    config: Config,
-    vms: Iterable[VMRow],
-    *,
-    registry: Registry | None = None,
-) -> list[tuple[VMRow, VMPlatform]]:
-    """Multi-VM :func:`bind_platform`: one registry build (lazy, so an
-    empty VM set stays a no-op), one bound platform per distinct SITE
-    shared across its VMs (a platform instance is site-bound),
-    deduplicated by VM name, preserving first-encounter order. ONE
-    resolver spans the whole batch: every site's platform preflights,
-    then a single resolve pass covers the union of their declared
-    secrets; prompt-once holds across sites, not just within one.
-    Feed the result to :func:`keep_actives`.
-    """
-    from agentworks.bootstrap import build_registry
-    from agentworks.secrets.resolver import Resolver
-
-    seen: set[str] = set()
-    by_site: dict[str, VMPlatform] = {}
-    pairs: list[tuple[VMRow, VMPlatform]] = []
-    resolver: Resolver | None = None
-    for vm in vms:
-        if vm.name in seen:
-            continue
-        seen.add(vm.name)
-        if registry is None:
-            registry = build_registry(config)
-        if resolver is None:
-            resolver = Resolver(config, registry)
-        if vm.site not in by_site:
-            by_site[vm.site] = bind_platform(
-                config, vm, registry=registry, resolver=resolver, prepare=False
-            )
-        pairs.append((vm, by_site[vm.site]))
-    # The batch's preflight boundary: every distinct site's platform
-    # preflights, then the one resolve pass for the union.
-    for platform in by_site.values():
-        platform.preflight(RunContext(config=config))
-    if resolver is not None:
-        resolver.resolve()
-    return pairs
-
-
-def ensure_active(
-    db: Database, config: Config, vm: VMRow, platform: VMPlatform
+    platform: VMPlatform,
+    ctx: RunContext,
 ) -> None:
     """Respect a manual stop; otherwise start on demand.
+
+    With :func:`keep_active` this is the imperative activation-gate
+    pair. Every command root has migrated onto the orchestrated gate
+    (``orchestration.activation``); :func:`keep_active` is the pair's
+    only remaining caller (see its docstring for the recorded interim
+    holds), and both retire with those holds.
 
     Fast path: a Tailscale reachability probe (cheap, no cloud API)
     short-circuits the common case, keeping backend round trips off the
@@ -304,7 +219,9 @@ def ensure_active(
     to reach the refusal, so the likely-stopped case asks the backend
     directly (an out-of-band start still proceeds via the observed
     RUNNING). ``platform`` is the BOUND platform from the caller's
-    composition root (:func:`bind_platform`).
+    already-run composition root, and ``ctx`` that composition's
+    op-start context (the platform's power ops read any op secret via
+    ``ctx.secret``, scoped delivery, the same as everywhere else).
     """
     if (
         not vm.operator_stopped
@@ -312,7 +229,7 @@ def ensure_active(
         and _is_tailscale_reachable(vm.tailscale_host)
     ):
         return
-    observed = platform.status(vm)
+    observed = platform.status(vm, ctx)
     if observed in (VMStatus.STOPPED, VMStatus.DEALLOCATED):
         # Re-read the intent flag: the caller-loaded row may predate a
         # concurrent `vm stop`/`vm start` in another terminal, and
@@ -333,7 +250,7 @@ def ensure_active(
                 hint=f"start it with: agw vm start {vm.name}",
             )
         output.info(f"VM '{vm.name}' is {observed.value}. Starting...")
-        platform.start(vm)
+        platform.start(vm, ctx)
         # Hold while tailscaled reattaches: a freshly booted WSL2
         # distro must not idle out during the handshake wait.
         with platform.vm_active(vm, config=config):
@@ -344,36 +261,37 @@ def ensure_active(
 
 @contextlib.contextmanager
 def keep_active(
-    db: Database, config: Config, vm: VMRow, platform: VMPlatform
+    db: Database,
+    config: Config,
+    vm: VMRow,
+    platform: VMPlatform,
+    ctx: RunContext,
 ) -> Iterator[None]:
     """Gate (:func:`ensure_active`), then hold (``vm_active``) for the
     context's duration.
 
-    Takes the BOUND platform from the composition root: binding may
-    need resolved config secrets, which only the composition root's
-    single resolve pass has. WSL2's ``vm_active`` spawns a keepalive
-    subprocess anchoring the distro against ``vmIdleTimeout``; the
-    other platforms' default hold is a no-op.
+    Takes the BOUND platform from the caller's already-run composition
+    root (binding may need resolved config secrets, which only that
+    root's single resolve pass has) plus that composition's op-start
+    ``ctx`` for the gate's power ops. WSL2's ``vm_active`` spawns a
+    keepalive subprocess anchoring the distro against
+    ``vmIdleTimeout``; the other platforms' default hold is a no-op.
+
+    The recorded INTERIM callers, each a handed-in-platform hold
+    inside an orchestrated caller's composition (rebuilding a boundary
+    there would re-resolve mid-command), and the reason this pair
+    outlives the resolver retirement's caller drain:
+
+    - the nested-teardown paths (``agents.manager.delete_agent`` /
+      ``workspaces.manager.delete_workspace`` with ``platform=`` from
+      a pending node's rollback), closing when the session-create
+      unwind hands a node instead of a platform;
+    - ``vms.initializer.initialize_vm``'s whole-init hold (the
+      platform handed in from ``create_vm``'s composition root; the
+      initializer internals are still imperative and hold no node).
     """
-    ensure_active(db, config, vm, platform)
+    ensure_active(db, config, vm, platform, ctx)
     with platform.vm_active(vm, config=config):
-        yield
-
-
-@contextlib.contextmanager
-def keep_actives(
-    db: Database,
-    config: Config,
-    pairs: Iterable[tuple[VMRow, VMPlatform]],
-) -> Iterator[None]:
-    """Multi-VM :func:`keep_active` over ``(vm, bound platform)`` pairs
-    (from :func:`bind_platforms`), entered via ``ExitStack`` so a
-    command touching multiple VMs (``session list --status``,
-    ``session stop --all``) keeps all of them anchored.
-    """
-    with contextlib.ExitStack() as stack:
-        for vm, platform in pairs:
-            stack.enter_context(keep_active(db, config, vm, platform))
         yield
 
 
@@ -436,15 +354,33 @@ def create_vm(
     validate_admin_username(resolved_admin_username)
 
     verify_tailscale_available()
+    from agentworks.capabilities.base import OperationScope, ScopeLevel
+    from agentworks.git_credentials.nodes import git_credential_node
+    from agentworks.orchestration.readiness import preflight_all
+    from agentworks.orchestration.secrets import ScopedSecrets, secret_union
+    from agentworks.orchestration.unwind import RealizationLog
+    from agentworks.orchestration.walk import walk
     from agentworks.secrets.resolver import Resolver
-
-    # Construct the git-credential providers against the operation's
-    # resolver up front, so their token secrets join the one boundary
-    # resolve below (and each can runup() its token afterward).
-    resolver = Resolver(config, registry)
-    providers = resolve_git_credential_providers(
-        registry, admin.git_credentials, resolver
+    from agentworks.vms.nodes import (
+        pending_vm_node,
+        vm_site_node,
+        vm_template_node,
     )
+
+    resolver = Resolver(config, registry)
+
+    # BUILD: the command names its direct resources (the resolved
+    # template, the chosen site, the admin template's declared
+    # credentials) and constructs the PENDING VM node up front with
+    # those edges attached; the walk assembles the graph. Provider
+    # and platform construction is cheap and touches no secret
+    # machinery; the walk union below is the boundary's source.
+    # Nothing resolves yet.
+    cred_nodes = tuple(
+        git_credential_node(registry, cred_name)
+        for cred_name in admin.git_credentials
+    )
+    providers = {node.provider.owner_name: node.provider for node in cred_nodes}
 
     # System slug: first interactive create prompts once (a blank
     # answer is final; see _resolve_system_slug). Runs before any
@@ -452,31 +388,34 @@ def create_vm(
     # leaves nothing behind.
     slug = _resolve_system_slug(db)
 
-    # The capability composition root: construct the site's platform
-    # against the operation's resolver (cheap; the site's config secrets
-    # register, nothing resolves yet), preflight every participating
-    # resource: the vm-template predicts its Tailscale key can resolve
-    # (the key is the template's responsibility, not the site's) and the
-    # platform checks its world; then run the operation's ONE resolve
-    # pass at the preflight boundary: tailscale auth, git-credential
-    # tokens, and the site's config secrets (proxmox's API token) in a
-    # single prompt session. Provisioning is hermetic: operator
-    # [admin.env] / [vm_templates.*.env] secrets are NOT prompted here:
-    # they're not used until runtime shells, which perform their own
-    # resolve at their composition root.
-    from agentworks.vms.sites import resolve_site
-    from agentworks.vms.templates import preflight_vm_template
+    template_node = vm_template_node(vm_tmpl, registry)
+    site_node = vm_site_node(registry, site)
+    pending_vm = pending_vm_node(db, vm_name, template_node, site_node, cred_nodes)
+    nodes = walk(pending_vm)
+    for secret_name in secret_union(nodes):
+        resolver.register_name(secret_name)
 
-    platform_obj = resolve_site(site, registry, resolver=resolver)
+    scope = OperationScope(level=ScopeLevel.VM, system_slug=slug, vm=vm_name)
 
+    def scoped_ctx(secret_names: tuple[str, ...]) -> RunContext:
+        return RunContext(
+            config=config,
+            operation_scope=scope,
+            secrets=ScopedSecrets(resolver.values, secret_names),
+        )
+
+    # PREFLIGHT-ALL, then the one boundary resolve: tailscale auth,
+    # git-credential tokens, and the site's config secrets (proxmox's
+    # API token) in a single prompt session. Provisioning is hermetic:
+    # operator [admin.env] / [vm_templates.*.env] secrets are NOT
+    # prompted here (they are runtime inputs, resolved at the shells'
+    # own composition roots), which is why the template node's
+    # secret_refs carry only the Tailscale key.
     output.phase("Preflight")
     output.detail(f"Checking vm-site/{site}...")
     output.detail(f"Checking vm-template/{vm_tmpl.name}...")
     announce_git_credentials(providers)
-    preflight_vm_template(vm_tmpl, resolver)
-    platform_obj.preflight(RunContext(config=config))
-    for provider in providers.values():
-        provider.preflight(RunContext(config=config))
+    preflight_all(nodes, RunContext(config=config, operation_scope=scope))
 
     output.phase("Resolving Secrets")
     resolver.resolve()
@@ -485,12 +424,22 @@ def create_vm(
     # Provisioning-phase runup: authenticate the platform's own
     # credential (proxmox API token) before create() mutates anything. A
     # definitive rejection aborts here, before the DB row or any backend
-    # resource exists. Runup is deferred and announced inline (no phase
-    # of its own); lima/wsl2/azure have no token, so this is a silent
-    # no-op for them.
-    platform_obj.runup(RunContext(config=config, secrets=resolver))
-    tailscale_auth_key = resolver.get(vm_tmpl.tailscale_auth_key)
-    git_tokens = _resolve_git_tokens(providers, resolver)
+    # resource exists (the FATAL policy: nothing realized, nothing to
+    # unwind). Runup is deferred and announced inline (no phase of its
+    # own); lima/wsl2/azure have no token, so this is a silent no-op for
+    # them. The credentials' write-step runup stays deferred into
+    # initialization, under the skip-and-degrade policy.
+    site_node.runup(scoped_ctx(site_node.secret_refs()))
+    tailscale_auth_key = scoped_ctx(template_node.secret_refs()).secret(
+        vm_tmpl.tailscale_auth_key
+    )
+    # Each credential's token, read through its node's SCOPED delivery.
+    git_tokens = {
+        node.provider.owner_name: scoped_ctx(node.secret_refs()).secret(
+            node.provider.secret_name
+        )
+        for node in cred_nodes
+    }
 
     # The VM's OS hostname, computed once at create time and recorded on the
     # row: {slug}-{name} with a slug, the bare name without. Bounded by
@@ -498,7 +447,12 @@ def create_vm(
     # inside the 63-char hostname-label and Azure 64-char limits.
     hostname = f"{slug}-{vm_name}" if slug else vm_name
 
-    # Create DB record with as-provisioned resource values.
+    # Create DB record with as-provisioned resource values. This is the
+    # pending VM's realization artifact (what teardown deletes), so the
+    # log records it the moment the row exists: a provisioning failure
+    # below unwinds exactly the row (today's rollback, relocated onto
+    # the node), and nothing past provisioning is rollback-tracked (an
+    # initialized-but-partial VM is kept, debuggable, reinit-able).
     db.insert_vm(
         vm_name,
         site=site,
@@ -510,23 +464,12 @@ def create_vm(
         swap_gib=vm_tmpl.swap,
         admin_username=resolved_admin_username,
     )
-
-    # -- Provisioning --
-    # If this fails, nothing was created on the remote host (or the remote
-    # couldn't be reached), so we clean up the DB record.
-    def _safe_delete_vm_row() -> None:
-        # Best-effort rollback: a DB error here (e.g. lock contention) must
-        # not mask the KeyboardInterrupt / provisioning exception that
-        # triggered the rollback.
-        try:
-            db.delete_vm(vm_name)
-        except Exception as cleanup_err:
-            output.warn(
-                f"rollback: failed to delete DB record for vm '{vm_name}': {cleanup_err}"
-            )
+    log = RealizationLog()
+    log.mark_realized(pending_vm)
 
     # The platform instance was bound (and preflighted, and its secrets
     # resolved) at the composition root above; dispatch is just ops now.
+    platform_obj = site_node.platform
     from agentworks.capabilities.vm_platform import ProvisionRequest
 
     request = ProvisionRequest(
@@ -543,27 +486,35 @@ def create_vm(
         swap_gib=vm_tmpl.swap,
     )
 
+    # The op-start context for the platform's ops (create here; the
+    # initializer's keep_active hold below): secrets scoped to the
+    # site's declared names.
+    platform_ctx = scoped_ctx(site_node.secret_refs())
+
     output.detail(f"Creating VM '{vm_name}' on vm-site '{site}'...")
     try:
-        result = platform_obj.create(request)
+        result = platform_obj.create(request, platform_ctx)
     except KeyboardInterrupt:
         output.warn(f"Cancelling vm create '{vm_name}'... rolling back.")
-        _safe_delete_vm_row()
+        log.unwind()
         raise
     except UserAbort:
         # No prompt lives in this span today (the boundary resolve ran
         # at the composition root above), but an operator abort must
         # never downgrade to a ProvisioningError; roll back like the
         # KeyboardInterrupt twin above.
-        _safe_delete_vm_row()
+        log.unwind()
         raise
     except Exception as e:
-        _safe_delete_vm_row()
+        log.unwind()
         raise ProvisioningError(
             f"provisioning failed: {e}",
             entity_kind="vm",
             entity_name=vm_name,
         ) from e
+    # The unwind window closes here: provisioning succeeded, the VM
+    # exists, and initialization failures keep it (with recovery
+    # guidance), exactly as before.
 
     # Persist the platform's opaque identifiers verbatim; the owning
     # platform is the column's only reader.
@@ -591,6 +542,7 @@ def create_vm(
             exec_target=result.native_transport,
             providers=providers,
             platform=platform_obj,
+            platform_ctx=platform_ctx,
             admin_username=resolved_admin_username,
             tailscale_auth_key=tailscale_auth_key,
             git_tokens=git_tokens,
@@ -655,7 +607,7 @@ def create_vm(
     vm = db.get_vm(vm_name)
     assert vm is not None
     if vm.init_status == InitStatus.PARTIAL.value:
-        output.info(f"VM '{vm_name}' is ready (with warnings -- see above)")
+        output.info(f"VM '{vm_name}' is ready (with warnings, see above)")
     else:
         output.info(f"VM '{vm_name}' is ready!")
 
@@ -699,12 +651,19 @@ def list_vms(db: Database, *, names_only: bool = False) -> None:
 
 
 def describe_vm(db: Database, config: Config, name: str) -> None:
-    """Show detailed information about a VM."""
+    """Show detailed information about a VM.
+
+    Orchestrated, composition only (:func:`_live_vm_boundary`): the
+    graph derives from the VM's row and the backend reads drive
+    through the node's held platform. NO activation gate ever opens:
+    describe reads state (one status probe is its op) and inspecting
+    a stopped VM must render "(manual)" / "(idle)", never start it.
+    """
     vm = _require_vm(db, name)
 
-    # Bind through the site so the platform (the site's capability) and
-    # the backend-side identity render polymorphically. Describe is an
-    # inspection command and a stranded row is exactly the one an
+    # Compose through the site so the platform (the site's capability)
+    # and the backend-side identity render polymorphically. Describe is
+    # an inspection command and a stranded row is exactly the one an
     # operator wants to look at, so a stranded site degrades to a
     # warning (with the manifest hint) rather than erroring: the row's
     # own fields still render.
@@ -719,23 +678,24 @@ def describe_vm(db: Database, config: Config, name: str) -> None:
     try:
         site_decl = lookup_site(vm.site, registry)
         # Known as soon as the declaration resolves: keep it alive even
-        # if the bind below degrades.
+        # if the boundary below degrades.
         site_platform = site_decl.platform
-        platform = bind_platform(config, vm, registry=registry)
+        vm_node, ops_ctx = _live_vm_boundary(db, config, vm, registry=registry)
+        platform = vm_node.site.platform
     except UserAbort:
         # Ctrl-C at the boundary's secret prompt aborts describe too;
         # a half-report would read as the command having succeeded.
         raise
     except AgentworksError as e:
-        # Inspection degrades on ANY typed bind/preflight failure (a
-        # stranded site's ConfigError, a missing tool's
+        # Inspection degrades on ANY typed build/preflight/resolve
+        # failure (a stranded site's ConfigError, a missing tool's
         # ConnectivityError, an unresolvable secret): describe is the
         # command an operator reaches for on exactly such a row, so the
         # row's own fields must still render.
         output.warn(f"{e}" + (f"\n{e.hint}" if e.hint else ""))
     else:
         # The backend reads degrade under the same discipline as the
-        # bind above: a live backend flake (API hiccup, SSH timeout)
+        # boundary above: a live backend flake (API hiccup, SSH timeout)
         # must not crash the report: a flaky backend is exactly when
         # an operator reaches for describe, and the row's static fields
         # still render with '-' placeholders.
@@ -743,7 +703,7 @@ def describe_vm(db: Database, config: Config, name: str) -> None:
             backend_label = platform.display_backend_name(vm)
             # Live observed status, paired with operator intent: a
             # manual stop reads differently from an idle timeout.
-            observed = platform.status(vm)
+            observed = platform.status(vm, ops_ctx)
             status_label = observed.value
             if observed in (VMStatus.STOPPED, VMStatus.DEALLOCATED):
                 status_label += " (manual)" if vm.operator_stopped else " (idle)"
@@ -885,6 +845,12 @@ def shell_vm(
     When ``workspace_name`` is set, the shell ``cd``s into the workspace
     directory and the workspace template's env joins the env chain. The
     workspace must belong to this VM.
+
+    Orchestrated (:func:`gated_vm_boundary`): the graph derives from
+    the VM's row, the activation gate replaces this command's
+    ``keep_active`` use (opening BEFORE the preflight sweep; its
+    just-in-time values seed the boundary resolver), and the
+    held-active span covers the whole interactive session.
     """
     import shlex
     import sys
@@ -919,50 +885,49 @@ def shell_vm(
             ),
         )
 
-    # The composition root: the admin shell's env-chain secrets join
-    # the bind's ONE boundary resolve (site secrets + env secrets, one
-    # prompt session), and the platform's preflight (missing tool,
-    # stranded site, unresolvable secret) fails before any prompt. The
-    # same scope dicts feed both the SecretTarget (via
-    # _vm_secret_target) and compose_env so the two consumers can't
-    # drift. Crucially the vm scope comes from vm.template (DB row),
-    # not the config-default template, which may not match and would
-    # silently route the wrong env into a shell on a
-    # non-default-template VM.
+    # The orchestrated composition root (gated_vm_boundary): the admin
+    # shell's env-chain secrets join the ONE boundary resolve (site
+    # secrets + env secrets, one prompt session), and every node's
+    # preflight (missing tool, stranded site, unresolvable secret)
+    # fails before any prompt. The same scope dicts feed both the
+    # SecretTarget (via _vm_secret_target) and compose_env so the two
+    # consumers can't drift. Crucially the vm scope comes from
+    # vm.template (DB row), not the config-default template, which may
+    # not match and would silently route the wrong env into a shell on
+    # a non-default-template VM.
     from agentworks.bootstrap import build_registry
-    from agentworks.secrets.resolver import Resolver
 
     registry = build_registry(config)
     scopes = _resolve_vm_admin_env_scopes(registry, vm, ws=ws)
-    resolver = Resolver(config, registry)
-    bound = bind_platform(
-        config, vm, registry=registry, resolver=resolver,
-        targets=[_vm_secret_target(scopes, label=f"vm-shell={vm.name}")],
-    )
-    values = resolver.values
-
-    from agentworks.vms.sites import site_platform_name
-
-    ctx = ResourceContext(
-        vm_name=vm.name,
-        platform=site_platform_name(vm.site, registry),
-        site=vm.site,
-        user=vm.admin_username,
-        workspace_name=ws.name if ws else None,
-        workspace_dir=ws.workspace_path if ws else None,
-    )
-    env = compose_env(
-        values=values,
-        ctx=ctx,
-        vm=scopes.vm,
-        workspace=scopes.workspace,
-        admin=scopes.admin,
-    )
 
     with contextlib.ExitStack() as stack:
-        stack.enter_context(keep_active(db, config, vm, bound))
+        vm_node, resolver = stack.enter_context(
+            gated_vm_boundary(
+                db, config, registry, vm,
+                targets=[_vm_secret_target(scopes, label=f"vm-shell={vm.name}")],
+            )
+        )
+
+        from agentworks.vms.sites import site_platform_name
+
+        ctx = ResourceContext(
+            vm_name=vm.name,
+            platform=site_platform_name(vm.site, registry),
+            site=vm.site,
+            user=vm.admin_username,
+            workspace_name=ws.name if ws else None,
+            workspace_dir=ws.workspace_path if ws else None,
+        )
+        env = compose_env(
+            values=resolver.values,
+            ctx=ctx,
+            vm=scopes.vm,
+            workspace=scopes.workspace,
+            admin=scopes.admin,
+        )
+
         target = (
-            native_transport(vm, bound, config, stack=stack)
+            native_transport(vm, vm_node.site.platform, config, stack=stack)
             if platform_transport
             else transport(vm, config)
         )
@@ -989,6 +954,10 @@ def exec_vm(
     When ``workspace_name`` is set, the command runs from the workspace
     directory and the workspace template's env joins the env chain. The
     workspace must belong to this VM.
+
+    Orchestrated (:func:`gated_vm_boundary`), mirroring
+    :func:`shell_vm`: the gate opens before the preflight sweep and
+    the held-active span covers the streamed remote command.
     """
     import shlex
 
@@ -1018,54 +987,77 @@ def exec_vm(
             hint="VM init may not be complete. Check 'vm describe' for status.",
         )
 
-    # The composition root: the exec env-chain secrets join the bind's
-    # ONE boundary resolve (site secrets + env secrets, one prompt
-    # session), after the platform's preflight. The same scope dicts
-    # feed both the SecretTarget and compose_env so the two consumers
-    # can't drift. The vm scope comes from vm.template (DB row), not
-    # the config-default template.
+    # The orchestrated composition root (gated_vm_boundary): the exec
+    # env-chain secrets join the ONE boundary resolve (site secrets +
+    # env secrets, one prompt session), after every node's preflight.
+    # The same scope dicts feed both the SecretTarget and compose_env
+    # so the two consumers can't drift. The vm scope comes from
+    # vm.template (DB row), not the config-default template.
     from agentworks.bootstrap import build_registry
-    from agentworks.secrets.resolver import Resolver
 
     registry = build_registry(config)
     scopes = _resolve_vm_admin_env_scopes(registry, vm, ws=ws)
-    resolver = Resolver(config, registry)
-    bound = bind_platform(
-        config, vm, registry=registry, resolver=resolver,
+
+    with gated_vm_boundary(
+        db, config, registry, vm,
         targets=[_vm_secret_target(scopes, label=f"vm-exec={vm.name}")],
-    )
-    values = resolver.values
+    ) as (_vm_node, resolver):
+        from agentworks.vms.sites import site_platform_name
 
-    from agentworks.vms.sites import site_platform_name
+        ctx = ResourceContext(
+            vm_name=vm.name,
+            platform=site_platform_name(vm.site, registry),
+            site=vm.site,
+            user=vm.admin_username,
+            workspace_name=ws.name if ws else None,
+            workspace_dir=ws.workspace_path if ws else None,
+        )
+        env = compose_env(
+            values=resolver.values,
+            ctx=ctx,
+            vm=scopes.vm,
+            workspace=scopes.workspace,
+            admin=scopes.admin,
+        )
 
-    ctx = ResourceContext(
-        vm_name=vm.name,
-        platform=site_platform_name(vm.site, registry),
-        site=vm.site,
-        user=vm.admin_username,
-        workspace_name=ws.name if ws else None,
-        workspace_dir=ws.workspace_path if ws else None,
-    )
-    env = compose_env(
-        values=values,
-        ctx=ctx,
-        vm=scopes.vm,
-        workspace=scopes.workspace,
-        admin=scopes.admin,
-    )
-
-    target = transport(vm, config)
-    remote_cmd = command[0] if len(command) == 1 else shlex.join(command)
-    if ws is not None:
-        remote_cmd = f"cd {shlex.quote(ws.workspace_path)} && {remote_cmd}"
-    with keep_active(db, config, vm, bound):
+        target = transport(vm, config)
+        remote_cmd = command[0] if len(command) == 1 else shlex.join(command)
+        if ws is not None:
+            remote_cmd = f"cd {shlex.quote(ws.workspace_path)} && {remote_cmd}"
         return target.call_streaming(remote_cmd, env=env)
 
 
 def add_git_credential(db: Database, config: Config, name: str, credential_name: str) -> None:
-    """Add or update a git credential on a VM."""
+    """Add or update a git credential on a VM.
+
+    This is the first ORCHESTRATED command: its graph is DERIVED from
+    the DB row and the declared references by the ``vms/nodes.py``
+    factories (zero hand-wired edges), the activation gate replaces
+    this command's ``keep_active`` use (opening BEFORE the preflight
+    sweep and seeding the boundary resolver with its just-in-time
+    values), secrets are delivered scoped to each node's declared
+    names, and a rejected token is FATAL (a plain uncaught raise: the
+    operator asked to add exactly this one credential, unlike vm/agent
+    provisioning's skip-and-degrade).
+
+    The tracer's three documented interim seams are CLOSED with the
+    resolver retirement: the walk union is the boundary's only source
+    (construct-time registration is gone), prediction is central at
+    the node preflights, and the platform's power ops read the
+    context (``ctx.secret``, with the gate's scoped reader as the
+    source for gate-driven ops).
+    """
     from agentworks.bootstrap import build_registry
+    from agentworks.git_credentials.nodes import git_credential_node
+    from agentworks.orchestration.activation import (
+        activation_gate,
+        gate_secret_resolver,
+    )
+    from agentworks.orchestration.readiness import preflight_all
+    from agentworks.orchestration.secrets import ScopedSecrets, secret_union
+    from agentworks.orchestration.walk import walk
     from agentworks.transports import transport
+    from agentworks.vms.nodes import live_vm_node
 
     # build_registry runs first so framework miss-policies (e.g.
     # GitCredentialKind's error policy on a typo'd credential name)
@@ -1082,56 +1074,66 @@ def add_git_credential(db: Database, config: Config, name: str, credential_name:
             hint="VM init may not be complete. Check 'vm describe' for status.",
         )
 
-    from agentworks.resources.access import git_credential
-
-    cred_config = git_credential(registry, credential_name)
-    if cred_config is None:
-        raise NotFoundError(
-            f"git credential '{credential_name}' not found in config",
-            entity_kind="git-credential",
-            entity_name=credential_name,
-        )
-
     from agentworks.secrets.resolver import Resolver
 
     resolver = Resolver(config, registry)
-    providers = resolve_git_credential_providers(
-        registry, [credential_name], resolver
-    )
-    provider = providers[credential_name]
+
+    # BUILD: the command names its direct resources (this VM, this
+    # credential); everything else enters through the derived graph
+    # (the row's site field, the decl's references).
+    cred_node = git_credential_node(registry, credential_name)
+    provider = cred_node.provider
 
     entry = provider.helper_entry()
     if entry.repos or entry.owner:
         # Scoped credentials need the helper's embedded selection map
         # rebuilt: a single-line store merge can't provide that. The
-        # full-rebuild path (reinit) can.
+        # full-rebuild path (reinit) can. Guarded before the VM node is
+        # built and before the gate, preserving the imperative error
+        # precedence (at HEAD the site bound after this guard, so a bad
+        # site never preempted this error) and ensuring a scoped
+        # credential never costs a prompt or a VM start.
         raise ValidationError(
             f"git credential '{credential_name}' is scoped (fine-grained "
             f"PAT); add it to the admin or agent template and run "
             f"'agw vm reinit {name}' instead of add-git-credential"
         )
 
-    # The composition root: the credential's token secret (registered on
-    # the resolver at construct) joins the bind's boundary resolve, so
-    # the platform preflight runs before any prompt and the operation
-    # stays one prompt session; runup() confirms the token afterward.
-    bound = bind_platform(
-        config, vm, registry=registry, resolver=resolver, prepare=False
-    )
-    bound.preflight(RunContext(config=config))
-    resolver.resolve()
-    # add-git-credential is a single explicit add, so a rejected token is
-    # fatal here (unlike vm/agent provisioning, which skips and continues
-    # to partial): the operator asked to add exactly this one credential.
-    if config.defaults.runup_git_credentials:
-        output.detail(
-            f"Performing runup test for git-credential/{credential_name}..."
-        )
-        provider.runup(RunContext(config=config, secrets=resolver))
-    token = _resolve_git_tokens(providers, resolver)[credential_name]
-    new_lines = provider.credential_lines(token)
+    vm_node = live_vm_node(db, config, registry, vm)
+    nodes = walk(vm_node, cred_node)
+    # The walk supplies the boundary union.
+    for secret_name in secret_union(nodes):
+        resolver.register_name(secret_name)
 
-    with keep_active(db, config, vm, bound):
+    scope = _vm_scope(db, name)
+
+    with activation_gate(vm_node, gate_secret_resolver(config, registry, resolver)):
+        # PREFLIGHT-ALL against the one command-start context, then the
+        # boundary resolve: the walk-away point.
+        preflight_all(nodes, RunContext(config=config, operation_scope=scope))
+        resolver.resolve()
+
+        def scoped_ctx(node_secret_refs: tuple[str, ...]) -> RunContext:
+            return RunContext(
+                config=config,
+                operation_scope=scope,
+                secrets=ScopedSecrets(resolver.values, node_secret_refs),
+            )
+
+        # add-git-credential is a single explicit add, so a rejected
+        # token is fatal here (unlike vm/agent provisioning, which
+        # skips and continues to partial): the operator asked to add
+        # exactly this one credential.
+        if config.defaults.runup_git_credentials:
+            output.detail(
+                f"Performing runup test for git-credential/{credential_name}..."
+            )
+            cred_node.runup(scoped_ctx(cred_node.secret_refs()))
+        # The materials-write op reads its token through the node's
+        # SCOPED delivery: only the credential's declared secret names.
+        token = scoped_ctx(cred_node.secret_refs()).secret(provider.secret_name)
+        new_lines = provider.credential_lines(token)
+
         target = transport(vm, config)
 
         # Read existing credentials, filter out entries this credential
@@ -1187,12 +1189,153 @@ def _credential_line_key(line: str) -> tuple[str, str] | None:
     return (userinfo.split(":", 1)[0], line.split("@", 1)[1])
 
 
+def _vm_scope(db: Database, vm_name: str) -> OperationScope:
+    """The VM commands' shared VM-level operation scope: the operation
+    is about the VM itself (the ``_workspace_scope`` /
+    ``_session_scope`` siblings' shape at this level). The VM level's
+    field rules (required vm; forbidden workspace, agent, session) are
+    enforced by the scope's own constructor."""
+    from agentworks.capabilities.base import OperationScope, ScopeLevel
+
+    return OperationScope(
+        level=ScopeLevel.VM,
+        system_slug=db.get_setting(SYSTEM_SLUG_KEY) or None,
+        vm=vm_name,
+    )
+
+
+@contextlib.contextmanager
+def gated_vm_boundary(
+    db: Database,
+    config: Config,
+    registry: Registry,
+    vm: VMRow,
+    *,
+    targets: Sequence[SecretTarget] = (),
+    scope: OperationScope | None = None,
+) -> Iterator[tuple[LiveVMNode, Resolver]]:
+    """The gate-opening commands' shared composition root (vm/agent
+    shell and exec, console attach, the workspace lifecycle ops):
+    commands that operate interactively on one existing VM. Build the
+    live VM node from its row (the site edge holds the bound
+    platform), register the walk union AND the command's env-chain
+    ``targets`` on the one resolver (site config secrets and runtime
+    env secrets are ONE prompt session), then open the ACTIVATION GATE
+    before the
+    preflight sweep (its just-in-time values seed the boundary
+    resolver) and run the one boundary resolve inside it. Yields
+    ``(vm_node, resolver)`` within the held-active span: the body's
+    interactive or streaming work stays anchored (WSL2's keepalive)
+    for the command's duration, and callers read ``resolver.values``
+    for env composition.
+
+    ``scope`` is the command's :class:`OperationScope`; when None the
+    default VM-level scope for this VM is built. THE RULE: pass the
+    level of the entity the command is ABOUT, not of what it walks
+    (the graph here is always the live VM alone; the scope names WHY
+    the operation runs). The workspace lifecycle callers pass a
+    WORKSPACE-level scope, the agent-op callers (agent shell / exec /
+    delete / grant / revoke) an AGENT-level one, and the singular
+    session ops a SESSION-level one accordingly; the VM default
+    serves the commands that are about the VM itself.
+
+    Deliberately NOT :func:`_live_vm_boundary` (the no-gate lifecycle
+    trio): these commands converge power state first, and the gate
+    ordering (gate, then preflight, then resolve, all inside the span)
+    changes the composition's shape rather than adding a flag to it.
+
+    """
+    from agentworks.orchestration.activation import (
+        activation_gate,
+        gate_secret_resolver,
+    )
+    from agentworks.orchestration.readiness import preflight_all
+    from agentworks.orchestration.secrets import secret_union
+    from agentworks.orchestration.walk import walk
+    from agentworks.secrets.resolver import Resolver
+    from agentworks.vms.nodes import live_vm_node
+
+    resolver = Resolver(config, registry)
+    vm_node = live_vm_node(db, config, registry, vm)
+    nodes = walk(vm_node)
+    for secret_name in secret_union(nodes):
+        resolver.register_name(secret_name)
+    if targets:
+        resolver.register_targets(targets)
+    if scope is None:
+        scope = _vm_scope(db, vm.name)
+    with activation_gate(vm_node, gate_secret_resolver(config, registry, resolver)):
+        preflight_all(nodes, RunContext(config=config, operation_scope=scope))
+        resolver.resolve()
+        yield vm_node, resolver
+
+
+def _live_vm_boundary(
+    db: Database,
+    config: Config,
+    vm: VMRow,
+    *,
+    registry: Registry | None = None,
+) -> tuple[LiveVMNode, RunContext]:
+    """The no-gate commands' shared composition root (``start_vm`` /
+    ``stop_vm`` / ``delete_vm`` / ``describe_vm``, whose graphs are
+    identical): build the live VM node from its row (the site edge
+    holds the bound platform), register the walk union on the
+    resolver, sweep preflight at VM scope, and run the one boundary
+    resolve. Returns the node plus the OP-START context (secrets
+    scoped to the site's declared names); callers drive the power ops
+    through the held platform (``node.site.platform``) with that
+    context, the declare/receive contract's delivery surface.
+    ``registry`` reuses a caller-built registry (describe builds one
+    early for its degrade-friendly site lookup); ``None`` builds one
+    here.
+
+    Deliberately NO activation gate: for start and stop the power op IS
+    the command's operation (a command whose op is the state change
+    does not converge state first), delete must not gate at all (an
+    operator-stopped VM would refuse; broken states are what delete
+    exists to clean up), and describe only READS state (a status
+    probe is its op; inspecting a stopped VM must never start it).
+    """
+    from agentworks.bootstrap import build_registry
+    from agentworks.orchestration.readiness import preflight_all
+    from agentworks.orchestration.secrets import ScopedSecrets, secret_union
+    from agentworks.orchestration.walk import walk
+    from agentworks.secrets.resolver import Resolver
+    from agentworks.vms.nodes import live_vm_node
+
+    if registry is None:
+        registry = build_registry(config)
+    resolver = Resolver(config, registry)
+    vm_node = live_vm_node(db, config, registry, vm)
+    nodes = walk(vm_node)
+    for secret_name in secret_union(nodes):
+        resolver.register_name(secret_name)
+    scope = _vm_scope(db, vm.name)
+    preflight_all(nodes, RunContext(config=config, operation_scope=scope))
+    resolver.resolve()
+    ops_ctx = RunContext(
+        config=config,
+        operation_scope=scope,
+        secrets=ScopedSecrets(resolver.values, vm_node.site.secret_refs()),
+    )
+    return vm_node, ops_ctx
+
+
 def start_vm(db: Database, config: Config, name: str) -> None:
     """Start a stopped VM. Clears the operator-stopped flag so the
-    ensure_active gate resumes auto-starting on demand."""
+    activation gate resumes auto-starting on demand.
+
+    Orchestrated, composition only: the graph derives from the VM's
+    row and the power ops drive through the node's held platform
+    (:func:`_live_vm_boundary`). No activation gate opens here: the
+    start IS this command's operation, and the operator-stopped flag
+    is CLEARED by it, never consulted.
+    """
     vm = _require_vm(db, name)
     _guard_failed_vm(vm)
-    platform = bind_platform(config, vm)
+    vm_node, ops_ctx = _live_vm_boundary(db, config, vm)
+    platform = vm_node.site.platform
     # An explicit start is operator intent, whatever the observed state:
     # clear the flag first so a crashed start doesn't leave the gate
     # refusing to auto-resume a VM the operator asked to run.
@@ -1202,15 +1345,18 @@ def start_vm(db: Database, config: Config, name: str) -> None:
     # which would make status() report RUNNING and mislabel the VM as
     # "already running". The keepalive then anchors the (now running) VM
     # through the Tailscale verification.
-    status = platform.status(vm)
+    status = platform.status(vm, ops_ctx)
     if status == VMStatus.RUNNING:
         output.info(f"VM '{name}' is already running")
     else:
-        platform.start(vm)
+        platform.start(vm, ops_ctx)
 
     # Tailscale verification runs inside the keepalive so a freshly booted
     # WSL2 distro doesn't idle-shut while we wait for tailscaled to come up.
-    with platform.vm_active(vm, config=config):
+    # The rejoin auth key, needed only on a failed reconnect, keeps its
+    # internal late resolve (the documented conditional-need exception):
+    # there is no gate here to hand a lazy reader through.
+    with vm_node.hold_active():
         _ensure_tailscale(db, config, vm, platform)
     # Only emit "is ready" on the path that actually started the VM. When
     # status was already RUNNING we already said so above, and Tailscale
@@ -1222,16 +1368,22 @@ def start_vm(db: Database, config: Config, name: str) -> None:
 
 
 def stop_vm(db: Database, config: Config, name: str) -> None:
-    """Stop a running VM and record the operator's intent."""
+    """Stop a running VM and record the operator's intent.
+
+    Orchestrated, composition only, mirroring :func:`start_vm`: no
+    activation gate (the stop IS the operation), power ops through the
+    node's held platform.
+    """
     vm = _require_vm(db, name)
     _guard_failed_vm(vm)
-    platform = bind_platform(config, vm)
+    vm_node, ops_ctx = _live_vm_boundary(db, config, vm)
+    platform = vm_node.site.platform
     # Record intent BEFORE the already-stopped short-circuit: an
     # operator stopping an already-stopped VM still means "keep it
     # stopped" (e.g. the VM idled out and they don't want the next op
     # to auto-resume it).
     db.set_operator_stopped(name, True)
-    status = platform.status(vm)
+    status = platform.status(vm, ops_ctx)
     if status in (VMStatus.STOPPED, VMStatus.DEALLOCATED):
         # Never conflate an auto-stop with an explicit one: when the VM
         # stopped on its own, this command still CHANGED something (the
@@ -1247,7 +1399,7 @@ def stop_vm(db: Database, config: Config, name: str) -> None:
     # No hold here: stop is the inverse of what the keepalive is for.
     # The platform stop call doesn't need SSH to the VM, and holding a
     # wsl.exe sleep subprocess open would fight `wsl --terminate`.
-    platform.stop(vm)
+    platform.stop(vm, ops_ctx)
     output.info(f"VM '{name}' stopped")
 
 
@@ -1265,17 +1417,37 @@ def rekey_vm(
     expired ephemeral keys. Uses the platform's native transport
     (out-of-band) since Tailscale connectivity drops during
     the operation.
+
+    Orchestrated: the walk roots the VM-TEMPLATE node beside the live
+    VM node, because the new auth key IS this command's planned op
+    (the contrast with reinit, whose graph deliberately excludes the
+    template: there the key belongs only to the gate's conditional
+    repair path). The template's readiness (predict the key
+    resolvable) runs in the preflight sweep and the key joins the ONE
+    boundary resolve, mirroring HEAD's interleaved
+    preflight-then-single-resolve exactly; this migration is what
+    retired the ``preflight_vm_template`` delegate. The running check
+    stays past the boundary (a backend status read; on proxmox it
+    needs the token), and the activation gate opens AFTER it, exactly
+    where HEAD held ``keep_active``: a not-running VM errors before
+    any gate, so rekey never auto-starts one outside the same race
+    HEAD had.
     """
     import ipaddress
     import shlex
     import time
 
     from agentworks.bootstrap import build_registry
+    from agentworks.orchestration.activation import activation_gate
+    from agentworks.orchestration.readiness import preflight_all
+    from agentworks.orchestration.secrets import secret_union
+    from agentworks.orchestration.walk import walk
     from agentworks.secrets.resolver import Resolver
     from agentworks.ssh import SSHError
     from agentworks.ssh_config import sync_ssh_config
     from agentworks.transports import native_transport, transport, wait_for_reconnect
-    from agentworks.vms.templates import preflight_vm_template, resolve_template
+    from agentworks.vms.nodes import live_vm_node, vm_template_node
+    from agentworks.vms.templates import resolve_template
 
     vm = _require_vm(db, name)
     _guard_failed_vm(vm)
@@ -1285,27 +1457,43 @@ def rekey_vm(
     # predicts the new auth key can resolve; the platform checks its
     # world), then the operation's one resolve pass: the new auth key
     # and any site secret (proxmox's API token) in a single prompt
-    # session. ``ignore_env`` is honored by temporarily masking the
-    # env-var backend for the auth-key secret (the env-var source reads
+    # session. The template node roots FIRST so the sweep keeps HEAD's
+    # precedence (template readiness before the platform preflight).
+    # ``ignore_env`` is honored by temporarily masking the env-var
+    # backend for the auth-key secret (the env-var source reads
     # ``os.environ`` at ``would_attempt`` time, so removing the var
     # skips it cleanly across BOTH the preflight prediction and the
     # resolve, and the prompt backend takes over).
     registry = build_registry(config)
     resolver = Resolver(config, registry)
-    platform = bind_platform(
-        config, vm, registry=registry, resolver=resolver, prepare=False
-    )
+    vm_node = live_vm_node(db, config, registry, vm)
     rekey_vm_tmpl = resolve_template(registry, vm.template)
+    tmpl_node = vm_template_node(rekey_vm_tmpl, registry)
+    nodes = walk(tmpl_node, vm_node)
+    for secret_name in secret_union(nodes):
+        resolver.register_name(secret_name)
+    # Cache hit by design: the auth key is already in the union (the
+    # template node's secret_refs); this call only fetches the DECL,
+    # which the --ignore-env env-var mask below needs.
     ts_decl = resolver.register_name(rekey_vm_tmpl.tailscale_auth_key)
+    scope = _vm_scope(db, name)
     with _mask_env_var_backend_for(ts_decl, masked=ignore_env):
-        preflight_vm_template(rekey_vm_tmpl, resolver)
-        platform.preflight(RunContext(config=config))
+        preflight_all(nodes, RunContext(config=config, operation_scope=scope))
         resolver.resolve()
     ts_auth_key = resolver.get(rekey_vm_tmpl.tailscale_auth_key)
 
     # The running check is an op (a backend status read), so it sits
-    # past the boundary: on proxmox it needs the API token.
-    status = platform.status(vm)
+    # past the boundary: on proxmox it needs the API token, delivered
+    # scoped to the site's declared names.
+    from agentworks.orchestration.secrets import ScopedSecrets
+
+    ops_ctx = RunContext(
+        config=config,
+        operation_scope=scope,
+        secrets=ScopedSecrets(resolver.values, vm_node.site.secret_refs()),
+    )
+    platform = vm_node.site.platform
+    status = platform.status(vm, ops_ctx)
     if status != VMStatus.RUNNING:
         raise StateError(
             f"VM '{name}' is not running (status: {status.value})",
@@ -1316,10 +1504,18 @@ def rekey_vm(
     output.info(f"Rekeying '{name}'...")
 
     with contextlib.ExitStack() as _stack:
-        # Holds the VM in an active state for the duration of the rekey.
-        # No-op for Lima/Azure/Proxmox; WSL2 anchors the distro against
-        # vmIdleTimeout so per-step `time.sleep`s can't let it idle out.
-        _stack.enter_context(keep_active(db, config, vm, platform))
+        # The activation gate, opened AFTER the boundary at exactly the
+        # point HEAD held ``keep_active``: converge power state (a race
+        # from the running check above, as at HEAD), then hold for the
+        # rekey's duration (no-op for Lima/Azure/Proxmox; WSL2 anchors
+        # the distro against vmIdleTimeout so per-step `time.sleep`s
+        # can't let it idle out). Boundary-then-gate means the gate
+        # callback must SERVE the boundary's cached values, never
+        # resolve or seed (the batch-ops precedent): the union already
+        # covers the gate secrets AND the repair path's rejoin key (the
+        # auth key is this command's op secret), and ``Resolver.get``
+        # refuses anything outside it loudly.
+        _stack.enter_context(activation_gate(vm_node, resolver.get))
 
         # native_transport() composes transient_route (Azure attach /
         # detach via the polymorphic hook) with the platform-native
@@ -1371,7 +1567,7 @@ def rekey_vm(
         output.detail(f"Tailscale IP: {new_ip}")
 
         # Update DB and SSH config with the new IP (correct regardless of
-        # reachability -- the old IP is definitely dead after logout)
+        # reachability: the old IP is definitely dead after logout)
         db.update_vm_tailscale(name, new_ip)
         sync_ssh_config(config, db)
         db.insert_vm_event(name, "rekey", f"new_ip={new_ip}")
@@ -1409,7 +1605,20 @@ def delete_vm(
     force: bool = False,
     yes: bool = False,
 ) -> None:
-    """Delete a VM, cleaning up all associated resources."""
+    """Delete a VM, cleaning up all associated resources.
+
+    Orchestrated, composition only: the child-count guard and the
+    confirm gate stay pre-boundary (zero prompts and zero resolves on
+    a refused or declined delete), then the whole build-and-boundary
+    composition (:func:`_live_vm_boundary`) is BEST-EFFORT: a broken
+    backend, a stranded site, or an unresolvable secret warns and
+    skips backend cleanup, because broken states are exactly what
+    delete exists to clean up. No activation gate ever opens (an
+    operator-stopped VM would refuse; deletion never starts a stopped
+    VM), and the Tailscale logout uses a hold-only span. ``UserAbort``
+    is the one exception nothing here may downgrade: an abort at the
+    boundary's secret prompt or inside an op span must keep the row.
+    """
     vm = _require_vm(db, name)
 
     # Check for workspaces (which contain agents and sessions)
@@ -1444,26 +1653,31 @@ def delete_vm(
             raise UserAbort("delete cancelled")
 
     # Platform-specific cleanup (also handles Tailscale logout)
+    vm_node: LiveVMNode | None
+    ops_ctx: RunContext | None = None
     try:
-        platform = bind_platform(config, vm)
+        vm_node, ops_ctx = _live_vm_boundary(db, config, vm)
     except UserAbort:
         # Ctrl-C at the boundary's secret prompt must keep the SIGINT
         # contract: abort the whole delete rather than orphaning the
-        # backend VM behind a warn. (bind_platform runs preflight and
-        # the resolve pass, so the prompt happens inside it.)
+        # backend VM behind a warn. (The boundary helper runs the
+        # preflight sweep and the resolve pass, so the prompt happens
+        # inside it.)
         raise
     except Exception as e:
-        # Preflight or bind failure (unreachable API, missing tool,
-        # unresolvable secret): warn and skip backend cleanup; broken
-        # backends are what delete exists to clean up.
-        platform = None
+        # Preflight or build failure (unreachable API, missing tool,
+        # stranded site, unresolvable secret): warn and skip backend
+        # cleanup; broken backends are what delete exists to clean up.
+        vm_node = None
         hint = getattr(e, "hint", None)
         output.warn(
             f"platform binding failed, skipping backend cleanup: {e}"
             + (f"\n{hint}" if hint else "")
         )
 
-    if platform is not None:
+    if vm_node is not None:
+        assert ops_ctx is not None  # set beside vm_node above
+        platform = vm_node.site.platform
         # Tailscale logout (best-effort, hold-only): the logout wants
         # the VM alive if it happens to be, but delete must NOT gate:
         # an operator-stopped VM would raise. (The WSL2 hold does boot a
@@ -1476,7 +1690,7 @@ def delete_vm(
         # through and delete the DB row the operator just declined.
         if vm.tailscale_host:
             try:
-                with platform.vm_active(vm, config=config):
+                with vm_node.hold_active():
                     _tailscale_logout(vm, config, platform)
             except UserAbort:
                 raise
@@ -1484,7 +1698,7 @@ def delete_vm(
                 output.warn(f"tailscale logout skipped: {e}")
 
         try:
-            platform.delete(vm)
+            platform.delete(vm, ops_ctx)
         except UserAbort:
             raise
         except Exception as e:
@@ -1515,7 +1729,15 @@ def reinit_vm(
 ) -> None:
     """Re-run initialization on a VM that has already been provisioned.
 
-    Requires provisioning_status == complete and a valid Tailscale connection.
+    Requires provisioning_status == complete and a valid Tailscale
+    connection. Orchestrated: the graph derives from the VM's row and
+    the admin template's declared credentials; the activation gate
+    replaces this command's ``keep_active`` use, opening BEFORE the
+    preflight sweep (its just-in-time values seed the boundary
+    resolver); tokens are delivered scoped to each node's declared
+    names. Nothing here is created, so there is no realization log and
+    nothing to unwind; a failed init leaves the VM re-runnable, as
+    before.
     """
     from agentworks.bootstrap import build_registry
     from agentworks.transports import transport
@@ -1526,16 +1748,25 @@ def reinit_vm(
 
     vm = _require_vm(db, name)
 
-    # Construct before any secret collection: a stranded site fails
-    # here with the manifest hint instead of after git-token prompts.
-    # prepare=False: the boundary (preflight + the one resolve pass)
-    # runs below, once the git-token declarations have joined the set.
+    from agentworks.capabilities.base import OperationScope, ScopeLevel
+    from agentworks.git_credentials.nodes import git_credential_node
+    from agentworks.orchestration.activation import (
+        activation_gate,
+        gate_secret_resolver,
+    )
+    from agentworks.orchestration.readiness import preflight_all
+    from agentworks.orchestration.secrets import ScopedSecrets, secret_union
+    from agentworks.orchestration.walk import walk
     from agentworks.secrets.resolver import Resolver
+    from agentworks.vms.nodes import live_vm_node
 
     resolver = Resolver(config, registry)
-    platform = bind_platform(
-        config, vm, registry=registry, resolver=resolver, prepare=False
-    )
+
+    # BUILD before any secret collection: a stranded site fails here
+    # (inside the live node's site edge) with the manifest hint instead
+    # of after git-token prompts. Construction is cheap; the walk union
+    # below is the boundary's source, nothing resolves yet.
+    vm_node = live_vm_node(db, config, registry, vm)
 
     # Resolve the VM's template so init uses the right values
     from agentworks.resources.access import admin_template
@@ -1560,53 +1791,76 @@ def reinit_vm(
 
     verify_tailscale_available()
     admin = admin_template(registry)
-    # Construct against the operation's resolver so the token secrets
-    # join the one boundary resolve below.
-    providers = resolve_git_credential_providers(
-        registry, admin.git_credentials, resolver
+    cred_nodes = tuple(
+        git_credential_node(registry, cred_name)
+        for cred_name in admin.git_credentials
+    )
+    providers = {node.provider.owner_name: node.provider for node in cred_nodes}
+
+    # The reinit graph: the live VM (whose row's site field is its edge
+    # to the vm-site node) plus each declared credential as its own
+    # root. The vm-template is deliberately NOT a node here: its
+    # Tailscale key is not part of reinit's planned ops (a broken
+    # node's rejoin resolves it on the gate's own conditional repair
+    # path), so it must not join the boundary union.
+    nodes = walk(vm_node, *cred_nodes)
+    for secret_name in secret_union(nodes):
+        resolver.register_name(secret_name)
+
+    scope = OperationScope(
+        level=ScopeLevel.VM,
+        system_slug=db.get_setting(SYSTEM_SLUG_KEY) or None,
+        vm=name,
     )
 
-    # The preflight boundary: git tokens and any site config secret
-    # (proxmox's API token) resolve in one prompt session. The
-    # vm-template's Tailscale key is NOT part of reinit's planned ops
-    # (a broken node's rejoin resolves it on its own conditional path),
-    # so the template preflight doesn't run here.
-    output.phase("Preflight")
-    output.detail(f"Checking vm-site/{vm.site}...")
-    announce_git_credentials(providers)
-    platform.preflight(RunContext(config=config))
-    for provider in providers.values():
-        provider.preflight(RunContext(config=config))
+    def scoped_ctx(secret_names: tuple[str, ...]) -> RunContext:
+        return RunContext(
+            config=config,
+            operation_scope=scope,
+            secrets=ScopedSecrets(resolver.values, secret_names),
+        )
 
-    output.phase("Resolving Secrets")
-    resolver.resolve()
+    with activation_gate(vm_node, gate_secret_resolver(config, registry, resolver)):
+        # The preflight boundary: git tokens and any site config secret
+        # (proxmox's API token) resolve in one prompt session.
+        # Provisioning is hermetic: no operator-env secrets are
+        # prompted at reinit; they get prompted at the use site (vm
+        # shell, session create, etc.).
+        output.phase("Preflight")
+        output.detail(f"Checking vm-site/{vm.site}...")
+        announce_git_credentials(providers)
+        preflight_all(nodes, RunContext(config=config, operation_scope=scope))
 
-    # No command-root runup at reinit: reinit reaches the VM over
-    # Tailscale SSH and never calls the platform API (so its token is not
-    # used here), and the git-credential runup is deferred into the
-    # Initialization phase (runup_and_filter at the write step). So the
-    # next banner the operator sees is Initialization.
-    git_tokens = _resolve_git_tokens(providers, resolver)
+        output.phase("Resolving Secrets")
+        resolver.resolve()
 
-    # Provisioning is hermetic: no operator-env secrets are prompted at
-    # reinit. They get prompted at the use site (vm shell, session
-    # create, etc.) once provisioning completes.
+        # No command-root runup at reinit: reinit reaches the VM over
+        # Tailscale SSH and never calls the platform API in its planned
+        # ops, and the git-credential runup is deferred into the
+        # Initialization phase (the skip-and-degrade policy at the
+        # write step). So the next banner the operator sees is
+        # Initialization.
+        git_tokens = {
+            node.provider.owner_name: scoped_ctx(node.secret_refs()).secret(
+                node.provider.secret_name
+            )
+            for node in cred_nodes
+        }
 
-    # Build Tailscale SSH target with logging
-    from agentworks.ssh import SSHLogger
+        # Build Tailscale SSH target with logging
+        from agentworks.ssh import SSHLogger
 
-    logger = SSHLogger(name, "vm-reinit")
-    for token in git_tokens.values():
-        logger.add_redaction(token)
-    ts_target = transport(vm, config, default_timeout=60, logger=logger)
+        logger = SSHLogger(name, "vm-reinit")
+        for token in git_tokens.values():
+            logger.add_redaction(token)
+        ts_target = transport(vm, config, default_timeout=60, logger=logger)
 
-    home = f"/home/{vm.admin_username}"
+        home = f"/home/{vm.admin_username}"
 
-    # Outer try/finally ensures the SSH logger is closed exactly once, AFTER
-    # any warning output. Matches the pattern used by agent create / reinit
-    # and workspace create / rehome.
-    try:
-        with keep_active(db, config, vm, platform):
+        # try/finally ensures the SSH logger is closed exactly once,
+        # AFTER any warning output. Matches the pattern used by agent
+        # create / reinit and workspace create / rehome.
+        try:
             try:
                 run_initialization(
                     db,
@@ -1631,8 +1885,8 @@ def reinit_vm(
             except Exception:
                 output.warn(f"Log: {logger.path}")
                 raise
-    finally:
-        logger.close()
+        finally:
+            logger.close()
 
     refreshed_vm = db.get_vm(name)
     assert refreshed_vm is not None
@@ -1762,43 +2016,20 @@ def _mask_env_var_backend_for(
         os.environ.update(saved)
 
 
-def _resolve_git_tokens(
-    providers: Mapping[str, GitCredentialProvider],
-    resolver: Resolver,
-) -> dict[str, str]:
-    """Read each provider's resolved token from the operation's resolver
-    cache into a ``{credential_name: value}`` dict.
-
-    The providers must have been constructed against ``resolver`` (so
-    their token secrets joined the boundary resolve) and the pass must
-    already have run. This does NOT run the git-credential runup: that is
-    deferred to the write step (Phase B for vm init, the credential-write
-    step for agent create), where a rejected token is skipped and the
-    operation continues to a partial result rather than failing before
-    the VM even exists. See ``runup_and_filter``.
-    """
-    return {
-        name: resolver.get(provider.secret_name)
-        for name, provider in providers.items()
-    }
-
-
 def _lookup_or_synthesize_secret(registry: Registry, name: str) -> SecretDecl:
     """Return the ``SecretDecl`` for ``name`` from the framework
     Registry, or synthesize a bare one matching the auto-declare shape
     if no Resource was published or auto-declared under that name.
 
-    Used by the Tailscale eager-resolve sites (``_collect_secrets`` for
-    ``vm create``, ``rekey_vm``, ``_ensure_tailscale``). All three need
-    the same fallback semantics: an operator who omits every
-    ``[vm_templates.*]`` section AND every ``[secrets.*]`` section
-    leaves the registry empty under the ``secret`` kind, so a strict
-    lookup raises ``KeyError``. Synthesizing a bare ``SecretDecl`` (the
-    same shape ``_SecretKind.synthesize`` would produce, minus
-    ``origin`` which resolution doesn't read) keeps the backend chain
-    callable. The Phase 2a ``VMTemplateKind`` will publish the default
-    template's references and make this fallback redundant for the
-    common case.
+    Used by ``_ensure_tailscale``'s imperative-caller late resolve (the
+    orchestrated callers moved onto ``Resolver.register_name``, which
+    carries the same fallback). The semantics: an operator who omits
+    every ``[vm_templates.*]`` section AND every ``[secrets.*]``
+    section leaves the registry empty under the ``secret`` kind, so a
+    strict lookup raises ``KeyError``. Synthesizing a bare
+    ``SecretDecl`` (the same shape ``_SecretKind.synthesize`` would
+    produce, minus ``origin`` which resolution doesn't read) keeps the
+    backend chain callable.
     """
     from agentworks.secrets.base import SecretDecl
     from agentworks.secrets.kinds import SECRET_KIND_NAME
@@ -1919,10 +2150,20 @@ def port_forward_vm(
 
     Each port spec is either REMOTE_PORT (local defaults to same) or
     LOCAL_PORT:REMOTE_PORT, matching kubectl port-forward syntax.
+
+    Orchestrated (:func:`gated_vm_boundary`): the graph derives from
+    the VM's row, the activation gate replaces this command's
+    ``keep_active`` use (opening BEFORE the preflight sweep; its
+    just-in-time values seed the boundary resolver), and the
+    held-active span covers the foreground SSH tunnel. The port-spec
+    validation and the no-Tailscale guard stay pre-gate: a refused
+    forward costs zero prompts, zero resolves, and zero gate events.
     """
     import signal
     import subprocess
     import sys
+
+    from agentworks.bootstrap import build_registry
 
     vm = _require_vm(db, name)
     _guard_failed_vm(vm)
@@ -1993,7 +2234,8 @@ def port_forward_vm(
         output.info("Use --verbose for detailed SSH output.")
 
     # Run in foreground until interrupted
-    with keep_active(db, config, vm, bind_platform(config, vm)):
+    registry = build_registry(config)
+    with gated_vm_boundary(db, config, registry, vm):
         try:
             proc = subprocess.Popen(ssh_cmd)
 
@@ -2019,10 +2261,20 @@ def _ensure_tailscale(
     config: Config,
     vm: VMRow,
     platform: VMPlatform,
+    *,
+    auth_key_source: Callable[[], str] | None = None,
 ) -> None:
     """After starting a VM, verify Tailscale connectivity and rejoin if
     needed. ``platform`` is the caller's bound platform (the gates never
     bind, and a re-bind here would re-run the resolve pass).
+
+    ``auth_key_source`` supplies the rejoin auth key when the caller
+    owns its resolution: the orchestrated activation gate passes its
+    lazy gate-secrets reader (nodes receive, never resolve), so the key
+    resolves on this function's first need, with the same
+    conditional-need timing as the internal resolve below. ``None``
+    keeps today's behavior for the imperative callers: this function
+    resolves the key itself, late.
     """
     from agentworks.transports import native_transport, transport, wait_for_reconnect
 
@@ -2039,25 +2291,28 @@ def _ensure_tailscale(
         output.info(f"Tailscale node {vm.tailscale_host} did not reconnect, rejoining...")
         db.clear_vm_tailscale(vm.name)
 
-    # Resolve a fresh Tailscale auth key via the framework before
-    # entering the native-transport block; the backend chain handles
-    # env-var lookup with prompt fallback. This is the documented
-    # conditional-need exception to the resolve-at-the-preflight-boundary
-    # contract: whether a rejoin (and therefore a NEW key) is needed is
-    # only knowable after starting the VM and watching the node fail to
-    # reconnect, so it gets its own late resolve rather than prompting
-    # every start for a key that is almost never used.
-    from agentworks.bootstrap import build_registry
-    from agentworks.secrets import resolve_for_command
-    from agentworks.vms.templates import resolve_template
+    if auth_key_source is not None:
+        auth_key = auth_key_source()
+    else:
+        # Resolve a fresh Tailscale auth key via the framework before
+        # entering the native-transport block; the backend chain handles
+        # env-var lookup with prompt fallback. This is the documented
+        # conditional-need exception to the resolve-at-the-preflight-boundary
+        # contract: whether a rejoin (and therefore a NEW key) is needed is
+        # only knowable after starting the VM and watching the node fail to
+        # reconnect, so it gets its own late resolve rather than prompting
+        # every start for a key that is almost never used.
+        from agentworks.bootstrap import build_registry
+        from agentworks.secrets import resolve_for_command
+        from agentworks.vms.templates import resolve_template
 
-    registry = build_registry(config)
-    rejoin_vm_tmpl = resolve_template(registry, vm.template)
-    ts_decl = _lookup_or_synthesize_secret(
-        registry, rejoin_vm_tmpl.tailscale_auth_key
-    )
-    resolved = resolve_for_command([], config, registry, extra_decls=[ts_decl])
-    auth_key = resolved[rejoin_vm_tmpl.tailscale_auth_key]
+        registry = build_registry(config)
+        rejoin_vm_tmpl = resolve_template(registry, vm.template)
+        ts_decl = _lookup_or_synthesize_secret(
+            registry, rejoin_vm_tmpl.tailscale_auth_key
+        )
+        resolved = resolve_for_command([], config, registry, extra_decls=[ts_decl])
+        auth_key = resolved[rejoin_vm_tmpl.tailscale_auth_key]
 
     # native_transport() composes Azure's attach/detach via
     # transient_route polymorphism with the reachability probe. Other

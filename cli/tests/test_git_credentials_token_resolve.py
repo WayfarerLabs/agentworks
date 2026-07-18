@@ -18,18 +18,26 @@ from agentworks.config import load_config
 
 
 def _resolve_tokens(config: object, registry: object, names: list[str]) -> dict[str, str]:
-    """Resolve git tokens for the named credentials via the agent
-    composition helper (which supersedes the removed _collect_git_tokens:
-    same construct -> preflight -> resolve, plus phase banners)."""
-    from types import SimpleNamespace
+    """Resolve git tokens for the named credentials the way the
+    orchestrated commands do: construct the credential nodes, register
+    the walk-derived union on the operation's resolver, run the one
+    boundary pass, and read each token through the node's SCOPED
+    delivery."""
+    from agentworks.git_credentials.nodes import git_credential_node
+    from agentworks.orchestration.secrets import ScopedSecrets, secret_union
+    from agentworks.secrets.resolver import Resolver
 
-    from agentworks.agents.manager import _preflight_resolve_agent_git
-
-    return _preflight_resolve_agent_git(
-        config,  # type: ignore[arg-type]
-        registry,  # type: ignore[arg-type]
-        SimpleNamespace(name="t", git_credentials=names),  # type: ignore[arg-type]
-    )
+    resolver = Resolver(config, registry)  # type: ignore[arg-type]
+    nodes = [git_credential_node(registry, n) for n in names]
+    for secret_name in secret_union(nodes):
+        resolver.register_name(secret_name)
+    resolver.resolve()
+    return {
+        node.provider.owner_name: ScopedSecrets(
+            resolver.values, node.secret_refs()
+        ).get(node.provider.secret_name)
+        for node in nodes
+    }
 
 
 @pytest.fixture()
@@ -165,6 +173,48 @@ def test_collect_git_tokens_empty_list_returns_empty_dict(
 
     registry = build_registry(config)
     assert _resolve_tokens(config, registry, []) == {}
+
+
+def test_manifest_declared_credential_resolves_through_the_fold(
+    tmp_path: Path,
+    ssh_keys: tuple[Path, Path],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A YAML-manifest-declared credential (here a scoped fine-grained
+    PAT) resolves through the same node fold as the TOML-declared ones:
+    both declaration surfaces feed the graph identically."""
+    cfg = _write_cfg(
+        tmp_path,
+        """\
+        [secret_config]
+        backends = ["env-var"]
+        """,
+        ssh_keys,
+    )
+    resources = tmp_path / "resources"
+    resources.mkdir()
+    (resources / "creds.yaml").write_text(
+        dedent(
+            """\
+            apiVersion: agentworks/v1
+            kind: git-credential
+            metadata:
+              name: widgets-bot
+            spec:
+              provider: github
+              provider_config:
+                repos: [acme/widgets]
+            """
+        )
+    )
+    config = load_config(cfg, warn_issues=False)
+    monkeypatch.setenv("AW_SECRET_GIT_TOKEN_WIDGETS_BOT", "tok123")
+
+    from agentworks.bootstrap import build_registry
+
+    registry = build_registry(config)
+    tokens = _resolve_tokens(config, registry, ["widgets-bot"])
+    assert tokens == {"widgets-bot": "tok123"}
 
 
 def test_collect_git_tokens_credential_lines_use_resolved_value(
