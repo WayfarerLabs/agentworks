@@ -1,5 +1,18 @@
 # VM sites and platforms: lockfile
 
+## 2026-07-18: partially superseded by the orchestration layer
+
+The orchestration-layer effort (ADR 0019,
+`docs/adrs/0019-orchestration-layer-command-plans-over-node-graphs.md`) retired the secret-handling
+model this SDD's FRD, HLA, and plan narrate: capability construction no longer takes a resolver and
+registers nothing at construct time; commands compose as plans over derived node graphs; the secret
+union derives from the walked plan and resolves in one boundary pass per composition root; instances
+receive values only through the context's scoped delivery (`ctx.secret(name)`). Read those artifacts
+as history of the Phase 7 capability adoption, not as the current contract. The living contract is
+`cli/agentworks/capabilities/README.md`; this SDD's own `capability-model.md` already redirects
+there. Everything else in this SDD (sites, platforms, the schema, the CLI surface, the slug) remains
+accurate.
+
 ## 2026-07-16
 
 The vm-sites SDD is complete and locked as of this date. All seven plan phases are done (every
