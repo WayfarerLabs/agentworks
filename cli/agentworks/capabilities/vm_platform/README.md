@@ -79,8 +79,8 @@ The symptom is far from the cause: a VM that provisioned fine simply stops being
 after a handful.
 
 The fix agentworks ships caps any oversized range back to the standard `65536` in `lima.py`'s create
-provision block (see the `mounts: []` and `subuid`-cap steps in `LIMA_TEMPLATE`). The general
-lessons, which apply to any future platform:
+provision block (see the `subuid`-cap step in `LIMA_TEMPLATE`). The general lessons, which apply to
+any future platform:
 
 - Enumerate backend-injected users and ID ranges early. `cat /etc/subuid /etc/subgid` and
   `cat /etc/passwd` on a freshly created VM with no agents yet is a five-minute check that would

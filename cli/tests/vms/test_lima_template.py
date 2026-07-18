@@ -11,9 +11,11 @@ easy to regress silently, so they get source-level tripwires here:
 
 from __future__ import annotations
 
+import re
 import shutil
 import subprocess
 import sys
+from typing import Any, cast
 
 import pytest
 import yaml
@@ -21,10 +23,10 @@ import yaml
 from agentworks.capabilities.vm_platform.lima import LIMA_TEMPLATE
 
 
-def _render() -> dict:
+def _render() -> dict[str, Any]:
     provision = "      #!/bin/bash\n      set -euo pipefail\n      echo provisioned"
     rendered = LIMA_TEMPLATE.format(cpus=4, memory=8, disk=50, provision_script=provision)
-    return yaml.safe_load(rendered)
+    return cast("dict[str, Any]", yaml.safe_load(rendered))
 
 
 def test_no_host_mounts() -> None:
@@ -38,10 +40,15 @@ def test_no_host_mounts() -> None:
 def test_subuid_cap_step_present_and_first() -> None:
     """A ``mode: system`` provision step caps oversized subid ranges, and it
     runs before the bootstrap step (which creates the admin user and would
-    otherwise allocate into a starved range)."""
+    otherwise allocate into a starved range).
+
+    Uses ``>= 2`` rather than an exact count so the invariant survives future
+    provision steps, but does insist a bootstrap step exists after the cap:
+    a template with only the cap step would silently pass an ``assert provision``
+    check while leaving the "cap-before-bootstrap" invariant unverified."""
     doc = _render()
     provision = doc["provision"]
-    assert len(provision) == 2
+    assert len(provision) >= 2, "expected cap step followed by at least one bootstrap step"
     cap = provision[0]
     assert cap["mode"] == "system"
     assert "/etc/subuid" in cap["script"]
@@ -62,8 +69,14 @@ def test_cap_awk_caps_giant_range_and_preserves_normal() -> None:
         line.strip() for line in doc["provision"][0]["script"].splitlines() if "awk -F:" in line
     )
     # Isolate the standalone `awk -F: '...'` program from the surrounding
-    # redirect so we can pipe sample content through it directly.
-    program = awk_line.split(">", 1)[0].strip()
+    # `"$f" >"$f.agw"` file/redirect suffix. Splitting on `>` naively is wrong
+    # because the awk program itself contains a `>` comparison (`$3+0>65536`);
+    # match the single-quoted program directly instead so it stays intact.
+    # Assumes the awk program does not itself contain a literal `'`; if that
+    # ever changes, this extraction has to change too.
+    match = re.search(r"awk -F: '[^']+'", awk_line)
+    assert match is not None, f"could not find awk program in: {awk_line!r}"
+    program = match.group(0)
 
     sample = (
         "agentworks:100000:65536\n"
