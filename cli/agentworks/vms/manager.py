@@ -436,13 +436,13 @@ def create_vm(
 
     verify_tailscale_available()
     from agentworks.capabilities.base import OperationScope, ScopeLevel
+    from agentworks.git_credentials.nodes import git_credential_node
     from agentworks.orchestration.readiness import preflight_all
     from agentworks.orchestration.secrets import ScopedSecrets, secret_union
     from agentworks.orchestration.unwind import RealizationLog
     from agentworks.orchestration.walk import walk
     from agentworks.secrets.resolver import Resolver
     from agentworks.vms.nodes import (
-        git_credential_node,
         pending_vm_node,
         vm_site_node,
         vm_template_node,
@@ -1141,12 +1141,13 @@ def add_git_credential(db: Database, config: Config, name: str, credential_name:
     """
     from agentworks.bootstrap import build_registry
     from agentworks.capabilities.base import OperationScope, ScopeLevel
+    from agentworks.git_credentials.nodes import git_credential_node
     from agentworks.orchestration.activation import activation_gate
     from agentworks.orchestration.readiness import preflight_all
     from agentworks.orchestration.secrets import ScopedSecrets, secret_union
     from agentworks.orchestration.walk import walk
     from agentworks.transports import transport
-    from agentworks.vms.nodes import git_credential_node, live_vm_node
+    from agentworks.vms.nodes import live_vm_node
 
     # build_registry runs first so framework miss-policies (e.g.
     # GitCredentialKind's error policy on a typo'd credential name)
@@ -1631,12 +1632,13 @@ def reinit_vm(
     vm = _require_vm(db, name)
 
     from agentworks.capabilities.base import OperationScope, ScopeLevel
+    from agentworks.git_credentials.nodes import git_credential_node
     from agentworks.orchestration.activation import activation_gate
     from agentworks.orchestration.readiness import preflight_all
     from agentworks.orchestration.secrets import ScopedSecrets, secret_union
     from agentworks.orchestration.walk import walk
     from agentworks.secrets.resolver import Resolver
-    from agentworks.vms.nodes import git_credential_node, live_vm_node
+    from agentworks.vms.nodes import live_vm_node
 
     resolver = Resolver(config, registry)
 

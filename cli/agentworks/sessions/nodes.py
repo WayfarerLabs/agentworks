@@ -26,7 +26,7 @@ operation scope's LEVEL makes explicit:
 from __future__ import annotations
 
 import shlex
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 
 from agentworks.capabilities.base import ScopeLevel
 from agentworks.errors import StateError
@@ -73,12 +73,14 @@ class RequiredCommandsCheck:
         required_commands: tuple[str, ...],
         target: AgentNode | None,
         admin: bool,
+        vm_name: str,
     ) -> None:
         self._session_name = session_name
         self._template_name = template_name
         self._required_commands = required_commands
         self._target = target
         self._admin = admin
+        self._vm_name = vm_name
         self._probed = False
 
     def preflight(self, ctx: RunContext) -> None:
@@ -87,9 +89,21 @@ class RequiredCommandsCheck:
     def runup(self, ctx: RunContext) -> None:
         self._check(ctx, stage="runup")
 
-    def _check(self, ctx: RunContext, *, stage: str) -> None:
+    def _check(
+        self, ctx: RunContext, *, stage: Literal["preflight", "runup"]
+    ) -> None:
         scope = ctx.operation_scope
-        if scope is None or scope.level is not ScopeLevel.SESSION:
+        if scope is None:
+            # A scope-less context reaching node readiness is an
+            # orchestrator bug, not an out-of-scope level: skipping
+            # here would silently disable the check forever.
+            raise StateError(
+                f"session '{self._session_name}': the required-commands "
+                f"check received a context with no operation scope; the "
+                f"orchestrator must attach one (the skip case is "
+                f"out-of-scope-for-the-LEVEL, never scope-less)."
+            )
+        if scope.level is not ScopeLevel.SESSION:
             # Out of scope for the level (a system-scoped doctor scan):
             # there is legitimately no session target here; skip.
             return
@@ -132,8 +146,10 @@ class RequiredCommandsCheck:
                 missing.append(cmd)
         if not missing:
             return
+        # Label parity with the imperative call sites: agent mode names
+        # the agent, admin mode names the VM.
         target_label = (
-            "the admin user"
+            f"VM '{self._vm_name}'"
             if self._admin or self._target is None
             else f"agent '{self._target.name}'"
         )
@@ -290,6 +306,7 @@ def pending_session_node(
         required_commands=tuple(template.required_commands),
         target=agent,
         admin=admin,
+        vm_name=vm.row.name,
     )
     return PendingSessionNode(name, check, agent, workspace, vm)
 
@@ -302,14 +319,40 @@ def live_session_node(
     workspace: WorkspaceNode,
     vm: LiveVMNode,
 ) -> LiveSessionNode:
-    """Build the live ``session/<name>`` node from its row (admin mode
-    when the row carries no agent), with the same one-object target
-    wiring as the pending factory."""
+    """Build the live ``session/<name>`` node from its row, with the
+    same one-object target wiring as the pending factory.
+
+    Admin mode comes from the ROW'S word (``agent_name`` is null),
+    never from the ``agent`` argument's absence: inferring admin from a
+    missing argument would structurally disable the fork's loud branch
+    (an agent-mode row handed no agent node would silently probe the
+    admin user instead of raising). The factory cross-checks both
+    directions and raises on mismatch."""
+    if row.agent_name is not None:
+        if agent is None:
+            raise StateError(
+                f"session '{row.name}' runs as agent "
+                f"'{row.agent_name}' but no agent node was handed to "
+                f"the factory; refusing to fall back to admin mode."
+            )
+        if agent.name != row.agent_name:
+            raise StateError(
+                f"session '{row.name}' runs as agent "
+                f"'{row.agent_name}' but the handed agent node is "
+                f"'{agent.name}'; the row's word and the graph must "
+                f"agree."
+            )
+    elif agent is not None:
+        raise StateError(
+            f"session '{row.name}' is an admin session but an agent "
+            f"node ('{agent.name}') was handed to the factory."
+        )
     check = RequiredCommandsCheck(
         session_name=row.name,
         template_name=template.name,
         required_commands=tuple(template.required_commands),
         target=agent,
-        admin=agent is None,
+        admin=row.agent_name is None,
+        vm_name=vm.row.name,
     )
     return LiveSessionNode(row, check, agent, workspace, vm)

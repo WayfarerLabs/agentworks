@@ -120,6 +120,15 @@ def test_system_level_scan_skips_the_check(db: Database) -> None:
     session.runup(_ctx(ScopeLevel.SYSTEM))  # still nothing
 
 
+def test_scope_less_context_is_a_loud_error(db: Database) -> None:
+    """A context with NO scope is an orchestrator bug, not an
+    out-of-scope level: skipping would silently disable the check
+    forever (the imperative call always ran)."""
+    session = _session(db, agent=None, admin=True)
+    with pytest.raises(StateError, match="no operation scope"):
+        session.preflight(RunContext())
+
+
 def test_pending_target_defers_then_probes_after_the_flip(db: Database) -> None:
     """Defer-then-probe, and the one-object contract in action: the
     check watches the SAME agent object the log flips, so realization
@@ -175,6 +184,7 @@ def test_absent_target_is_a_loud_error(db: Database) -> None:
         required_commands=("claude",),
         target=None,
         admin=False,
+        vm_name="box",
     )
     with pytest.raises(StateError, match="refusing to skip"):
         check.preflight(_ctx())
@@ -187,20 +197,37 @@ def test_admin_mode_probes_the_admin_target(db: Database) -> None:
     assert len(probe.commands) == 1
 
 
-def test_missing_transport_defers_at_preflight_and_is_loud_at_runup(
-    db: Database,
-) -> None:
-    """A realized target with no transport on the command-start context
-    defers (the stage's timing did not carry it); the op-start context
-    must carry it, so runup without one is a loud error."""
-    vm = _vm_node(db)
-    agent = _pending_agent(db, vm)
-    agent.mark_realized()
-    session = _session(db, agent=agent, vm=vm)
+def test_admin_mode_error_names_the_vm(db: Database) -> None:
+    """Label parity with the imperative call sites: admin sessions
+    name the VM, not the agent."""
+    session = _session(db, agent=None, admin=True)
+    probe = _Probe(missing={"claude"})
+    with pytest.raises(StateError, match="requires 'claude'") as exc:
+        session.preflight(_ctx(agent=None, admin=True, admin_target=probe))
+    assert "for VM 'box'." in str(exc.value)
 
-    session.preflight(_ctx())  # no transport: defer, no raise
+
+@pytest.mark.parametrize("admin_mode", [False, True])
+def test_missing_transport_defers_at_preflight_and_is_loud_at_runup(
+    db: Database, admin_mode: bool
+) -> None:
+    """A probe-ready target with no transport on the command-start
+    context defers (the stage's timing did not carry it); the op-start
+    context must carry it, so runup without one is a loud error. Same
+    shape in agent and admin mode."""
+    vm = _vm_node(db)
+    if admin_mode:
+        session = _session(db, agent=None, admin=True, vm=vm)
+        ctx = _ctx(agent=None, admin=True)
+    else:
+        agent = _pending_agent(db, vm)
+        agent.mark_realized()
+        session = _session(db, agent=agent, vm=vm)
+        ctx = _ctx()
+
+    session.preflight(ctx)  # no transport: defer, no raise
     with pytest.raises(StateError, match="op-start context"):
-        session.runup(_ctx())
+        session.runup(ctx)
 
 
 # -- the factory contracts ---------------------------------------------------
@@ -235,8 +262,8 @@ def test_session_create_graph_shares_one_vm_node(db: Database) -> None:
     ephemeral fold)."""
     from agentworks.agents.nodes import AgentTemplateNode, pending_agent_node
     from agentworks.agents.templates import ResolvedAgentTemplate
+    from agentworks.git_credentials.nodes import GitCredentialNode
     from agentworks.orchestration.walk import walk
-    from agentworks.vms.nodes import GitCredentialNode
     from agentworks.workspaces.nodes import pending_workspace_node
 
     vm = _vm_node(db)
@@ -339,6 +366,7 @@ def test_pending_workspace_teardown_is_todays_rollback_body(
     (call,) = calls
     assert call["name"] == "ws1"
     assert call["force"] is True and call["yes"] is True
+    assert call["platform"] is vm.site.platform
 
 
 def test_reverse_realization_order_reproduces_rollback_order(
@@ -373,3 +401,173 @@ def test_reverse_realization_order_reproduces_rollback_order(
     log.mark_realized(agent)
     log.unwind()
     assert order == ["agent", "workspace"]
+
+
+# -- the live halves ---------------------------------------------------------
+
+
+def _live_agent(db: Database, vm: LiveVMNode, name: str = "dev"):
+    from agentworks.agents.nodes import live_agent_node
+    from agentworks.db import AgentRow
+
+    row = AgentRow(
+        name=name, vm_name=vm.row.name, linux_user=f"agw-{name}",
+        template=None, grant_all=False, created_at="",
+    )
+    return live_agent_node(row, vm)
+
+
+def _session_row(*, agent_name: str | None) -> object:
+    from agentworks.db import SessionRow
+
+    return SessionRow(
+        name="s1", workspace_name="ws1", template="claude",
+        mode="agent" if agent_name else "admin",
+        created_at="", updated_at="", agent_name=agent_name,
+    )
+
+
+def _live_workspace(db: Database, vm: LiveVMNode):
+    from agentworks.db import WorkspaceRow
+    from agentworks.workspaces.nodes import live_workspace_node
+
+    row = WorkspaceRow(
+        name="ws1", vm_name=vm.row.name, template=None,
+        workspace_path="/srv/ws1", created_at="", last_seen_at=None,
+        linux_group="ws-ws1",
+    )
+    return live_workspace_node(row, vm)
+
+
+def test_live_agent_and_workspace_nodes_shape(db: Database) -> None:
+    vm = _vm_node(db)
+    agent = _live_agent(db, vm)
+    workspace = _live_workspace(db, vm)
+    assert agent.key == "agent/dev"
+    assert agent.realized is True  # a live node IS realized
+    assert agent.deps() == (vm,)
+    assert workspace.key == "workspace/ws1"
+    assert workspace.deps() == (vm,)
+
+
+def test_live_session_probes_its_realized_agent_at_preflight(
+    db: Database,
+) -> None:
+    from agentworks.sessions.nodes import live_session_node
+
+    vm = _vm_node(db)
+    agent = _live_agent(db, vm)
+    session = live_session_node(
+        _session_row(agent_name="dev"),  # type: ignore[arg-type]
+        ResolvedSessionTemplate(name="claude", required_commands=["claude"]),
+        agent=agent,
+        workspace=_live_workspace(db, vm),
+        vm=vm,
+    )
+    probe = _Probe()
+    session.preflight(_ctx(agent_target=probe))
+    assert len(probe.commands) == 1  # realized target: the early probe
+
+
+def test_live_session_admin_mode_comes_from_the_row(db: Database) -> None:
+    from agentworks.sessions.nodes import live_session_node
+
+    vm = _vm_node(db)
+    session = live_session_node(
+        _session_row(agent_name=None),  # type: ignore[arg-type]
+        ResolvedSessionTemplate(name="claude", required_commands=["claude"]),
+        agent=None,
+        workspace=_live_workspace(db, vm),
+        vm=vm,
+    )
+    probe = _Probe(missing={"claude"})
+    with pytest.raises(StateError, match="for VM 'box'"):
+        session.preflight(_ctx(agent=None, admin=True, admin_target=probe))
+
+
+def test_live_session_agent_row_with_no_agent_node_is_loud(
+    db: Database,
+) -> None:
+    """The fork's loud branch must survive the live factory: an
+    agent-mode row handed no agent node is a lookup bug, never a
+    silent fall-back to admin."""
+    from agentworks.sessions.nodes import live_session_node
+
+    vm = _vm_node(db)
+    with pytest.raises(StateError, match="refusing to fall back"):
+        live_session_node(
+            _session_row(agent_name="dev"),  # type: ignore[arg-type]
+            ResolvedSessionTemplate(name="claude"),
+            agent=None,
+            workspace=_live_workspace(db, vm),
+            vm=vm,
+        )
+
+
+def test_live_session_admin_row_with_an_agent_node_is_loud(
+    db: Database,
+) -> None:
+    from agentworks.sessions.nodes import live_session_node
+
+    vm = _vm_node(db)
+    with pytest.raises(StateError, match="admin session"):
+        live_session_node(
+            _session_row(agent_name=None),  # type: ignore[arg-type]
+            ResolvedSessionTemplate(name="claude"),
+            agent=_live_agent(db, vm),
+            workspace=_live_workspace(db, vm),
+            vm=vm,
+        )
+
+
+def test_live_session_agent_name_mismatch_is_loud(db: Database) -> None:
+    from agentworks.sessions.nodes import live_session_node
+
+    vm = _vm_node(db)
+    with pytest.raises(StateError, match="must agree"):
+        live_session_node(
+            _session_row(agent_name="dev"),  # type: ignore[arg-type]
+            ResolvedSessionTemplate(name="claude"),
+            agent=_live_agent(db, vm, name="other"),
+            workspace=_live_workspace(db, vm),
+            vm=vm,
+        )
+
+
+# -- the agent-template factory (declared references become edges) -----------
+
+
+def test_agent_template_node_derives_credential_edges(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The factory obligation, proven through real declared resources:
+    one git-credential node per declared name, in declaration order,
+    each carrying its token secret."""
+    from agentworks.agents.nodes import agent_template_node
+    from agentworks.agents.templates import resolve_template
+    from agentworks.bootstrap import build_registry
+    from agentworks.config import load_config
+
+    key = tmp_path / "id_ed25519"
+    key.write_text("private")
+    (tmp_path / "id_ed25519.pub").write_text("public")
+    cfg = tmp_path / "config.toml"
+    cfg.write_text(
+        f'[operator]\nssh_public_key = "{key}.pub"\nssh_private_key = "{key}"\n'
+        '[git_credentials.gh]\nprovider = "github"\n'
+        '[git_credentials.gh2]\nprovider = "github"\n'
+        "[agent_templates.default]\n"
+        'git_credentials = ["gh", "gh2"]\n'
+    )
+    config = load_config(cfg, warn_issues=False, warn_deprecations=False)
+    registry = build_registry(config)
+    tmpl = resolve_template(registry, None)
+    node = agent_template_node(registry, tmpl, None)
+    assert node.key == "agent-template/default"
+    assert [c.key for c in node.deps()] == [
+        "git-credential/gh",
+        "git-credential/gh2",
+    ]
+    assert node.credentials[0].secret_refs() == ("git-token-gh",)
+    assert node.credentials[1].secret_refs() == ("git-token-gh2",)
+    assert node.secret_refs() == ()  # tokens ride the credential nodes

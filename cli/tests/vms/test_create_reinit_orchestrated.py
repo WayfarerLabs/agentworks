@@ -78,13 +78,13 @@ def test_create_graph_derives_from_declared_resources(
     the template's env-block secrets EXCLUDED (hermetic provisioning).
     """
     from agentworks.bootstrap import build_registry
+    from agentworks.git_credentials.nodes import git_credential_node
     from agentworks.orchestration.node import CreatableNode
     from agentworks.orchestration.secrets import secret_union
     from agentworks.orchestration.walk import walk
     from agentworks.resources.access import admin_template
     from agentworks.secrets.resolver import Resolver
     from agentworks.vms.nodes import (
-        git_credential_node,
         pending_vm_node,
         vm_site_node,
         vm_template_node,

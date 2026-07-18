@@ -223,11 +223,12 @@ def test_graph_derives_from_row_and_declared_references(
     reproduce what the imperative composition covered (site config
     secrets plus the credential token)."""
     from agentworks.bootstrap import build_registry
+    from agentworks.git_credentials.nodes import git_credential_node
     from agentworks.orchestration.node import Node
     from agentworks.orchestration.secrets import secret_union
     from agentworks.orchestration.walk import walk
     from agentworks.secrets.resolver import Resolver
-    from agentworks.vms.nodes import git_credential_node, live_vm_node
+    from agentworks.vms.nodes import live_vm_node
 
     config = make_config()
     vm = _seed_vm(db)

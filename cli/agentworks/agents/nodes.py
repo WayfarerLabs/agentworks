@@ -25,10 +25,11 @@ if TYPE_CHECKING:
     from agentworks.capabilities.base import RunContext
     from agentworks.config import Config
     from agentworks.db import AgentRow, Database
+    from agentworks.git_credentials.nodes import GitCredentialNode
     from agentworks.orchestration.node import Node
     from agentworks.resources.registry import Registry
     from agentworks.secrets.resolver import Resolver
-    from agentworks.vms.nodes import GitCredentialNode, LiveVMNode
+    from agentworks.vms.nodes import LiveVMNode
 
     from .templates import ResolvedAgentTemplate
 
@@ -205,7 +206,7 @@ def agent_template_node(
     template: each name in its declared ``git_credentials`` becomes an
     edge to a ``git-credential`` node (constructed here, one per name,
     each holding its provider instance)."""
-    from agentworks.vms.nodes import git_credential_node
+    from agentworks.git_credentials.nodes import git_credential_node
 
     credentials = tuple(
         git_credential_node(registry, cred_name, resolver)
