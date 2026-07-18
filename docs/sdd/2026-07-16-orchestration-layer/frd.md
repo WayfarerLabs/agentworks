@@ -1,6 +1,7 @@
 # Orchestration layer: functional requirements
 
-**Status:** Draft **Repo:** `agentworks` **Path:** `cli/agentworks/`
+**Status:** Locked (2026-07-18, see [locked.md](locked.md)) **Repo:** `agentworks` **Path:**
+`cli/agentworks/`
 
 ## Background
 
@@ -101,7 +102,11 @@ behavior. This SDD re-homes the composition around them; it does not redesign th
   from them.
 - **Live resource**: a node representing an instance that exists in the installation, distinct from
   the template it was made from: a VM, a workspace, an agent, a session, a console. Today these
-  exist only as DB rows plus scattered manager logic; this SDD makes them first-class nodes.
+  exist only as DB rows plus scattered manager logic; this SDD makes them first-class nodes. (As
+  landed, 2026-07-18: console instances never became nodes. No migrated command forced one, and the
+  console attach seam ruled that attach provisions nothing console-shaped, so its graph is the live
+  VM alone; a future console command that needs one introduces it then, the emerge-when-forced
+  rule.)
 - **Pending node**: a live resource the current command will create. It participates in the plan
   (identity, dependencies, readiness contributions) before it exists in the world, and is marked
   realized when its mutation completes. Pending-ness is a property of the node in the plan, not a
@@ -172,9 +177,11 @@ behavior. This SDD re-homes the composition around them; it does not redesign th
 ### R3: Live resources are first-class nodes, including pending ones
 
 - VM, workspace, agent, session, and console instances are nodes, distinct from their templates,
-  constructed from their DB rows. Their capability machinery enters correctly per R1: a live VM node
-  holds its row and depends (a graph edge) on its `vm-site` node, and the `vm-site` node HOLDS the
-  platform instance as a contained field (the platform instance is not itself a node).
+  constructed from their DB rows. (As landed, 2026-07-18: all but consoles; console instances never
+  became nodes, see the glossary's as-landed note.) Their capability machinery enters correctly per
+  R1: a live VM node holds its row and depends (a graph edge) on its `vm-site` node, and the
+  `vm-site` node HOLDS the platform instance as a contained field (the platform instance is not
+  itself a node).
 - Identity is TWO layers (maintainer discussion, 2026-07-17). **Layer 1, intrinsic self-identity**:
   a node's own `kind/name` and, for a live node, the ancestor names its DB row carries (a live agent
   knows its VM and its own name). Path-independent and self-determined, so a node reached by several

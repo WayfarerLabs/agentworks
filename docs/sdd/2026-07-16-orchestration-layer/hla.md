@@ -1,6 +1,7 @@
 # Orchestration layer: high-level architecture
 
-**Status:** Draft **Repo:** `agentworks` **Path:** `cli/agentworks/`
+**Status:** Locked (2026-07-18, see [locked.md](locked.md)) **Repo:** `agentworks` **Path:**
+`cli/agentworks/`
 
 Builds on the FRD in this directory and on [`spike-findings.md`](spike-findings.md) (all four R11
 bets hold on real types). The FRD owns the requirements and rulings; this HLA pins the shapes: where
@@ -645,7 +646,10 @@ Interim seams (an orchestrated command calling not-yet-migrated machinery) are d
 - The gate-to-boundary cache seeding path: `Resolver.resolve` deliberately refuses post-pass
   registration today, so the LLD pins how the activation gate's just-in-time values pre-seed the
   boundary pass without weakening that guard.
-- Console nodes: no migrated command needs one until late; introduce lazily (R8).
+- Console nodes: no migrated command needs one until late; introduce lazily (R8). (Resolved as
+  landed, 2026-07-18: never introduced. The console attach seam ruled that attach provisions nothing
+  console-shaped, so no migrated command ever forced a console node; a future console command that
+  needs one introduces it then.)
 - Whether `readiness.py`'s policy helpers stay two functions (sweep, skip-and-degrade) or the tracer
   reveals a third shape.
 - `OperationScope` exact per-level field rules and `__post_init__` enforcement (the table pins the

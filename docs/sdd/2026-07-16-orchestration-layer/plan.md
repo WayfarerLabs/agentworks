@@ -1,6 +1,7 @@
 # Orchestration layer: implementation plan
 
-**Status:** Draft **Repo:** `agentworks` **Path:** `cli/agentworks/`
+**Status:** Locked (2026-07-18, see [locked.md](locked.md)) **Repo:** `agentworks` **Path:**
+`cli/agentworks/`
 
 Tracks the work behind the FRD and HLA in this directory. The shape is fixed by two FRD rules and
 they govern every phase below:
@@ -943,10 +944,21 @@ ops read the context; the full suite green.
 Goal: finalize the permanent record. (The `capabilities/README.md` rewrite and the model narrative
 are NOT here; they ride their phases per the lockstep rule.)
 
-- [ ] Confirm `capabilities/README.md`, `docs/guides/resources.md`, and the top-level model
+- [x] Confirm `capabilities/README.md`, `docs/guides/resources.md`, and the top-level model
       narrative reflect HEAD (the node protocol, orchestrator ownership of traversal/secrets, the
       completed declare/receive contract, the two-layer identity + operation scope), each having
-      landed with its phase.
+      landed with its phase. CONFIRMED (2026-07-18): `capabilities/README.md` was rewritten to HEAD
+      in the retirement push (construction binds config alone, central prediction at the holding
+      node, ops on `RunContext`, scoped delivery as the only value path, the
+      landing-command-by-command prose replaced by LANDED); `docs/guides/resources.md` speaks only
+      to the operator-facing surface (backends, the chain, one resolve pass and at-most-one prompt
+      per command), all still true at HEAD, so it needed and got no change; the top-level model
+      narrative (the repo `README.md` Core Concepts and `cli/README.md`) is operator-conceptual and
+      makes no claim this effort's internals touched (its one adjacent claim, `vm start` recovering
+      an expired rejoin key by re-resolving through the chain, remains true via the gate's repair
+      path). Also confirmed at lock: the console-node open question resolved to never-introduced
+      (emerge-when-forced), recorded as as-landed notes on the FRD's R3/glossary console mentions
+      and the HLA's open question, and in `locked.md`.
 - [x] Promote and NUMBER the ADR from this feature directory into `docs/adrs/` (it references ADR
       0016, `0016-yaml-resource-manifests.md`, for the capability collapse and
       `capabilities/README.md` for the lifecycle contract; its own number is assigned at promotion,
@@ -961,7 +973,12 @@ are NOT here; they ride their phases per the lockstep rule.)
       this box specifies. The parity-driven unwind note rides its Unwind decision and Alternatives
       Considered. The one SDD-scoped word the ADR needed (rollbackable) moved from this directory's
       `.cspell.json` to the root dictionary per the dictionary promotion rule.
-- [ ] Write `locked.md` summarizing the final state.
+- [x] Write `locked.md` summarizing the final state. WRITTEN (2026-07-18): what shipped, the
+      as-landed divergences, the phase history in brief, the R7 exception ledger, the surviving
+      riders with their owners (the three interim `keep_active` holds, the port-forward `sys.exit`
+      rider, issue #189, the write-dead `last_seen_at` column and the tmuxinator materials smell),
+      and where the permanent record lives. The artifacts in this directory are immutable from this
+      point.
 
 Definition of done: the ADR is numbered and promoted; permanent docs are accurate at HEAD; the
 lockfile is written.
