@@ -194,13 +194,13 @@ command entry.
 
 ### 2. construct (bind; cheap, config-valid by construction)
 
-The instance is constructed bound to its `(name, config)`: its config, _not_ resolved secret values,
-and no secret machinery at all (the operation's boundary union comes from the plan's declared
-references; values arrive later through the context). Construction re-runs `validate_config` and
-**fails on an invalid config shape**: you do not build an instance around an invalid blob, so a
-shape error dies here, at construction, never later in preflight. (Errors that need the world to
-detect, an unreachable API, a missing tool, are preflight's job, not this.) Construction is
-otherwise cheap: no network, no secret resolution, no prompt.
+The instance is constructed bound to its `(owner_name, config)`: its config, _not_ resolved secret
+values, and no secret machinery at all (the operation's boundary union comes from the plan's
+declared references; values arrive later through the context). Construction re-runs
+`validate_config` and **fails on an invalid config shape**: you do not build an instance around an
+invalid blob, so a shape error dies here, at construction, never later in preflight. (Errors that
+need the world to detect, an unreachable API, a missing tool, are preflight's job, not this.)
+Construction is otherwise cheap: no network, no secret resolution, no prompt.
 
 This is uniform across hosting shapes. Whether a consuming resource is dedicated to one capability
 (`vm-site`) or holds it as one field among many (a `session` with a harness), the instance is
@@ -453,7 +453,7 @@ framework owning everything in between:
 2. **Receive, from the context.** Read resolved secret values only via `ctx.secret(name)`, in
    `runup` and in ops (their signatures converged on `RunContext`; a VM platform's power ops take
    the op-start context beside the row). There is no other value source: the instance holds no
-   resolver and no reader, and construct only _binds_ (name plus config); it never resolves.
+   resolver and no reader, and construct only _binds_ (`owner_name` plus config); it never resolves.
 
 The rule that ties the two together is the self-vs-context split stated with `RunContext` above:
 pre-resolve concerns read `self`, post-resolve concerns read the context. `ctx.secret(name)` raises

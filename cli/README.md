@@ -131,8 +131,8 @@ examples (an Azure site, a remote-Lima site with `platform_config.vm_host`). The
 | `agw vm describe <name>`                            | Show VM details, workspaces, and event log                    |
 | `agw vm shell <name> [--workspace <ws>]`            | Admin shell on a VM (optionally rooted in a workspace)        |
 | `agw vm exec <name> [--workspace <ws>] -- <cmd...>` | Run a one-shot command as admin (optionally from a workspace) |
-| `agw vm start <name>`                               | Start a stopped VM                                            |
-| `agw vm stop <name>`                                | Stop a running VM                                             |
+| `agw vm start <name>`                               | Start a stopped VM and clear its manual-stop intent           |
+| `agw vm stop <name>`                                | Stop a VM and keep it stopped (no auto-start)                 |
 | `agw vm reinit <name>`                              | Re-run initialization on a provisioned VM                     |
 | `agw vm delete <name>`                              | Delete a VM (with confirmation)                               |
 | `agw vm backup <name>`                              | Back up a VM: metadata, agents, workspaces, and files         |
@@ -141,6 +141,12 @@ examples (an Azure site, a remote-Lima site with `platform_config.vm_host`). The
 | `agw vm logs <name>`                                | Show SSH logs for a VM                                        |
 | `agw vm console <name>`                             | _Deprecated_: use `agw console`                               |
 | `agw vm add-git-credential <name> <cred>`           | Add or update a git credential                                |
+
+**Power-state semantics:** a VM that stopped on its own (idle timeout, host reboot) is started
+automatically, on demand, by any command that needs it live. A VM stopped with `agw vm stop` is
+different: that records your intent, so it stays down and commands that would need it refuse with a
+hint until you run `agw vm start`, which clears the intent. `agw vm describe` shows which case a
+stopped VM is in: its status reads `stopped (manual)` versus `stopped (idle)`.
 
 `vm create <name>` takes the VM name as a required positional. Optional flags: `--template` (a
 declared vm-template) and `--site` (a declared vm-site; falls back to `defaults.site`, else the one
@@ -649,16 +655,19 @@ listed in `[secret_config].backends`. Today the implemented backends are:
 - `env-var` -- reads from the operator's process env. Default convention is
   `AW_SECRET_<UPPER_SNAKE_CASE>`, overridable per secret via the secret's `backend_mappings`
   (`env-var: CUSTOM_NAME`).
-- `prompt` -- interactive prompt; batched at the start of the CLI run.
+- `prompt` -- interactive prompt; you are never asked for the same secret twice in one command, and
+  all prompting happens before the command starts changing anything.
 
-**Eager prompting (FRD R4):** every command that opens new shells resolves all needed secrets up
-front, before any state mutation. The set of secrets is computed from the command's static filters
-(positional targets, `--vm`, `--workspace`, `--agent`, etc.) -- dynamic predicates like
+**Resolve before any mutation:** a command resolves all the secrets its plan needs up front, before
+it starts changing anything. A secret that cannot be resolved by any active backend fails at
+preflight with a hint (`agw secret describe <name>` shows how each backend looks it up), before any
+prompt and before any VM is started. The set of secrets is computed from the command's static
+filters (positional targets, `--vm`, `--workspace`, `--agent`, etc.) -- dynamic predicates like
 `--all-stopped` apply later, so the prompted set may over-approximate. Non-interactive mode (no TTY
 or `--non-interactive`) surfaces missing secrets as `SecretUnavailableError` with a per-secret hint
 naming which backends were tried. Commands that join existing shells (`session attach`,
 `session list`, `console attach` against a live tmux session, `console add-sessions`) consume no
-secrets per FRD R4 / R5.
+secrets.
 
 **Miss semantics:** what "not found" means depends on the backend. Conventional sources (`env-var`,
 `prompt`) treat a missing value as a soft miss and fall through to the next backend in the chain --

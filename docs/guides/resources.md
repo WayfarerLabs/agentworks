@@ -185,9 +185,10 @@ Two layers, one rule each:
 
 Resolution is a pass over the chain in precedence order: the first backend that produces a value
 wins. You are never prompted for the same secret twice in one command, and all prompting happens up
-front, before the command starts changing anything. `agw secret list` shows how each active backend
-would look up each secret; `agw secret describe <name>` shows one secret in full; `agw doctor`
-reports one row per secret with the runtime outcome.
+front, before the command starts changing anything. A secret no active backend can resolve fails at
+preflight with a hint, before any prompt and before anything changes. `agw secret list` shows how
+each active backend would look up each secret; `agw secret describe <name>` shows one secret in
+full; `agw doctor` reports one row per secret with the runtime outcome.
 
 ## Inspecting the whole picture
 

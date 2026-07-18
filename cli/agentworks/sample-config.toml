@@ -151,8 +151,9 @@ ssh_private_key = "~/.ssh/id_ed25519"        # required: used for SSH connection
 #              AW_SECRET_<UPPER_SNAKE_CASE>, so secret "npm-token" reads from
 #              AW_SECRET_NPM_TOKEN unless overridden via
 #              `[secrets.<name>].backend_mappings.env-var`.
-#   prompt  -- interactive prompt. Always applies; the operator is asked once
-#              per missing secret per CLI invocation (batched up front).
+#   prompt  -- interactive prompt. Always applies; you are never asked for
+#              the same secret twice in one command, and all prompting
+#              happens before the command starts changing anything.
 # Backends are registered code capabilities (agw resource list --kind
 # secret-backend); their names are the valid chain entries here. (The old
 # `[secret_backends.*]` TOML sections are deprecated no-ops.)
