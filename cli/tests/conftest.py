@@ -13,6 +13,11 @@ import pytest
 from agentworks.db import Database
 from agentworks.secrets.resolver import Resolver
 
+# The orchestrated-command suites' shared fixture trio (proxmox
+# section, make_config, resolve_counter) lives in its own module so it
+# reads as the suites' vocabulary rather than universal machinery.
+pytest_plugins = ["tests.orchestrated_fixtures"]
+
 
 @pytest.fixture
 def db(tmp_path: Path) -> Generator[Database, None, None]:

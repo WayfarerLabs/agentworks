@@ -11,53 +11,23 @@ from pathlib import Path
 
 import pytest
 
-from agentworks.config import load_config
 from agentworks.vms import manager as vm_manager
-
-PROXMOX_SECTION = """
-[proxmox]
-api_url = "https://pve:8006"
-node = "pve1"
-token_id = "agw@pam!agw"
-template_vmid = 9000
-"""
+from tests.orchestrated_fixtures import PROXMOX_SECTION, write_operator_config
 
 
 @pytest.fixture
 def make_config(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
-    key = tmp_path / "id_ed25519"
-    key.write_text("private")
-    (tmp_path / "id_ed25519.pub").write_text("public")
+    """This suite's ``make_config`` delta from the shared fixture:
+    nothing baked in (each test names its sites), and deterministic
+    platform preflights (lima checks for limactl locally; pretend the
+    tool exists regardless of the host)."""
     monkeypatch.setenv("AW_SECRET_PROXMOX_TOKEN", "pve-token")
-    # Deterministic platform preflights: lima checks for limactl
-    # locally; pretend the tool exists regardless of the host.
     monkeypatch.setattr("shutil.which", lambda name: f"/usr/bin/{name}")
 
     def _make(extra: str = ""):
-        path = tmp_path / "config.toml"
-        path.write_text(
-            f'[operator]\nssh_public_key = "{key}.pub"\nssh_private_key = "{key}"\n'
-            + extra
-        )
-        return load_config(path, warn_issues=False, warn_deprecations=False)
+        return write_operator_config(tmp_path, extra)
 
     return _make
-
-
-@pytest.fixture
-def resolve_counter(monkeypatch: pytest.MonkeyPatch) -> list[object]:
-    """Count boundary resolve passes through the real backend loop."""
-    from agentworks.secrets import resolve as secrets_resolve
-
-    calls: list[object] = []
-    real = secrets_resolve.resolve_secrets
-
-    def _counting(secrets: list[object], *args: object, **kwargs: object) -> dict[str, str]:
-        calls.append([getattr(s, "name", s) for s in secrets])
-        return real(secrets, *args, **kwargs)  # type: ignore[arg-type]
-
-    monkeypatch.setattr(secrets_resolve, "resolve_secrets", _counting)
-    return calls
 
 
 def _vm(name: str, site: str) -> object:
@@ -67,7 +37,7 @@ def _vm(name: str, site: str) -> object:
 
 
 def test_no_site_secrets_skips_the_resolve_pass(
-    make_config, resolve_counter: list[object]
+    make_config, resolve_counter: list[list[str]]
 ) -> None:
     """A secret-free site's boundary resolve is a no-op: the backend
     loop never runs, so nothing can prompt."""
@@ -78,7 +48,7 @@ def test_no_site_secrets_skips_the_resolve_pass(
 
 
 def test_secret_bearing_site_resolves_exactly_once(
-    make_config, resolve_counter: list[object]
+    make_config, resolve_counter: list[list[str]]
 ) -> None:
     """The bound platform's declared config secret resolves in the ONE
     boundary pass and ops read it from the resolver's cache."""
@@ -93,7 +63,7 @@ def test_secret_bearing_site_resolves_exactly_once(
 
 
 def test_preflight_failure_prevents_the_resolve_pass(
-    make_config, resolve_counter: list[object], monkeypatch: pytest.MonkeyPatch
+    make_config, resolve_counter: list[list[str]], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """The lifecycle ordering pin: a failing preflight means the
     operator is never asked for a secret (no resolve pass runs)."""
@@ -111,7 +81,7 @@ def test_preflight_failure_prevents_the_resolve_pass(
 
 
 def test_bind_platforms_one_resolve_and_one_instance_per_site(
-    make_config, resolve_counter: list[object]
+    make_config, resolve_counter: list[list[str]]
 ) -> None:
     """Two VMs at the same secret-bearing site share one bound platform
     and the whole batch shares ONE resolve pass (prompt-once across a
@@ -126,7 +96,7 @@ def test_bind_platforms_one_resolve_and_one_instance_per_site(
 
 
 def test_bind_platforms_union_spans_sites(
-    make_config, resolve_counter: list[object]
+    make_config, resolve_counter: list[list[str]]
 ) -> None:
     """A mixed-site batch still resolves once: the union of both sites'
     declared secrets goes through a single pass."""
@@ -140,7 +110,7 @@ def test_bind_platforms_union_spans_sites(
 
 
 def test_env_targets_join_the_site_secret_pass(
-    make_config, resolve_counter: list[object], monkeypatch: pytest.MonkeyPatch
+    make_config, resolve_counter: list[list[str]], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """The headline one-prompt-session pin: a command's env-chain secret
     (via ``targets=``) and the site's config secret resolve in ONE
@@ -166,10 +136,8 @@ def test_env_targets_join_the_site_secret_pass(
         resolver=resolver, targets=[target],
     )
 
-    from typing import cast
-
     assert len(resolve_counter) == 1
-    assert sorted(cast("list[str]", resolve_counter[0])) == [
+    assert sorted(resolve_counter[0]) == [
         "api-key",
         "proxmox-token",
     ]

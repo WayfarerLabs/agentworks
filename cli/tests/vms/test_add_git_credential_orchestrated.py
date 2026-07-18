@@ -26,24 +26,16 @@ import pytest
 
 from agentworks.capabilities.git_credential.github import GitHubCredentialProvider
 from agentworks.capabilities.vm_platform.proxmox import ProxmoxPlatform
-from agentworks.config import load_config
 from agentworks.db import VMStatus
 from agentworks.errors import StateError, TokenRejectedError, ValidationError
 from agentworks.vms import manager as vm_manager
+from tests.orchestrated_fixtures import PROXMOX_SECTION, write_operator_config
 
 if TYPE_CHECKING:
     from pathlib import Path
 
     from agentworks.capabilities.base import OperationScope, RunContext
     from agentworks.db import Database, VMRow
-
-PROXMOX_SECTION = """
-[proxmox]
-api_url = "https://pve:8006"
-node = "pve1"
-token_id = "agw@pam!agw"
-template_vmid = 9000
-"""
 
 GIT_CRED_SECTION = """
 [git_credentials.gh]
@@ -53,37 +45,16 @@ provider = "github"
 
 @pytest.fixture
 def make_config(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
-    key = tmp_path / "id_ed25519"
-    key.write_text("private")
-    (tmp_path / "id_ed25519.pub").write_text("public")
+    """This suite's ``make_config`` delta from the shared fixture: the
+    git token in the env, and the default body REPLACED per test (the
+    proxmox section is part of the default, not baked in)."""
     monkeypatch.setenv("AW_SECRET_PROXMOX_TOKEN", "pve-token")
     monkeypatch.setenv("AW_SECRET_GIT_TOKEN_GH", "ghtok")
 
     def _make(extra: str = PROXMOX_SECTION + GIT_CRED_SECTION):
-        path = tmp_path / "config.toml"
-        path.write_text(
-            f'[operator]\nssh_public_key = "{key}.pub"\nssh_private_key = "{key}"\n'
-            + extra
-        )
-        return load_config(path, warn_issues=False, warn_deprecations=False)
+        return write_operator_config(tmp_path, extra)
 
     return _make
-
-
-@pytest.fixture
-def resolve_counter(monkeypatch: pytest.MonkeyPatch) -> list[list[str]]:
-    """Record every backend-loop pass (the prompt-session oracle)."""
-    from agentworks.secrets import resolve as secrets_resolve
-
-    calls: list[list[str]] = []
-    real = secrets_resolve.resolve_secrets
-
-    def _counting(secrets: list[object], *args: object, **kwargs: object) -> dict[str, str]:
-        calls.append([getattr(s, "name", str(s)) for s in secrets])
-        return real(secrets, *args, **kwargs)  # type: ignore[arg-type]
-
-    monkeypatch.setattr(secrets_resolve, "resolve_secrets", _counting)
-    return calls
 
 
 class _FakeTarget:

@@ -15,24 +15,13 @@ from typing import TYPE_CHECKING, Any
 import pytest
 
 from agentworks.capabilities.vm_platform.proxmox import ProxmoxPlatform
-from agentworks.config import load_config
 from agentworks.errors import ExternalError
 from agentworks.vms import manager as vm_manager
 from agentworks.workspaces import manager as workspace_manager
 
 if TYPE_CHECKING:
-    from pathlib import Path
-
     from agentworks.capabilities.base import OperationScope, RunContext
     from agentworks.db import Database
-
-PROXMOX_SECTION = """
-[proxmox]
-api_url = "https://pve:8006"
-node = "pve1"
-token_id = "agw@pam!agw"
-template_vmid = 9000
-"""
 
 # A workspace template with an env-block secret reference: a RUNTIME
 # input (delivered where sessions run), which must never join the
@@ -41,41 +30,6 @@ WORKSPACE_ENV_SECTION = """
 [workspace_templates.default.env]
 WS_TOKEN = { secret = "ws-env-secret" }
 """
-
-
-@pytest.fixture
-def make_config(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):  # noqa: ANN201
-    key = tmp_path / "id_ed25519"
-    key.write_text("private")
-    (tmp_path / "id_ed25519.pub").write_text("public")
-    monkeypatch.setenv("AW_SECRET_PROXMOX_TOKEN", "pve-token")
-
-    def _make(extra: str = ""):  # noqa: ANN202
-        path = tmp_path / "config.toml"
-        path.write_text(
-            f'[operator]\nssh_public_key = "{key}.pub"\nssh_private_key = "{key}"\n'
-            + PROXMOX_SECTION
-            + extra
-        )
-        return load_config(path, warn_issues=False, warn_deprecations=False)
-
-    return _make
-
-
-@pytest.fixture
-def resolve_counter(monkeypatch: pytest.MonkeyPatch) -> list[list[str]]:
-    """Record every backend-loop pass (the prompt-session oracle)."""
-    from agentworks.secrets import resolve as secrets_resolve
-
-    calls: list[list[str]] = []
-    real = secrets_resolve.resolve_secrets
-
-    def _counting(secrets: list[object], *args: object, **kwargs: object) -> dict[str, str]:
-        calls.append([getattr(s, "name", str(s)) for s in secrets])
-        return real(secrets, *args, **kwargs)  # type: ignore[arg-type]
-
-    monkeypatch.setattr(secrets_resolve, "resolve_secrets", _counting)
-    return calls
 
 
 @pytest.fixture

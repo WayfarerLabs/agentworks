@@ -17,58 +17,13 @@ from typing import TYPE_CHECKING
 import pytest
 
 from agentworks.capabilities.vm_platform.proxmox import ProxmoxPlatform
-from agentworks.config import load_config
+from agentworks.db import VMStatus
 from agentworks.errors import UserAbort
 from agentworks.vms import manager as vm_manager
 
 if TYPE_CHECKING:
-    from pathlib import Path
-
     from agentworks.db import Database, VMRow
     from tests.conftest import CapturedOutput
-
-PROXMOX_SECTION = """
-[proxmox]
-api_url = "https://pve:8006"
-node = "pve1"
-token_id = "agw@pam!agw"
-template_vmid = 9000
-"""
-
-
-@pytest.fixture
-def make_config(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):  # noqa: ANN201
-    key = tmp_path / "id_ed25519"
-    key.write_text("private")
-    (tmp_path / "id_ed25519.pub").write_text("public")
-    monkeypatch.setenv("AW_SECRET_PROXMOX_TOKEN", "pve-token")
-
-    def _make(extra: str = ""):  # noqa: ANN202
-        path = tmp_path / "config.toml"
-        path.write_text(
-            f'[operator]\nssh_public_key = "{key}.pub"\nssh_private_key = "{key}"\n'
-            + PROXMOX_SECTION
-            + extra
-        )
-        return load_config(path, warn_issues=False, warn_deprecations=False)
-
-    return _make
-
-
-@pytest.fixture
-def resolve_counter(monkeypatch: pytest.MonkeyPatch) -> list[list[str]]:
-    """Record every backend-loop pass (the prompt-session oracle)."""
-    from agentworks.secrets import resolve as secrets_resolve
-
-    calls: list[list[str]] = []
-    real = secrets_resolve.resolve_secrets
-
-    def _counting(secrets: list[object], *args: object, **kwargs: object) -> dict[str, str]:
-        calls.append([getattr(s, "name", str(s)) for s in secrets])
-        return real(secrets, *args, **kwargs)  # type: ignore[arg-type]
-
-    monkeypatch.setattr(secrets_resolve, "resolve_secrets", _counting)
-    return calls
 
 
 @pytest.fixture(autouse=True)
@@ -87,9 +42,12 @@ def _fake_backend(monkeypatch: pytest.MonkeyPatch) -> dict[str, int]:
     choreography above them runs for real."""
     counts = {"status": 0, "delete": 0}
 
-    def _status(self: ProxmoxPlatform, row: VMRow) -> None:
+    # The counter is the never-probes oracle (asserted zero where it
+    # matters); a raise here would be swallowed by delete's best-effort
+    # spans and could never signal anything.
+    def _status(self: ProxmoxPlatform, row: VMRow) -> VMStatus:
         counts["status"] += 1
-        raise AssertionError("delete must never probe power state")
+        return VMStatus.STOPPED
 
     def _delete(self: ProxmoxPlatform, row: VMRow) -> None:
         counts["delete"] += 1
