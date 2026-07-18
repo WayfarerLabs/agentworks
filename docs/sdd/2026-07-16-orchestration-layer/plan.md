@@ -117,7 +117,21 @@ unwind.
       `status` needs the API token before the boundary), which must demonstrably not double-prompt.
       The gate parity assertion also covers the operator-stopped RE-READ race guard: the VM node's
       `auto_start` must re-read the intent flag at start time, as HEAD's `ensure_active` does
-      (reviewer carry, 2026-07-17).
+      (reviewer carry, 2026-07-17). (Implementation note, 2026-07-17, recording two facts the
+      checked wording glosses and one ruling. FIRST, the derived preflight SET is a strict SUPERSET
+      of the imperative one: the sweep preflights every participating node, including the
+      git-credential provider, which the imperative command constructed but never preflighted; the
+      secret UNION matches exactly. SECOND, that superset shifts one error shape, a knowing R7
+      exception: an unresolvable token now fails at the sweep as the capability base preflight's
+      `ConfigError` with the secret-describe hint, instead of HEAD's `SecretUnavailableError` at the
+      boundary resolve; the new shape matches what `vm reinit` already produces for the same
+      failure, so the exception buys cross-command consistency. THIRD, the prompt-session ruling
+      (2026-07-17): the checked "exactly ONE prompt session" phrasing overstates the invariant; what
+      is promised and proven is ALL interactivity strictly before the walk-away point, and no secret
+      resolved or prompted twice. Contiguity is not promised: on a stopped VM with prompt-backed
+      secrets there are two interactive moments, the gate then the boundary, separated by the VM
+      start, which is the gate-first ordering the model itself requires so readiness probes a live
+      target.)
 - [x] The imperative `add_git_credential` is retired (or reduced to a thin call into the
       orchestrator); the interim seam to any not-yet-migrated machinery is documented here. (Seam
       catalog for this command, also stated in the orchestrator's docstring: (1) capability
@@ -128,7 +142,11 @@ unwind.
       close with the resolver retirement in Phase 5. (3) The node's auto-start reuses the imperative
       repair machinery via `_ensure_tailscale(auth_key_source=...)`: the key still arrives through
       the gate's lazy reader (nodes never resolve), and the parameter's default keeps today's
-      internal late resolve for the imperative callers. The imperative `ensure_active` /
+      internal late resolve for the imperative callers. (4) Resolvability PREDICTION still runs
+      through the instances' bound resolvers: the sweep composes the instances' own preflight
+      predictions, preserving their exact error shapes, and the central `predict_resolution` helper
+      (Phase 0) has no production caller until the Phase 5 retirement, where it takes over; the HLA
+      Secrets section carries the matching as-landed note. The imperative `ensure_active` /
       `keep_active` pair keeps serving un-migrated commands; the VM node's gate surface mirrors it
       case for case in `tests/vms/test_vm_nodes.py`, the oracle-vs-gate parity assertion.)
 - [x] `capabilities/README.md` (lockstep, R9): the first consuming-resource node (`git-credential`,

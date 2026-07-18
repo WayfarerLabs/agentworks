@@ -12,6 +12,7 @@
     "ungranted",
     "gatable",
     "inlines",
-    "touchpoints"
+    "touchpoints",
+    "preflighted"
   ]
 }

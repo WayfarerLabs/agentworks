@@ -287,12 +287,16 @@ The path, end to end, replacing the resolver's three entangled jobs:
    bullet must show a real capability runup reading through it; until then today's whole-cache
    reader is the fallback and delivery-scoping is a follow-up within the migration, not a blocker.
 
-**Resolver retirement** (R5/R9) is sequenced, not big-bang: central prediction lands with the tracer
-bullet; construct-time registration becomes dead weight as commands migrate (the walk supplies the
-union); the `resolver` constructor parameter comes off `Capability` (and the vm-template seam the
-spike flagged closes) in a dedicated cleanup step once no migrated command depends on it. Ops read
-`ctx.secrets` per the completed declare/receive contract (PR #182's direction; proxmox's op-client
-bridge dies in the same step).
+**Resolver retirement** (R5/R9) is sequenced, not big-bang: the central prediction HELPER lands with
+the tracer bullet, but its production caller waits for the retirement (as landed, 2026-07-17: the
+tracer's preflight sweep composes the instances' own bound-resolver predictions, preserving their
+exact error shapes, and `predict_resolution` stays unit-tested until the cleanup step wires it in;
+this is the tracer's third documented seam, beside construct-time registration and the op-client
+bridge, see the plan's Phase 1 seam catalog); construct-time registration becomes dead weight as
+commands migrate (the walk supplies the union); the `resolver` constructor parameter comes off
+`Capability` (and the vm-template seam the spike flagged closes) in a dedicated cleanup step once no
+migrated command depends on it. Ops read `ctx.secrets` per the completed declare/receive contract
+(PR #182's direction; proxmox's op-client bridge dies in the same step).
 
 ## The context: identity, operation scope, and gated access
 
