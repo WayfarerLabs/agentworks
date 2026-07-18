@@ -489,9 +489,23 @@ Goal: migrate the rest opportunistically, then remove the now-dead per-instance 
       start's rejoin repair keeps `_ensure_tailscale`'s internal late resolve (no gate exists to
       hand a lazy reader through; the same conditional-need exception as HEAD); the imperative
       `ensure_active` / `keep_active` / `bind_platform` / `bind_platforms` / `keep_actives`
-      machinery still serves the un-migrated callers (session batch ops and consoles, the shell /
-      exec roots, workspace shell/console/rehome, agent shell/exec, `vms/backup.py`, the
-      initializer's share-wait, and `rekey_vm`) and retires as they migrate. Where proven:
+      machinery still serves every un-migrated VM-touching command and retires as they migrate.
+      STILL-OPEN SEAM CATALOG (corrected 2026-07-18, review round: the first-landed list was a
+      subset), the caller inventory the resolver-retirement box drains, re-derivable with
+      `grep -rn "bind_platform\|ensure_active\|keep_active" cli/agentworks` (call sites, not
+      definitions or docstrings; the pattern covers all five names by substring), grouped by module:
+      `vms/manager.py` (`describe_vm`, `shell_vm`, `exec_vm`, `rekey_vm`, which is also
+      `preflight_vm_template`'s last production caller, and `port_forward_vm`); `vms/backup.py`
+      (`backup_vm`); `vms/initializer.py` (`initialize_vm`'s share-wait hold);
+      `workspaces/manager.py` (`reinit_workspace`, `rehome_workspace` via `_rehome_vm`,
+      `delete_workspace`, `copy_workspace`, and the deprecated `shell_workspace` /
+      `console_workspace`); `agents/manager.py` (`delete_agent`, `shell_agent`, `exec_agent`,
+      `grant_workspaces`, `revoke_workspaces`); `sessions/manager.py` (`_prepare_vm` serving the
+      singular session ops `stop_session`, `delete_session`, `describe_session`, `attach_session`,
+      and `session_logs`; `bind_platforms` + `keep_actives` serving the batch ops
+      `stop_all_sessions`, `restart_all_sessions`, and `list_sessions`'s status pass);
+      `sessions/console.py` (`attach_console`); `sessions/multi_console.py`
+      (`_prepare_vm_target_for_attach`, the console attach/restore path). Where proven:
       `tests/vms/test_lifecycle_orchestrated.py` (the shared derived graph and union, per-command
       boundary bursts in the tracer's mirror shape with the stopped / running / already-stopped
       short-circuits, the flag semantics end to end against the real commands, the VM scope reaching
@@ -507,7 +521,8 @@ Goal: migrate the rest opportunistically, then remove the now-dead per-instance 
       `resolver` constructor parameter from `Capability`; close the `preflight_vm_template` resolver
       seam (prediction is central now); kill proxmox's op-client bridge so `_api` reads the token
       from the context (`ctx.secret`) rather than the bound resolver, completing PR #182's
-      direction.
+      direction. The caller inventory to drain first is the vm-lifecycle seam box's still-open seam
+      catalog above.
 
 Definition of done: every command orchestrated; `Capability` constructs without a resolver; proxmox
 ops read the context; the full suite green.
