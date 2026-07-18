@@ -460,6 +460,45 @@ Goal: migrate the rest opportunistically, then remove the now-dead per-instance 
       WORKSPACE scope reaching platform readiness); `tests/test_operation_scope.py` carries the
       WORKSPACE level's both-direction violation tests (the not-constructible-yet pin retires with
       the rules landing).
+- [x] `vm start` / `vm stop` / `vm delete` orchestrated (2026-07-18), one green shippable unit
+      superseding the vm-lifecycle portion of the next box (whose remaining scope is the shell /
+      exec roots, the console commands, and the agent delete/grant/revoke migration with the
+      `agents/manager.py` split). RULING: none of the three opens the activation gate. For start and
+      stop the power op IS the command's operation (a command whose op is the state change does not
+      converge state first); start CLEARS `operator_stopped` and stop SETS it, so the gate's intent
+      flag is these commands' mutation, never their input, and the four-way relationship holds: stop
+      records operator intent, start is the explicit operator start that clears it, the gate's
+      auto-start elsewhere keeps respecting it. For delete the no-gate ruling is HEAD-derived: the
+      imperative body never called `ensure_active` / `keep_active` (an operator-stopped VM would
+      refuse, and broken states are what delete exists to clean up), used a hold-only `vm_active`
+      span for the Tailscale logout, and never started a stopped VM to delete it; the never-gates
+      oracle test pins zero status probes on an operator-stopped VM. All preserved exactly.
+      COMPOSITION: the three commands share one composition root (`vms.manager._live_vm_boundary`),
+      because their graphs are identical: the live VM node from the row (the site edge holds the
+      platform), walk union = the site's config secrets only, VM-level scope, preflight sweep, ONE
+      boundary resolve; the ops drive through `vm_node.site.platform`. Delete keeps its entire
+      build-and-boundary inside the best-effort span (warn and skip backend cleanup; UserAbort never
+      downgraded), and its child-count guard and confirm gate stay pre-boundary (zero prompts, zero
+      resolves on a refused delete). Operator-stopped semantics verbatim: stop records intent BEFORE
+      the already-stopped short-circuit and keeps the auto-vs-manual message fork; start clears the
+      flag BEFORE the status probe; messages unchanged. R7: NO timing shifts, sanctioned or
+      otherwise: the imperative bodies already ran preflight-then-resolve (`bind_platform`) at the
+      exact point the orchestrated boundary now sits, and the sweep adds only the live VM node's
+      no-op readiness to the imperative preflight set. Interim seams: construct-time registration
+      beside the walk union, and the op-client bridge (both close with the resolver retirement);
+      start's rejoin repair keeps `_ensure_tailscale`'s internal late resolve (no gate exists to
+      hand a lazy reader through; the same conditional-need exception as HEAD); the imperative
+      `ensure_active` / `keep_active` / `bind_platform` / `bind_platforms` / `keep_actives`
+      machinery still serves the un-migrated callers (session batch ops and consoles, the shell /
+      exec roots, workspace shell/console/rehome, agent shell/exec, `vms/backup.py`, the
+      initializer's share-wait, and `rekey_vm`) and retires as they migrate. Where proven:
+      `tests/vms/test_lifecycle_orchestrated.py` (the shared derived graph and union, per-command
+      boundary bursts in the tracer's mirror shape with the stopped / running / already-stopped
+      short-circuits, the flag semantics end to end against the real commands, the VM scope reaching
+      platform readiness); `tests/vms/test_delete_vm_gating.py` (extended, never weakened: the
+      no-gate boundary-burst pin, the stranded-site degrade with the manifest hint, both UserAbort
+      pins, now driven through the orchestrated composition against the real registry/resolver and
+      backend loop).
 - [ ] `vm delete`, `vm start` / `vm stop`, the shell / exec roots, and console commands (console
       nodes introduced lazily here), each a green shippable unit. The agent delete/grant/revoke
       migration in this phase also splits the overgrown `agents/manager.py` at that natural seam
