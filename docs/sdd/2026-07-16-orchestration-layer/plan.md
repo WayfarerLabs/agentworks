@@ -232,12 +232,28 @@ at SYSTEM level). When PR 168 lands, the real harness instance replaces the seam
 orchestrator change. This keeps R8's "pausable, always green" across the SDD boundary rather than
 assuming lockstep landing.
 
-- [ ] `sessions/nodes.py` and `workspaces/nodes.py`: live-and-pending session and workspace nodes;
+Phase 3 lands in TWO pushes at the coordinator-sanctioned seam (2026-07-17): first the nodes, the
+SESSION scope level, and the four-way fork (the two boxes checked below); then the phase-free
+realization choreography and the two orchestrators.
+
+- [x] `sessions/nodes.py` and `workspaces/nodes.py`: live-and-pending session and workspace nodes;
       `agents/nodes.py`: the live-and-pending agent node with intrinsic (row-carried) identity. The
       session factory MUST pass the SAME agent-node object as both the session's dep and the held
       harness's `target` field (one memoized object), so the harness's `target.realized` observes
       the node the orchestrator flips via `mark_realized`; two constructions would make the harness
-      defer forever (first-consumer note, 2026-07-17).
+      defer forever (first-consumer note, 2026-07-17). (Implementation note: with the harness
+      capability not yet landed, the held machinery is the relocated required-commands check
+      (`RequiredCommandsCheck`, `Readiness`-only, composed by the session node), carrying the
+      four-way fork and probing through the context's target accessors; the harness instance
+      replaces it, fork semantics unchanged. The one-object contract is enforced by the factory
+      signature (nodes are handed in, never re-constructed) and proven by a
+      defer-then-probe-after-the-flip test on the same object. The pending session node's `teardown`
+      deliberately raises until the orchestrators land (its realizing slice defines its artifacts);
+      the pending agent/workspace teardowns are today's `_rollback_ephemerals` bodies (forced
+      deletes through the VM's bound platform), with the reverse-order oracle test proving
+      agent-before-workspace. The SESSION `OperationScope` level rules landed with this box
+      (requires vm/workspace/session, exactly one of agent/admin); WORKSPACE and AGENT stay
+      non-constructible until their commands.)
 - [ ] The PHASE-FREE realization choreography per creatable kind (the agent-realization body: agent
       ops plus the git-credential nodes' materials ops), factored as domain code with no phases and
       no resolve of its own, replacing the `git_tokens` + `own_root` nesting hack.
@@ -245,9 +261,12 @@ assuming lockstep landing.
       defers on its pending target); resolve; dependency-ordered roll-forward with
       `log.mark_realized` after each bespoke mutation; the command-shaped restart ordering (kill
       before the `restart` op) and its pinned non-rollbackable window.
-- [ ] The level-driven SKIP branch's first real exercise: a doctor scan reaching a harness (or a
+- [x] The level-driven SKIP branch's first real exercise: a doctor scan reaching a harness (or a
       harness-like required-commands node) at SYSTEM level, asserting it NO-OPS rather than erroring
-      (the branch the spike structurally could not prove).
+      (the branch the spike structurally could not prove). (Proven in `tests/test_session_nodes.py`:
+      a SYSTEM-level context reaching the session node's required-commands check no-ops, even with
+      no target at all, while the same check at SESSION level defers on pending, probes on realized,
+      fires once, and is loud on an absent target.)
 - [ ] Coordinate with the re-scoped harness SDD: this pad drops the threaded `OperationIdentity` and
       `to_create` in favor of intrinsic layer-1 identity, the per-command operation scope, and
       pending nodes; the harness instance reads only the LEVEL off the operation scope and addresses
