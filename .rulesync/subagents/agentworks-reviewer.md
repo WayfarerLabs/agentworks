@@ -161,10 +161,11 @@ A command is a plan over a derived graph of nodes (ADR 0019;
 `cli/agentworks/capabilities/README.md`). Each command's orchestrator is bespoke named code that
 composes the shared building blocks: derive the graph from declared references and DB rows, walk it
 (memoized, multi-root, one object per key), run the preflight sweep, resolve the whole secret union
-in one boundary pass, deliver secrets scoped to each node's declared names, and drive power state
-through the activation gate where the command needs a live VM. Capability instances implement
-`Readiness` only; they are held by nodes and composed, never keyed or walked. Two contracts, one
-model: what differs between an instance and a node is graph participation, which lives in the type.
+in one boundary pass per composition root, deliver secrets scoped to each node's declared names, and
+drive power state through the activation gate where the command needs a live VM. Capability
+instances implement `Readiness` only; they are held by nodes and composed, never keyed or walked.
+Two contracts, one model: what differs between an instance and a node is graph participation, which
+lives in the type.
 
 Look for:
 
@@ -186,9 +187,12 @@ Look for:
   (`vm start` / `stop` / `delete` never gate), or skipping the gate on a command whose readiness
   probes must reach a live VM. Validation placed after the gate or boundary when it could run
   before: cheap, row- or config-based checks bail early, before any prompt or VM start.
-- Scope discipline: contexts built without an `OperationScope` reaching node readiness (that is loud
-  by design; a silent skip is a bug), or a scope level that does not name the entity the command is
-  about.
+- Scope discipline: a node that READS the operation scope must raise loudly on a scope-less context
+  rather than silently skip (today's scope consumer is the required-commands check in
+  `sessions/nodes.py`; a new scope-consuming node that skips instead is a bug); most nodes never
+  read the scope, so the loudness is the consumer's obligation, not a structural guarantee.
+  Orchestrators must attach the right scope to every context they build, and the scope level must
+  name the entity the command is about.
 - Creation discipline: `mark_realized` doing more than bookkeeping; a `teardown` whose failure does
   not name the artifact left standing; an unwind window that silently differs from the command's
   stated semantics (what is rolled back on failure, and what is deliberately kept, are decisions the
@@ -374,7 +378,7 @@ failure to whichever client is calling it.
 
 - Translates argv into service-layer calls.
 - Owns interactivity decisions (when to prompt, when to error in non-interactive mode).
-- Validates input early via the `_prompt_*` helpers (see check 8).
+- Validates input early via the `_prompt_*` helpers (see check 9).
 - Translates service exceptions into `typer.Exit(1)` plus a user-facing message.
 
 **Assertions are for internal invariants only.** `assert` strips under `python -O` and has no
