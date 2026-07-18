@@ -573,10 +573,73 @@ Goal: migrate the rest opportunistically, then remove the now-dead per-instance 
       pin, VM scope reaching readiness); existing oracle suites mechanically re-seamed, assertions
       preserved (`test_vm_shell_provisioner.py`, `test_workspace_rooted_shells.py`,
       `test_secrets_eager_resolve.py`, `test_session_transport.py`).
-- [ ] `vm delete`, `vm start` / `vm stop`, the shell / exec roots, and console commands (console
-      nodes introduced lazily here), each a green shippable unit. The agent delete/grant/revoke
-      migration in this phase also splits the overgrown `agents/manager.py` at that natural seam
-      (deferred there deliberately, review ruling 2026-07-17, rather than splitting mid-migration).
+- [x] `agent delete` / `agent grant-workspaces` / `agent revoke-workspaces` orchestrated
+      (2026-07-18), the seam that also splits the overgrown `agents/manager.py` (the split was
+      deferred to exactly this migration deliberately, review ruling 2026-07-17, rather than
+      splitting mid-migration). THE SPLIT, a separate mechanical commit so the reviewer can diff
+      refactor and migration honestly (bodies moved verbatim, behavior identical, suite green at the
+      split commit alone): `agents/grants.py` (the workspace-grant / group-membership domain: grant
+      / revoke, `revoke_workspace_grants`, `workspace_group`, the membership pair) and
+      `agents/initializer.py` (the on-VM provisioning bodies, mirroring the `vms/initializer.py`
+      precedent: the create / delete user bodies plus their private profile / rc / mise /
+      install-command sub-steps); `agents/manager.py` keeps lifecycle, list / describe, and the
+      direct shell / exec surface (945 lines, over the 500 target, under the 1000 cap). PUBLIC
+      RENAMES (names tell the truth: the underscore prefix lied about cross-module visibility):
+      `_add_to_workspace_group` -> `add_to_workspace_group`, `_remove_from_workspace_group` ->
+      `remove_from_workspace_group` (consumed by sessions/manager.py, sessions/nodes.py,
+      agents/realize.py, workspaces/realize.py), `_create_agent_on_vm` -> `create_agent_on_vm`,
+      `_delete_agent_on_vm` -> `delete_agent_on_vm` (consumed by agents/realize.py and manager);
+      `_resolve_ws_group` stays private (grants.py-only). Every import site re-pointed, no
+      compatibility re-exports. GATE RULING: all three commands DO open the activation gate (HEAD:
+      `keep_active(bind_platform(...))` on each; they operate interactively over SSH on an existing
+      VM), via the shared `vms.manager.gated_vm_boundary` root with NO env-chain targets (none of
+      the three composes runtime env or passed a SecretTarget at HEAD), so the boundary is exactly
+      the walk union (the site's config secret), VM-level scope, the whole SSH body inside the
+      held-active span. Validation stays pre-gate exactly as HEAD: grant / revoke's empty-request
+      ValidationError and unknown-agent NotFoundError; delete's sessions-guard StateError, confirm
+      gate (UserAbort on decline), and NotFound, all pre-boundary with zero prompts, zero resolves,
+      zero gate events on any refusal. DELETE TWO-PATH RULING: `platform=None` (the standalone
+      command and delete_session's agent-cleanup call) makes delete its own composition root via
+      `gated_vm_boundary`; a handed-in bound `platform` (agents/nodes.py
+      `PendingAgentNode.teardown`, the ephemeral rollback, which runs INSIDE the caller's held gate
+      span) keeps HEAD's `keep_active(db, config, vm, platform)` verbatim, never rebuilding a
+      boundary or re-resolving mid-rollback: the INTERIM nested-teardown seam, recorded in the
+      docstring, closing when the session-create unwind hands a node instead of a platform. R7
+      records, the one sanctioned shift only, the same pre-walk-away bucket as every prior gated
+      seam: the gate opens BEFORE the preflight sweep and boundary resolve where HEAD bound
+      (preflight + resolve) first and gated after; the sweep itself adds only the live VM node's
+      no-op readiness to the site preflight the imperative bind already ran, so no other shifts.
+      Behavior quirk pinned as-is, not healed: revoke --all deletes the explicit rows before its
+      granted-workspaces snapshot, so an explicitly-only-granted workspace never gets its on-VM
+      membership removed on that path (the removal branch cannot fire); fixing that drift is a
+      behavior change outside this parity-bound seam. STILL-OPEN CATALOG entries CLOSED from the
+      vm-lifecycle box: `agents/manager.py` `delete_agent` (its nested-platform path still rides
+      `keep_active` until the session unwind seam), `grant_workspaces` and `revoke_workspaces` (now
+      in `agents/grants.py`). REMAINING: `describe_vm`, `rekey_vm`, `port_forward_vm`, `backup_vm`,
+      `initialize_vm`'s share-wait, `reinit_workspace`, `rehome_workspace`, `delete_workspace`,
+      `copy_workspace`, the deprecated pair, `sessions/manager.py` `_prepare_vm` and the
+      `bind_platforms` / `keep_actives` batch ops. Where proven:
+      `tests/agents/test_delete_grant_revoke_orchestrated.py` (the trio's shared derived graph and
+      site-only union, gate-prompt parity per command on reachable and stopped VMs in the tracer's
+      mirror shape, the four pre-gate refusal pins with zero resolves and zero gate events, VM scope
+      reaching node readiness, delete choreography end to end on the standalone path, the
+      nested-platform zero-extra-resolves / no-second-boundary pin, and the grant / revoke
+      choreography incl. the pinned quirk); existing oracle suites mechanically re-seamed with the
+      split (import paths and patch targets follow the moved, renamed functions; assertions
+      preserved: `test_agents.py`, `test_consoles.py`, `test_error_wrapper.py`,
+      `test_session_transport.py`, `test_secrets_eager_resolve.py`, `test_obtain_token_removed.py`
+      extended to cover `agents/initializer.py`, `tests/agents/test_create_reinit_orchestrated.py`,
+      `tests/sessions/test_session_nodes.py`, `tests/sessions/test_create_restart_orchestrated.py`,
+      `tests/conftest.py`).
+- [ ] The remaining un-migrated commands, each a green shippable unit, drawn from the still-open
+      catalog above: `rekey_vm` (its migration retires `preflight_vm_template`), `port_forward_vm`,
+      `backup_vm`, `initialize_vm`'s share-wait hold, `reinit_workspace`, `rehome_workspace` (via
+      `_rehome_vm`), `delete_workspace` (whose composition absorbs the nested
+      `revoke_workspace_grants` helper), `copy_workspace`, the deprecated `shell_workspace` /
+      `console_workspace` (dying code: retire by deletion, not migration), `describe_vm`
+      (decide-or-record: read-only, may close as never-migrates under the no-over-orchestration
+      ruling), and `sessions/manager.py`'s `_prepare_vm` (serving the singular session ops) plus the
+      `bind_platforms` / `keep_actives` batch ops.
 - [ ] RESOLVER RETIREMENT once no migrated command depends on the bound resolver: drop the
       `resolver` constructor parameter from `Capability`; close the `preflight_vm_template` resolver
       seam (prediction is central now); kill proxmox's op-client bridge so `_api` reads the token
