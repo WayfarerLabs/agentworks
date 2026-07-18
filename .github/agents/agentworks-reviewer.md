@@ -50,8 +50,11 @@ the existing way, not to widen the surface.
 - `cli/README.md`: live CLI surface, configuration shape, and command reference. Anchor here for
   what each command does.
 - `docs/adrs/`: architectural decision records (VM-based infra, Debian base, Tailscale, config-
-  driven init, template inheritance, VM-scoped agents, etc.). The ADRs are how the project records
-  intentional commitments.
+  driven init, template inheritance, VM-scoped agents, the orchestration layer, etc.). The ADRs are
+  how the project records intentional commitments.
+- `cli/agentworks/capabilities/README.md`: the capability model and the orchestration composition
+  contracts (Readiness vs Node, declare-and-receive secrets, the context). Anchor here, with ADR
+  0019, for how commands compose.
 - The active SDD under `docs/sdd/<sdd_feature_dir>/` if the change is part of an SDD effort.
 - `docs/guides/idempotency.md`: the idempotency contract for reinit-able operations.
 - `.rulesync/rules/`: always-on conventions (code style, conventional commits, etc.).
@@ -151,7 +154,53 @@ Look for:
 - Provisioning-time decisions being recorded as if they were declarative config (locking the VM into
   a shape that can't be changed later).
 
-### 4. Templates, inheritance, and ephemerality
+### 4. Commands compose through the orchestration layer
+
+A command is a plan over a derived graph of nodes (ADR 0019;
+`cli/agentworks/capabilities/README.md`). Each command's orchestrator is bespoke named code that
+composes the shared building blocks: derive the graph from declared references and DB rows, walk it
+(memoized, multi-root, one object per key), run the preflight sweep, resolve the whole secret union
+in one boundary pass, deliver secrets scoped to each node's declared names, and drive power state
+through the activation gate where the command needs a live VM. Capability instances implement
+`Readiness` only; they are held by nodes and composed, never keyed or walked. Two contracts, one
+model: what differs between an instance and a node is graph participation, which lives in the type.
+
+Look for:
+
+- New command paths that hand-roll what the building blocks own: manual per-instance preflight
+  loops, ad-hoc resolver construction or reads, secrets resolved at scattered points instead of the
+  one boundary pass. Conversely, over-orchestration: a read-only or pure-row command given a graph,
+  gate, or boundary it does not need.
+- Instance-as-node regressions: a capability implementation growing `key` or `deps`, an orchestrator
+  invoking a held instance's lifecycle directly instead of through its holding node, or an inline
+  instance being keyed into a graph.
+- Secret access outside declare-and-receive: any resolved-value read that is not `ctx.secret(name)`
+  / scoped delivery; construct-time secret registration; a resurrected bound resolver; resolution
+  after the boundary pass outside the one sanctioned conditional-repair shape (the Tailscale rejoin
+  key, resolved late only when the repair path actually needs it).
+- Hand-wired edges: an orchestrator wiring dependencies the node factories should derive from
+  declared references and row fields. Two constructions of "the same" node (the walk raises loudly
+  on this; the fix is in the factory, not in softening the walk).
+- Gate misuse in either direction: gating a command whose operation IS the power-state change
+  (`vm start` / `stop` / `delete` never gate), or skipping the gate on a command whose readiness
+  probes must reach a live VM. Validation placed after the gate or boundary when it could run
+  before: cheap, row- or config-based checks bail early, before any prompt or VM start.
+- Scope discipline: contexts built without an `OperationScope` reaching node readiness (that is
+  loud by design; a silent skip is a bug), or a scope level that does not name the entity the
+  command is about.
+- Creation discipline: `mark_realized` doing more than bookkeeping; a `teardown` whose failure does
+  not name the artifact left standing; an unwind window that silently differs from the command's
+  stated semantics (what is rolled back on failure, and what is deliberately kept, are decisions the
+  orchestrator records).
+- New shared structure across orchestrators should emerge from real repetition and be documented
+  when it lands, not built speculatively; when the same composition shape appears in a third place,
+  factoring it is right, and inventing a generic engine ahead of any repetition is not.
+- A newly orchestrated command shipping without the established test carries: the gate-prompt parity
+  pin (one boundary burst, nothing resolved or prompted twice, everything interactive before the
+  walk-away point), the graph-derivation pin, and the zero-resolve/zero-gate refusal pins for its
+  pre-boundary validation failures. Their absence is the leading indicator of the rest of this list.
+
+### 5. Templates, inheritance, and ephemerality
 
 Each entity layer (VM, agent, workspace, session) has its own template mechanism with inheritance
 (ADR 0005), and each layer has an intended lifespan: **VMs long-lived**, workspaces medium-lived,
@@ -169,7 +218,7 @@ Look for:
 - New behavior that only works for newly-created entities, with no story for the existing long-
   lived ones.
 
-### 5. The embedded-tool set is small and deliberate
+### 6. The embedded-tool set is small and deliberate
 
 The README's "Tightly Integrated Tools" section names the set of tools Agentworks fully embraces:
 SSH as the control plane, Tailscale as the network plane, tmux for session management, plus the
@@ -189,7 +238,7 @@ Look for:
 - New mandatory dependencies introduced in passing (a new system package, a new Python dep, a new
   external service) without a justification.
 
-### 6. Don't bake in a specific agent runtime
+### 7. Don't bake in a specific agent runtime
 
 The operator chooses what runs inside a session: Claude Code, Codex CLI, Aider, a homegrown agent
 loop, or an interactive shell. The core platform must work for all of these. Optional integrations
@@ -210,7 +259,7 @@ This check is narrow on purpose: the question is only "does the core platform re
 runtime to function?" Where optional integrations live in the config, how their fields are named,
 and so on, is a separate concern handled by the consistency / pattern checks.
 
-### 7. DB as the source of truth (and migration discipline)
+### 8. DB as the source of truth (and migration discipline)
 
 Anything an existing entity needs to know about itself should be stored on its row, not derived from
 naming conventions or recomputed from configuration. We learned this the hard way with agent Linux
@@ -254,7 +303,7 @@ Look for:
 - Validation that re-checks state by re-deriving from convention rather than reading the stored
   value. Legacy rows may not match the current convention.
 
-### 8. Elegant, consistent CLI
+### 9. Elegant, consistent CLI
 
 Agentworks is meant to be a joy to use. New commands should feel like siblings of existing ones, not
 bespoke islands. Operators should be able to guess the shape of a new command from their experience
@@ -295,7 +344,7 @@ Look for:
   actual behavior.
 - Error messages that don't suggest a recovery path when the user can take one.
 
-### 9. Service layer is the authority; CLI is one of several clients
+### 10. Service layer is the authority; CLI is one of several clients
 
 The Typer CLI is one of several potential clients (a web app and other surfaces are anticipated).
 All business logic lives in the service layer; the CLI is a thin translation layer. This is also
@@ -346,7 +395,7 @@ Look for:
 - Direct construction of CLI-shaped error messages in `manager.py` modules ("Error: ..." prefixes,
   "...; pass --foo" hints). Service errors carry meaning; the CLI renders them.
 
-### 10. Documentation in sync with the live surface
+### 11. Documentation in sync with the live surface
 
 Behavioral changes need documentation updates. Architectural ones may need an ADR.
 
@@ -361,7 +410,7 @@ Look for:
   README, sample config, generator-script headers, or doctor health-check messages.
 - ADRs or SDDs that have been superseded but not marked as such.
 
-### 11. Pattern consistency
+### 12. Pattern consistency
 
 If similar work has been done elsewhere, the new code should follow that pattern unless there is a
 clear, intentional, documented reason to diverge. This catch-all check covers consistency concerns
@@ -379,7 +428,7 @@ Look for:
 - New conventions encoded in code without first being agreed in a doc. New conventions should land
   in an ADR or rulesync rule before they spread through the codebase.
 
-### 12. Environment diversity: review for machines and configurations that are not this one
+### 13. Environment diversity: review for machines and configurations that are not this one
 
 Agentworks runs on Windows, macOS, and Linux, on hosts with wildly different tooling installed
 (limactl, wsl.exe, cloud CLIs and credentials, shells, tmux versions), under configurations ranging
