@@ -1300,10 +1300,14 @@ def gated_vm_boundary(
     for env composition.
 
     ``scope`` is the command's :class:`OperationScope`; when None the
-    default VM-level scope for this VM is built. The workspace
-    lifecycle callers pass a WORKSPACE-level scope: their graph is
-    still the live VM alone, but the operation is about the workspace,
-    and the scope names WHY the operation runs, not what it walks.
+    default VM-level scope for this VM is built. THE RULE: pass the
+    level of the entity the command is ABOUT, not of what it walks
+    (the graph here is always the live VM alone; the scope names WHY
+    the operation runs). The workspace lifecycle callers pass a
+    WORKSPACE-level scope accordingly; the agent-op callers (agent
+    shell / exec / delete / grant / revoke) still ride the VM default
+    and owe an AGENT-level lift under the same rule when their code
+    is next touched.
 
     Deliberately NOT :func:`_live_vm_boundary` (the no-gate lifecycle
     trio): these commands converge power state first, and the gate

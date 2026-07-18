@@ -446,12 +446,12 @@ bring live state up.
 
 #### Workspace tmuxinator config
 
-Each workspace carries a tmuxinator config (`.tmuxinator.yml` in the workspace root, symlinked as
-`~/.config/tmuxinator/ws-<name>-console.yml`) describing a `ws-<name>-console` session: an
-admin-shell window plus one window per session. It is regenerated whenever sessions change. The
-`agw workspace console` command that attached to it was removed (superseded by named consoles); the
-config remains usable directly on the VM via `tmuxinator start ws-<name>-console` (e.g. inside VS
-Code's integrated terminal).
+Workspaces with tmuxinator enabled in their template (the default) carry a tmuxinator config
+(`.tmuxinator.yml` in the workspace root, symlinked as `~/.config/tmuxinator/ws-<name>-console.yml`)
+describing a `ws-<name>-console` session: an admin-shell window plus one window per session. It is
+regenerated whenever sessions change. The `agw workspace console` command that attached to it was
+removed (superseded by named consoles); the config remains usable directly on the VM via
+`tmuxinator start ws-<name>-console` (e.g. inside VS Code's integrated terminal).
 
 #### VM console (deprecated)
 

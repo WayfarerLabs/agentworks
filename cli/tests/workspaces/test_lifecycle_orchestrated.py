@@ -492,14 +492,18 @@ def test_delete_without_vm_row_is_db_only_with_zero_gate(
 def test_rehome_confirm_sits_inside_the_span_after_the_dir_checks(
     db: Database,
     make_config,  # noqa: ANN001
+    resolve_counter: list[list[str]],
     monkeypatch: pytest.MonkeyPatch,
     captured_output,  # noqa: ANN001
 ) -> None:
-    """The order pin: gate events first, then the SSH directory
-    existence checks, then the confirm (which renders their results).
-    A declined confirm raises UserAbort and leaves the DB path
-    unchanged; by then the gate has already run, because the checks
-    the prompt reports on need SSH (inherently post-gate)."""
+    """The order pin, which doubles as rehome's gate-prompt parity
+    carry: on a stopped VM the gate's just-in-time token resolve is
+    the ONLY backend pass (the boundary is fully seeded), then the
+    gate events, then the SSH directory existence checks, then the
+    confirm (which renders their results). A declined confirm raises
+    UserAbort and leaves the DB path unchanged; by then the gate has
+    already run, because the checks the prompt reports on need SSH
+    (inherently post-gate)."""
     from agentworks import output as output_mod
 
     config = make_config()
@@ -530,6 +534,7 @@ def test_rehome_confirm_sits_inside_the_span_after_the_dir_checks(
         "run:test -d /dst/ws1",
         "confirm",
     ]
+    assert resolve_counter == [["proxmox-token"]]
     ws = db.get_workspace("ws1")
     assert ws is not None and ws.workspace_path == "/srv/ws1"
 
@@ -644,3 +649,32 @@ def test_copy_same_vm_reuses_the_source_composition(
     row = db.get_workspace("ws2")
     assert row is not None and row.vm_name == "box"
     assert "Workspace 'ws1' copied to 'ws2'" in captured_output.info
+
+
+def test_copy_refusals_fail_with_zero_resolves_and_zero_gate(
+    db: Database,
+    make_config,  # noqa: ANN001
+    resolve_counter: list[list[str]],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Copy's cheap row refusals stay pre-everything: an unknown
+    source workspace and an already-existing destination both fail
+    before any prompt, resolve, or gate event."""
+    from agentworks.errors import AlreadyExistsError
+
+    config = make_config()
+    _seed(db)
+    _no_gate(monkeypatch)
+
+    with pytest.raises(NotFoundError, match="workspace 'nope' not found"):
+        workspace_manager.copy_workspace(
+            db, config, "nope", dest_name="ws2", vm_name="box"
+        )
+
+    _seed_workspace(db, vm_name="box", name="ws2")
+    with pytest.raises(AlreadyExistsError, match="workspace 'ws2' already exists"):
+        workspace_manager.copy_workspace(
+            db, config, "ws1", dest_name="ws2", vm_name="box"
+        )
+
+    assert resolve_counter == []
