@@ -29,34 +29,46 @@ construction sites), not tracer-local. It lands here because flipping it once up
 than per-command (the HLA open question "flip all three at once?" is answered yes); it is green-able
 and behavior-neutral.
 
-- [ ] `orchestration/node.py`: the `Readiness` protocol (`preflight`, `runup`) and the `Node`
+- [x] `orchestration/node.py`: the `Readiness` protocol (`preflight`, `runup`) and the `Node`
       protocol (`Readiness` + `key`, `deps`, `secret_refs`); the `<kind>/<name>` key convention; the
       creatable-node `teardown` surface (declared here, first implemented in Phase 2).
-- [ ] Capability instances stay `Readiness`-ONLY on `capabilities/base.py` (R1): no `key`, no
+- [x] Capability instances stay `Readiness`-ONLY on `capabilities/base.py` (R1): no `key`, no
       `deps`, so they are structurally not nodes. The `git-credential` and `vm-site`
       consuming-resource nodes (their `deps()`/`secret_refs()` and a `preflight`/`runup` that
       composes the held instance) land with the tracer in Phase 1. LLD decides whether that
       composition is a one-line per-kind fan-in or a shared held-instances hook (neither protocol
       exposes a held-instances accessor today); the same decision governs `secret_refs` aggregation
       over a map of held instances.
-- [ ] `orchestration/walk.py`: memoized, cycle-checked, deterministic multi-root walk
+- [x] `orchestration/walk.py`: memoized, cycle-checked, deterministic multi-root walk
       (`walk(*roots)` from day one, per spike finding 2).
-- [ ] `orchestration/secrets.py`: `secret_union(nodes)`; central resolvability prediction from
+- [x] `orchestration/secrets.py`: `secret_union(nodes)`; central resolvability prediction from
       DECLARED references (preserving `preview_resolution`'s exact semantics, including the
       optimistic interactive-backend answer); the scoped delivery reader (`ctx.secret(name)` view).
-- [ ] `OperationScope` + `ScopeLevel` on `capabilities/base.py`: full five-level enum; frozen value
+- [x] `OperationScope` + `ScopeLevel` on `capabilities/base.py`: full five-level enum; frozen value
       object; `__post_init__` ENFORCING the level-to-fields invariant. Implement SYSTEM and VM
       levels' rules now (the tracer's needs); the deeper levels' rules land with their commands.
-- [ ] `RunContext`: add the `OperationScope` field; convert `admin_target` / `agent_target` /
+      (Implementation note: the un-ruled levels, WORKSPACE / AGENT / SESSION, REFUSE construction
+      with a typed error until their rules land, so no scope with an unenforced invariant can
+      exist.)
+- [x] `RunContext`: add the `OperationScope` field; convert `admin_target` / `agent_target` /
       `secrets` from bare fields to PLAIN accessor methods (`ctx.agent_target()` / `ctx.secret()`),
-      pass-through, no requester binding, no gating (deferred to the plugin SDD).
-- [ ] `orchestration/readiness.py`: the preflight SWEEP over a walk's output (the skip-and-degrade
+      pass-through, no requester binding, no gating (deferred to the plugin SDD). (Implementation
+      note: constructor keywords kept their public names, so the fourteen construction sites needed
+      no diff; the reader migration covered every `ctx.secrets` consumer, and the
+      no-resolved-secrets guard centralized into `ctx.secret()`'s typed `ConfigError`.)
+- [x] `orchestration/readiness.py`: the preflight SWEEP over a walk's output (the skip-and-degrade
       policy helper is Phase 2).
-- [ ] `orchestration/activation.py`: the gate STRUCTURE (`ensure_active` + the held `vm_active` span
+- [x] `orchestration/activation.py`: the gate STRUCTURE (`ensure_active` + the held `vm_active` span
       relocated here), the `operator_stopped` refusal, and the just-in-time gate-secret resolution.
       (The gate-to-boundary SEED of resolved values moves to Phase 1, so it is designed against the
       tracer's real proxmox `status`-needs-token caller rather than speculatively here, reviewer
-      question 2026-07-17.)
+      question 2026-07-17.) (Implementation note: the gate landed as `ensure_active` /
+      `activation_gate` over a narrow `GateTarget` protocol, the power-state slice the live VM node
+      implements in Phase 1, keeping the helper domain-blind per the HLA's layering rule; the
+      refusal is raised from the target's own `auto_start`, per "the node is the authority". The
+      imperative `vms.manager.ensure_active` / `keep_active` pair keeps serving the un-migrated
+      commands and retires as they migrate, per R8's coexistence rule; oracle parity between the two
+      is asserted when the tracer wires the real VM node in Phase 1.)
 
 Definition of done: unit tests for the walk (dedup/cycle/order), the secret union and prediction,
 `OperationScope` enforcement (a mis-leveled scope cannot construct), the scoped reader, and the gate
