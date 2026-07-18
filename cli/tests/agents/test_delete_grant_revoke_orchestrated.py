@@ -610,7 +610,7 @@ def test_revoke_all_warns_about_remaining_implicit_access(
     on-VM group membership is never removed (every snapshot survivor
     still has a grant, so the removal branch cannot fire on this
     path). Fixing that drift is a behavior change, not a migration
-    concern."""
+    concern (tracked as issue #189)."""
     config = make_config()
     _seed(db)
     _seed_workspace(db, vm_name="box", name="ws1")
