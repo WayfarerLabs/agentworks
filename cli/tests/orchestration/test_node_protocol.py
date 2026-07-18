@@ -45,7 +45,11 @@ class _FakeNode:
 
 @dataclass
 class _FakeCreatableNode(_FakeNode):
+    realized: bool = field(default=False)
     torn_down: bool = field(default=False)
+
+    def mark_realized(self) -> None:
+        self.realized = True
 
     def teardown(self) -> None:
         self.torn_down = True

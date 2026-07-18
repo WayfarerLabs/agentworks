@@ -102,17 +102,36 @@ class Node(Readiness, Protocol):
 
 @runtime_checkable
 class CreatableNode(Node, Protocol):
-    """A node kind a command can create: ``Node`` plus the node-scope
-    half of unwind.
+    """A node kind a command can create: ``Node`` plus pending-ness and
+    the node-scope half of unwind.
 
-    Declared here so the creatable surface has one home; the first
-    implementations (and the ``RealizationLog`` that sequences
-    teardowns, plus the pending-to-realized bookkeeping) land with
-    ``vm create``'s pending nodes. Teardown bodies are today's rollback
-    code relocated onto the nodes; SEQUENCING them (reverse realization
-    order, best-effort, never masking the original error) is the
-    orchestrator's job, not the node's.
+    A creating command constructs the PENDING node up front, with its
+    names chosen and its edges attached, so identity is complete before
+    the thing exists in the world. Pending-to-realized is a mutation OF
+    the node, one-way, flipped by the orchestrator through
+    ``RealizationLog.mark_realized`` immediately after the bespoke
+    realizing mutation succeeds: every edge holder observes the
+    transition on the same object, which is why one-object-per-node is
+    a construction contract, not a preference.
+
+    Teardown bodies are today's rollback code relocated onto the
+    nodes; SEQUENCING them (reverse realization order, best-effort,
+    never masking the original error) is the orchestrator's job (the
+    log's), not the node's.
     """
+
+    @property
+    def realized(self) -> bool:
+        """Whether the realizing mutation has completed. Readiness
+        checks read this to defer on a pending target."""
+        ...
+
+    def mark_realized(self) -> None:
+        """Record the pending-to-realized flip: pure bookkeeping (the
+        name says so; the realizing WORK is orchestrator choreography
+        of node ops, never this method). One-way; a second call is a
+        loud error."""
+        ...
 
     def teardown(self) -> None:
         """Delete what this node's realizing mutation made. Invoked
