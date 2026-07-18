@@ -36,19 +36,21 @@ command-specific composition code at the top of the service layer. There is one 
 command, plural by design; no engine, no declarative plan artifact, and no required shape. What is
 shared and contractual is the node surface and a small set of helpers under
 `cli/agentworks/orchestration/` (`node`, `walk`, `secrets`, `readiness`, `activation`, `unwind`)
-that depend only on the node protocol and the secrets framework, never on a domain. Domains
-implement their own nodes; orchestrators drive both.
+that depend on the node protocol, the capability context, and the secrets framework, never on a
+domain. Domains implement their own nodes; orchestrators drive both.
 
 ### Readiness and Node, two complementary contracts
 
 - **`Readiness`** is two verbs: `preflight` (pre-resolve, dependency-blind, read-only) and `runup`
   (post-resolve, authenticated, read-only, deferred to just before the ops it gates). Capability
   instances satisfy it and nothing more.
-- **`Node`** is `Readiness` plus graph identity: `key`, declared `deps`, declared `secret_refs`.
-  Only consuming resources (a vm-site, a git-credential) and live resources (a VM, a workspace, an
-  agent, a session, whether existing or pending) are nodes. A capability instance is **held** by a
-  node and its readiness is **composed** by the holder; it is structurally not a node and is never
-  walked. Keys are plain `<kind>/<name>` over naturally globally-unique names.
+- **`Node`** is `Readiness` plus graph identity: `key`, declared `deps`, declared `secret_refs`. The
+  node species are consuming resources (a vm-site, a git-credential), readiness-bearing resolved
+  templates (a vm-template, whose declared auth-key secret is its readiness; an agent-template,
+  whose credential references become edges), and live resources (a VM, a workspace, an agent, a
+  session, whether existing or pending). A capability instance is **held** by a node and its
+  readiness is **composed** by the holder; it is structurally not a node and is never walked. Keys
+  are plain `<kind>/<name>` over naturally globally-unique names.
 - Ops stay domain-specific and deliberately un-unified, on the instances and node kinds. Creatable
   node kinds additionally expose `teardown()`, their half of unwind.
 
@@ -81,28 +83,39 @@ object, so the pending-to-realized flip is observed everywhere without rewiring.
 
 ### The activation gate
 
-Commands that touch an existing VM converge its power state through a gate that opens after build
-and **before** the preflight sweep, and stays open as a span through the whole command (platforms
-with idle shutdown are held active; unwind runs inside the span). The node is the authority on
-auto-start: an operator-stopped VM refuses with a typed error, including a re-read of the intent
-flag to close the concurrent-stop race. Gate secrets (the platform API credential; the Tailscale
-rejoin key on the repair path) resolve just-in-time through the normal backend chain, the one
-sanctioned resolution outside the boundary pass: narrow known names, entirely before the walk-away
-point, skipped on the fast path, and **seeded** into the boundary pass so no secret ever resolves or
+Commands whose readiness probes must reach a live VM converge its power state through a gate that
+opens after build and **before** the preflight sweep, and stays open as a span through the whole
+command (platforms with idle shutdown are held active; unwind runs inside the span). The node is the
+authority on auto-start: an operator-stopped VM refuses with a typed error, including a re-read of
+the intent flag to close the concurrent-stop race. In this gate-first shape, gate secrets (the
+platform API credential) resolve just-in-time through the normal backend chain, the one sanctioned
+resolution outside the boundary pass: narrow known names, entirely before the walk-away point,
+skipped on the fast path, and **seeded** into the boundary pass so no secret ever resolves or
 prompts twice in one command.
+
+Not every command gates, and not every gate precedes its boundary. Commands whose op IS the power
+state change (`vm start` / `stop`), commands that must work on broken state (`vm delete`), and
+read-only inspection (`vm describe`) never gate: they compose without one and drive their ops
+directly. Compositions whose boundary resolve runs before their gate (`vm rekey`; the batch session
+ops, which run one boundary over the whole batch and then per-VM gates) hand the gate a callback
+that **serves the already-cached boundary values** instead of resolving, so the no-double-resolve
+property holds from the other direction. The Tailscale rejoin key keeps its conditional-need late
+resolve on the repair path in every shape (whether a rejoin is needed is only knowable after a start
+fails to reconnect); it reads through the gate's scoped reader, and after a boundary has already run
+it resolves late without seeding.
 
 ### Secrets: declare, union, predict centrally, resolve once, deliver scoped
 
 The path end to end: capabilities and nodes **declare** secret references; the command's union is
 computed from the walked plan's `secret_refs` (never from construction side effects); resolvability
 is **predicted centrally** over declarations, by the node holding the instance, with doctor
-consuming the same computation; the union resolves in **one pass** at the preflight boundary (one
-prompt session, at a predictable moment, after preflight passes and before anything mutates); and
-values are **delivered scoped**: `ctx.secret(name)` hands a node or instance only the names it
-declared, refusing anything else with a typed error. Capability construction binds `(name, config)`
-and touches no secret machinery at all; scoped delivery through the context is the only way an
-instance ever sees a secret value. The per-instance resolver object is retired; what remains is an
-orchestrator-owned boundary resolver at each composition root.
+consuming the same computation; the union resolves in **one boundary pass per composition root**,
+after preflight passes and before anything mutates (the walk-away point); and values are **delivered
+scoped**: `ctx.secret(name)` hands a node or instance only the names it declared, refusing anything
+else with a typed error. Capability construction binds `(name, config)` and touches no secret
+machinery at all; scoped delivery through the context is the only way an instance ever sees a secret
+value. The per-instance resolver object is retired; what remains is an orchestrator-owned boundary
+resolver at each composition root.
 
 ### Unwind
 
@@ -119,8 +132,11 @@ design decision.
 
 ### Positive
 
-- One prompt session per command, at a predictable point, with the no-double-resolve property held
-  structurally (union from the plan, gate values seeded, scoped delivery over the cached pass).
+- The proven interactivity invariant: all prompting sits strictly before the walk-away point, no
+  secret resolves or prompts twice in one command, and each composition root runs exactly one
+  boundary pass; the no-double-resolve property is held structurally (union from the plan, gate
+  values seeded or served from the cached pass, scoped delivery over it). Contiguity of prompts is
+  deliberately not promised (see Negative).
 - Scoped secret delivery is a security invariant, not a convention: an instance cannot read a secret
   it did not declare, and cannot hold a value source of its own.
 - Graphs are derived from declared references and rows, so a command's composition cannot drift from
@@ -139,8 +155,10 @@ design decision.
   nothing resolves twice. A confirmed-reachable VM costs nothing.
 - Preflight is dependency-blind by construction (it runs before anything is created), so checks that
   need mid-command state belong in runup; authors must place checks by stage.
-- Within the single boundary prompt session, prompting order follows the walk's deterministic
-  first-encounter order; it is stable, but it is the graph's order, not an author's.
+- Within a boundary pass, prompting order follows the walk's deterministic first-encounter order; it
+  is stable, but it is the graph's order, not an author's. A command composed of multiple roots (a
+  cross-VM workspace copy runs one composition per VM) runs one boundary pass per root, so its
+  interactivity is per-composition, not one global session.
 
 ## Alternatives Considered
 

@@ -340,15 +340,16 @@ current token and the op mints when that check says it must.
 Secret resolution rides the same seam, and its timing is pinned to the preflight boundary: **resolve
 as soon as preflight passes.** Once the operation's preflight checks clear, the framework resolves
 the union of secrets needed across all planned ops across all participating resources (the
-template's Tailscale key and the site's API token join the same pass) in one batch, one prompt
-session, values cached; runup then runs on those resolved values, and ops draw from the same cache
-through the context (a minting provider produces its token here, guarded by check-then-mint).
-Resolution is deliberately neither of the two extremes: not eager at command entry (a prompt could
-precede a fatal check that would have sunk the op), and not deferred to first op-need (prompts would
-land mid-operation, scattered across the run). The operator is prompted exactly once, at a
-predictable moment, after the work is confirmed able to proceed and before it starts. In one line:
-preflight passing is the trigger, the command's declared set is the scope. Wait for preflight, then
-do it all.
+template's Tailscale key and the site's API token join the same pass) in one batched boundary pass,
+values cached; runup then runs on those resolved values, and ops draw from the same cache through
+the context (a minting provider produces its token here, guarded by check-then-mint). Resolution is
+deliberately neither of the two extremes: not eager at command entry (a prompt could precede a fatal
+check that would have sunk the op), and not deferred to first op-need (prompts would land
+mid-operation, scattered across the run). The promised invariant: all prompting happens before the
+work starts mutating anything (the walk-away point), and nothing is resolved or prompted twice in
+one command; contiguity is not promised (an activation gate may prompt for a stopped VM's credential
+before the boundary pass does the rest). In one line: preflight passing is the trigger, the
+command's declared set is the scope. Wait for preflight, then do it all.
 
 Prompting now happens inside the service-layer operation (at the preflight boundary rather than at
 bind), so the operator's abort point moves with it, and the error discipline moves too. A Ctrl-C at
