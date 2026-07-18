@@ -1,20 +1,20 @@
-"""The per-operation secret resolver: the handle a capability instance
-is constructed against.
+"""The per-operation secret resolver: ORCHESTRATOR-OWNED boundary
+machinery (no capability instance ever holds one).
 
-One ``Resolver`` per service-layer operation. Participating resources
-register the secrets they declare (a capability instance's config
-secrets register at construct; a vm-template's Tailscale key registers
-at its preflight), preflights *predict* resolvability without prompting,
-and the operation runs ONE :meth:`resolve` pass at the preflight
-boundary (as soon as every participating resource's preflight passes),
-covering the union of everything registered, one prompt session. Ops
-then draw values from the cache via :meth:`get`.
+One ``Resolver`` per service-layer operation, living at the
+composition root. The orchestrator registers the plan's secret union
+on it (the walk's declared ``secret_refs``, plus any env-chain
+targets), runs ONE :meth:`resolve` pass at the preflight boundary (as
+soon as every participating node's preflight passes), one prompt
+session, and then delivers values downstream through scoped readers
+(``orchestration.secrets.ScopedSecrets`` over :meth:`values`); the
+activation gate's just-in-time values enter through :meth:`seed`.
 
 This does not change the no-cross-invocation-cache stance (ADR 0016):
 the cache lives and dies with the operation, exactly like the resolved
 mapping the composition roots used to thread down as a dict; the
-resolver just reifies "resolve once per command and pass the values
-down" into an object a capability instance can hold.
+resolver just reifies "resolve once per command and hand the values
+down" into one object per operation.
 """
 
 from __future__ import annotations

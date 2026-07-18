@@ -51,7 +51,7 @@ def remote_advisories(registry: Registry, url: str) -> list[str]:
     return the deduped advisories.
 
     Config-only and wiring-blind by design: each declared credential is
-    constructed from its config (no resolver, no token) and judges the
+    constructed from its config (no token) and judges the
     URL by its own host and scope semantics (see
     ``GitCredentialProvider.review_remote``). Whether a given credential
     is actually wired to the user who will clone is deliberately not
@@ -73,7 +73,7 @@ def remote_advisories(registry: Registry, url: str) -> list[str]:
         if provider_cls is None:
             continue
         provider = provider_cls(
-            name, cred.provider_config, None, description=cred.description
+            name, cred.provider_config, description=cred.description
         )
         for msg in provider.review_remote(url):
             if msg not in seen:

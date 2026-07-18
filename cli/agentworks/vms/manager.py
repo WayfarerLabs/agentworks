@@ -372,12 +372,12 @@ def create_vm(
     # BUILD: the command names its direct resources (the resolved
     # template, the chosen site, the admin template's declared
     # credentials) and constructs the PENDING VM node up front with
-    # those edges attached; the walk assembles the graph. Provider and
-    # platform construction is cheap and registers the declared secrets
-    # on the resolver (the construct-registration seam beside the
-    # walk-derived union below); nothing resolves yet.
+    # those edges attached; the walk assembles the graph. Provider
+    # and platform construction is cheap and touches no secret
+    # machinery; the walk union below is the boundary's source.
+    # Nothing resolves yet.
     cred_nodes = tuple(
-        git_credential_node(registry, cred_name, resolver)
+        git_credential_node(registry, cred_name)
         for cred_name in admin.git_credentials
     )
     providers = {node.provider.owner_name: node.provider for node in cred_nodes}
@@ -389,7 +389,7 @@ def create_vm(
     slug = _resolve_system_slug(db)
 
     template_node = vm_template_node(vm_tmpl, registry)
-    site_node = vm_site_node(registry, site, resolver)
+    site_node = vm_site_node(registry, site)
     pending_vm = pending_vm_node(db, vm_name, template_node, site_node, cred_nodes)
     nodes = walk(pending_vm)
     for secret_name in secret_union(nodes):
@@ -1040,13 +1040,12 @@ def add_git_credential(db: Database, config: Config, name: str, credential_name:
     operator asked to add exactly this one credential, unlike vm/agent
     provisioning's skip-and-degrade).
 
-    Interim seam: the capability instances are still constructed
-    against the operation's resolver (construct-time registration,
-    beside the walk-derived union) until the resolver constructor
-    parameter drops. The tracer's other two documented seams are
-    closed: prediction is central at the node preflights, and the
-    platform's power ops read the context (``ctx.secret``, with the
-    gate's scoped reader as the source for gate-driven ops).
+    The tracer's three documented interim seams are CLOSED with the
+    resolver retirement: the walk union is the boundary's only source
+    (construct-time registration is gone), prediction is central at
+    the node preflights, and the platform's power ops read the
+    context (``ctx.secret``, with the gate's scoped reader as the
+    source for gate-driven ops).
     """
     from agentworks.bootstrap import build_registry
     from agentworks.git_credentials.nodes import git_credential_node
@@ -1082,7 +1081,7 @@ def add_git_credential(db: Database, config: Config, name: str, credential_name:
     # BUILD: the command names its direct resources (this VM, this
     # credential); everything else enters through the derived graph
     # (the row's site field, the decl's references).
-    cred_node = git_credential_node(registry, credential_name, resolver)
+    cred_node = git_credential_node(registry, credential_name)
     provider = cred_node.provider
 
     entry = provider.helper_entry()
@@ -1100,10 +1099,9 @@ def add_git_credential(db: Database, config: Config, name: str, credential_name:
             f"'agw vm reinit {name}' instead of add-git-credential"
         )
 
-    vm_node = live_vm_node(db, config, registry, vm, resolver)
+    vm_node = live_vm_node(db, config, registry, vm)
     nodes = walk(vm_node, cred_node)
-    # The walk supplies the boundary union (idempotent next to the
-    # construct-time registration seam noted above).
+    # The walk supplies the boundary union.
     for secret_name in secret_union(nodes):
         resolver.register_name(secret_name)
 
@@ -1219,11 +1217,11 @@ def gated_vm_boundary(
     """The gate-opening commands' shared composition root (vm/agent
     shell and exec, console attach, the workspace lifecycle ops):
     commands that operate interactively on one existing VM. Build the
-    live VM node from its row (the site edge holds the bound platform;
-    construction registers the site's declared config secrets),
-    register the walk union AND the command's env-chain ``targets`` on
-    the one resolver (site config secrets and runtime env secrets are
-    ONE prompt session), then open the ACTIVATION GATE before the
+    live VM node from its row (the site edge holds the bound
+    platform), register the walk union AND the command's env-chain
+    ``targets`` on the one resolver (site config secrets and runtime
+    env secrets are ONE prompt session), then open the ACTIVATION GATE
+    before the
     preflight sweep (its just-in-time values seed the boundary
     resolver) and run the one boundary resolve inside it. Yields
     ``(vm_node, resolver)`` within the held-active span: the body's
@@ -1246,8 +1244,6 @@ def gated_vm_boundary(
     ordering (gate, then preflight, then resolve, all inside the span)
     changes the composition's shape rather than adding a flag to it.
 
-    Interim seam: construct-time registration still coexists with the
-    walk-derived union until the resolver constructor parameter drops.
     """
     from agentworks.orchestration.activation import (
         activation_gate,
@@ -1260,7 +1256,7 @@ def gated_vm_boundary(
     from agentworks.vms.nodes import live_vm_node
 
     resolver = Resolver(config, registry)
-    vm_node = live_vm_node(db, config, registry, vm, resolver)
+    vm_node = live_vm_node(db, config, registry, vm)
     nodes = walk(vm_node)
     for secret_name in secret_union(nodes):
         resolver.register_name(secret_name)
@@ -1311,16 +1307,13 @@ def _live_vm_boundary(
     if registry is None:
         registry = build_registry(config)
     resolver = Resolver(config, registry)
-    vm_node = live_vm_node(db, config, registry, vm, resolver)
+    vm_node = live_vm_node(db, config, registry, vm)
     nodes = walk(vm_node)
     for secret_name in secret_union(nodes):
         resolver.register_name(secret_name)
     scope = _vm_scope(db, vm.name)
     preflight_all(nodes, RunContext(config=config, operation_scope=scope))
     resolver.resolve()
-    # Interim seam: construct-time registration still coexists with
-    # the walk-derived union until the resolver constructor parameter
-    # drops.
     ops_ctx = RunContext(
         config=config,
         operation_scope=scope,
@@ -1473,7 +1466,7 @@ def rekey_vm(
     # resolve, and the prompt backend takes over).
     registry = build_registry(config)
     resolver = Resolver(config, registry)
-    vm_node = live_vm_node(db, config, registry, vm, resolver)
+    vm_node = live_vm_node(db, config, registry, vm)
     rekey_vm_tmpl = resolve_template(registry, vm.template)
     tmpl_node = vm_template_node(rekey_vm_tmpl, registry)
     nodes = walk(tmpl_node, vm_node)
@@ -1771,9 +1764,9 @@ def reinit_vm(
 
     # BUILD before any secret collection: a stranded site fails here
     # (inside the live node's site edge) with the manifest hint instead
-    # of after git-token prompts. Construction is cheap; the declared
-    # secrets register on the resolver, nothing resolves yet.
-    vm_node = live_vm_node(db, config, registry, vm, resolver)
+    # of after git-token prompts. Construction is cheap; the walk union
+    # below is the boundary's source, nothing resolves yet.
+    vm_node = live_vm_node(db, config, registry, vm)
 
     # Resolve the VM's template so init uses the right values
     from agentworks.resources.access import admin_template
@@ -1799,7 +1792,7 @@ def reinit_vm(
     verify_tailscale_available()
     admin = admin_template(registry)
     cred_nodes = tuple(
-        git_credential_node(registry, cred_name, resolver)
+        git_credential_node(registry, cred_name)
         for cred_name in admin.git_credentials
     )
     providers = {node.provider.owner_name: node.provider for node in cred_nodes}

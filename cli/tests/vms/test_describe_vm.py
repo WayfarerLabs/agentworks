@@ -62,7 +62,7 @@ def _describe(
     # site edge, whose only constructor is resolve_site.
     monkeypatch.setattr(
         "agentworks.vms.sites.resolve_site",
-        lambda name, registry, *, resolver=None: _Platform(status),
+        lambda name, registry: _Platform(status),
     )
     calls: list[str] = []
 

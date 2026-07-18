@@ -94,9 +94,8 @@ def create_workspace(
     # BUILD: the command names its direct resources (this VM, the
     # chosen workspace name) and constructs the pending workspace node
     # with its VM edge attached; the walk assembles the graph.
-    # Construction is cheap and registers the site's declared secrets
-    # on the resolver (the construct-time registration seam beside the
-    # walk-derived union below); nothing resolves yet.
+    # Construction is cheap and touches no secret machinery; the walk
+    # union below is the boundary's source. Nothing resolves yet.
     from agentworks.capabilities.base import RunContext
     from agentworks.orchestration.activation import (
         activation_gate,
@@ -111,7 +110,7 @@ def create_workspace(
 
     resolver = Resolver(config, registry)
 
-    vm_node = live_vm_node(db, config, registry, vm, resolver)
+    vm_node = live_vm_node(db, config, registry, vm)
 
     def _teardown_platform_ctx() -> RunContext:
         # The nested teardown's op-start context: built at teardown

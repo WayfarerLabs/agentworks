@@ -237,7 +237,6 @@ def _check_vm_sites(config: Config, registry: Registry) -> HealthGroup:
     here is the error the next command would hit.
     """
     from agentworks.db import Database
-    from agentworks.secrets.resolver import Resolver
     from agentworks.vms.sites import (
         VMSiteDecl,
         site_disabled_reason,
@@ -262,9 +261,7 @@ def _check_vm_sites(config: Config, registry: Registry) -> HealthGroup:
             from agentworks.capabilities.base import RunContext
             from agentworks.vms.nodes import vm_site_node
 
-            site_node = vm_site_node(
-                registry, name, Resolver(config, registry)
-            )
+            site_node = vm_site_node(registry, name)
             site_node.preflight(RunContext(config=config))
         except Exception as e:
             # A failing preflight on an enabled site is the error the

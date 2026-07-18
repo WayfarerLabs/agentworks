@@ -25,7 +25,6 @@ if TYPE_CHECKING:
 
     from agentworks.capabilities.base import RunContext
     from agentworks.resources.reference import ConfigReference
-    from agentworks.secrets.resolver import Resolver
 
 
 def _http_probe(
@@ -108,13 +107,13 @@ class GitCredentialProvider(Capability):
     A thin-wrapper capability (``git-credential`` over
     ``git-credential-provider``): the ``git-credential`` consuming
     resource names a provider and supplies its ``provider_config``, and
-    the instance does the real work. It is constructed by the site/agent
+    the instance does the real work. It is constructed by the
     composition roots as ``cls(credential_name, provider_config,
-    resolver, description=...)``: bound to one declared credential plus
-    the operation's resolver (never resolved secret values; see the
-    ``Capability`` lifecycle). The declared token secret registers on the
-    resolver at construct and its value arrives via the operation's
-    single resolve pass at the preflight boundary.
+    description=...)``: bound to one declared credential, never
+    resolved secret values (see the ``Capability`` lifecycle). The
+    declared token secret joins the operation's boundary union through
+    the holding node's ``secret_refs`` and its value arrives through
+    the context at ``runup`` / op time.
 
     Subclasses (``GitHubCredentialProvider``, ``AzDOCredentialProvider``)
     override ``validate_config`` (declaring the token secret and any
@@ -128,11 +127,10 @@ class GitCredentialProvider(Capability):
         self,
         owner_name: str,
         config: Mapping[str, object],
-        resolver: Resolver | None = None,
         *,
         description: str | None = None,
     ) -> None:
-        super().__init__(owner_name, config, resolver)
+        super().__init__(owner_name, config)
         # Display sugar for the consuming resource's name; not part of
         # the capability's config (which is provider_config alone).
         self._description = description
@@ -142,7 +140,7 @@ class GitCredentialProvider(Capability):
         """The token secret this credential sources its PAT from: the
         one secret its ``validate_config`` declared (default
         ``git-token-<name>``). Named by the helper's rejection
-        diagnosis and read from the resolver at ``runup``."""
+        diagnosis and read from the context at ``runup``."""
         if self._secret_refs:
             return self._secret_refs[0].name
         return default_token_secret(self.owner_name)

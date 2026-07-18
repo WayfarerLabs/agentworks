@@ -141,7 +141,6 @@ def test_batch_graph_two_vms_share_one_site_node(
     from agentworks.bootstrap import build_registry
     from agentworks.orchestration.secrets import secret_union
     from agentworks.orchestration.walk import walk
-    from agentworks.secrets.resolver import Resolver
     from agentworks.vms.nodes import VMSiteNode, live_vm_node
 
     config = make_config()
@@ -150,11 +149,10 @@ def test_batch_graph_two_vms_share_one_site_node(
     vm_a, vm_b = db.get_vm("vm-a"), db.get_vm("vm-b")
     assert vm_a is not None and vm_b is not None
     registry = build_registry(config)
-    resolver = Resolver(config, registry)
 
     site_nodes: dict[str, VMSiteNode] = {}
-    node_a = live_vm_node(db, config, registry, vm_a, resolver, site_nodes=site_nodes)
-    node_b = live_vm_node(db, config, registry, vm_b, resolver, site_nodes=site_nodes)
+    node_a = live_vm_node(db, config, registry, vm_a, site_nodes=site_nodes)
+    node_b = live_vm_node(db, config, registry, vm_b, site_nodes=site_nodes)
     nodes = walk(node_a, node_b)
 
     assert [n.key for n in nodes] == ["vm-site/proxmox", "vm/vm-a", "vm/vm-b"]

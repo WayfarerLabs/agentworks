@@ -28,7 +28,7 @@ def _resolve_tokens(config: object, registry: object, names: list[str]) -> dict[
     from agentworks.secrets.resolver import Resolver
 
     resolver = Resolver(config, registry)  # type: ignore[arg-type]
-    nodes = [git_credential_node(registry, n, resolver) for n in names]  # type: ignore[arg-type]
+    nodes = [git_credential_node(registry, n) for n in names]
     for secret_name in secret_union(nodes):
         resolver.register_name(secret_name)
     resolver.resolve()

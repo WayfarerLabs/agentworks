@@ -101,7 +101,6 @@ def test_create_graph_derives_from_row_and_pending_name(
     from agentworks.bootstrap import build_registry
     from agentworks.orchestration.secrets import secret_union
     from agentworks.orchestration.walk import walk
-    from agentworks.secrets.resolver import Resolver
     from agentworks.vms.nodes import live_vm_node
     from agentworks.workspaces.nodes import pending_workspace_node
 
@@ -110,9 +109,8 @@ def test_create_graph_derives_from_row_and_pending_name(
     vm = db.get_vm("box")
     assert vm is not None
     registry = build_registry(config)
-    resolver = Resolver(config, registry)
 
-    vm_node = live_vm_node(db, config, registry, vm, resolver)
+    vm_node = live_vm_node(db, config, registry, vm)
     pending = pending_workspace_node(db, config, "ws1", vm_node, None, RunContext)
     nodes = walk(pending)
 

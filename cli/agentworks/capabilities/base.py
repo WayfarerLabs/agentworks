@@ -8,8 +8,8 @@ contracts (the full capability model is documented in
 1. ``validate_config``: pure classmethod; validates a config blob's
    shape and returns the resource references it implies.
 2. construct: cheap, config-valid by construction (re-runs
-   ``validate_config``); binds ``(name, config, resolver)``, never
-   resolved secret values. No network, no resolution, no prompt.
+   ``validate_config``); binds ``(name, config)``, never resolved
+   secret values. No network, no resolution, no prompt.
 3. ``preflight``: pre-resolve, read-only, best-effort readiness;
    checks unauthenticated reachability / tools (the declared secrets'
    resolvability is predicted centrally by the holding node, not by
@@ -19,8 +19,9 @@ contracts (the full capability model is documented in
    provider's ``GET /user``, a platform's API check), the engine
    run-up before takeoff. Default no-op.
 5. ops: the mutation phase, subclass-owned. Values come from the
-   resolver's cache, populated by the operation's single resolve pass at
-   the preflight boundary; minting lives here (runup never mutates).
+   context (``ctx.secret``), populated by the operation's single
+   resolve pass at the preflight boundary; minting lives here (runup
+   never mutates).
 
 Readiness is two methods split by the secret-resolve boundary: preflight
 before the prompt, runup after it. That split is what keeps an
@@ -45,7 +46,6 @@ if TYPE_CHECKING:
 
     from agentworks.config import Config
     from agentworks.resources.reference import ConfigReference
-    from agentworks.secrets.resolver import Resolver
     from agentworks.transports import Transport
 
 
@@ -280,7 +280,7 @@ def is_idempotent_op(cls: type, op_name: str) -> bool:
 
 class Capability(ABC):
     """A capability implementation bound to one consuming resource's
-    config and the operation's resolver.
+    config.
 
     Class-level identity (``name``, ``description``) is what the
     registry's read-only capability row carries. ``owner_kind`` names
@@ -296,32 +296,25 @@ class Capability(ABC):
         self,
         owner_name: str,
         config: Mapping[str, object],
-        resolver: Resolver | None = None,
     ) -> None:
-        """Bind to ``(owner_name, config, resolver)``.
+        """Bind to ``(owner_name, config)``.
 
         Config validity is a construct-time invariant: ``validate_config``
         re-runs here, so a shape error dies at construction, never later
         in preflight. Construction is otherwise cheap: no network, no
-        secret resolution, no prompt. The declared secret references
-        register on the resolver, so the operation's boundary resolve
-        covers the union across every instance constructed against it.
-
-        ``resolver`` is optional only for direct construction in tests
-        and inspection surfaces; the composition roots always pass one,
-        and ops that need a value fail with a typed error without it.
+        secret resolution, no prompt, and no secret machinery at all:
+        the operation's boundary union comes from the plan's declared
+        ``secret_refs`` (the walk), and resolved values arrive per call
+        through the context (``ctx.secret``, scoped delivery). The
+        instance never holds a value source.
         """
         self.owner_name = owner_name
         self.config = config
-        self.resolver = resolver
         self._secret_refs: tuple[ConfigReference, ...] = tuple(
             ref
             for ref in type(self).validate_config(self._owner_display, config)
             if ref.kind == "secret"
         )
-        if resolver is not None:
-            for ref in self._secret_refs:
-                resolver.register_name(ref.name)
 
     @property
     def _owner_display(self) -> str:

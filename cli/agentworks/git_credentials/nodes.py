@@ -22,7 +22,6 @@ if TYPE_CHECKING:
     from agentworks.orchestration.node import Node
     from agentworks.resources.reference import ResourceReference
     from agentworks.resources.registry import Registry
-    from agentworks.secrets.resolver import Resolver
 
 
 class GitCredentialNode:
@@ -76,9 +75,7 @@ class GitCredentialNode:
         self._provider.runup(ctx)
 
 
-def git_credential_node(
-    registry: Registry, name: str, resolver: Resolver | None
-) -> GitCredentialNode:
+def git_credential_node(registry: Registry, name: str) -> GitCredentialNode:
     """Build the ``git-credential/<name>`` node from its DECLARED
     resource: the decl's provider reference becomes the held instance
     (constructed, not edged), and its ``secret``-kind references become
@@ -94,7 +91,7 @@ def git_credential_node(
             entity_kind="git-credential",
             entity_name=name,
         )
-    provider = resolve_git_credential_providers(registry, [name], resolver)[name]
+    provider = resolve_git_credential_providers(registry, [name])[name]
     secret_refs = tuple(
         ref for ref in decl.referenced_resources() if ref.kind == "secret"
     )

@@ -198,11 +198,13 @@ def test_graph_is_the_live_vm_alone_no_workspace_node(
     registry = build_registry(config)
     resolver = Resolver(config, registry)
 
-    nodes = walk(live_vm_node(db, config, registry, vm, resolver))
+    nodes = walk(live_vm_node(db, config, registry, vm))
 
     assert [n.key for n in nodes] == ["vm-site/proxmox", "vm/box"]
     assert secret_union(nodes) == ("proxmox-token",)
 
+    for name in secret_union(nodes):
+        resolver.register_name(name)
     resolver.resolve()
     assert set(resolver.values) == {"proxmox-token"}
 

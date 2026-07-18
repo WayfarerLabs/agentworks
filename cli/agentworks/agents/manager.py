@@ -281,10 +281,9 @@ def create_agent(
     # BUILD: the command names its direct resources (the resolved
     # template, this VM) and constructs the pending agent node with its
     # edges attached; the walk assembles the graph. Construction is
-    # cheap and registers the declared secrets on the resolver (the
-    # construct-time registration seam beside the walk-derived union
-    # below); nothing resolves yet. A stranded site fails here, before
-    # any prompt.
+    # cheap and touches no secret machinery; the walk union below is
+    # the boundary's source. Nothing resolves yet. A stranded site
+    # fails here, before any prompt.
     from agentworks.agents.nodes import (
         agent_template_node,
         credential_tokens,
@@ -309,8 +308,8 @@ def create_agent(
 
     resolver = Resolver(config, registry)
 
-    vm_node = live_vm_node(db, config, registry, vm, resolver)
-    tmpl_node = agent_template_node(registry, agent_tmpl, resolver)
+    vm_node = live_vm_node(db, config, registry, vm)
+    tmpl_node = agent_template_node(registry, agent_tmpl)
 
     def _teardown_platform_ctx() -> RunContext:
         # The nested teardown's op-start context: built at teardown
@@ -617,9 +616,9 @@ def reinit_agent(
 
     resolver = Resolver(config, registry)
 
-    vm_node = live_vm_node(db, config, registry, vm, resolver)
+    vm_node = live_vm_node(db, config, registry, vm)
     agent_node = live_agent_node(agent, vm_node)
-    tmpl_node = agent_template_node(registry, agent_tmpl, resolver)
+    tmpl_node = agent_template_node(registry, agent_tmpl)
     nodes = walk(agent_node, tmpl_node)
     for secret_name in secret_union(nodes):
         resolver.register_name(secret_name)

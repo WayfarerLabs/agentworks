@@ -224,7 +224,7 @@ def test_shell_vm_provisioner_uses_native_transport(
     # provisioner-shaped platform.
     monkeypatch.setattr(
         "agentworks.vms.sites.resolve_site",
-        lambda name, registry, *, resolver=None: _StubProvisioner(),
+        lambda name, registry: _StubProvisioner(),
     )
 
     # Also pin the Tailscale path so it would explode if accidentally taken.

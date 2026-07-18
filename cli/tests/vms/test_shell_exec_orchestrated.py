@@ -119,11 +119,13 @@ def test_graph_derives_from_row_and_env_joins_via_targets(
     registry = build_registry(config)
     resolver = Resolver(config, registry)
 
-    nodes = walk(live_vm_node(db, config, registry, vm, resolver))
+    nodes = walk(live_vm_node(db, config, registry, vm))
 
     assert [n.key for n in nodes] == ["vm-site/proxmox", "vm/box"]
     assert secret_union(nodes) == ("proxmox-token",)
 
+    for name in secret_union(nodes):
+        resolver.register_name(name)
     scopes = vm_manager._resolve_vm_admin_env_scopes(registry, vm)
     resolver.register_targets(
         [vm_manager._vm_secret_target(scopes, label="vm-shell=box")]

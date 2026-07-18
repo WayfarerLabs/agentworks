@@ -1,5 +1,6 @@
-"""The ``Capability`` base: config-valid-by-construction, the secret
-registration + prediction contract, and the per-op idempotency markers.
+"""The ``Capability`` base: config-valid-by-construction, the
+no-secret-machinery construction contract, and the per-op idempotency
+markers.
 """
 
 from __future__ import annotations
@@ -40,36 +41,19 @@ class _SecretCap(Capability):
         )
 
 
-class _FakeResolver:
-    """Records registrations (the construct-time registration seam)."""
-
-    def __init__(self) -> None:
-        self.registered: list[str] = []
-
-    def register_name(self, name: str):  # type: ignore[no-untyped-def]
-        from agentworks.secrets.base import SecretDecl
-
-        self.registered.append(name)
-        return SecretDecl(name=name, description="")
-
-
 def test_construct_revalidates_config() -> None:
     """A shape error dies at construction, never later in preflight."""
     with pytest.raises(ConfigError, match="accepts no configuration"):
         _SecretlessCap("t1", {"stray": 1})
 
 
-def test_construct_registers_declared_secrets_on_the_resolver() -> None:
-    """The construct-time registration seam (retires with the resolver
-    constructor parameter)."""
-    resolver = _FakeResolver()
-    _SecretCap("t1", {}, resolver)  # type: ignore[arg-type]
-    assert resolver.registered == ["the-token"]
-
-
-def test_construct_without_resolver_is_allowed_for_inspection() -> None:
+def test_construct_touches_no_secret_machinery() -> None:
+    """Construction binds ``(name, config)`` and nothing else: no
+    resolver, no reader, no registration (the boundary union comes
+    from the plan's declared secret_refs). The never-again pin for
+    the retired construct-time registration."""
     cap = _SecretCap("t1", {})
-    assert cap.resolver is None
+    assert not hasattr(cap, "resolver")
 
 
 def test_base_preflight_is_a_no_op() -> None:

@@ -701,7 +701,7 @@ def test_agent_template_node_derives_credential_edges(
     config = load_config(cfg, warn_issues=False, warn_deprecations=False)
     registry = build_registry(config)
     tmpl = resolve_template(registry, None)
-    node = agent_template_node(registry, tmpl, None)
+    node = agent_template_node(registry, tmpl)
     assert node.key == "agent-template/default"
     assert [c.key for c in node.deps()] == [
         "git-credential/gh",

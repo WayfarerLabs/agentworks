@@ -45,7 +45,6 @@ if TYPE_CHECKING:
     from agentworks.orchestration.node import Node
     from agentworks.resources.reference import ResourceReference
     from agentworks.resources.registry import Registry
-    from agentworks.secrets.resolver import Resolver
     from agentworks.vms.templates import ResolvedVMTemplate
 
 
@@ -416,9 +415,7 @@ class PendingVMNode:
 # -- Factories: the translation rule applied to real declared resources ----
 
 
-def vm_site_node(
-    registry: Registry, name: str, resolver: Resolver | None
-) -> VMSiteNode:
+def vm_site_node(registry: Registry, name: str) -> VMSiteNode:
     """Build the ``vm-site/<name>`` node from its DECLARED resource:
     the platform capability reference becomes the held bound instance
     (via ``resolve_site``, the disabled-site chokepoint), and the
@@ -428,7 +425,7 @@ def vm_site_node(
     from agentworks.vms.sites import lookup_site, resolve_site
 
     decl = lookup_site(name, registry)
-    platform = resolve_site(name, registry, resolver=resolver)
+    platform = resolve_site(name, registry)
     secret_refs = tuple(
         ref for ref in decl.referenced_resources() if ref.kind == "secret"
     )
@@ -440,7 +437,6 @@ def live_vm_node(
     config: Config,
     registry: Registry,
     row: VMRow,
-    resolver: Resolver | None,
     *,
     site_nodes: dict[str, VMSiteNode] | None = None,
 ) -> LiveVMNode:
@@ -460,11 +456,11 @@ def live_vm_node(
     composition's shape.
     """
     if site_nodes is None:
-        site = vm_site_node(registry, row.site, resolver)
+        site = vm_site_node(registry, row.site)
     else:
         memoized = site_nodes.get(row.site)
         if memoized is None:
-            memoized = vm_site_node(registry, row.site, resolver)
+            memoized = vm_site_node(registry, row.site)
             site_nodes[row.site] = memoized
         site = memoized
     return LiveVMNode(db, config, registry, row, site)

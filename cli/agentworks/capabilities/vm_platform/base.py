@@ -81,12 +81,12 @@ class VMPlatform(Capability):
     Registered in ``VM_PLATFORM_REGISTRY`` and published as a read-only
     ``vm-platform`` capability resource; invoked only through site
     resolution (``agentworks.vms.sites``). Instances are constructed by
-    the site layer as ``cls(site_name, platform_config, resolver)``:
-    the platform bound to one declared site plus the operation's
-    resolver (never resolved secret values; see the ``Capability``
-    lifecycle). The declared config secrets register on the resolver at
-    construct and their values arrive via the operation's single
-    resolve pass at the preflight boundary.
+    the site layer as ``cls(site_name, platform_config)``: the platform
+    bound to one declared site, never resolved secret values (see the
+    ``Capability`` lifecycle). The declared config secrets join an
+    operation's boundary union through the holding node's
+    ``secret_refs`` and their values arrive per op call through the
+    context (``ctx.secret``).
 
     Class-level contract (consumed by the vm-site kind decoder, the
     capability publisher, and the DB migration): ``name``,

@@ -30,7 +30,6 @@ if TYPE_CHECKING:
     from agentworks.git_credentials.nodes import GitCredentialNode
     from agentworks.orchestration.node import Node
     from agentworks.resources.registry import Registry
-    from agentworks.secrets.resolver import Resolver
     from agentworks.vms.nodes import LiveVMNode
 
     from .templates import ResolvedAgentTemplate
@@ -231,7 +230,7 @@ class PendingAgentNode:
 
 
 def agent_template_node(
-    registry: Registry, tmpl: ResolvedAgentTemplate, resolver: Resolver | None
+    registry: Registry, tmpl: ResolvedAgentTemplate
 ) -> AgentTemplateNode:
     """Build the ``agent-template/<name>`` node from the RESOLVED
     template: each name in its declared ``git_credentials`` becomes an
@@ -240,7 +239,7 @@ def agent_template_node(
     from agentworks.git_credentials.nodes import git_credential_node
 
     credentials = tuple(
-        git_credential_node(registry, cred_name, resolver)
+        git_credential_node(registry, cred_name)
         for cred_name in tmpl.git_credentials
     )
     return AgentTemplateNode(tmpl, credentials)

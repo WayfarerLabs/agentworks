@@ -98,29 +98,6 @@ def _px_registry() -> Registry:
     )
 
 
-def test_construction_registers_the_declared_token() -> None:
-    """The construct-time registration seam (retires with the resolver
-    constructor parameter): construction registers the site's declared
-    config secret on the operation's resolver."""
-    from typing import cast
-
-    from agentworks.secrets.base import SecretDecl
-    from agentworks.secrets.resolver import Resolver
-
-    class _StubResolver:
-        def __init__(self) -> None:
-            self.registered: list[str] = []
-
-        def register_name(self, name: str) -> SecretDecl:
-            self.registered.append(name)
-            return SecretDecl(name=name, description="")
-
-    stub = _StubResolver()
-    bound = resolve_site("px", _px_registry(), resolver=cast(Resolver, stub))
-    assert isinstance(bound, ProxmoxPlatform)
-    assert stub.registered == ["proxmox-token"]
-
-
 def test_ops_read_the_token_through_the_context() -> None:
     """The instance-reads-context pin: the op client reads its token
     only via ``ctx.secret`` (scoped delivery). A context scoped to the

@@ -110,7 +110,6 @@ def test_create_graph_derives_from_template_and_row(
     from agentworks.bootstrap import build_registry
     from agentworks.orchestration.secrets import secret_union
     from agentworks.orchestration.walk import walk
-    from agentworks.secrets.resolver import Resolver
     from agentworks.vms.nodes import live_vm_node
 
     config = make_config()
@@ -118,12 +117,9 @@ def test_create_graph_derives_from_template_and_row(
     vm = db.get_vm("box")
     assert vm is not None
     registry = build_registry(config)
-    resolver = Resolver(config, registry)
 
-    vm_node = live_vm_node(db, config, registry, vm, resolver)
-    tmpl_node = agent_template_node(
-        registry, resolve_template(registry, None), resolver
-    )
+    vm_node = live_vm_node(db, config, registry, vm)
+    tmpl_node = agent_template_node(registry, resolve_template(registry, None))
     pending = pending_agent_node(
         db, config, "dev", tmpl_node, vm_node, RunContext
     )
@@ -151,7 +147,6 @@ def test_reinit_graph_derives_from_row_and_stored_template(
     from agentworks.bootstrap import build_registry
     from agentworks.orchestration.secrets import secret_union
     from agentworks.orchestration.walk import walk
-    from agentworks.secrets.resolver import Resolver
     from agentworks.vms.nodes import live_vm_node
 
     config = make_config()
@@ -160,12 +155,11 @@ def test_reinit_graph_derives_from_row_and_stored_template(
     vm = db.get_vm("box")
     assert vm is not None
     registry = build_registry(config)
-    resolver = Resolver(config, registry)
 
-    vm_node = live_vm_node(db, config, registry, vm, resolver)
+    vm_node = live_vm_node(db, config, registry, vm)
     agent_node = live_agent_node(row, vm_node)
     tmpl_node = agent_template_node(
-        registry, resolve_template(registry, row.template), resolver
+        registry, resolve_template(registry, row.template)
     )
     nodes = walk(agent_node, tmpl_node)
 
@@ -265,7 +259,10 @@ def test_create_reachable_vm_fast_path_costs_no_gate_resolve(
 
     agent_manager.create_agent(db, config, name="dev", vm_name="box")
 
-    assert resolve_counter == [["proxmox-token", "git-token-gh"]]
+    # One burst covering the whole union, in the walk's deterministic
+    # first-encounter order (the union's only source since the
+    # construct-time registration seam closed).
+    assert resolve_counter == [["git-token-gh", "proxmox-token"]]
     assert mutation["git_tokens"] == {"gh": "ghtok"}
 
 

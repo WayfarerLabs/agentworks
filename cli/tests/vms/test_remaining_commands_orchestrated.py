@@ -185,7 +185,7 @@ def test_rekey_graph_roots_the_template_beside_the_live_vm(
     resolver = Resolver(config, registry)
 
     tmpl_node = vm_template_node(resolve_template(registry, vm.template), resolver)
-    vm_node = live_vm_node(db, config, registry, vm, resolver)
+    vm_node = live_vm_node(db, config, registry, vm)
     nodes = walk(tmpl_node, vm_node)
 
     assert [n.key for n in nodes] == [

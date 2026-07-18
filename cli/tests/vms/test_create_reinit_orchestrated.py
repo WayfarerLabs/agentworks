@@ -104,11 +104,11 @@ def test_create_graph_derives_from_declared_resources(
     assert admin.git_credentials == ["gh"]
 
     creds = tuple(
-        git_credential_node(registry, name, resolver)
+        git_credential_node(registry, name)
         for name in admin.git_credentials
     )
     template = vm_template_node(resolve_template(registry, None), resolver)
-    site = vm_site_node(registry, "proxmox", resolver)
+    site = vm_site_node(registry, "proxmox")
     pending = pending_vm_node(db, "nvm", template, site, creds)
     nodes = walk(pending)
 

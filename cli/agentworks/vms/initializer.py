@@ -43,7 +43,6 @@ if TYPE_CHECKING:
     from agentworks.config import Config
     from agentworks.db import Database
     from agentworks.resources.registry import Registry
-    from agentworks.secrets.resolver import Resolver
     from agentworks.vms.admin import AdminConfig
     from agentworks.vms.templates import ResolvedVMTemplate
 
@@ -1276,7 +1275,6 @@ def verify_tailscale_available() -> None:
 def resolve_git_credential_providers(
     registry: Registry,
     names: list[str],
-    resolver: Resolver | None = None,
 ) -> dict[str, GitCredentialProvider]:
     """Construct git credential provider (capability) instances from the
     registry.
@@ -1285,11 +1283,9 @@ def resolve_git_credential_providers(
     row's or an agent template's ``git_credentials`` list). Each
     provider is built from its ``provider_config`` and re-validates that
     config at construct (so a bad scope value fails loudly here, never
-    silently WIDENING the credential). When ``resolver`` is passed, each
-    provider registers its token secret on it at construct, so the
-    operation's boundary resolve covers them and the provider can
-    ``runup()`` the token afterward; pass ``None`` for materials-only
-    or inspection construction.
+    silently WIDENING the credential). The declared token secrets join
+    an operation's boundary union through the holding node's
+    ``secret_refs``; construction touches no secret machinery.
     """
     from agentworks.capabilities.git_credential import (
         GIT_CREDENTIAL_PROVIDER_REGISTRY,
@@ -1322,7 +1318,6 @@ def resolve_git_credential_providers(
         providers[name] = provider_cls(
             name,
             cred_config.provider_config,
-            resolver,
             description=cred_config.description,
         )
     return providers

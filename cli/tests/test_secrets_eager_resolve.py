@@ -518,7 +518,7 @@ def test_vm_shell_env_target_joins_the_bind_boundary(
     # real lima site is disabled where limactl isn't installed).
     monkeypatch.setattr(
         "agentworks.vms.sites.resolve_site",
-        lambda name, registry, *, resolver=None: SimpleNamespace(),
+        lambda name, registry: SimpleNamespace(),
     )
 
     class _Stop(Exception):
@@ -736,7 +736,7 @@ def test_agent_exec_env_target_joins_the_bind_boundary(
     # real lima site is disabled where limactl isn't installed).
     monkeypatch.setattr(
         "agentworks.vms.sites.resolve_site",
-        lambda name, registry, *, resolver=None: SimpleNamespace(),
+        lambda name, registry: SimpleNamespace(),
     )
 
     class _Stop(Exception):

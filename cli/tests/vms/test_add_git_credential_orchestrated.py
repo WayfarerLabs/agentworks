@@ -198,16 +198,14 @@ def test_graph_derives_from_row_and_declared_references(
     from agentworks.orchestration.node import Node
     from agentworks.orchestration.secrets import secret_union
     from agentworks.orchestration.walk import walk
-    from agentworks.secrets.resolver import Resolver
     from agentworks.vms.nodes import live_vm_node
 
     config = make_config()
     vm = _seed_vm(db)
     registry = build_registry(config)
-    resolver = Resolver(config, registry)
 
-    cred = git_credential_node(registry, "gh", resolver)
-    vm_node = live_vm_node(db, config, registry, vm, resolver)
+    cred = git_credential_node(registry, "gh")
+    vm_node = live_vm_node(db, config, registry, vm)
     nodes = walk(vm_node, cred)
 
     assert [n.key for n in nodes] == ["vm-site/proxmox", "vm/box", "git-credential/gh"]

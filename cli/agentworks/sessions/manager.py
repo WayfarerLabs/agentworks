@@ -517,7 +517,7 @@ def _batch_vm_boundary(
     resolver = Resolver(config, registry)
     site_nodes: dict[str, VMSiteNode] = {}
     vm_nodes = [
-        live_vm_node(db, config, registry, vm, resolver, site_nodes=site_nodes)
+        live_vm_node(db, config, registry, vm, site_nodes=site_nodes)
         for vm in vms
     ]
     nodes = walk(*vm_nodes)
@@ -1533,9 +1533,9 @@ def create_session(
     # through declared edges (the VM row's site field, an ephemeral
     # agent template's git_credentials), and every edge holder shares
     # the same object (the walk enforces one-object-per-key loudly).
-    # Construction is cheap and registers declared secrets on the
-    # resolver (the construct-time registration seam, closed by the
-    # per-instance resolver retirement); nothing resolves yet.
+    # Construction is cheap and touches no secret machinery; the
+    # walk union below is the boundary's source. Nothing resolves
+    # yet.
     from agentworks.agents.nodes import (
         agent_template_node,
         credential_tokens,
@@ -1566,7 +1566,7 @@ def create_session(
 
     resolver = Resolver(config, registry)
 
-    vm_node = live_vm_node(db, config, registry, vm, resolver)
+    vm_node = live_vm_node(db, config, registry, vm)
 
     def _teardown_platform_ctx() -> RunContext:
         # The nested teardowns' op-start context (the ephemeral agent /
@@ -1627,7 +1627,7 @@ def create_session(
 
         assert agent_name is not None  # defaulted to ``name`` above
         agent_tmpl = _resolve_agent_tmpl(registry, agent_template)
-        agent_tmpl_node = agent_template_node(registry, agent_tmpl, resolver)
+        agent_tmpl_node = agent_template_node(registry, agent_tmpl)
         pending_agent = pending_agent_node(
             db, config, agent_name, agent_tmpl_node, vm_node,
             _teardown_platform_ctx,
@@ -1649,8 +1649,7 @@ def create_session(
     )
     nodes = walk(session_node)
 
-    # The walk supplies the boundary union (idempotent next to the
-    # construct-time registration seam noted above), and the session's
+    # The walk supplies the boundary union, and the session's
     # runtime env chain joins the SAME pass through the pre-create
     # SecretTarget seam, so the env-chain secrets and the graph's
     # config/token secrets stay ONE prompt session. Hermeticity is
@@ -2253,7 +2252,7 @@ def restart_session(
 
     resolver = Resolver(config, registry)
 
-    vm_node = live_vm_node(db, config, registry, vm, resolver)
+    vm_node = live_vm_node(db, config, registry, vm)
     workspace_node = live_workspace_node(ws, vm_node)
     agent_node: LiveAgentNode | None = None
     if session.agent_name is not None:

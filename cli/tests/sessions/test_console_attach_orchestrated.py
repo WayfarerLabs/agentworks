@@ -104,7 +104,6 @@ def test_attach_graph_is_the_live_vm_alone(
     from agentworks.bootstrap import build_registry
     from agentworks.orchestration.secrets import secret_union
     from agentworks.orchestration.walk import walk
-    from agentworks.secrets.resolver import Resolver
     from agentworks.vms.nodes import live_vm_node
 
     config = make_config()
@@ -112,9 +111,8 @@ def test_attach_graph_is_the_live_vm_alone(
     vm = db.get_vm("box")
     assert vm is not None
     registry = build_registry(config)
-    resolver = Resolver(config, registry)
 
-    nodes = walk(live_vm_node(db, config, registry, vm, resolver))
+    nodes = walk(live_vm_node(db, config, registry, vm))
 
     assert [n.key for n in nodes] == ["vm-site/proxmox", "vm/box"]
     assert secret_union(nodes) == ("proxmox-token",)

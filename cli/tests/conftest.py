@@ -11,7 +11,6 @@ from pathlib import Path
 import pytest
 
 from agentworks.db import Database
-from agentworks.secrets.resolver import Resolver
 
 # The orchestrated-command suites' shared fixture trio (proxmox
 # section, make_config, resolve_counter) lives in its own module so it
@@ -315,9 +314,7 @@ def stub_vm_gates(monkeypatch: pytest.MonkeyPatch) -> _StubPlatform:
     # ``tailscale ping``; the gate then fast-paths (the stub's job, same
     # scope as the imperative ensure_active stub above) and holds via
     # the stub platform's no-op ``vm_active``.
-    def _fake_resolve_site(
-        name: object, registry: object, *, resolver: Resolver | None = None
-    ) -> _StubPlatform:
+    def _fake_resolve_site(name: object, registry: object) -> _StubPlatform:
         return platform
 
     monkeypatch.setattr("agentworks.vms.sites.resolve_site", _fake_resolve_site)

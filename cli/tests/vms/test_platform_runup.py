@@ -39,7 +39,7 @@ class _StubResolver:
 
 
 def _platform() -> ProxmoxPlatform:
-    return ProxmoxPlatform("px", _CONFIG, _StubResolver({"proxmox-token": "tok"}))  # type: ignore[arg-type]
+    return ProxmoxPlatform("px", _CONFIG)
 
 
 def _ctx() -> RunContext:
