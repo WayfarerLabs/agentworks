@@ -2156,9 +2156,9 @@ def _is_tailscale_reachable(tailscale_host: str) -> bool:
         if not _warned_tailscale_missing:
             _warned_tailscale_missing = True
             output.warn(
-                "tailscale binary not found on PATH; the Tailscale power-state "
-                "fast path is unavailable, so gated commands fall back to a "
-                "slower cloud round trip. Install tailscale to restore it."
+                "tailscale binary not found on PATH; VM power-state checks "
+                "will fall back to slower cloud API calls. Install tailscale "
+                "(or add it to PATH) to speed them up."
             )
         return False
 

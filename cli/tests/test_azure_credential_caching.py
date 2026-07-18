@@ -175,6 +175,42 @@ class TestCredentialCaching:
         assert counters["get_token"] == 1
         assert counters["cred_build"] == 1
 
+    def test_second_subscription_builds_own_clients_not_credential(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """One instance serving VMs whose stored resource IDs name
+        different subscriptions (a site whose subscription changed after
+        older VMs were created) builds a client per subscription, never
+        reusing the first subscription's client against the second, while
+        the subscription-independent credential still builds exactly once."""
+        counters = _install_fakes(monkeypatch)
+        vm_a: VMRow = _fake_vm()  # type: ignore[assignment]
+        vm_b: VMRow = _fake_vm(  # type: ignore[assignment]
+            _RESOURCE_ID.replace("sub-A", "sub-B")
+        )
+        platform = _platform()
+
+        assert platform.status(vm_a, RunContext()) is VMStatus.RUNNING
+        assert platform.status(vm_b, RunContext()) is VMStatus.RUNNING
+        platform.attach_public_ip(vm_a)
+        platform.attach_public_ip(vm_b)
+
+        # One compute and one network client per subscription, keyed by
+        # subscription (the accessor passes the key to the constructor,
+        # so the keys also pin what each client was bound to).
+        assert counters["compute_build"] == 2
+        assert counters["network_build"] == 2
+        assert set(platform._compute_cached) == {"sub-A", "sub-B"}
+        assert set(platform._network_cached) == {"sub-A", "sub-B"}
+
+        # Repeats hit the per-subscription cache; the credential (and its
+        # probe) built exactly once for the whole instance.
+        assert platform.status(vm_a, RunContext()) is VMStatus.RUNNING
+        assert platform.status(vm_b, RunContext()) is VMStatus.RUNNING
+        assert counters["compute_build"] == 2
+        assert counters["cred_build"] == 1
+        assert counters["get_token"] == 1
+
     def test_browser_fallback_preserved_and_cached(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:

@@ -94,9 +94,11 @@ def _build_credential() -> object:
 
     Returns object to avoid a hard import of azure.core at module load
     time. Callers cast to the appropriate type when constructing SDK
-    clients. Called at most once per platform instance (via the caching
-    :meth:`AzureVMPlatform._get_credential`), so the probe's cost, and its
-    browser-fallback decision, are paid once per command, not per op.
+    clients. The credential is subscription-independent, so this is
+    called at most once per platform instance (via the caching
+    :meth:`AzureVMPlatform._get_credential`) even when the instance's
+    SDK clients span multiple subscriptions; the probe's cost, and its
+    browser-fallback decision, are paid once per instance, not per op.
     """
     from azure.core.exceptions import ClientAuthenticationError
     from azure.identity import DefaultAzureCredential, InteractiveBrowserCredential
@@ -216,14 +218,19 @@ class AzureVMPlatform(VMPlatform):
     def __init__(self, owner_name: str, config: Mapping[str, object]) -> None:
         super().__init__(owner_name, config)
         # Azure credential and SDK clients, built on FIRST need by the
-        # accessors below and reused for the instance's remaining ops. The
-        # site memo (vms/nodes.py) builds one instance per site per
-        # command, and a site is one subscription, so caching here means
-        # one credential build (one live get_token probe) per command
-        # instead of one per method call.
+        # accessors below and reused for the instance's remaining ops.
+        # The credential is subscription-independent, so it caches once
+        # per instance (one live get_token probe per command, given the
+        # vms/nodes.py site memo shares one instance per site). The
+        # clients are keyed by subscription_id: the site's config names
+        # one subscription, but power ops parse each VM's stored resource
+        # ID, and rows created under an older subscription must keep
+        # operating regardless of what the config says today, so one
+        # instance can legitimately see heterogeneous subscriptions in a
+        # multi-VM batch.
         self._credential_cached: object | None = None
-        self._compute_cached: ComputeManagementClient | None = None
-        self._network_cached: NetworkManagementClient | None = None
+        self._compute_cached: dict[str, ComputeManagementClient] = {}
+        self._network_cached: dict[str, NetworkManagementClient] = {}
 
     # No preflight override: azure has no config secrets (the base's
     # prediction pass is a no-op) and no unauthenticated readiness
@@ -276,28 +283,32 @@ class AzureVMPlatform(VMPlatform):
         return cred
 
     def _compute_client(self, az: _HasSubscriptionId) -> ComputeManagementClient:
-        """The compute client, built on first need from the cached
-        credential and reused for the instance's remaining ops."""
+        """The compute client for ``az``'s subscription, built on first
+        need from the cached credential and reused for the instance's
+        remaining ops against that subscription (see ``__init__`` for why
+        the cache keys by subscription)."""
         from azure.mgmt.compute import ComputeManagementClient
 
-        compute = self._compute_cached
+        compute = self._compute_cached.get(az.subscription_id)
         if compute is None:
             # _get_credential() returns a TokenCredential-compatible object;
             # the cast avoids a hard azure.core import at module load time.
             compute = ComputeManagementClient(self._get_credential(), az.subscription_id)  # type: ignore[arg-type]
-            self._compute_cached = compute
+            self._compute_cached[az.subscription_id] = compute
         return compute
 
     def _network_client(self, az: _HasSubscriptionId) -> NetworkManagementClient:
-        """The network client, built on first need from the cached
-        credential and reused for the instance's remaining ops."""
+        """The network client for ``az``'s subscription, built on first
+        need from the cached credential and reused for the instance's
+        remaining ops against that subscription (see ``__init__`` for why
+        the cache keys by subscription)."""
         from azure.mgmt.network import NetworkManagementClient
 
-        network = self._network_cached
+        network = self._network_cached.get(az.subscription_id)
         if network is None:
             # Same as _compute_client: credential is TokenCredential-compatible at runtime.
             network = NetworkManagementClient(self._get_credential(), az.subscription_id)  # type: ignore[arg-type]
-            self._network_cached = network
+            self._network_cached[az.subscription_id] = network
         return network
 
     def create(self, request: ProvisionRequest, ctx: RunContext) -> ProvisionResult:
