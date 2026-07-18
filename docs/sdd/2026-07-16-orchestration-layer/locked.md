@@ -82,7 +82,9 @@ and seam landed as a complete, green, shippable unit.
 
 ## R7 exception ledger (sanctioned behavior records)
 
-All in the sanctioned pre-walk-away bucket unless noted; everything else is verbatim parity:
+The named, sanctioned behavior records (amended 2026-07-18, closeout review round: entries 9 through
+11 were in the phases' checked records but missing from this ledger's first writing); everything not
+named here landed as parity under the suite oracle:
 
 1. **Gate-before-boundary** (every gated seam): the gate opens before the preflight sweep and
    boundary resolve where the imperative roots bound (preflight + resolve) first and gated after. A
@@ -107,6 +109,21 @@ All in the sanctioned pre-walk-away bucket unless noted; everything else is verb
    before its granted-workspaces snapshot, so an explicitly-only-granted workspace never gets its
    on-VM membership removed on that path (issue #189; fixing it is a behavior change outside this
    parity-bound effort).
+9. **Error-shape shift at the sweep** (the tracer, then every derived-graph sweep): the preflight
+   set is a strict superset of the imperative one (the sweep preflights every participating node),
+   and an unresolvable token now fails at the sweep as a `ConfigError` with the secret-describe hint
+   instead of the imperative `SecretUnavailableError` at the boundary resolve; accepted knowingly,
+   buying cross-command consistency with the shape `vm reinit` already produced.
+10. **Probe-to-preflight moves** (session create/restart): the required-commands probe moved to
+    PREFLIGHT for realized targets where the imperative flow probed post-resolve and
+    post-mutation-start, so a missing binary or a pre-rollout agent's SSH refusal now surfaces
+    BEFORE the BROKEN/--force and confirm gates (bail-earlier error precedence), and at create the
+    existing-agent SSH probe precedes the workspace realization (less to unwind); the nested
+    creates' second gate probes consolidated into the one held gate.
+11. **Rollback-failure message shape** (Phase 2, carried through Phase 3): the rollback-failure
+    warning is the `RealizationLog`'s generic "rollback: teardown of <key> failed" line rather than
+    each command's bespoke wording, an accepted message-shape shift on a failure-of-the-rollback
+    path.
 
 Permanent design exceptions (not migration artifacts): the gate's just-in-time secrets are the one
 sanctioned resolution outside the boundary pass, and the Tailscale rejoin key keeps its
@@ -141,3 +158,17 @@ activation module).
 
 Nothing under `docs/sdd/2026-07-16-orchestration-layer/` is load-bearing for the current system;
 this directory can be deleted per the SDD lifecycle once its history stops informing current work.
+
+## Amendments
+
+- **2026-07-18 (closeout review round, same day as the lock, before push):** the R7 ledger gained
+  entries 9 through 11 (the sweep error-shape shift, the probe-to-preflight moves, the
+  rollback-failure message shape), which the phases' checked records carried but the ledger's first
+  writing omitted, and its "everything else is verbatim parity" framing was softened to match. In
+  the permanent docs, ADR 0019's node taxonomy gained the resolved-template species, its gate
+  section was qualified (no-gate commands and boundary-first gates that serve the cached pass), and
+  its "one prompt session" phrasing was replaced by the proven invariant (all interactivity
+  pre-walk-away, nothing resolved or prompted twice, one boundary pass per composition root);
+  `capabilities/README.md` and `docs/guides/resources.md` had the same prompted-exactly-once
+  overstatement corrected to that invariant (the guide's claim was equally inaccurate before this
+  effort, e.g. cross-VM copy's two passes, and was fixed under the docs-reflect-HEAD tiebreaker).

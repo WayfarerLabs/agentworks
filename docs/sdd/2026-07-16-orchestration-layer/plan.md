@@ -958,7 +958,14 @@ are NOT here; they ride their phases per the lockstep rule.)
       an expired rejoin key by re-resolving through the chain, remains true via the gate's repair
       path). Also confirmed at lock: the console-node open question resolved to never-introduced
       (emerge-when-forced), recorded as as-landed notes on the FRD's R3/glossary console mentions
-      and the HLA's open question, and in `locked.md`.
+      and the HLA's open question, and in `locked.md`. (Corrected 2026-07-18, closeout review round:
+      this record's "at-most-one prompt per command, all still true at HEAD" claim about
+      `docs/guides/resources.md` was wrong, and was wrong before this effort too (cross-VM copy has
+      always run two passes, and a gated stopped VM prompts at the gate and again at the boundary);
+      the guide now states the operator-level invariant actually promised and proven, never the same
+      secret twice in one command and all prompting before the command starts changing anything,
+      alongside the same correction to `capabilities/README.md`'s prompted-exactly-once sentence and
+      to ADR 0019; see `locked.md`'s amendment.)
 - [x] Promote and NUMBER the ADR from this feature directory into `docs/adrs/` (it references ADR
       0016, `0016-yaml-resource-manifests.md`, for the capability collapse and
       `capabilities/README.md` for the lifecycle contract; its own number is assigned at promotion,
