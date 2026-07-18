@@ -967,7 +967,7 @@ def delete_workspace(
 
         # Revoke agent workspace grants (agents are VM-scoped, not deleted with workspaces)
         if vm is not None:
-            from agentworks.agents.manager import revoke_workspace_grants
+            from agentworks.agents.grants import revoke_workspace_grants
 
             revoke_workspace_grants(db, config, name, vm)
 
@@ -999,7 +999,7 @@ def copy_workspace(
     import tempfile
     from pathlib import Path
 
-    from agentworks.agents.manager import workspace_group
+    from agentworks.agents.grants import workspace_group
     from agentworks.ssh import SSHLogger
     from agentworks.transports import SSHTransport, transport
     validate_name(dest_name)

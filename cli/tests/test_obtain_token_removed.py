@@ -52,13 +52,15 @@ def test_obtain_token_method_gone_from_concrete_providers() -> None:
 
 
 def test_manager_modules_have_no_obtain_token_calls() -> None:
-    """The three manager-side modules that previously called
+    """The manager-side modules that previously called
     ``provider.obtain_token(...)`` (vms/manager.py, agents/manager.py,
-    vms/initializer.py) must use the framework instead.
+    vms/initializer.py, with the agent body since moved to
+    agents/initializer.py) must use the framework instead.
     """
     for module_name in (
         "agentworks.vms.manager",
         "agentworks.agents.manager",
+        "agentworks.agents.initializer",
         "agentworks.vms.initializer",
     ):
         src = _read_module_source(module_name)

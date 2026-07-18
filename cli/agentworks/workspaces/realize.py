@@ -61,7 +61,7 @@ def realize_workspace(
     failure AFTER unwinding its own partial state; the caller's
     realization log never sees a half-made workspace.
     """
-    from agentworks.agents.manager import _add_to_workspace_group, workspace_group
+    from agentworks.agents.grants import add_to_workspace_group, workspace_group
     from agentworks.ssh import SSHLogger
     from agentworks.workspaces.backends.vm import (
         create_vm_workspace,
@@ -171,7 +171,7 @@ def realize_workspace(
                     )
                     continue
                 try:
-                    _add_to_workspace_group(
+                    add_to_workspace_group(
                         vm, config, db, agent.linux_user, name, logger=ssh_logger
                     )
                     added += 1

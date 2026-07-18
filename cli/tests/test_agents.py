@@ -4,12 +4,12 @@ from __future__ import annotations
 
 import pytest
 
-from agentworks.agents.manager import (
-    derive_linux_user,
+from agentworks.agents.grants import (
     grant_workspaces,
     revoke_workspaces,
     workspace_group,
 )
+from agentworks.agents.manager import derive_linux_user
 from agentworks.db import Database
 from agentworks.errors import ValidationError
 

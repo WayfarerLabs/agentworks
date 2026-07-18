@@ -95,7 +95,7 @@ def agent_grant_workspaces(
     ] = False,
 ) -> None:
     """Grant an agent explicit access to workspaces."""
-    from agentworks.agents.manager import grant_workspaces
+    from agentworks.agents.grants import grant_workspaces
     from agentworks.config import load_config
 
     grant_workspaces(
@@ -119,7 +119,7 @@ def agent_revoke_workspaces(
     ] = False,
 ) -> None:
     """Revoke explicit workspace grants from an agent."""
-    from agentworks.agents.manager import revoke_workspaces
+    from agentworks.agents.grants import revoke_workspaces
     from agentworks.config import load_config
 
     revoke_workspaces(

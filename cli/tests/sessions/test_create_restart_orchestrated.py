@@ -233,7 +233,9 @@ def _create_stubs(
     _requiring_template(monkeypatch, "claude")
 
     monkeypatch.setattr(agent_mgr, "_assert_agent_ssh_works", lambda *a, **k: None)
-    monkeypatch.setattr(agent_mgr, "_add_to_workspace_group", lambda *a, **k: None)
+    monkeypatch.setattr(
+        "agentworks.agents.grants.add_to_workspace_group", lambda *a, **k: None
+    )
     monkeypatch.setattr(tmux_mod, "deploy_restricted_config", lambda *a, **k: None)
     monkeypatch.setattr(
         session_manager, "_build_session_command", lambda *a, **k: "true"
@@ -328,7 +330,6 @@ def test_create_failure_cleans_session_slice_then_unwinds_ephemerals(
     shape: the session's partial-state cleanup (row delete, grant
     revoke, group removal) runs FIRST, then the realized ephemerals
     unwind in reverse realization order (agent before workspace)."""
-    from agentworks.agents import manager as agent_mgr
     from agentworks.sessions import tmux as tmux_mod
     from agentworks.sessions.manager import create_session
 
@@ -359,8 +360,7 @@ def test_create_failure_cleans_session_slice_then_unwinds_ephemerals(
 
     monkeypatch.setattr(Database, "delete_session", _marking_delete_session)
     monkeypatch.setattr(
-        agent_mgr,
-        "_remove_from_workspace_group",
+        "agentworks.agents.grants.remove_from_workspace_group",
         lambda *a, **k: events.append("remove_group"),
     )
     monkeypatch.setattr(

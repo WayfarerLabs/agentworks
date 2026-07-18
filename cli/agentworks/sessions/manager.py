@@ -1716,9 +1716,9 @@ def create_session(
                     # Auto-grant implicit workspace access if the agent has no
                     # existing grant on this workspace.
                     if not db.has_any_grant(resolved_agent_name, workspace_name):
-                        from agentworks.agents.manager import _add_to_workspace_group
+                        from agentworks.agents.grants import add_to_workspace_group
 
-                        _add_to_workspace_group(
+                        add_to_workspace_group(
                             vm, config, db, linux_user, workspace_name
                         )
                     db.insert_agent_grant(
@@ -2658,11 +2658,11 @@ def delete_session(
             db.delete_agent_grant(session.agent_name, session.workspace_name, "implicit", session_name=name)
             # If no grants remain, remove from workspace group
             if not db.has_any_grant(session.agent_name, session.workspace_name):
-                from agentworks.agents.manager import _remove_from_workspace_group
+                from agentworks.agents.grants import remove_from_workspace_group
 
                 agent = db.get_agent(session.agent_name)
                 if agent:
-                    _remove_from_workspace_group(vm, config, db, agent.linux_user, session.workspace_name)
+                    remove_from_workspace_group(vm, config, db, agent.linux_user, session.workspace_name)
 
         _regenerate_tmuxinator(db, config, vm, ws)
 

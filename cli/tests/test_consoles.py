@@ -1892,7 +1892,7 @@ def test_delete_workspace_kills_console_windows(
         lambda *a, **k: None,
     )
     monkeypatch.setattr(
-        "agentworks.agents.manager.revoke_workspace_grants",
+        "agentworks.agents.grants.revoke_workspace_grants",
         lambda *a, **k: None,
     )
 
@@ -1947,11 +1947,11 @@ def test_delete_agent_kills_console_windows(
     create_console(db, name="con", vm_name="vm1", session_specs=["s1", "s2"])
 
     monkeypatch.setattr(
-        "agentworks.agents.manager._remove_from_workspace_group",
+        "agentworks.agents.grants.remove_from_workspace_group",
         lambda *a, **k: None,
     )
     monkeypatch.setattr(
-        "agentworks.agents.manager._delete_agent_on_vm",
+        "agentworks.agents.initializer.delete_agent_on_vm",
         lambda *a, **k: None,
     )
     # delete_agent now refreshes operator SSH config; stub it out since the

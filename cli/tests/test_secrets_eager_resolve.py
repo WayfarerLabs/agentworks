@@ -1267,16 +1267,16 @@ def test_agent_setup_runners_have_no_env_injection() -> None:
     runner re-introduces the coupling this rule exists to prevent."""
     import inspect
 
-    from agentworks.agents import manager as agent_mgr
+    from agentworks.agents import initializer as agent_init
 
-    src = inspect.getsource(agent_mgr._create_agent_on_vm)
+    src = inspect.getsource(agent_init.create_agent_on_vm)
     assert "env=agent_env" not in src, (
-        "found 'env=agent_env' in _create_agent_on_vm; provisioning runners "
+        "found 'env=agent_env' in create_agent_on_vm; provisioning runners "
         "must not inject operator env. Identity comes via the per-user "
         "profile fragment, not SetEnv."
     )
     assert "agent_env = compose_env" not in src, (
-        "found 'agent_env = compose_env' in _create_agent_on_vm; the "
+        "found 'agent_env = compose_env' in create_agent_on_vm; the "
         "operator-env composition was removed because no provisioning "
         "runner consumes it."
     )
@@ -1335,12 +1335,12 @@ def test_create_agent_on_vm_ends_with_ensure_files_sourced() -> None:
     source lines."""
     import inspect
 
-    from agentworks.agents import manager as agent_mgr
+    from agentworks.agents import initializer as agent_init
 
-    src = inspect.getsource(agent_mgr._create_agent_on_vm)
+    src = inspect.getsource(agent_init.create_agent_on_vm)
     assert "_ensure_agentworks_files_sourced" in src, (
         "expected _ensure_agentworks_files_sourced call in "
-        "_create_agent_on_vm; without it, dotfiles install can leave "
+        "create_agent_on_vm; without it, dotfiles install can leave "
         "AGENTWORKS_AGENT and mise activation unreachable for the agent."
     )
 

@@ -344,12 +344,12 @@ class PendingSessionNode:
             return
         if not remaining:
             try:
-                from agentworks.agents.manager import _remove_from_workspace_group
+                from agentworks.agents.grants import remove_from_workspace_group
 
                 # Re-read the VM row: the activation gate may have
                 # updated its Tailscale address since node construction.
                 vm_row = self._db.get_vm(self._vm.row.name) or self._vm.row
-                _remove_from_workspace_group(
+                remove_from_workspace_group(
                     vm_row,
                     self._config,
                     self._db,

@@ -2159,7 +2159,7 @@ def install_claude_plugins(
     invocation gets a non-login shell that sources neither ``.bashrc``
     nor ``.profile``, so ``command -v claude`` would falsely fail. Both
     the admin call site (``_phase_b_setup`` in this file) and the agent
-    call site (``_create_agent_on_vm`` in ``agents/manager.py``) wrap
+    call site (``create_agent_on_vm`` in ``agents/initializer.py``) wrap
     accordingly; the helper itself stays transport- and user-agnostic.
     """
     if not marketplaces and not plugins:

@@ -402,12 +402,12 @@ def test_pending_session_teardown_is_todays_rollback_body(
     implicit grant, and (no other grant remaining) remove the agent
     from the workspace group, exactly the imperative session-internal
     rollback."""
-    from agentworks.agents import manager as agents_manager
+    from agentworks.agents import grants as agents_grants
 
     removed: list[tuple[str, str]] = []
     monkeypatch.setattr(
-        agents_manager,
-        "_remove_from_workspace_group",
+        agents_grants,
+        "remove_from_workspace_group",
         lambda vm, config, db_, linux_user, ws, **k: removed.append(
             (linux_user, ws)
         ),
@@ -429,12 +429,12 @@ def test_pending_session_teardown_keeps_group_with_other_grants(
 ) -> None:
     """An explicit grant survives the implicit revoke, so the group
     membership stays (it backs the remaining grant)."""
-    from agentworks.agents import manager as agents_manager
+    from agentworks.agents import grants as agents_grants
 
     removed: list[tuple[str, str]] = []
     monkeypatch.setattr(
-        agents_manager,
-        "_remove_from_workspace_group",
+        agents_grants,
+        "remove_from_workspace_group",
         lambda *a, **k: removed.append(("called", "")),
     )
     vm = _vm_node(db)

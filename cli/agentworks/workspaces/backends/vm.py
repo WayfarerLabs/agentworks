@@ -30,7 +30,7 @@ def create_vm_workspace(
 
     Errors if the workspace directory already exists on the VM.
     """
-    from agentworks.agents.manager import workspace_group
+    from agentworks.agents.grants import workspace_group
 
     assert vm.tailscale_host is not None
     target = transport(vm, config, logger=logger)

@@ -115,8 +115,7 @@ def test_create_session_probes_before_state_mutation(
 
     add_calls: list[tuple[str, str]] = []
     monkeypatch.setattr(
-        agent_mgr,
-        "_add_to_workspace_group",
+        "agentworks.agents.grants.add_to_workspace_group",
         lambda vm, config, db, lu, ws, **k: add_calls.append((lu, ws)),
     )
 
@@ -172,7 +171,9 @@ def test_create_session_uses_agent_target_for_tmux(
     targets = _patch_common(monkeypatch, call_log=call_log)
 
     monkeypatch.setattr(agent_mgr, "_assert_agent_ssh_works", lambda *a, **k: None)
-    monkeypatch.setattr(agent_mgr, "_add_to_workspace_group", lambda *a, **k: None)
+    monkeypatch.setattr(
+        "agentworks.agents.grants.add_to_workspace_group", lambda *a, **k: None
+    )
     monkeypatch.setattr(
         session_manager, "_build_session_command", lambda *a, **k: "true"
     )
@@ -255,8 +256,7 @@ def test_create_session_aborts_on_missing_required_command(
 
     add_calls: list[tuple[str, str]] = []
     monkeypatch.setattr(
-        agent_mgr,
-        "_add_to_workspace_group",
+        "agentworks.agents.grants.add_to_workspace_group",
         lambda vm, config, db, lu, ws, **k: add_calls.append((lu, ws)),
     )
 

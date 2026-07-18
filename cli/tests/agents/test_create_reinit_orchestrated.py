@@ -5,7 +5,7 @@ the grant-all reconciliation riding the realization body.
 
 Real config, registry, resolver, and backend loop (env-var backend);
 the platform's backend ops, the reachability probe, the transports,
-and the on-VM mutation (``_create_agent_on_vm``) are the fakes.
+and the on-VM mutation (``create_agent_on_vm``) are the fakes.
 """
 
 from __future__ import annotations
@@ -14,6 +14,8 @@ from typing import TYPE_CHECKING, Any
 
 import pytest
 
+from agentworks.agents import grants as agent_grants
+from agentworks.agents import initializer as agent_initializer
 from agentworks.agents import manager as agent_manager
 from agentworks.capabilities.vm_platform.proxmox import ProxmoxPlatform
 from agentworks.errors import ExternalError
@@ -58,7 +60,7 @@ def mutation(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
         captured["git_tokens"] = kwargs["git_tokens"]
         captured["agent_name"] = kwargs["agent_name"]
 
-    monkeypatch.setattr(agent_manager, "_create_agent_on_vm", _fake_mutation)
+    monkeypatch.setattr(agent_initializer, "create_agent_on_vm", _fake_mutation)
     monkeypatch.setattr(
         "agentworks.ssh_config.sync_ssh_config", lambda *a, **k: None
     )
@@ -287,11 +289,11 @@ def test_create_mutation_failure_cleans_up_and_leaves_no_row(
     def _boom(*a: Any, **k: Any) -> None:
         raise RuntimeError("ssh exploded")
 
-    monkeypatch.setattr(agent_manager, "_create_agent_on_vm", _boom)
+    monkeypatch.setattr(agent_initializer, "create_agent_on_vm", _boom)
     deletes: list[str] = []
     monkeypatch.setattr(
-        agent_manager,
-        "_delete_agent_on_vm",
+        agent_initializer,
+        "delete_agent_on_vm",
         lambda vm, config_, linux_user, **k: deletes.append(linux_user),
     )
 
@@ -316,7 +318,7 @@ def test_reinit_mutation_failure_wraps_and_keeps_the_agent(
     def _boom(*a: Any, **k: Any) -> None:
         raise RuntimeError("ssh exploded")
 
-    monkeypatch.setattr(agent_manager, "_create_agent_on_vm", _boom)
+    monkeypatch.setattr(agent_initializer, "create_agent_on_vm", _boom)
 
     with pytest.raises(ExternalError, match="reinitializing agent: ssh exploded"):
         agent_manager.reinit_agent(db, config, name="dev")
@@ -383,8 +385,8 @@ def test_create_grant_all_reconciles_between_insert_and_sync(
     _reachable(monkeypatch, True)
     group_adds: list[tuple[str, str]] = []
     monkeypatch.setattr(
-        agent_manager,
-        "_add_to_workspace_group",
+        agent_grants,
+        "add_to_workspace_group",
         lambda vm, config_, db_, linux_user, ws, **k: group_adds.append(
             (linux_user, ws)
         ),

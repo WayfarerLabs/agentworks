@@ -9,7 +9,7 @@ scoped delivery), opens no gate, and re-checks nothing its caller
 already validated (name shape, existence, the VM row). The body owns
 the mutation, the git-credential materials ops it carries (whose
 write-step runup runs under the skip-and-degrade policy inside
-``_create_agent_on_vm``), and the mutation's own partial-state cleanup
+``create_agent_on_vm``), and the mutation's own partial-state cleanup
 (a half-configured Linux user), which it unwinds itself before
 re-raising. Rollback of a COMPLETED agent is the pending agent node's
 ``teardown``, driven by the orchestrator's realization log, never this
@@ -31,7 +31,7 @@ the SSH-config refresh, exactly the imperative order; only the
 standalone command offers the flag. Both ``agent create`` and the
 session orchestrator call this body; ``agent reinit`` shares the
 underlying mutation but not the insert, so it drives
-``_create_agent_on_vm`` directly.
+``create_agent_on_vm`` directly.
 """
 
 from __future__ import annotations
@@ -69,11 +69,8 @@ def realize_agent(
     half-configured user); the caller's realization log never sees a
     half-made agent. Returns the inserted row.
     """
-    from agentworks.agents.manager import (
-        _create_agent_on_vm,
-        _delete_agent_on_vm,
-        derive_linux_user,
-    )
+    from agentworks.agents.initializer import create_agent_on_vm, delete_agent_on_vm
+    from agentworks.agents.manager import derive_linux_user
     from agentworks.ssh import SSHLogger
 
     linux_user = derive_linux_user(name)
@@ -84,7 +81,7 @@ def realize_agent(
         # exception. Surface them as a warning and let the original error
         # continue to propagate.
         try:
-            _delete_agent_on_vm(vm, config, linux_user, logger=ssh_logger)
+            delete_agent_on_vm(vm, config, linux_user, logger=ssh_logger)
         except Exception as cleanup_err:
             output.warn(
                 f"rollback during agent create failed: {cleanup_err}. "
@@ -96,7 +93,7 @@ def realize_agent(
     # rollback commands are logged BEFORE the footer, not after.
     try:
         try:
-            _create_agent_on_vm(
+            create_agent_on_vm(
                 vm, config, registry, template, linux_user,
                 agent_name=name,
                 git_tokens=git_tokens,
@@ -127,10 +124,10 @@ def realize_agent(
 
     # If grant_all, add to all existing workspace groups
     if grant_all_workspaces:
-        from agentworks.agents.manager import _add_to_workspace_group
+        from agentworks.agents.grants import add_to_workspace_group
 
         for ws in db.list_workspaces(vm_name=vm.name):
-            _add_to_workspace_group(vm, config, db, linux_user, ws.name, logger=None)
+            add_to_workspace_group(vm, config, db, linux_user, ws.name, logger=None)
             db.insert_agent_grant(name, ws.name, "explicit")
 
     # Refresh operator SSH config so `ssh <prefix><vm>--<agent>` works.
