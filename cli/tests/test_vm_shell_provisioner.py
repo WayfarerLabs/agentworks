@@ -22,7 +22,7 @@ import pytest
 
 from agentworks.db import Database
 from agentworks.errors import StateError
-from tests.conftest import stub_build_registry, stub_vm_gates
+from tests.conftest import empty_secret_target, stub_build_registry, stub_vm_gates
 
 if TYPE_CHECKING:
     pass
@@ -118,7 +118,12 @@ def _patch_common(
         vm_manager, "_resolve_vm_admin_env_scopes",
         lambda *a, **k: vm_manager._VmAdminEnvScopes(vm={}, workspace=None, admin={}),  # type: ignore[attr-defined]
     )
-    monkeypatch.setattr(vm_manager, "_vm_secret_target", lambda *a, **k: object())
+    # A real, empty SecretTarget: the orchestrated root registers the
+    # env target on the operation's REAL resolver, so a bare object()
+    # sentinel no longer survives the seam.
+    monkeypatch.setattr(
+        vm_manager, "_vm_secret_target", lambda *a, **k: empty_secret_target()
+    )
     monkeypatch.setattr("agentworks.secrets.resolve_for_command", lambda *a, **k: None)
     # compose_env normally calls into the secret resolver; stub out the
     # whole thing for tests that aren't exercising env composition.
@@ -218,6 +223,9 @@ def test_shell_vm_provisioner_uses_native_transport(
     class _StubProvisioner:
         name = "stub"
 
+        def preflight(self, ctx: object) -> None:
+            return None
+
         def native_transport(self, vm: object, *, config: object | None = None) -> object:
             provisioner_calls.append((getattr(vm, "name", "?"), config))
             return _stub_target()
@@ -226,9 +234,16 @@ def test_shell_vm_provisioner_uses_native_transport(
         def transient_route(self, vm: object):  # type: ignore[no-untyped-def]
             yield
 
+        def vm_active(self, vm: object, *, config: object | None = None):  # type: ignore[no-untyped-def]
+            return contextlib.nullcontext()
+
+    # The orchestrated root reaches the platform through the node's
+    # site edge, whose only constructor is resolve_site; override the
+    # conftest stub (installed by _patch_common) with this test's
+    # provisioner-shaped platform.
     monkeypatch.setattr(
-        vm_manager, "bind_platform",
-        _marking_bind(_StubProvisioner),
+        "agentworks.vms.sites.resolve_site",
+        lambda name, registry, *, resolver=None: _StubProvisioner(),
     )
 
     # Also pin the Tailscale path so it would explode if accidentally taken.
@@ -644,7 +659,9 @@ def test_exec_vm_warns_but_continues_on_failed_init(
         vm_manager, "_resolve_vm_admin_env_scopes",
         lambda *a, **k: vm_manager._VmAdminEnvScopes(vm={}, workspace=None, admin={}),
     )
-    monkeypatch.setattr(vm_manager, "_vm_secret_target", lambda *a, **k: object())
+    monkeypatch.setattr(
+        vm_manager, "_vm_secret_target", lambda *a, **k: empty_secret_target()
+    )
     monkeypatch.setattr("agentworks.secrets.resolve_for_command", lambda *a, **k: None)
     monkeypatch.setattr("agentworks.env.compose_env", lambda **k: {})
     stub_vm_gates(monkeypatch)

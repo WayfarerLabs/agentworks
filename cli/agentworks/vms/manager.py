@@ -917,6 +917,12 @@ def shell_vm(
     When ``workspace_name`` is set, the shell ``cd``s into the workspace
     directory and the workspace template's env joins the env chain. The
     workspace must belong to this VM.
+
+    Orchestrated (:func:`gated_vm_boundary`): the graph derives from
+    the VM's row, the activation gate replaces this command's
+    ``keep_active`` use (opening BEFORE the preflight sweep; its
+    just-in-time values seed the boundary resolver), and the
+    held-active span covers the whole interactive session.
     """
     import shlex
     import sys
@@ -951,50 +957,49 @@ def shell_vm(
             ),
         )
 
-    # The composition root: the admin shell's env-chain secrets join
-    # the bind's ONE boundary resolve (site secrets + env secrets, one
-    # prompt session), and the platform's preflight (missing tool,
-    # stranded site, unresolvable secret) fails before any prompt. The
-    # same scope dicts feed both the SecretTarget (via
-    # _vm_secret_target) and compose_env so the two consumers can't
-    # drift. Crucially the vm scope comes from vm.template (DB row),
-    # not the config-default template, which may not match and would
-    # silently route the wrong env into a shell on a
-    # non-default-template VM.
+    # The orchestrated composition root (gated_vm_boundary): the admin
+    # shell's env-chain secrets join the ONE boundary resolve (site
+    # secrets + env secrets, one prompt session), and every node's
+    # preflight (missing tool, stranded site, unresolvable secret)
+    # fails before any prompt. The same scope dicts feed both the
+    # SecretTarget (via _vm_secret_target) and compose_env so the two
+    # consumers can't drift. Crucially the vm scope comes from
+    # vm.template (DB row), not the config-default template, which may
+    # not match and would silently route the wrong env into a shell on
+    # a non-default-template VM.
     from agentworks.bootstrap import build_registry
-    from agentworks.secrets.resolver import Resolver
 
     registry = build_registry(config)
     scopes = _resolve_vm_admin_env_scopes(registry, vm, ws=ws)
-    resolver = Resolver(config, registry)
-    bound = bind_platform(
-        config, vm, registry=registry, resolver=resolver,
-        targets=[_vm_secret_target(scopes, label=f"vm-shell={vm.name}")],
-    )
-    values = resolver.values
-
-    from agentworks.vms.sites import site_platform_name
-
-    ctx = ResourceContext(
-        vm_name=vm.name,
-        platform=site_platform_name(vm.site, registry),
-        site=vm.site,
-        user=vm.admin_username,
-        workspace_name=ws.name if ws else None,
-        workspace_dir=ws.workspace_path if ws else None,
-    )
-    env = compose_env(
-        values=values,
-        ctx=ctx,
-        vm=scopes.vm,
-        workspace=scopes.workspace,
-        admin=scopes.admin,
-    )
 
     with contextlib.ExitStack() as stack:
-        stack.enter_context(keep_active(db, config, vm, bound))
+        vm_node, resolver = stack.enter_context(
+            gated_vm_boundary(
+                db, config, registry, vm,
+                targets=[_vm_secret_target(scopes, label=f"vm-shell={vm.name}")],
+            )
+        )
+
+        from agentworks.vms.sites import site_platform_name
+
+        ctx = ResourceContext(
+            vm_name=vm.name,
+            platform=site_platform_name(vm.site, registry),
+            site=vm.site,
+            user=vm.admin_username,
+            workspace_name=ws.name if ws else None,
+            workspace_dir=ws.workspace_path if ws else None,
+        )
+        env = compose_env(
+            values=resolver.values,
+            ctx=ctx,
+            vm=scopes.vm,
+            workspace=scopes.workspace,
+            admin=scopes.admin,
+        )
+
         target = (
-            native_transport(vm, bound, config, stack=stack)
+            native_transport(vm, vm_node.site.platform, config, stack=stack)
             if platform_transport
             else transport(vm, config)
         )
@@ -1021,6 +1026,10 @@ def exec_vm(
     When ``workspace_name`` is set, the command runs from the workspace
     directory and the workspace template's env joins the env chain. The
     workspace must belong to this VM.
+
+    Orchestrated (:func:`gated_vm_boundary`), mirroring
+    :func:`shell_vm`: the gate opens before the preflight sweep and
+    the held-active span covers the streamed remote command.
     """
     import shlex
 
@@ -1050,47 +1059,43 @@ def exec_vm(
             hint="VM init may not be complete. Check 'vm describe' for status.",
         )
 
-    # The composition root: the exec env-chain secrets join the bind's
-    # ONE boundary resolve (site secrets + env secrets, one prompt
-    # session), after the platform's preflight. The same scope dicts
-    # feed both the SecretTarget and compose_env so the two consumers
-    # can't drift. The vm scope comes from vm.template (DB row), not
-    # the config-default template.
+    # The orchestrated composition root (gated_vm_boundary): the exec
+    # env-chain secrets join the ONE boundary resolve (site secrets +
+    # env secrets, one prompt session), after every node's preflight.
+    # The same scope dicts feed both the SecretTarget and compose_env
+    # so the two consumers can't drift. The vm scope comes from
+    # vm.template (DB row), not the config-default template.
     from agentworks.bootstrap import build_registry
-    from agentworks.secrets.resolver import Resolver
 
     registry = build_registry(config)
     scopes = _resolve_vm_admin_env_scopes(registry, vm, ws=ws)
-    resolver = Resolver(config, registry)
-    bound = bind_platform(
-        config, vm, registry=registry, resolver=resolver,
+
+    with gated_vm_boundary(
+        db, config, registry, vm,
         targets=[_vm_secret_target(scopes, label=f"vm-exec={vm.name}")],
-    )
-    values = resolver.values
+    ) as (_vm_node, resolver):
+        from agentworks.vms.sites import site_platform_name
 
-    from agentworks.vms.sites import site_platform_name
+        ctx = ResourceContext(
+            vm_name=vm.name,
+            platform=site_platform_name(vm.site, registry),
+            site=vm.site,
+            user=vm.admin_username,
+            workspace_name=ws.name if ws else None,
+            workspace_dir=ws.workspace_path if ws else None,
+        )
+        env = compose_env(
+            values=resolver.values,
+            ctx=ctx,
+            vm=scopes.vm,
+            workspace=scopes.workspace,
+            admin=scopes.admin,
+        )
 
-    ctx = ResourceContext(
-        vm_name=vm.name,
-        platform=site_platform_name(vm.site, registry),
-        site=vm.site,
-        user=vm.admin_username,
-        workspace_name=ws.name if ws else None,
-        workspace_dir=ws.workspace_path if ws else None,
-    )
-    env = compose_env(
-        values=values,
-        ctx=ctx,
-        vm=scopes.vm,
-        workspace=scopes.workspace,
-        admin=scopes.admin,
-    )
-
-    target = transport(vm, config)
-    remote_cmd = command[0] if len(command) == 1 else shlex.join(command)
-    if ws is not None:
-        remote_cmd = f"cd {shlex.quote(ws.workspace_path)} && {remote_cmd}"
-    with keep_active(db, config, vm, bound):
+        target = transport(vm, config)
+        remote_cmd = command[0] if len(command) == 1 else shlex.join(command)
+        if ws is not None:
+            remote_cmd = f"cd {shlex.quote(ws.workspace_path)} && {remote_cmd}"
         return target.call_streaming(remote_cmd, env=env)
 
 
@@ -1266,6 +1271,70 @@ def _credential_line_key(line: str) -> tuple[str, str] | None:
         return None
     userinfo = line.split("//", 1)[1].split("@", 1)[0]
     return (userinfo.split(":", 1)[0], line.split("@", 1)[1])
+
+
+@contextlib.contextmanager
+def gated_vm_boundary(
+    db: Database,
+    config: Config,
+    registry: Registry,
+    vm: VMRow,
+    *,
+    targets: Sequence[SecretTarget] = (),
+) -> Iterator[tuple[LiveVMNode, Resolver]]:
+    """The gate-opening commands' shared composition root (vm/agent
+    shell and exec, console attach): commands that operate
+    interactively on one existing VM. Build the live VM node from its
+    row (the site edge holds the bound platform; construction
+    registers the site's declared config secrets), register the walk
+    union AND the command's env-chain ``targets`` on the one resolver
+    (site config secrets and runtime env secrets are ONE prompt
+    session), then open the ACTIVATION GATE before the preflight sweep
+    (its just-in-time values seed the boundary resolver) and run the
+    one boundary resolve inside it. Yields ``(vm_node, resolver)``
+    within the held-active span: the body's interactive or streaming
+    work stays anchored (WSL2's keepalive) for the command's duration,
+    and callers read ``resolver.values`` for env composition.
+
+    Deliberately NOT :func:`_live_vm_boundary` (the no-gate lifecycle
+    trio): these commands converge power state first, and the gate
+    ordering (gate, then preflight, then resolve, all inside the span)
+    changes the composition's shape rather than adding a flag to it.
+
+    Interim seams, the same pair every migrated command records:
+    construct-time registration coexists with the walk-derived union,
+    and the platform's power ops read their API token through the
+    instance's bound resolver (the op-client bridge, why the gate's
+    resolve callback seeds it). Both close with the per-instance
+    resolver retirement.
+    """
+    from agentworks.capabilities.base import OperationScope, ScopeLevel
+    from agentworks.orchestration.activation import (
+        activation_gate,
+        gate_secret_resolver,
+    )
+    from agentworks.orchestration.readiness import preflight_all
+    from agentworks.orchestration.secrets import secret_union
+    from agentworks.orchestration.walk import walk
+    from agentworks.secrets.resolver import Resolver
+    from agentworks.vms.nodes import live_vm_node
+
+    resolver = Resolver(config, registry)
+    vm_node = live_vm_node(db, config, registry, vm, resolver)
+    nodes = walk(vm_node)
+    for secret_name in secret_union(nodes):
+        resolver.register_name(secret_name)
+    if targets:
+        resolver.register_targets(targets)
+    scope = OperationScope(
+        level=ScopeLevel.VM,
+        system_slug=db.get_setting(SYSTEM_SLUG_KEY) or None,
+        vm=vm.name,
+    )
+    with activation_gate(vm_node, gate_secret_resolver(config, registry, resolver)):
+        preflight_all(nodes, RunContext(config=config, operation_scope=scope))
+        resolver.resolve()
+        yield vm_node, resolver
 
 
 def _live_vm_boundary(db: Database, config: Config, vm: VMRow) -> LiveVMNode:

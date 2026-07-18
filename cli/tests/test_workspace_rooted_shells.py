@@ -23,7 +23,7 @@ import pytest
 
 from agentworks.db import Database
 from agentworks.errors import AuthorizationError, NotFoundError, ValidationError
-from tests.conftest import stub_build_registry, stub_vm_gates
+from tests.conftest import empty_secret_target, stub_build_registry, stub_vm_gates
 
 # ---------------------------------------------------------------------------
 # Fixtures / helpers
@@ -85,7 +85,12 @@ def _patch_vm_common(monkeypatch: pytest.MonkeyPatch) -> None:
             vm={}, workspace=None, admin={}
         ),
     )
-    monkeypatch.setattr(vm_manager, "_vm_secret_target", lambda *a, **k: object())
+    # A real, empty SecretTarget: the orchestrated roots register the
+    # env target on the operation's REAL resolver, so a bare object()
+    # sentinel no longer survives the seam.
+    monkeypatch.setattr(
+        vm_manager, "_vm_secret_target", lambda *a, **k: empty_secret_target()
+    )
     monkeypatch.setattr("agentworks.secrets.resolve_for_command", lambda *a, **k: None)
     monkeypatch.setattr("agentworks.env.compose_env", lambda **k: {})
     stub_vm_gates(monkeypatch)
@@ -563,7 +568,9 @@ def test_shell_vm_passes_workspace_scope_to_secret_target(
         return vm_manager._VmAdminEnvScopes(vm={}, workspace=None, admin={})
 
     monkeypatch.setattr(vm_manager, "_resolve_vm_admin_env_scopes", _spy_scopes)
-    monkeypatch.setattr(vm_manager, "_vm_secret_target", lambda *a, **k: object())
+    monkeypatch.setattr(
+        vm_manager, "_vm_secret_target", lambda *a, **k: empty_secret_target()
+    )
     monkeypatch.setattr("agentworks.secrets.resolve_for_command", lambda *a, **k: None)
     monkeypatch.setattr("agentworks.env.compose_env", lambda **k: {})
     stub_vm_gates(monkeypatch)

@@ -496,11 +496,11 @@ def test_agent_reinit_does_not_eager_resolve_operator_env() -> None:
 def test_vm_shell_env_target_joins_the_bind_boundary(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """The one-prompt-session pin for the runtime roots: shell_vm hands
-    its env-chain SecretTarget to bind_platform, so the env secrets ride
-    the SAME boundary resolve as the site's config secrets; there is
-    no separate env prompt session, and no prompt can precede the
-    platform preflight (the boundary runs inside the bind)."""
+    """The one-prompt-session pin for the runtime roots: shell_vm
+    registers its env-chain SecretTarget on the operation's ONE
+    resolver (``register_targets``), so the env secrets ride the SAME
+    boundary resolve as the site's config secrets; there is no
+    separate env prompt session."""
     from agentworks.vms import manager as vm_manager
 
     db = _seed_basic_db(tmp_path)
@@ -511,17 +511,26 @@ def test_vm_shell_env_target_joins_the_bind_boundary(
         lambda *a, **k: vm_manager._VmAdminEnvScopes(vm={}, workspace=None, admin={}),
     )
     monkeypatch.setattr(vm_manager, "_vm_secret_target", lambda *a, **k: sentinel_target)
+    # Node construction binds the site's platform before the target
+    # registration this test spies on; keep it host-independent (the
+    # real lima site is disabled where limactl isn't installed).
+    monkeypatch.setattr(
+        "agentworks.vms.sites.resolve_site",
+        lambda name, registry, *, resolver=None: SimpleNamespace(),
+    )
 
     class _Stop(Exception):
         pass
 
     bound_targets: list[list[object]] = []
 
-    def _bind_spy(config: object, vm: object, **kwargs: Any) -> object:
-        bound_targets.append(list(kwargs.get("targets") or ()))
+    from agentworks.secrets.resolver import Resolver
+
+    def _register_spy(self: Resolver, targets: object) -> None:
+        bound_targets.append(list(targets))  # type: ignore[call-overload]
         raise _Stop
 
-    monkeypatch.setattr(vm_manager, "bind_platform", _bind_spy)
+    monkeypatch.setattr(Resolver, "register_targets", _register_spy)
 
     config = SimpleNamespace(
         vm=SimpleNamespace(env={}),
@@ -543,9 +552,12 @@ def test_vm_shell_eager_resolve_fires_before_ssh(
 
     db = _seed_basic_db(tmp_path)
 
-    # The root now binds (and preflights) the platform before the env
-    # resolve; make the lima tool check deterministic on any host.
+    # The root preflights the platform before the env resolve; make
+    # the lima tool check deterministic on any host. The activation
+    # gate opens (fast path) before the boundary; keep its
+    # reachability probe off the network.
     monkeypatch.setattr("shutil.which", lambda name: f"/usr/bin/{name}")
+    monkeypatch.setattr(vm_manager, "_is_tailscale_reachable", lambda host: True)
 
     monkeypatch.setattr(
         vm_manager, "_resolve_vm_admin_env_scopes",
@@ -595,9 +607,12 @@ def test_vm_exec_eager_resolve_fires_before_ssh(
 
     db = _seed_basic_db(tmp_path)
 
-    # The root now binds (and preflights) the platform before the env
-    # resolve; make the lima tool check deterministic on any host.
+    # The root preflights the platform before the env resolve; make
+    # the lima tool check deterministic on any host. The activation
+    # gate opens (fast path) before the boundary; keep its
+    # reachability probe off the network.
     monkeypatch.setattr("shutil.which", lambda name: f"/usr/bin/{name}")
+    monkeypatch.setattr(vm_manager, "_is_tailscale_reachable", lambda host: True)
 
     monkeypatch.setattr(
         vm_manager, "_resolve_vm_admin_env_scopes",
