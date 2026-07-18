@@ -546,12 +546,16 @@ Goal: migrate the rest opportunistically, then remove the now-dead per-instance 
       precedence preserved verbatim (exec's dash rejection, workspace resolution incl. the agent
       authz chain, `_guard_failed_vm` with `allow_failed_init` on shell/exec, tailscale guards) with
       ONE deliberate hoist: the console paths' no-Tailscale row guard moves PRE-GATE (HEAD checked
-      it after `ensure_active`; the gate cannot populate the already-loaded row, so the hoist only
-      removes a wasted prompt-and-start, the same bail-early direction as this phase's
-      workspace-create ruling; hoists later would be the unsanctioned direction). R7 records, all in
-      the sanctioned pre-walk-away bucket: (1) the gate opens BEFORE preflight/resolve where HEAD
-      bound (preflight + resolve) first and gated after, so a stopped VM sees two prompt bursts,
-      gate then boundary, nothing resolved or prompted twice, contiguity not promised (the recorded
+      it after `ensure_active`; the gate cannot populate the already-loaded row, so the command's
+      own outcome is identical, the same bail-early direction as this phase's workspace-create
+      ruling; hoists later would be the unsanctioned direction; amended 2026-07-18, review round:
+      the first-landed "only removes a wasted prompt-and-start" over-claimed, because HEAD's
+      post-gate order could start the stopped VM and its rejoin repopulated an empty address row,
+      letting a RETRY of the command succeed; the hoist forgoes that accidental heal, and retries
+      now fail until an explicit `vm start` or reinit). R7 records, all in the sanctioned
+      pre-walk-away bucket: (1) the gate opens BEFORE preflight/resolve where HEAD bound
+      (preflight + resolve) first and gated after, so a stopped VM sees two prompt bursts, gate then
+      boundary, nothing resolved or prompted twice, contiguity not promised (the recorded
       prompt-session ruling); (2) the consoles' hold now also spans the preflight/resolve boundary
       and pre-attach body (a superset of HEAD's hold, the gate-span property every gated seam
       carries). STILL-OPEN CATALOG entries CLOSED from the vm-lifecycle box: `vms/manager.py`

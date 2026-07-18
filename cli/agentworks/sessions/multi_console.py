@@ -1939,8 +1939,12 @@ def _prepare_vm_target_for_attach(
     # Cheap row validation stays pre-gate: a VM with no Tailscale
     # address can never be attached to, so it must fail with zero
     # prompts and zero VM starts. (The imperative body checked this
-    # after its gate; the gate cannot populate the address on the row
-    # already loaded, so hoisting only removes the wasted start.)
+    # after its gate; the gate cannot populate the address on the
+    # already-loaded row, so this command's outcome is identical. The
+    # hoist does forgo one accidental heal: the post-gate order could
+    # start a stopped VM whose rejoin repopulated the row's address,
+    # letting a RETRY succeed; now the retry keeps failing until an
+    # explicit vm start or reinit.)
     if vm.tailscale_host is None:
         raise StateError(
             f"VM '{vm.name}' has no Tailscale address",
