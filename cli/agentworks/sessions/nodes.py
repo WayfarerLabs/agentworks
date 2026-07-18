@@ -139,11 +139,42 @@ class RequiredCommandsCheck:
         self._probed = True
 
     def _probe(self, transport: Transport) -> None:
+        """Probe every required command with ``$SHELL -lic 'command -v
+        <cmd>'``, the same shell flags the tmux pane command uses.
+        Matters because PATH additions can live in any of the dotfiles
+        those flags source:
+
+        - ``-l`` (login): /etc/profile, ~/.profile, ~/.bash_profile,
+          where mise activation and the agentworks profile fragments
+          live.
+        - ``-i`` (interactive): ~/.bashrc, ~/.zshrc, and any user PATH
+          addition guarded by ``[[ $- == *i* ]]`` or ``[ -n "$PS1" ]``.
+        - ``-c``: run the probe and exit.
+
+        The probe runs over the SSH command channel without a PTY, so
+        shells may emit a "no job control in this shell" warning when
+        started interactive. The warning lands on stderr and doesn't
+        change the exit status; the probe uses ``check=False`` so
+        stderr is discarded.
+
+        One residual gap: tools that gate PATH on ``[[ -t 0 ]]`` (real
+        TTY check) won't be visible to the probe. Closing that would
+        require requesting a PTY for the probe, which has its own side
+        effects. PATH mutations gated on a real TTY are rare; leaving
+        uncovered for now.
+
+        Without this check, a missing binary surfaces only as a cryptic
+        downstream failure: the pane command dies instantly, the fresh
+        per-session tmux server exits, and the next ``server-access``
+        call fails against a now-dead socket. Checking up front turns
+        that into an actionable error with no partial state to roll
+        back (and, at restart, with the old session still running).
+        """
         missing: list[str] = []
         for cmd in self._required_commands:
             inner = f"command -v {shlex.quote(cmd)} >/dev/null 2>&1"
             probe = transport.run(f'"$SHELL" -lic {shlex.quote(inner)}', check=False)
-            if not getattr(probe, "ok", False):
+            if not probe.ok:
                 missing.append(cmd)
         if not missing:
             return

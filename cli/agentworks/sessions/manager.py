@@ -736,67 +736,6 @@ def _build_session_command(
     return _substitute_template_vars(raw_command, variables)
 
 
-def _assert_required_commands(
-    run_command: RunCommand,
-    template: ResolvedSessionTemplate,
-    *,
-    session_name: str,
-    target_label: str,
-) -> None:
-    """Verify every command the template declares as required exists on the
-    session's launch target, before any tmux work happens.
-
-    A template lists the executables its command needs via ``required_commands``
-    (e.g. the ``claude`` template requires ``claude``). Without this check, a
-    missing binary surfaces only as a cryptic downstream failure: the pane
-    command dies instantly, the fresh per-session tmux server exits, and the
-    next ``server-access`` call fails against a now-dead socket (see
-    ``sessions/tmux._grant_server_access``). Checking up front turns that into
-    an actionable error with no partial state to roll back.
-
-    Probes with ``$SHELL -lic 'command -v <cmd>'`` -- the same shell flags
-    ``tmux._pane_command`` uses for the actual pane. Matters because PATH
-    additions can live in any of the dotfiles those flags source:
-
-    - ``-l`` (login): /etc/profile, ~/.profile, ~/.bash_profile -- where
-      mise activation and the agentworks profile fragments live.
-    - ``-i`` (interactive): ~/.bashrc, ~/.zshrc, and any user PATH addition
-      guarded by ``[[ $- == *i* ]]`` or ``[ -n "$PS1" ]``.
-    - ``-c``: run the probe and exit.
-
-    The probe runs over the SSH command channel without a PTY, so shells
-    may emit a "no job control in this shell" warning when started
-    interactive. The warning lands on stderr and doesn't change the exit
-    status; this call uses ``check=False`` so stderr is discarded.
-
-    One residual gap: tools that gate PATH on ``[[ -t 0 ]]`` (real TTY
-    check) won't be visible to the probe. Closing that would require
-    requesting a PTY for the probe, which has its own side effects. PATH
-    mutations gated on a real TTY are rare; leaving uncovered for now.
-    """
-    missing: list[str] = []
-    for cmd in template.required_commands:
-        inner = f"command -v {shlex.quote(cmd)} >/dev/null 2>&1"
-        probe = run_command(f'"$SHELL" -lic {shlex.quote(inner)}', check=False)
-        if not getattr(probe, "ok", False):
-            missing.append(cmd)
-    if not missing:
-        return
-
-    joined = ", ".join(repr(c) for c in missing)
-    verb = "is" if len(missing) == 1 else "are"
-    raise StateError(
-        f"template '{template.name}' requires {joined}, which {verb} not "
-        f"installed or not on PATH for {target_label}.",
-        entity_kind="session",
-        entity_name=session_name,
-        hint=(
-            f"Install the missing command(s) on {target_label}, or create the "
-            "session with a different template (--template)."
-        ),
-    )
-
-
 # -- Liveness checks -------------------------------------------------------
 
 
@@ -2067,7 +2006,16 @@ def restart_session(
     force: bool = False,
     yes: bool = False,
 ) -> None:
-    """Restart a session. Prompts if running (--yes to skip). --force for BROKEN."""
+    """Restart a session. Prompts if running (--yes to skip). --force for BROKEN.
+
+    Orchestrated: the live graph derives from the session's rows, the
+    activation gate replaces the imperative ensure_active + hold, and
+    the preflight sweep fires the required-commands probe BEFORE the
+    kill (a missing binary aborts with the old session still running).
+    Nothing here is created, so no realization log exists; the window
+    after the kill is deliberately non-rollbackable (no unwind is
+    consulted there), exactly the imperative shape.
+    """
     from agentworks.bootstrap import build_registry
     from agentworks.sessions.tmux import (
         create_session as create_tmux_session,
@@ -2079,11 +2027,93 @@ def restart_session(
     registry = build_registry(config)
 
     session = _require_session(db, name)
-    ws, vm, run_command, _run_as_root, admin_target, vm_platform = _prepare_vm(
-        db, config, session.workspace_name, operation="session-restart",
+    ws = _require_workspace(db, session.workspace_name)
+    vm = _require_vm_for_workspace(db, ws)
+    template = _resolve_template(registry, session.template)
+
+    # ===== Build: the live node graph from the rows =========================
+    #
+    # Everything exists, so every node is live and nothing is realized
+    # or unwound: the session row names its agent, workspace, and VM,
+    # and the domain factories construct one node per row (the VM row's
+    # site field is its edge to the vm-site node, which holds the
+    # platform instance). Construction registers the site's declared
+    # secrets on the resolver; nothing resolves yet.
+    from agentworks.agents.nodes import live_agent_node
+    from agentworks.capabilities.base import (
+        OperationScope,
+        RunContext,
+        ScopeLevel,
     )
-    # _prepare_vm just gated; hold only (no second gate probe).
-    with vm_platform.vm_active(vm, config=config):
+    from agentworks.db import SYSTEM_SLUG_KEY
+    from agentworks.orchestration.activation import activation_gate
+    from agentworks.orchestration.readiness import preflight_all
+    from agentworks.orchestration.secrets import secret_union
+    from agentworks.orchestration.walk import walk
+    from agentworks.secrets.resolver import Resolver
+    from agentworks.sessions.nodes import live_session_node
+    from agentworks.vms.manager import _gate_secret_resolver
+    from agentworks.vms.nodes import live_vm_node
+    from agentworks.workspaces.nodes import live_workspace_node
+
+    resolver = Resolver(config, registry)
+
+    vm_node = live_vm_node(db, config, registry, vm, resolver)
+    workspace_node = live_workspace_node(ws, vm_node)
+    agent_node: LiveAgentNode | None = None
+    if session.agent_name is not None:
+        agent_row = db.get_agent(session.agent_name)
+        if agent_row is None:
+            raise NotFoundError(
+                f"agent '{session.agent_name}' (referenced by session '{session.name}') not found",
+                entity_kind="agent",
+                entity_name=session.agent_name,
+            )
+        agent_node = live_agent_node(agent_row, vm_node)
+    session_node = live_session_node(
+        session,
+        template,
+        agent=agent_node,
+        workspace=workspace_node,
+        vm=vm_node,
+    )
+    nodes = walk(session_node)
+    # The walk supplies the boundary union (the site's config secrets;
+    # live nodes declare nothing else). The session's env chain is
+    # deliberately NOT part of this boundary: it resolves after the
+    # BROKEN/confirm gates below, the recorded bail-before-prompt
+    # exception.
+    for secret_name in secret_union(nodes):
+        resolver.register_name(secret_name)
+
+    scope = OperationScope(
+        level=ScopeLevel.SESSION,
+        system_slug=db.get_setting(SYSTEM_SLUG_KEY) or None,
+        vm=vm.name,
+        workspace=ws.name,
+        session=name,
+        agent=session.agent_name,
+        admin=session.agent_name is None,
+    )
+
+    # The activation gate replaces this command's imperative
+    # ensure_active + vm_active hold: opened once, before the preflight
+    # sweep, held through the whole command, its just-in-time values
+    # seeding the boundary resolver.
+    with activation_gate(vm_node, _gate_secret_resolver(config, registry, resolver)):
+        if vm.tailscale_host is None:
+            raise StateError(
+                f"VM '{vm.name}' has no Tailscale address",
+                entity_kind="vm",
+                entity_name=vm.name,
+            )
+
+        from agentworks.ssh import SSHLogger
+
+        logger = SSHLogger(vm.name, "session-restart")
+        admin_target = transport(vm, config, logger=logger)
+        run_command: RunCommand = admin_target.run
+
         session = _ensure_pid(session, target=admin_target, db=db)
 
         # Legacy migration: sessions predating the per-session-socket model
@@ -2111,8 +2141,8 @@ def restart_session(
         # front rather than leaving us with a stopped session we can't
         # restart. Same transport is used for kill (above) and create
         # (below): every destructive step on an agent session goes via
-        # direct agent SSH (FRD R1, Phase 3). _build_session_target always
-        # returns a same-uid target, so no sudo is needed for kill.
+        # direct agent SSH. _build_session_target always returns a
+        # same-uid target, so no sudo is needed for kill.
         is_admin = session.mode == SessionMode.ADMIN.value
         session_target = _build_session_target(
             session, vm=vm, config=config, db=db, admin_target=admin_target
@@ -2120,11 +2150,29 @@ def restart_session(
         session_run_command: RunCommand = session_target.run
         kill_sudo = False
 
+        # PREFLIGHT-ALL over the walk rooted at the live session node,
+        # against the one command-start context: the required-commands
+        # check's target (an existing agent, or the admin) is realized,
+        # so it probes NOW, pre-resolve and PRE-KILL, and a missing
+        # binary aborts the restart with the old session still running.
+        # Then the boundary resolve for the graph's union (gate-resolved
+        # values are already seeded, so nothing resolves twice).
+        preflight_all(
+            nodes,
+            RunContext(
+                config=config,
+                operation_scope=scope,
+                admin_target=admin_target,
+                agent_target=None if is_admin else session_target,
+            ),
+        )
+        resolver.resolve()
+
         # Bail-before-prompt: refuse the operation up front in the cases
         # where the operator either lacks the right flag (BROKEN + no
         # --force) or declines the confirm (OK + interactive 'no').
-        # Eager-resolve runs AFTER these checks so we don't ask for
-        # secrets the command was about to discard.
+        # Eager-resolve of the env chain runs AFTER these checks so we
+        # don't ask for secrets the command was about to discard.
         # UNKNOWN is impossible here -- _ensure_pid raises on unresolvable
         # sessions. Legacy sessions short-circuit at ``status =
         # SessionStatus.STOPPED`` above, so neither gate fires for them --
@@ -2141,30 +2189,18 @@ def restart_session(
         ):
             raise UserAbort("restart cancelled")
 
-        # Eager-prompting orchestration (FRD R4 / Phase 6): resolve every
-        # secret referenced by this session's env chain BEFORE any kill /
-        # destructive step. Non-interactive failures surface as
-        # SecretUnavailableError with no partial state to clean up.
-        # This is the recorded bail-before-prompt exception to the
-        # one-boundary-resolve contract: the site's config secrets
-        # resolved at _prepare_vm's bind (before ensure_active's ops
-        # needed them), but the env chain deliberately resolves HERE
-        # (after the BROKEN/--force refusal and the "Restart?" confirm)
-        # so a declined restart never prompts for secrets it was about
-        # to discard. Folding it into the boundary would trade that
-        # operator protection for one fewer session on proxmox only.
-        template = _resolve_template(registry, session.template)
-
-        # Pre-flight the template's required commands before the destructive
-        # kill below, so a missing binary aborts the restart with a clear
-        # error instead of tearing down the old session and then failing to
-        # bring up the new one (see _assert_required_commands).
-        _assert_required_commands(
-            session_run_command,
-            template,
-            session_name=name,
-            target_label=(f"agent '{session.agent_name}'" if session.agent_name else f"VM '{vm.name}'"),
-        )
+        # Eager-prompting orchestration: resolve every secret referenced
+        # by this session's env chain BEFORE any kill / destructive step.
+        # Non-interactive failures surface as SecretUnavailableError with
+        # no partial state to clean up. This is the recorded
+        # bail-before-prompt exception to the one-boundary-resolve
+        # contract: the graph's union (the site's config secrets)
+        # resolved at the preflight boundary above, but the env chain
+        # deliberately resolves HERE (after the BROKEN/--force refusal
+        # and the "Restart?" confirm) so a declined restart never
+        # prompts for secrets it was about to discard. Folding it into
+        # the boundary would trade that operator protection for one
+        # fewer prompt session on proxmox only.
 
         from agentworks.secrets import resolve_for_command
 
