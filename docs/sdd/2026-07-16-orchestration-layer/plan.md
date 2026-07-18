@@ -716,16 +716,81 @@ Goal: migrate the rest opportunistically, then remove the now-dead per-instance 
       (`test_consoles.py` delete-workspace path already rides `stub_vm_gates`'s resolve_site +
       reachability stubs; the session-nodes and ephemeral-rollback suites patch `delete_workspace`
       itself).
+- [x] The sessions machinery orchestrated (2026-07-18), two green shippable units: the
+      `bind_platforms` / `keep_actives` batch ops (`stop_all_sessions`, `restart_all_sessions`,
+      `list_sessions`' status pass) and `_prepare_vm` serving the singular ops (`stop_session`,
+      `delete_session`, `describe_session`, `attach_session`, `session_logs`). THE SITE-NODE MEMO:
+      the cross-node memo `live_vm_node`'s docstring promised lands with this first multi-consumer
+      command: the factory gains keyword-only `site_nodes` (build-or-reuse per site name; None keeps
+      the single-VM shape), so a batch's live VM nodes SHARE one `VMSiteNode` object per site (the
+      walk raises otherwise; sharing the site node also shares the held platform instance, the old
+      by-site dedup). BATCH RULING, coalesced IS parity with ZERO timing shift (R7): HEAD already
+      coalesced (one preflight + resolve pass covering the batch union, THEN per-VM gate + hold), so
+      the orchestrated composition (`sessions/manager._batch_vm_boundary`: multi-root
+      `walk(*vm_nodes)`, union registered once, SYSTEM-level scope per the one-level-per-COMMAND
+      rule, `preflight_all`, ONE resolve, then `activation_gate` per node in VM order on an
+      ExitStack) keeps HEAD's boundary-then-gates order exactly; no shift, sanctioned or otherwise
+      (the gate-before-boundary shift prior seams sanctioned exists for VM-touching preflights, and
+      the batch's preflights are site-only). The batch gate callback does NOT resolve or seed: it
+      SERVES the boundary's cached values (`resolver.get`), so two stopped VMs sharing a site cost
+      exactly ONE backend burst (a per-gate just-in-time resolve would re-resolve, and
+      `Resolver.seed` after the boundary raises by design); the ONE exception, refined against the
+      code during this seam, is the repair path's Tailscale rejoin key, inherently outside the
+      boundary union (lazy, read only when a started VM fails to reconnect), which resolves late
+      through the backend chain without seeding, HEAD's documented conditional-need exception
+      carried forward. An empty VM set stays a complete no-op (no registry, no resolver, no gate),
+      HEAD's lazy-bind property; per-VM error semantics are HEAD's verbatim (an operator-stopped
+      VM's gate refusal propagates and aborts the whole batch before any SSH probe; the
+      warn-and-continue inside `ensure_pids_batch` / `batch_check_all_sessions` is untouched).
+      `bind_platforms` / `keep_actives` lost their last callers and are DELETED from
+      `vms/manager.py`; `tests/conftest.py` `stub_vm_gates` drops the dead patches. SINGULAR OPS:
+      `_prepare_vm` is now a `@contextmanager` yielding `(ws, vm, run_command, run_as_root, target)`
+      inside a `gated_vm_boundary` span (the seam-3 console precedent), collapsing the returned
+      platform plumbing and the callers' own `vm_active` holds into the gate span. The ws/vm
+      NotFound checks stay pre-boundary; the no-Tailscale row guard HOISTS pre-gate with the same
+      honest record as the console seam (the gate cannot populate the already-loaded row, so the
+      command's outcome is identical; the hoist forgoes the accidental heal where a post-gate
+      start's rejoin repopulated the row and let a RETRY succeed, which now fails until an explicit
+      vm start or reinit). DESCRIBE HOLD SUPERSET: `describe_session` discarded the platform at HEAD
+      (gate, no hold) and now runs inside the span, a hold it did not have, a no-op everywhere but
+      WSL2 where it anchors the probes (the same equal-or-superset bucket the console seam
+      recorded). SCOPE: the singular ops run at SESSION level per the pass-the-level rule (vm,
+      workspace, session, agent-or-admin from the row); the constructor rules match, with one
+      mechanical adaptation recorded honestly: the SESSION level requires the vm name, which is only
+      known after `_prepare_vm`'s own row resolution, so the callers hand the session row (the
+      identity source) and `_prepare_vm` builds the scope (`_session_scope`) once ws/vm resolve,
+      rather than callers passing a pre-built scope they cannot construct. PRE-BOUND PATH: the
+      planned two-path seam turned out vacuous at HEAD (grep found NO caller passing `platform=`),
+      so the parameter is removed rather than kept as an unreachable branch, the same
+      caller-less-parameter removal precedent as workspace create. RIDER DISPOSITIONS: (1) the
+      multi-root walk is exercised for real here, with the site-node memo as the mechanism (copy's
+      sequential ruling stands for its own reasons); (2) the rehome sessions-stopped guard rider
+      RESOLVES TO NOTHING FURTHER: `ensure_pids_batch` / `batch_check_all_sessions` are
+      transport-only utilities (verified: no bind / ensure / keep calls), the batch CALLERS now
+      orchestrate around them, and rehome's pre-gate use is correct as-is; (3) the AGENT-scope lift
+      rider is untouched here (this seam touches no agent-op caller) and falls to the
+      resolver-retirement sweep. STILL-OPEN CATALOG entries CLOSED from the vm-lifecycle box:
+      `sessions/manager.py` `_prepare_vm` and the batch ops. REMAINING: `describe_vm`
+      (decide-or-record), `rekey_vm`, `port_forward_vm`, `backup_vm`, `initialize_vm`'s share-wait,
+      then the resolver retirement. Where proven:
+      `tests/sessions/test_singular_batch_orchestrated.py` (the multi-root graph pin with the
+      shared-site-node identity and once-only union, batch one-burst parity on reachable VMs and the
+      two-stopped-VMs-one-site single-backend-burst with the full gate/hold order pin, the empty-set
+      complete no-op, the operator-stopped abort-before-probes pin, per-singular-command one-burst
+      parity, the gate-seeded stopped-VM shape for stop and describe, describe's hold-superset order
+      pin, the pre-gate refusals with zero resolves and zero gate events (unknown session, unknown
+      workspace, the hoisted no-Tailscale guard), and the SESSION scope reaching node readiness);
+      `tests/vms/test_bind_platform.py` trimmed to the surviving imperative `bind_platform` (the
+      batch pins moved); `tests/test_secrets_eager_resolve.py` re-seamed to the context-manager stub
+      shape, assertions preserved.
 - [ ] The remaining un-migrated commands, each a green shippable unit, drawn from the still-open
       catalog above: `rekey_vm` (its migration retires `preflight_vm_template`), `port_forward_vm`,
-      `backup_vm`, `initialize_vm`'s share-wait hold, `describe_vm` (decide-or-record: read-only,
-      may close as never-migrates under the no-over-orchestration ruling), and
-      `sessions/manager.py`'s `_prepare_vm` (serving the singular session ops) plus the
-      `bind_platforms` / `keep_actives` batch ops (which also absorb the rehome sessions-stopped
-      guard rider recorded above). RIDER: the agent-op callers of `gated_vm_boundary` (agent shell /
-      exec / delete / grant / revoke) still ride its VM-level default; under the recorded
+      `backup_vm`, `initialize_vm`'s share-wait hold, and `describe_vm` (decide-or-record:
+      read-only, may close as never-migrates under the no-over-orchestration ruling). RIDER: the
+      agent-op callers of `gated_vm_boundary` (agent shell / exec / delete / grant / revoke) still
+      ride its VM-level default; under the recorded
       pass-the-level-of-the-entity-the-command-is-about rule they owe an AGENT-level lift, landing
-      with whichever of the sessions/batch seam or the resolver-retirement sweep touches them first.
+      with the resolver-retirement sweep (the sessions seam did not touch them).
 - [ ] RESOLVER RETIREMENT once no migrated command depends on the bound resolver: drop the
       `resolver` constructor parameter from `Capability`; close the `preflight_vm_template` resolver
       seam (prediction is central now); kill proxmox's op-client bridge so `_api` reads the token
