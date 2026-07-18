@@ -116,6 +116,10 @@ def runup_and_filter(
     from agentworks.orchestration.readiness import runup_skip_and_degrade
 
     by_secret = {p.secret_name: git_tokens[name] for name, p in providers.items()}
+    # Deliberately scope-less: this write-step context predates the
+    # orchestrated model and carries no operation scope until the write
+    # step itself migrates (the providers' runup reads only its token,
+    # never the scope, so nothing is lost meanwhile).
     ctx = RunContext(config=config, secrets=_MappedSecrets(by_secret))
 
     def announce(provider: GitCredentialProvider) -> None:

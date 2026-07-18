@@ -22,6 +22,8 @@ from typing import TYPE_CHECKING
 from agentworks.errors import StateError
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from agentworks.capabilities.base import RunContext
     from agentworks.config import Config
     from agentworks.db import AgentRow, Database
@@ -234,6 +236,27 @@ def agent_template_node(
         for cred_name in tmpl.git_credentials
     )
     return AgentTemplateNode(tmpl, credentials)
+
+
+def credential_tokens(
+    template: AgentTemplateNode,
+    scoped_ctx: Callable[[tuple[str, ...]], RunContext],
+) -> dict[str, str]:
+    """Each declared credential's token, read through its node's SCOPED
+    delivery: the ``{credential_name: token}`` map the materials write
+    consumes.
+
+    The fold every orchestrator that provisions an agent runs between
+    its boundary resolve and the mutation; ``scoped_ctx`` is the
+    orchestrator's per-node context factory, so delivery stays
+    restricted to each credential's own declared names.
+    """
+    return {
+        node.provider.owner_name: scoped_ctx(node.secret_refs()).secret(
+            node.provider.secret_name
+        )
+        for node in template.credentials
+    }
 
 
 def live_agent_node(row: AgentRow, vm: LiveVMNode) -> LiveAgentNode:

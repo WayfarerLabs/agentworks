@@ -165,6 +165,46 @@ def test_create_graph_derives_from_template_and_row(
     assert secret_union(nodes) == ("git-token-gh", "proxmox-token")
 
 
+def test_reinit_graph_derives_from_row_and_stored_template(
+    db: Database, make_config, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Reinit's two-root walk: the live agent (whose row carries the VM
+    chain but no template edge) plus the stored template (whose declared
+    credentials become edges, because the materials rewrite needs their
+    tokens in the boundary union). One VM object serves both roots."""
+    from agentworks.agents.nodes import agent_template_node, live_agent_node
+    from agentworks.agents.templates import resolve_template
+    from agentworks.bootstrap import build_registry
+    from agentworks.orchestration.secrets import secret_union
+    from agentworks.orchestration.walk import walk
+    from agentworks.secrets.resolver import Resolver
+    from agentworks.vms.nodes import live_vm_node
+
+    config = make_config()
+    _seed_vm(db)
+    row = db.insert_agent("dev", "box", "agt-dev", template="default")
+    vm = db.get_vm("box")
+    assert vm is not None
+    registry = build_registry(config)
+    resolver = Resolver(config, registry)
+
+    vm_node = live_vm_node(db, config, registry, vm, resolver)
+    agent_node = live_agent_node(row, vm_node)
+    tmpl_node = agent_template_node(
+        registry, resolve_template(registry, row.template), resolver
+    )
+    nodes = walk(agent_node, tmpl_node)
+
+    assert [n.key for n in nodes] == [
+        "vm-site/proxmox",
+        "vm/box",
+        "agent/dev",
+        "git-credential/gh",
+        "agent-template/default",
+    ]
+    assert secret_union(nodes) == ("proxmox-token", "git-token-gh")
+
+
 # -- gate-prompt parity (the per-command carry) -------------------------------
 
 
@@ -227,6 +267,32 @@ def test_reinit_stopped_vm_gate_resolves_once_and_seeds_the_boundary(
     assert mutation["git_tokens"] == {"gh": "ghtok"}
     assert mutation["agent_name"] == "dev"
     assert any("reinitialized" in m for m in captured_output.info)
+    # Banner parity: reinit frames the same phases the imperative root
+    # did, so a framing regression cannot pass.
+    assert "=== Preflight ===" in captured_output.info
+    assert "=== Resolving Secrets ===" in captured_output.info
+    assert "=== Agent Initialization ===" in captured_output.info
+    assert "Checking agent-template/default..." in captured_output.detail
+
+
+def test_create_reachable_vm_fast_path_costs_no_gate_resolve(
+    db: Database,
+    make_config,  # noqa: ANN001
+    resolve_counter: list[list[str]],
+    mutation: dict[str, Any],
+    monkeypatch: pytest.MonkeyPatch,
+    captured_output,  # noqa: ANN001
+) -> None:
+    """The gate's fast path on a reachable VM: no just-in-time resolve
+    at all, so the command's whole union rides ONE boundary burst."""
+    config = make_config()
+    _seed_vm(db)
+    _reachable(monkeypatch, True)
+
+    agent_manager.create_agent(db, config, name="dev", vm_name="box")
+
+    assert resolve_counter == [["proxmox-token", "git-token-gh"]]
+    assert mutation["git_tokens"] == {"gh": "ghtok"}
 
 
 # -- failure parity -----------------------------------------------------------

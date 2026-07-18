@@ -1377,6 +1377,7 @@ def create_session(
     # per-instance resolver retirement); nothing resolves yet.
     from agentworks.agents.nodes import (
         agent_template_node,
+        credential_tokens,
         live_agent_node,
         pending_agent_node,
     )
@@ -1600,12 +1601,7 @@ def create_session(
                 # SCOPED delivery (the boundary pass above covered
                 # them; the graph-derived fold replaces the nested
                 # create_agent's git_tokens hand-off).
-                git_tokens = {
-                    node.provider.owner_name: scoped_ctx(node.secret_refs()).secret(
-                        node.provider.secret_name
-                    )
-                    for node in agent_tmpl_node.credentials
-                }
+                git_tokens = credential_tokens(agent_tmpl_node, scoped_ctx)
                 realize_agent(
                     db,
                     config,

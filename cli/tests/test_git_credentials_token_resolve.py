@@ -175,6 +175,48 @@ def test_collect_git_tokens_empty_list_returns_empty_dict(
     assert _resolve_tokens(config, registry, []) == {}
 
 
+def test_manifest_declared_credential_resolves_through_the_fold(
+    tmp_path: Path,
+    ssh_keys: tuple[Path, Path],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A YAML-manifest-declared credential (here a scoped fine-grained
+    PAT) resolves through the same node fold as the TOML-declared ones:
+    both declaration surfaces feed the graph identically."""
+    cfg = _write_cfg(
+        tmp_path,
+        """\
+        [secret_config]
+        backends = ["env-var"]
+        """,
+        ssh_keys,
+    )
+    resources = tmp_path / "resources"
+    resources.mkdir()
+    (resources / "creds.yaml").write_text(
+        dedent(
+            """\
+            apiVersion: agentworks/v1
+            kind: git-credential
+            metadata:
+              name: widgets-bot
+            spec:
+              provider: github
+              provider_config:
+                repos: [acme/widgets]
+            """
+        )
+    )
+    config = load_config(cfg, warn_issues=False)
+    monkeypatch.setenv("AW_SECRET_GIT_TOKEN_WIDGETS_BOT", "tok123")
+
+    from agentworks.bootstrap import build_registry
+
+    registry = build_registry(config)
+    tokens = _resolve_tokens(config, registry, ["widgets-bot"])
+    assert tokens == {"widgets-bot": "tok123"}
+
+
 def test_collect_git_tokens_credential_lines_use_resolved_value(
     tmp_path: Path,
     ssh_keys: tuple[Path, Path],

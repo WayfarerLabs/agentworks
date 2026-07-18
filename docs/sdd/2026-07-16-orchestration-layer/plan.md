@@ -426,7 +426,9 @@ Definition of done: both commands orchestrated; the nesting hack removed; the fu
 Goal: migrate the rest opportunistically, then remove the now-dead per-instance resolver.
 
 - [ ] `vm delete`, `vm start` / `vm stop`, the shell / exec roots, and console commands (console
-      nodes introduced lazily here), each a green shippable unit.
+      nodes introduced lazily here), each a green shippable unit. The agent delete/grant/revoke
+      migration in this phase also splits the overgrown `agents/manager.py` at that natural seam
+      (deferred there deliberately, review ruling 2026-07-17, rather than splitting mid-migration).
 - [ ] RESOLVER RETIREMENT once no migrated command depends on the bound resolver: drop the
       `resolver` constructor parameter from `Capability`; close the `preflight_vm_template` resolver
       seam (prediction is central now); kill proxmox's op-client bridge so `_api` reads the token

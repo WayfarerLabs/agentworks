@@ -269,7 +269,11 @@ def create_agent(
     # construct-time registration seam beside the walk-derived union
     # below); nothing resolves yet. A stranded site fails here, before
     # any prompt.
-    from agentworks.agents.nodes import agent_template_node, pending_agent_node
+    from agentworks.agents.nodes import (
+        agent_template_node,
+        credential_tokens,
+        pending_agent_node,
+    )
     from agentworks.capabilities.base import (
         OperationScope,
         RunContext,
@@ -332,12 +336,7 @@ def create_agent(
         # Each credential's token, read through its node's SCOPED
         # delivery; the write-step runup inside the body applies the
         # skip-and-degrade policy as before.
-        git_tokens = {
-            node.provider.owner_name: scoped_ctx(node.secret_refs()).secret(
-                node.provider.secret_name
-            )
-            for node in tmpl_node.credentials
-        }
+        git_tokens = credential_tokens(tmpl_node, scoped_ctx)
 
         output.phase("Agent Initialization")
         from agentworks.agents.realize import realize_agent
@@ -526,7 +525,11 @@ def reinit_agent(
     # planned-ops participant at reinit: the materials rewrite needs
     # its tokens, so they must join the boundary union). The live
     # agent's row carries no template edge, so the walk is multi-root.
-    from agentworks.agents.nodes import agent_template_node, live_agent_node
+    from agentworks.agents.nodes import (
+        agent_template_node,
+        credential_tokens,
+        live_agent_node,
+    )
     from agentworks.capabilities.base import (
         OperationScope,
         RunContext,
@@ -582,12 +585,7 @@ def reinit_agent(
                 secrets=ScopedSecrets(resolver.values, secret_names),
             )
 
-        git_tokens = {
-            node.provider.owner_name: scoped_ctx(node.secret_refs()).secret(
-                node.provider.secret_name
-            )
-            for node in tmpl_node.credentials
-        }
+        git_tokens = credential_tokens(tmpl_node, scoped_ctx)
 
         output.phase("Agent Initialization")
         from agentworks.ssh import SSHLogger
