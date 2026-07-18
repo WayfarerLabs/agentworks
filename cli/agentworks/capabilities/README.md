@@ -471,9 +471,9 @@ stable surface, and only the framework plumbing behind it moves.
 
 Both shipped capabilities are the reference: `git-credential-provider` (github, azdo) reads its
 token via `ctx.secret(name)` in `runup`, and `vm-platform/proxmox` reads its API token the same way
-in `runup` and in its ops (the op client is built per call from the delivered value); both get the
-accessor's typed `ConfigError` when the context carries none. A new capability should never hold a
-value source of its own.
+in `runup` and in its ops (the op client is built on first need from the delivered value and reused
+for the operation); both get the accessor's typed `ConfigError` when the context carries none. A new
+capability should never hold a value source of its own.
 
 ## Where capabilities live
 

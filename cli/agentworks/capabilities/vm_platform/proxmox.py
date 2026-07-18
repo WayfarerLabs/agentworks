@@ -47,6 +47,12 @@ class ProxmoxPlatform(VMPlatform):
         "escape hatch."
     )
 
+    def __init__(self, owner_name: str, config: Mapping[str, object]) -> None:
+        super().__init__(owner_name, config)
+        # The op client, built on FIRST need by :meth:`_api` and reused
+        # for the instance's remaining ops.
+        self._api_cached: ProxmoxAPI | None = None
+
     @classmethod
     def validate_config(
         cls, owner: str, config: Mapping[str, object]
@@ -126,7 +132,7 @@ class ProxmoxPlatform(VMPlatform):
         secrets (inspection?) is the accessor's typed ``ConfigError``;
         an undeclared or unresolved name is scoped delivery's own typed
         refusal."""
-        api: ProxmoxAPI | None = getattr(self, "_api_cached", None)
+        api = self._api_cached
         if api is None:
             token_secret = str(self._cfg("token_secret", DEFAULT_TOKEN_SECRET))
             api = self._build_api(ctx.secret(token_secret))

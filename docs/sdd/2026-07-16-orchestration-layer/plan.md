@@ -881,21 +881,25 @@ Goal: migrate the rest opportunistically, then remove the now-dead per-instance 
       git-credential node preflights (via the new `require_predicted_refs`, whose `owner` is the
       node key, which IS the instance's owner display, so the owner/usage error shapes are preserved
       verbatim) and `VMTemplateNode.preflight` (message and hint verbatim); the base
-      `Capability.preflight` is a documented no-op and `Resolver.predict` retired with its callers.
-      DOCTOR PARITY: the per-site row re-seams onto `vm_site_node(...).preflight`, the same
-      computation with the same framing; doctor stays preflight-only; suites green. SEED
-      DISPOSITION: `Resolver.seed` is KEPT for the no-double-resolve property (gate-resolved names
-      are excluded from the boundary loop) and its docstring rewritten honestly; the
-      serve-the-bridge-pre-boundary rationale died with the bridge. AGENT LIFT (the carried rider):
-      `agents.manager.agent_scope` (public; `agents.grants` shares it, the split's
-      cross-module-visibility precedent) puts agent shell / exec / delete (standalone) / grant /
-      revoke at AGENT level; the suites' scope-reaches-readiness pins re-seam VM to AGENT with the
-      agent name now asserted. R7: ONE named shift, justified: the single boundary prompt session's
-      INTERNAL order now follows the walk's deterministic first-encounter order rather than
-      construct-registration order (agent create resolves `git-token-gh` before `proxmox-token` in
-      its one burst); the set, the session count, and the walk-away point are unchanged, and no
-      other behavior shifts. NEVER-AGAIN SWEEP at the constructor-drop commit
-      (`grep -rn "self\.resolver\|self\._resolver\|resolver\.get\|resolver\.values"     cli/agentworks`):
+      `Capability.preflight` is a documented no-op and `Resolver.predict` retired with its callers
+      (review round, 2026-07-18: the first-landed record claimed the verbatim shapes with no direct
+      pin behind them, only the vm-template failure path and the structural owner-display argument;
+      `tests/orchestration/test_secrets.py` now pins `require_predicted_refs` directly: the
+      resolvable pass, the refusal with the EXACT owner/usage message and hint asserted whole, the
+      empty-refs early return, and the config-None guard). DOCTOR PARITY: the per-site row re-seams
+      onto `vm_site_node(...).preflight`, the same computation with the same framing; doctor stays
+      preflight-only; suites green. SEED DISPOSITION: `Resolver.seed` is KEPT for the
+      no-double-resolve property (gate-resolved names are excluded from the boundary loop) and its
+      docstring rewritten honestly; the serve-the-bridge-pre-boundary rationale died with the
+      bridge. AGENT LIFT (the carried rider): `agents.manager.agent_scope` (public; `agents.grants`
+      shares it, the split's cross-module-visibility precedent) puts agent shell / exec / delete
+      (standalone) / grant / revoke at AGENT level; the suites' scope-reaches-readiness pins re-seam
+      VM to AGENT with the agent name now asserted. R7: ONE named shift, justified: the single
+      boundary prompt session's INTERNAL order now follows the walk's deterministic first-encounter
+      order rather than construct-registration order (agent create resolves `git-token-gh` before
+      `proxmox-token` in its one burst); the set, the session count, and the walk-away point are
+      unchanged, and no other behavior shifts. NEVER-AGAIN SWEEP at the constructor-drop commit
+      (`grep -rn "self\.resolver\|self\._resolver\|resolver\.get\|resolver\.values" cli/agentworks`):
       every survivor is orchestrator-owned at a composition root (`ScopedSecrets` assembly and
       `compose_env` values at the shell/exec/provisioning roots; rekey's op-secret read and its gate
       callback serving the boundary cache; the sessions batch gate callback;
@@ -925,10 +929,11 @@ Goal: migrate the rest opportunistically, then remove the now-dead per-instance 
       the op, seeding and burst parity), `tests/vms/test_sites_dispatch.py` (the
       instance-reads-context pin), `tests/test_capability_base.py` (the construction pin),
       `tests/vms/test_vm_nodes.py` (central template prediction against a real registry and backend
-      chain), `tests/vms/test_live_vm_boundary.py` (the returned ops context serves the site's
-      declared names), `tests/test_doctor.py` / `tests/test_doctor_env_and_secrets.py` (parity), the
-      agent orchestrated suites plus `tests/test_operation_scope.py` (the AGENT lift), and the whole
-      suite as the oracle.
+      chain), `tests/orchestration/test_secrets.py` (the `require_predicted_refs` direct pins,
+      review round), `tests/vms/test_live_vm_boundary.py` (the returned ops context serves the
+      site's declared names), `tests/test_doctor.py` / `tests/test_doctor_env_and_secrets.py`
+      (parity), the agent orchestrated suites plus `tests/test_operation_scope.py` (the AGENT lift),
+      and the whole suite as the oracle.
 
 Definition of done: every command orchestrated; `Capability` constructs without a resolver; proxmox
 ops read the context; the full suite green.

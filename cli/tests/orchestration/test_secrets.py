@@ -13,17 +13,22 @@ from typing import TYPE_CHECKING, cast
 
 import pytest
 
-from agentworks.errors import StateError
+from agentworks.errors import ConfigError, StateError
 from agentworks.orchestration.secrets import (
     ScopedSecrets,
     predict_resolution,
+    require_predicted_refs,
     secret_declarations,
     secret_union,
 )
+from agentworks.resources.reference import SecretReference
 from agentworks.secrets.base import SecretDecl
 
 if TYPE_CHECKING:
+    from pathlib import Path
+
     from agentworks.capabilities.base import RunContext
+    from agentworks.config import Config
     from agentworks.resources.registry import Registry
     from agentworks.secrets.resolve import ActiveBackend
 
@@ -174,6 +179,83 @@ def test_prediction_covers_every_declaration() -> None:
         "a": "env-var",
         "b": None,
     }
+
+
+# -- require_predicted_refs --------------------------------------------------
+
+
+def _px_ref() -> SecretReference:
+    return SecretReference(
+        name="proxmox-token",
+        kind="secret",
+        usage="the Proxmox API token",
+        source=("vm-site", "px"),
+    )
+
+
+def _env_only_setup(tmp_path: Path) -> tuple[Config, Registry]:
+    """A real config and registry with the env-var backend alone, so
+    predictions are driven by the environment (the node suites'
+    not-resolvable shape)."""
+    from agentworks.bootstrap import build_registry
+    from tests.orchestrated_fixtures import write_operator_config
+
+    config = write_operator_config(
+        tmp_path, '[secret_config]\nbackends = ["env-var"]\n'
+    )
+    return config, build_registry(config)
+
+
+def test_require_predicted_refs_passes_when_resolvable(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    config, registry = _env_only_setup(tmp_path)
+    monkeypatch.setenv("AW_SECRET_PROXMOX_TOKEN", "tok")
+    require_predicted_refs("vm-site/px", (_px_ref(),), config, registry)
+
+
+def test_require_predicted_refs_refuses_with_owner_usage_framing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The per-instance error shape, preserved VERBATIM through
+    centralization (the retired base-preflight prediction's framing):
+    owner display, secret name, declared usage, and the describe
+    hint."""
+    config, registry = _env_only_setup(tmp_path)
+    monkeypatch.delenv("AW_SECRET_PROXMOX_TOKEN", raising=False)
+    with pytest.raises(ConfigError) as exc:
+        require_predicted_refs("vm-site/px", (_px_ref(),), config, registry)
+    assert str(exc.value) == (
+        "vm-site/px: secret 'proxmox-token' (the Proxmox API token) is "
+        "not resolvable by any active backend"
+    )
+    assert exc.value.hint == (
+        "`agw secret describe proxmox-token` shows how each backend "
+        "looks the secret up; add a backend mapping or extend "
+        "[secret_config].backends."
+    )
+
+
+def test_require_predicted_refs_empty_refs_is_a_no_op() -> None:
+    """The early return: with nothing declared, neither the config nor
+    the registry is touched (the cast object would explode on any
+    lookup), so a secret-free node's preflight costs nothing here."""
+    require_predicted_refs("vm/box", (), None, cast("Registry", object()))
+
+
+def test_require_predicted_refs_without_config_is_loud(
+    tmp_path: Path,
+) -> None:
+    """A config-less context reaching a secret-declaring node's
+    prediction is an inspection-shaped caller bug, refused with a typed
+    error rather than a crash (the old cannot-preflight-without-a-
+    resolver guard's successor)."""
+    _config, registry = _env_only_setup(tmp_path)
+    with pytest.raises(
+        ConfigError, match="without config on the context"
+    ) as exc:
+        require_predicted_refs("vm-site/px", (_px_ref(),), None, registry)
+    assert str(exc.value).startswith("vm-site/px: ")
 
 
 # -- ScopedSecrets -----------------------------------------------------------
