@@ -30,6 +30,8 @@ from agentworks.errors import StateError
 if TYPE_CHECKING:
     from collections.abc import Iterable, Mapping
 
+    from agentworks.config import Config
+    from agentworks.resources.reference import ResourceReference
     from agentworks.resources.registry import Registry
     from agentworks.secrets.base import SecretDecl
     from agentworks.secrets.resolve import ActiveBackend
@@ -94,6 +96,50 @@ def predict_resolution(
     from agentworks.secrets.resolve import preview_resolution
 
     return {decl.name: preview_resolution(decl, backends) for decl in decls}
+
+
+def require_predicted_refs(
+    owner: str,
+    refs: Iterable[ResourceReference],
+    config: Config | None,
+    registry: Registry,
+) -> None:
+    """The node-preflight half of central prediction: every declared
+    secret reference must be predicted resolvable by some active
+    backend, without prompting (an unresolvable secret is fatal and
+    knowable pre-resolve; a prompt-only secret's value check defers
+    past preflight). The holding node runs this for its held
+    instance's declared config secrets, with the same owner/usage
+    error framing the per-instance prediction produced; ``owner`` is
+    the node's ``<kind>/<name>`` key, which IS the instance's owner
+    display.
+    """
+    from agentworks.errors import ConfigError
+    from agentworks.secrets.resolve import active_backends
+
+    refs = tuple(refs)
+    if not refs:
+        return
+    if config is None:
+        raise ConfigError(
+            f"{owner}: cannot predict declared secret resolvability "
+            f"without config on the context (assembled for inspection?)"
+        )
+    predictions = predict_resolution(
+        secret_declarations((ref.name for ref in refs), registry),
+        active_backends(config, registry),
+    )
+    for ref in refs:
+        if predictions[ref.name] is None:
+            raise ConfigError(
+                f"{owner}: secret '{ref.name}' ({ref.usage}) is not "
+                f"resolvable by any active backend",
+                hint=(
+                    f"`agw secret describe {ref.name}` shows how each "
+                    "backend looks the secret up; add a backend mapping "
+                    "or extend [secret_config].backends."
+                ),
+            )
 
 
 class ScopedSecrets:

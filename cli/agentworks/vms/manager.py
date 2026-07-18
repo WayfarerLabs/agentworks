@@ -377,7 +377,7 @@ def create_vm(
     # leaves nothing behind.
     slug = _resolve_system_slug(db)
 
-    template_node = vm_template_node(vm_tmpl, resolver)
+    template_node = vm_template_node(vm_tmpl, registry)
     site_node = vm_site_node(registry, site, resolver)
     pending_vm = pending_vm_node(db, vm_name, template_node, site_node, cred_nodes)
     nodes = walk(pending_vm)
@@ -1461,7 +1461,7 @@ def rekey_vm(
     resolver = Resolver(config, registry)
     vm_node = live_vm_node(db, config, registry, vm, resolver)
     rekey_vm_tmpl = resolve_template(registry, vm.template)
-    tmpl_node = vm_template_node(rekey_vm_tmpl, resolver)
+    tmpl_node = vm_template_node(rekey_vm_tmpl, registry)
     nodes = walk(tmpl_node, vm_node)
     for secret_name in secret_union(nodes):
         resolver.register_name(secret_name)

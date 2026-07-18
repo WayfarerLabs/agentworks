@@ -11,8 +11,9 @@ contracts (the full capability model is documented in
    ``validate_config``); binds ``(name, config, resolver)``, never
    resolved secret values. No network, no resolution, no prompt.
 3. ``preflight``: pre-resolve, read-only, best-effort readiness;
-   predicts secret resolvability without prompting, checks unauthenticated
-   reachability / tools. Doctor reuses it.
+   checks unauthenticated reachability / tools (the declared secrets'
+   resolvability is predicted centrally by the holding node, not by
+   the instance). Doctor reuses it.
 4. ``runup``: post-resolve, read-only, authenticated readiness; with
    resolved secrets in hand, does the authenticated dry-run (a git
    provider's ``GET /user``, a platform's API check), the engine
@@ -188,8 +189,8 @@ class RunContext:
       requesting node.
 
     The rule that goes with it: readiness's pre-resolve concerns read
-    ``self`` (config bound at construct, ``self.resolver`` for
-    prediction); ``runup`` and ops read the context.
+    ``self`` (config bound at construct); ``runup`` and ops read the
+    context.
     """
 
     config: Config | None
@@ -376,7 +377,7 @@ class Capability(ABC):
         """
         return None
 
-    def preflight(self, ctx: RunContext) -> None:
+    def preflight(self, ctx: RunContext) -> None:  # noqa: B027  # intentional concrete no-op default
         """Verify readiness: "will the real work probably succeed?"
 
         Read-only and side-effect-free; that property is load-bearing:
@@ -398,38 +399,20 @@ class Capability(ABC):
         targets that ALREADY exist (a `session create` sees the existing
         VM's ``admin_target``; a `vm create` sees none, which is what
         structurally enforces the blindness above) but NO resolved secrets
-        yet. Pre-resolve concerns still read ``self``: ``self.config``
-        and ``self.resolver`` in its prediction role.
+        yet. Pre-resolve concerns still read ``self`` (``self.config``).
 
-        Base behavior: every secret reference the bound config declares
-        must be predicted resolvable by some active backend, without
-        prompting (an unresolvable secret is fatal and knowable here; a
-        prompt-only secret's value check defers past preflight).
-        Subclasses extend (``super().preflight()``) with their world
-        checks: required tools present, an unauthenticated endpoint
-        reachable, anything knowable without secrets or mid-command
-        state.
+        Resolvability prediction for the declared secret references is
+        NOT the instance's job: it is central, run by the holding node
+        over the declarations (``orchestration.secrets``), so an
+        unresolvable secret still fails the sweep with the same
+        owner/usage framing without the instance touching the secret
+        machinery.
+
+        Base behavior: no-op. Subclasses extend
+        (``super().preflight()``) with their world checks: required
+        tools present, an unauthenticated endpoint reachable, anything
+        knowable without secrets or mid-command state.
         """
-        if not self._secret_refs:
-            return
-        if self.resolver is None:
-            raise ConfigError(
-                f"{self._owner_display}: cannot preflight declared "
-                f"secrets without a resolver (constructed for inspection?)"
-            )
-        for ref in self._secret_refs:
-            decl = self.resolver.register_name(ref.name)
-            if self.resolver.predict(decl) is None:
-                raise ConfigError(
-                    f"{self._owner_display}: secret '{ref.name}' "
-                    f"({ref.usage}) is not resolvable by any active "
-                    f"backend",
-                    hint=(
-                        f"`agw secret describe {ref.name}` shows how each "
-                        "backend looks the secret up; add a backend mapping "
-                        "or extend [secret_config].backends."
-                    ),
-                )
 
     def runup(self, ctx: RunContext) -> None:  # noqa: B027  # intentional concrete no-op default
         """Authenticated readiness: with secrets in hand, does the real

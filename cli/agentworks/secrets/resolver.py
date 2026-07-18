@@ -33,18 +33,17 @@ if TYPE_CHECKING:
 
 
 class Resolver:
-    """Accumulate an operation's secret declarations; predict, resolve
-    once, then serve cached values.
+    """Accumulate an operation's secret declarations; resolve once,
+    then serve cached values.
 
-    The three verbs map onto the capability lifecycle:
+    The two verbs map onto the operation's lifecycle:
 
-    - :meth:`predict` (preflight): the name of the first active backend
-      that would resolve the secret, or ``None`` when nothing would;
-      never prompts (an interactive backend is reported without
-      probing; probing would BE the prompt).
     - :meth:`resolve` (the preflight boundary): one batched pass over
       the active backends for every registered declaration: one
       prompt session. Idempotent when nothing new was registered.
+      (Resolvability PREDICTION is not this object's job: it is
+      central, over declarations, via
+      ``orchestration.secrets.predict_resolution``.)
     - :meth:`get` (ops): a cached value. Raises a typed error if the
       boundary resolve has not run; an op must never trigger
       resolution (a prompt mid-op is exactly what the boundary
@@ -136,19 +135,6 @@ class Resolver:
             self._seeded[name] = value
 
     # -- the lifecycle verbs -------------------------------------------
-
-    def predict(self, decl: SecretDecl) -> str | None:
-        """Non-prompting resolvability prediction for preflights: the
-        first active backend that would resolve ``decl``, or ``None``.
-        A non-interactive backend must actually produce a value to be
-        reported (an unset env var does not count as resolvable); the
-        interactive prompt backend is reported without probing.
-        """
-        from agentworks.secrets.resolve import active_backends, preview_resolution
-
-        return preview_resolution(
-            decl, active_backends(self._config, self._registry)
-        )
 
     def resolve(self) -> None:
         """THE operation's one resolve pass, run at the preflight

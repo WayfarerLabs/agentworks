@@ -43,6 +43,7 @@ if TYPE_CHECKING:
     from agentworks.db import Database, VMRow
     from agentworks.git_credentials.nodes import GitCredentialNode
     from agentworks.orchestration.node import Node
+    from agentworks.resources.reference import ResourceReference
     from agentworks.resources.registry import Registry
     from agentworks.secrets.resolver import Resolver
     from agentworks.vms.templates import ResolvedVMTemplate
@@ -58,11 +59,13 @@ class VMSiteNode:
         self,
         name: str,
         platform: VMPlatform,
-        secret_refs: tuple[str, ...],
+        secret_refs: tuple[ResourceReference, ...],
+        registry: Registry,
     ) -> None:
         self._name = name
         self._platform = platform
         self._secret_refs = secret_refs
+        self._registry = registry
 
     @property
     def key(self) -> str:
@@ -79,9 +82,18 @@ class VMSiteNode:
         return ()
 
     def secret_refs(self) -> tuple[str, ...]:
-        return self._secret_refs
+        return tuple(ref.name for ref in self._secret_refs)
 
     def preflight(self, ctx: RunContext) -> None:
+        # Central prediction over the site's declared config secrets
+        # (the platform API credential), with the old per-instance
+        # owner/usage error framing; then the held instance's own
+        # world checks.
+        from agentworks.orchestration.secrets import require_predicted_refs
+
+        require_predicted_refs(
+            self.key, self._secret_refs, ctx.config, self._registry
+        )
         self._platform.preflight(ctx)
 
     def runup(self, ctx: RunContext) -> None:
@@ -253,16 +265,13 @@ class VMTemplateNode:
     """The resolved ``vm-template`` node: the template's readiness,
     formerly the free function ``preflight_vm_template``, relocated
     here so it has the same home every other readiness check has.
-    Built by :func:`vm_template_node`.
-
-    Holds the operation's resolver because the relocated check
-    predicts through one (the recorded seam; it closes when prediction
-    goes central with the per-instance resolver retirement).
+    Built by :func:`vm_template_node`. Holds the registry because the
+    readiness check predicts centrally over the key's declaration.
     """
 
-    def __init__(self, tmpl: ResolvedVMTemplate, resolver: Resolver) -> None:
+    def __init__(self, tmpl: ResolvedVMTemplate, registry: Registry) -> None:
         self._tmpl = tmpl
-        self._resolver = resolver
+        self._registry = registry
 
     @property
     def key(self) -> str:
@@ -286,15 +295,32 @@ class VMTemplateNode:
 
     def preflight(self, ctx: RunContext) -> None:
         """The template's readiness: its Tailscale auth key must be
-        predicted resolvable, without prompting. The key is the
-        template's responsibility, not the site's; the declaration
-        lookup rides ``Resolver.register_name``'s lookup-or-synthesize
-        fallback (an operator with no ``[secrets.*]`` sections still
-        gets a callable backend chain)."""
-        decl = self._resolver.register_name(self._tmpl.tailscale_auth_key)
-        if self._resolver.predict(decl) is None:
-            from agentworks.errors import ConfigError
+        predicted resolvable, without prompting, via the central
+        prediction over its declaration. The key is the template's
+        responsibility, not the site's; the declaration lookup rides
+        ``secret_declarations``'s lookup-or-synthesize fallback (an
+        operator with no ``[secrets.*]`` sections still gets a
+        callable backend chain)."""
+        from agentworks.errors import ConfigError
+        from agentworks.orchestration.secrets import (
+            predict_resolution,
+            secret_declarations,
+        )
+        from agentworks.secrets.resolve import active_backends
 
+        if ctx.config is None:
+            raise ConfigError(
+                f"vm-template '{self._tmpl.name}': cannot predict the "
+                f"Tailscale auth key's resolvability without config on "
+                f"the context (assembled for inspection?)"
+            )
+        (decl,) = secret_declarations(
+            [self._tmpl.tailscale_auth_key], self._registry
+        )
+        predicted = predict_resolution(
+            (decl,), active_backends(ctx.config, self._registry)
+        )
+        if predicted[decl.name] is None:
             raise ConfigError(
                 f"vm-template '{self._tmpl.name}': the Tailscale auth key "
                 f"secret '{decl.name}' is not resolvable by any active "
@@ -395,10 +421,10 @@ def vm_site_node(
 
     decl = lookup_site(name, registry)
     platform = resolve_site(name, registry, resolver=resolver)
-    secret_names = tuple(
-        ref.name for ref in decl.referenced_resources() if ref.kind == "secret"
+    secret_refs = tuple(
+        ref for ref in decl.referenced_resources() if ref.kind == "secret"
     )
-    return VMSiteNode(name, platform, secret_names)
+    return VMSiteNode(name, platform, secret_refs, registry)
 
 
 def live_vm_node(
@@ -436,11 +462,11 @@ def live_vm_node(
     return LiveVMNode(db, config, registry, row, site)
 
 
-def vm_template_node(tmpl: ResolvedVMTemplate, resolver: Resolver) -> VMTemplateNode:
+def vm_template_node(tmpl: ResolvedVMTemplate, registry: Registry) -> VMTemplateNode:
     """Build the ``vm-template/<name>`` node from the RESOLVED template
     (inheritance already applied; the resolved object is the backing
     data, the way a row backs a live node)."""
-    return VMTemplateNode(tmpl, resolver)
+    return VMTemplateNode(tmpl, registry)
 
 
 def pending_vm_node(

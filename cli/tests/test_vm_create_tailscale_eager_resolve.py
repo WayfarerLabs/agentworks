@@ -2,8 +2,9 @@
 
 The Tailscale secret resolves through the operation's resolver at the
 preflight boundary, BEFORE any state-mutating provisioning starts (the
-vm-template's preflight registers and predicts it); the install runner
-receives the value as a keyword argument; no ``env=`` injection.
+vm-template node declares it, the walk union registers it, and the
+node's preflight predicts it centrally); the install runner receives
+the value as a keyword argument; no ``env=`` injection.
 """
 
 from __future__ import annotations
@@ -17,15 +18,19 @@ from agentworks.config import load_config
 
 
 def _resolve_tailscale_key(config, registry, vm_tmpl) -> str:  # type: ignore[no-untyped-def]
-    """The create-path shape: the vm-template node's preflight registers
-    + predicts the key, the boundary resolve runs, ops read from the
-    cache."""
+    """The create-path shape: the vm-template node declares the key
+    (its ``secret_refs``, which the walk union registers), its
+    preflight predicts it centrally, the boundary resolve runs, ops
+    read from the cache."""
     from agentworks.capabilities.base import RunContext
     from agentworks.secrets.resolver import Resolver
     from agentworks.vms.nodes import vm_template_node
 
     resolver = Resolver(config, registry)
-    vm_template_node(vm_tmpl, resolver).preflight(RunContext())
+    node = vm_template_node(vm_tmpl, registry)
+    for name in node.secret_refs():
+        resolver.register_name(name)
+    node.preflight(RunContext(config=config))
     resolver.resolve()
     return resolver.get(vm_tmpl.tailscale_auth_key)
 
@@ -143,16 +148,13 @@ def test_template_preflight_fails_on_unresolvable_key(
     from agentworks.bootstrap import build_registry
     from agentworks.capabilities.base import RunContext
     from agentworks.errors import ConfigError
-    from agentworks.secrets.resolver import Resolver
     from agentworks.vms.nodes import vm_template_node
     from agentworks.vms.templates import resolve_template
 
     registry = build_registry(config)
     vm_tmpl = resolve_template(registry, "default")
-    resolver = Resolver(config, registry)
     with pytest.raises(ConfigError, match="not resolvable"):
-        vm_template_node(vm_tmpl, resolver).preflight(RunContext())
-    assert not resolver.resolved
+        vm_template_node(vm_tmpl, registry).preflight(RunContext(config=config))
 
 
 def test_join_tailscale_signature_requires_auth_key_kwarg() -> None:

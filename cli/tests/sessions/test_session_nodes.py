@@ -44,7 +44,7 @@ def _vm_node(db: Database, name: str = "box") -> LiveVMNode:
     db.insert_vm(name, site="stub", hostname=name)
     row = db.get_vm(name)
     assert row is not None
-    site = VMSiteNode("stub", cast("VMPlatform", _Platform()), ())
+    site = VMSiteNode("stub", cast("VMPlatform", _Platform()), (), cast("Registry", object()))
     return LiveVMNode(
         db, cast("Config", object()), cast("Registry", object()), row, site
     )
@@ -273,7 +273,12 @@ def test_session_create_graph_shares_one_vm_node(db: Database) -> None:
         owner_name="gh", secret_name="git-token-gh",
         preflight=lambda ctx: None, runup=lambda ctx: None,
     )
-    cred = GitCredentialNode("gh", provider, ("git-token-gh",))  # type: ignore[arg-type]
+    cred = GitCredentialNode(
+        "gh",
+        provider,  # type: ignore[arg-type]
+        (SimpleNamespace(name="git-token-gh", usage="the auth token"),),  # type: ignore[arg-type]
+        cast("Registry", object()),
+    )
     template = AgentTemplateNode(
         ResolvedAgentTemplate(name="default", git_credentials=["gh"]), (cred,)
     )

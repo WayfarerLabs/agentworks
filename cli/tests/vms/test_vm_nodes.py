@@ -19,12 +19,12 @@ from agentworks.vms.nodes import LiveVMNode, VMSiteNode
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterator
+    from pathlib import Path
 
     from agentworks.capabilities.vm_platform import VMPlatform
     from agentworks.config import Config
     from agentworks.db import Database, VMRow
     from agentworks.resources.registry import Registry
-    from agentworks.secrets.resolver import Resolver
 
 
 class _GatePlatform:
@@ -64,7 +64,9 @@ class _GatePlatform:
 def _node(
     db: Database, platform: _GatePlatform, vm: VMRow
 ) -> tuple[LiveVMNode, VMSiteNode]:
-    site = VMSiteNode("stub", cast("VMPlatform", platform), ())
+    site = VMSiteNode(
+        "stub", cast("VMPlatform", platform), (), cast("Registry", object())
+    )
     node = LiveVMNode(
         db, cast("Config", object()), cast("Registry", object()), vm, site
     )
@@ -282,23 +284,6 @@ def test_rejoin_auth_key_reads_lazily_through_the_gate_reader(
 # -- the vm-template node ----------------------------------------------------
 
 
-class _PredictResolver:
-    """The two-verb slice VMTemplateNode reads: register + predict."""
-
-    def __init__(self, *, resolvable: bool) -> None:
-        self._resolvable = resolvable
-        self.registered: list[str] = []
-
-    def register_name(self, name: str):  # noqa: ANN201 - stub
-        from agentworks.secrets.base import SecretDecl
-
-        self.registered.append(name)
-        return SecretDecl(name=name, description="")
-
-    def predict(self, decl: object) -> str | None:
-        return "env-var" if self._resolvable else None
-
-
 def test_template_node_declares_only_the_tailscale_key() -> None:
     """Hermetic provisioning: the template's env-block secrets are
     runtime inputs, so they must NOT fold into the node's secret_refs
@@ -312,29 +297,38 @@ def test_template_node_declares_only_the_tailscale_key() -> None:
         name="default",
         env={"API_KEY": EnvEntry(key="API_KEY", secret="api-key")},
     )
-    node = vm_template_node(tmpl, cast("Resolver", _PredictResolver(resolvable=True)))
+    node = vm_template_node(tmpl, cast("Registry", object()))
     assert node.key == "vm-template/default"
     assert node.secret_refs() == ("tailscale-auth-key",)
     assert node.deps() == ()
 
 
-def test_template_node_preflight_predicts_the_key() -> None:
+def test_template_node_preflight_predicts_the_key(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The relocated readiness check predicts CENTRALLY over the key's
+    declaration (the held-resolver prediction seam is closed): with the
+    env-var backend alone, a set variable predicts resolvable and an
+    unset one raises the delegate's old typed error."""
+    from agentworks.bootstrap import build_registry
     from agentworks.capabilities.base import RunContext
     from agentworks.errors import ConfigError
     from agentworks.vms.nodes import vm_template_node
     from agentworks.vms.templates import ResolvedVMTemplate
+    from tests.orchestrated_fixtures import write_operator_config
 
-    ok = _PredictResolver(resolvable=True)
-    vm_template_node(ResolvedVMTemplate(name="default"), cast("Resolver", ok)).preflight(
-        RunContext()
+    config = write_operator_config(
+        tmp_path, '[secret_config]\nbackends = ["env-var"]\n'
     )
-    assert ok.registered == ["tailscale-auth-key"]
+    registry = build_registry(config)
+    node = vm_template_node(ResolvedVMTemplate(name="default"), registry)
 
-    bad = _PredictResolver(resolvable=False)
+    monkeypatch.setenv("AW_SECRET_TAILSCALE_AUTH_KEY", "tskey")
+    node.preflight(RunContext(config=config))  # no error
+
+    monkeypatch.delenv("AW_SECRET_TAILSCALE_AUTH_KEY")
     with pytest.raises(ConfigError, match="not resolvable"):
-        vm_template_node(
-            ResolvedVMTemplate(name="default"), cast("Resolver", bad)
-        ).preflight(RunContext())
+        node.preflight(RunContext(config=config))
 
 
 # -- the pending VM node -----------------------------------------------------
@@ -345,10 +339,11 @@ def _pending(db: Database):
     from agentworks.vms.templates import ResolvedVMTemplate
 
     template = vm_template_node(
-        ResolvedVMTemplate(name="default"),
-        cast("Resolver", _PredictResolver(resolvable=True)),
+        ResolvedVMTemplate(name="default"), cast("Registry", object())
     )
-    site = VMSiteNode("stub", cast("VMPlatform", _GatePlatform()), ())
+    site = VMSiteNode(
+        "stub", cast("VMPlatform", _GatePlatform()), (), cast("Registry", object())
+    )
     return pending_vm_node(db, "nvm", template, site, ()), template, site
 
 

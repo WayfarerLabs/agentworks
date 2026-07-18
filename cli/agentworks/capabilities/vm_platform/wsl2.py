@@ -476,7 +476,8 @@ class WSL2Platform(VMPlatform):
 
     def preflight(self, ctx: RunContext) -> None:
         """``wsl.exe`` must be on PATH (which also implies Windows).
-        No config secrets, so the base's prediction pass is a no-op."""
+        No config secrets, so the holding node's central prediction
+        has nothing to check."""
         super().preflight(ctx)
         import shutil
 

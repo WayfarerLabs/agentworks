@@ -1,6 +1,7 @@
-"""The per-operation ``Resolver``: registration, non-prompting
-prediction, the single boundary resolve, strict cached ``get``, and the
-late-registration guard.
+"""The per-operation ``Resolver``: registration, the single boundary
+resolve, strict cached ``get``, and the late-registration guard.
+(Resolvability prediction is central, not this object's: see
+``tests/orchestration/test_secrets.py``.)
 """
 
 from __future__ import annotations
@@ -39,18 +40,6 @@ def test_register_name_synthesizes_when_registry_is_sparse(env) -> None:
     resolver = Resolver(config, registry)
     decl = resolver.register_name("never-declared")
     assert decl.name == "never-declared"
-
-
-def test_predict_reports_backend_or_none(env, monkeypatch: pytest.MonkeyPatch) -> None:
-    config, registry = env()
-    resolver = Resolver(config, registry)
-    decl = resolver.register_name("some-token")
-
-    monkeypatch.setenv("AW_SECRET_SOME_TOKEN", "v")
-    assert resolver.predict(decl) == "env-var"
-
-    monkeypatch.delenv("AW_SECRET_SOME_TOKEN")
-    assert resolver.predict(decl) is None
 
 
 def test_resolve_is_one_pass_and_idempotent(env, monkeypatch: pytest.MonkeyPatch) -> None:

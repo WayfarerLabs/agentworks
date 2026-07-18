@@ -41,20 +41,16 @@ class _SecretCap(Capability):
 
 
 class _FakeResolver:
-    """Records registrations; prediction outcome is programmable."""
+    """Records registrations (the construct-time registration seam)."""
 
-    def __init__(self, *, resolvable: bool = True) -> None:
+    def __init__(self) -> None:
         self.registered: list[str] = []
-        self.resolvable = resolvable
 
     def register_name(self, name: str):  # type: ignore[no-untyped-def]
         from agentworks.secrets.base import SecretDecl
 
         self.registered.append(name)
         return SecretDecl(name=name, description="")
-
-    def predict(self, decl: object) -> str | None:
-        return "env-var" if self.resolvable else None
 
 
 def test_construct_revalidates_config() -> None:
@@ -64,6 +60,8 @@ def test_construct_revalidates_config() -> None:
 
 
 def test_construct_registers_declared_secrets_on_the_resolver() -> None:
+    """The construct-time registration seam (retires with the resolver
+    constructor parameter)."""
     resolver = _FakeResolver()
     _SecretCap("t1", {}, resolver)  # type: ignore[arg-type]
     assert resolver.registered == ["the-token"]
@@ -74,23 +72,12 @@ def test_construct_without_resolver_is_allowed_for_inspection() -> None:
     assert cap.resolver is None
 
 
-def test_base_preflight_predicts_declared_secrets() -> None:
-    ok = _SecretCap("t1", {}, _FakeResolver(resolvable=True))  # type: ignore[arg-type]
-    ok.preflight(RunContext())  # no error
-
-    bad = _SecretCap("t1", {}, _FakeResolver(resolvable=False))  # type: ignore[arg-type]
-    with pytest.raises(ConfigError, match="not resolvable"):
-        bad.preflight(RunContext())
-
-
-def test_base_preflight_without_secrets_is_a_no_op() -> None:
-    _SecretlessCap("t1", {}).preflight(RunContext())  # no resolver needed
-
-
-def test_preflight_with_secrets_but_no_resolver_raises() -> None:
-    cap = _SecretCap("t1", {})
-    with pytest.raises(ConfigError, match="without a resolver"):
-        cap.preflight(RunContext())
+def test_base_preflight_is_a_no_op() -> None:
+    """Resolvability prediction is CENTRAL (the holding node predicts
+    over declarations via ``orchestration.secrets``), so the base's
+    preflight has nothing to do, with or without declared secrets."""
+    _SecretlessCap("t1", {}).preflight(RunContext())
+    _SecretCap("t1", {}).preflight(RunContext())  # no resolver, no error
 
 
 def test_idempotency_marker_reads_through_overrides() -> None:
