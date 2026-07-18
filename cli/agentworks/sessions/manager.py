@@ -62,6 +62,9 @@ if TYPE_CHECKING:
         LiveWorkspaceNode,
         PendingWorkspaceNode,
     )
+    from agentworks.workspaces.templates import (
+        ResolvedTemplate as ResolvedWorkspaceTemplate,
+    )
 
 
 # -- Helpers ---------------------------------------------------------------
@@ -1409,7 +1412,25 @@ def create_session(
 
     workspace_node: LiveWorkspaceNode | PendingWorkspaceNode
     pending_workspace: PendingWorkspaceNode | None = None
+    workspace_tmpl: ResolvedWorkspaceTemplate | None = None
     if new_workspace:
+        # Cheap validation now, before the gate and before any secret
+        # is touched: template resolution, the repo advisories
+        # (config-only, no tokens), and the VM init-status guard fail
+        # with zero prompts and zero VM starts, the bail-early
+        # precedence every migrated command keeps.
+        from agentworks.workspaces.manager import _guard_vm_status
+        from agentworks.workspaces.templates import (
+            resolve_template as _resolve_ws_tmpl,
+        )
+
+        workspace_tmpl = _resolve_ws_tmpl(registry, workspace_template)
+        if workspace_tmpl.repo:
+            from agentworks.git_credentials import remote_advisories
+
+            for advisory in remote_advisories(registry, workspace_tmpl.repo):
+                output.warn(advisory)
+        _guard_vm_status(vm)
         pending_workspace = pending_workspace_node(
             db, config, workspace_name, vm_node, workspace_template
         )
@@ -1579,13 +1600,14 @@ def create_session(
             if pending_workspace is not None:
                 from agentworks.workspaces.realize import realize_workspace
 
+                assert workspace_tmpl is not None  # resolved at build above
                 realize_workspace(
                     db,
                     config,
                     registry,
                     name=workspace_name,
                     vm=vm,
-                    template_name=workspace_template,
+                    template=workspace_tmpl,
                 )
                 log.mark_realized(pending_workspace)
             if pending_agent is not None:

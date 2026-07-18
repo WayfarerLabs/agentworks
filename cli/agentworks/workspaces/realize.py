@@ -33,6 +33,7 @@ if TYPE_CHECKING:
     from agentworks.config import Config
     from agentworks.db import Database, VMRow
     from agentworks.resources.registry import Registry
+    from agentworks.workspaces.templates import ResolvedTemplate
 
 
 def realize_workspace(
@@ -42,12 +43,18 @@ def realize_workspace(
     *,
     name: str,
     vm: VMRow,
-    template_name: str | None,
+    template: ResolvedTemplate,
 ) -> str:
     """Make workspace ``name`` real on ``vm``: create the on-VM
-    directory from its template, generate the VS Code workspace stub,
-    insert the DB row, and reconcile grant-all agents onto the new
-    workspace's group.
+    directory from its RESOLVED template, generate the VS Code
+    workspace stub, insert the DB row, and reconcile grant-all agents
+    onto the new workspace's group.
+
+    The template arrives resolved and the VM pre-validated: cheap
+    config- and row-based checks (template resolution, the repo
+    advisories, the VM init-status guard) are the calling
+    orchestrator's pre-gate duty, so their failures never cost a
+    prompt or a VM start; this body is only the mutation.
 
     Returns the VS Code workspace stub path, for callers with an
     open-in-VS-Code tail; callers without one ignore it. Raises on
@@ -61,23 +68,7 @@ def realize_workspace(
         delete_vm_workspace,
         generate_vscode_workspace,
     )
-    from agentworks.workspaces.manager import (
-        _guard_vm_status,
-        _revert_grant_on_failure,
-    )
-    from agentworks.workspaces.templates import resolve_template
-
-    template = resolve_template(registry, template_name)
-
-    # Advise if the template's repo remote will not resolve cleanly
-    # against the declared git credentials (config-only, no tokens).
-    if template.repo:
-        from agentworks.git_credentials import remote_advisories
-
-        for advisory in remote_advisories(registry, template.repo):
-            output.warn(advisory)
-
-    _guard_vm_status(vm)
+    from agentworks.workspaces.manager import _revert_grant_on_failure
 
     workspace_path: str | None = None
     vscode_path: str | None = None

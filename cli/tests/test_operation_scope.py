@@ -23,6 +23,18 @@ def test_system_scope_constructs_bare() -> None:
 def test_system_slug_is_allowed_at_every_constructible_level() -> None:
     OperationScope(level=ScopeLevel.SYSTEM, system_slug="lab")
     OperationScope(level=ScopeLevel.VM, system_slug="lab", vm="box")
+    OperationScope(
+        level=ScopeLevel.WORKSPACE, system_slug="lab", vm="box", workspace="ws1"
+    )
+    OperationScope(level=ScopeLevel.AGENT, system_slug="lab", vm="box", agent="dev")
+    OperationScope(
+        level=ScopeLevel.SESSION,
+        system_slug="lab",
+        vm="box",
+        workspace="ws1",
+        session="s1",
+        admin=True,
+    )
 
 
 def test_vm_scope_requires_its_vm() -> None:

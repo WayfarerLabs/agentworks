@@ -405,8 +405,8 @@ def test_ephemeral_agent_name_defaults_to_session_name(
 
     db = Database(tmp_path / "test.db")
     db._conn.execute(
-        "INSERT INTO vms (name, site, hostname, admin_username, tailscale_host) "
-        "VALUES ('bbvm1', 'lima', 'h', 'admin', '100.64.0.5')"
+        "INSERT INTO vms (name, site, hostname, admin_username, tailscale_host, init_status) "
+        "VALUES ('bbvm1', 'lima', 'h', 'admin', '100.64.0.5', 'complete')"
     )
     db._conn.commit()
     config = SimpleNamespace(session=SimpleNamespace(history_limit=50000))
@@ -506,8 +506,8 @@ def test_eager_resolve_fires_exactly_once_for_new_workspace_and_new_agent(
 
     db = Database(tmp_path / "test.db")
     db._conn.execute(
-        "INSERT INTO vms (name, site, hostname, admin_username, tailscale_host) "
-        "VALUES ('vm1', 'lima', 'h', 'admin', '100.64.0.5')"
+        "INSERT INTO vms (name, site, hostname, admin_username, tailscale_host, init_status) "
+        "VALUES ('vm1', 'lima', 'h', 'admin', '100.64.0.5', 'complete')"
     )
     db._conn.commit()
     _install_session_prep_stubs(monkeypatch)
@@ -585,8 +585,8 @@ def test_realize_bodies_take_domain_shaped_kwargs_only(
 
     db = Database(tmp_path / "test.db")
     db._conn.execute(
-        "INSERT INTO vms (name, site, hostname, admin_username, tailscale_host) "
-        "VALUES ('vm1', 'lima', 'h', 'admin', '100.64.0.5')"
+        "INSERT INTO vms (name, site, hostname, admin_username, tailscale_host, init_status) "
+        "VALUES ('vm1', 'lima', 'h', 'admin', '100.64.0.5', 'complete')"
     )
     db._conn.commit()
     _install_session_prep_stubs(monkeypatch)
@@ -632,7 +632,7 @@ def test_realize_bodies_take_domain_shaped_kwargs_only(
     # Allowlist, not denylist: the seam contract is domain-shaped args
     # and NOTHING else, so any smuggled kwarg (values, resolver,
     # platform, ...) trips this regardless of its name.
-    assert seam_kwargs["realize_workspace"] == {"name", "vm", "template_name"}
+    assert seam_kwargs["realize_workspace"] == {"name", "vm", "template"}
     assert seam_kwargs["realize_agent"] == {"name", "vm", "template", "git_tokens"}
     db.close()
 
@@ -647,8 +647,8 @@ def test_failure_after_ephemeral_create_rolls_back_ephemerals(
 
     db = Database(tmp_path / "test.db")
     db._conn.execute(
-        "INSERT INTO vms (name, site, hostname, admin_username, tailscale_host) "
-        "VALUES ('vm1', 'lima', 'h', 'admin', '100.64.0.5')"
+        "INSERT INTO vms (name, site, hostname, admin_username, tailscale_host, init_status) "
+        "VALUES ('vm1', 'lima', 'h', 'admin', '100.64.0.5', 'complete')"
     )
     db._conn.commit()
     _install_session_prep_stubs(monkeypatch)
@@ -961,7 +961,7 @@ def test_workspace_prompt_picks_create_new(
     (call,) = realize_workspace_calls
     assert call["name"] == "s1"
     assert call["vm"].name == "vm1"  # type: ignore[attr-defined]
-    assert call["template_name"] is None
+    assert call["template"].name == "default"  # type: ignore[attr-defined]
     db.close()
 
 

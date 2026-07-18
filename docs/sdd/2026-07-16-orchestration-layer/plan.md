@@ -438,21 +438,28 @@ Goal: migrate the rest opportunistically, then remove the now-dead per-instance 
       the realize-body vs standalone duplication for workspaces; `realize_workspace` is now the
       SINGLE copy of the slice and returns the VS Code stub path for the standalone command's
       open-in-VS-Code tail (the session orchestrator ignores the return). `create_workspace`'s
-      now-caller-less `platform` parameter is removed at the moment its docstring recorded. R7
-      exception records, all in the sanctioned pre-walk-away bucket: (1) the gate opens BEFORE any
-      preflight or resolve (HEAD guarded, bound, and only then held `keep_active`); (2) template
-      resolution and the repo advisories now run AFTER the gate opens (inside the body; HEAD ran
-      them before the VM was even resolved), and `_guard_vm_status` runs after them too, so an
-      auto-stopped VM now auto-starts before a guard, preflight, or resolve failure would surface
-      (reinit's recorded corollary; the start is maintenance, never rollback-tracked); (3) the final
-      "Workspace created" info prints exactly once, from the body, and now precedes the VS Code
-      launch (HEAD launched first and printed last). The command frames NO phase banners: it never
-      did, and bodies never frame. Where proven: `tests/workspaces/test_create_orchestrated.py`
-      (derived graph and site-only union with the template-env hermeticity pin, gate-prompt parity
-      on stopped and reachable VMs in the tracer's mirror shape, mutation-failure cleanup with no
-      row, the WORKSPACE scope reaching platform readiness); `tests/test_operation_scope.py` carries
-      the WORKSPACE level's both-direction violation tests (the not-constructible-yet pin retires
-      with the rules landing).
+      now-caller-less `platform` parameter is removed at the moment its docstring recorded. The
+      realize body takes the RESOLVED template (mirroring the agent body): cheap validation,
+      template resolution, the repo advisories, and the VM init-status guard, is the calling
+      orchestrator's PRE-GATE duty at both call sites (the standalone command in its base order;
+      session create at BUILD for a new workspace, an earlier surface than the nested call's
+      mutation-time checks, the bail-early direction), so a bad template or an init-incomplete VM
+      fails with zero prompts and zero VM starts, matching every migrated sibling's precedence
+      (review ruling, 2026-07-18, reversing this box's first-landed shape which had relocated the
+      validation into the body, post-gate; the reinit corollary about auto-starting before a
+      preflight or resolve failure covers only checks that are INHERENTLY post-gate, and does not
+      extend to validation relocated there). R7 exception records, all in the sanctioned
+      pre-walk-away bucket: (1) the gate opens BEFORE any preflight or resolve (HEAD guarded, bound,
+      and only then held `keep_active`); (2) the final "Workspace created" info prints exactly once,
+      from the body, and now precedes the VS Code launch (HEAD launched first and printed last). The
+      command frames NO phase banners: it never did, and bodies never frame. Where proven:
+      `tests/workspaces/test_create_orchestrated.py` (derived graph and site-only union with the
+      template-env hermeticity pin, an end-to-end hermeticity run against an env-bearing template,
+      gate-prompt parity on stopped and reachable VMs in the tracer's mirror shape, the bad-template
+      bail with zero resolve calls and zero gate events, mutation-failure cleanup with no row, the
+      WORKSPACE scope reaching platform readiness); `tests/test_operation_scope.py` carries the
+      WORKSPACE level's both-direction violation tests (the not-constructible-yet pin retires with
+      the rules landing).
 - [ ] `vm delete`, `vm start` / `vm stop`, the shell / exec roots, and console commands (console
       nodes introduced lazily here), each a green shippable unit. The agent delete/grant/revoke
       migration in this phase also splits the overgrown `agents/manager.py` at that natural seam

@@ -67,7 +67,28 @@ def create_workspace(
             entity_name=ws_name,
         )
 
+    # Cheap validation FIRST, before the gate and before any secret is
+    # touched: template resolution, the repo advisories (config-only,
+    # no tokens), and the VM init-status guard all fail with zero
+    # prompts and zero VM starts, the same bail-early precedence every
+    # migrated sibling keeps.
+    from agentworks.workspaces.templates import resolve_template
+
+    template = resolve_template(registry, template_name)
+
+    # Advise if the resolved template's repo remote will not resolve
+    # cleanly against the declared git credentials (config-only, no
+    # tokens). Each credential judges the URL by its own host/scope
+    # semantics; see git_credentials.remote_advisories. Only the single
+    # template actually being used is checked, and only here at use time.
+    if template.repo:
+        from agentworks.git_credentials import remote_advisories
+
+        for advisory in remote_advisories(registry, template.repo):
+            output.warn(advisory)
+
     vm = _resolve_vm(db, vm_name)
+    _guard_vm_status(vm)
 
     # BUILD: the command names its direct resources (this VM, the
     # chosen workspace name) and constructs the pending workspace node
@@ -130,7 +151,7 @@ def create_workspace(
             registry,
             name=ws_name,
             vm=vm,
-            template_name=template_name,
+            template=template,
         )
         # Bookkeeping only, deliberately not via a realization log:
         # this command never unwinds a realized workspace (a failure

@@ -106,8 +106,8 @@ def _seed_vm(db: Database) -> None:
 
     db.insert_vm("box", site="proxmox", hostname="box")
     db.update_vm_tailscale("box", "100.64.0.9")
-    # The realize body's _guard_vm_status refuses VMs that never
-    # finished initializing, so the seeded row must be COMPLETE.
+    # The orchestrator's pre-gate _guard_vm_status refuses VMs that
+    # never finished initializing, so the seeded row must be COMPLETE.
     db.update_vm_init_status("box", InitStatus.COMPLETE)
 
 
@@ -216,6 +216,60 @@ def test_create_reachable_vm_fast_path_costs_no_gate_resolve(
     workspace_manager.create_workspace(db, config, name="ws1", vm_name="box")
 
     assert resolve_counter == [["proxmox-token"]]
+    assert db.get_workspace("ws1") is not None
+
+
+def test_create_bad_template_bails_before_any_prompt_or_start(
+    db: Database,
+    make_config,  # noqa: ANN001
+    resolve_counter: list[list[str]],
+    monkeypatch: pytest.MonkeyPatch,
+    captured_output,  # noqa: ANN001
+) -> None:
+    """The bail-early precedence, pinned: cheap validation (an unknown
+    template) fails BEFORE the gate and before any secret is touched,
+    with zero resolve calls and zero gate events, even on a stopped
+    VM. Validation relocated behind the gate would trip this."""
+    config = make_config()
+    _seed_vm(db)
+    events: list[str] = []
+    _stop_the_vm(monkeypatch, events)
+
+    # The raw ValueError is the imperative command's pre-existing error
+    # shape for an unknown template (asserted as-is: this test pins the
+    # ORDER, not the shape).
+    with pytest.raises(ValueError, match="nope"):
+        workspace_manager.create_workspace(
+            db, config, name="ws1", vm_name="box", template_name="nope"
+        )
+
+    assert resolve_counter == []  # no prompt, no backend pass
+    assert events == []  # no status probe, no start
+    assert db.get_workspace("ws1") is None
+
+
+def test_create_never_resolves_the_template_env_secret(
+    db: Database,
+    make_config,  # noqa: ANN001
+    resolve_counter: list[list[str]],
+    mutation: dict[str, Any],
+    monkeypatch: pytest.MonkeyPatch,
+    captured_output,  # noqa: ANN001
+) -> None:
+    """End-to-end hermeticity: driving the real command against an
+    env-bearing workspace template never resolves the env secret (a
+    runtime input, delivered where sessions run), on top of the
+    union-level pin above."""
+    config = make_config(WORKSPACE_ENV_SECTION)
+    _seed_vm(db)
+    _reachable(monkeypatch, True)
+
+    workspace_manager.create_workspace(db, config, name="ws1", vm_name="box")
+
+    assert resolve_counter == [["proxmox-token"]]
+    assert all(
+        "ws-env-secret" not in burst for burst in resolve_counter
+    ), "the template env secret must never join a provisioning pass"
     assert db.get_workspace("ws1") is not None
 
 
