@@ -407,6 +407,8 @@ def live_vm_node(
     registry: Registry,
     row: VMRow,
     resolver: Resolver | None,
+    *,
+    site_nodes: dict[str, VMSiteNode] | None = None,
 ) -> LiveVMNode:
     """Build the ``vm/<name>`` node from its DB row. The row's ``site``
     field translates to the live edge (row fields become edges): the
@@ -414,14 +416,24 @@ def live_vm_node(
     caller wires nothing by hand.
 
     One-object-per-key: a command whose graph reaches the same site
-    from several places must construct through one factory pass and
-    share the returned objects (the walk enforces this loudly); a
-    cross-node memo emerges when the first multi-consumer command
-    migrates.
+    from several places must share ONE site-node object (the walk
+    enforces this loudly). ``site_nodes`` is that sharing mechanism,
+    the cross-node memo: a multi-VM command passes one dict across its
+    ``live_vm_node`` calls and each site node is built on first
+    encounter and reused after, which also shares the held platform
+    instance per site (the by-site dedup the imperative batch bind
+    performed). ``None`` builds a fresh site node, the single-VM
+    composition's shape.
     """
-    return LiveVMNode(
-        db, config, registry, row, vm_site_node(registry, row.site, resolver)
-    )
+    if site_nodes is None:
+        site = vm_site_node(registry, row.site, resolver)
+    else:
+        memoized = site_nodes.get(row.site)
+        if memoized is None:
+            memoized = vm_site_node(registry, row.site, resolver)
+            site_nodes[row.site] = memoized
+        site = memoized
+    return LiveVMNode(db, config, registry, row, site)
 
 
 def vm_template_node(tmpl: ResolvedVMTemplate, resolver: Resolver) -> VMTemplateNode:

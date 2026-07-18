@@ -35,7 +35,7 @@ from agentworks.vms.initializer import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Iterable, Iterator, Sequence
+    from collections.abc import Callable, Iterator, Sequence
 
     from agentworks.capabilities.base import OperationScope
     from agentworks.capabilities.vm_platform import VMPlatform
@@ -248,50 +248,6 @@ def bind_platform(
     return platform
 
 
-def bind_platforms(
-    config: Config,
-    vms: Iterable[VMRow],
-    *,
-    registry: Registry | None = None,
-) -> list[tuple[VMRow, VMPlatform]]:
-    """Multi-VM :func:`bind_platform`: one registry build (lazy, so an
-    empty VM set stays a no-op), one bound platform per distinct SITE
-    shared across its VMs (a platform instance is site-bound),
-    deduplicated by VM name, preserving first-encounter order. ONE
-    resolver spans the whole batch: every site's platform preflights,
-    then a single resolve pass covers the union of their declared
-    secrets; prompt-once holds across sites, not just within one.
-    Feed the result to :func:`keep_actives`.
-    """
-    from agentworks.bootstrap import build_registry
-    from agentworks.secrets.resolver import Resolver
-
-    seen: set[str] = set()
-    by_site: dict[str, VMPlatform] = {}
-    pairs: list[tuple[VMRow, VMPlatform]] = []
-    resolver: Resolver | None = None
-    for vm in vms:
-        if vm.name in seen:
-            continue
-        seen.add(vm.name)
-        if registry is None:
-            registry = build_registry(config)
-        if resolver is None:
-            resolver = Resolver(config, registry)
-        if vm.site not in by_site:
-            by_site[vm.site] = bind_platform(
-                config, vm, registry=registry, resolver=resolver, prepare=False
-            )
-        pairs.append((vm, by_site[vm.site]))
-    # The batch's preflight boundary: every distinct site's platform
-    # preflights, then the one resolve pass for the union.
-    for platform in by_site.values():
-        platform.preflight(RunContext(config=config))
-    if resolver is not None:
-        resolver.resolve()
-    return pairs
-
-
 def ensure_active(
     db: Database, config: Config, vm: VMRow, platform: VMPlatform
 ) -> None:
@@ -362,23 +318,6 @@ def keep_active(
     """
     ensure_active(db, config, vm, platform)
     with platform.vm_active(vm, config=config):
-        yield
-
-
-@contextlib.contextmanager
-def keep_actives(
-    db: Database,
-    config: Config,
-    pairs: Iterable[tuple[VMRow, VMPlatform]],
-) -> Iterator[None]:
-    """Multi-VM :func:`keep_active` over ``(vm, bound platform)`` pairs
-    (from :func:`bind_platforms`), entered via ``ExitStack`` so a
-    command touching multiple VMs (``session list --status``,
-    ``session stop --all``) keeps all of them anchored.
-    """
-    with contextlib.ExitStack() as stack:
-        for vm, platform in pairs:
-            stack.enter_context(keep_active(db, config, vm, platform))
         yield
 
 

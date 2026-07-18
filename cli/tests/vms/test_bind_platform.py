@@ -1,8 +1,11 @@
-"""``bind_platform`` / ``bind_platforms``: the composition-root helper's
-capability-lifecycle discipline. Construction is cheap and never
-resolves; preflight runs before the operation's single resolve pass
-(one prompt session; none at all without declared secrets); a batch
-shares one resolver across sites; the registry build stays lazy.
+"""``bind_platform``: the imperative composition-root helper's
+capability-lifecycle discipline (it still serves the un-migrated
+VM-touching commands). Construction is cheap and never resolves;
+preflight runs before the operation's single resolve pass (one prompt
+session; none at all without declared secrets). The batch variant's
+pins (one resolve per batch, shared per-site instance, empty-set
+no-op) live with the orchestrated batch composition in
+``tests/sessions/test_singular_batch_orchestrated.py``.
 """
 
 from __future__ import annotations
@@ -80,35 +83,6 @@ def test_preflight_failure_prevents_the_resolve_pass(
     assert resolve_counter == []
 
 
-def test_bind_platforms_one_resolve_and_one_instance_per_site(
-    make_config, resolve_counter: list[list[str]]
-) -> None:
-    """Two VMs at the same secret-bearing site share one bound platform
-    and the whole batch shares ONE resolve pass (prompt-once across a
-    batch command, not just within one site)."""
-    config = make_config(PROXMOX_SECTION)
-    vms = [_vm("v1", "proxmox"), _vm("v2", "proxmox"), _vm("v1", "proxmox")]
-    pairs = vm_manager.bind_platforms(config, vms)  # type: ignore[arg-type]
-
-    assert [vm.name for vm, _ in pairs] == ["v1", "v2"]  # name dedup
-    assert pairs[0][1] is pairs[1][1]  # shared instance per site
-    assert len(resolve_counter) == 1
-
-
-def test_bind_platforms_union_spans_sites(
-    make_config, resolve_counter: list[list[str]]
-) -> None:
-    """A mixed-site batch still resolves once: the union of both sites'
-    declared secrets goes through a single pass."""
-    config = make_config(PROXMOX_SECTION)
-    vms = [_vm("v1", "lima-local"), _vm("v2", "proxmox")]
-    pairs = vm_manager.bind_platforms(config, vms)  # type: ignore[arg-type]
-
-    assert len(pairs) == 2
-    assert len(resolve_counter) == 1
-    assert resolve_counter[0] == ["proxmox-token"]
-
-
 def test_env_targets_join_the_site_secret_pass(
     make_config, resolve_counter: list[list[str]], monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -143,17 +117,3 @@ def test_env_targets_join_the_site_secret_pass(
     ]
     assert resolver.get("api-key") == "k"
     assert resolver.get("proxmox-token") == "pve-token"
-
-
-def test_bind_platforms_empty_set_builds_no_registry(
-    make_config, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """Batch commands with an empty VM set (e.g. `session stop --all`
-    matching nothing) must stay a complete no-op."""
-    import agentworks.bootstrap as bootstrap
-
-    def _boom(*a: object, **k: object) -> object:
-        raise AssertionError("build_registry must not run for an empty VM set")
-
-    monkeypatch.setattr(bootstrap, "build_registry", _boom)
-    assert vm_manager.bind_platforms(make_config(), []) == []

@@ -276,8 +276,8 @@ def stub_platform_support(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def stub_vm_gates(monkeypatch: pytest.MonkeyPatch) -> _StubPlatform:
-    """Stub ``bind_platform`` / ``ensure_active`` / ``keep_active`` (and
-    the multi-VM variants) in every gate-consuming module.
+    """Stub ``bind_platform`` / ``ensure_active`` / ``keep_active`` in
+    every gate-consuming module.
 
     Tests that exercise transport / rollback / env plumbing don't want
     the gates building registries, resolving site secrets, or probing
@@ -326,12 +326,6 @@ def stub_vm_gates(monkeypatch: pytest.MonkeyPatch) -> _StubPlatform:
             f"{mod}.ensure_active", lambda *a, **k: None, raising=False
         )
         monkeypatch.setattr(f"{mod}.keep_active", _null_hold, raising=False)
-        monkeypatch.setattr(
-            f"{mod}.bind_platforms",
-            lambda config, vms, *, registry=None: [(vm, platform) for vm in vms],
-            raising=False,
-        )
-        monkeypatch.setattr(f"{mod}.keep_actives", _null_hold, raising=False)
 
     # The orchestrated commands' equivalents of the same two seams: the
     # node factories bind their platform through ``resolve_site`` (the

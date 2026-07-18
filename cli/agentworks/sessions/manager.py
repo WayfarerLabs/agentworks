@@ -28,9 +28,7 @@ from agentworks.ssh import SSH_TRANSPORT_ERROR
 from agentworks.transports import transport
 from agentworks.vms.manager import (
     bind_platform,
-    bind_platforms,
     ensure_active,
-    keep_actives,
 )
 
 _ENV_KEY_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
@@ -40,7 +38,7 @@ _TEMPLATE_VAR_RE = re.compile(r"\{\{(\w+)\}\}")
 _KNOWN_TEMPLATE_VARS = {"session_name", "workspace_name"}
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping
+    from collections.abc import Iterator, Mapping, Sequence
 
     from agentworks.agents.nodes import (
         AgentTemplateNode,
@@ -405,9 +403,9 @@ def _distinct_vms_for_sessions(db: Database, sessions: list[SessionRow]) -> list
     """Resolve the distinct set of VMs that host the given sessions.
 
     Used by the batch session operations (stop_all_sessions, restart_all_sessions,
-    list_sessions) to feed `keep_actives` with exactly the VMs whose SSH
+    list_sessions) to feed `_batch_vm_boundary` with exactly the VMs whose SSH
     transports will be touched. Order is insertion order keyed by VM name so
-    keepalive entry messages render in a stable order.
+    gate and keepalive entry messages render in a stable order.
     """
     distinct: list[VMRow] = []
     seen: set[str] = set()
@@ -421,6 +419,99 @@ def _distinct_vms_for_sessions(db: Database, sessions: list[SessionRow]) -> list
         distinct.append(vm)
         seen.add(ws.vm_name)
     return distinct
+
+
+@contextlib.contextmanager
+def _batch_vm_boundary(
+    db: Database, config: Config, vms: Sequence[VMRow]
+) -> Iterator[None]:
+    """The batch session ops' composition root (stop_all_sessions,
+    restart_all_sessions, list_sessions' status pass): ONE boundary
+    over the distinct VMs, then each VM's activation gate and
+    held-active span.
+
+    Mirrors the imperative batch order exactly (preflight + one
+    resolve covering the whole batch, THEN per-VM gate + hold),
+    orchestrated: one multi-root walk over the live VM nodes, with one
+    shared site node per distinct site via the factory's ``site_nodes``
+    memo (one held platform instance per site, the old by-site dedup),
+    the walk union registered once on ONE resolver, a SYSTEM-level
+    scope (one level per COMMAND, never per node; each VM's identity
+    comes from its own node), one preflight sweep, ONE boundary
+    resolve, and only then the gates in VM order on an ExitStack. A
+    failing gate (an operator-stopped VM) propagates and aborts the
+    whole batch, exactly as the imperative per-VM gate loop did.
+
+    The gate callback SERVES the boundary's cached values
+    (``resolver.get``): the union already covers every gate secret, so
+    two stopped VMs sharing a site cost exactly ONE backend pass
+    (a per-gate just-in-time resolve would re-resolve the shared
+    site's secret, and ``Resolver.seed`` after the boundary raises by
+    design). The one exception is the repair path's Tailscale rejoin
+    key: it is inherently outside the boundary union (lazy, read only
+    when a started VM fails to reconnect) and resolves late through
+    the backend chain, the same documented conditional-need exception
+    the imperative repair path carried; it cannot seed, because the
+    boundary has already resolved.
+
+    An empty VM set stays a complete no-op (no registry, no resolver,
+    no gate), the imperative lazy-bind property: ``session list
+    --no-status`` and empty filter results must cost nothing here.
+    """
+    if not vms:
+        yield
+        return
+
+    from agentworks.bootstrap import build_registry
+    from agentworks.capabilities.base import (
+        OperationScope,
+        RunContext,
+        ScopeLevel,
+    )
+    from agentworks.db import SYSTEM_SLUG_KEY
+    from agentworks.orchestration.activation import activation_gate
+    from agentworks.orchestration.readiness import preflight_all
+    from agentworks.orchestration.secrets import secret_union
+    from agentworks.orchestration.walk import walk
+    from agentworks.secrets.resolver import Resolver
+    from agentworks.vms.nodes import VMSiteNode, live_vm_node
+
+    registry = build_registry(config)
+    resolver = Resolver(config, registry)
+    site_nodes: dict[str, VMSiteNode] = {}
+    vm_nodes = [
+        live_vm_node(db, config, registry, vm, resolver, site_nodes=site_nodes)
+        for vm in vms
+    ]
+    nodes = walk(*vm_nodes)
+    union = secret_union(nodes)
+    for secret_name in union:
+        resolver.register_name(secret_name)
+    scope = OperationScope(
+        level=ScopeLevel.SYSTEM,
+        system_slug=db.get_setting(SYSTEM_SLUG_KEY) or None,
+    )
+    preflight_all(nodes, RunContext(config=config, operation_scope=scope))
+    resolver.resolve()
+
+    covered = set(union)
+
+    def _serve_gate_secret(secret_name: str) -> str:
+        if secret_name in covered:
+            return resolver.get(secret_name)
+        # The rejoin repair key: resolve late, never seed (see above).
+        from agentworks.orchestration.secrets import secret_declarations
+        from agentworks.secrets.resolve import active_backends, resolve_secrets
+
+        (decl,) = secret_declarations([secret_name], registry)
+        return resolve_secrets([decl], active_backends(config, registry))[
+            secret_name
+        ]
+
+    with contextlib.ExitStack() as stack:
+        for vm_node in vm_nodes:
+            stack.enter_context(activation_gate(vm_node, _serve_gate_secret))
+        yield
 
 
 def _resolve_template(registry: Registry, template_name: str | None) -> ResolvedSessionTemplate:
@@ -2379,12 +2470,13 @@ def stop_all_sessions(
         admin_only=admin_only,
     )
 
-    # Resolve distinct VMs from the filtered session set and enter the
-    # keepalive BEFORE the SSH probes. The probes (ensure_pids_batch,
-    # batch_check_all_sessions) issue per-VM round-trips; on WSL2 they
-    # would race the idle timer without the anchor. No-op on non-WSL2.
+    # Resolve distinct VMs from the filtered session set and open the
+    # batch boundary + per-VM gates BEFORE the SSH probes. The probes
+    # (ensure_pids_batch, batch_check_all_sessions) issue per-VM
+    # round-trips; on WSL2 they would race the idle timer without the
+    # held-active anchor (a no-op hold on other platforms).
     distinct_vms = _distinct_vms_for_sessions(db, sessions)
-    with keep_actives(db, config, bind_platforms(config, distinct_vms)):
+    with _batch_vm_boundary(db, config, distinct_vms):
         # Auto-repair NULL-PID sessions, then batch check
         sessions = ensure_pids_batch(sessions, db=db, config=config)
         status_map = batch_check_all_sessions(sessions, db=db, config=config)
@@ -2475,13 +2567,13 @@ def restart_all_sessions(
     )
 
     # Resolve distinct VMs from the filtered set and anchor them BEFORE the
-    # SSH probes. Each restart_session call also enters its own keepalive;
-    # the redundant inner wrap is a no-op on already-active VMs and a cheap
+    # SSH probes. Each restart_session call also opens its own gate span;
+    # the redundant inner gate is a no-op on already-active VMs and a cheap
     # extra subprocess on WSL2 (accepted, see PR description).
     distinct_vms = _distinct_vms_for_sessions(db, sessions)
 
     failed: list[tuple[str, str]] = []
-    with keep_actives(db, config, bind_platforms(config, distinct_vms)):
+    with _batch_vm_boundary(db, config, distinct_vms):
         # Auto-repair NULL-PID sessions, then batch check
         sessions = ensure_pids_batch(sessions, db=db, config=config)
         status_map = batch_check_all_sessions(sessions, db=db, config=config)
@@ -2880,7 +2972,7 @@ def list_sessions(
     )
 
     status_map: dict[str, SessionStatus] = {}
-    with keep_actives(db, config, bind_platforms(config, status_keepalive_vms)):
+    with _batch_vm_boundary(db, config, status_keepalive_vms):
         if not no_status:
             sessions = ensure_pids_batch(sessions, db=db, config=config)
             status_map = batch_check_all_sessions(sessions, db=db, config=config)
