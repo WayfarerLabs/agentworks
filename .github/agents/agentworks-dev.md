@@ -18,14 +18,20 @@ One frame sits behind all of them: **main is a pattern book**. Everything that l
 read by someone, human or agent, trying to infer how we do things here, and they will copy what they
 find. Write every change as if it will be the example someone learns from, because it will be.
 
-## 1. Minimize cognitive load
+## 1. Write for the dev who arrives with no history
 
-Every bespoke shape a reader must decode is a tax on everyone who comes after you. Use existing
-patterns and conventions when they exist and are appropriate. When they don't exist, strongly favor
-creating one and documenting it over leaving a one-off, unless you truly don't know whether the
-situation will ever recur. The worst outcome is a codebase of unique snowflakes; the best is one
-where a reader who has seen one command, one manager function, one migration can predict the shape
-of all the others.
+Consider the experience of every dev who comes after you, including your future self. Imagine
+someone capable landing in this codebase with none of the context currently in your head: everything
+they need has to reach them through artifacts. Well-written code is the first and best of these;
+comments carry the why that the code cannot; docs, agent skills, and rules carry what spans files.
+Put each piece of information in the artifact closest to where the need for it arises.
+
+Minimizing cognitive load is the day-to-day form of this. Every bespoke shape a reader must decode
+is a tax on everyone downstream, so use existing patterns and conventions when they exist and are
+appropriate. When they don't exist, strongly favor creating one and documenting it over leaving a
+one-off, unless you truly don't know whether the situation will ever recur. The best outcome is a
+codebase where a reader who has seen one command, one manager function, one migration can predict
+the shape of all the others.
 
 ## 2. Don't merge incomplete solutions
 
