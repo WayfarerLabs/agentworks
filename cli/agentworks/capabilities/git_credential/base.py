@@ -167,23 +167,18 @@ class GitCredentialProvider(Capability):
         written to any VM.
 
         Post-resolve and read-only: it reads the token from the context's
-        resolved secrets (``ctx.secrets``) and does a single authenticated
-        GET. A definitive rejection raises ``TokenRejectedError`` (safe:
-        runup runs before any VM/user mutation); network indeterminacy or
-        any other non-success warns and continues unverified, so a
-        transient outage never blocks work a valid token would have done.
-        Operators skip this whole stage via the composition root (which
-        gates the call on ``[defaults]``); it is not this method's job to
-        consult that flag.
+        resolved secrets (``ctx.secret(name)``) and does a single
+        authenticated GET. A definitive rejection raises
+        ``TokenRejectedError`` (safe: runup runs before any VM/user
+        mutation); network indeterminacy or any other non-success warns
+        and continues unverified, so a transient outage never blocks work
+        a valid token would have done. Operators skip this whole stage via
+        the composition root (which gates the call on ``[defaults]``); it
+        is not this method's job to consult that flag. A context with no
+        resolved secrets at all (inspection only?) is the accessor's
+        typed ``ConfigError``.
         """
-        from agentworks.errors import ConfigError
-
-        if ctx.secrets is None:
-            raise ConfigError(
-                f"{self._owner_display}: cannot check the token without "
-                f"resolved secrets in the run context (inspection only?)"
-            )
-        self._verify_token(ctx.secrets.get(self.secret_name))
+        self._verify_token(ctx.secret(self.secret_name))
 
     def review_remote(self, url: str) -> list[str]:
         """Advisory review of a declared repo remote URL against THIS

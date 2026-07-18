@@ -94,7 +94,7 @@ def test_proxmox_runup_network_warns(
 def test_proxmox_runup_without_secrets_is_error() -> None:
     """A runup with no resolved secrets in the context (inspection) is a
     typed error, not a crash: runup runs post-resolve and must be handed
-    the token via ``ctx.secrets``."""
+    the token via ``ctx.secret(name)``."""
     from agentworks.errors import ConfigError
 
     with pytest.raises(ConfigError, match="resolved secrets"):

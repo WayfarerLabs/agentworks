@@ -151,25 +151,18 @@ class ProxmoxPlatform(VMPlatform):
         outage never blocks work a valid token would have done.
 
         Post-resolve and read-only: the token comes from the context's
-        resolved secrets (``ctx.secrets``), the same value the op client
-        reads via the bound resolver. runup builds a throwaway client for
-        the check and leaves ``self`` untouched."""
+        resolved secrets (``ctx.secret(name)``), the same value the op
+        client reads via the bound resolver. runup builds a throwaway
+        client for the check and leaves ``self`` untouched. A context
+        with no resolved secrets at all (inspection only?) is the
+        accessor's typed ``ConfigError``, so every capability's runup
+        fails that case the same way."""
         from agentworks import output
         from agentworks.errors import TokenRejectedError
 
         token_secret = str(self._cfg("token_secret", DEFAULT_TOKEN_SECRET))
-        if ctx.secrets is None:
-            # ConfigError, not the op path's StateError, for parity with
-            # every capability's runup: the git-credential base runup raises
-            # the same type for this same "context assembled without a
-            # resolve pass" case, so all runups fail the same way.
-            raise ConfigError(
-                f"vm-site '{self.site_name}': cannot check the Proxmox API "
-                f"token without resolved secrets in the run context "
-                f"(inspection only?)"
-            )
         output.detail(f"Performing runup test for vm-site/{self.site_name}...")
-        api = self._build_api(ctx.secrets.get(token_secret))
+        api = self._build_api(ctx.secret(token_secret))
         try:
             api.next_id()
         except ProxmoxAPIError as e:

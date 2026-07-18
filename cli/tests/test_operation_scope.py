@@ -1,0 +1,75 @@
+"""``OperationScope``: the level-to-fields invariant is ENFORCED at
+construction (a mis-leveled scope cannot exist), not documented in
+prose.
+"""
+
+from __future__ import annotations
+
+import dataclasses
+
+import pytest
+
+from agentworks.capabilities.base import OperationScope, ScopeLevel
+from agentworks.errors import StateError
+
+
+def test_system_scope_constructs_bare() -> None:
+    scope = OperationScope(level=ScopeLevel.SYSTEM)
+    assert scope.system_slug is None  # unset on a first-ever create
+    assert scope.vm is None
+    assert not scope.admin
+
+
+def test_system_slug_is_allowed_at_every_constructible_level() -> None:
+    OperationScope(level=ScopeLevel.SYSTEM, system_slug="lab")
+    OperationScope(level=ScopeLevel.VM, system_slug="lab", vm="box")
+
+
+def test_vm_scope_requires_its_vm() -> None:
+    scope = OperationScope(level=ScopeLevel.VM, vm="box")
+    assert scope.vm == "box"
+    with pytest.raises(StateError, match=r"requires 'vm'"):
+        OperationScope(level=ScopeLevel.VM)
+
+
+@pytest.mark.parametrize("field", ["vm", "workspace", "agent", "session"])
+def test_system_scope_forbids_deeper_names(field: str) -> None:
+    with pytest.raises(StateError, match=f"forbids '{field}'"):
+        OperationScope(level=ScopeLevel.SYSTEM, **{field: "x"})  # type: ignore[arg-type]
+
+
+@pytest.mark.parametrize("field", ["workspace", "agent", "session"])
+def test_vm_scope_forbids_deeper_names(field: str) -> None:
+    with pytest.raises(StateError, match=f"forbids '{field}'"):
+        OperationScope(level=ScopeLevel.VM, vm="box", **{field: "x"})  # type: ignore[arg-type]
+
+
+@pytest.mark.parametrize("level", [ScopeLevel.SYSTEM, ScopeLevel.VM])
+def test_admin_is_session_vocabulary_only(level: ScopeLevel) -> None:
+    kwargs = {"vm": "box"} if level is ScopeLevel.VM else {}
+    with pytest.raises(StateError, match="admin"):
+        OperationScope(level=level, admin=True, **kwargs)  # type: ignore[arg-type]
+
+
+def test_error_names_every_violation_at_once() -> None:
+    with pytest.raises(StateError, match=r"requires 'vm'.*forbids 'session'"):
+        OperationScope(level=ScopeLevel.VM, session="s1")
+
+
+@pytest.mark.parametrize(
+    "level", [ScopeLevel.WORKSPACE, ScopeLevel.AGENT, ScopeLevel.SESSION]
+)
+def test_deeper_levels_are_loudly_not_constructible_yet(level: ScopeLevel) -> None:
+    """The full five-level enum is a cheap contract defined up front,
+    but a level's field rules land with the commands that operate at
+    it; until then no scope with an unenforced invariant can exist."""
+    with pytest.raises(StateError, match="cannot be constructed"):
+        OperationScope(
+            level=level, vm="box", workspace="ws1", agent="dev", session="s1"
+        )
+
+
+def test_scope_is_frozen() -> None:
+    scope = OperationScope(level=ScopeLevel.VM, vm="box")
+    with pytest.raises(dataclasses.FrozenInstanceError):
+        scope.vm = "other"  # type: ignore[misc]

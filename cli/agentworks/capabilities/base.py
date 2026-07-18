@@ -34,9 +34,10 @@ from __future__ import annotations
 
 from abc import ABC
 from dataclasses import dataclass
+from enum import Enum
 from typing import TYPE_CHECKING, Any, ClassVar, Protocol
 
-from agentworks.errors import ConfigError
+from agentworks.errors import ConfigError, StateError
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping
@@ -50,13 +51,100 @@ if TYPE_CHECKING:
 class SecretReader(Protocol):
     """Read-only access to resolved secret values, as runup/ops see them
     at the op boundary. The operation's resolver satisfies it (post
-    resolve pass); a future permission model can substitute a scoped
-    view. Raises if a name was not resolved."""
+    resolve pass), as does the orchestration layer's scoped delivery
+    view (``orchestration.secrets.ScopedSecrets``). Raises if a name
+    was not resolved."""
 
     def get(self, name: str) -> str: ...
 
 
+class ScopeLevel(Enum):
+    """How deep an operation's identity chain reaches (the operation
+    scope's key). One level per COMMAND, never per node: a batch
+    command over N VMs is SYSTEM level, with each VM's identity coming
+    from the nodes themselves."""
+
+    SYSTEM = "system"  # the whole installation, no VM
+    VM = "vm"  # a VM
+    WORKSPACE = "workspace"  # a workspace on a VM
+    AGENT = "agent"  # an agent user in a workspace on a VM
+    SESSION = "session"  # a harness as agent-or-admin, in a workspace, on a VM
+
+
+# The level-to-fields invariant, per constructible level: (required
+# name fields, forbidden name fields). ``system_slug`` is the anchor,
+# allowed at every level; ``admin`` is SESSION vocabulary and is
+# enforced separately. WORKSPACE / AGENT / SESSION rules land with the
+# commands that operate at those levels (orchestration-layer plan,
+# phases 3-4); until then those levels are loudly non-constructible,
+# so no scope with an unenforced invariant can exist.
+_SCOPE_LEVEL_RULES: dict[ScopeLevel, tuple[tuple[str, ...], tuple[str, ...]]] = {
+    ScopeLevel.SYSTEM: ((), ("vm", "workspace", "agent", "session")),
+    ScopeLevel.VM: (("vm",), ("workspace", "agent", "session")),
+}
+
+
 @dataclass(frozen=True)
+class OperationScope:
+    """WHY an operation is running: its static identity chain, keyed by
+    :class:`ScopeLevel`. Built once per command, at the orchestrator's
+    entry; identical on every node's context; names only (strings).
+
+    ``__post_init__`` ENFORCES that exactly the level's fields are set
+    and the rest are absent, so a scope inconsistent with its level
+    cannot be constructed. This is a promised invariant, not a
+    convention.
+
+    It is DESCRIPTIVE, not power-granting, which is why it is a plain
+    ungated field on the context: a node reads the LEVEL off it (the
+    skip/defer/probe/error fork) and treats the name fields as framing
+    for errors and logs. A node never ADDRESSES through these names;
+    acting identity is the node's own (layer 1, its ``kind/name`` and
+    row-carried ancestors).
+    """
+
+    level: ScopeLevel
+    system_slug: str | None = None  # the anchor; may be unset on a first-ever create
+    vm: str | None = None
+    workspace: str | None = None
+    agent: str | None = None
+    session: str | None = None
+    admin: bool = False
+
+    def __post_init__(self) -> None:
+        rules = _SCOPE_LEVEL_RULES.get(self.level)
+        if rules is None:
+            raise StateError(
+                f"OperationScope cannot be constructed at the "
+                f"{self.level.value} level yet: that level's field rules "
+                f"land with the commands that operate at it "
+                f"(orchestration-layer SDD)."
+            )
+        required, forbidden = rules
+        problems = [
+            f"requires {field!r}"
+            for field in required
+            if getattr(self, field) is None
+        ]
+        problems += [
+            f"forbids {field!r} (got {getattr(self, field)!r})"
+            for field in forbidden
+            if getattr(self, field) is not None
+        ]
+        if self.admin:
+            problems.append(
+                "forbids 'admin' (SESSION vocabulary: exactly one of "
+                "agent/admin, at SESSION level only)"
+            )
+        if problems:
+            raise StateError(
+                f"OperationScope level-to-fields invariant violated: a "
+                f"{self.level.value}-level scope "
+                f"{'; '.join(problems)}."
+            )
+
+
+@dataclass(frozen=True, init=False)
 class RunContext:
     """The resolved runtime world handed to a capability at a stage
     boundary: to ``runup`` and, as op shapes converge, to ops (and to
@@ -66,23 +154,81 @@ class RunContext:
     timing is the whole difference between the two readiness stages:
     ``preflight`` gets it as of command start (targets that ALREADY
     exist, and no resolved secrets yet); ``runup`` gets it as of op start
-    (current targets, resolved secrets). Every field is optional and is
+    (current targets, resolved secrets). Everything is optional and is
     present only when it exists at that timing and, in a future
     permission model, when the capability is granted it: a
     provisioning-phase runup has no on-VM targets; a `vm create`
     preflight has none either (the VM is created later, which is
     exactly what keeps preflight dependency-blind); a `session create`
-    preflight against an existing VM does have `admin_target`.
+    preflight against an existing VM does have an admin target.
+
+    Two kinds of content, shaped differently on purpose:
+
+    - The DESCRIPTIVE world is plain fields: ``config`` and
+      ``operation_scope`` (why the command is running; reading it
+      grants no capability, so it is ungated).
+    - The POWER-GRANTING world (execution targets, resolved secrets)
+      is reached through plain accessor METHODS,
+      :meth:`admin_target` / :meth:`agent_target` / :meth:`secret`.
+      In v1 they are pure pass-through (no requester binding, no
+      grant check); the method shape exists so the node-facing
+      signature is stable when a later permission model gates by the
+      requesting node.
 
     The rule that goes with it: readiness's pre-resolve concerns read
     ``self`` (config bound at construct, ``self.resolver`` for
     prediction); ``runup`` and ops read the context.
     """
 
-    config: Config | None = None
-    admin_target: Transport | None = None
-    agent_target: Transport | None = None
-    secrets: SecretReader | None = None
+    config: Config | None
+    operation_scope: OperationScope | None
+    _admin_target: Transport | None
+    _agent_target: Transport | None
+    _secrets: SecretReader | None
+
+    def __init__(
+        self,
+        *,
+        config: Config | None = None,
+        operation_scope: OperationScope | None = None,
+        admin_target: Transport | None = None,
+        agent_target: Transport | None = None,
+        secrets: SecretReader | None = None,
+    ) -> None:
+        # Hand-written only to store the power-granting inputs under
+        # private names while their public surface is the accessor
+        # methods below (a generated __init__ would force callers to
+        # spell the private names). Frozen dataclass, so assignment
+        # goes through object.__setattr__.
+        object.__setattr__(self, "config", config)
+        object.__setattr__(self, "operation_scope", operation_scope)
+        object.__setattr__(self, "_admin_target", admin_target)
+        object.__setattr__(self, "_agent_target", agent_target)
+        object.__setattr__(self, "_secrets", secrets)
+
+    def admin_target(self) -> Transport | None:
+        """The admin execution target, when one exists at this stage's
+        timing. Plain pass-through in v1."""
+        return self._admin_target
+
+    def agent_target(self) -> Transport | None:
+        """The agent execution target, when one exists at this stage's
+        timing. Plain pass-through in v1."""
+        return self._agent_target
+
+    def secret(self, name: str) -> str:
+        """A resolved secret value, from the operation's boundary
+        resolve pass (delivery may be scoped to the reader's declared
+        names). Raises :class:`~agentworks.errors.ConfigError` when the
+        context carries no resolved secrets at all: post-resolve code
+        reached with a pre-boundary (or inspection-only) context."""
+        if self._secrets is None:
+            raise ConfigError(
+                f"secret {name!r} requested from a run context with no "
+                f"resolved secrets (assembled before the resolve "
+                f"boundary, or for inspection only?)"
+            )
+        return self._secrets.get(name)
 
 
 def idempotent_op[F: "Callable[..., Any]"](fn: F) -> F:
@@ -271,11 +417,11 @@ class Capability(ABC):
 
         Preflight's post-resolve twin (preflight is the walk-around; this
         is the run-up at the hold-short line, right before the op). It
-        reads resolved secret values from the context (``ctx.secrets``,
+        reads resolved secret values from the context (``ctx.secret(name)``,
         the op-start :class:`RunContext`) and does the authenticated reads
         preflight cannot: a git provider's ``GET /user``, a platform's
         API connection check. It may also use the context's execution
-        targets (``ctx.admin_target`` / ``ctx.agent_target``) that an
+        targets (``ctx.admin_target()`` / ``ctx.agent_target()``) that an
         earlier phase created. Read-only and side-effect-free exactly like
         :meth:`preflight` (it never mints, creates, or mutates), which is
         what lets it be re-run and, via a future ``doctor --runup``,

@@ -135,17 +135,18 @@ gain; deferring it is strictly more capable.
 
 That "current context" is a concrete object: **`RunContext`** (`capabilities/base.py`), the resolved
 runtime world the service-layer operation assembles and hands to `preflight`, `runup`, and (as op
-shapes converge) ops. It carries the operation's config, the execution targets (`admin_target` /
-`agent_target`: transports to run as those users on a VM), and resolved `secrets`. Every field is
-optional, and the timing is what populates it: **preflight gets it as of command start** (targets
-that _already_ exist, no resolved secrets), **runup gets it as of op start** (current targets,
-resolved secrets). It is the same object minus the secrets, differing only by when it is built --
-which is exactly why the dependency-blindness above is structural rather than a rule to remember: a
-`vm create` preflight is simply handed a context with no VM target, so it _cannot_ reach the thing
-the command has not created yet. (A future permission model omits fields the same way: a capability
-not granted a target or a secret just finds it absent.) The rule that pairs with it: pre-resolve
-concerns read `self` (config bound at construct, `self.resolver` for prediction); runup and ops read
-the context.
+shapes converge) ops. It carries the operation's config and operation scope as plain fields, and the
+power-granting world behind plain accessor methods: the execution targets (`ctx.admin_target()` /
+`ctx.agent_target()`: transports to run as those users on a VM) and resolved secrets
+(`ctx.secret(name)`). Everything is optional, and the timing is what populates it: **preflight gets
+it as of command start** (targets that _already_ exist, no resolved secrets), **runup gets it as of
+op start** (current targets, resolved secrets). It is the same object minus the secrets, differing
+only by when it is built -- which is exactly why the dependency-blindness above is structural rather
+than a rule to remember: a `vm create` preflight is simply handed a context with no VM target, so it
+_cannot_ reach the thing the command has not created yet. (A future permission model omits fields
+the same way: a capability not granted a target or a secret just finds it absent.) The rule that
+pairs with it: pre-resolve concerns read `self` (config bound at construct, `self.resolver` for
+prediction); runup and ops read the context.
 
 ### 1. `validate_config` (declare; pure, classmethod)
 
@@ -427,17 +428,17 @@ framework owning everything in between:
    no resolver, no I/O, no resolution. This is the capability's _entire_ input side. The framework
    reads those references to build the resolvability prediction preflight uses and to scope the one
    batched resolve pass.
-2. **Receive, from the context.** Read resolved secret values only from `ctx.secrets`, in `runup`
-   (and in ops as their signatures converge on `RunContext`). Never fetch a value through
+2. **Receive, from the context.** Read resolved secret values only via `ctx.secret(name)`, in
+   `runup` (and in ops as their signatures converge on `RunContext`). Never fetch a value through
    `self.resolver`: the bound resolver is a _prediction_ tool for preflight (`register_name` /
    `predict`, which never returns a value), not a value source. And construct only _binds_ (config
    plus resolver); it never resolves.
 
 The rule that ties the two together is the self-vs-context split stated with `RunContext` above:
-pre-resolve concerns read `self`, post-resolve concerns read the context. A secret is absent from
-`ctx.secrets` only when the context was assembled without a resolve pass (inspection), and that is a
-typed `ConfigError`, not a silent skip: runup runs post-resolve, so a missing value is a caller bug,
-not a state to tolerate.
+pre-resolve concerns read `self`, post-resolve concerns read the context. `ctx.secret(name)` raises
+only when the context was assembled without a resolve pass (inspection), and that is a typed
+`ConfigError`, not a silent skip: runup runs post-resolve, so a missing value is a caller bug, not a
+state to tolerate.
 
 Holding this line is what keeps a capability **forward-compatible with the resolution model moving
 under it.** The direction of travel is an orchestration layer that resolves the whole reference
@@ -448,10 +449,10 @@ behind it moves. One that reaches into `self.resolver` for values, or resolves a
 be rewritten.
 
 Both shipped capabilities are the reference: `git-credential-provider` (github, azdo) and
-`vm-platform/proxmox` read their tokens from `ctx.secrets` in `runup` and raise a typed
-`ConfigError` when it is absent. Proxmox's op client is the one remaining bridge (its `_api` still
-reads the token through the bound resolver, pending the op-signature convergence noted with
-`RunContext`); a new capability should not add a second.
+`vm-platform/proxmox` read their tokens via `ctx.secret(name)` in `runup` and get its typed
+`ConfigError` when the context carries none. Proxmox's op client is the one remaining bridge (its
+`_api` still reads the token through the bound resolver, pending the op-signature convergence noted
+with `RunContext`); a new capability should not add a second.
 
 ## Where capabilities live
 
