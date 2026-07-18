@@ -18,7 +18,7 @@ from agentworks.errors import (
     UserAbort,
     ValidationError,
 )
-from agentworks.vms.manager import bind_platform, gated_vm_boundary, keep_active
+from agentworks.vms.manager import gated_vm_boundary, keep_active
 
 if TYPE_CHECKING:
     from agentworks.capabilities.base import OperationScope
@@ -936,12 +936,29 @@ def copy_workspace(
     dest_name: str,
     vm_name: str | None = None,
 ) -> None:
-    """Copy a workspace to a new VM workspace."""
+    """Copy a workspace to a new VM workspace.
+
+    Orchestrated (``vms.manager.gated_vm_boundary``, WORKSPACE scope),
+    the first two-VM command: the composition stays SEQUENTIAL per VM,
+    exactly the imperative shape, rather than a coalesced multi-root
+    single-boundary graph. The imperative command ran two separate
+    binds (two prompt sessions, one per site, when source and dest
+    differ), and the dest VM is only known mid-command
+    (``_resolve_vm`` may interactively prompt); coalescing would merge
+    prompt sessions AND hoist the interactive chooser, both behavior
+    changes beyond parity. The source boundary (source workspace's
+    scope) is entered on the ExitStack before the pack; when the dest
+    VM differs, a SECOND boundary (dest workspace's scope) nests on
+    the same stack so both VMs stay held; the same-VM case reuses the
+    source composition with no second boundary. The multi-root walk
+    stays available for the batch commands that already coalesce.
+    """
     import contextlib
     import tempfile
     from pathlib import Path
 
     from agentworks.agents.grants import workspace_group
+    from agentworks.bootstrap import build_registry
     from agentworks.ssh import SSHLogger
     from agentworks.transports import SSHTransport, transport
     validate_name(dest_name)
@@ -975,9 +992,12 @@ def copy_workspace(
                     entity_name=src_ws.vm_name,
                 )
             _guard_vm_status(src_vm)
-            src_platform = bind_platform(config, src_vm)
+            registry = build_registry(config)
             _keepalive_stack.enter_context(
-                keep_active(db, config, src_vm, src_platform)
+                gated_vm_boundary(
+                    db, config, registry, src_vm,
+                    scope=_workspace_scope(db, src_vm, source_name),
+                )
             )
             if src_vm.tailscale_host is None:
                 raise StateError(
@@ -1013,12 +1033,15 @@ def copy_workspace(
             dest_vm = _resolve_vm(db, vm_name)
             _guard_vm_status(dest_vm)
             if dest_vm.name != src_vm.name:
-                dest_platform = bind_platform(config, dest_vm)
                 _keepalive_stack.enter_context(
-                    keep_active(db, config, dest_vm, dest_platform)
+                    gated_vm_boundary(
+                        db, config, registry, dest_vm,
+                        scope=_workspace_scope(db, dest_vm, dest_name),
+                    )
                 )
-            # Same VM: the src bind + keepalive above already gate and
-            # hold it; a second bind would re-run the resolve pass.
+            # Same VM: the source boundary and held span above already
+            # gate and hold it; a second boundary would re-run the
+            # resolve pass.
             if dest_vm.tailscale_host is None:
                 raise StateError(
                     f"VM '{dest_vm.name}' has no Tailscale address",

@@ -532,3 +532,115 @@ def test_rehome_confirm_sits_inside_the_span_after_the_dir_checks(
     ]
     ws = db.get_workspace("ws1")
     assert ws is not None and ws.workspace_path == "/srv/ws1"
+
+
+# -- copy: the sequential two-boundary composition ----------------------------
+
+
+def _wire_copy_fakes(
+    monkeypatch: pytest.MonkeyPatch, events: list[str]
+) -> _FakeAdminTarget:
+    """The copy command's fakes: a transport double that IS an
+    SSHTransport (the pack step asserts the concrete type to read the
+    raw ssh argv off it), a recording ``subprocess.run`` for the tar
+    pipe, and hold-span recording on the platform's ``vm_active``."""
+    import subprocess as subprocess_mod
+
+    from agentworks.transports import SSHTransport
+
+    # The fake FIRST in the MRO so its recording run / write_file /
+    # copy_to win; SSHTransport supplies the concrete type (and the
+    # host / user / identity_file attributes the pack step reads).
+    class _FakeSSHTarget(_FakeAdminTarget, SSHTransport):  # type: ignore[misc]  # the fake's recording run deliberately shadows the real signature
+        def __init__(self) -> None:
+            SSHTransport.__init__(self, "100.64.0.9", user="admin")
+            _FakeAdminTarget.__init__(self, events=events)
+
+    fake = _FakeSSHTarget()
+    monkeypatch.setattr(
+        "agentworks.transports.transport", lambda vm, config, **kwargs: fake
+    )
+
+    def _fake_pack(args: object, **kwargs: object) -> SimpleNamespace:
+        events.append("pack")
+        return SimpleNamespace(returncode=0, stderr=b"")
+
+    monkeypatch.setattr(subprocess_mod, "run", _fake_pack)
+
+    real_vm_active = ProxmoxPlatform.vm_active
+
+    @contextlib.contextmanager
+    def _recording_hold(self: ProxmoxPlatform, row, *, config=None):  # noqa: ANN001, ANN202
+        events.append(f"hold-enter:{row.name}")
+        with real_vm_active(self, row, config=config):
+            yield
+        events.append(f"hold-exit:{row.name}")
+
+    monkeypatch.setattr(ProxmoxPlatform, "vm_active", _recording_hold)
+    return fake
+
+
+def test_copy_cross_vm_runs_two_sequential_boundaries_with_nested_holds(
+    db: Database,
+    make_config,  # noqa: ANN001
+    resolve_counter: list[list[str]],
+    monkeypatch: pytest.MonkeyPatch,
+    captured_output,  # noqa: ANN001
+) -> None:
+    """Cross-VM copy: TWO boundary bursts in order (source first, then
+    dest; one shared site config here, so both bursts name the site's
+    secret), the dest boundary only entered after the pack (the dest
+    VM is resolved mid-command, as at HEAD), and BOTH holds open
+    concurrently (the dest span nests inside the source span)."""
+    config = make_config()
+    _seed(db)
+    db.insert_vm("box2", site="proxmox", hostname="box2")
+    db.update_vm_tailscale("box2", "100.64.0.10")
+    db.update_vm_init_status("box2", InitStatus.COMPLETE)
+    _reachable(monkeypatch, True)
+    events: list[str] = []
+    _wire_copy_fakes(monkeypatch, events)
+
+    workspace_manager.copy_workspace(
+        db, config, "ws1", dest_name="ws2", vm_name="box2"
+    )
+
+    # Two sequential compositions, one boundary resolve each.
+    assert resolve_counter == [["proxmox-token"], ["proxmox-token"]]
+    # Source held before the pack; dest boundary only after it; the
+    # dest hold exits before the source hold (nested spans, both open
+    # across the unpack).
+    assert events.index("hold-enter:box") < events.index("pack")
+    assert events.index("pack") < events.index("hold-enter:box2")
+    assert events.index("hold-exit:box2") < events.index("hold-exit:box")
+    row = db.get_workspace("ws2")
+    assert row is not None and row.vm_name == "box2" and row.template == "copied"
+    assert any("tar xzf" in e for e in events if e.startswith("run:"))
+    assert "Workspace 'ws1' copied to 'ws2'" in captured_output.info
+
+
+def test_copy_same_vm_reuses_the_source_composition(
+    db: Database,
+    make_config,  # noqa: ANN001
+    resolve_counter: list[list[str]],
+    monkeypatch: pytest.MonkeyPatch,
+    captured_output,  # noqa: ANN001
+) -> None:
+    """Same-VM copy: exactly ONE boundary (no second resolve, no
+    second hold); the source composition already gates and holds the
+    one VM."""
+    config = make_config()
+    _seed(db)
+    _reachable(monkeypatch, True)
+    events: list[str] = []
+    _wire_copy_fakes(monkeypatch, events)
+
+    workspace_manager.copy_workspace(
+        db, config, "ws1", dest_name="ws2", vm_name="box"
+    )
+
+    assert resolve_counter == [["proxmox-token"]]
+    assert events.count("hold-enter:box") == 1
+    row = db.get_workspace("ws2")
+    assert row is not None and row.vm_name == "box"
+    assert "Workspace 'ws1' copied to 'ws2'" in captured_output.info
