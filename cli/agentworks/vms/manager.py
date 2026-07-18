@@ -1089,30 +1089,6 @@ def exec_vm(
         return target.call_streaming(remote_cmd, env=env)
 
 
-def _gate_secret_resolver(
-    config: Config, registry: Registry, resolver: Resolver
-) -> Callable[[str], str]:
-    """The activation gate's just-in-time resolve callback, shared by
-    the orchestrated VM commands: resolve through the normal backend
-    chain and SEED the boundary resolver as each value lands, so the
-    platform's power ops (which read the bound resolver, the interim
-    op-client bridge) see it immediately and the boundary pass never
-    resolves or prompts it again (``Resolver.seed``)."""
-
-    def resolve_gate_secret(secret_name: str) -> str:
-        from agentworks.orchestration.secrets import secret_declarations
-        from agentworks.secrets.resolve import active_backends, resolve_secrets
-
-        (decl,) = secret_declarations([secret_name], registry)
-        value = resolve_secrets([decl], active_backends(config, registry))[
-            secret_name
-        ]
-        resolver.seed({secret_name: value})
-        return value
-
-    return resolve_gate_secret
-
-
 def add_git_credential(db: Database, config: Config, name: str, credential_name: str) -> None:
     """Add or update a git credential on a VM.
 
@@ -1142,7 +1118,10 @@ def add_git_credential(db: Database, config: Config, name: str, credential_name:
     from agentworks.bootstrap import build_registry
     from agentworks.capabilities.base import OperationScope, ScopeLevel
     from agentworks.git_credentials.nodes import git_credential_node
-    from agentworks.orchestration.activation import activation_gate
+    from agentworks.orchestration.activation import (
+        activation_gate,
+        gate_secret_resolver,
+    )
     from agentworks.orchestration.readiness import preflight_all
     from agentworks.orchestration.secrets import ScopedSecrets, secret_union
     from agentworks.orchestration.walk import walk
@@ -1202,7 +1181,7 @@ def add_git_credential(db: Database, config: Config, name: str, credential_name:
         vm=name,
     )
 
-    with activation_gate(vm_node, _gate_secret_resolver(config, registry, resolver)):
+    with activation_gate(vm_node, gate_secret_resolver(config, registry, resolver)):
         # PREFLIGHT-ALL against the one command-start context, then the
         # boundary resolve: the walk-away point.
         preflight_all(nodes, RunContext(config=config, operation_scope=scope))
@@ -1633,7 +1612,10 @@ def reinit_vm(
 
     from agentworks.capabilities.base import OperationScope, ScopeLevel
     from agentworks.git_credentials.nodes import git_credential_node
-    from agentworks.orchestration.activation import activation_gate
+    from agentworks.orchestration.activation import (
+        activation_gate,
+        gate_secret_resolver,
+    )
     from agentworks.orchestration.readiness import preflight_all
     from agentworks.orchestration.secrets import ScopedSecrets, secret_union
     from agentworks.orchestration.walk import walk
@@ -1700,7 +1682,7 @@ def reinit_vm(
             secrets=ScopedSecrets(resolver.values, secret_names),
         )
 
-    with activation_gate(vm_node, _gate_secret_resolver(config, registry, resolver)):
+    with activation_gate(vm_node, gate_secret_resolver(config, registry, resolver)):
         # The preflight boundary: git tokens and any site config secret
         # (proxmox's API token) resolve in one prompt session.
         # Provisioning is hermetic: no operator-env secrets are

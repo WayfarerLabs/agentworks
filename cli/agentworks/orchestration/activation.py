@@ -66,6 +66,9 @@ if TYPE_CHECKING:
     from collections.abc import Callable, Iterator
 
     from agentworks.capabilities.base import SecretReader
+    from agentworks.config import Config
+    from agentworks.resources.registry import Registry
+    from agentworks.secrets.resolver import Resolver
 
 
 class GateTarget(Protocol):
@@ -189,6 +192,30 @@ def ensure_active(
             _GateSecrets(values, target.repair_secret_refs, resolve_secret)
         )
     return values
+
+
+def gate_secret_resolver(
+    config: Config, registry: Registry, resolver: Resolver
+) -> Callable[[str], str]:
+    """The gate's just-in-time resolve callback, shared by every
+    migrated command that opens the gate: resolve through the normal
+    backend chain and SEED the boundary resolver as each value lands,
+    so the platform's power ops (which read the bound resolver, the
+    interim op-client bridge) see it immediately and the boundary pass
+    never resolves or prompts it again (``Resolver.seed``)."""
+
+    def resolve_gate_secret(secret_name: str) -> str:
+        from agentworks.orchestration.secrets import secret_declarations
+        from agentworks.secrets.resolve import active_backends, resolve_secrets
+
+        (decl,) = secret_declarations([secret_name], registry)
+        value = resolve_secrets([decl], active_backends(config, registry))[
+            secret_name
+        ]
+        resolver.seed({secret_name: value})
+        return value
+
+    return resolve_gate_secret
 
 
 @contextlib.contextmanager

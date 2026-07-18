@@ -40,10 +40,14 @@ def create_workspace(
 ) -> None:
     """Create a workspace on a VM.
 
-    ``platform`` accepts the caller's already-bound platform (session
-    create's ephemeral-workspace path) so the nested create doesn't
-    re-run the site's secret resolve pass; when None this function is
-    its own composition root and binds once.
+    ``platform`` accepts a caller's already-bound platform so a nested
+    create doesn't re-run the site's secret resolve pass; when None
+    this function is its own composition root and binds once. No
+    caller passes it anymore (the orchestrated session create realizes
+    its ephemeral workspace through
+    ``workspaces.realize.realize_workspace`` instead of nesting this
+    command); the parameter is retained only until this command's own
+    migration onto the orchestrated model removes it.
     """
     from agentworks.agents.manager import workspace_group
     from agentworks.bootstrap import build_registry

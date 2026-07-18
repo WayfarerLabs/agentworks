@@ -1386,14 +1386,16 @@ def create_session(
         ScopeLevel,
     )
     from agentworks.db import SYSTEM_SLUG_KEY
-    from agentworks.orchestration.activation import activation_gate
+    from agentworks.orchestration.activation import (
+        activation_gate,
+        gate_secret_resolver,
+    )
     from agentworks.orchestration.readiness import preflight_all
     from agentworks.orchestration.secrets import ScopedSecrets, secret_union
     from agentworks.orchestration.unwind import RealizationLog
     from agentworks.orchestration.walk import walk
     from agentworks.secrets.resolver import Resolver
     from agentworks.sessions.nodes import pending_session_node
-    from agentworks.vms.manager import _gate_secret_resolver
     from agentworks.vms.nodes import live_vm_node
     from agentworks.workspaces.nodes import (
         live_workspace_node,
@@ -1497,7 +1499,7 @@ def create_session(
     # preflight sweep (so every probe reaches a live target), held
     # through the whole command, with its just-in-time values seeding
     # the boundary resolver so nothing resolves or prompts twice.
-    with activation_gate(vm_node, _gate_secret_resolver(config, registry, resolver)):
+    with activation_gate(vm_node, gate_secret_resolver(config, registry, resolver)):
         # Reload the VM row: the gate may have rejoined Tailscale (only
         # when the VM was stopped/deallocated) and updated
         # ``vms.tailscale_host``. The in-memory ``vm`` from our pre-check
@@ -2046,13 +2048,15 @@ def restart_session(
         ScopeLevel,
     )
     from agentworks.db import SYSTEM_SLUG_KEY
-    from agentworks.orchestration.activation import activation_gate
+    from agentworks.orchestration.activation import (
+        activation_gate,
+        gate_secret_resolver,
+    )
     from agentworks.orchestration.readiness import preflight_all
     from agentworks.orchestration.secrets import secret_union
     from agentworks.orchestration.walk import walk
     from agentworks.secrets.resolver import Resolver
     from agentworks.sessions.nodes import live_session_node
-    from agentworks.vms.manager import _gate_secret_resolver
     from agentworks.vms.nodes import live_vm_node
     from agentworks.workspaces.nodes import live_workspace_node
 
@@ -2100,7 +2104,7 @@ def restart_session(
     # ensure_active + vm_active hold: opened once, before the preflight
     # sweep, held through the whole command, its just-in-time values
     # seeding the boundary resolver.
-    with activation_gate(vm_node, _gate_secret_resolver(config, registry, resolver)):
+    with activation_gate(vm_node, gate_secret_resolver(config, registry, resolver)):
         if vm.tailscale_host is None:
             raise StateError(
                 f"VM '{vm.name}' has no Tailscale address",

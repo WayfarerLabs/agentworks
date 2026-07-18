@@ -38,7 +38,7 @@ from agentworks.db import Database
 from agentworks.errors import ValidationError
 from agentworks.secrets.resolver import Resolver
 
-from .conftest import stub_build_registry, stub_vm_gates
+from .conftest import empty_secret_target, stub_build_registry, stub_vm_gates
 
 
 @pytest.fixture(autouse=True)
@@ -166,7 +166,9 @@ def test_explicit_vm_agreeing_with_workspace_passes_anchor_check(
     # registration and reads template env; the stub above keeps the
     # SimpleNamespace config out of template resolution.
     monkeypatch.setattr(
-        session_manager, "_session_secret_target_pre_create", lambda *a, **k: object()
+        session_manager,
+        "_session_secret_target_pre_create",
+        lambda *a, **k: empty_secret_target(),
     )
 
     called: list[str] = []
@@ -257,7 +259,9 @@ def test_no_vm_anchor_with_single_vm_auto_selects(
     # registration and reads template env; the stub above keeps the
     # SimpleNamespace config out of template resolution.
     monkeypatch.setattr(
-        session_manager, "_session_secret_target_pre_create", lambda *a, **k: object()
+        session_manager,
+        "_session_secret_target_pre_create",
+        lambda *a, **k: empty_secret_target(),
     )
 
     called: list[str] = []
@@ -567,13 +571,11 @@ def test_eager_resolve_fires_exactly_once_for_new_workspace_and_new_agent(
     db.close()
 
 
-def test_nested_creates_are_their_own_composition_units(
+def test_realize_bodies_take_domain_shaped_kwargs_only(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Pin the composition-unit seam (resource-manifests SDD, Phase 3.6
-    follow-up, re-pinned for the orchestrated model): the realization
-    bodies are phase-free domain code, and their seam contract is
-    domain-shaped kwargs ONLY. Everything power-shaped arrives already
+    """Pin the realization-body seam contract: the bodies are
+    phase-free domain code and receive domain-shaped kwargs ONLY. Everything power-shaped arrives already
     prepared by the orchestrator: the agent body's ``git_tokens`` are
     pre-resolved (read through scoped delivery at the one boundary),
     and NO resolver, values mapping, or platform threads through, so a
@@ -791,7 +793,9 @@ def test_admin_non_interactive_on_vm_with_agents_does_not_prompt(
     # registration and reads template env; the stub above keeps the
     # SimpleNamespace config out of template resolution.
     monkeypatch.setattr(
-        session_manager, "_session_secret_target_pre_create", lambda *a, **k: object()
+        session_manager,
+        "_session_secret_target_pre_create",
+        lambda *a, **k: empty_secret_target(),
     )
 
     called: list[str] = []
@@ -878,7 +882,9 @@ def _stub_for_post_prompt_flow(monkeypatch: pytest.MonkeyPatch) -> list[str]:
     # registration and reads template env; the stub above keeps the
     # SimpleNamespace config out of template resolution.
     monkeypatch.setattr(
-        session_manager, "_session_secret_target_pre_create", lambda *a, **k: object()
+        session_manager,
+        "_session_secret_target_pre_create",
+        lambda *a, **k: empty_secret_target(),
     )
 
     def _spy(*a: object, **k: object) -> None:

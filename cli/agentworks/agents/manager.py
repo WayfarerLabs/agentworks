@@ -228,10 +228,14 @@ def create_agent(
 ) -> None:
     """Create an agent on a VM.
 
-    ``platform`` accepts the caller's already-bound platform (session
-    create's ephemeral-agent path) so the nested create doesn't re-run
-    the site's secret resolve pass; when None this function is its own
-    composition root and binds once.
+    ``platform`` accepts a caller's already-bound platform so a nested
+    create doesn't re-run the site's secret resolve pass; when None
+    this function is its own composition root and binds once. No
+    caller passes it anymore (the orchestrated session create realizes
+    its ephemeral agent through ``agents.realize.realize_agent``
+    instead of nesting this command); the parameter, and its
+    ``git_tokens`` sibling, are retained only until this command's own
+    migration onto the orchestrated model removes them.
     """
 
     from agentworks.agents.templates import resolve_template

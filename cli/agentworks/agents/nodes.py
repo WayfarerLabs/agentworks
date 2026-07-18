@@ -157,12 +157,19 @@ class PendingAgentNode:
 
     @property
     def linux_user(self) -> str:
-        """The Linux user the realizing mutation creates, derived from
-        the chosen name exactly as the mutation derives it (complete
-        identity while still pending)."""
-        from agentworks.agents.manager import derive_linux_user
-
-        return derive_linux_user(self._name)
+        """The realized agent's Linux user, read from its DB row (the
+        row is the truth; the realizing mutation derives and stores
+        it). Consumers run post-realization, so a missing row is a
+        sequencing bug and raises loudly rather than re-deriving a
+        value the mutation may not have written yet."""
+        row = self._db.get_agent(self._name)
+        if row is None:
+            raise StateError(
+                f"agent '{self._name}' has no DB row yet; linux_user is "
+                f"read from the row, only after the realizing mutation "
+                f"has inserted it."
+            )
+        return row.linux_user
 
     @property
     def template(self) -> AgentTemplateNode:
