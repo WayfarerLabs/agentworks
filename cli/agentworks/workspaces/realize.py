@@ -13,14 +13,13 @@ re-raising. Rollback of a COMPLETED workspace is not this function's
 job either: that is the pending workspace node's ``teardown``, driven
 by the orchestrator's realization log.
 
-Parity oracle: the mutation slice of ``workspaces.manager
-.create_workspace``, exactly as ``session create --new-workspace``
-invoked it nested at the time this body was factored out (same
-messages, same error wrapping, same grant-all reconciliation, minus
-the nested command root's own registry build, re-validation, and
-re-gate). The standalone ``workspace create`` command still carries
-its own copy of this slice; the two converge when that command
-migrates onto the orchestrated model.
+Parity oracle: the mutation slice of the imperative ``workspaces
+.manager.create_workspace``, exactly as ``session create
+--new-workspace`` invoked it nested at the time this body was factored
+out (same messages, same error wrapping, same grant-all
+reconciliation, minus the nested command root's own registry build,
+re-validation, and re-gate). The standalone ``workspace create`` now
+runs this body too, so it is the SINGLE copy of the slice.
 """
 
 from __future__ import annotations
@@ -44,14 +43,16 @@ def realize_workspace(
     name: str,
     vm: VMRow,
     template_name: str | None,
-) -> None:
+) -> str:
     """Make workspace ``name`` real on ``vm``: create the on-VM
     directory from its template, generate the VS Code workspace stub,
     insert the DB row, and reconcile grant-all agents onto the new
     workspace's group.
 
-    Raises on failure AFTER unwinding its own partial state; the
-    caller's realization log never sees a half-made workspace.
+    Returns the VS Code workspace stub path, for callers with an
+    open-in-VS-Code tail; callers without one ignore it. Raises on
+    failure AFTER unwinding its own partial state; the caller's
+    realization log never sees a half-made workspace.
     """
     from agentworks.agents.manager import _add_to_workspace_group, workspace_group
     from agentworks.ssh import SSHLogger
@@ -212,3 +213,8 @@ def realize_workspace(
         ssh_logger.close()
 
     output.info(f"Workspace '{name}' created")
+    # vscode_path was assigned inside the try before the row insert;
+    # reaching here means the body completed without raising, so it is
+    # set. Assert for the type-checker.
+    assert vscode_path is not None
+    return vscode_path

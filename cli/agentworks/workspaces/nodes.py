@@ -58,7 +58,8 @@ class LiveWorkspaceNode:
 class PendingWorkspaceNode:
     """The workspace a create command will make: name chosen up front,
     VM edge attached at construction, realized when its bespoke
-    mutation (today's ``create_workspace`` body) completes.
+    mutation (the ``workspaces.realize.realize_workspace`` body)
+    completes.
 
     ``teardown`` is today's ephemeral-workspace rollback body relocated
     (a forced ``delete_workspace`` through the VM's bound platform).
