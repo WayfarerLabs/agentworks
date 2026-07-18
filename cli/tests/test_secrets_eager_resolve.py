@@ -111,21 +111,24 @@ def test_session_create_eager_resolve_fires_before_db_insert(
     monkeypatch.setattr(session_manager, "_resolve_template", lambda *a, **k: _Tmpl())
     # _session_secret_target_pre_create reads config.vm_templates /
     # agent_templates which the SimpleNamespace below doesn't have; stub
-    # it to a sentinel so the root still builds its bind targets.
-    sentinel_target = object()
+    # it to an empty target so the root still registers its env seam.
+    from tests.conftest import empty_secret_target
+
     monkeypatch.setattr(
-        session_manager, "_session_secret_target_pre_create", lambda *a, **k: sentinel_target
+        session_manager,
+        "_session_secret_target_pre_create",
+        lambda *a, **k: empty_secret_target(),
     )
 
-    # The env chain now resolves inside the bind's boundary pass, so an
-    # unresolvable secret surfaces from bind_platform itself.
+    # The env chain resolves in the orchestrator's one boundary pass, so
+    # an unresolvable secret surfaces from the resolver's resolve().
     def _explode(*args: object, **kwargs: object) -> None:
         raise SecretUnavailableError(
             "no active backend could resolve secret(s): api-key",
             hint="api-key: tried env-var",
         )
 
-    monkeypatch.setattr("agentworks.sessions.manager.bind_platform", _explode)
+    monkeypatch.setattr("agentworks.secrets.resolver.Resolver.resolve", _explode)
 
     config = SimpleNamespace(session=SimpleNamespace(history_limit=50000))
 
@@ -148,11 +151,13 @@ def test_session_create_eager_resolve_fires_before_db_insert(
 def test_session_create_calls_resolve_with_session_target(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """create_session passes a single SecretTarget (the one returned by
-    ``_session_secret_target_pre_create``) into the bind's boundary
-    resolve. Verifies the glue that turns a session command into a
-    candidate set."""
+    """create_session registers a single SecretTarget (the one returned
+    by ``_session_secret_target_pre_create``) on the operation's
+    resolver, joining the one boundary resolve. Verifies the glue that
+    turns a session command into a candidate set."""
+    from agentworks.secrets.resolver import Resolver as _RealResolver
     from agentworks.sessions import manager as session_manager
+    from tests.conftest import empty_secret_target
 
     db = _seed_basic_db(tmp_path)
     _stub_session_prep(monkeypatch)
@@ -166,22 +171,28 @@ def test_session_create_calls_resolve_with_session_target(
 
     monkeypatch.setattr(session_manager, "_resolve_template", lambda *a, **k: _Tmpl())
 
-    sentinel_target = object()
+    sentinel_target = empty_secret_target(label="sentinel")
     monkeypatch.setattr(
-        session_manager, "_session_secret_target_pre_create", lambda *a, **k: sentinel_target
+        session_manager,
+        "_session_secret_target_pre_create",
+        lambda *a, **k: sentinel_target,
     )
 
     class _Sentinel(Exception):
-        """Raised from the bind spy so we can stop the test before the
+        """Raised from the resolve spy so we can stop the test before the
         long-running SSH-driven part of create_session runs."""
 
     calls: list[list[object]] = []
+    real_register = _RealResolver.register_targets
 
-    def _bind_spy(config: object, vm: object, **kwargs: Any) -> object:
-        calls.append(list(kwargs.get("targets") or ()))
-        raise _Sentinel
+    def _register_spy(self: _RealResolver, targets: Any) -> None:
+        calls.append(list(targets))
+        real_register(self, targets)
 
-    monkeypatch.setattr("agentworks.sessions.manager.bind_platform", _bind_spy)
+    monkeypatch.setattr(_RealResolver, "register_targets", _register_spy)
+    monkeypatch.setattr(
+        _RealResolver, "resolve", lambda self: (_ for _ in ()).throw(_Sentinel())
+    )
 
     config = SimpleNamespace(session=SimpleNamespace(history_limit=50000))
 
@@ -196,7 +207,7 @@ def test_session_create_calls_resolve_with_session_target(
             admin=True,
         )
 
-    assert len(calls) == 1, f"expected exactly one boundary bind, got {len(calls)}"
+    assert len(calls) == 1, f"expected exactly one target registration, got {len(calls)}"
     assert calls[0] == [sentinel_target], "session target list should contain one target"
     db.close()
 

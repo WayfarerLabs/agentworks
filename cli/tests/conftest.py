@@ -171,6 +171,12 @@ class _StubPlatform:
 
     name = "stub"
 
+    def preflight(self, ctx: object) -> None:
+        return None
+
+    def runup(self, ctx: object) -> None:
+        return None
+
     def vm_active(self, vm: object, *, config: object | None = None) -> AbstractContextManager[None]:
         return contextlib.nullcontext()
 
@@ -321,6 +327,24 @@ def stub_vm_gates(monkeypatch: pytest.MonkeyPatch) -> _StubPlatform:
             raising=False,
         )
         monkeypatch.setattr(f"{mod}.keep_actives", _null_hold, raising=False)
+
+    # The orchestrated commands' equivalents of the same two seams: the
+    # node factories bind their platform through ``resolve_site`` (the
+    # only constructor of platform instances), and the activation gate's
+    # fast path probes Tailscale reachability. Stub both so orchestrated
+    # commands neither construct real platforms nor shell out to
+    # ``tailscale ping``; the gate then fast-paths (the stub's job, same
+    # scope as the imperative ensure_active stub above) and holds via
+    # the stub platform's no-op ``vm_active``.
+    def _fake_resolve_site(
+        name: object, registry: object, *, resolver: Resolver | None = None
+    ) -> _StubPlatform:
+        return platform
+
+    monkeypatch.setattr("agentworks.vms.sites.resolve_site", _fake_resolve_site)
+    monkeypatch.setattr(
+        "agentworks.vms.manager._is_tailscale_reachable", lambda host: True
+    )
     return platform
 
 
@@ -359,6 +383,19 @@ class _StubSessionTemplate:
     env: dict[str, str] = {}  # noqa: RUF012 - mutable class attr is fine for a stub
 
 
+def empty_secret_target(label: str = "test"):  # noqa: ANN201 - test helper
+    """A real, empty ``SecretTarget``: the stub for the env-chain seam.
+
+    The orchestrated session commands register their env target on the
+    operation's REAL resolver (``register_targets``), so a bare ``None``
+    or sentinel object no longer survives the seam; an empty target
+    walks the same code with zero referenced secrets.
+    """
+    from agentworks.secrets import SecretTarget
+
+    return SecretTarget(vm={}, label=label)
+
+
 def stub_session_resolvers(monkeypatch: pytest.MonkeyPatch) -> None:
     """Stub the session-template, env, and eager-resolve helpers in
     ``sessions.manager``.
@@ -384,10 +421,12 @@ def stub_session_resolvers(monkeypatch: pytest.MonkeyPatch) -> None:
         session_manager, "_resolve_session_env", lambda *a, **k: {}
     )
     monkeypatch.setattr(
-        session_manager, "_session_secret_target", lambda *a, **k: None
+        session_manager, "_session_secret_target", lambda *a, **k: empty_secret_target()
     )
     monkeypatch.setattr(
-        session_manager, "_session_secret_target_pre_create", lambda *a, **k: None
+        session_manager,
+        "_session_secret_target_pre_create",
+        lambda *a, **k: empty_secret_target(),
     )
     # ``resolve_for_command`` is imported locally inside create_session /
     # restart_session, so patch its module-level home; the import inside

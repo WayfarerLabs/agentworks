@@ -43,8 +43,8 @@ if TYPE_CHECKING:
     from ..agents.nodes import LiveAgentNode, PendingAgentNode
     from .templates import ResolvedSessionTemplate
 
-    AgentNode = LiveAgentNode | PendingAgentNode
-    WorkspaceNode = LiveWorkspaceNode | PendingWorkspaceNode
+    type AgentNode = LiveAgentNode | PendingAgentNode
+    type WorkspaceNode = LiveWorkspaceNode | PendingWorkspaceNode
 
 
 class RequiredCommandsCheck:
