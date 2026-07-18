@@ -1,5 +1,8 @@
-"""Gate semantics: ``ensure_active`` / ``keep_active`` and the
-operator_stopped flag writes in ``start_vm`` / ``stop_vm``.
+"""Gate semantics of the imperative ``ensure_active`` / ``keep_active``
+pair (still serving the un-migrated commands: batch ops, shell / exec
+roots, consoles, rekey). The operator_stopped flag writes of the
+orchestrated ``start_vm`` / ``stop_vm`` are pinned in
+``test_lifecycle_orchestrated.py``.
 """
 
 from __future__ import annotations
@@ -207,63 +210,3 @@ def test_keep_active_gates_then_holds(
         pass
 
     assert platform.holds == 1
-
-
-def test_stop_sets_flag_before_already_stopped_shortcut(
-    db: Database, monkeypatch: pytest.MonkeyPatch, captured_output
-) -> None:
-    """Stopping an idle-stopped VM still records the intent, and the
-    message says so instead of the misleading bare 'already stopped'
-    (the command DID change something: auto-start is now off)."""
-    _seed(db)
-    platform = _GatePlatform(status=VMStatus.STOPPED)
-    monkeypatch.setattr(
-        vm_manager, "bind_platform", lambda config, vm, registry=None: platform
-    )
-
-    vm_manager.stop_vm(db, object(), "gvm")  # type: ignore[arg-type]
-
-    vm = db.get_vm("gvm")
-    assert vm is not None
-    assert vm.operator_stopped is True
-    assert platform.stop_calls == 0  # short-circuited, flag still set
-    (message,) = captured_output.info
-    assert "stopped on its own" in message
-    assert "will not be auto-started" in message
-
-
-def test_stop_of_a_manually_stopped_vm_is_a_true_noop(
-    db: Database, monkeypatch: pytest.MonkeyPatch, captured_output
-) -> None:
-    """Only when the intent was ALREADY recorded does 'already' apply,
-    and it names the manual state."""
-    _seed(db)
-    db.set_operator_stopped("gvm", True)
-    platform = _GatePlatform(status=VMStatus.STOPPED)
-    monkeypatch.setattr(
-        vm_manager, "bind_platform", lambda config, vm, registry=None: platform
-    )
-
-    vm_manager.stop_vm(db, object(), "gvm")  # type: ignore[arg-type]
-
-    (message,) = captured_output.info
-    assert message == "VM 'gvm' is already manually stopped"
-
-
-def test_start_clears_flag(
-    db: Database, monkeypatch: pytest.MonkeyPatch, captured_output: object
-) -> None:
-    _seed(db)
-    db.set_operator_stopped("gvm", True)
-    platform = _GatePlatform(status=VMStatus.STOPPED)
-    monkeypatch.setattr(
-        vm_manager, "bind_platform", lambda config, vm, registry=None: platform
-    )
-    monkeypatch.setattr(vm_manager, "_ensure_tailscale", lambda *a, **k: None)
-
-    vm_manager.start_vm(db, object(), "gvm")  # type: ignore[arg-type]
-
-    vm = db.get_vm("gvm")
-    assert vm is not None
-    assert vm.operator_stopped is False
-    assert platform.start_calls == 1

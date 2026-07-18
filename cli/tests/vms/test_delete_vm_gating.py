@@ -1,6 +1,12 @@
 """``delete_vm`` cleanup discipline: never gates, never lets a
-best-effort step (bind, hold, logout) skip the backend delete, and
-keeps the SIGINT contract at a site-secret prompt.
+best-effort step (the build-and-boundary composition, the hold, the
+logout) skip the backend delete, and keeps the SIGINT contract at a
+site-secret prompt.
+
+Real config, registry, resolver, and backend loop (env-var backend);
+the platform's backend ops and the Tailscale logout are the fakes,
+mirroring ``test_lifecycle_orchestrated.py`` (delete shares the
+lifecycle commands' composition root, ``_live_vm_boundary``).
 """
 
 from __future__ import annotations
@@ -10,34 +16,59 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from agentworks.db import VMStatus
-from agentworks.errors import ConfigError, UserAbort
+from agentworks.capabilities.vm_platform.proxmox import ProxmoxPlatform
+from agentworks.config import load_config
+from agentworks.errors import UserAbort
 from agentworks.vms import manager as vm_manager
 
 if TYPE_CHECKING:
+    from pathlib import Path
+
     from agentworks.db import Database, VMRow
     from tests.conftest import CapturedOutput
 
+PROXMOX_SECTION = """
+[proxmox]
+api_url = "https://pve:8006"
+node = "pve1"
+token_id = "agw@pam!agw"
+template_vmid = 9000
+"""
 
-class _DeletePlatform:
-    name = "stub"
 
-    def __init__(self, *, hold_raises: bool = False) -> None:
-        self.hold_raises = hold_raises
-        self.status_calls = 0
-        self.delete_calls = 0
+@pytest.fixture
+def make_config(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):  # noqa: ANN201
+    key = tmp_path / "id_ed25519"
+    key.write_text("private")
+    (tmp_path / "id_ed25519.pub").write_text("public")
+    monkeypatch.setenv("AW_SECRET_PROXMOX_TOKEN", "pve-token")
 
-    def status(self, vm: VMRow) -> VMStatus:
-        self.status_calls += 1
-        return VMStatus.STOPPED
+    def _make(extra: str = ""):  # noqa: ANN202
+        path = tmp_path / "config.toml"
+        path.write_text(
+            f'[operator]\nssh_public_key = "{key}.pub"\nssh_private_key = "{key}"\n'
+            + PROXMOX_SECTION
+            + extra
+        )
+        return load_config(path, warn_issues=False, warn_deprecations=False)
 
-    def vm_active(self, vm: VMRow, *, config: object | None = None) -> contextlib.AbstractContextManager[None]:
-        if self.hold_raises:
-            raise RuntimeError("keepalive exited immediately")
-        return contextlib.nullcontext()
+    return _make
 
-    def delete(self, vm: VMRow) -> None:
-        self.delete_calls += 1
+
+@pytest.fixture
+def resolve_counter(monkeypatch: pytest.MonkeyPatch) -> list[list[str]]:
+    """Record every backend-loop pass (the prompt-session oracle)."""
+    from agentworks.secrets import resolve as secrets_resolve
+
+    calls: list[list[str]] = []
+    real = secrets_resolve.resolve_secrets
+
+    def _counting(secrets: list[object], *args: object, **kwargs: object) -> dict[str, str]:
+        calls.append([getattr(s, "name", str(s)) for s in secrets])
+        return real(secrets, *args, **kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(secrets_resolve, "resolve_secrets", _counting)
+    return calls
 
 
 @pytest.fixture(autouse=True)
@@ -45,144 +76,177 @@ def _no_ssh_config(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("agentworks.ssh_config.sync_ssh_config", lambda *a, **k: None)
 
 
-def _seed(db: Database, *, tailscale: str | None = "100.64.0.3") -> None:
-    db.insert_vm("dvm", site="lima", hostname="dvm")
-    if tailscale:
-        db.update_vm_tailscale("dvm", tailscale)
+def _seed(db: Database, *, site: str = "proxmox") -> None:
+    db.insert_vm("dvm", site=site, hostname="dvm")
+    db.update_vm_tailscale("dvm", "100.64.0.3")
     db.set_operator_stopped("dvm", True)  # must not matter: delete never gates
 
 
+def _fake_backend(monkeypatch: pytest.MonkeyPatch) -> dict[str, int]:
+    """Fake the platform's backend ops with call counters; the delete
+    choreography above them runs for real."""
+    counts = {"status": 0, "delete": 0}
+
+    def _status(self: ProxmoxPlatform, row: VMRow) -> None:
+        counts["status"] += 1
+        raise AssertionError("delete must never probe power state")
+
+    def _delete(self: ProxmoxPlatform, row: VMRow) -> None:
+        counts["delete"] += 1
+
+    monkeypatch.setattr(ProxmoxPlatform, "status", _status)
+    monkeypatch.setattr(ProxmoxPlatform, "delete", _delete)
+    return counts
+
+
 def test_delete_never_gates(
-    db: Database, monkeypatch: pytest.MonkeyPatch, captured_output: CapturedOutput
+    db: Database,
+    make_config,  # noqa: ANN001
+    resolve_counter: list[list[str]],
+    monkeypatch: pytest.MonkeyPatch,
+    captured_output: CapturedOutput,
 ) -> None:
     """An operator-stopped VM deletes cleanly: no gate, no StateError,
-    no status probe."""
+    no status probe, no start. The union still resolves, exactly once,
+    at the boundary (the site's config secret feeds the backend
+    delete): the delete-shaped mirror of the gate-prompt parity carry,
+    whose gate burst is exactly absent."""
     _seed(db)
-    platform = _DeletePlatform()
-    monkeypatch.setattr(
-        vm_manager, "bind_platform", lambda config, vm, registry=None: platform
-    )
+    counts = _fake_backend(monkeypatch)
     monkeypatch.setattr(vm_manager, "_tailscale_logout", lambda *a, **k: None)
 
-    vm_manager.delete_vm(db, object(), "dvm", yes=True)  # type: ignore[arg-type]
+    vm_manager.delete_vm(db, make_config(), "dvm", yes=True)
 
-    assert platform.status_calls == 0
-    assert platform.delete_calls == 1
+    assert counts["status"] == 0
+    assert counts["delete"] == 1
+    assert resolve_counter == [["proxmox-token"]]
     assert db.get_vm("dvm") is None
 
 
 def test_hold_failure_does_not_skip_delete(
-    db: Database, monkeypatch: pytest.MonkeyPatch, captured_output: CapturedOutput
+    db: Database,
+    make_config,  # noqa: ANN001
+    monkeypatch: pytest.MonkeyPatch,
+    captured_output: CapturedOutput,
 ) -> None:
     """A broken hold (e.g. a manually unregistered WSL2 distro) is
     exactly what delete cleans up: warn and keep going."""
     _seed(db)
-    platform = _DeletePlatform(hold_raises=True)
-    monkeypatch.setattr(
-        vm_manager, "bind_platform", lambda config, vm, registry=None: platform
-    )
+    counts = _fake_backend(monkeypatch)
 
-    vm_manager.delete_vm(db, object(), "dvm", yes=True)  # type: ignore[arg-type]
+    def _broken_hold(
+        self: ProxmoxPlatform, row: VMRow, *, config: object | None = None
+    ) -> contextlib.AbstractContextManager[None]:
+        raise RuntimeError("keepalive exited immediately")
 
-    assert platform.delete_calls == 1
+    monkeypatch.setattr(ProxmoxPlatform, "vm_active", _broken_hold)
+
+    vm_manager.delete_vm(db, make_config(), "dvm", yes=True)
+
+    assert counts["delete"] == 1
     assert db.get_vm("dvm") is None
     assert any("logout skipped" in w for w in captured_output.warnings)
 
 
 def test_logout_failure_does_not_skip_delete(
-    db: Database, monkeypatch: pytest.MonkeyPatch, captured_output: CapturedOutput
+    db: Database,
+    make_config,  # noqa: ANN001
+    monkeypatch: pytest.MonkeyPatch,
+    captured_output: CapturedOutput,
 ) -> None:
     _seed(db)
-    platform = _DeletePlatform()
-    monkeypatch.setattr(
-        vm_manager, "bind_platform", lambda config, vm, registry=None: platform
-    )
+    counts = _fake_backend(monkeypatch)
 
     def _boom(*a: object, **k: object) -> None:
         raise RuntimeError("transport exploded")
 
     monkeypatch.setattr(vm_manager, "_tailscale_logout", _boom)
 
-    vm_manager.delete_vm(db, object(), "dvm", yes=True)  # type: ignore[arg-type]
+    vm_manager.delete_vm(db, make_config(), "dvm", yes=True)
 
-    assert platform.delete_calls == 1
+    assert counts["delete"] == 1
     assert db.get_vm("dvm") is None
 
 
-def test_bind_failure_warns_with_hint_and_still_deletes_row(
-    db: Database, monkeypatch: pytest.MonkeyPatch, captured_output: CapturedOutput
+def test_stranded_site_warns_with_hint_and_still_deletes_row(
+    db: Database,
+    make_config,  # noqa: ANN001
+    resolve_counter: list[list[str]],
+    monkeypatch: pytest.MonkeyPatch,
+    captured_output: CapturedOutput,
 ) -> None:
-    """A stranded site degrades: backend cleanup is skipped with
-    the manifest hint rendered, the DB row still goes."""
-    _seed(db)
+    """A stranded site degrades: the build fails inside the best-effort
+    boundary, backend cleanup is skipped with the manifest hint
+    rendered, no secret ever resolves, and the DB row still goes."""
+    _seed(db, site="gone")
 
-    def _stranded(config: object, vm: object, registry: object = None) -> object:
-        raise ConfigError("site 'gone' is not declared", hint="kind: vm-site")
-
-    monkeypatch.setattr(vm_manager, "bind_platform", _stranded)
-
-    vm_manager.delete_vm(db, object(), "dvm", yes=True)  # type: ignore[arg-type]
+    vm_manager.delete_vm(db, make_config(), "dvm", yes=True)
 
     assert db.get_vm("dvm") is None
+    assert resolve_counter == []
     joined = "\n".join(captured_output.warnings)
     assert "skipping backend cleanup" in joined
     assert "kind: vm-site" in joined
 
 
-def test_user_abort_at_bind_aborts_the_delete(
-    db: Database, monkeypatch: pytest.MonkeyPatch, captured_output: CapturedOutput
+def test_user_abort_at_boundary_prompt_aborts_the_delete(
+    db: Database,
+    make_config,  # noqa: ANN001
+    monkeypatch: pytest.MonkeyPatch,
+    captured_output: CapturedOutput,
 ) -> None:
-    """Ctrl-C at the boundary's secret prompt (inside bind_platform)
-    aborts the whole delete rather than orphaning the backend VM behind
-    a warn."""
+    """Ctrl-C at the boundary's secret prompt (inside the one resolve
+    pass) aborts the whole delete rather than orphaning the backend VM
+    behind a warn."""
     _seed(db)
+    _fake_backend(monkeypatch)
 
-    def _abort(config: object, vm: object, registry: object = None) -> object:
+    def _abort(*a: object, **k: object) -> dict[str, str]:
         raise UserAbort("cancelled at prompt")
 
-    monkeypatch.setattr(vm_manager, "bind_platform", _abort)
+    monkeypatch.setattr("agentworks.secrets.resolve.resolve_secrets", _abort)
 
     with pytest.raises(UserAbort):
-        vm_manager.delete_vm(db, object(), "dvm", yes=True)  # type: ignore[arg-type]
+        vm_manager.delete_vm(db, make_config(), "dvm", yes=True)
 
     assert db.get_vm("dvm") is not None
 
 
 def test_user_abort_inside_an_op_span_aborts_the_delete(
-    db: Database, monkeypatch: pytest.MonkeyPatch, captured_output: CapturedOutput
+    db: Database,
+    make_config,  # noqa: ANN001
+    monkeypatch: pytest.MonkeyPatch,
+    captured_output: CapturedOutput,
 ) -> None:
     """The op-span catch-alls are best-effort ("warn and continue") but
     must NOT downgrade a UserAbort: a swallowed abort would fall through
     and delete the DB row the operator just declined. Pinned for both
     best-effort spans (the logout hold and the backend delete)."""
     _seed(db)
-
-    class _AbortingPlatform(_DeletePlatform):
-        def delete(self, vm: VMRow) -> None:
-            super().delete(vm)
-            raise UserAbort("cancelled mid-op")
-
-    platform = _AbortingPlatform()
-    monkeypatch.setattr(
-        vm_manager, "bind_platform", lambda config, vm, registry=None: platform
-    )
+    config = make_config()
+    counts = _fake_backend(monkeypatch)
     monkeypatch.setattr(vm_manager, "_tailscale_logout", lambda *a, **k: None)
 
+    def _aborting_delete(self: ProxmoxPlatform, row: VMRow) -> None:
+        counts["delete"] += 1
+        raise UserAbort("cancelled mid-op")
+
+    monkeypatch.setattr(ProxmoxPlatform, "delete", _aborting_delete)
+
     with pytest.raises(UserAbort):
-        vm_manager.delete_vm(db, object(), "dvm", yes=True)  # type: ignore[arg-type]
+        vm_manager.delete_vm(db, config, "dvm", yes=True)
+    assert counts["delete"] == 1
     assert db.get_vm("dvm") is not None
 
     # Same contract at the hold+logout span.
+    counts2 = _fake_backend(monkeypatch)
+
     def _abort_logout(*a: object, **k: object) -> None:
         raise UserAbort("cancelled during logout")
 
-    platform2 = _DeletePlatform()
-    monkeypatch.setattr(
-        vm_manager, "bind_platform", lambda config, vm, registry=None: platform2
-    )
     monkeypatch.setattr(vm_manager, "_tailscale_logout", _abort_logout)
 
     with pytest.raises(UserAbort):
-        vm_manager.delete_vm(db, object(), "dvm", yes=True)  # type: ignore[arg-type]
+        vm_manager.delete_vm(db, config, "dvm", yes=True)
     assert db.get_vm("dvm") is not None
-    assert platform2.delete_calls == 0  # aborted before the backend delete
+    assert counts2["delete"] == 0  # aborted before the backend delete

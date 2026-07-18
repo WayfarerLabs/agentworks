@@ -1,4 +1,4 @@
-"""VM lifecycle management -- create, list, start, stop, delete."""
+"""VM lifecycle management: create, list, start, stop, delete."""
 
 from __future__ import annotations
 
@@ -45,6 +45,7 @@ if TYPE_CHECKING:
     from agentworks.secrets import SecretTarget
     from agentworks.secrets.base import SecretDecl
     from agentworks.secrets.resolver import Resolver
+    from agentworks.vms.nodes import LiveVMNode
 
 
 class _VmAdminEnvScopes(NamedTuple):
@@ -681,7 +682,7 @@ def create_vm(
     vm = db.get_vm(vm_name)
     assert vm is not None
     if vm.init_status == InitStatus.PARTIAL.value:
-        output.info(f"VM '{vm_name}' is ready (with warnings -- see above)")
+        output.info(f"VM '{vm_name}' is ready (with warnings, see above)")
     else:
         output.info(f"VM '{vm_name}' is ready!")
 
@@ -1262,12 +1263,65 @@ def _credential_line_key(line: str) -> tuple[str, str] | None:
     return (userinfo.split(":", 1)[0], line.split("@", 1)[1])
 
 
+def _live_vm_boundary(db: Database, config: Config, vm: VMRow) -> LiveVMNode:
+    """The lifecycle commands' shared composition root (``start_vm`` /
+    ``stop_vm`` / ``delete_vm``, whose graphs are identical): build the
+    live VM node from its row (the site edge holds the bound platform;
+    construction registers the site's declared config secrets), register
+    the walk union on the resolver, sweep preflight at VM scope, and run
+    the one boundary resolve. Returns the node; callers drive the power
+    ops through its held platform (``node.site.platform``).
+
+    Deliberately NO activation gate: for start and stop the power op IS
+    the command's operation (a command whose op is the state change
+    does not converge state first), and delete must not gate at all (an
+    operator-stopped VM would refuse; broken states are what delete
+    exists to clean up).
+
+    Interim seams, the same pair every migrated command records:
+    construct-time registration coexists with the walk-derived union,
+    and the platform's power ops read their API token through the
+    instance's bound resolver (the op-client bridge). Both close with
+    the per-instance resolver retirement.
+    """
+    from agentworks.bootstrap import build_registry
+    from agentworks.capabilities.base import OperationScope, ScopeLevel
+    from agentworks.orchestration.readiness import preflight_all
+    from agentworks.orchestration.secrets import secret_union
+    from agentworks.orchestration.walk import walk
+    from agentworks.secrets.resolver import Resolver
+    from agentworks.vms.nodes import live_vm_node
+
+    registry = build_registry(config)
+    resolver = Resolver(config, registry)
+    vm_node = live_vm_node(db, config, registry, vm, resolver)
+    nodes = walk(vm_node)
+    for secret_name in secret_union(nodes):
+        resolver.register_name(secret_name)
+    scope = OperationScope(
+        level=ScopeLevel.VM,
+        system_slug=db.get_setting(SYSTEM_SLUG_KEY) or None,
+        vm=vm.name,
+    )
+    preflight_all(nodes, RunContext(config=config, operation_scope=scope))
+    resolver.resolve()
+    return vm_node
+
+
 def start_vm(db: Database, config: Config, name: str) -> None:
     """Start a stopped VM. Clears the operator-stopped flag so the
-    ensure_active gate resumes auto-starting on demand."""
+    activation gate resumes auto-starting on demand.
+
+    Orchestrated, composition only: the graph derives from the VM's
+    row and the power ops drive through the node's held platform
+    (:func:`_live_vm_boundary`). No activation gate opens here: the
+    start IS this command's operation, and the operator-stopped flag
+    is CLEARED by it, never consulted.
+    """
     vm = _require_vm(db, name)
     _guard_failed_vm(vm)
-    platform = bind_platform(config, vm)
+    vm_node = _live_vm_boundary(db, config, vm)
+    platform = vm_node.site.platform
     # An explicit start is operator intent, whatever the observed state:
     # clear the flag first so a crashed start doesn't leave the gate
     # refusing to auto-resume a VM the operator asked to run.
@@ -1285,7 +1339,10 @@ def start_vm(db: Database, config: Config, name: str) -> None:
 
     # Tailscale verification runs inside the keepalive so a freshly booted
     # WSL2 distro doesn't idle-shut while we wait for tailscaled to come up.
-    with platform.vm_active(vm, config=config):
+    # The rejoin auth key, needed only on a failed reconnect, keeps its
+    # internal late resolve (the documented conditional-need exception):
+    # there is no gate here to hand a lazy reader through.
+    with vm_node.hold_active():
         _ensure_tailscale(db, config, vm, platform)
     # Only emit "is ready" on the path that actually started the VM. When
     # status was already RUNNING we already said so above, and Tailscale
@@ -1297,10 +1354,15 @@ def start_vm(db: Database, config: Config, name: str) -> None:
 
 
 def stop_vm(db: Database, config: Config, name: str) -> None:
-    """Stop a running VM and record the operator's intent."""
+    """Stop a running VM and record the operator's intent.
+
+    Orchestrated, composition only, mirroring :func:`start_vm`: no
+    activation gate (the stop IS the operation), power ops through the
+    node's held platform.
+    """
     vm = _require_vm(db, name)
     _guard_failed_vm(vm)
-    platform = bind_platform(config, vm)
+    platform = _live_vm_boundary(db, config, vm).site.platform
     # Record intent BEFORE the already-stopped short-circuit: an
     # operator stopping an already-stopped VM still means "keep it
     # stopped" (e.g. the VM idled out and they don't want the next op
@@ -1446,7 +1508,7 @@ def rekey_vm(
         output.detail(f"Tailscale IP: {new_ip}")
 
         # Update DB and SSH config with the new IP (correct regardless of
-        # reachability -- the old IP is definitely dead after logout)
+        # reachability: the old IP is definitely dead after logout)
         db.update_vm_tailscale(name, new_ip)
         sync_ssh_config(config, db)
         db.insert_vm_event(name, "rekey", f"new_ip={new_ip}")
@@ -1484,7 +1546,20 @@ def delete_vm(
     force: bool = False,
     yes: bool = False,
 ) -> None:
-    """Delete a VM, cleaning up all associated resources."""
+    """Delete a VM, cleaning up all associated resources.
+
+    Orchestrated, composition only: the child-count guard and the
+    confirm gate stay pre-boundary (zero prompts and zero resolves on
+    a refused or declined delete), then the whole build-and-boundary
+    composition (:func:`_live_vm_boundary`) is BEST-EFFORT: a broken
+    backend, a stranded site, or an unresolvable secret warns and
+    skips backend cleanup, because broken states are exactly what
+    delete exists to clean up. No activation gate ever opens (an
+    operator-stopped VM would refuse; deletion never starts a stopped
+    VM), and the Tailscale logout uses a hold-only span. ``UserAbort``
+    is the one exception nothing here may downgrade: an abort at the
+    boundary's secret prompt or inside an op span must keep the row.
+    """
     vm = _require_vm(db, name)
 
     # Check for workspaces (which contain agents and sessions)
@@ -1519,26 +1594,29 @@ def delete_vm(
             raise UserAbort("delete cancelled")
 
     # Platform-specific cleanup (also handles Tailscale logout)
+    vm_node: LiveVMNode | None
     try:
-        platform = bind_platform(config, vm)
+        vm_node = _live_vm_boundary(db, config, vm)
     except UserAbort:
         # Ctrl-C at the boundary's secret prompt must keep the SIGINT
         # contract: abort the whole delete rather than orphaning the
-        # backend VM behind a warn. (bind_platform runs preflight and
-        # the resolve pass, so the prompt happens inside it.)
+        # backend VM behind a warn. (The boundary helper runs the
+        # preflight sweep and the resolve pass, so the prompt happens
+        # inside it.)
         raise
     except Exception as e:
-        # Preflight or bind failure (unreachable API, missing tool,
-        # unresolvable secret): warn and skip backend cleanup; broken
-        # backends are what delete exists to clean up.
-        platform = None
+        # Preflight or build failure (unreachable API, missing tool,
+        # stranded site, unresolvable secret): warn and skip backend
+        # cleanup; broken backends are what delete exists to clean up.
+        vm_node = None
         hint = getattr(e, "hint", None)
         output.warn(
             f"platform binding failed, skipping backend cleanup: {e}"
             + (f"\n{hint}" if hint else "")
         )
 
-    if platform is not None:
+    if vm_node is not None:
+        platform = vm_node.site.platform
         # Tailscale logout (best-effort, hold-only): the logout wants
         # the VM alive if it happens to be, but delete must NOT gate:
         # an operator-stopped VM would raise. (The WSL2 hold does boot a
@@ -1551,7 +1629,7 @@ def delete_vm(
         # through and delete the DB row the operator just declined.
         if vm.tailscale_host:
             try:
-                with platform.vm_active(vm, config=config):
+                with vm_node.hold_active():
                     _tailscale_logout(vm, config, platform)
             except UserAbort:
                 raise
