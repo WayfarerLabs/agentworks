@@ -39,6 +39,29 @@ the result.
 
 Source files in `.rulesync/` are the canonical input; never edit generated output directly.
 
+## Running multiple installs under one user
+
+Two or more agentworks installs under one user (in-flight branches, dev alongside a stable setup,
+separate projects, whatever the reason) share `~/.config/agentworks/` by default, which means they
+share the SQLite DB and its migration state. A migration on one install can leave the DB at a schema
+the other install does not know about.
+
+Set `AW_CONFIG_DIR` per shell to give each install its own config tree (config.toml, DB, backups,
+logs, resource manifests):
+
+```bash
+export AW_CONFIG_DIR=~/.config/agentworks-my-install
+agw config init
+```
+
+`~` expansion is supported. Empty and whitespace-only values fall back to the default, so a stray
+`export AW_CONFIG_DIR=` will not silently redirect state into an unrelated directory. `agw doctor`
+suffixes its Config file row with `(AW_CONFIG_DIR override)` when the env var is active so an
+operator inheriting a shared machine notices the redirect at a glance.
+
+For SSH config and VS Code workspace isolation on top of that, see the `system_slug` prompt on
+`agw vm create`.
+
 ## Spec-Driven Development
 
 Significant development efforts follow the SDD workflow. See [docs/sdd/](docs/sdd/) for existing

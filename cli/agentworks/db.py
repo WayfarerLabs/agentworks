@@ -1,7 +1,9 @@
 """SQLite state database for Agentworks.
 
-Database lives at ~/.config/agentworks/agentworks.db. Created automatically on
-first use. Schema migrations are forward-only via a version table.
+Database lives at ~/.config/agentworks/agentworks.db by default; follows
+``AW_CONFIG_DIR`` when the whole config tree is relocated. Created
+automatically on first use. Schema migrations are forward-only via a
+version table.
 """
 
 from __future__ import annotations
