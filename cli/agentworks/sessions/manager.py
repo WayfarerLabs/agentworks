@@ -26,10 +26,7 @@ from agentworks.errors import (
 from agentworks.sessions.tmux import AGENT_SOCKET_ROOT
 from agentworks.ssh import SSH_TRANSPORT_ERROR
 from agentworks.transports import transport
-from agentworks.vms.manager import (
-    bind_platform,
-    ensure_active,
-)
+from agentworks.vms.manager import gated_vm_boundary
 
 _ENV_KEY_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
@@ -46,7 +43,7 @@ if TYPE_CHECKING:
         PendingAgentNode,
     )
     from agentworks.agents.templates import ResolvedAgentTemplate
-    from agentworks.capabilities.vm_platform import VMPlatform
+    from agentworks.capabilities.base import OperationScope
     from agentworks.config import Config
     from agentworks.db import AgentRow, Database, SessionRow, VMRow, WorkspaceRow
     from agentworks.env import EnvEntry
@@ -304,33 +301,64 @@ def _require_vm_for_workspace(db: Database, ws: WorkspaceRow) -> VMRow:
     return vm
 
 
+def _session_scope(
+    db: Database, session: SessionRow, ws: WorkspaceRow, vm: VMRow
+) -> OperationScope:
+    """The singular session ops' SESSION-level operation scope: the
+    operation is about the session (running as its agent, or as the
+    admin), even though the composed graph is the live VM alone; pass
+    the level of the entity the command is ABOUT, not of what it
+    walks. The SESSION level's field rules (required vm + workspace +
+    session; exactly one of agent/admin) are enforced by the scope's
+    own constructor."""
+    from agentworks.capabilities.base import OperationScope, ScopeLevel
+    from agentworks.db import SYSTEM_SLUG_KEY
+
+    return OperationScope(
+        level=ScopeLevel.SESSION,
+        system_slug=db.get_setting(SYSTEM_SLUG_KEY) or None,
+        vm=vm.name,
+        workspace=ws.name,
+        session=session.name,
+        agent=session.agent_name,
+        admin=session.agent_name is None,
+    )
+
+
+@contextlib.contextmanager
 def _prepare_vm(
     db: Database,
     config: Config,
-    workspace_name: str,
+    session: SessionRow,
     *,
     operation: str | None = None,
-    platform: VMPlatform | None = None,
-) -> tuple[WorkspaceRow, VMRow, RunCommand, RunCommand, Transport, VMPlatform]:
-    """Validate workspace/VM, ensure running, and return
-    (ws, vm, run_command, run_as_root, target, platform).
-
-    This is the command's composition root for the VM gate: the
-    platform is bound ONCE here (or accepted pre-bound via
-    ``platform``) and returned so callers hold it for subsequent
-    ``keep_active`` spans: re-binding would re-run the site's secret
-    resolve pass. If operation is set, creates an SSHLogger and
-    attaches it to the Transport so all calls log automatically.
+) -> Iterator[tuple[WorkspaceRow, VMRow, RunCommand, RunCommand, Transport]]:
+    """The singular session ops' composition root (stop / delete /
+    describe / attach / logs): validate the session's workspace and VM
+    rows, then yield ``(ws, vm, run_command, run_as_root, target)``
+    INSIDE ``gated_vm_boundary``'s held-active span, which replaces
+    the imperative bind + point gate and the callers' own ``vm_active``
+    holds. The scope is SESSION-level, built here from the session row
+    once the vm/workspace rows it names are resolved: the ops are
+    about the session, not the VM they walk. If ``operation`` is set,
+    an SSHLogger attaches to the Transport so all calls log
+    automatically.
     """
+    from agentworks.bootstrap import build_registry
     from agentworks.ssh import SSHLogger
 
-    ws = _require_workspace(db, workspace_name)
+    ws = _require_workspace(db, session.workspace_name)
     vm = _require_vm_for_workspace(db, ws)
 
-    if platform is None:
-        platform = bind_platform(config, vm)
-    ensure_active(db, config, vm, platform)
-
+    # Cheap row validation stays pre-gate: a VM with no Tailscale
+    # address can never serve a session op, so it must fail with zero
+    # prompts and zero VM starts. (The imperative body checked this
+    # after its gate; the gate cannot populate the address on the
+    # already-loaded row, so the command's outcome is identical. The
+    # hoist does forgo one accidental heal: the post-gate order could
+    # start a stopped VM whose rejoin repopulated the row's address,
+    # letting a RETRY succeed; now the retry keeps failing until an
+    # explicit vm start or reinit.)
     if vm.tailscale_host is None:
         raise StateError(
             f"VM '{vm.name}' has no Tailscale address",
@@ -338,11 +366,15 @@ def _prepare_vm(
             entity_name=vm.name,
         )
 
-    logger = SSHLogger(vm.name, operation) if operation else None
-    target = transport(vm, config, logger=logger)
-    run_command: RunCommand = target.run
-    run_as_root: RunCommand = partial(target.run, sudo=True)
-    return ws, vm, run_command, run_as_root, target, platform
+    registry = build_registry(config)
+    with gated_vm_boundary(
+        db, config, registry, vm, scope=_session_scope(db, session, ws, vm)
+    ):
+        logger = SSHLogger(vm.name, operation) if operation else None
+        target = transport(vm, config, logger=logger)
+        run_command: RunCommand = target.run
+        run_as_root: RunCommand = partial(target.run, sudo=True)
+        yield ws, vm, run_command, run_as_root, target
 
 
 def _require_session(db: Database, name: str) -> SessionRow:
@@ -2047,11 +2079,13 @@ def stop_session(
     from agentworks.sessions.tmux import force_kill_tmux_server
 
     session = _require_session(db, name)
-    _ws, vm, _run_command, _, admin_target, vm_platform = _prepare_vm(
-        db, config, session.workspace_name, operation="session-stop"
-    )
-    # _prepare_vm just gated; hold only (no second gate probe).
-    with vm_platform.vm_active(vm, config=config):
+    with _prepare_vm(db, config, session, operation="session-stop") as (
+        _ws,
+        vm,
+        _run_command,
+        _run_as_root,
+        admin_target,
+    ):
         session = _ensure_pid(session, target=admin_target, db=db)
         status = check_session_status(session, target=admin_target)
 
@@ -2666,11 +2700,13 @@ def delete_session(
 ) -> None:
     """Delete a session. Prompts if running/unknown (--yes to skip). --force for BROKEN."""
     session = _require_session(db, name)
-    ws, vm, _run_command, _run_as_root, admin_target, vm_platform = _prepare_vm(
-        db, config, session.workspace_name, operation="session-delete"
-    )
-    # _prepare_vm just gated; hold only (no second gate probe).
-    with vm_platform.vm_active(vm, config=config):
+    with _prepare_vm(db, config, session, operation="session-delete") as (
+        ws,
+        vm,
+        _run_command,
+        _run_as_root,
+        admin_target,
+    ):
         session = _ensure_pid(session, target=admin_target, db=db)
         status = check_session_status(session, target=admin_target)
 
@@ -2838,36 +2874,48 @@ def describe_session(
     *,
     name: str,
 ) -> None:
-    """Show session details."""
+    """Show session details.
+
+    Runs inside ``_prepare_vm``'s gate span: a hold the imperative
+    body did not take (it gated and discarded the platform). The
+    superset is a no-op everywhere but WSL2, where it anchors the
+    status probes against the idle timer.
+    """
     session = _require_session(db, name)
-    ws, vm, run_command, _, target, _vm_platform = _prepare_vm(db, config, session.workspace_name, operation=None)
-    session = _ensure_pid(session, target=target, db=db)
+    with _prepare_vm(db, config, session, operation=None) as (
+        _ws,
+        vm,
+        _run_command,
+        _run_as_root,
+        target,
+    ):
+        session = _ensure_pid(session, target=target, db=db)
 
-    status = check_session_status(session, target=target)
+        status = check_session_status(session, target=target)
 
-    # Build status label with PID if running and current boot
-    if status == SessionStatus.OK and session.pid and session.pid > 0:
-        status_label = f"running (PID {session.pid})"
-    elif status == SessionStatus.BROKEN and session.pid and session.pid > 0:
-        status_label = f"broken (PID {session.pid} alive, tmux unreachable)"
-    else:
-        status_label = {
-            SessionStatus.OK: "running",
-            SessionStatus.STOPPED: "stopped",
-            SessionStatus.BROKEN: "broken",
-            SessionStatus.UNKNOWN: "unknown",
-        }[status]
+        # Build status label with PID if running and current boot
+        if status == SessionStatus.OK and session.pid and session.pid > 0:
+            status_label = f"running (PID {session.pid})"
+        elif status == SessionStatus.BROKEN and session.pid and session.pid > 0:
+            status_label = f"broken (PID {session.pid} alive, tmux unreachable)"
+        else:
+            status_label = {
+                SessionStatus.OK: "running",
+                SessionStatus.STOPPED: "stopped",
+                SessionStatus.BROKEN: "broken",
+                SessionStatus.UNKNOWN: "unknown",
+            }[status]
 
-    mode_label = f"agent ({session.agent_name})" if session.agent_name else "admin"
+        mode_label = f"agent ({session.agent_name})" if session.agent_name else "admin"
 
-    output.info(f"Name:       {session.name}")
-    output.info(f"Workspace:  {session.workspace_name}")
-    output.info(f"VM:         {vm.name}")
-    output.info(f"Template:   {session.template}")
-    output.info(f"Mode:       {mode_label}")
-    output.info(f"Status:     {status_label}")
-    output.info(f"Created:    {session.created_at}")
-    output.info(f"Updated:    {session.updated_at}")
+        output.info(f"Name:       {session.name}")
+        output.info(f"Workspace:  {session.workspace_name}")
+        output.info(f"VM:         {vm.name}")
+        output.info(f"Template:   {session.template}")
+        output.info(f"Mode:       {mode_label}")
+        output.info(f"Status:     {status_label}")
+        output.info(f"Created:    {session.created_at}")
+        output.info(f"Updated:    {session.updated_at}")
 
 
 def batch_check_all_sessions(
@@ -3058,11 +3106,13 @@ def attach_session(
     from agentworks.sessions.tmux import tmux_cmd
 
     session = _require_session(db, name)
-    _ws, vm, _run_command, _, target, vm_platform = _prepare_vm(
-        db, config, session.workspace_name, operation="session-attach"
-    )
-    # _prepare_vm just gated; hold only (no second gate probe).
-    with vm_platform.vm_active(vm, config=config):
+    with _prepare_vm(db, config, session, operation="session-attach") as (
+        _ws,
+        _vm,
+        _run_command,
+        _run_as_root,
+        target,
+    ):
         session = _ensure_pid(session, target=target, db=db)
         status = check_session_status(session, target=target)
 
@@ -3094,11 +3144,13 @@ def session_logs(
     from agentworks.sessions.tmux import capture_output
 
     session = _require_session(db, name)
-    _ws, vm, run_command, _, target, vm_platform = _prepare_vm(
-        db, config, session.workspace_name, operation="session-logs"
-    )
-    # _prepare_vm just gated; hold only (no second gate probe).
-    with vm_platform.vm_active(vm, config=config):
+    with _prepare_vm(db, config, session, operation="session-logs") as (
+        _ws,
+        _vm,
+        run_command,
+        _run_as_root,
+        target,
+    ):
         session = _ensure_pid(session, target=target, db=db)
         status = check_session_status(session, target=target)
 

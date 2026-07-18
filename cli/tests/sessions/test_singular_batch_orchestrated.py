@@ -32,11 +32,12 @@ import pytest
 
 from agentworks.capabilities.vm_platform.proxmox import ProxmoxPlatform
 from agentworks.db import PID_STOPPED, SessionMode, VMStatus
-from agentworks.errors import StateError
+from agentworks.errors import NotFoundError, StateError
 from agentworks.sessions import manager as session_manager
 from agentworks.vms import manager as vm_manager
 
 if TYPE_CHECKING:
+    from agentworks.capabilities.base import OperationScope, RunContext
     from agentworks.db import Database
 
 
@@ -103,13 +104,16 @@ def _record_holds(monkeypatch: pytest.MonkeyPatch, events: list[str]) -> None:
 
 
 class _FakeTarget:
-    """Transport double for the probe / kill helpers."""
+    """Transport double for the probe / kill / regenerate helpers."""
 
     def run(self, cmd: str, **kwargs: object) -> SimpleNamespace:
         return SimpleNamespace(ok=True, returncode=0, stdout="", stderr="")
 
     def interactive(self, cmd: str, **kwargs: object) -> int:
         return 0
+
+    def write_file(self, path: str, content: str, **kwargs: object) -> None:
+        return None
 
 
 @pytest.fixture
@@ -278,3 +282,270 @@ def test_batch_operator_stopped_vm_aborts_before_the_probes(
 
     with pytest.raises(StateError, match="manually stopped"):
         session_manager.stop_all_sessions(db, config)
+
+
+# -- the singular ops (_prepare_vm as a gate span) ----------------------------
+
+
+def _seed_singular(db: Database, *, agent: str | None = None) -> None:
+    _seed_vm(db, "box", "100.64.0.9")
+    if agent is not None:
+        db.insert_agent(agent, "box", f"aw-{agent}")
+    _seed_session(db, "s1", "ws-box", agent=agent)
+
+
+def test_stop_session_reachable_vm_is_one_boundary_burst(
+    db: Database,
+    make_config,  # noqa: ANN001
+    resolve_counter: list[list[str]],
+    target: _FakeTarget,
+    monkeypatch: pytest.MonkeyPatch,
+    captured_output,  # noqa: ANN001
+) -> None:
+    config = make_config()
+    _seed_singular(db)
+    _reachable(monkeypatch, True)
+
+    session_manager.stop_session(db, config, name="s1")
+
+    assert resolve_counter == [["proxmox-token"]]
+    assert any("already stopped" in m for m in captured_output.info)
+
+
+def test_stop_session_stopped_vm_gate_burst_seeds_the_boundary(
+    db: Database,
+    make_config,  # noqa: ANN001
+    resolve_counter: list[list[str]],
+    target: _FakeTarget,
+    monkeypatch: pytest.MonkeyPatch,
+    captured_output,  # noqa: ANN001
+) -> None:
+    """The gate opens before the boundary (the sanctioned pre-walk-away
+    shift every gated seam carries): its just-in-time token resolve
+    fully seeds the union, so one backend pass total, nothing twice."""
+    config = make_config()
+    _seed_singular(db)
+    events: list[str] = []
+    _stop_the_vms(monkeypatch, events)
+
+    session_manager.stop_session(db, config, name="s1")
+
+    assert events == ["status:box", "start:box", "tailscale:box"]
+    assert resolve_counter == [["proxmox-token"]]
+
+
+def test_delete_session_reachable_vm_is_one_boundary_burst(
+    db: Database,
+    make_config,  # noqa: ANN001
+    resolve_counter: list[list[str]],
+    target: _FakeTarget,
+    monkeypatch: pytest.MonkeyPatch,
+    captured_output,  # noqa: ANN001
+) -> None:
+    config = make_config()
+    _seed_singular(db)
+    _reachable(monkeypatch, True)
+
+    session_manager.delete_session(db, config, name="s1", yes=True)
+
+    assert resolve_counter == [["proxmox-token"]]
+    assert db.get_session("s1") is None
+
+
+def test_attach_session_reachable_vm_is_one_boundary_burst(
+    db: Database,
+    make_config,  # noqa: ANN001
+    resolve_counter: list[list[str]],
+    target: _FakeTarget,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config = make_config()
+    _seed_singular(db)
+    _reachable(monkeypatch, True)
+
+    with pytest.raises(StateError, match="not running"):
+        session_manager.attach_session(db, config, name="s1")
+
+    assert resolve_counter == [["proxmox-token"]]
+
+
+def test_session_logs_reachable_vm_is_one_boundary_burst(
+    db: Database,
+    make_config,  # noqa: ANN001
+    resolve_counter: list[list[str]],
+    target: _FakeTarget,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config = make_config()
+    _seed_singular(db)
+    _reachable(monkeypatch, True)
+
+    with pytest.raises(StateError, match="not running"):
+        session_manager.session_logs(db, config, name="s1")
+
+    assert resolve_counter == [["proxmox-token"]]
+
+
+def test_describe_session_holds_across_the_probe(
+    db: Database,
+    make_config,  # noqa: ANN001
+    resolve_counter: list[list[str]],
+    target: _FakeTarget,
+    monkeypatch: pytest.MonkeyPatch,
+    captured_output,  # noqa: ANN001
+) -> None:
+    """Describe's hold SUPERSET, explicitly: the imperative body gated
+    and DISCARDED the platform (no hold); the gate span now holds
+    across the status probe (a no-op everywhere but WSL2, where it
+    anchors the probe). Pinned as hold-open, probe, hold-close, with
+    the one boundary burst."""
+    config = make_config()
+    _seed_singular(db)
+    _reachable(monkeypatch, True)
+    events: list[str] = []
+    _record_holds(monkeypatch, events)
+
+    def _probe(session: object, *, target: object) -> object:
+        events.append("probe")
+        from agentworks.db import SessionStatus
+
+        return SessionStatus.STOPPED
+
+    monkeypatch.setattr(session_manager, "check_session_status", _probe)
+
+    session_manager.describe_session(db, config, name="s1")
+
+    assert events == ["hold-open:box", "probe", "hold-close:box"]
+    assert resolve_counter == [["proxmox-token"]]
+    assert any("Status:     stopped" in m for m in captured_output.info)
+
+
+def test_describe_session_stopped_vm_gate_burst_seeds_the_boundary(
+    db: Database,
+    make_config,  # noqa: ANN001
+    resolve_counter: list[list[str]],
+    target: _FakeTarget,
+    monkeypatch: pytest.MonkeyPatch,
+    captured_output,  # noqa: ANN001
+) -> None:
+    config = make_config()
+    _seed_singular(db)
+    events: list[str] = []
+    _stop_the_vms(monkeypatch, events)
+
+    session_manager.describe_session(db, config, name="s1")
+
+    assert events == ["status:box", "start:box", "tailscale:box"]
+    assert resolve_counter == [["proxmox-token"]]
+
+
+def test_unknown_session_refuses_with_zero_resolves_and_zero_gate(
+    db: Database,
+    make_config,  # noqa: ANN001
+    resolve_counter: list[list[str]],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config = make_config()
+    _seed_vm(db, "box", "100.64.0.9")
+    _reachable(monkeypatch, False)
+
+    def _no_status(self: ProxmoxPlatform, row: object) -> VMStatus:
+        raise AssertionError("the gate ran for an unknown session")
+
+    monkeypatch.setattr(ProxmoxPlatform, "status", _no_status)
+
+    with pytest.raises(NotFoundError, match="session 'ghost' not found"):
+        session_manager.stop_session(db, config, name="ghost")
+
+    assert resolve_counter == []
+
+
+def test_unknown_workspace_refuses_with_zero_resolves_and_zero_gate(
+    db: Database,
+    make_config,  # noqa: ANN001
+    resolve_counter: list[list[str]],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config = make_config()
+    # An orphan session row (its workspace is gone): the FK is relaxed
+    # for the insert to reproduce the dangling-reference state.
+    db._conn.execute("PRAGMA foreign_keys = OFF")
+    db._conn.execute(
+        "INSERT INTO sessions (name, workspace_name, template, mode, socket_path) "
+        "VALUES ('orphan', 'ghost-ws', 'default', 'admin', '/tmp/orphan.sock')"
+    )
+    db._conn.commit()
+    db._conn.execute("PRAGMA foreign_keys = ON")
+    _reachable(monkeypatch, False)
+
+    def _no_status(self: ProxmoxPlatform, row: object) -> VMStatus:
+        raise AssertionError("the gate ran for an unknown workspace")
+
+    monkeypatch.setattr(ProxmoxPlatform, "status", _no_status)
+
+    with pytest.raises(NotFoundError, match="workspace 'ghost-ws' not found"):
+        session_manager.stop_session(db, config, name="orphan")
+
+    assert resolve_counter == []
+
+
+def test_no_tailscale_vm_fails_pre_gate_with_zero_resolves(
+    db: Database,
+    make_config,  # noqa: ANN001
+    resolve_counter: list[list[str]],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The hoisted row guard: a VM with no Tailscale address refuses
+    BEFORE any prompt and before any VM start (the imperative body
+    checked it after its gate; the hoist forgoes the accidental heal
+    where a post-gate start's rejoin repopulated the row)."""
+    config = make_config()
+    _seed_vm(db, "box", None)
+    _seed_session(db, "s1", "ws-box")
+    _reachable(monkeypatch, False)
+
+    def _no_status(self: ProxmoxPlatform, row: object) -> VMStatus:
+        raise AssertionError("the gate ran for a VM with no address")
+
+    monkeypatch.setattr(ProxmoxPlatform, "status", _no_status)
+
+    with pytest.raises(StateError, match="no Tailscale address"):
+        session_manager.stop_session(db, config, name="s1")
+
+    assert resolve_counter == []
+
+
+def test_session_scope_reaches_node_readiness(
+    db: Database,
+    make_config,  # noqa: ANN001
+    target: _FakeTarget,
+    monkeypatch: pytest.MonkeyPatch,
+    captured_output,  # noqa: ANN001
+) -> None:
+    """The singular ops run at SESSION level (the recorded
+    pass-the-level-of-the-entity rule): the scope carries the session's
+    full identity chain to every node preflight."""
+    from agentworks.capabilities.base import ScopeLevel
+
+    config = make_config()
+    _seed_singular(db, agent="a1")
+    _reachable(monkeypatch, True)
+    scopes: list[OperationScope | None] = []
+    real = ProxmoxPlatform.preflight
+
+    def _recording(self: ProxmoxPlatform, ctx: RunContext) -> None:
+        scopes.append(ctx.operation_scope)
+        real(self, ctx)
+
+    monkeypatch.setattr(ProxmoxPlatform, "preflight", _recording)
+
+    session_manager.describe_session(db, config, name="s1")
+
+    (scope,) = scopes
+    assert scope is not None
+    assert scope.level is ScopeLevel.SESSION
+    assert scope.vm == "box"
+    assert scope.workspace == "ws-box"
+    assert scope.session == "s1"
+    assert scope.agent == "a1"
+    assert scope.admin is False

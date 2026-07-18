@@ -1041,11 +1041,15 @@ def test_session_attach_does_not_eager_resolve(
     ws_row = db.get_workspace("ws1")
     vm_row = db.get_vm("vm1")
     assert ws_row is not None and vm_row is not None
-    gate_platform = stub_vm_gates(monkeypatch)
-    monkeypatch.setattr(
-        session_manager, "_prepare_vm",
-        lambda *a, **k: (ws_row, vm_row, fake_target.run, None, fake_target, gate_platform),
-    )
+    stub_vm_gates(monkeypatch)
+
+    # _prepare_vm is a gate-span context manager now; the stub yields
+    # the same 5-tuple shape inside a trivial span.
+    @contextlib.contextmanager
+    def _fake_prepare_vm(*a: object, **k: object):  # noqa: ANN202
+        yield (ws_row, vm_row, fake_target.run, None, fake_target)
+
+    monkeypatch.setattr(session_manager, "_prepare_vm", _fake_prepare_vm)
     monkeypatch.setattr(
         session_manager, "_ensure_pid", lambda session, **kwargs: session,
     )
@@ -1053,8 +1057,6 @@ def test_session_attach_does_not_eager_resolve(
         session_manager, "check_session_status",
         lambda *a, **k: SessionStatus.OK,
     )
-
-    import contextlib
 
     config = SimpleNamespace(operator=SimpleNamespace(ssh_private_key=None))
     # interactive() returns int and the manager doesn't sys.exit here,
@@ -1130,20 +1132,23 @@ def test_session_describe_does_not_eager_resolve(
         return {}
 
     monkeypatch.setattr("agentworks.secrets.resolve_for_command", _track_resolve)
-    # describe_session calls _prepare_vm which probes SSH connectivity.
-    # Stub it and the downstream status helpers; the contract under test
-    # is whether resolve_for_command fires, not the probe path.
+    # describe_session enters _prepare_vm's gate span, which probes SSH
+    # connectivity. Stub it (a context manager yielding the 5-tuple)
+    # and the downstream status helpers; the contract under test is
+    # whether resolve_for_command fires, not the probe path.
     ws_row = db.get_workspace("ws1")
     vm_row = db.get_vm("vm1")
     assert ws_row is not None and vm_row is not None
     fake_target = SimpleNamespace(
         run=lambda *a, **k: SimpleNamespace(ok=True, returncode=0, stdout="", stderr=""),
     )
-    gate_platform = stub_vm_gates(monkeypatch)
-    monkeypatch.setattr(
-        session_manager, "_prepare_vm",
-        lambda *a, **k: (ws_row, vm_row, fake_target.run, None, fake_target, gate_platform),
-    )
+    stub_vm_gates(monkeypatch)
+
+    @contextlib.contextmanager
+    def _fake_prepare_vm(*a: object, **k: object):  # noqa: ANN202
+        yield (ws_row, vm_row, fake_target.run, None, fake_target)
+
+    monkeypatch.setattr(session_manager, "_prepare_vm", _fake_prepare_vm)
     monkeypatch.setattr(
         session_manager, "_ensure_pid", lambda session, **kwargs: session,
     )
