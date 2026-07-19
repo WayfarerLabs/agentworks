@@ -87,7 +87,7 @@ The swap and mirror points, cited so each phase edits the right lines:
       the `ResolvedSessionTemplate` reshape and `_merge_pair` walk. **Done when:** every Phase 1-4
       interface question in the HLA "Open questions / for LLD" list has a pinned answer or an
       explicit deferral, reviewed.
-- [ ] **Write `claude-code-lld.md`** (before Phase 2). Pins: the resume-vs-launch detection
+- [x] **Write `claude-code-lld.md`** (before Phase 2). Pins: the resume-vs-launch detection
       mechanism (prefer folding the check into the launch snippet per the HLA decision), verified
       against the latest stable Claude Code CLI at implementation time (latest-stable rule); exact
       flag spellings for `permission_mode` / `model` / `extra_args`; the visible-decision mechanism
@@ -144,28 +144,49 @@ changes; the rows appear in the registry and are inert until Phase 3 consumes th
 `resource list/kinds/describe` surfaces; `shell` start/restart/merge/validate; the layering-import
 guard.
 
-## Phase 2: `claude-code` built-in
+## Phase 2: `claude-code` built-in (plus harness-state persistence and the deferred claude-code docs)
 
-Add the second member. Still unconsumed by `sessions/` (its row lists; no template can select it
-until Phase 4).
+Runs LAST in execution order (the claude-code detection needed operator research, now resolved, see
+the "Execution reorder" note). Because P4 already landed the template surface, registering
+`claude-code` here makes it immediately selectable, so P4's two deferred claude-code sub-items (the
+sample document and the doc example) land in this phase too. This phase also adds the
+general-purpose harness-state blob, which `claude-code` is the first user of.
 
+- [ ] **Harness-state persistence** (harness-api LLD "Harness-state persistence"; a deliberate
+      reversal of "DB unchanged"). A forward-only migration adds a `harness_state` column to the
+      `sessions` table (JSON, default `'{}'`, existing rows backfilled) and `SessionRow` gains the
+      `harness_state: dict` field; `_harness_for_template` (`sessions/nodes.py`) loads it (or `{}`
+      for a fresh create) and passes it as the harness constructor's `state=` kwarg; `Harness` gains
+      the `state` property; the session manager persists `harness.state` to the row after the
+      `start` / `restart` op (folded into the create INSERT and the restart UPDATE). The blob is
+      harness-owned and opaque to the core. **Done when:** the migration applies + backfills on a
+      pre-existing DB (add the migration-fixture test), a value a harness mutates on create is read
+      back on restart (round-trip test), and `shell` (which mutates nothing) leaves it `{}`.
 - [ ] **`claude_code.py`: the `claude-code` harness** per the claude-code LLD. Config vocab
       `permission_mode` / `model` / `extra_args`; unknown fields are validation errors naming the
-      harness and field; `validate_config` shape-only, returns `()`. `start`/`restart` are symmetric
-      and state-aware: detect a resumable session named by `self._session_name` and resume it, else
-      launch fresh; required executable `claude` via `require_commands`. The chosen path is visible
-      to the operator (never silent). Register in `HARNESS_REGISTRY`. **Done when:** with a stubbed
-      target, start/restart resume when a session exists and launch fresh when it does not;
-      `permission_mode`/`model`/`extra_args` map to the LLD-verified flags; the visible-decision
-      output is asserted; no test invokes a real `claude` binary.
-- [ ] **Docs riding this phase:** none yet (unconsumed). `docs/guides/resources.md` capability-story
-      mention of `harness` may land here since the capability now has both members, but its worked
-      session-template examples wait for Phase 4; prefer to land the whole resources.md story in P4
-      to avoid a half-example.
+      harness and field; `validate_config` shape-only, returns `()`. `start`/`restart` share one
+      `_resume_or_launch`: read/mint the session id in `self._state["session_id"]`, run the
+      slug-independent `find <uuid>.jsonl` existence probe on the launch target, then
+      `--resume     <uuid>` if present else `--session-id <uuid> --name <session>`; the pane string
+      is a single `sh -c` with a prepended visible-decision `echo`; required executable `claude` via
+      `require_commands`. Register in `HARNESS_REGISTRY`. **Done when:** with a stubbed target,
+      present->resume and absent->fresh; the minted id persists via the state blob; the flags map to
+      the LLD-verified spellings; the visible-decision output is asserted; no test invokes a real
+      `claude` binary.
+- [ ] **The deferred claude-code docs (from P4).** Add the `claude-code` sample document to
+      `manifests/samples/session-template.yaml` and the worked `claude-code` example to
+      `docs/guides/resources.md` (the spots P4 left noted); complete P4's "Samples + sample-config"
+      and "Docs riding this phase" items. No `docs/sdd/` path in any permanent doc.
+- [ ] **The P4 claude-code end-to-end carry (from P4's Tests P4).** Drive a `harness: claude-code`
+      template through session create AND restart via the real orchestrator: op-dispatch produces
+      the resume/launch pane string; restart-post-kill end state; the visible decision through the
+      real launch; and the substitution-safety case (a generated snippet is not mangled).
+      Deterministic stubbing, no real `claude` binary.
 
-**Tests P2:** detection both directions (resumable present/absent) via deterministic stubbing;
-config vocab validation + unknown-field error; `extra_args` verbatim passthrough; visible-decision
-output; required-command probe uses `claude`.
+**Tests P2:** harness-state migration + backfill + round-trip; detection both directions
+(present/absent) via deterministic stubbing; config vocab validation + unknown-field error;
+`extra_args` verbatim passthrough; visible-decision output; required-command probe uses `claude`;
+the end-to-end carry above.
 
 ## Phase 3: Swap the session node onto the harness (retire the interim seams)
 

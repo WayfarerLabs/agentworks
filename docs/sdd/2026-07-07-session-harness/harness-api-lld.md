@@ -63,6 +63,7 @@ class Harness(Capability):
         workspace_name: str,           # the session's workspace ancestor
         target: _Target | None,        # the agent node it runs as; None in admin mode
         admin: bool,                   # admin mode (uses ctx.admin_target())
+        state: dict[str, object],      # the harness's per-session persisted blob (section 12)
     ) -> None:
         super().__init__(owner_name, config)
         self._session_name = session_name
@@ -70,7 +71,14 @@ class Harness(Capability):
         self._workspace_name = workspace_name
         self._target = target
         self._admin = admin
+        self._state = state            # mutated in-place by ops; the manager persists it
         self._probed = False           # single-fire guard (relocated verbatim)
+
+    @property
+    def state(self) -> dict[str, object]:
+        """The harness's per-session state blob, mutated by the ops; the
+        session manager persists it after the op (section 12)."""
+        return self._state
 
     @abstractmethod
     def start(self, ctx: RunContext) -> str: ...
@@ -501,6 +509,33 @@ one line each so this LLD is self-contained:
 - `harness/__init__.py`: `HARNESS_REGISTRY` (name -> class), `harness_for(name)`, `publish_to` (one
   `HarnessEntry` per harness with `Origin.built_in(source="agentworks.capabilities.harness")`),
   mirroring `capabilities/git_credential/__init__.py:44-79`.
+
+## 12. Harness-state persistence (the per-session blob)
+
+A harness gets a general-purpose per-session state blob it can read and update, persisted on the
+session row. `claude-code` is the first user (it stores its Claude session id,
+`claude-code-lld.md`); `shell` uses none of it; the slot is there for any harness. This REVERSES the
+SDD's original "Database: unchanged" decision (FRD/HLA), a deliberate change, not incidental.
+
+- **Schema.** The `sessions` table gains a `harness_state` column, a JSON object (`TEXT` holding
+  JSON, default `'{}'`), harness-owned and OPAQUE to the core (it never inspects the keys). A
+  forward-only migration adds the column and backfills existing rows to `{}` (the SQLite
+  table-rebuild discipline is not needed for a pure additive column with a default). `SessionRow`
+  gains a `harness_state: dict[str, object]` field.
+- **Construction.** The session factory (`_harness_for_template`, `sessions/nodes.py`) reads the
+  session row's `harness_state` (or `{}` for a fresh create, where no row exists yet) and passes it
+  as the harness constructor's `state=` kwarg (section 1). The SAME dict object flows in.
+- **Read/write during the op.** A harness reads `self._state.get(key)` and may mutate it in place
+  (`claude-code`: mint and record `session_id` on the first `start`). The op return value is
+  unchanged (still the pane command string); state is a side channel.
+- **Persistence.** After the manager calls `harness.start(ctx)` / `harness.restart(ctx)`, it reads
+  `harness.state` (section 1's property) and writes it to the session row: folded into the row
+  INSERT on create (so a freshly minted `session_id` lands with the new row) and an UPDATE on
+  restart (usually a no-op, the id already stored). The manager owns the DB write; the harness never
+  touches the DB (layering).
+- **Restart re-resolution.** Restart re-resolves the template and reconstructs the harness, but now
+  loads `harness_state` from the stored row, so a value minted on create survives to restart. This
+  is what lets `claude-code` store rather than re-derive its id.
 
 ## Contradictions with pinned decisions / FRD / HLA assumptions
 

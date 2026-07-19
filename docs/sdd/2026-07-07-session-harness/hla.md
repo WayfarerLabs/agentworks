@@ -113,6 +113,7 @@ class Harness(Capability):
         workspace_name: str,        # the session's workspace ancestor
         target: Node | None,        # the agent node it runs as; None in admin mode
         admin: bool,                # admin mode (uses ctx.admin_target())
+        state: dict,                # the per-session harness_state blob (persisted by the manager)
     ) -> None: ...
     # Construction captures the SESSION's OWN identity: its name plus its
     # row-carried ancestors (vm, workspace, and agent-or-admin, the last
@@ -342,13 +343,19 @@ shared helper the built-ins use.
 - `agw resource list/describe/kinds` need no code changes; rows and references render through the
   existing framework surfaces (FRD R8).
 
-### Database: unchanged, deliberately
+### Database: one additive column for harness state
 
-No schema migration. `SessionRow` stores the template NAME (plus placement and tmux lifecycle
-fields); neither the pane command nor the harness pair is persisted. Restart re-resolves the
-template by the stored name, reconstructs the harness, and dispatches fresh, so harness and config
-always come from current declared config, the semantics template edits already have between create
-and restart.
+`SessionRow` stores the template NAME (plus placement and tmux lifecycle fields); the pane command
+and the harness pair are still NOT persisted (restart re-resolves the template by the stored name
+and reconstructs the harness, so harness and config always come from current declared config, the
+semantics template edits already have between create and restart). One thing IS now persisted: a
+general-purpose per-session `harness_state` JSON blob, harness-owned and opaque to the core, added
+as a single forward-only additive column (default `{}`, existing rows backfilled). This is a
+deliberate reversal of the original "DB unchanged" stance: a harness is a stateful adapter and needs
+a place to persist per-session state, and `claude-code` is the first user (it stores its Claude
+session id there rather than re-deriving it, so the id is minted once and read back on restart). The
+harness reads and mutates the blob during its ops; the manager persists it to the row after the op.
+Full mechanics in the harness-api LLD "Harness-state persistence".
 
 ### Migration tool (`migrate/planning.py`)
 
