@@ -1729,8 +1729,22 @@ def reinit_vm(
 
     verify_tailscale_available()
     # Resolve the admin-template the VM was created with (NULL column =
-    # reserved ``default``), not always ``default``.
-    admin = admin_template(registry, vm.admin_template or "default")
+    # reserved ``default``), not always ``default``. Mirror create's
+    # clean error if the operator has since removed the declaration, so a
+    # dropped admin-template surfaces as a typed error naming the selector
+    # rather than a raw KeyError traceback.
+    from agentworks.resources.access import kind_dict
+
+    selected_admin_template = vm.admin_template or "default"
+    try:
+        admin = admin_template(registry, selected_admin_template)
+    except KeyError:
+        raise unknown_template_error(
+            kind="admin-template",
+            label="admin template",
+            name=selected_admin_template,
+            available=kind_dict(registry, "admin-template"),
+        ) from None
     cred_nodes = tuple(
         git_credential_node(registry, cred_name)
         for cred_name in admin.git_credentials
