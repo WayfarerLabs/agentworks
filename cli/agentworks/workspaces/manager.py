@@ -186,8 +186,6 @@ def describe_workspace(
     output.info(f"Template:   {ws.template or 'default'}")
     output.info(f"Path:       {ws.workspace_path}")
     output.info(f"Created:    {ws.created_at}")
-    if ws.last_seen_at:
-        output.info(f"Last Seen:  {ws.last_seen_at}")
 
     # Sessions
     sessions = db.list_sessions(workspace_name=name)

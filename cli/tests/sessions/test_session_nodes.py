@@ -572,7 +572,7 @@ def _live_workspace(db: Database, vm: LiveVMNode):
 
     row = WorkspaceRow(
         name="ws1", vm_name=vm.row.name, template=None,
-        workspace_path="/srv/ws1", created_at="", last_seen_at=None,
+        workspace_path="/srv/ws1", created_at="",
         linux_group="ws-ws1",
     )
     return live_workspace_node(row, vm)
