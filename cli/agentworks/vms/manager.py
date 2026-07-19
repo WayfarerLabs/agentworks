@@ -831,8 +831,12 @@ def shell_vm(
     *,
     platform_transport: bool = False,
     workspace_name: str | None = None,
-) -> None:
+) -> int:
     """Open a shell on a VM as the admin user.
+
+    Returns the interactive session's exit code; the CLI layer owns the
+    translation to process exit (check 9: no sys.exit in the service),
+    mirroring :func:`exec_vm`.
 
     By default uses the Tailscale SSH transport. Pass
     ``platform_transport=True`` (the ``vm shell --platform`` flag) to
@@ -853,7 +857,6 @@ def shell_vm(
     held-active span covers the whole interactive session.
     """
     import shlex
-    import sys
 
     from agentworks.env import ResourceContext, compose_env
     from agentworks.transports import native_transport, transport
@@ -933,9 +936,8 @@ def shell_vm(
         )
         if ws is not None:
             cmd = f"cd {shlex.quote(ws.workspace_path)} && exec $SHELL -l"
-            sys.exit(target.interactive(cmd, env=env))
-        else:
-            sys.exit(target.interactive("", env=env))
+            return target.interactive(cmd, env=env)
+        return target.interactive("", env=env)
 
 
 def exec_vm(

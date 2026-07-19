@@ -277,7 +277,7 @@ def session_attach(
     from agentworks.config import load_config
     from agentworks.sessions.manager import attach_session
 
-    attach_session(get_db(), load_config(), name=name)
+    raise typer.Exit(attach_session(get_db(), load_config(), name=name))
 
 
 @session_app.command("delete")

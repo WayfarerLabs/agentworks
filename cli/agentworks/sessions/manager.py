@@ -5,7 +5,6 @@ from __future__ import annotations
 import contextlib
 import re
 import shlex
-import sys
 from functools import partial
 from typing import TYPE_CHECKING, NamedTuple
 
@@ -3181,8 +3180,13 @@ def attach_session(
     config: Config,
     *,
     name: str,
-) -> None:
-    """Attach to a session's tmux session (interactive)."""
+) -> int:
+    """Attach to a session's tmux session (interactive).
+
+    Returns the interactive session's exit code; the CLI layer owns the
+    translation to process exit (check 9: no sys.exit in the service),
+    mirroring :func:`agentworks.vms.manager.exec_vm`.
+    """
     from agentworks.sessions.tmux import tmux_cmd
 
     session = _require_session(db, name)
@@ -3210,7 +3214,7 @@ def attach_session(
             )
 
         q_session = shlex.quote(name)
-        sys.exit(target.interactive(tmux_cmd(f"attach -t {q_session}", session.socket_path)))
+        return target.interactive(tmux_cmd(f"attach -t {q_session}", session.socket_path))
 
 
 def session_logs(

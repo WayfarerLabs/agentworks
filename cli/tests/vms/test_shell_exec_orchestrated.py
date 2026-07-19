@@ -152,9 +152,8 @@ def test_shell_reachable_vm_is_one_boundary_burst(
     _seed_vm(db)
     _reachable(monkeypatch, True)
 
-    with pytest.raises(SystemExit) as exc:
-        vm_manager.shell_vm(db, config, "box")
-    assert exc.value.code == 0
+    # shell_vm returns the interactive exit code; the CLI owns process exit.
+    assert vm_manager.shell_vm(db, config, "box") == 0
 
     assert len(resolve_counter) == 1
     assert sorted(resolve_counter[0]) == ["proxmox-token", "vm-env-secret"]
@@ -179,8 +178,7 @@ def test_shell_stopped_vm_gate_burst_then_boundary_burst(
     events: list[str] = []
     _stop_the_vm(monkeypatch, events)
 
-    with pytest.raises(SystemExit):
-        vm_manager.shell_vm(db, config, "box")
+    assert vm_manager.shell_vm(db, config, "box") == 0
 
     assert events == ["status", "start", "tailscale"]  # the gate ran
     assert resolve_counter == [["proxmox-token"], ["vm-env-secret"]]
@@ -350,8 +348,7 @@ def test_shell_interactive_runs_inside_the_held_active_span(
 
     target.interactive = _tracking  # type: ignore[method-assign]
 
-    with pytest.raises(SystemExit):
-        vm_manager.shell_vm(db, config, "box")
+    assert vm_manager.shell_vm(db, config, "box") == 0
 
     assert events == ["hold-open", "interactive", "hold-close"]
 
@@ -400,8 +397,7 @@ def test_shell_platform_transport_routes_through_the_node_platform(
 
     monkeypatch.setattr("agentworks.transports.transport", _no_transport)
 
-    with pytest.raises(SystemExit):
-        vm_manager.shell_vm(db, config, "box", platform_transport=True)
+    assert vm_manager.shell_vm(db, config, "box", platform_transport=True) == 0
 
     (platform,) = seen
     assert isinstance(platform, ProxmoxPlatform)

@@ -1059,10 +1059,9 @@ def test_session_attach_does_not_eager_resolve(
     )
 
     config = SimpleNamespace(operator=SimpleNamespace(ssh_private_key=None))
-    # interactive() returns int and the manager doesn't sys.exit here,
-    # but suppress for forward-compat with future refactors.
-    with contextlib.suppress(SystemExit):
-        session_manager.attach_session(db, config, name="s1")  # type: ignore[arg-type]
+    # attach_session returns interactive()'s exit code (0, stubbed) and
+    # does not sys.exit; the CLI owns the process exit.
+    assert session_manager.attach_session(db, config, name="s1") == 0  # type: ignore[arg-type]
 
     assert resolve_called == [], (
         "session attach joins existing shell; must not eager-resolve"
