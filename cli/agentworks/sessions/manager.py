@@ -1716,6 +1716,30 @@ def create_session(
         target = transport(vm, config, logger=logger)
         run_command: RunCommand = target.run
 
+        # Preflight phase: name the resources this create touches (the
+        # session template, any ephemeral workspace / agent templates, and
+        # the ephemeral agent's git credentials) in the same
+        # <kind>/<name> form vm/agent create use, then run the readiness
+        # sweep. Framed as a phase so session create reads like a plan
+        # executing, matching vm create.
+        output.phase("Preflight")
+        output.detail(f"Checking session-template/{template.name}...")
+        if new_workspace:
+            assert workspace_tmpl is not None  # resolved at build above
+            output.detail(f"Checking workspace-template/{workspace_tmpl.name}...")
+        if new_agent:
+            assert agent_tmpl is not None  # resolved at build above
+            output.detail(f"Checking agent-template/{agent_tmpl.name}...")
+        if agent_tmpl_node is not None:
+            from agentworks.vms.initializer import announce_git_credentials
+
+            announce_git_credentials(
+                {
+                    cred.provider.owner_name: cred.provider
+                    for cred in agent_tmpl_node.credentials
+                }
+            )
+
         # Probe direct agent SSH for an EXISTING agent before any
         # prompt or mutation: a pre-rollout agent surfaces as an
         # actionable StateError with nothing to roll back (the
@@ -1746,6 +1770,8 @@ def create_session(
                 agent_target=agent_target,
             ),
         )
+
+        output.phase("Resolving Secrets")
         resolver.resolve()
         secret_values = resolver.values
 
@@ -1766,11 +1792,16 @@ def create_session(
         # session (tmux up) is deliberately never rolled back.
         log = RealizationLog()
         try:
-            # ---- Ephemeral realizations ------------------------------------
+            # ---- Ephemeral realizations (each its own plan stage) ----------
             if pending_workspace is not None:
                 from agentworks.workspaces.realize import realize_workspace
 
                 assert workspace_tmpl is not None  # resolved at build above
+                output.phase("Creating Workspace")
+                output.detail(
+                    f"Creating workspace '{workspace_name}' on VM '{vm.name}' "
+                    f"(template: {workspace_tmpl.name})..."
+                )
                 realize_workspace(
                     db,
                     config,
@@ -1785,7 +1816,8 @@ def create_session(
 
                 assert agent_name is not None  # defaulted to ``name`` above
                 assert agent_tmpl is not None and agent_tmpl_node is not None
-                output.info(
+                output.phase("Creating Agent")
+                output.detail(
                     f"Creating agent '{agent_name}' on VM '{vm.name}' "
                     f"(template: {agent_tmpl.name})..."
                 )
@@ -1871,7 +1903,8 @@ def create_session(
                 expected_socket = agent_socket_path(linux_user, name)
 
             mode_label = f"agent: {resolved_agent_name}" if resolved_agent_name else "admin"
-            output.info(
+            output.phase("Starting Session")
+            output.detail(
                 f"Starting session '{name}' on workspace '{workspace_name}' "
                 f"({mode_label}, template: {template.name})..."
             )
