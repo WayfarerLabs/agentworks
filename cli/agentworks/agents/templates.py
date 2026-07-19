@@ -10,7 +10,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
-from agentworks.errors import ConfigError
+from agentworks.errors import ConfigError, unknown_template_error
 
 if TYPE_CHECKING:
     from agentworks.agents.template import AgentTemplate
@@ -47,8 +47,12 @@ def resolve_from_dict(
     """Resolve an agent template from a templates dict (no Config required)."""
     if template_name is not None and template_name != "default":
         if template_name not in templates:
-            msg = f"Unknown agent template: {template_name}"
-            raise ValueError(msg)
+            raise unknown_template_error(
+                kind="agent-template",
+                label="agent template",
+                name=template_name,
+                available=templates,
+            )
         return _resolve(templates, template_name)
 
     if "default" in templates:

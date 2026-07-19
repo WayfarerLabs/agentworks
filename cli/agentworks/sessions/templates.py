@@ -10,7 +10,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
-from agentworks.errors import ConfigError
+from agentworks.errors import ConfigError, unknown_template_error
 
 if TYPE_CHECKING:
     from agentworks.env import EnvEntry
@@ -53,8 +53,12 @@ def resolve_from_dict(
     """Resolve a session template from a templates dict (no Config required)."""
     if template_name is not None and template_name != "default":
         if template_name not in templates:
-            msg = f"Unknown session template: {template_name}"
-            raise ValueError(msg)
+            raise unknown_template_error(
+                kind="session-template",
+                label="session template",
+                name=template_name,
+                available=templates,
+            )
         return _resolve(templates, template_name)
 
     if "default" in templates:

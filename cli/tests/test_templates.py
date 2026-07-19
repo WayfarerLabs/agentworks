@@ -9,6 +9,7 @@ import pytest
 
 from agentworks.bootstrap import build_registry
 from agentworks.config import load_config
+from agentworks.errors import NotFoundError
 from agentworks.workspaces.templates import resolve_template
 
 
@@ -93,5 +94,27 @@ def test_builtin_fallback(tmp_path: Path) -> None:
 
 
 def test_unknown_template(config):  # type: ignore[no-untyped-def]
-    with pytest.raises(ValueError, match="Unknown"):
+    # A bad template name renders as a clean typed error (not a bare
+    # ValueError that escapes to the CLI's traceback handler), and the
+    # hint lists the declared names so the operator can correct it in
+    # place without consulting deprecated config.
+    with pytest.raises(NotFoundError, match="Unknown workspace template") as exc:
         resolve_template(build_registry(config), "nonexistent")
+    assert exc.value.entity_kind == "workspace-template"
+    assert exc.value.entity_name == "nonexistent"
+    assert exc.value.hint is not None
+    assert exc.value.hint.startswith("available workspace templates: ")
+    for declared in ("base", "child", "default", "grandchild"):
+        assert declared in exc.value.hint
+
+
+def test_unknown_template_hint_when_none_declared() -> None:
+    # With no declared templates in the dict (the config eager-resolve
+    # path can call resolve_from_dict before any default is materialized),
+    # the hint is honest about the empty set rather than presenting an
+    # empty list.
+    from agentworks.workspaces.templates import resolve_from_dict
+
+    with pytest.raises(NotFoundError) as exc:
+        resolve_from_dict({}, "nonexistent")
+    assert exc.value.hint == "no workspace templates are declared"

@@ -188,10 +188,13 @@ def test_create_bad_template_bails_before_any_prompt_or_start(
     events: list[str] = []
     _stop_the_vm(monkeypatch, events)
 
-    # The raw ValueError is the imperative command's pre-existing error
-    # shape for an unknown template (asserted as-is: this test pins the
-    # ORDER, not the shape).
-    with pytest.raises(ValueError, match="nope"):
+    # An unknown template now raises the typed NotFoundError (rendered
+    # cleanly by the CLI, not a traceback). This test pins the ORDER, not
+    # the shape, so any AgentworksError naming the bad template satisfies
+    # the bail-early precedence.
+    from agentworks.errors import NotFoundError
+
+    with pytest.raises(NotFoundError, match="nope"):
         workspace_manager.create_workspace(
             db, config, name="ws1", vm_name="box", template_name="nope"
         )
