@@ -123,7 +123,7 @@ class TemplateReference(ResourceReference):
     in the existing template resolvers; this class is purely the
     framework's handle on the reference.
 
-    No extra fields beyond the base today -- the subclass exists so
+    No extra fields beyond the base today; the subclass exists so
     producers and the framework agree on the target kind via the type.
     """
 

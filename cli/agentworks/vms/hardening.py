@@ -32,9 +32,9 @@ HARDENING_SYSCTL_PATH = "/etc/sysctl.d/99-agentworks.conf"
 HARDENING_SYSCTL_CONTENT = """\
 # Managed by agentworks. Do not edit; this file is rewritten on vm reinit.
 # Defense-in-depth baseline for shared multi-user VMs: restrict kernel log
-# and pointer exposure, confine ptrace to descendants, and enable the
-# protected symlink/hardlink/fifo/regular-file guards against symlink and
-# fifo attacks in world-writable dirs.
+# and pointer exposure, confine ptrace to descendants, enable the protected
+# symlink/hardlink/fifo/regular-file guards against symlink and fifo attacks
+# in world-writable dirs, and disable unprivileged BPF.
 kernel.dmesg_restrict = 1
 kernel.kptr_restrict = 1
 kernel.yama.ptrace_scope = 1

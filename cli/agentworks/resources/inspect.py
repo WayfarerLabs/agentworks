@@ -17,7 +17,7 @@ text (when their Resource type has a ``description`` field), and
 auto-declared resources get a framework-synthesized
 ``"(auto) <usage> for <kind>/<name>"`` / ``"(auto) auto-declared default
 <kind>"``. Kinds whose Resource type has no ``description`` field
-render an empty cell -- the accepted cost of the cross-kind view.
+render an empty cell, the accepted cost of the cross-kind view.
 
 The framework reads ``origin`` / ``description`` / ``usage`` off each
 Resource via ``getattr`` rather than a shared ``Resource`` base class:
