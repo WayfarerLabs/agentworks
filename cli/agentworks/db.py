@@ -98,7 +98,7 @@ class VMRow:
     # proxmox vmid/node, lima instance_name).
     platform_metadata: dict[str, str] = field(default_factory=dict)
     # Operator intent flag: the operator explicitly stopped this VM, so
-    # auto-start gates (ensure_active) must not restart it.
+    # the activation gate's auto-start must not restart it.
     operator_stopped: bool = False
 
 
@@ -932,7 +932,7 @@ class Database:
         self._conn.commit()
 
     def set_operator_stopped(self, name: str, stopped: bool) -> None:
-        """Record operator stop/start intent (gates ensure_active)."""
+        """Record operator stop/start intent (gates the activation gate's auto-start)."""
         self._conn.execute(
             "UPDATE vms SET operator_stopped = ? WHERE name = ?",
             (1 if stopped else 0, name),

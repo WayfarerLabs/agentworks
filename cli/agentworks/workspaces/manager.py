@@ -18,15 +18,15 @@ from agentworks.errors import (
     UserAbort,
     ValidationError,
 )
-from agentworks.vms.manager import gated_vm_boundary, keep_active
+from agentworks.vms.manager import gated_vm_boundary
 
 if TYPE_CHECKING:
-    from agentworks.capabilities.base import OperationScope, RunContext
-    from agentworks.capabilities.vm_platform import VMPlatform
+    from agentworks.capabilities.base import OperationScope
     from agentworks.config import Config
     from agentworks.db import Database, VMRow, WorkspaceRow
     from agentworks.resources.registry import Registry
     from agentworks.transports import Transport
+    from agentworks.vms.nodes import LiveVMNode
 
 
 def create_workspace(
@@ -103,7 +103,7 @@ def create_workspace(
         gate_secret_resolver,
     )
     from agentworks.orchestration.readiness import preflight_all
-    from agentworks.orchestration.secrets import ScopedSecrets, secret_union
+    from agentworks.orchestration.secrets import secret_union
     from agentworks.orchestration.walk import walk
     from agentworks.secrets.resolver import Resolver
     from agentworks.vms.nodes import live_vm_node
@@ -113,21 +113,8 @@ def create_workspace(
 
     vm_node = live_vm_node(db, config, registry, vm)
 
-    def _teardown_platform_ctx() -> RunContext:
-        # The nested teardown's op-start context: built at teardown
-        # time (post-boundary, values resolved), scoped to the site's
-        # declared names. (This command never unwinds a realized
-        # workspace, so the source exists for the node's contract, not
-        # for a path this command takes.)
-        return RunContext(
-            config=config,
-            secrets=ScopedSecrets(
-                resolver.values, vm_node.site.secret_refs()
-            ),
-        )
-
     pending_workspace = pending_workspace_node(
-        db, config, ws_name, vm_node, template_name, _teardown_platform_ctx
+        db, config, ws_name, vm_node, template_name
     )
     nodes = walk(pending_workspace)
     # The walk supplies the boundary union (the site's config secrets;
@@ -874,33 +861,30 @@ def delete_workspace(
     *,
     force: bool = False,
     yes: bool = False,
-    platform: VMPlatform | None = None,
-    platform_ctx: RunContext | None = None,
+    vm_node: LiveVMNode | None = None,
 ) -> None:
     """Delete a workspace.
 
-    Orchestrated on the standalone path (``platform=None``, the
-    command root and ``delete_session``'s workspace-cleanup call):
+    Orchestrated on the standalone path (``vm_node=None``, the command
+    root and ``delete_session``'s workspace-cleanup call):
     ``vms.manager.gated_vm_boundary`` composes the live-VM graph at
-    WORKSPACE scope, the activation gate replaces this command's
-    ``keep_active``, and the held-active span covers the session-kill
-    and on-VM removal work. The sessions guard, the confirm gate, and
-    the not-found check stay pre-boundary: a refusal costs zero
-    prompts, zero resolves, and zero gate events. A missing VM row
+    WORKSPACE scope, the activation gate's held-active span covers the
+    session-kill and on-VM removal work. The sessions guard, the confirm
+    gate, and the not-found check stay pre-boundary: a refusal costs
+    zero prompts, zero resolves, and zero gate events. A missing VM row
     skips the boundary entirely (DB-only cleanup), and a VM without a
     Tailscale address skips only the SSH session-kill block, exactly
     the imperative shape.
 
-    ``platform`` accepts the caller's already-bound platform (session
-    create's ephemeral ROLLBACK path, where
-    ``PendingWorkspaceNode.teardown`` runs INSIDE the caller's held
-    gate span), paired with ``platform_ctx``, that composition's
-    op-start context for the hold's power ops: that path must not
-    rebuild a boundary or re-run the resolve pass mid-rollback, so it
-    keeps the imperative ``keep_active`` hold on the handed-in
-    platform. This is the INTERIM nested-teardown seam; it closes
-    when the session-create unwind hands a node instead of a
-    platform.
+    ``vm_node`` is the nested-teardown path (session create's ephemeral
+    ROLLBACK, where ``PendingWorkspaceNode.teardown`` runs INSIDE the
+    caller's held activation gate). That gate already converged the VM
+    and holds it active across the whole unwind, so this path composes
+    NO second boundary and resolves NOTHING: it trusts the caller's
+    gate and re-enters only the keepalive hold, reaching the platform
+    through the node's own site edge. Passing the node (never a bare
+    platform) is what keeps a teardown from silently falling into the
+    boundary-building standalone branch.
     """
 
     ws = db.get_workspace(name)
@@ -943,7 +927,7 @@ def delete_workspace(
     console_pairs: list[tuple[str, str]] = []
     with contextlib.ExitStack() as _keepalive_stack:
         if vm is not None:
-            if platform is None:
+            if vm_node is None:
                 # The standalone composition root: build the boundary here.
                 from agentworks.bootstrap import build_registry
 
@@ -956,19 +940,31 @@ def delete_workspace(
                 )
             else:
                 # The nested-teardown path: the caller's composition
-                # already resolved and holds its gate open, so only the
-                # hold is re-entered (never a second boundary or
-                # resolve); the handed-in ctx serves the hold's power
-                # ops.
-                if platform_ctx is None:
+                # already converged the VM and holds its activation gate
+                # open across this unwind, so we compose no second
+                # boundary and resolve nothing; we re-enter only the
+                # keepalive hold, reaching the platform through the
+                # node's own site edge.
+                #
+                # That hold keeps the NODE's VM active, but the delete
+                # body issues its SSH + DB work against the workspace's
+                # own VM (``ws.vm_name``). Enforce that they are the same
+                # VM: a mismatched node would silently hold one VM active
+                # while operating on another. Unreachable today (the
+                # pending nodes always pass their own ``self._vm``), so
+                # this is a loud guard on a teardown-wiring bug, not a
+                # runtime branch we expect to take.
+                if vm_node.row.name != ws.vm_name:
                     raise StateError(
-                        f"delete_workspace('{name}') was handed a bound "
-                        f"platform without its op-start context; the "
-                        f"nested-teardown path passes both or neither."
+                        f"nested teardown of workspace '{name}' was "
+                        f"handed a VM node for '{vm_node.row.name}', but "
+                        f"the workspace is on '{ws.vm_name}'; the node "
+                        f"handed to a teardown must be the entity's own "
+                        f"VM node (teardown-wiring bug).",
+                        entity_kind="workspace",
+                        entity_name=name,
                     )
-                _keepalive_stack.enter_context(
-                    keep_active(db, config, vm, platform, platform_ctx)
-                )
+                _keepalive_stack.enter_context(vm_node.hold_active())
 
         if vm is not None and vm.tailscale_host is not None:
             from agentworks.db import SessionStatus

@@ -35,8 +35,8 @@ from agentworks.transports import (
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
+    from contextlib import AbstractContextManager
 
-    from agentworks.capabilities.base import RunContext
     from agentworks.capabilities.git_credential.base import GitCredentialProvider
     from agentworks.capabilities.vm_platform import VMPlatform
     from agentworks.catalog import AptSourceEntry, SystemInstallCommandEntry, UserInstallCommandEntry
@@ -1417,7 +1417,7 @@ def initialize_vm(
     providers: dict[str, GitCredentialProvider],
     platform: VMPlatform,
     *,
-    platform_ctx: RunContext,
+    hold_active: AbstractContextManager[None],
     admin_username: str = "agentworks",
     tailscale_auth_key: str,
     git_tokens: dict[str, str],
@@ -1431,15 +1431,14 @@ def initialize_vm(
     Phase B (setup) steps are non-fatal: failures are logged as warnings
     and the VM gets 'partial' status instead of 'complete'.
 
-    Both ``tailscale_auth_key`` and ``git_tokens`` are required; ``create_vm``
-    resolves them via the framework at manager-entry and threads them in,
-    along with the BOUND ``platform`` from its composition root (used
-    for the keepalive hold; the gates never bind) and ``platform_ctx``,
-    that composition's op-start context for the platform's power ops
-    (secrets scoped to the site's declared names).
+    Both ``tailscale_auth_key`` and ``git_tokens`` are required;
+    ``create_vm`` resolves them via the framework at manager-entry and
+    threads them in. ``hold_active`` is the keepalive span built at
+    ``create_vm``'s composition root (``platform.vm_active``), anchoring
+    the VM active for the whole init; ``platform`` still rides along for
+    the WSL2 swap check below.
     """
     from agentworks.ssh import SSHLogger
-    from agentworks.vms.manager import keep_active
 
     home = f"/home/{admin_username}"
     logger = SSHLogger(vm_name, "vm-create")
@@ -1457,14 +1456,12 @@ def initialize_vm(
     # Anchor the VM in an active state for the full init span. No-op for
     # Lima/Azure/Proxmox; WSL2 holds a wsl.exe subprocess open so the distro
     # doesn't idle-shut between Phase A (wsl.exe transport) and Phase B
-    # (Tailscale SSH). This is a recorded INTERIM keep_active hold on the
-    # handed-in platform from create_vm's orchestrated composition root
-    # (rebuilding a boundary here would re-resolve mid-command, and the
-    # imperative initializer internals hold no node to hold_active on);
-    # it retires when these internals orchestrate.
-    vm_for_keepalive = db.get_vm(vm_name)
-    assert vm_for_keepalive is not None, "create_vm inserts the row before init"
-    with keep_active(db, config, vm_for_keepalive, platform, platform_ctx):
+    # (Tailscale SSH). The span is built at create_vm's composition root
+    # and handed in; the VM was just provisioned and is running, so no
+    # power-state convergence happens here, only the hold.
+    vm_row = db.get_vm(vm_name)
+    assert vm_row is not None, "create_vm inserts the row before init"
+    with hold_active:
         try:
             db.insert_vm_event(vm_name, "provisioning_started", transport)
             ts_target = _phase_a_bootstrap(
@@ -1475,7 +1472,7 @@ def initialize_vm(
                 exec_target,
                 home,
                 admin_username,
-                vm_for_keepalive.hostname,
+                vm_row.hostname,
                 logger,
                 tailscale_auth_key=tailscale_auth_key,
                 # WSL2 handles swap natively before bootstrap; every

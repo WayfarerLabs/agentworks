@@ -111,7 +111,7 @@ def test_create_graph_derives_from_row_and_pending_name(
     registry = build_registry(config)
 
     vm_node = live_vm_node(db, config, registry, vm)
-    pending = pending_workspace_node(db, config, "ws1", vm_node, None, RunContext)
+    pending = pending_workspace_node(db, config, "ws1", vm_node, None)
     nodes = walk(pending)
 
     assert [n.key for n in nodes] == ["vm-site/proxmox", "vm/box", "workspace/ws1"]

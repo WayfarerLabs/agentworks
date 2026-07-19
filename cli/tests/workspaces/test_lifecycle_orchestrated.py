@@ -124,6 +124,21 @@ def _no_gate(monkeypatch: pytest.MonkeyPatch) -> None:
     _reachable(monkeypatch, False)
 
 
+def _node_holding(
+    db: Database, config: object, platform: object, *, vm_name: str = "box"
+):  # noqa: ANN202
+    """A live VM node for ``vm_name`` (default 'box') whose site holds
+    the given platform: the shape a nested teardown hands
+    ``delete_workspace`` (it re-enters the hold through
+    ``vm_node.site.platform``)."""
+    from agentworks.vms.nodes import LiveVMNode, VMSiteNode
+
+    row = db.get_vm(vm_name)
+    assert row is not None
+    site = VMSiteNode("proxmox", platform, (), object())  # type: ignore[arg-type]
+    return LiveVMNode(db, config, object(), row, site)  # type: ignore[arg-type]
+
+
 class _FakeAdminTarget:
     """Admin transport double: every command is recorded (optionally
     into a shared event log) and answers ok unless a substring matches
@@ -544,13 +559,15 @@ def test_delete_nested_platform_path_reuses_the_callers_composition(
     monkeypatch: pytest.MonkeyPatch,
     captured_output,  # noqa: ANN001
 ) -> None:
-    """The nested-teardown seam: a handed-in bound platform means the
-    caller's composition already resolved and holds its gate open, so
-    delete performs ZERO additional resolves and composes no second
-    boundary (a status probe would be one); only the hold is
-    re-entered."""
+    """The nested-teardown seam: the caller hands its already-held VM
+    NODE, whose gate has converged and holds the VM, so delete performs
+    ZERO additional resolves and composes no second boundary (a status
+    probe would be one); it trusts that gate and re-enters only the
+    keepalive hold, reaching the platform through the node's site edge."""
 
     class _BoundPlatformStub:
+        name = "proxmox"
+
         def __init__(self) -> None:
             self.holds = 0
 
@@ -565,9 +582,10 @@ def test_delete_nested_platform_path_reuses_the_callers_composition(
 
     config = make_config()
     _seed(db)
-    _no_gate(monkeypatch)  # any gate composition would probe status and fail
-    _reachable(monkeypatch, True)  # keep_active's fast path
+    _no_gate(monkeypatch)  # any boundary composition would probe status and fail
+    _reachable(monkeypatch, True)
     bound = _BoundPlatformStub()
+    vm_node = _node_holding(db, config, bound)
 
     workspace_manager.delete_workspace(
         db,
@@ -575,14 +593,46 @@ def test_delete_nested_platform_path_reuses_the_callers_composition(
         "ws1",
         force=True,
         yes=True,
-        platform=bound,  # type: ignore[arg-type]
-        platform_ctx=RunContext(),
+        vm_node=vm_node,
     )
 
     assert resolve_counter == []  # nothing resolved beyond the caller's pass
     assert bound.holds == 1  # the hold was re-entered, nothing else
     assert db.get_workspace("ws1") is None
     assert any("rm -rf /srv/ws1" in c for c in target.commands)
+
+
+def test_delete_nested_rejects_a_mismatched_vm_node(
+    db: Database,
+    make_config,  # noqa: ANN001
+    resolve_counter: list[list[str]],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Enforce-invariants pin: a teardown must hand ``delete_workspace``
+    the workspace's OWN vm node. A node for a different VM would hold
+    that VM active while the delete body issues SSH + DB work against
+    the workspace's real VM, a silent footgun; the guard raises a typed
+    ``StateError`` before the hold is ever entered."""
+    config = make_config()
+    _seed(db)  # ws1 on 'box'
+    # A live node for a DIFFERENT VM than ws1's ('box').
+    db.insert_vm("other", site="proxmox", hostname="other")
+    db.update_vm_tailscale("other", "100.64.0.10")
+    _no_gate(monkeypatch)  # nothing may probe status or hold the VM
+    vm_node = _node_holding(db, config, object(), vm_name="other")
+
+    with pytest.raises(StateError, match="teardown-wiring bug"):
+        workspace_manager.delete_workspace(
+            db,
+            config,
+            "ws1",
+            force=True,
+            yes=True,
+            vm_node=vm_node,
+        )
+
+    assert resolve_counter == []  # refused before any resolve
+    assert db.get_workspace("ws1") is not None  # nothing was deleted
 
 
 def test_delete_without_vm_row_is_db_only_with_zero_gate(
