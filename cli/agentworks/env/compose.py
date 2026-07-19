@@ -17,8 +17,7 @@ fly (there is no resolver to fall back to, by design).
 
 Identity vars take precedence over user-defined env on key collision: an
 operator who sets AGENTWORKS_SESSION_KIND in their own env gets a load-time
-warning during config validation and the value has no runtime effect. See
-FRD R1 / HLA "Env transport: SSH SetEnv".
+warning during config validation and the value has no runtime effect.
 """
 
 from __future__ import annotations
@@ -78,7 +77,7 @@ def compose_env(
             user_env[key] = entry.value
     # Identity overlays user_env: AGENTWORKS_* names always reflect the
     # platform-set value when sshd injects the SetEnv'd vars into the
-    # user's shell (FRD R1). A collision in user env has already produced
+    # user's shell. A collision in user env has already produced
     # a load-time warning in config._parse_env_table; here we silently
     # discard it.
     return {**user_env, **identity}
