@@ -606,16 +606,16 @@ def test_revoke_all_warns_about_remaining_implicit_access(
     monkeypatch: pytest.MonkeyPatch,
     captured_output: CapturedOutput,
 ) -> None:
-    """revoke --all clears the flag and every explicit grant and warns
+    """revoke --all clears the flag and every explicit grant, removes the
+    agent from the group of any workspace with no grant left, and warns
     about the workspaces still implicitly reachable via sessions.
 
-    Choreography pinned as at HEAD, quirk included: the explicit rows
-    are deleted BEFORE the granted-workspaces snapshot, so a workspace
-    whose only grant was explicit is absent from the snapshot and its
-    on-VM group membership is never removed (every snapshot survivor
-    still has a grant, so the removal branch cannot fire on this
-    path). Fixing that drift is a behavior change, not a migration
-    concern (tracked as issue #189)."""
+    Fixed behavior (issue #189): the granted-workspaces snapshot is now
+    taken BEFORE the explicit rows are deleted, so a workspace whose only
+    grant was explicit stays in the snapshot and its on-VM group
+    membership is removed (what the help text implies). Previously the
+    snapshot ran after the delete, so such a workspace was absent from it
+    and its membership survived the revoke."""
     config = make_config()
     _seed(db)
     _seed_workspace(db, vm_name="box", name="ws1")
@@ -634,9 +634,10 @@ def test_revoke_all_warns_about_remaining_implicit_access(
     assert row is not None and not row.grant_all
     assert db.has_any_grant("a1", "ws1")  # implicit survives
     assert not db.has_any_grant("a1", "ws2")
-    # The HEAD quirk: no membership removal happens on this path (ws2
-    # left the snapshot with its explicit row; ws1 still has a grant).
-    assert not any("gpasswd" in c for c in target.commands)
+    # ws2's only grant was explicit, so with it gone the agent is removed
+    # from ws2's group; ws1 still has its implicit grant, so it is not.
+    assert any("gpasswd -d agt-a1 ws-ws2" in c for c in target.commands)
+    assert not any("ws-ws1" in c for c in target.commands)
     assert "All explicit grants revoked for agent 'a1'" in captured_output.info
     assert (
         "agent still has implicit access via sessions to: ws1"
