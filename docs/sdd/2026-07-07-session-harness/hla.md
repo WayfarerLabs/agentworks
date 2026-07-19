@@ -81,9 +81,11 @@ retires when the swap lands.
 
 A harness is a `Capability` (so it satisfies `Readiness` and gets the
 registry/kind/`validate_config` machinery) whose ops are `start` / `restart`. Beyond the base
-`(owner_name, config)` it is constructed with the session-runtime identity the readiness fork and
-the ops need, exactly the values the merged `RequiredCommandsCheck` is constructed with today.
-Everything else the harness reads at call time from the `RunContext`.
+`(owner_name, config)` it is constructed with the session's OWN identity, its name plus its
+row-carried ancestors (vm, workspace, agent-or-admin), the same values the merged
+`RequiredCommandsCheck` takes plus `workspace_name`. Everything else the harness reads at call time
+from the `RunContext`, but its identity is its own (see the design decision), not the operation
+scope's.
 
 ```python
 # capabilities/harness/base.py (pseudocode-level; exact types at LLD)
@@ -106,11 +108,24 @@ class Harness(Capability):
         owner_name: str,            # the session-template name (config owner)
         config: Mapping[str, object],  # the merged harness_config blob
         *,
-        session_name: str,          # the session it runs (addresses the tool by this)
+        session_name: str,          # the session's own name (addresses the tool)
+        vm_name: str,               # the session's VM ancestor
+        workspace_name: str,        # the session's workspace ancestor
         target: Node | None,        # the agent node it runs as; None in admin mode
         admin: bool,                # admin mode (uses ctx.admin_target())
-        vm_name: str,               # for error/log framing
     ) -> None: ...
+    # Construction captures the SESSION's OWN identity: its name plus its
+    # row-carried ancestors (vm, workspace, and agent-or-admin, the last
+    # via target+admin). This is layer-1 identity, threaded from the
+    # session's rows by the factory, and it is the harness's OWN identity,
+    # distinct from ctx.operation_scope (the OPERATION's identity, layer
+    # 2). The two coincide for a session command, but the harness owns its
+    # identity rather than trusting the operation context to be about it:
+    # at SESSION level it VERIFIES the scope's names match its own (belt
+    # and suspenders against a mis-wired ctx handing it the wrong VM or
+    # agent), and it reads only the LEVEL off the scope for the
+    # skip/defer/probe fork. It addresses and frames through its own
+    # identity, never through the scope's names.
 
     @classmethod
     def validate_config(
@@ -153,14 +168,20 @@ Contract points:
   a kind, a row in `agw resource list`, and `validate_config` for its blob; `Capability` provides
   all of that and satisfies `Readiness` (its `preflight`/`runup`). The instance is what the session
   node holds; the class is what `HARNESS_REGISTRY` publishes and `validate_config` runs on at load.
-- **Construction carries the session-runtime identity; the blob is the config.** `owner_name` is the
+- **Construction captures the session's OWN identity; the blob is the config.** `owner_name` is the
   session-template name (the config owner, for `validate_config` framing); `config` is the merged
-  `harness_config`. The `session_name` / `target` / `admin` / `vm_name` kwargs are the runtime
-  identity, the same set the merged `RequiredCommandsCheck` takes, supplied by the session factory.
-  The harness addresses the tool session by its OWN `session_name` (`claude --name <session>`),
-  never by `ctx.operation_scope.session`; it reads only the LEVEL off the scope (below). No bound
-  resolver: `Capability` construction is `(owner_name, config)` on the merged base, and runup/ops
-  read secrets through `ctx.secret(name)`.
+  `harness_config`. The `session_name` / `vm_name` / `workspace_name` / `target` / `admin` kwargs
+  are the session's layer-1 identity, its name plus its row-carried ancestors, supplied by the
+  session factory from the session's rows (extending the set the merged `RequiredCommandsCheck`
+  takes with `workspace_name`, so the full chain is present for framing and verification). The
+  harness addresses the tool session by its OWN `session_name` (`claude --name <session>`) and
+  frames its errors with its own vm/agent, never through `ctx.operation_scope`'s names, which are
+  the OPERATION's identity (layer 2), a different thing that only coincides. From the scope the
+  harness reads the LEVEL (the skip/defer/probe fork, below) and, at SESSION level, VERIFIES the
+  scope's names match its own as a belt-and-suspenders guard against a mis-wired context (a harness
+  executes commands on a VM as a user, so being handed a context for the wrong session is exactly
+  what this catches). No bound resolver: `Capability` construction is `(owner_name, config)` on the
+  merged base, and runup/ops read secrets through `ctx.secret(name)`.
 - **The return of `start`/`restart` is a pane command string, and that is the whole tmux story.**
   The session path applies template-variable substitution and `exec` wrapping and hands it to tmux,
   exactly as `_build_session_command`'s output is handled today. The harness never sees tmux: it
@@ -190,6 +211,14 @@ fork reads the operation scope's LEVEL and the target node's realized state:
 - **in scope, target absent for another reason** (agent mode, no target node): a LOUD error, never a
   silent skip.
 
+At SESSION level (every branch except the SKIP), before it acts, the harness first VERIFIES the
+scope's identity matches its own captured identity (`scope.session == self._session_name`, same for
+`vm` / `workspace`, and the agent-or-admin choice); a mismatch is a loud error, the belt-and-
+suspenders against a mis-wired context. The SKIP branch does no such check, because at SYSTEM level
+the scope legitimately describes a broader operation than this session (that is what the skip is
+for). Whether the merged `RequiredCommandsCheck` grows this guard too, or it arrives with the
+harness, is an LLD detail; the harness owns its identity either way.
+
 Two things this inherits from the merged model rather than reinvents:
 
 - **Pending-ness lives on the node, not on the context.** The harness reads `self._target.realized`,
@@ -211,9 +240,11 @@ This is the swap, and it is small because the merged code was written for it.
   today build a `RequiredCommandsCheck` from the resolved template's `required_commands` and hand it
   to the session node as its held readiness. The swap: they instead construct
   `harness_for(resolved.harness)(...)` (the template name and `harness_config` positionally, then
-  the `session_name` / `target` / `admin` / `vm_name` runtime kwargs) and hand THAT to the session
-  node. The one-object target wiring the factory already enforces (the same agent node as the
-  session's dep and the check's target) carries over unchanged; the harness takes the agent node
+  the session's own identity as kwargs: `session_name` / `vm_name` / `workspace_name` / `target` /
+  `admin`) and hand THAT to the session node. The factory has all these on hand already, from the
+  same rows it builds the check from; it adds `workspace_name`, which the check does not currently
+  take. The one-object target wiring the factory already enforces (the same agent node as the
+  session's dep and the harness's `target`) carries over unchanged; the harness takes the agent node
   where the check did.
 - **The session node composes it, unchanged.** `LiveSessionNode` / `PendingSessionNode` already
   delegate `preflight` / `runup` to their held readiness (`self._check.preflight(ctx)`); after the
@@ -367,6 +398,30 @@ build for this (an `OperationIdentity` object, a `to_create` context field, a re
 the orchestration layer provides the operation scope, the pending-node signal, and the accessor
 context, and the harness reads them.
 
+### The harness carries its OWN identity, not the operation scope's
+
+The harness captures the session's identity (name plus vm/workspace/agent-or-admin ancestors) at
+construction, from the session's rows, rather than reading those names off `ctx.operation_scope`.
+The distinction is the merged model's own: layer-1 identity is a node's kind/name and its
+row-carried ancestors, and the session's VM, workspace, and agent are exactly those ancestors, so
+they are the harness's OWN identity. `OperationScope` is layer 2, the OPERATION's identity ("why is
+this running"), which coincides with the session's identity for a session command but is a different
+thing. Reading `ctx.operation_scope.vm` as "my VM" would trust that coincidence; the model
+explicitly says a node acts and frames through its own layer-1 identity, not the scope's descriptive
+names.
+
+Owning the identity buys a belt-and-suspenders guard: at SESSION level the harness verifies the
+scope's names match its own before it acts, so a mis-wired context (the orchestrator handing this
+harness a context assembled for a different session) is a loud error rather than commands run
+against the wrong VM or agent, which for something that executes on a VM as a user is worth
+catching. The cost is one more construction kwarg (`workspace_name`) than the merged
+`RequiredCommandsCheck` takes; the factory has it in hand from the same rows. (An earlier draft of
+this SDD went the other way, reading `vm_name` from the scope to shrink the constructor; that
+conflated the two identities and was reversed, 2026-07-18.) The one thing the harness DOES read from
+the scope is the LEVEL, which is genuinely the operation's property, not the session's: it answers
+"am I being called as a real session command or as a doctor scan," which the session's own identity
+cannot say.
+
 ### claude-code's existence check: prefer runtime logic in the pane command
 
 The resume-vs-launch detection can be a `ctx.agent_target()` probe or runtime shell logic folded
@@ -412,9 +467,12 @@ auth interactivity must precede the boundary resolve), so it is deferred until i
   `harness.restart` (replacing `_build_session_command`). Both are named above; the LLD pins the
   diffs and confirms the session node's composition delegation and one-object target wiring carry
   over unchanged.
-- **The harness's framing inputs**: whether the harness holds `vm_name` (as `RequiredCommandsCheck`
-  does, for error labels) or reads it from `ctx.operation_scope.vm` (the merged model's descriptive
-  scope names). Cosmetic; pin one.
+- **The scope-vs-identity verification**: DECIDED that the harness captures its own session identity
+  at construction and reads only the LEVEL off the scope (see the design decision). The LLD pins the
+  mechanics: exactly which fields the SESSION-level guard compares (`session` / `vm` / `workspace` /
+  agent-or-admin), whether it raises or warns on mismatch (raise recommended, it is an orchestrator
+  bug), and whether the guard also lands on the merged `RequiredCommandsCheck` before the swap or
+  arrives with the harness.
 - **Claude Code detection and flags**: how a resumable session named `<session>` is detected (CLI
   listing vs on-disk session files) and the exact spellings for `permission_mode` / `model` /
   `extra_args`; verify against the latest stable Claude Code CLI at implementation (latest-stable

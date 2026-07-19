@@ -395,7 +395,11 @@ machinery is to stay non-interactive.
   win for existing agents and every restart); in scope with the target absent for another reason is
   a LOUD error, never a silent skip. The harness reads the LEVEL off `ctx.operation_scope` and the
   target's `realized` off the agent-or-admin node it is constructed with; `to_create` does not exist
-  in this model (pending-ness lives on the node). `preflight` and `runup` are general hooks (a
+  in this model (pending-ness lives on the node). The harness carries its OWN session identity (name
+  plus vm/workspace/agent-or-admin ancestors, captured at construction from the session's rows) and
+  acts and frames through that, not through the operation scope's names, which are the operation's
+  identity, a different thing that only coincides; at SESSION level it verifies the scope matches
+  its own as a guard against a mis-wired context (HLA). `preflight` and `runup` are general hooks (a
   future harness may add target-independent checks to preflight or authenticated checks to runup);
   the built-ins fill only the required-commands slice.
 - **The harness executes on the launch target as the target user**, through `ctx.agent_target()`
