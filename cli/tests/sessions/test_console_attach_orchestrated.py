@@ -157,7 +157,7 @@ def test_vm_console_stopped_vm_gate_burst_seeds_the_boundary(
     events: list[str] = []
     _stop_the_vm(monkeypatch, events)
 
-    vm_console.attach_console(db, config, vm_name="box")
+    assert vm_console.attach_console(db, config, vm_name="box") == 0
 
     assert events == ["status", "start", "tailscale"]  # the gate ran
     assert resolve_counter == [["proxmox-token"]]
@@ -210,7 +210,7 @@ def test_vm_scope_reaches_node_readiness(
 
     monkeypatch.setattr(ProxmoxPlatform, "preflight", _recording)
 
-    vm_console.attach_console(db, config, vm_name="box")
+    assert vm_console.attach_console(db, config, vm_name="box") == 0
 
     (scope,) = scopes
     assert scope is not None
@@ -275,7 +275,7 @@ def test_named_console_stopped_vm_gate_burst_seeds_the_boundary(
     events: list[str] = []
     _stop_the_vm(monkeypatch, events)
 
-    multi_console.attach_console(db, config, name="c1")
+    assert multi_console.attach_console(db, config, name="c1") == 0
 
     assert events == ["status", "start", "tailscale"]
     assert resolve_counter == [["proxmox-token"]]

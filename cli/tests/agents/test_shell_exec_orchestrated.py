@@ -184,7 +184,7 @@ def test_shell_stopped_vm_gate_burst_then_boundary_burst(
     events: list[str] = []
     _stop_the_vm(monkeypatch, events)
 
-    agent_manager.shell_agent(db, config, name="a1")
+    assert agent_manager.shell_agent(db, config, name="a1") == 0
 
     assert events == ["status", "start", "tailscale"]  # the gate ran
     assert resolve_counter == [["proxmox-token"], ["agent-env-secret"]]
@@ -306,7 +306,7 @@ def test_shell_interactive_runs_inside_the_held_active_span(
 
     target.interactive = _tracking  # type: ignore[method-assign]
 
-    agent_manager.shell_agent(db, config, name="a1")
+    assert agent_manager.shell_agent(db, config, name="a1") == 0
 
     assert events == ["hold-open", "interactive", "hold-close"]
 
