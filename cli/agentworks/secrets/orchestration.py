@@ -108,10 +108,10 @@ def compute_needed_secrets(
 
     For each target, merges the per-scope env dicts via ``effective_env``
     (preserving the scope precedence ladder
-    ``session > (agent | admin) > workspace > vm``), collects which
-    declared secrets that merged env references, and unions the results
+    ``session > (agent | admin) > workspace > vm``), collects the declared
+    secrets those merged env dicts reference, and unions the results
     across all targets. ``extra_decls`` adds decls that aren't referenced
-    by any target's env chain -- a hook for legacy-prompt migrations
+    by any target's env chain: a hook for legacy-prompt migrations
     (e.g. Tailscale auth key, git credentials) that need eager resolution
     without being modeled as env-table entries today.
 

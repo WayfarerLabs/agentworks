@@ -1,5 +1,5 @@
 """Kind registrations for the vms domain: ``vm-template``,
-``admin-template`` (the admin user is a per-VM concept -- provisioned by
+``admin-template`` (the admin user is a per-VM concept, provisioned by
 ``vms/initializer``, one per VM; its ``instances()`` iterates VMs),
 ``vm-site`` (the declarable "configured place to create VMs"), and
 ``vm-platform`` (the capability kind backing sites).

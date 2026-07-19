@@ -246,7 +246,7 @@ def used_by_for(
     """Project ``(kind, resource) -> tuple[InstanceRef, ...] | None`` via
     the kind's ``instances`` hook. ``None`` for kinds that don't
     implement the hook (catalog, providers, backends) or when ``db``
-    isn't available -- callers treat ``None`` as ``-`` rather than ``0``
+    isn't available; callers treat ``None`` as ``-`` rather than ``0``
     to distinguish "kind has no instance concept" from "kind has zero
     instances right now."
 

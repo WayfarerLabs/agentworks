@@ -6,8 +6,8 @@ Two phases:
   B. Initialization (over Tailscale SSH): packages, install commands, git credentials,
      dotfiles. Repeatable via `vm reinit`. Tracked via init_status.
 
-Phase A steps are fatal -- if they fail, the VM is unreachable and useless.
-Phase B steps are non-fatal -- failures produce warnings and a 'partial' status.
+Phase A steps are fatal: if they fail, the VM is unreachable and useless.
+Phase B steps are non-fatal: failures produce warnings and a 'partial' status.
 """
 
 from __future__ import annotations
@@ -1427,8 +1427,8 @@ def initialize_vm(
 ) -> None:
     """Run the full initialization sequence on a newly provisioned VM.
 
-    Phase A (bootstrap) steps are fatal -- any failure aborts initialization.
-    Phase B (setup) steps are non-fatal -- failures are logged as warnings
+    Phase A (bootstrap) steps are fatal: any failure aborts initialization.
+    Phase B (setup) steps are non-fatal: failures are logged as warnings
     and the VM gets 'partial' status instead of 'complete'.
 
     Both ``tailscale_auth_key`` and ``git_tokens`` are required; ``create_vm``
