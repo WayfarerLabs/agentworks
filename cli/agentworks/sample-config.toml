@@ -339,19 +339,19 @@ ssh_private_key = "~/.ssh/id_ed25519"        # required: used for SSH connection
 # The flat command fields below are the `shell` harness's config vocabulary.
 # They keep working here and are hoisted to `harness = "shell"` internally;
 # YAML manifests spell them under `harness_config` instead (the primary
-# authoring surface -- run `agw resource sample session-template`):
+# authoring surface; run `agw resource sample session-template`):
 #
-# command           -- the pane command; supports {{session_name}} and
-#                      {{workspace_name}} variables (empty = login shell).
-# restart_command   -- used by `agw session restart`; falls back to command.
-#                      Useful when a tool needs a different invocation on
-#                      restart. (For Claude Code, prefer the dedicated
-#                      `claude-code` harness below, which resumes on its own.)
-# required_commands -- executables the command needs; checked on the launch
-#                      target (the agent, or the VM admin for admin sessions)
-#                      BEFORE the session is created, so a missing binary fails
-#                      fast with a clear error instead of a cryptic tmux
-#                      failure. Unioned during inheritance (de-duplicated).
+# command:           the pane command; supports {{session_name}} and
+#                     {{workspace_name}} variables (empty = login shell).
+# restart_command:   used by `agw session restart`; falls back to command.
+#                     Useful when a tool needs a different invocation on
+#                     restart. (For Claude Code, prefer the dedicated
+#                     `claude-code` harness below, which resumes on its own.)
+# required_commands: executables the command needs; checked on the launch
+#                     target (the agent, or the VM admin for admin sessions)
+#                     BEFORE the session is created, so a missing binary fails
+#                     fast with a clear error instead of a cryptic tmux
+#                     failure. Unioned during inheritance (de-duplicated).
 #
 # The flat fields cannot combine with a non-`shell` `harness` or an explicit
 # `harness_config` table (one spelling per declaration). env maps merge during

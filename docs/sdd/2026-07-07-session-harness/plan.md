@@ -331,11 +331,11 @@ graph and framework-uniform fields, not kind-specific spec fields).
 
 ## Phase 5: Closeout
 
-- [ ] **Promote the ADR.** Move `adr-session-harness.md` into `docs/adrs/` as the next number
+- [x] **Promote the ADR.** Move `adr-session-harness.md` into `docs/adrs/` as the next number
       (`0020-...` at this writing; confirm the max at promotion), referencing ADR 0016 (capability
       collapse) and ADR 0019 (orchestration layer) for the node/readiness model. **Done when:** the
       numbered ADR exists in `docs/adrs/` and the in-feature draft is removed.
-- [ ] **Final sweeps.** RE-VERIFY the consumer inventory is empty of flat-field readers across code,
+- [x] **Final sweeps.** RE-VERIFY the consumer inventory is empty of flat-field readers across code,
       tests, docs, and samples (the readers are actually cleared in P4, where deleting the fields
       forces it; this is a re-check, not the primary sweep); promote any SDD `.cspell.json` word
       that now lives in permanent code to the root dictionary; reword the newly-authored `--`
@@ -343,7 +343,7 @@ graph and framework-uniform fields, not kind-specific spec fields).
       a prose-polish pass, not a bulk sweep of pre-existing usage); run
       `./scripts/lint-files.sh     --fix` across touched files; full gate green. **Done when:**
       CI-equivalent gates pass and no `docs/sdd/` reference exists in permanent code or docs.
-- [ ] **Lock.** Create `locked.md` summarizing the final state (per the SDD lifecycle). **Done
+- [x] **Lock.** Create `locked.md` summarizing the final state (per the SDD lifecycle). **Done
       when:** `locked.md` exists and the effort is closed.
 
 ## Decisions (resolved by the lead, 2026-07-19)

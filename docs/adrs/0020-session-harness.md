@@ -1,17 +1,13 @@
-# Session Harness
+# 20. Model a Session's Workload as a Harness Capability
 
 Date: 2026-07-19
 
-> Draft, in-feature. This ADR is authored alongside the session-harness effort and kept current
-> through Phase 4. Phase 5 promotes it into `docs/adrs/` as the next number (confirm the max at
-> promotion) and removes this draft. Until then it is the design of record for the harness model.
-
 ## Status
 
-Proposed (draft). Builds on the capability / declarable-resource split of
-[ADR 0016](../../adrs/0016-yaml-resource-manifests.md) and the orchestration layer of
-[ADR 0019](../../adrs/0019-orchestration-layer-command-plans-over-node-graphs.md); the capability
-lifecycle contract it relies on (validate / construct / preflight / runup / ops) is documented in
+Accepted. Builds on the capability / declarable-resource split of
+[ADR 0016](0016-yaml-resource-manifests.md) and the orchestration layer of
+[ADR 0019](0019-orchestration-layer-command-plans-over-node-graphs.md); the capability lifecycle
+contract it relies on (validate / construct / preflight / runup / ops) is documented in
 `cli/agentworks/capabilities/README.md`.
 
 ## Context
@@ -66,6 +62,16 @@ resource that holds one.
   substitution (lifted out of the deleted `_build_session_command`). `restart` is assembled after
   the old process is killed, so a state-aware harness (claude-code) decides resume-vs-launch with it
   dead.
+- **A harness gets a per-session state blob, persisted on the session row.** This reverses the SDD's
+  original "database unchanged" assumption, deliberately: the `sessions` table gains an opaque
+  `harness_state` JSON column that the manager round-trips (reads it into the harness constructor,
+  writes `harness.state` back after each op), and a harness reads and mutates it in place through
+  `self._state`. `shell` uses none of it; `claude-code` is the first user, minting and storing a
+  Claude session id there on the first `start` so it survives to `restart`. `claude-code` then
+  decides resume-vs-launch with an op-time, file-presence probe: it checks whether that stored
+  session id's transcript exists on the launch target (a slug-independent `find` under the Claude
+  config dir), empirically confirmed to equal Claude's own resume boundary, rather than trusting any
+  in-memory or derived state.
 - **`harness` + `harness_config` inherit as a PAIR.** Template inheritance merges the pair through
   one rule (`_merge_pair`): a child silent about `harness` leaves the accumulated pair untouched (so
   a harness-silent later parent no longer wipes an earlier parent's config); a child naming a
@@ -94,11 +100,18 @@ resource that holds one.
 - Inheritance for the workload is now pair-scoped, not per-field, which is a different mental model
   from the other three flat-field template families; the reference-plus-blob shape and the pair rule
   are documented to compensate.
-- The migration lands in phases: for the phases between the swap and the surface change, the harness
-  is always `shell`, built from the template's still-flat fields via an interim adapter. That
-  interim `main` state is complete and honest (the mechanism is real and swapped in; only the
-  template selector is pending), but it is a two-step where a one-step surface change would be
-  simpler, deliberately, to isolate the orchestrator wiring from the dataclass reshape.
+- The migration landed in phases: between the orchestrator swap and the template's surface change,
+  the harness was always `shell`, built from the template's still-flat fields via an interim
+  adapter. Each interim `main` state was complete and honest (the mechanism was real and swapped in;
+  only the template selector was pending), but it was a two-step where a one-step surface change
+  would have been simpler, deliberately, to isolate the orchestrator wiring from the dataclass
+  reshape. `SessionTemplate` now carries only `harness` / `harness_config`; the legacy flat
+  `command` / `restart_command` / `required_commands` spelling is accepted solely as TOML-loader
+  backward compatibility (hoisted into `harness_config` at load) and rejected in manifests.
+- The per-session `harness_state` blob is a real, if narrow, expansion of persisted surface: the
+  core DB now carries an opaque-to-it, harness-owned blob it never inspects, a deliberate reversal
+  of the SDD's original "database unchanged" assumption once `claude-code`'s resume-vs-launch
+  decision needed somewhere durable to keep its session id.
 
 ## Alternatives Considered
 

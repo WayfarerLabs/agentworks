@@ -509,12 +509,12 @@ spec:
 `shell`'s `harness_config` vocabulary is the command surface every template used to spell at the
 spec top level:
 
-- `command` -- the pane command (empty/omitted is a plain login shell). Supports `{{session_name}}`
+- `command`: the pane command (empty/omitted is a plain login shell). Supports `{{session_name}}`
   and `{{workspace_name}}` variable substitution (double-brace syntax).
-- `restart_command` -- used by `session restart`, for a tool that needs a different invocation on
+- `restart_command`: used by `session restart`, for a tool that needs a different invocation on
   restart. If omitted, `command` is used. (To run Claude Code, prefer the dedicated `claude-code`
   harness below, which resumes the previous conversation on its own.)
-- `required_commands` -- executables the command needs, checked on the session's launch target (the
+- `required_commands`: executables the command needs, checked on the session's launch target (the
   agent, or the VM admin for admin sessions) before any state mutation, so launching a session whose
   tool is not installed fails fast with a clear error instead of a cryptic downstream tmux failure.
   Merged (de-duped, order-preserving) across template inheritance.
@@ -525,10 +525,10 @@ session and `session restart` resumes the same conversation when its transcript 
 launch target, and announces the chosen action (resume vs new session) in the pane, so the decision
 is never silent. Its `harness_config` vocabulary is three optional fields:
 
-- `permission_mode` -- forwarded verbatim to `claude --permission-mode` (its choice set is Claude's,
+- `permission_mode`: forwarded verbatim to `claude --permission-mode` (its choice set is Claude's,
   not validated here).
-- `model` -- forwarded verbatim to `claude --model`.
-- `extra_args` -- a list of raw argv tokens appended last, the escape hatch for any flag the harness
+- `model`: forwarded verbatim to `claude --model`.
+- `extra_args`: a list of raw argv tokens appended last, the escape hatch for any flag the harness
   does not model. Each element is one argv token (shell-quoted, never re-split), and elements
   support the `{{session_name}}` / `{{workspace_name}}` variables.
 

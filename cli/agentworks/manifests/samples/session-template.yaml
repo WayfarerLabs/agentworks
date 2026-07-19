@@ -6,9 +6,9 @@
 ## is still a login shell.
 ##
 ## `shell`'s config vocabulary is the legacy command fields, now nested:
-##   command           -- the pane command (empty/omitted = login shell)
-##   restart_command   -- used by `agw session restart`; falls back to command
-##   required_commands -- executables checked on the launch target first
+##   command:           the pane command (empty/omitted = login shell)
+##   restart_command:   used by `agw session restart`; falls back to command
+##   required_commands: executables checked on the launch target first
 ## Commands support the {{session_name}} and {{workspace_name}} variables.
 ## Env maps merge during inheritance (child wins); required_commands union.
 ##
@@ -30,9 +30,9 @@
 ## restating command strings: `session create` starts a new Claude session and
 ## `session restart` resumes the same conversation when its transcript still
 ## exists. `harness_config` is three optional fields:
-##   permission_mode -- forwarded to `claude --permission-mode`
-##   model           -- forwarded to `claude --model`
-##   extra_args      -- raw argv tokens appended last (the escape hatch)
+##   permission_mode: forwarded to `claude --permission-mode`
+##   model:           forwarded to `claude --model`
+##   extra_args:      raw argv tokens appended last (the escape hatch)
 ## The only launch-target requirement is that `claude` is installed.
 ##
 #---
