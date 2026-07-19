@@ -73,8 +73,8 @@ class _GitCredentialKind:
         # Unreachable under the "error" miss policy: the Registry's
         # finalize pass raises ConfigError before dispatching to
         # synthesize for error-policy kinds. The method exists to
-        # satisfy the Protocol; honors the Phase 2a empty-references
-        # contract (FRD R3) by raising the typed framework error so a
+        # satisfy the Protocol; honors the empty-references
+        # contract by raising the typed framework error so a
         # hypothetical future change that gives the kind a reserved
         # default has an obvious landing pad.
         raise NoUnreferencedDefaultError(
@@ -95,7 +95,7 @@ class _GitCredentialProviderKind:
     builtin_override: Literal["allow", "reserved"] = "reserved"
 
     def synthesize(self, references: Sequence[ResourceReference]) -> Any:
-        # Unreachable under the error miss policy; honors the Phase 2a
+        # Unreachable under the error miss policy; honors the
         # empty-references contract via the typed framework error so a
         # future change that gives the kind a reserved default has an
         # obvious landing pad.
