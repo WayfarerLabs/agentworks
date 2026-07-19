@@ -49,7 +49,7 @@ class InstanceRef:
     SDD can return the same dataclass from a sibling
     ``provisioned_instances(...)`` hook (today's projection is "per
     current config"; a manifest-driven sibling would be "per provisioned
-    state"). See the Phase 3c "Forward-compat note" in the plan.
+    state").
     """
 
     instance_kind: str
@@ -98,7 +98,7 @@ class ResourceKind(Protocol):
       Resources can accrue later-discovered incoming edges from
       second-level dispatches uniformly with operator-declared ones.
 
-      **Empty-references contract** (Phase 2a): every kind's
+      **Empty-references contract**: every kind's
       ``synthesize`` must have defined behavior when called with
       ``references=()``. Kinds whose ``auto_declare_names`` is a
       non-None set MUST build a code-defined default in this case (the

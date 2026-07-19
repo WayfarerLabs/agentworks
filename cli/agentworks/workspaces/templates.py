@@ -68,7 +68,7 @@ def _resolve(
     raise ``ConfigError`` instead of ``RecursionError``. The framework's
     cycle pass at build_registry time is the canonical check; this guard
     is the safety net for callers that resolve without going through
-    build_registry (Phase 2a.2).
+    build_registry.
     """
     if name in _visiting:
         path = " -> ".join((*_visiting, name))

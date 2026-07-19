@@ -37,8 +37,8 @@ at me?" by iterating its own ``references``.
 
 Concrete ``ResourceReference`` subclasses exist so producers and the
 framework agree on the target kind via the *type*, not via string-dispatch
-on the ``kind`` field. ``SecretReference`` (Phase 1) and
-``TemplateReference`` (Phase 2) carry no extra fields beyond the base today;
+on the ``kind`` field. ``SecretReference`` and
+``TemplateReference`` carry no extra fields beyond the base today;
 future kinds may. Producers always instantiate a concrete subclass --
 ``ResourceReference`` itself is abstract-by-convention, not by ``ABC``;
 the framework consumes references through the base type but never builds
@@ -123,7 +123,7 @@ class TemplateReference(ResourceReference):
     in the existing template resolvers; this class is purely the
     framework's handle on the reference.
 
-    No extra fields beyond the base in Phase 2a -- the subclass exists so
+    No extra fields beyond the base today -- the subclass exists so
     producers and the framework agree on the target kind via the type.
     """
 

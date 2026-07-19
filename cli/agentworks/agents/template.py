@@ -71,7 +71,7 @@ class AgentTemplate:
                     source=source,
                 )
             )
-        # Catalog references for user_install_commands (Phase 2b).
+        # Catalog references for user_install_commands.
         for cmd in self.user_install_commands or []:
             refs.append(
                 _ResourceReq(

@@ -2,7 +2,7 @@
 
 ``list_resources`` / ``render_resource_table`` back ``agw resource list``;
 ``describe_resource`` / ``render_resource_description`` back
-``agw resource describe KIND/NAME`` (FRD R12 / Phase 2c).
+``agw resource describe KIND/NAME``.
 
 The cross-kind shape **stops at framework-uniform fields**: kind, name,
 origin (variant + sub-fields), usage list, description. Kind-specific
@@ -11,18 +11,18 @@ field lookups) lives in the per-kind commands (``agw secret describe``,
 etc.); rendering it here would require semantic knowledge the cross-kind
 command intentionally doesn't carry.
 
-Description is reliably populated across kinds thanks to Phase 2a's
-generalized polish: operator-declared resources carry the operator's
+Description is reliably populated across kinds because the framework
+fills it generally: operator-declared resources carry the operator's
 text (when their Resource type has a ``description`` field), and
 auto-declared resources get a framework-synthesized
 ``"(auto) <usage> for <kind>/<name>"`` / ``"(auto) auto-declared default
 <kind>"``. Kinds whose Resource type has no ``description`` field
-render an empty cell -- that's the cross-kind cost the SDD accepts.
+render an empty cell -- the accepted cost of the cross-kind view.
 
 The framework reads ``origin`` / ``description`` / ``usage`` off each
 Resource via ``getattr`` rather than a shared ``Resource`` base class:
 kind types share these fields by convention (every kind today declares
-all three), but Phase 2a deliberately kept the kinds free-form so a
+all three), but the kinds are deliberately free-form so a
 future kind can omit a field without breaking the registry. ``getattr``
 with a default keeps the cross-kind walk safe.
 """
@@ -530,7 +530,7 @@ def render_resource_description(desc: ResourceDescription) -> None:
         output.detail("(none recorded)")
     else:
         # Dedupe by (source, usage) preserving first-encounter order --
-        # same dedupe as agw secret describe (FRD R10).
+        # same dedupe as agw secret describe.
         seen: set[tuple[tuple[str, str], str]] = set()
         for entry in desc.references:
             key = (entry.source, entry.usage)
