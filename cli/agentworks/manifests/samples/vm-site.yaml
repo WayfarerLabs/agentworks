@@ -30,6 +30,10 @@
 #  platform: azure-vm
 #  platform_config:
 #    subscription_id: 00000000-0000-0000-0000-000000000000
+#    # The resource group must already exist. `vm create` checks it at
+#    # runup (an authenticated, read-only probe) and fails cleanly before
+#    # provisioning if it is absent; create it with
+#    # `az group create -n agw-dev -l eastus`.
 #    resource_group: agw-dev
 #    region: eastus
 #    # Optional: override the built-in B-series size catalog. `vm create`

@@ -7,6 +7,12 @@ Date: 2026-07-16
 Accepted. Removes the `azure_vm_size` template field and the `vm create` hardware/admin override
 flags introduced in the earliest CLI. Implements issue #178.
 
+### Amendment (2026-07-18)
+
+The `vm create` provisioning line now always names the selected SKU's spec (its cpus/memory), not
+just the SKU name it already showed. The round-up warning below is retained, reworded to one concise
+line that leads with the rounded-up-to SKU and names the requested shape as the reason.
+
 ## Context
 
 `vm create` was one of the first commands and carried baggage the rest of the surface has since
