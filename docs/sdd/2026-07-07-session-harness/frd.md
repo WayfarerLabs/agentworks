@@ -104,6 +104,73 @@ servers attached to a `claude.ai` login), so a launched agent could silently gai
 the operator never granted it for THIS agent. When Agentworks manages that surface, the harness is
 where the policy lives, and the safe default is non-inheritance (see R4's future-direction notes).
 
+### Target state: the harness as a tool adapter (forward-looking, NOT v1)
+
+This subsection records the cohesive target state the v1 harness fits into, so the v1 boundaries
+read as deliberate rather than arbitrary. None of it is built in this effort; it exists to keep the
+design pointed somewhere and to explain why v1 leaves certain adjacent surfaces alone (maintainer
+discussion, 2026-07-18).
+
+**A harness is a tool's ADAPTER to Agentworks, and adaptation happens at more than one point.** The
+session harness this SDD builds is the RUNTIME face: it adapts "run this workload" to the tool's
+launch semantics (start/restart, resume). The other face is PROVISIONING: adapting Agentworks's
+generic agent artifacts to the tool's user-provisioning semantics (where its config files live, how
+skills and rules and MCP register). Both faces do the same essential job, translate generic intent
+into tool-specific mechanics, which is what makes them the harness rather than incidental plumbing.
+
+**Naming: `harness` is the runtime; provisioning is `<level>-harness-prep`.** A harness is
+inherently a session-level concept (it runs the tool), so it keeps the bare name and never needs a
+`session-` qualifier. The provisioning pieces are not harnesses (they run nothing); they PREPARE an
+environment for the harness, so they are `<level>-harness-prep`, level-qualified because prep can
+exist at more than one level while a runtime harness cannot. The first is `agent-harness-prep` (the
+agent user's home: `~/.claude`, user plugins, skills, rules, MCP). Later candidates follow the
+tool's own config layering: `workspace-harness-prep` (project-scoped config in the workspace dir)
+and, rarely, `vm-harness-prep` (system-scoped). ("agent" vs "user" for the first level is unsettled:
+the merged model's `ScopeLevel` says AGENT, but the provisioning is user-home-scoped and an
+admin-run session's user is not an agent; resolved when the prep is designed.)
+
+**What `agent-harness-prep` holds, two kinds:**
+
+- **Tool-native config**, its own capability-owned blob (the prep's equivalent of `harness_config`).
+  This is the eventual home of today's `claude_marketplaces` / `claude_plugins` agent-template
+  fields: they are Claude-Code-native, so they re-home onto the claude-code prep the same way the
+  session command strings re-homed onto the session harness. v1 deliberately leaves them where they
+  are (R4), because moving them belongs with the prep capability, not this SDD.
+- **The translator role.** Generic artifacts (skills, rules, MCP intent, "here is your env") are
+  emitted tool-agnostically by features and the core artifact model (WHAT); the prep exposes them
+  per the tool's conventions (HOW). This is the artifact-management future above, made concrete: the
+  generic model knows no tool, and each tool's prep is the only tool-aware translator. The R4
+  user-level-MCP security item lands here on the PROVISIONING side: user MCP is generic intent the
+  prep exposes, and the non-inheritance default is the policy on that translation (the session
+  harness's role is reading/enforcing at launch, not provisioning).
+
+**Coupling is DECLARATIVE, not runtime-detected.** Most prep output is enrichment: absent it, the
+session still runs, just worse, so there is nothing to probe for and turn into an error. The
+reliable tie is a declared-prep record: a session's `harness: claude-code` implies a required
+`claude-code` agent-harness-prep, and the check is "was this agent prepped with it" (a
+provisioning-record check, warning-level), never an inspection of individual artifacts. Only a hard
+prereq (if a prep also installs the tool binary) stays detectable, via the session harness's own
+readiness; enrichment does not.
+
+**The session-side schema, when it exists, sorts by OWNERSHIP into three buckets** (the principle,
+concrete field names deferred to the prep design):
+
+- `harness` (framework-owned selector) and `harness_config` (the selected capability's own config),
+  as v1 ships them; plus
+- a capability-AGNOSTIC framework group (working name `harness_support`) for cross-cutting settings
+  the specific harness does not own: `require_agent_prep` (an escape hatch; the selector implies its
+  own prep, so this is only for extra or cross-harness requirements) and `expose_artifacts` (deliver
+  THIS session's agent's generic artifacts into the session workspace at launch, as an alternative
+  when the agent cannot be pre-prepped). `expose_artifacts` is scoped to the session's own agent,
+  not a roll-up of every agent's data; even so it carries a residual visibility caveat (workspace
+  co-tenants can see the exposed artifacts), so it is an explicit opt-in, not a default. The rule
+  that keeps this coherent: does a field configure the specific harness (-> `harness_config`), the
+  harness framework generically (-> the agnostic group), or the plain session (-> the spec root)?
+
+The packaging unit for all of this is the plugin (plugin SDD): a tool ships as a plugin that
+registers a `harness` plus its `harness-prep`(s) under one identity, which is what lets the
+session's implied-prep coupling and the shared translation knowledge work.
+
 ### Scope
 
 In scope: the `harness` capability kind and code registry (in the `capabilities/` subtree, extending
@@ -283,8 +350,8 @@ spec:
   Claude session or launched fresh (mechanism at LLD, an output line or the pane's first visible
   output). The decision must never be silent (review finding, 2026-07-08; operator-control spirit).
 - `claude_marketplaces` / `claude_plugins` stay on the agent/admin templates: they are
-  provision-time (VM/agent setup) concerns, not session-start concerns. The plugin SDD decides
-  whether they move when Claude Code becomes a plugin.
+  provision-time (VM/agent setup) concerns, not session-start concerns. Their eventual home is the
+  `agent-harness-prep` capability (see the target-state subsection above); v1 leaves them untouched.
 - **Reserved future directions (NOT in v1; recorded because they show where the harness config
   vocabulary and contract grow).** The pinned field set above is the v1 surface; each item below is
   a future harness_config field or contract extension the design leaves room for, not a commitment:
@@ -296,8 +363,9 @@ spec:
     MCP inheritance, or to pin an explicit MCP config). When this ships, the SAFE DEFAULT is
     non-inheritance: an agent gets only the MCP surface Agentworks granted it, and inheriting the
     operator's personal servers is an explicit, visible opt-in. Recorded now so v1 does not
-    accidentally build in silent inheritance; connects to the artifact-management future (model
-    change, above).
+    accidentally build in silent inheritance. The PROVISIONING of user MCP is `agent-harness-prep`'s
+    job (target-state subsection above); the session harness's role is reading/enforcing the policy
+    at launch.
   - **Question-timeout control.** Claude Code's interactive question-timeout behavior (how long it
     waits on a prompt before it proceeds or fails) is a candidate `harness_config` field, so an
     unattended/walk-away session can pin the timeout policy the operator wants rather than the CLI
@@ -515,7 +583,12 @@ The model change (Background) lands in the permanent docs, not just in code and 
   invariant).
 - **A Codex harness**: nothing blocks one, but no member ships until its conventions are pinned;
   `claude-code` proves the multi-member path.
-- **Moving `claude_marketplaces` / `claude_plugins`**: agent-provision surface, untouched (R4).
+- **The provisioning face of the harness (`agent-harness-prep` and its `workspace`/`vm` kin)**: the
+  whole two-face target state, the prep capability, the generic-artifact translation, the session
+  `harness_support` schema, and the declared-prep coupling, is recorded as forward-looking direction
+  (the target-state subsection) and built by a later effort, not here.
+- **Moving `claude_marketplaces` / `claude_plugins`**: agent-provision surface, untouched; their
+  target-state home is `agent-harness-prep` (target-state subsection), not this SDD.
 - **A dedicated `harness` declarable kind**: deliberately absent per the capability collapse; if a
   harness someday needs multiple configured instances with identity beyond one reference site, the
   graduate-when-real clause applies.
