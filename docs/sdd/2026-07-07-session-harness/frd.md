@@ -456,16 +456,18 @@ machinery is to stay non-interactive.
   the session orchestrator calls the harness's `start` / `restart` op where it calls
   `_build_session_command` today. The harness is a `Readiness`, never a graph node: it has no `key`
   and no `deps`, and the orchestrator never walks it.
-- **Readiness is the required-commands check, and it keeps the merged fork.** The four-way readiness
-  fork the merged `RequiredCommandsCheck` implements moves into the harness unchanged: out of scope
-  for the operation's LEVEL (a system-scoped doctor scan reaching a session) SKIPS; in scope with a
-  pending target DEFERS to runup; in scope with a realized target PROBES now (the earlier-failure
-  win for existing agents and every restart); in scope with the target absent for another reason is
-  a LOUD error, never a silent skip. The harness reads the LEVEL off `ctx.operation_scope` and the
-  target's `realized` off the agent-or-admin node it is constructed with; `to_create` does not exist
-  in this model (pending-ness lives on the node). The harness carries its OWN session identity (name
-  plus vm/workspace/agent-or-admin ancestors, captured at construction from the session's rows) and
-  acts and frames through that, not through the operation scope's names, which are the operation's
+- **Readiness is the required-commands check, and it keeps the merged fork.** The readiness fork the
+  merged `RequiredCommandsCheck` implements moves into the harness unchanged. Its precondition: a
+  scope-less context (`ctx.operation_scope is None`) is itself a LOUD error, an orchestrator bug,
+  never a silent skip. Within a present scope the four-way fork runs: out of scope for the
+  operation's LEVEL (a system-scoped doctor scan reaching a session) SKIPS; in scope with a pending
+  target DEFERS to runup; in scope with a realized target PROBES now (the earlier-failure win for
+  existing agents and every restart); in scope with the target absent for another reason is a LOUD
+  error, never a silent skip. The harness reads the LEVEL off `ctx.operation_scope` and the target's
+  `realized` off the agent-or-admin node it is constructed with; `to_create` does not exist in this
+  model (pending-ness lives on the node). The harness carries its OWN session identity (name plus
+  vm/workspace/agent-or-admin ancestors, captured at construction from the session's rows) and acts
+  and frames through that, not through the operation scope's names, which are the operation's
   identity, a different thing that only coincides; at SESSION level it verifies the scope matches
   its own as a guard against a mis-wired context (HLA). `preflight` and `runup` are general hooks (a
   future harness may add target-independent checks to preflight or authenticated checks to runup);

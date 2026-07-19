@@ -201,6 +201,10 @@ The harness's `preflight` / `runup` ARE the target-environment check, and its sh
 merged as `RequiredCommandsCheck`; the harness inherits it verbatim (the merged code says so). The
 fork reads the operation scope's LEVEL and the target node's realized state:
 
+- **no scope at all** (`ctx.operation_scope is None`): a LOUD error. A scope-reading node handed a
+  scope-less context is an orchestrator bug, never a silent skip (the merged check raises a
+  `StateError` here today, and the harness preserves it). This is the precondition to the level fork
+  below.
 - **out of scope for the level** (a system-scoped doctor scan reaching a session,
   `ctx.operation_scope .level is not ScopeLevel.SESSION`): SKIP, a legitimate no-op. This is how
   doctor gets a harness health row with no session context and no special-casing.
@@ -216,8 +220,8 @@ scope's identity matches its own captured identity (`scope.session == self._sess
 `vm` / `workspace`, and the agent-or-admin choice); a mismatch is a loud error, the belt-and-
 suspenders against a mis-wired context. The SKIP branch does no such check, because at SYSTEM level
 the scope legitimately describes a broader operation than this session (that is what the skip is
-for). Whether the merged `RequiredCommandsCheck` grows this guard too, or it arrives with the
-harness, is an LLD detail; the harness owns its identity either way.
+for). This guard does not exist on the interim `RequiredCommandsCheck` (confirmed at HEAD), so it
+arrives with the harness; the harness owns its identity regardless.
 
 Two things this inherits from the merged model rather than reinvents:
 
@@ -254,9 +258,13 @@ This is the swap, and it is small because the merged code was written for it.
   is there for a future harness).
 - **The session orchestrator's ops.** Where the session create/restart orchestrator calls
   `_build_session_command` today to get the pane command string, it calls `harness.start(ctx)` /
-  `harness.restart(ctx)`. Template-variable substitution, `exec` wrapping, and tmux creation stay
-  where they are, operating on the harness's returned string exactly as on
-  `_build_session_command`'s.
+  `harness.restart(ctx)`. Two wiring details the swap must handle, since `_build_session_command`
+  takes no context today: the call site ASSEMBLES an op-start `RunContext` (the execution targets
+  and the scoped secrets, mirroring the runup context the merged path already builds), and template-
+  variable substitution, which currently lives INSIDE `_build_session_command`, lifts out to wrap
+  the harness's returned string. `exec` wrapping and tmux creation stay where they are, operating on
+  that string exactly as on `_build_session_command`'s output. (The plan pins both as Phase 3 items
+  and the harness-api LLD details them.)
 - **Restart ordering is the orchestrator's, preserved.** On restart the target exists, so readiness
   probes at preflight (pre-resolve, pre-kill), and `restart` is called after the kill (claude-code
   needs the old process dead before it decides resume-vs-launch). The merged orchestrator already
