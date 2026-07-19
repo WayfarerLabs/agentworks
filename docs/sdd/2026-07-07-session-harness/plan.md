@@ -69,7 +69,7 @@ The swap and mirror points, cited so each phase edits the right lines:
 
 ## LLDs (write early, before the code they pin)
 
-- [ ] **Write `harness-api-lld.md`** (before Phase 1). Pins: the `Harness(Capability)` constructor
+- [x] **Write `harness-api-lld.md`** (before Phase 1). Pins: the `Harness(Capability)` constructor
       and `owner_kind`; `validate_config` shape-only-at-load vs completeness-on-merged-blob split;
       the `merge_config` classmethod hook and `shell`'s `required_commands` union override; the
       readiness fork relocation including the fifth `scope is None` branch and the new SESSION-level

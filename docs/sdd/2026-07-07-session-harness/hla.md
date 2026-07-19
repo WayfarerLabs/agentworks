@@ -155,10 +155,11 @@ class Harness(Capability):
         old session is killed). Replaces _build_session_command for
         restart."""
 
-    # OPTIONAL classmethod hook (getattr-gated, repo precedent):
+    # BASE classmethod with a shallow default (the ABC supplies it, so
+    # the resolver calls it unconditionally, no getattr guard):
     #   def merge_config(cls, base: Mapping, child: Mapping) -> dict
     # Inheritance-time blob merge for same-harness parent/child pairs;
-    # absent means shallow {**base, **child}. `shell` overrides it to
+    # the default is shallow {**base, **child}. `shell` overrides it to
     # union required_commands (parity with today's append-dedupe).
 ```
 
@@ -260,11 +261,14 @@ This is the swap, and it is small because the merged code was written for it.
   `_build_session_command` today to get the pane command string, it calls `harness.start(ctx)` /
   `harness.restart(ctx)`. Two wiring details the swap must handle, since `_build_session_command`
   takes no context today: the call site ASSEMBLES an op-start `RunContext` (the execution targets
-  and the scoped secrets, mirroring the runup context the merged path already builds), and template-
-  variable substitution, which currently lives INSIDE `_build_session_command`, lifts out to wrap
-  the harness's returned string. `exec` wrapping and tmux creation stay where they are, operating on
-  that string exactly as on `_build_session_command`'s output. (The plan pins both as Phase 3 items
-  and the harness-api LLD details them.)
+  and the secrets scoped to the session node's `secret_refs()`, mirroring the readiness context the
+  merged path already builds, the runup context on create and the preflight context on restart,
+  since the restart path retains no runup context and must capture the boundary resolver's values
+  for the op ctx), and template-variable substitution, which currently lives INSIDE
+  `_build_session_command`, lifts out to wrap the harness's returned string. `exec` wrapping and
+  tmux creation stay where they are, operating on that string exactly as on
+  `_build_session_command`'s output. (The plan pins both as Phase 3 items and the harness-api LLD
+  details them.)
 - **Restart ordering is the orchestrator's, preserved.** On restart the target exists, so readiness
   probes at preflight (pre-resolve, pre-kill), and `restart` is called after the kill (claude-code
   needs the old process dead before it decides resume-vs-launch). The merged orchestrator already
