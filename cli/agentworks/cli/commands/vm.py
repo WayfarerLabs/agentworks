@@ -194,7 +194,7 @@ def vm_shell(
         typer.Option(
             "--platform",
             # Legacy alias for one release. Visible in help: click has
-            # no per-alias hiding (recorded Phase 5 deviation).
+            # no per-alias hiding.
             "--provisioner",
             help=(
                 "Use the platform-native transport (limactl shell, wsl.exe, "

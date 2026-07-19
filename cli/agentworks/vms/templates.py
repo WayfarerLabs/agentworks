@@ -91,7 +91,7 @@ def _resolve_from_dict(
     the resolver's internal safety net -- the canonical cycle check
     lives in ``Registry.finalize`` at build_registry time, but this
     resolver is also called eagerly by ``load_config`` before any
-    registry is built (FRD R6 / Phase 2a.1), so it needs its own
+    registry is built, so it needs its own
     guard.
     """
     if name in _visiting:

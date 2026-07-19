@@ -237,12 +237,12 @@ DYNAMIC_COMPLETIONS: dict[tuple[str, str], str] = {
 
     # Secret inspection
     ("secret.describe", "name"): "secrets",
-    # Resource inspection (Phase 2c; describe took the single KIND/NAME
+    # Resource inspection (describe took the single KIND/NAME
     # grammar in the display-syntax unification)
     ("resource.list", "kind"): "resource_kinds",
     ("resource.describe", "ref"): "resource_refs",
     ("resource.edit", "ref"): "resource_refs",
-    # Resource migration + authoring (Phase 4). `resource sample`'s kind
+    # Resource migration + authoring. `resource sample`'s kind
     # argument is a static click.Choice (SAMPLE_KINDS), so it completes
     # via ParamSpec.choices rather than a dynamic completer.
     ("resource.migrate", "selectors"): "migrate_selectors",

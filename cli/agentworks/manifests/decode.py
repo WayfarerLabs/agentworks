@@ -11,10 +11,11 @@ Capability-owned blobs are the one deliberate exception to shared
 validation: the named capability validates its ``provider_config``
 (invoked here on the TRUE blob, with the loader's flat shape validating
 its own assembled blob), and the two sources diverge on stray blob
-keys by design (the flat domain stays silently loose until Phase 6).
+keys by design (the flat domain stays silently loose until the flat
+shape is retired).
 
 ``KIND_SECTIONS`` maps kind identifiers to their legacy TOML section
-names; it is the shared table the Phase 4 migrator consumes so the two
+names; it is the shared table the manifest migrator consumes so the two
 sides cannot disagree about what maps to what.
 """
 
@@ -260,7 +261,7 @@ def _decode_vm_site(doc: Document, spec: dict[str, object], issues: list[str]) -
     from agentworks.config import validate_name
     from agentworks.vms.sites import VMSiteDecl
 
-    # FRD R2: site names follow the VM-name rules (they appear in
+    # Site names follow the VM-name rules (they appear in
     # hostnames and SSH host aliases).
     validate_name(doc.name)
     platform = spec.pop("platform", None)
@@ -295,7 +296,7 @@ def _decode_vm_site(doc: Document, spec: dict[str, object], issues: list[str]) -
     # installed"); a plugin's platform may simply not be here.
     from agentworks.capabilities.vm_platform import VM_PLATFORM_REGISTRY
 
-    # FRD R2: a site named after a known platform must declare that
+    # A site named after a known platform must declare that
     # platform; `vm-site/azure-vm` backed by lima would make every
     # `--site azure-vm` mean something other than it says.
     if doc.name in VM_PLATFORM_REGISTRY and platform != doc.name:

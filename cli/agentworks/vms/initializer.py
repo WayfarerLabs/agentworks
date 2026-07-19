@@ -170,8 +170,7 @@ def _write_agentworks_profile(
 
 # -- VM-side identity / sshd / sudoers fragments -----------------------------
 #
-# Three on-VM files maintained by agentworks init (per the env-and-secrets
-# SDD's Phase 4):
+# Three on-VM files maintained by agentworks init:
 #
 #   /etc/profile.d/agentworks-identity.sh
 #     System-wide login-shell fragment with the VM-stable identity vars
@@ -1250,7 +1249,7 @@ def _run_catalog_commands(
 
 
 # VM hardening (sysctl baseline + /proc hidepid=1) lives in
-# agentworks.vms.hardening per FRD R4a + R4b.
+# agentworks.vms.hardening.
 
 
 def verify_tailscale_available() -> None:
@@ -1349,7 +1348,7 @@ def rejoin_tailscale(
 
     Installs Tailscale if needed, joins the tailnet, and updates the DB
     with the new Tailscale IP. ``auth_key`` is resolved by the caller via
-    the framework's eager-resolve (Phase 1c).
+    the framework's eager-resolve.
 
     Returns the new Tailscale IP.
     """
@@ -1375,9 +1374,9 @@ def _join_tailscale(
 ) -> str:
     """Join Tailscale, update DB. Returns the Tailscale IP.
 
-    Phase 1c of the Resource Registry SDD: the Tailscale auth key
-    arrives via the ``auth_key`` keyword argument from the framework's
-    eager-resolve at manager-entry. The legacy env-var fallback and
+    The Tailscale auth key arrives via the ``auth_key`` keyword argument
+    from the framework's eager-resolve at manager-entry. The legacy
+    env-var fallback and
     prompt-here-if-missing path are gone; callers must thread the
     resolved value in.
     """
@@ -1432,8 +1431,7 @@ def initialize_vm(
     Phase B (setup) steps are non-fatal -- failures are logged as warnings
     and the VM gets 'partial' status instead of 'complete'.
 
-    Phase 1c (Tailscale) + Phase 1d (git credentials): both
-    ``tailscale_auth_key`` and ``git_tokens`` are required; ``create_vm``
+    Both ``tailscale_auth_key`` and ``git_tokens`` are required; ``create_vm``
     resolves them via the framework at manager-entry and threads them in,
     along with the BOUND ``platform`` from its composition root (used
     for the keepalive hold; the gates never bind) and ``platform_ctx``,
@@ -1553,7 +1551,7 @@ def run_initialization(
     from reinit_vm() for repeatable re-initialization. Pass
     ``is_first_init=True`` from initialize_vm so steps that expect prior
     state (e.g. tmux socket dirs) can skip warnings on missing state.
-    Phase 1d: ``git_tokens`` is required (no provider-side fallback);
+    ``git_tokens`` is required (no provider-side fallback);
     callers must thread the framework-resolved dict in.
     """
     db.insert_vm_event(vm_name, "init_started")
@@ -1697,7 +1695,7 @@ def _run_bootstrap_script(
     """Generate, copy, and run a bootstrap script on the VM. Returns Tailscale IP.
 
     Used for WSL2 where the bootstrap cannot be embedded in a platform's
-    native mechanism (Lima provision block, Azure cloud-init). Phase 1c:
+    native mechanism (Lima provision block, Azure cloud-init).
     ``tailscale_auth_key`` is required; the framework-resolved value
     arrives from ``create_vm`` -> ``initialize_vm`` -> ``_phase_a_bootstrap``.
     """
@@ -1815,14 +1813,14 @@ def _phase_b_setup(
 ) -> None:
     """Phase B: Setup (over Tailscale SSH). Non-fatal steps warn and continue.
 
-    ``git_tokens`` is required (Phase 1d): every provider listed in
+    ``git_tokens`` is required: every provider listed in
     ``providers`` must have a pre-resolved token value in the dict.
     """
     from agentworks.catalog import catalog_from_registry
 
     output.detail(f"vm: {vm_name}")
     db.update_vm_init_status(vm_name, InitStatus.IN_PROGRESS)
-    # Phase 2b: catalog reference validation moved to the framework
+    # Catalog reference validation lives in the framework
     # (catalog kinds' error miss policy fires at build_registry time,
     # which the manager-entry hoist runs before reaching this point).
     catalog = catalog_from_registry(registry)
@@ -1871,7 +1869,7 @@ def _phase_b_setup(
     # tailscaled (would disconnect us); takes effect on next cold boot.
     apply_tailscaled_dns_fix(ts_target, logger)
 
-    # Non-fatal: VM-wide SetEnv plumbing (env-and-secrets SDD Phase 4).
+    # Non-fatal: VM-wide SetEnv plumbing.
     # Runs before apt install so subsequent SSH commands within init can
     # rely on the SetEnv path. These targets don't touch zsh-shipped files,
     # so dpkg conffile handling doesn't apply.
@@ -2211,7 +2209,7 @@ def _configure_git_credentials(
     """Configure git credential store on the VM with the pre-resolved
     framework tokens.
 
-    Phase 1d of the Resource Registry SDD: ``git_tokens`` is required
+    ``git_tokens`` is required
     (no provider-side fallback); the framework resolves every token
     at manager-entry and threads the ``{credential_name: value}``
     dict in. Any name in ``providers`` that doesn't have a matching

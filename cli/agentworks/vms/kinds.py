@@ -128,7 +128,7 @@ class _AdminTemplateKind:
         """Every VM uses the singleton ``admin-template:default`` -- the
         admin template defines the admin user on each VM, and there's one
         admin user per VM. No DB column ties VMs to a non-default admin
-        template yet (Phase 2a.3 plurified the framework but the operator
+        template yet (the framework was plurified but the operator
         surface still publishes only ``default``). When/if a future SDD
         adds ``[admin_templates.<name>]`` parsing plus a ``vm.admin-template``
         column, this method changes to filter by that column the same way
