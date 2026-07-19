@@ -298,10 +298,12 @@ def vm_console(
         "(see 'agw console --help'). This command will be removed in a future release."
     )
 
-    attach_console(
-        get_db(),
-        load_config(),
-        vm_name=name,
-        recreate=recreate,
-        allow_nesting=allow_nesting,
+    raise typer.Exit(
+        attach_console(
+            get_db(),
+            load_config(),
+            vm_name=name,
+            recreate=recreate,
+            allow_nesting=allow_nesting,
+        )
     )

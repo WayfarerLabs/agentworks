@@ -259,8 +259,7 @@ def test_attach_console_focuses_session_pane_per_window(
         returncode=0, stdout="_PLACEHOLDER\nalpha\nbeta\n"
     )
 
-    with pytest.raises(SystemExit):
-        attach_console(db, _StubConfig(), name="con", allow_nesting=True)
+    attach_console(db, _StubConfig(), name="con", allow_nesting=True)
 
     selects = [c for c in fake_target.commands if "select-pane" in c]
     assert "tmux select-pane -t aw-console-con:alpha.0" in selects
@@ -333,10 +332,9 @@ def test_attach_console_aw_session_vertical_layout(
         returncode=0, stdout="80x36\n0 %1\n1 %2\n"
     )
 
-    with pytest.raises(SystemExit):
-        attach_console(
-            db, _StubVerticalLayoutConfig(), name="con", allow_nesting=True  # type: ignore[arg-type]
-        )
+    attach_console(
+        db, _StubVerticalLayoutConfig(), name="con", allow_nesting=True  # type: ignore[arg-type]
+    )
 
     # One select-layout with the hand-computed string for 1-shell case
     # (session 18, shell 17).

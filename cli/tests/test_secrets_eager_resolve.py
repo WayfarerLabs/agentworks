@@ -993,8 +993,7 @@ def test_attach_console_existing_tmux_session_skips_eager_resolve(
     )
 
     monkeypatch.delenv("TMUX", raising=False)
-    with pytest.raises(SystemExit):
-        multi_console.attach_console(db, config, name="c1")  # type: ignore[arg-type]
+    multi_console.attach_console(db, config, name="c1")  # type: ignore[arg-type]
 
     assert resolve_called == [], (
         "plain attach (existing tmux session) must NOT eager-resolve "

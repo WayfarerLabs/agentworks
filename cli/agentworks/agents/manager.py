@@ -795,8 +795,12 @@ def shell_agent(
     *,
     name: str,
     workspace_name: str | None = None,
-) -> None:
+) -> int:
     """Open a shell as an agent user on a VM.
+
+    Returns the interactive session's exit code; the CLI layer owns the
+    translation to process exit (check 9: no sys.exit in the service),
+    mirroring :func:`agentworks.vms.manager.exec_vm`.
 
     Orchestrated (``vms.manager.gated_vm_boundary``): the graph
     derives from the VM's row, the activation gate replaces this
@@ -813,8 +817,6 @@ def shell_agent(
         )
 
     vm = _require_vm(db, agent.vm_name)
-
-    import sys
 
     from agentworks.env import ResourceContext, compose_env
     from agentworks.transports import agent_transport
@@ -877,10 +879,9 @@ def shell_agent(
             # SSH as the agent, then cd into the workspace and exec an
             # interactive login shell. No sudo / su involved.
             shell_cmd = f"cd {q_path} && exec $SHELL -li"
-            sys.exit(target.interactive(shell_cmd, env=env))
-        else:
-            # SSH as the agent with no command -> interactive login shell.
-            sys.exit(target.interactive("", env=env))
+            return target.interactive(shell_cmd, env=env)
+        # SSH as the agent with no command -> interactive login shell.
+        return target.interactive("", env=env)
 
 
 def exec_agent(
