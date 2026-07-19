@@ -53,7 +53,7 @@ def _http_probe(
 
 def credential_name_from_owner(owner: str) -> str:
     """The credential name from a standardized ``git-credential/<name>``
-    owner. Resource names cannot contain ``/`` (FRD R13), so the split
+    owner. Resource names cannot contain ``/``, so the split
     is exact."""
     return owner.split("/", 1)[1] if "/" in owner else owner
 

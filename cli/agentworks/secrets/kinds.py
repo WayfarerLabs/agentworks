@@ -12,7 +12,7 @@ load. ``SecretDecl`` (the declarable row) already lives in
 restriction -- any name a ``SecretReference`` references is
 auto-synthesized when not operator-declared. The synthesized
 ``SecretDecl`` carries an empty ``description``; operators are warned
-(per FRD R9) that auto-declared secrets should be promoted to explicit
+that auto-declared secrets should be promoted to explicit
 ``[secrets.<name>]`` blocks so they can carry a description.
 
 ``SecretBackendKind`` is a read-only capability kind. Backends are code
@@ -133,8 +133,7 @@ class _SecretKind:
         per-command scoping (e.g. ``vm reinit`` walks only the VM's
         subgraph). The result is *per current config*: edits to config
         change the projection immediately, even for sessions that were
-        provisioned against a different config. See the Phase 3c
-        "Forward-compat note" in the SDD plan.
+        provisioned against a different config.
         """
         target_name = resource.name
         for session in db.list_sessions():

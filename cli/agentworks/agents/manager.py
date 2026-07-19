@@ -78,7 +78,7 @@ class _AgentDirectEnvScopes(NamedTuple):
     The ``workspace`` field is ``None`` for shells / execs that don't
     pin a workspace context (``agent shell`` without ``--workspace``,
     ``agent exec`` today). When set, workspace-template env enters the
-    FRD R2 precedence ladder between vm and agent.
+    scope precedence ladder between vm and agent.
     """
 
     vm: dict[str, EnvEntry]
@@ -100,7 +100,7 @@ def _resolve_agent_direct_env_scopes(
     identical scope state -- no drift between "what was prompted for"
     and "what was passed to the shell."
 
-    Scope sources mirror the FRD R2 precedence ladder:
+    Scope sources mirror the scope precedence ladder:
 
     - ``vm``: the VM's actual template env (from the ``vm.template`` DB row).
     - ``workspace``: when ``ws`` is supplied, the workspace template's env.
@@ -861,8 +861,8 @@ def shell_agent(
             agent=scopes.agent,
         )
 
-        # Direct agent SSH (FRD R1): no admin+sudo detour. The agent's
-        # authorized_keys (Phase 3) accepts the operator's key set.
+        # Direct agent SSH: no admin+sudo detour. The agent's
+        # authorized_keys accepts the operator's key set.
         target = agent_transport(vm, config, agent)
 
         # Probe direct agent SSH first so pre-rollout agents (whose
@@ -895,7 +895,7 @@ def exec_agent(
     """Execute a command as an agent user on a VM via direct agent SSH.
 
     Opens a non-interactive SSH session directly as the agent's Linux user
-    (FRD R1) and runs the command in a login shell so the agent's PATH /
+    and runs the command in a login shell so the agent's PATH /
     profile is in scope. Stdout / stderr stream through to the caller; the
     return value is the remote command's exit code.
 

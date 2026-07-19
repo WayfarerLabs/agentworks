@@ -1,11 +1,11 @@
 """Service-layer introspection and rendering for ``agw secret`` commands.
 
 ``build_secret_table`` / ``render_secret_table`` back ``agw secret list``;
-``describe_secret`` / ``render_secret_description`` back the Phase-1e
+``describe_secret`` / ``render_secret_description`` back
 ``agw secret describe <name>``. Both follow the same "build structured
 view, render via ``agentworks.output``" pattern.
 
-Per FRD R10, neither command prompts the operator nor resolves a secret
+Neither command prompts the operator nor resolves a secret
 value for display; they report state by asking the active backends
 (``would_attempt`` / ``describe_lookup``) directly.
 """
@@ -66,7 +66,7 @@ class SecretTable:
     chain order (precedence order). ``rows`` is one per
     Registry-published secret (operator-declared and auto-declared
     alike). ``operator_count`` / ``auto_count`` drive the header
-    summary per FRD R10.
+    summary.
     """
 
     backends: tuple[str, ...]
@@ -80,7 +80,7 @@ def build_secret_table(config: Config, registry: Registry) -> SecretTable:
 
     The table iterates the Registry's ``"secret"`` kind so auto-declared
     secrets surface in ``agw secret list`` alongside operator-declared
-    ones (FRD R10). Each row carries an Origin string so operators can
+    ones. Each row carries an Origin string so operators can
     tell which secret came from where; the header summary reports the
     counts.
 
@@ -104,8 +104,8 @@ def build_secret_table(config: Config, registry: Registry) -> SecretTable:
             operator_count += 1
         elif variant == "auto-declared":
             auto_count += 1
-        # built-in not yet a path for secrets; Phase 2b's catalog
-        # publisher emits built-in but for non-secret kinds.
+        # built-in is not yet a path for secrets; the catalog
+        # publisher emits built-in origins but only for non-secret kinds.
 
         cells = tuple(
             SecretCell(
@@ -158,7 +158,7 @@ def render_secret_table(table: SecretTable) -> None:
         )
         return
 
-    # Header summary per FRD R10: total + per-origin counts.
+    # Header summary: total + per-origin counts.
     total = len(table.rows)
     parts: list[str] = []
     if table.operator_count:
@@ -279,7 +279,7 @@ def describe_secret(
 ) -> SecretDescription:
     """Build a ``SecretDescription`` for one secret in the registry.
 
-    Per FRD R10. No prompting, no resolution for display (the
+    No prompting, no resolution for display (the
     resolution PREVIEW probes non-interactive backends only). Raises
     ``NotFoundError`` if ``name`` isn't a
     published secret -- typed at the service layer so CLI / future
@@ -351,7 +351,7 @@ def describe_secret(
 def render_secret_description(desc: SecretDescription) -> None:
     """Emit a ``SecretDescription`` as operator-friendly sections:
     header, referenced by, used by (when db provided), backend
-    mappings, resolution preview. Mirrors FRD R10's documented shape.
+    mappings, resolution preview.
     """
     # --- Header ---
     output.info(f"Secret: {desc.name}")

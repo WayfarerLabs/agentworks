@@ -88,10 +88,10 @@ def _resolve_from_dict(
     ``_visiting`` carries the chain of in-progress resolves so cycles
     raise a clean ``ConfigError`` (matching the framework's cycle-pass
     error shape) instead of crashing with ``RecursionError``. This is
-    the resolver's internal safety net -- the canonical cycle check
+    the resolver's internal safety net; the canonical cycle check
     lives in ``Registry.finalize`` at build_registry time, but this
     resolver is also called eagerly by ``load_config`` before any
-    registry is built (FRD R6 / Phase 2a.1), so it needs its own
+    registry is built, so it needs its own
     guard.
     """
     if name in _visiting:

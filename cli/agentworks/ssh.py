@@ -1,8 +1,8 @@
 """SSH execution primitive.
 
-After Phase 4 of the polymorphic-transports refactor, the
-``ExecTarget`` / Lima / WSL2 / RemoteLima surfaces in this module are
-gone. ``agentworks.transports.ssh.SSHTransport`` is the
+The polymorphic-transports refactor removed the ``ExecTarget`` / Lima /
+WSL2 / RemoteLima surfaces from this module.
+``agentworks.transports.ssh.SSHTransport`` is the
 ``Transport``-shaped replacement for the per-command surface; this
 module retains the small set of bare-``SSHTarget`` helpers that aren't
 ``Transport``-shaped:

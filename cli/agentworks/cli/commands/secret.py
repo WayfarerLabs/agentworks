@@ -53,7 +53,7 @@ def secret_describe(
 ) -> None:
     """Show the full per-secret detail view.
 
-    Five sections per FRD R10 (extended in Phase 3c): header (name,
+    Five sections: header (name,
     kind, origin, description, hint); ``Referenced by:`` (one row per
     matching config reference); ``Used by (per current config):`` (one
     row per live session whose subgraph reaches this secret, projected

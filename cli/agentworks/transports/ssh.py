@@ -139,7 +139,7 @@ class SSHTransport(Transport):
         ``retries`` and ``on_retry`` are SSH-only extensions and are not
         part of the ``Transport`` ABC. Lima / WSL2 / RemoteLima do not
         retry on timeout, so neither parameter has anything to bind to
-        there. Phase 3 type-narrows callers that need either parameter
+        there. Callers that need either parameter are type-narrowed
         to ``SSHTransport`` rather than hoisting these to the ABC.
         """
         if sudo:

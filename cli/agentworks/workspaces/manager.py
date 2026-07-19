@@ -24,6 +24,7 @@ if TYPE_CHECKING:
     from agentworks.capabilities.base import OperationScope
     from agentworks.config import Config
     from agentworks.db import Database, VMRow, WorkspaceRow
+    from agentworks.resources.registry import Registry
     from agentworks.transports import Transport
     from agentworks.vms.nodes import LiveVMNode
 
@@ -258,6 +259,11 @@ def reinit_workspace(
       time; the underlying chown/chmod/setfacl are no-ops on already-correct
       state. Report `OK:` on success.
 
+    Git identity (the template's `git_user_name` / `git_user_email`)
+    converges here too, detection-based: an identity added or changed on
+    the template after create is stamped into the checkout's repo-local
+    config, and an already-correct value reports `OK:`.
+
     Same semantic as `vm reinit` and `agent reinit`: the declared state in
     the DB is the source of truth; this reinit converges live state to
     match.
@@ -393,6 +399,14 @@ def reinit_workspace(
         except SSHError as e:
             output.warn(f"parent traversal fix failed: {e}")
 
+        # 5b. Converge the checkout's git identity. Repo-local config is
+        # actor-agnostic and idempotent, so identity joins the reinit
+        # convergence set: an identity added or changed on the template
+        # after create lands here (detection-based, so an unchanged value
+        # reports OK). Only meaningful when the workspace is a git repo; a
+        # declared identity on a repo-less workspace is a no-op.
+        fixes += _reinit_git_identity(target, registry, ws)
+
         # 6. Reconcile agent group membership
         # Get agents that SHOULD be in the group (have any grant)
         granted_agents = set()
@@ -434,6 +448,87 @@ def reinit_workspace(
             output.info(f"\nApplied {fixes} fix(es)")
         else:
             output.info("\nAlready up to date")
+
+
+def _reinit_git_identity(
+    target: Transport,
+    registry: Registry,
+    ws: WorkspaceRow,
+) -> int:
+    """Converge the checkout's repo-local git identity to its template.
+
+    Mirrors the create-time stamp in
+    ``workspaces.backends.vm.create_vm_workspace``: the identity lives in
+    the checkout's own ``.git/config`` (actor-agnostic), so re-applying it
+    is idempotent. Detection-based, so an already-correct value reports
+    ``OK`` and only a real change counts as a fix.
+
+    Three no-op cases: the template (or its resolution) is gone, the
+    template declares no identity, or the on-disk workspace path is not a
+    git checkout (probed with ``git rev-parse``). Note the last check is on
+    the checkout, not the template's ``repo`` field: a workspace whose repo
+    was later dropped from the template keeps its existing checkout, so its
+    identity still converges.
+
+    Returns the number of identity fields it actually changed.
+    """
+    from agentworks.errors import ConfigError
+    from agentworks.ssh import SSHError
+    from agentworks.workspaces.templates import resolve_template
+
+    try:
+        tmpl = resolve_template(registry, ws.template)
+    except (ValueError, ConfigError):
+        # The workspace's template is gone from config; nothing to converge
+        # toward. Ownership/permission convergence above does not need it.
+        return 0
+
+    declared = [
+        (key, value)
+        for key, value in (
+            ("user.name", tmpl.git_user_name),
+            ("user.email", tmpl.git_user_email),
+        )
+        if value
+    ]
+    if not declared:
+        return 0
+
+    quoted_path = shlex.quote(ws.workspace_path)
+    try:
+        is_repo = target.run(f"git -C {quoted_path} rev-parse --git-dir", check=False)
+        if not is_repo.ok:
+            # "not a git repository" is the expected, quiet no-op (a
+            # workspace created without a repo). Any other probe failure
+            # (git missing, a broken checkout, permissions) is a real
+            # problem the operator should see, not a silent OK.
+            stderr = (is_repo.stderr or "").strip()
+            if "not a git repository" in stderr.lower():
+                output.detail("OK: git identity (workspace has no repo)")
+            else:
+                output.warn(
+                    f"git identity skipped: could not probe {ws.workspace_path} "
+                    f"as a git repo ({stderr or 'unknown error'})"
+                )
+            return 0
+
+        fixed = 0
+        for key, value in declared:
+            current = target.run(
+                f"git -C {quoted_path} config --local --get {key}", check=False
+            )
+            if current.ok and current.stdout.strip() == value:
+                output.detail(f"OK: git {key}")
+                continue
+            target.run(
+                f"git -C {quoted_path} config --local {key} {shlex.quote(value)}"
+            )
+            output.detail(f"Fixed: git {key}")
+            fixed += 1
+        return fixed
+    except SSHError as e:
+        output.warn(f"git identity check failed: {e}")
+        return 0
 
 
 def _revert_grant_on_failure(db: Database, agent_name: str, ws_name: str) -> None:
