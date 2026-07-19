@@ -48,7 +48,7 @@ def build_registry(config: Config, manifests: ManifestSet | None = None) -> Regi
     ``ManifestSet`` (e.g. ``ManifestSet.empty()``) to skip the auto-load.
     """
     from agentworks import catalog, output, secrets
-    from agentworks.capabilities import git_credential
+    from agentworks.capabilities import git_credential, harness
     from agentworks.capabilities import vm_platform as vm_platforms
     from agentworks.errors import StateError
     from agentworks.manifests import RESOURCES_DIRNAME, load_manifests
@@ -84,6 +84,7 @@ def build_registry(config: Config, manifests: ManifestSet | None = None) -> Regi
     builtin_manifests.publish_to(registry)
     catalog.publish_to(registry, config)
     git_credential.publish_to(registry)
+    harness.publish_to(registry)
     secrets.publish_to(registry)
     vm_platforms.publish_to(registry)
     config.publish_to(registry)

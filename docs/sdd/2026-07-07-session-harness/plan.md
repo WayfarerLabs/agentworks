@@ -92,12 +92,12 @@ The swap and mirror points, cited so each phase edits the right lines:
 Stand up `capabilities/harness/` mirroring `capabilities/git_credential/`. Nothing in `sessions/`
 changes; the rows appear in the registry and are inert until Phase 3 consumes them.
 
-- [ ] **Package skeleton** `capabilities/harness/{__init__.py,base.py,kinds.py,shell.py}`.
+- [x] **Package skeleton** `capabilities/harness/{__init__.py,base.py,kinds.py,shell.py}`.
       `__init__.py` exports `HARNESS_REGISTRY` (name -> class), `harness_for(name)` (registry lookup
       with typed framing), and `publish_to(registry)`. Pure Python; no import of `sessions/` or
       `orchestration/` (layering rule R1). **Done when:** `import agentworks.capabilities.harness`
       succeeds and the module imports neither forbidden package (assert by a layering test).
-- [ ] **`base.py`: `Harness(Capability)` ABC** per the harness-api LLD. `owner_kind` is
+- [x] **`base.py`: `Harness(Capability)` ABC** per the harness-api LLD. `owner_kind` is
       `"session-template"`; the constructor takes
       `(owner_name, config, *, session_name, vm_name, workspace_name, target, admin)`; abstract
       `start(ctx)` / `restart(ctx)` return the raw pane string; the optional `merge_config`
@@ -107,31 +107,30 @@ changes; the rows appear in the registry and are inert until Phase 3 consumes th
       helper is a COPY; `RequiredCommandsCheck._probe` stays until Phase 3. **Done when:** `Harness`
       is abstract, the helper reproduces the probe error shape verbatim, and unit tests cover a
       present/missing command against a stub transport.
-- [ ] **`kinds.py`: `_HarnessKind` + `HarnessEntry`** mirroring `_GitCredentialProviderKind`
+- [x] **`kinds.py`: `_HarnessKind` + `HarnessEntry`** mirroring `_GitCredentialProviderKind`
       (`category="capability"`, `miss_policy="error"`, `builtin_override="reserved"`,
       `auto_declare_names=None`, `synthesize` raising `NoUnreferencedDefaultError`); frozen
       `HarnessEntry(name, origin, references)`. Self-registers
       `KIND_REGISTRY["harness"] =     _HarnessKind()` at import. **Done when:** the kind is in
       `KIND_REGISTRY` after importing the module and a `kind: harness` manifest document gets the
       standard capability-kind envelope rejection.
-- [ ] **Index + publisher wiring.** Add `import agentworks.capabilities.harness.kinds  # noqa: F401`
+- [x] **Index + publisher wiring.** Add `import agentworks.capabilities.harness.kinds  # noqa: F401`
       to `resources/kinds/__init__.py`; add the `harness` import at `bootstrap.py:51` and
       `harness.publish_to(registry)` in the built-in block near `bootstrap.py:86`. `publish_to` adds
       one `HarnessEntry` per registered harness with
       `Origin.built_in(source="agentworks.capabilities.harness")`. **Done when:**
       `agw resource     list` shows the `harness/shell` row, `agw resource kinds` lists `harness`
       with its category/description, and `agw resource describe harness/shell` renders.
-- [ ] **`shell.py`: the `shell` harness.** Config vocab `command` / `restart_command` /
+- [x] **`shell.py`: the `shell` harness.** Config vocab `command` / `restart_command` /
       `required_commands` (all optional); `validate_config` accepts exactly these, shape-only,
       returns `()`; `start` returns `command` (empty = login shell), `restart` returns
       `restart_command` or `command`; `merge_config` unions `required_commands` (append-dedupe) and
       child-wins the scalars; `preflight`/`runup` call `require_commands`. **Done when:** unit tests
       cover start/restart strings, empty-config login shell, `merge_config` union + scalar override,
       and unknown-field rejection.
-- [ ] **Docs riding this phase:** none of the model-narrative docs are true yet (nothing consumes
+- [x] **Docs riding this phase:** none of the model-narrative docs are true yet (nothing consumes
       the harness), so they wait. The SDD `.cspell.json` gains any new permanent-code vocabulary
-      introduced here (e.g. `claude-code` already present in repo; add words only as code needs
-      them).
+      introduced here (P1 needed none).
 
 **Tests P1:** kind registration + envelope rejection; `publish_to` row/origin;
 `resource list/kinds/describe` surfaces; `shell` start/restart/merge/validate; the layering-import
@@ -178,8 +177,12 @@ path did moves onto the harness in one slice.
 - [ ] **Node reshape** in `sessions/nodes.py`: `LiveSessionNode` / `PendingSessionNode` hold
       `_harness` instead of `_check`; `preflight`/`runup` delegate to `self._harness`;
       `secret_refs()` folds in the harness's declared secrets (none for built-ins; plumbing
-      present). `deps()`, `mark_realized()`, `teardown()`, `key` unchanged. **Done when:**
-      delegation compiles and the readiness-fork tests (below) pass against the harness.
+      present). `deps()`, `mark_realized()`, `teardown()`, `key` unchanged. This phase ADDS a public
+      accessor on `Harness` (e.g. `secret_refs() -> tuple[str, ...]`, mirroring how
+      `GitCredentialProvider` exposes `secret_name` to its holder) for the node to fold in, rather
+      than the node reaching into the base `Capability._secret_refs` private field (P1 review,
+      forward catch). **Done when:** delegation compiles, the harness exposes the public accessor,
+      and the readiness-fork tests (below) pass against the harness.
 - [ ] **Op call sites** in `sessions/manager.py`: replace `_build_session_command` at `1932` with
       `harness.start(ctx)` and at `2483` with `harness.restart(ctx)`, where `ctx` is an op-start
       `RunContext` assembled at the call site carrying the execution targets and scoped secrets. The

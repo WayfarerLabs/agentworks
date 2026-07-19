@@ -156,8 +156,11 @@ def merge_config(
   resolver").
 - **`shell` overrides to union `required_commands`.** The scalars (`command`, `restart_command`)
   child-win via the shallow default; `required_commands` unions append-dedupe, preserving today's
-  semantics. The union reuses the existing `_append_dedupe` helper (`sessions/templates.py:33-41`),
-  which the reshape leaves in place:
+  semantics. The union uses an `_append_dedupe` helper the harness carries as its OWN per-domain
+  copy (the trivial helper at `sessions/templates.py:33-41`); the capability layer may not import
+  `sessions/` (layering rule R1), and the codebase already keeps a copy per domain
+  (`sessions/templates.py`, `agents/templates.py`), so a copy is the sanctioned shape, not a reuse
+  edge:
 
   ```python
   # capabilities/harness/shell.py, on ShellHarness
@@ -214,9 +217,14 @@ helper; it relocates into the harness's `preflight`/`runup` wiring (section 5).
 ## 5. Readiness fork relocation + single-fire guard
 
 The `RequiredCommandsCheck._check` fork (`sessions/nodes.py:93-139`) relocates into the harness's
-readiness UNCHANGED, including the fifth `scope is None` loud branch. `preflight` and `runup` stay
-thin dispatchers over one `_readiness(ctx, stage=...)` method (mirroring `sessions/nodes.py:87-91`);
-the built-ins fill the probe slot with `require_commands`. The fork, in order:
+readiness UNCHANGED, including the fifth `scope is None` loud branch. "Unchanged" here means the
+branch STRUCTURE and semantics; the internal orchestrator-bug message strings are reworded from "the
+required-commands check ..." to "the harness ..." (the class IS the harness now, and these are
+internal-bug strings, not operator-facing parity surfaces). Only `require_commands`'s probe strings
+are byte-for-byte (section 4), because those are what the probe-parity tests assert. `preflight` and
+`runup` stay thin dispatchers over one `_readiness(ctx, stage=...)` method (mirroring
+`sessions/nodes.py:87-91`); the built-ins fill the probe slot with `require_commands`. The fork, in
+order:
 
 1. **`ctx.operation_scope is None`** -> LOUD `StateError` (`sessions/nodes.py:97-106`). Orchestrator
    bug, never a silent skip. Relocated verbatim.
