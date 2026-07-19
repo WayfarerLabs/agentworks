@@ -133,9 +133,8 @@ def test_vm_console_reachable_vm_is_one_boundary_burst(
     _seed_vm(db)
     _reachable(monkeypatch, True)
 
-    with pytest.raises(SystemExit) as exc:
-        vm_console.attach_console(db, config, vm_name="box")
-    assert exc.value.code == 0
+    # attach_console returns the interactive exit code; the CLI owns process exit.
+    assert vm_console.attach_console(db, config, vm_name="box") == 0
 
     assert resolve_counter == [["proxmox-token"]]
     assert target.interactive_calls == ["tmux attach -t vm-console"]
@@ -158,8 +157,7 @@ def test_vm_console_stopped_vm_gate_burst_seeds_the_boundary(
     events: list[str] = []
     _stop_the_vm(monkeypatch, events)
 
-    with pytest.raises(SystemExit):
-        vm_console.attach_console(db, config, vm_name="box")
+    assert vm_console.attach_console(db, config, vm_name="box") == 0
 
     assert events == ["status", "start", "tailscale"]  # the gate ran
     assert resolve_counter == [["proxmox-token"]]
@@ -212,8 +210,7 @@ def test_vm_scope_reaches_node_readiness(
 
     monkeypatch.setattr(ProxmoxPlatform, "preflight", _recording)
 
-    with pytest.raises(SystemExit):
-        vm_console.attach_console(db, config, vm_name="box")
+    assert vm_console.attach_console(db, config, vm_name="box") == 0
 
     (scope,) = scopes
     assert scope is not None
@@ -258,8 +255,7 @@ def test_named_console_attach_holds_across_the_interactive_attach(
 
     target.interactive = _tracking  # type: ignore[method-assign]
 
-    with pytest.raises(SystemExit):
-        multi_console.attach_console(db, config, name="c1")
+    multi_console.attach_console(db, config, name="c1")
 
     assert events == ["hold-open", "interactive", "hold-close"]
     assert any("Attaching to running console 'c1'" in m for m in captured_output.info)
@@ -279,8 +275,7 @@ def test_named_console_stopped_vm_gate_burst_seeds_the_boundary(
     events: list[str] = []
     _stop_the_vm(monkeypatch, events)
 
-    with pytest.raises(SystemExit):
-        multi_console.attach_console(db, config, name="c1")
+    assert multi_console.attach_console(db, config, name="c1") == 0
 
     assert events == ["status", "start", "tailscale"]
     assert resolve_counter == [["proxmox-token"]]

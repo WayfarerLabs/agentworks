@@ -160,12 +160,14 @@ def console_attach(
     from agentworks.config import load_config
     from agentworks.sessions.multi_console import attach_console
 
-    attach_console(
-        get_db(),
-        load_config(),
-        name=name,
-        recreate=recreate,
-        allow_nesting=allow_nesting,
+    raise typer.Exit(
+        attach_console(
+            get_db(),
+            load_config(),
+            name=name,
+            recreate=recreate,
+            allow_nesting=allow_nesting,
+        )
     )
 
 

@@ -38,7 +38,12 @@ from agentworks.db import Database
 from agentworks.errors import ValidationError
 from agentworks.secrets.resolver import Resolver
 
-from .conftest import empty_secret_target, stub_build_registry, stub_vm_gates
+from .conftest import (
+    CapturedOutput,
+    empty_secret_target,
+    stub_build_registry,
+    stub_vm_gates,
+)
 
 
 @pytest.fixture(autouse=True)
@@ -568,6 +573,75 @@ def test_eager_resolve_fires_exactly_once_for_new_workspace_and_new_agent(
         "realize_agent",
         "session_slice",
     ]
+    db.close()
+
+
+def test_session_create_frames_phases_like_a_plan(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    captured_output: CapturedOutput,
+) -> None:
+    """Session create reads like a plan executing (the vm-create model):
+    a Preflight phase that names each resource it checks, a Resolving
+    Secrets phase, then the ephemeral workspace and agent realized as
+    distinct, announced stages. Pins the operator-facing framing only;
+    the graph, realization order, and secrets are unchanged (the ordering
+    tests above pin those)."""
+    from agentworks.sessions.manager import create_session
+
+    db = Database(tmp_path / "test.db")
+    db._conn.execute(
+        "INSERT INTO vms (name, site, hostname, admin_username, tailscale_host, init_status) "
+        "VALUES ('vm1', 'lima', 'h', 'admin', '100.64.0.5', 'complete')"
+    )
+    db._conn.commit()
+    _install_session_prep_stubs(monkeypatch)
+
+    def _ws_spy(db: object, config: object, registry: object, **kwargs: object) -> None:
+        db._conn.execute(  # type: ignore[attr-defined]
+            "INSERT INTO workspaces (name, vm_name, workspace_path, linux_group) "
+            "VALUES (?, ?, ?, ?)",
+            (kwargs["name"], kwargs["vm"].name, "/tmp/ws", f"ws-{kwargs['name']}"),  # type: ignore[attr-defined]
+        )
+        db._conn.commit()  # type: ignore[attr-defined]
+
+    def _ag_spy(db: object, config: object, registry: object, **kwargs: object) -> None:
+        db.insert_agent(kwargs["name"], kwargs["vm"].name, f"aw-{kwargs['name']}")  # type: ignore[attr-defined,union-attr]
+
+    monkeypatch.setattr("agentworks.workspaces.realize.realize_workspace", _ws_spy)
+    monkeypatch.setattr("agentworks.agents.realize.realize_agent", _ag_spy)
+
+    class _Stop(Exception):
+        pass
+
+    # Stop at the session's own realizing slice: the ephemeral stages
+    # (Creating Workspace / Creating Agent) have already been framed and
+    # run by this point, which is what this test pins.
+    monkeypatch.setattr(
+        "agentworks.sessions.manager._require_workspace",
+        lambda *a, **k: (_ for _ in ()).throw(_Stop()),
+    )
+
+    config = SimpleNamespace(session=SimpleNamespace(history_limit=50000))
+    with pytest.raises(_Stop):
+        create_session(
+            db,
+            config,  # type: ignore[arg-type]
+            name="s1",
+            new_workspace=True,
+            new_agent=True,
+            vm_name="vm1",
+        )
+
+    assert "=== Preflight ===" in captured_output.info
+    assert "=== Resolving Secrets ===" in captured_output.info
+    assert "=== Creating Workspace ===" in captured_output.info
+    assert "=== Creating Agent ===" in captured_output.info
+    # Preflight names each resource in the <kind>/<name> form vm/agent
+    # create use.
+    assert any(m.startswith("Checking session-template/") for m in captured_output.detail)
+    assert any(m.startswith("Checking workspace-template/") for m in captured_output.detail)
+    assert any(m.startswith("Checking agent-template/") for m in captured_output.detail)
     db.close()
 
 

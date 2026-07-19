@@ -197,10 +197,9 @@ def test_shell_vm_workspace_cds_into_workspace_path(
 
     monkeypatch.setattr("agentworks.transports.transport", _factory)
 
-    with pytest.raises(SystemExit):
-        vm_manager.shell_vm(  # type: ignore[arg-type]
-            db, config, "vm1", workspace_name="ws1",
-        )
+    assert vm_manager.shell_vm(  # type: ignore[arg-type]
+        db, config, "vm1", workspace_name="ws1",
+    ) == 0
 
     assert len(captured_cmd) == 1
     assert captured_cmd[0] == "cd /opt/agentworks/workspaces/ws1 && exec $SHELL -l"
@@ -227,8 +226,7 @@ def test_shell_vm_no_workspace_keeps_empty_command(
 
     monkeypatch.setattr("agentworks.transports.transport", _factory)
 
-    with pytest.raises(SystemExit):
-        vm_manager.shell_vm(db, config, "vm1")  # type: ignore[arg-type]
+    assert vm_manager.shell_vm(db, config, "vm1") == 0  # type: ignore[arg-type]
 
     assert captured_cmd == [""]
 
@@ -587,10 +585,9 @@ def test_shell_vm_passes_workspace_scope_to_secret_target(
 
     config = SimpleNamespace()
 
-    with pytest.raises(SystemExit):
-        vm_manager.shell_vm(  # type: ignore[arg-type]
-            db, config, "vm1", workspace_name="ws1",
-        )
+    assert vm_manager.shell_vm(  # type: ignore[arg-type]
+        db, config, "vm1", workspace_name="ws1",
+    ) == 0
 
     ws_arg = captured_scopes.get("ws")
     assert ws_arg is not None, (

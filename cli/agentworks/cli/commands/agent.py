@@ -167,7 +167,9 @@ def agent_shell(
     from agentworks.agents.manager import shell_agent
     from agentworks.config import load_config
 
-    shell_agent(get_db(), load_config(), name=name, workspace_name=workspace)
+    raise typer.Exit(
+        shell_agent(get_db(), load_config(), name=name, workspace_name=workspace)
+    )
 
 
 @agent_app.command("delete")

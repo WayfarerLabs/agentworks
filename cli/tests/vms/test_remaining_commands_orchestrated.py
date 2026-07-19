@@ -436,9 +436,9 @@ def test_port_forward_reachable_vm_is_one_boundary_burst(
     _seed_vm(db)
     _reachable(monkeypatch, True)
 
-    with pytest.raises(SystemExit) as exc:
-        vm_manager.port_forward_vm(db, config, "box", ["8080", "9000:3000"])
-    assert exc.value.code == 0
+    # The service returns the SSH exit code; the CLI layer owns the
+    # translation to process exit (check 9: no sys.exit in the service).
+    assert vm_manager.port_forward_vm(db, config, "box", ["8080", "9000:3000"]) == 0
 
     assert resolve_counter == [["proxmox-token"]]
     (argv,) = tunnel.argv
@@ -473,8 +473,7 @@ def test_port_forward_stopped_vm_gates_then_forwards(
         vm_manager, "_ensure_tailscale", lambda *a, **k: events.append("tailscale")
     )
 
-    with pytest.raises(SystemExit):
-        vm_manager.port_forward_vm(db, config, "box", ["8080"])
+    assert vm_manager.port_forward_vm(db, config, "box", ["8080"]) == 0
 
     assert events == ["status", "start", "tailscale"]  # the gate ran
     assert resolve_counter == [["proxmox-token"]]
@@ -526,8 +525,7 @@ def test_port_forward_scope_reaches_node_readiness(
 
     monkeypatch.setattr(ProxmoxPlatform, "preflight", _recording)
 
-    with pytest.raises(SystemExit):
-        vm_manager.port_forward_vm(db, config, "box", ["8080"])
+    assert vm_manager.port_forward_vm(db, config, "box", ["8080"]) == 0
 
     (scope,) = scopes
     assert scope is not None

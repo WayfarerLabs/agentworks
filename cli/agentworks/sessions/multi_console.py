@@ -13,7 +13,6 @@ import contextlib
 import os
 import posixpath
 import shlex
-import sys
 from collections import Counter
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
@@ -2005,8 +2004,12 @@ def attach_console(
     name: str,
     recreate: bool = False,
     allow_nesting: bool = False,
-) -> None:
-    """Attach to a named console, building or rebuilding tmux state as needed."""
+) -> int:
+    """Attach to a named console, building or rebuilding tmux state as needed.
+
+    Returns the interactive attach's exit code; the CLI layer owns the
+    translation to process exit (check 9: no sys.exit in the service).
+    """
     if os.environ.get("TMUX") and not allow_nesting:
         raise StateError(
             "already inside a tmux session. Nesting is not recommended "
@@ -2066,7 +2069,7 @@ def attach_console(
             output.info(f"Attaching to running console '{name}'.")
 
         tmux_name = tmux_session_name(name)
-        sys.exit(target.interactive(f"tmux attach -t {shlex.quote(tmux_name)}"))
+        return target.interactive(f"tmux attach -t {shlex.quote(tmux_name)}")
 
 
 def delete_console(
