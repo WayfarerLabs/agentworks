@@ -2,10 +2,10 @@
 
 Config lives at ~/.config/agentworks/config.toml. It is read-only at runtime.
 
-Post-move contract (resource-manifests SDD): this module holds the
-settings dataclasses plus the legacy TOML resource loaders/publisher
-(``Config.publish_to`` and the ``_load_*`` helpers) that die in Phase 6 --
-nothing else. The declarable-resource dataclasses (VMTemplate,
+This module holds the settings dataclasses plus the legacy TOML
+resource loaders/publisher (``Config.publish_to`` and the ``_load_*``
+helpers) slated for removal; nothing else. The declarable-resource
+dataclasses (VMTemplate,
 AgentTemplate, AdminConfig, WorkspaceTemplate, SessionTemplate,
 NamedConsoleConfig, GitCredentialConfig) and the console/tmux layout
 constants now live in their domain packages; the loaders import them from
@@ -291,7 +291,7 @@ class _SectionLineMap:
     def lookup(self, *path: str) -> SourceLocation:
         """Return ``SourceLocation`` for the Resource at the given section
         path. Picks the earliest contributing header (the section itself or
-        any sub-section under it) per Phase 0's design. If nothing matches
+        any sub-section under it). If nothing matches
         (the Resource is synthesized by code rather than declared by the
         operator), returns ``SourceLocation(config_path, line=0)``.
         """
@@ -647,7 +647,7 @@ def _load_vm_templates(
     # TOML's implicit-parent semantics already populate this dict: writing
     # `[vm_templates.x.env]` alone produces `raw == {"x": {"env": {...}}}` even
     # without a separate `[vm_templates.x]` header, and the loop iterates `x`
-    # like any other template. Per the revised FRD R2, that minimal form is a
+    # like any other template. That minimal form is a
     # valid Resource; declared_at picks the earliest contributing header (the
     # env line, in that case) via `_SectionLineMap.lookup`.
     templates: dict[str, VMTemplate] = {}
@@ -699,7 +699,7 @@ def _load_vm_templates(
             declared_at=decls.lookup("vm_templates", name),
         )
 
-    # Phase 2a.1: validation moved to the framework / resolver. The
+    # Validation lives in the framework / resolver, not here. The
     # framework's VMTemplateKind miss policy + Registry.finalize cycle
     # pass own the canonical inherits-reference validation (called via
     # build_registry). The per-template field-merging resolver in
@@ -824,8 +824,8 @@ def _load_agent_templates(
             declared_at=decls.lookup("agent_templates", name),
         )
 
-    # Phase 2a.2: inherits-reference validation and cycle detection move
-    # to the framework (AgentTemplateKind's miss policy +
+    # Inherits-reference validation and cycle detection live in the
+    # framework (AgentTemplateKind's miss policy +
     # Registry.finalize's cycle pass). The agents/templates.py resolver
     # also has its own visited-set guard as a safety net for callers
     # that resolve without going through build_registry.
@@ -862,6 +862,16 @@ def _load_catalog_sections(
     )
 
 
+_WORKSPACE_TEMPLATE_KEYS = {
+    "inherits",
+    "repo",
+    "tmuxinator",
+    "git_user_name",
+    "git_user_email",
+    "env",
+}
+
+
 def _load_workspace_templates(
     data: dict[str, object],
     issues: list[str],
@@ -875,6 +885,9 @@ def _load_workspace_templates(
     for name, tdata in raw.items():
         if not isinstance(tdata, dict):
             raise ConfigError(f"workspace_templates.{name} must be a table")
+        _warn_unexpected_keys(
+            tdata, _WORKSPACE_TEMPLATE_KEYS, f"workspace_templates.{name}", issues
+        )
         repo = str(tdata["repo"]) if "repo" in tdata else None
         # Embedded-username advice moved to a provider-owned preflight
         # (git_credentials.remote_advisories, run when a template is
@@ -885,6 +898,12 @@ def _load_workspace_templates(
             inherits=list(tdata.get("inherits", [])),
             repo=repo,
             tmuxinator=bool(tdata["tmuxinator"]) if "tmuxinator" in tdata else None,
+            git_user_name=(
+                str(tdata["git_user_name"]) if "git_user_name" in tdata else None
+            ),
+            git_user_email=(
+                str(tdata["git_user_email"]) if "git_user_email" in tdata else None
+            ),
             env=_parse_env_table(
                 tdata.get("env"),
                 context=f"workspace_templates.{name}",
@@ -893,8 +912,8 @@ def _load_workspace_templates(
             declared_at=decls.lookup("workspace_templates", name),
         )
 
-    # Phase 2a.2: inherits-reference validation and cycle detection move
-    # to the framework (WorkspaceTemplateKind's miss policy +
+    # Inherits-reference validation and cycle detection live in the
+    # framework (WorkspaceTemplateKind's miss policy +
     # Registry.finalize's cycle pass). The workspaces/templates.py
     # resolver also has its own visited-set guard.
     return templates
@@ -915,8 +934,8 @@ def _load_git_credentials(
     for name, cdata in raw.items():
         if not isinstance(cdata, dict):
             raise ConfigError(f"git_credentials.{name} must be a table")
-        # Phase 2b.1: the ``type`` field's reference-existence check
-        # moves to the framework via
+        # The ``type`` field's reference-existence check
+        # lives in the framework via
         # ``GitCredentialConfig.referenced_resources`` emitting a
         # ``ResourceReference(kind="git-credential-provider", ...)``;
         # ``_GitCredentialProviderKind``'s error miss policy fires at
@@ -968,7 +987,7 @@ def _load_git_credentials(
         # hoisting it into the blob for other providers would promote a
         # historically-ignored stray key into a validation error and
         # break released configs (loads-today). The flat domain's
-        # stray-key silence stays until Phase 6 retires it, EXCEPT
+        # stray-key silence stays until the flat shape is retired, EXCEPT
         # github scope keys, where silence would ship a credential with
         # BROADER authority than the operator declared; those warn.
         if warn_ignored_scope_keys and cred_type == "github":
@@ -1060,8 +1079,8 @@ def _load_session_templates(
             declared_at=decls.lookup("session_templates", name),
         )
 
-    # Phase 2a.2: inherits-reference validation and cycle detection move
-    # to the framework (SessionTemplateKind's miss policy +
+    # Inherits-reference validation and cycle detection live in the
+    # framework (SessionTemplateKind's miss policy +
     # Registry.finalize's cycle pass). The sessions/templates.py
     # resolver also has its own visited-set guard.
     return templates
@@ -1246,7 +1265,7 @@ def _warn_deprecated_resource_sections(
     deprecations: list[str],
 ) -> tuple[str, ...]:
     """ONE aggregated deprecation issue for the TOML resource sections
-    present (Phase 5, aggregated at maintainer direction -- a warning
+    present (aggregated at maintainer direction; a warning
     per section was obnoxious on real configs).
 
     Dual-path is permanent policy short of a future major release: these
@@ -1459,7 +1478,7 @@ def load_config(
         resource_data, deprecations
     )
     secret_config_data = _load_secret_config(data, issues, decls)
-    # Phase 1b: env-block secret references no longer error at config load
+    # Env-block secret references no longer error at config load
     # when they don't match a [secrets.<name>] block; the framework
     # auto-declares them at finalize. Resolution runs through the active
     # backends (``agentworks.secrets.resolve``).

@@ -75,3 +75,16 @@ recreated (skipped if exists), but the shell is updated if the template changed.
 | Step                    | Notes                                                                    |
 | ----------------------- | ------------------------------------------------------------------------ |
 | Dotfiles (local source) | Overwritten, not merged. Side effects from previous installs may linger. |
+
+## Workspace reinit
+
+`workspace reinit` converges the on-VM workspace to the DB and template. It never re-clones the repo
+(the checkout is preserved) and never removes on-VM state.
+
+### Fully idempotent
+
+| Step                         | Notes                                                                                                                                                                                                                   |
+| ---------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Workspace group + membership | Group created if missing; admin and granted agents reconciled against the grants.                                                                                                                                       |
+| Ownership, permissions, ACLs | Canonical chown/chmod/setfacl re-run every time; no-ops on already-correct state.                                                                                                                                       |
+| Git identity                 | Template `git_user_name` / `git_user_email` stamped into the checkout's repo-local config; detection-based, so an already-correct value is left as-is. No-op when no identity is declared or the workspace has no repo. |

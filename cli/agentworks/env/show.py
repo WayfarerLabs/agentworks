@@ -32,9 +32,9 @@ if TYPE_CHECKING:
 
 
 # Source scopes appear in this fixed order in the rendered output (most
-# general to most specific), matching the FRD R2 precedence ladder. The
+# general to most specific), matching the scope precedence ladder. The
 # "identity" scope sits last because per-context identity vars win on
-# collision with user-defined env (FRD R1).
+# collision with user-defined env.
 Scope = Literal["vm", "workspace", "admin", "agent", "session", "identity"]
 
 _SCOPE_ORDER: tuple[Scope, ...] = (

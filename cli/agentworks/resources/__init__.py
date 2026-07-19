@@ -17,8 +17,7 @@ multi-source orchestration.
 from __future__ import annotations
 
 # Importing .kinds populates KIND_REGISTRY at module-load time via each kind
-# module's self-registration. Phase 1a registers SecretKind, AdminTemplateKind,
-# and NamedConsoleTemplateKind; Phase 2 kinds slot in by adding new files
+# module's self-registration. New kinds slot in by adding new files
 # under kinds/ and importing them from kinds/__init__.py.
 from agentworks.resources import kinds  # noqa: F401
 from agentworks.resources.kind import (

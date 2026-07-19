@@ -368,7 +368,7 @@ def add_sessions(
                 entity_name=spec.name,
             )
 
-    # Eager-prompting orchestration (FRD R4 / Phase 6.6 review): when
+    # Eager-prompting orchestration: when
     # any spec carries shells > 0 the live-attach path below will open
     # new shells via _add_session_window. Resolve every referenced
     # secret BEFORE the DB write so a failure leaves no partial state.
@@ -624,7 +624,7 @@ def add_shell(
             entity_name=session_name,
         )
 
-    # Eager-prompting orchestration (FRD R4 / Phase 6): resolve any
+    # Eager-prompting orchestration: resolve any
     # secrets referenced by this pane's env chain BEFORE the DB write +
     # potential pane-split below. No platform instance participates in
     # this command (the live sync is pure Tailscale, no platform ops),
@@ -781,7 +781,7 @@ def restore_session(
             output.info(
                 f"window '{session_name}' is missing; rebuilding from config..."
             )
-            # Eager-prompting orchestration (FRD R4 / Phase 6.6 review):
+            # Eager-prompting orchestration:
             # the window-rebuild path also opens new shells (one per
             # configured shell entry, via _add_session_window ->
             # _split_shell_pane). Resolve every referenced secret BEFORE
@@ -920,7 +920,7 @@ def restore_session(
             )
         session_user = _session_linux_user(db, session, vm)
 
-        # Eager-prompting orchestration (FRD R4 / Phase 6): restore_session
+        # Eager-prompting orchestration: restore_session
         # opens new shells for the missing pane indices. Conditional-need
         # exception to the one-boundary-resolve contract: which panes are
         # missing is only knowable from live tmux state, post-bind.
@@ -1295,13 +1295,13 @@ def _console_build_secret_targets(
     """Build the SecretTarget list for every pane the console build path
     would open from scratch.
 
-    The set covers panes that OPEN NEW SHELLS (per FRD R4):
+    The set covers panes that OPEN NEW SHELLS:
 
     - The admin shell window (when ``console.admin_shell`` is set):
       vm + admin scope.
     - For each session window: every configured shell pane (a session-
       attach pane joins the session's existing tmux server and consumes
-      no new secrets -- skipped here per FRD R4).
+      no new secrets, so it is skipped here).
 
     Same ``use_admin`` promotion as ``_split_shell_pane`` (shell admin
     flag OR session_user == admin_user) so the eager-resolve scope
@@ -1839,7 +1839,7 @@ def _build_console_tmux(
         # is impossible for any session (validate_name rejects leading hyphen,
         # consecutive hyphens, and trailing hyphen), so we don't need extra
         # logic to distinguish this internal window from real session windows.
-        # No sudo wrapper: the SSH user IS the admin user (FRD R1 direct
+        # No sudo wrapper: the SSH user IS the admin user (direct
         # target-user SSH), so a login shell at the pane is the goal directly.
         target.run(
             f"tmux new-session -d -s {q_con} -n {shlex.quote(ADMIN_SHELL_WINDOW)} "
@@ -2029,13 +2029,13 @@ def attach_console(
         exists = _console_tmux_exists(target, name)
         layout = named_console_template(registry).tmux_layout
 
-        # Eager-prompting orchestration (FRD R4 / Phase 6): the
+        # Eager-prompting orchestration: the
         # build path opens new shells (admin shell + helper shell panes
         # per session window). Resolve every referenced secret BEFORE
         # _build_console_tmux issues the first tmux command. The plain
         # attach path (tmux session already exists) opens no new shells
-        # so it skips eager-resolve, matching FRD R4 / R5: "console
-        # attach joins existing shells, consumes no secrets."
+        # so it skips eager-resolve: console attach joins existing
+        # shells and consumes no secrets.
         # Conditional-need exception to the one-boundary-resolve
         # contract: whether a build is needed is only knowable from live
         # tmux state, post-boundary (the gate and its boundary resolve

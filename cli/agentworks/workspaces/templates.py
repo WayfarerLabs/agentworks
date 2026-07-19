@@ -24,6 +24,8 @@ class ResolvedTemplate:
     name: str
     repo: str | None = None
     tmuxinator: bool = True
+    git_user_name: str | None = None
+    git_user_email: str | None = None
     env: dict[str, EnvEntry] = field(default_factory=dict)
 
 
@@ -72,7 +74,7 @@ def _resolve(
     raise ``ConfigError`` instead of ``RecursionError``. The framework's
     cycle pass at build_registry time is the canonical check; this guard
     is the safety net for callers that resolve without going through
-    build_registry (Phase 2a.2).
+    build_registry.
     """
     if name in _visiting:
         path = " -> ".join((*_visiting, name))
@@ -103,6 +105,10 @@ def _merge(target: ResolvedTemplate, source: ResolvedTemplate) -> None:
     if source.repo is not None:
         target.repo = source.repo
     target.tmuxinator = source.tmuxinator
+    if source.git_user_name is not None:
+        target.git_user_name = source.git_user_name
+    if source.git_user_email is not None:
+        target.git_user_email = source.git_user_email
     target.env = {**target.env, **source.env}
 
 
@@ -112,5 +118,9 @@ def _merge_template(target: ResolvedTemplate, tmpl: WorkspaceTemplate) -> None:
         target.repo = tmpl.repo
     if tmpl.tmuxinator is not None:
         target.tmuxinator = tmpl.tmuxinator
+    if tmpl.git_user_name is not None:
+        target.git_user_name = tmpl.git_user_name
+    if tmpl.git_user_email is not None:
+        target.git_user_email = tmpl.git_user_email
     if tmpl.env:
         target.env = {**target.env, **tmpl.env}

@@ -486,7 +486,7 @@ def _check_ssh_key(g: HealthGroup, path: object, label: str) -> None:
 
 
 def _check_secrets(config: Config, registry: Registry) -> HealthGroup:
-    """Check every registry secret per env-and-secrets SDD FRD R6.
+    """Check every registry secret for a runtime-resolvable value.
 
     One row per secret -- operator-declared AND auto-declared alike
     (the auto-declared ones, e.g. ``tailscale-auth-key`` and the

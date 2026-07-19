@@ -58,7 +58,7 @@ class AptPackageEntry:
     description: str
     apt: list[str]
     apt_sources: list[str] = field(default_factory=list)
-    # Phase 2b: catalog entries become first-class Registry citizens.
+    # Catalog entries are first-class Registry citizens.
     # ``origin`` is set by the publisher (``built-in by
     # agentworks.catalog`` for built-in entries); ``references`` is attached
     # by the framework's finalize pass from incoming references.
@@ -333,7 +333,7 @@ def load_catalog(config: Config) -> ResolvedCatalog:
 # ``_validate_references`` retired: the framework validates
 # apt-package -> apt-source edges via ``AptSourceKind``'s ``error`` miss
 # policy at ``Registry.finalize`` time (the reference is emitted by
-# ``AptPackageEntry.referenced_resources()``). Same pattern as Phase 2b.0
+# ``AptPackageEntry.referenced_resources()``). Same pattern as
 # dropping ``validate_selections``: single source of truth for
 # reference validation lives in the framework.
 
@@ -341,7 +341,7 @@ def load_catalog(config: Config) -> ResolvedCatalog:
 def publish_to(registry: Registry, config: Config | None = None) -> None:
     """Publish catalog entries into the registry as first-class Resources.
 
-    Phase 2b: built-in catalog entries become Registry citizens with
+    Built-in catalog entries are Registry citizens with
     ``Origin.built_in(source="agentworks.catalog")``. The four
     catalog kinds (``apt-source``, ``apt-package``,
     ``system-install-command``, ``user-install-command``) use the
@@ -392,7 +392,7 @@ def publish_to(registry: Registry, config: Config | None = None) -> None:
     # stashed at load-time, publish each with operator-declared origin.
     #
     # Line-level ``declared_at`` isn't attached per-entry yet: catalog
-    # loaders don't consume Phase 0's ``_SectionLineMap`` and Config
+    # loaders don't consume ``_SectionLineMap`` and Config
     # stores raw dicts (not typed entries) for these sections. Publishing
     # here uses ``Origin.operator_declared(file=CONFIG_PATH, line=0)`` --
     # the sentinel for "real file, no single declaration line" (see
@@ -425,10 +425,10 @@ def publish_to(registry: Registry, config: Config | None = None) -> None:
         registry.add("user-install-command", user_name, user_cmd, op_origin)
 
 
-# validate_selections removed in Phase 2b.0: the framework's catalog
+# validate_selections removed: the framework's catalog
 # kinds + miss policy validate these references at build_registry time,
-# which every manager-entry function calls before any business logic
-# (per Phase 2a.0's hoist sweep). The function had no remaining
+# which every manager-entry function calls before any business logic.
+# The function had no remaining
 # production callers; tests covering the old contract were also dropped.
 
 
@@ -449,7 +449,7 @@ def publish_to(registry: Registry, config: Config | None = None) -> None:
 # references must resolve to a known name.
 #
 # ``apt-source`` was originally not a framework kind (only operator-facing
-# config referenced by name got promoted in Phase 2b.0). It joined the
+# config referenced by name got promoted at first). It joined the
 # framework later so the ``apt-package -> apt-source`` dependency graph
 # becomes visible on ``agw resource describe apt-source/<name>``'s
 # ``Referenced by:`` section, and so unknown-source errors flow through
@@ -461,7 +461,7 @@ def _synthesize_no_default(kind: str, references: Sequence[ResourceReference]) -
     """Shared synthesize body for the catalog kinds. Unreachable under
     the ``error`` miss policy (Registry.finalize raises ConfigError
     before dispatching to synthesize for error-policy kinds). Honors
-    the Phase 2a empty-references contract by raising the typed
+    the empty-references contract by raising the typed
     framework error so a hypothetical future change that gives a
     catalog kind a reserved default has an obvious landing pad.
     """

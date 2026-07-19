@@ -1,7 +1,5 @@
 """Env model: EnvEntry, scope merge, AGENTWORKS_* identity vars, env composition.
 
-See ``docs/sdd/2026-06-05-env-and-secrets/`` for design.
-
 Pure data with no Typer dependency. Consumers (sessions, consoles, vms,
 agents) assemble effective env via ``compose_env`` and hand the resulting
 ``dict[str, str]`` to the transport layer (``Transport.run(env=...)`` /

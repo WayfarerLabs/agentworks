@@ -54,7 +54,7 @@ class _VmAdminEnvScopes(NamedTuple):
 
     The ``workspace`` field is ``None`` for vm-level commands without a
     workspace pin (``vm shell`` / ``vm exec`` without ``--workspace``).
-    When set, workspace-template env enters the FRD R2 precedence ladder
+    When set, workspace-template env enters the scope precedence ladder
     between vm and admin.
     """
 

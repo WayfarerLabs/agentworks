@@ -114,7 +114,7 @@ class VMTemplate:
         # Catalog references: each name in apt_packages /
         # system_install_commands resolves to a built-in catalog
         # Resource via the framework's miss policy (error on typo,
-        # citing this template's source). Phase 2b.
+        # citing this template's source).
         for pkg in self.apt_packages or []:
             refs.append(
                 _ResourceReq(

@@ -111,7 +111,7 @@ def _build_session_target(
     Returns a ``Transport`` whose SSH user is the session's owning Linux user
     (admin for admin-mode, agent for agent-mode). For agent sessions, builds
     an agent ``Transport`` and probes it; raises StateError with a reinit hint
-    if the agent's authorized_keys aren't provisioned (FRD R1 / Phase 3).
+    if the agent's authorized_keys aren't provisioned.
     For admin sessions, returns the admin target unchanged.
 
     Single-session paths use this to make kill / restart operations
@@ -120,7 +120,7 @@ def _build_session_target(
     the session it will operate on, callers can issue destructive commands
     without sudo. Batch paths intentionally don't use this helper; they
     keep admin's target across all sessions and pass ``sudo=True`` to
-    reach into agent tmux servers (FRD R1 carve-out for batch ops).
+    reach into agent tmux servers (carve-out for batch ops).
     """
     if session.mode == SessionMode.ADMIN.value:
         return admin_target
@@ -785,7 +785,7 @@ def _session_secret_target(
     """Build a SecretTarget for a session, for eager-prompting orchestration.
 
     Constructed from the same template chain that ``_resolve_session_env``
-    would consume; substitution invariance (Phase 6.1) guarantees the
+    would consume; substitution invariance guarantees the
     SecretDecl union is identical pre- vs post-substitution.
     """
     from agentworks.secrets import SecretTarget
@@ -1959,7 +1959,7 @@ def create_session(
                 )
                 # Pick the SSH transport for tmux operations:
                 # - admin sessions: admin's run_command (unchanged)
-                # - agent sessions: agent's run_command (FRD R1, direct
+                # - agent sessions: agent's run_command (direct
                 #   target-user SSH). agent_target was built and probed above
                 #   so a pre-rollout agent never reaches this point. admin's
                 #   ``target`` is still passed for socket-root setup which
@@ -2176,7 +2176,7 @@ def stop_session(
         # Pick the destructive-op transport BEFORE doing anything destructive.
         # For agent sessions this also probes the agent's direct SSH so a
         # pre-rollout agent surfaces as an actionable StateError up front
-        # rather than mid-kill (FRD R1, Phase 3). _build_session_target
+        # rather than mid-kill. _build_session_target
         # always returns a same-uid target, so no sudo is needed for the
         # destructive ops below.
         target = _build_session_target(
@@ -2635,7 +2635,7 @@ def stop_all_sessions(
 
         # Build (session, target, target_owns_session) tuples for _execute_stop.
         # Batch ops keep admin's target across all sessions for efficiency
-        # (FRD R1 carve-out): admin's path into agent tmux servers requires
+        # (carve-out): admin's path into agent tmux servers requires
         # sudo. target_owns_session is True only for admin's own sessions.
         stop_targets: list[tuple[SessionRow, Transport, bool]] = []
         for s in alive_sessions:
@@ -2800,7 +2800,7 @@ def delete_session(
 
         # Pick the destructive-op transport BEFORE prompting the operator.
         # For agent sessions, ``_build_session_target`` probes direct agent
-        # SSH (FRD R1, Phase 3); a pre-rollout agent surfaces here as an
+        # SSH; a pre-rollout agent surfaces here as an
         # actionable error rather than after the operator has already
         # confirmed the delete. The helper returns a same-uid target, so
         # no sudo is needed for the destructive ops below.
@@ -2881,7 +2881,7 @@ def delete_session(
         if member_consoles:
             from agentworks.sessions.multi_console import kill_session_windows
 
-            # Consoles are admin-owned (FRD R1 carve-out): admin manages
+            # Consoles are admin-owned (carve-out): admin manages
             # admin's tmux server. Use admin_target regardless of session mode.
             kill_session_windows(
                 admin_target, pairs=[(c, name) for c in member_consoles]

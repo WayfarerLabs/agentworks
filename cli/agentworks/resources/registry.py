@@ -172,7 +172,7 @@ class Registry:
 
         Steps:
 
-        0. **Always-materialize reserved-default names** (Phase 2a):
+        0. **Always-materialize reserved-default names**:
            Kinds whose ``auto_declare_names`` is a non-None set guarantee
            those names exist in the registry after finalize, regardless
            of whether anything referenced them. Seeded before the
@@ -228,7 +228,7 @@ class Registry:
             raise RuntimeError("registry has already been finalized")
 
         # 0: always-materialize reserved-default names. Seeds the worklist
-        # so unreferenced defaults still land in the registry (FRD R3).
+        # so unreferenced defaults still land in the registry.
         self._materialize_reserved_defaults()
 
         # 1: worklist loop. ``walked`` tracks which Resources have had
@@ -283,7 +283,7 @@ class Registry:
         stay reference-driven.
 
         Origin convention: the kind owns origin assignment for the
-        empty-references path. By contract (FRD R3), kinds with
+        empty-references path. By contract, kinds with
         ``auto_declare_names`` non-None synthesize with
         ``Origin.auto_declared(source=ALWAYS_MATERIALIZE_SOURCE)``
         themselves. The Registry does NOT stamp origin here, distinct
@@ -292,8 +292,7 @@ class Registry:
 
         Called at the start of ``finalize`` before the worklist loop so
         the seeded Resources participate in the reference walk
-        alongside operator-published ones (FRD R3, HLA Publish-and-
-        finalize section).
+        alongside operator-published ones.
         """
         for kind, kind_handler in KIND_REGISTRY.items():
             if kind_handler.auto_declare_names is None:
@@ -410,9 +409,8 @@ class Registry:
 
 def _referenced_resources(resource: Any) -> Sequence[ResourceReference]:
     """Return the Resource's ``referenced_resources()`` or an empty
-    sequence if it doesn't define one. Phase 1a has no producers wired
-    beyond what tests synthesize; Phase 1b adds the method to env-bearing
-    Resources, Phase 1c/d to VMTemplate / GitCredentialConfig.
+    sequence if it doesn't define one. Not every Resource type defines
+    the method, so the ``getattr`` fallback keeps the walk safe.
     """
     method = getattr(resource, "referenced_resources", None)
     if method is None:
@@ -502,10 +500,9 @@ def _detect_cycles(resources: dict[str, dict[str, Any]]) -> None:
     """Detect cycles across the reference graph via iterative DFS
     three-coloring.
 
-    Phase 1 has no producers that introduce cycles (secrets don't
-    reference secrets); the check runs for completeness and is the
-    backbone of Phase 2's template-inheritance validation. Implemented
-    iteratively so deep inheritance chains in Phase 2 don't risk
+    Secrets don't reference secrets, so they can't form cycles; the
+    check exists to guard template-inheritance chains, which can.
+    Implemented iteratively so deep inheritance chains don't risk
     CPython's default recursion limit.
 
     Raises ``ConfigError`` with the cycle path on the first cycle.

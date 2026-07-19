@@ -69,7 +69,7 @@ class Resolver:
         """Register every secret referenced by the targets' env chains.
 
         This is how the runtime env system joins the operation's one
-        resolve pass: each target's merged per-scope env (the FRD R2
+        resolve pass: each target's merged per-scope env (the scope
         precedence ladder) is walked for secret references via
         ``compute_needed_secrets``, and the resulting declarations join
         the set, so a command's site secrets, provisioning secrets,

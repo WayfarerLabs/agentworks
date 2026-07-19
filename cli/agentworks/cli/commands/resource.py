@@ -3,7 +3,7 @@
 Stops at framework-uniform fields (kind, name, origin, usage,
 description). Kind-specific detail (secret backend mappings, template
 inheritance chains, etc.) lives in the per-kind commands
-(``agw secret describe``, ...). See FRD R12 / Phase 2c.
+(``agw secret describe``, ...).
 """
 
 from __future__ import annotations

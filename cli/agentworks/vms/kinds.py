@@ -1,5 +1,5 @@
 """Kind registrations for the vms domain: ``vm-template``,
-``admin-template`` (the admin user is a per-VM concept -- provisioned by
+``admin-template`` (the admin user is a per-VM concept, provisioned by
 ``vms/initializer``, one per VM; its ``instances()`` iterates VMs),
 ``vm-site`` (the declarable "configured place to create VMs"), and
 ``vm-platform`` (the capability kind backing sites).
@@ -128,7 +128,7 @@ class _AdminTemplateKind:
         """Every VM uses the singleton ``admin-template:default`` -- the
         admin template defines the admin user on each VM, and there's one
         admin user per VM. No DB column ties VMs to a non-default admin
-        template yet (Phase 2a.3 plurified the framework but the operator
+        template yet (the framework was plurified but the operator
         surface still publishes only ``default``). When/if a future SDD
         adds ``[admin_templates.<name>]`` parsing plus a ``vm.admin-template``
         column, this method changes to filter by that column the same way

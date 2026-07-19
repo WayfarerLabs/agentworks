@@ -59,8 +59,8 @@ _SYNTHESIZED_PATH = Path("<synthesized>")
 
 def synthesized() -> SourceLocation:
     """Sentinel ``SourceLocation`` for Resources constructed outside the
-    config loader -- direct construction in tests, framework ``synthesize``
-    paths in Phase 1a+, etc. Distinct from the loader's omitted-singleton
+    config loader: direct construction in tests, framework ``synthesize``
+    paths, etc. Distinct from the loader's omitted-singleton
     sentinel: see ``SourceLocation`` docstring for the discriminator rule.
     """
     return SourceLocation(file=_SYNTHESIZED_PATH, line=0)

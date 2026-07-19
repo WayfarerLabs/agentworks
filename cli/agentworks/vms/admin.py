@@ -26,11 +26,11 @@ if TYPE_CHECKING:
 class AdminConfig:
     """Per-user config for the admin user on VMs.
 
-    Phase 2a.3 plurified the underlying ``admin-template`` kind from
+    The underlying ``admin-template`` kind was plurified from
     singleton-conceptual to named-multi-instance: ``AdminConfig`` now
     carries its own ``name`` (default ``"default"``) just like the other
-    template kinds. The operator-facing surface is unchanged in this
-    phase -- the loader only accepts the ``[admin]`` block and produces
+    template kinds. The operator-facing surface is unchanged: the loader
+    only accepts the ``[admin]`` block and produces
     one instance with name ``"default"``. Issue #165 adds
     ``[admin_templates.<name>]`` parsing, the ``--admin-template`` CLI
     flag, and the VM DB column; that work can land without re-touching
@@ -71,7 +71,7 @@ class AdminConfig:
             env_references(self.env, source)
         )
         refs.extend(credential_references(self.git_credentials, source))
-        # Catalog references for user_install_commands (Phase 2b).
+        # Catalog references for user_install_commands.
         for cmd in self.user_install_commands:
             refs.append(
                 _ResourceReq(
