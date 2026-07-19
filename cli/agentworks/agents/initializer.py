@@ -58,8 +58,8 @@ def create_agent_on_vm(
 
     Keeping these two phases disjoint by transport (admin_target vs.
     agent_target) minimizes the code surface that runs as root on the
-    agent's behalf and matches FRD R1's "operations whose target user is
-    the agent open SSH directly as the agent's Linux user."
+    agent's behalf and matches the rule that operations whose target
+    user is the agent open SSH directly as the agent's Linux user.
     """
     from agentworks.sessions.tmux import (
         cleanup_stale_sockets,
@@ -390,7 +390,7 @@ def _run_agent_install_commands(
     profile fragment with the accumulated PATH. Failures warn but do
     not abort.
 
-    Runs entirely over agent SSH (FRD R1). The agent owns its home, so
+    Runs entirely over agent SSH. The agent owns its home, so
     the profile fragment is written via ``agent_target.write_file``
     directly, with no sudo / chown dance.
 
@@ -547,7 +547,7 @@ def _run_agent_mise_setup(
 ) -> None:
     """Set up mise for an agent: shims PATH, config, lockfile, install.
 
-    Runs entirely over agent SSH (FRD R1). Writes the mise config and
+    Runs entirely over agent SSH. Writes the mise config and
     rc files directly via ``agent_target.write_file``; fetches the
     lockfile via ``fetch_file`` over the same agent transport so the
     file lands at its final path owned by the agent with no sudo step.

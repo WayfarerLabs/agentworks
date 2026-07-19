@@ -84,7 +84,7 @@ class GitCredentialConfig:
         from agentworks.resources.reference import SecretReference
 
         source = ("git-credential", self.name)
-        # Phase 2b.1: the ``provider`` field references a known provider
+        # The ``provider`` field references a known provider
         # kind; framework miss policy catches typos.
         refs: list[ResourceReference] = [
             _ResourceReq(

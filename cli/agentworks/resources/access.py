@@ -5,7 +5,7 @@ The Registry's generic surface (``lookup`` / ``iter_kind`` /
 Consumers overwhelmingly want a few concrete shapes; centralizing them
 here keeps kind-string literals in one place and call sites readable.
 
-These accessors are the Phase 1 repoint target: every read that used to
+These accessors centralize resource reads: every read that used to
 be a ``Config`` resource attribute goes through here (or through a
 template resolver that does). ``Config.publish_to`` and
 ``catalog.publish_to`` remain the only direct readers of Config resource

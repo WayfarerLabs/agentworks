@@ -324,7 +324,7 @@ def _grant_server_access(
 ) -> None:
     """Grant tmux server-access to every member of the socket group.
 
-    Called as the agent (the tmux server owner) post FRD R1. No inner
+    Called as the agent (the tmux server owner). No inner
     sudo is needed: the agent runs ``tmux server-access`` against its
     own server.
     """
@@ -368,7 +368,7 @@ def _pane_command(command: str, q_path: str) -> str:
 
     Defensive against a caller pre-prepending ``exec``: this function is the
     sole owner of the exec wrapping, so a leading ``exec`` on the input is
-    stripped before re-applying. (A prior Phase 3 pass had both
+    stripped before re-applying. (A prior version had both
     ``_build_session_command`` and ``_pane_command`` emitting their own
     ``exec``, producing ``cd ... && exec exec <cmd>``; that's harmless at
     runtime but visible in scrollback and confusing.)
@@ -407,7 +407,7 @@ def create_session(
 
     For admin mode, ``run_command`` is admin's SSH connection. ``target`` is
     used for sudo socket-root setup (writing under ``/run/agentworks/``).
-    For agent mode, ``run_command`` is the AGENT's SSH connection (FRD R1),
+    For agent mode, ``run_command`` is the AGENT's SSH connection,
     and ``target`` must be admin's ``Transport`` (for AGENT_SOCKET_ROOT setup).
 
     ``env`` flows to the pane via two channels (belt and suspenders):
@@ -599,7 +599,7 @@ def force_kill_tmux_server(
     ``use_sudo`` defaults True for the admin path (cross-uid kill of an
     agent's tmux pid; admin's NOPASSWD sudo). Pass False when ``target`` is
     the agent's own ``Transport``: the agent can kill its own pid and remove
-    its own socket without sudo. FRD R1's carve-out for admin force-kill
+    its own socket without sudo. The admin force-kill carve-out
     applies to batch operations; single-session agent ops go through agent
     SSH directly (no sudo).
     """

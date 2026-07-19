@@ -2,11 +2,9 @@
 
 A pure-data producer: takes a ResourceContext describing the shell's scope
 and returns the subset of AGENTWORKS_* vars that apply. No I/O, no config
-reads. The on-VM profile fragment writer (vms/initializer.py, Phase 4)
+reads. The on-VM profile fragment writer (vms/initializer.py)
 calls this with the VM-level subset; runtime shell-opens (sessions,
 consoles, exec, agent-shell) call it with the full chain.
-
-See FRD R1 for the full var table and the "Set when" predicates.
 """
 
 from __future__ import annotations
@@ -75,9 +73,8 @@ def vm_stable_identity_env(ctx: ResourceContext) -> dict[str, str]:
     """VM-stable subset, written to ``/etc/profile.d/agentworks-identity.sh``.
 
     The same on every Linux user on the VM and every shell that VM hosts.
-    Phase 4 of the env-and-secrets effort writes these to a system-wide
-    profile fragment so that any shell on the VM (including raw ssh logins)
-    sees them.
+    VM init writes these to a system-wide profile fragment so that any
+    shell on the VM (including raw ssh logins) sees them.
 
     ``AGENTWORKS_PLATFORM`` keeps its name and meaning (the capability
     name it has always carried; the azure value reads ``azure-vm``

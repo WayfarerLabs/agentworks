@@ -96,7 +96,7 @@ class _NamedConsoleTemplateKind:
         the admin template kind: the routine path whenever the operator
         declares no ``[named_console]`` section and no manifest.
 
-        Tolerates ``references=()`` per the Phase 2a contract; uses
+        Tolerates ``references=()`` per the empty-references contract; uses
         the synthetic ``("framework", "always-materialize")`` source
         when called that way.
         """
@@ -108,17 +108,18 @@ class _NamedConsoleTemplateKind:
     ) -> Iterable[InstanceRef]:
         """Every console implicitly uses the singleton
         ``named-console-template:default`` -- there's no per-console
-        template column on the operator surface yet, and Phase 2a.3
-        deferred plurifying ``NamedConsoleConfig`` (no ``name`` field),
+        template column on the operator surface yet, and
+        ``NamedConsoleConfig`` has not been plurified (no ``name`` field),
         so the kind is effectively a singleton today. When operator
         demand for named console templates lands, plurify
-        ``NamedConsoleConfig`` (mirror the Phase 2a.3 admin change) and
+        ``NamedConsoleConfig`` (mirror how ``admin-template`` was
+        plurified) and
         switch this filter to ``resource.name`` + a ``console.template``
         column.
 
         Asymmetry with ``admin-template``: that kind guards with
         ``if resource.name != "default": return`` because ``AdminConfig``
-        has a ``name`` field (Phase 2a.3 plurified it). ``NamedConsoleConfig``
+        has a ``name`` field. ``NamedConsoleConfig``
         doesn't have a ``name`` field yet, and the registry refuses any
         non-``default`` named-console-template name via miss-policy
         dispatch, so the guard isn't reachable today. When the plurified
