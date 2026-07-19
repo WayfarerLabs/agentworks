@@ -9,14 +9,17 @@ Every development effort, large or small, follows the same shape. Hold it in min
 step, not only when you remember to.
 
 - **Size up the work first.** Large or significant efforts (new subsystems, contract or schema
-  changes, wide or hard-to-reverse work) go through the `sdd` skill and are implemented by
-  delegating each step to `agentworks-dev` subagents, so the lead keeps a concise context and holds
-  the overall picture. Small, well-patterned changes skip SDD and are done directly.
+  changes, wide or hard-to-reverse work) go through the `sdd` skill. The lead authors and owns the
+  FRD, HLA, and plan (writing the plan is how the lead pressure-tests the upstream docs); the LLDs
+  and the implementation of each plan step are delegated to `agentworks-dev` subagents, so the lead
+  keeps a concise context and holds the overall picture. Small, well-patterned changes skip SDD and
+  are done directly.
 - **Review every step** with the `agentworks-reviewer` subagent, using a model at least as capable
   as the dev that produced the work. Push back on incorrect findings; otherwise fix anything valid,
   and iterate until everyone is happy.
 - **Commit and push at regular intervals**, and open a non-draft PR when close to merge-ready,
-  triaging Copilot's automated review of new pushes.
+  triaging Copilot's automated review of new pushes. Default to one PR per feature (SDD artifacts
+  included); split only when phases carry independent standalone value.
 - **Escalate the significant** (necessary redesigns, wrong requirements, decisions that are the
   operator's) and otherwise keep pushing while the road is clear.
 

@@ -40,13 +40,26 @@ directory. The plan's checkboxes are the source of truth for what is done. Follo
 phased-review guidance (FRD first, then HLA, then plan/LLDs) so concerns surface while they are
 still cheap.
 
+**The lead authors and owns the plan; do not delegate it.** Writing the plan is how the lead
+pressure-tests the FRD and HLA: cutting the work into honest, always-green phases is what exposes
+where the upstream docs are vague or wrong, and the author is the one positioned to feed those fixes
+straight back upstream. Owning the plan also keeps the picture and the decision-making in one place,
+so a dev who hits a plan problem raises it to the lead, who owns and revises it, rather than to an
+ambiguous drafting author. You MAY delegate code _scouting_ to inform the plan (read these files,
+report the anchors, shapes, and surprises: facts, not phasing), but the phasing and the plan
+document are the lead's. The FRD and HLA are lead-authored for the same reason; the LLDs are not
+(section 3).
+
 The SDD skill runs its pre-implementation artifact review as a **draft PR** by design. That is the
 one sanctioned exception to the non-draft default in section 6.
 
 ## 3. Large efforts: implement through delegation
 
-Implement large efforts by delegating each step to `agentworks-dev` subagents rather than doing the
-depth yourself. The lead (you) stays out of the weeds on purpose:
+Once the plan exists (section 2), implement large efforts by delegating the downstream work to
+`agentworks-dev` subagents rather than doing the depth yourself. Delegatable: the **LLDs** (bounded,
+downstream detail-pins for a single component, which fill in one box of the already-owned plan
+rather than encoding the whole picture) and the **implementation** of each plan step. The lead (you)
+stays out of the weeds on purpose:
 
 - **Keep the lead's context concise.** A lead buried in file-by-file edits loses the thread. Hand
   the implementation of each plan step to a dev subagent, read back its result and its hand-off
@@ -54,9 +67,13 @@ depth yourself. The lead (you) stays out of the weeds on purpose:
 - **Hold the overall picture.** The lead owns sequencing across steps, the cross-cutting invariants
   no single step sees, the plan checkboxes, and the decision of when to escalate (section 8). That
   is the job the delegation frees you to do well.
-- Give each dev subagent a crisp, self-contained task: the plan step or SDD slice it owns, the
-  relevant `file:line` anchors, and the definition of done. Let it build on the code at HEAD, not on
-  your summary of it.
+- Give each dev subagent a crisp, self-contained task: the plan step or LLD it owns, the relevant
+  `file:line` anchors, and the definition of done. Let it build on the code at HEAD, not on your
+  summary of it.
+- **A delegated subagent surfaces decisions to the LEAD, not "to the operator."** The lead is the
+  filter: the dev raises a decision or a plan problem, the lead decides it, and only the genuinely
+  operator-significant ones go up (section 8). Review LLDs closely; like the plan, they can surface
+  an FRD/HLA gap, which the lead feeds upstream.
 
 ## 4. Choose the model deliberately for each delegation
 
@@ -86,11 +103,21 @@ The stance toward any finding, from the reviewer or from automated review (secti
 - Iterate until everyone is happy. Do not move on from a step with a live, unaddressed valid finding
   hanging over it.
 
+Who applies the fixes follows ownership: findings on **code** loop back to the implementing dev
+subagent (it keeps the context and the authorship, and the review-then-revise loop stays intact),
+while findings on a lead-owned artifact (the plan, an LLD the lead is finalizing) are the lead's to
+apply directly.
+
 ## 6. Commit, push, and PR
 
 - **Commit and push at regular intervals.** Do not hoard work in a local branch; frequent, honest
   commits keep the work reviewable and recoverable. Follow the project's Conventional Commits
   convention (`CONTRIBUTING.md`) for message shape.
+- **One PR per feature is the default.** Put the whole feature in a single PR, SDD artifacts
+  included. Split into multiple PRs only when there is a good reason, the usual one being legitimate
+  SDD phases that each carry independent, standalone value. A phase that only has value once a later
+  phase lands is not a reason to split; it is a commit within the one PR. Always-green phased
+  commits give reviewers a natural commit-by-commit reading order inside a single large PR.
 - **Open a PR when the work is close to merge-ready**, not before. A PR signals "this is ready for
   eyes," so open it when that is true.
 - **Non-draft by default.** Avoid draft PRs unless specifically asked for one. The single routine
