@@ -40,10 +40,14 @@ if TYPE_CHECKING:
     # reads a target's `.realized` / `.name`, but capabilities/harness/
     # must not import orchestration/ or sessions/ at runtime (layering
     # rule, FRD R1 / HLA package-layout). A Protocol keeps the type
-    # without the import edge.
+    # without the import edge. The members are READ-ONLY properties: real
+    # agent nodes expose name/realized as @property, and a read-write
+    # protocol attribute would not be satisfied by them (mypy).
     class _Target(Protocol):
-        name: str
-        realized: bool
+        @property
+        def name(self) -> str: ...
+        @property
+        def realized(self) -> bool: ...
 
 
 class Harness(Capability):

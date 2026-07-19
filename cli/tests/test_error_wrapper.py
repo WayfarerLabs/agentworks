@@ -223,11 +223,6 @@ def test_create_session_rolls_back_on_keyboard_interrupt(
     monkeypatch.setattr("agentworks.transports.transport", fake_factory)
     monkeypatch.setattr("agentworks.sessions.manager.transport", fake_factory)
     # deploy_restricted_config does its own SSH writes -- skip them.
-    monkeypatch.setattr(
-        session_manager,
-        "_build_session_command",
-        lambda *args, **kwargs: "true",
-    )
     monkeypatch.setattr(tmux_mod, "deploy_restricted_config", lambda *args, **kwargs: None)
 
     # The inner SSH operation raises KI mid-way through.
@@ -302,9 +297,6 @@ def test_create_session_releases_group_membership_on_keyboard_interrupt(
     # the SimpleNamespace config doesn't need an `operator` attribute.
     agent_factory = lambda vm, config, agent, **kwargs: _Target()  # noqa: E731
     monkeypatch.setattr("agentworks.transports.agent_transport", agent_factory)
-    monkeypatch.setattr(
-        session_manager, "_build_session_command", lambda *args, **kwargs: "true"
-    )
     monkeypatch.setattr(tmux_mod, "deploy_restricted_config", lambda *args, **kwargs: None)
     monkeypatch.setattr(agent_grants, "add_to_workspace_group", lambda *a, **k: None)
 
@@ -378,9 +370,6 @@ def test_create_session_rollback_failure_does_not_mask_keyboard_interrupt(
     fake_factory = lambda vm, config, **kwargs: _Target()  # noqa: E731
     monkeypatch.setattr("agentworks.transports.transport", fake_factory)
     monkeypatch.setattr("agentworks.sessions.manager.transport", fake_factory)
-    monkeypatch.setattr(
-        session_manager, "_build_session_command", lambda *args, **kwargs: "true"
-    )
     monkeypatch.setattr(tmux_mod, "deploy_restricted_config", lambda *args, **kwargs: None)
 
     def _explode(*args: object, **kwargs: object) -> tuple[None, None]:

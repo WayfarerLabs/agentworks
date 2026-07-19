@@ -37,8 +37,8 @@ def test_pane_command_wraps_in_login_interactive_shell() -> None:
 
 
 def test_pane_command_owns_exec_no_double_wrap() -> None:
-    """Regression: a previous Phase 3 pass had ``_build_session_command``
-    prepend ``exec`` and ``_pane_command`` prepend it again, producing
+    """Regression: a previous pass had the command source prepend
+    ``exec`` and ``_pane_command`` prepend it again, producing
     ``cd ... && exec exec claude``. The exec wrapping is owned by
     ``_pane_command`` only; if the caller hands us a command that already
     starts with ``exec``, we must NOT double it."""

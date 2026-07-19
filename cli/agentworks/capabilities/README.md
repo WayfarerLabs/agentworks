@@ -83,12 +83,14 @@ adds is described by the orchestration layer's two contracts (`orchestration/nod
   instances' declared secrets fold into the node's `secret_refs`.
 
 So EVERY consuming-resource node grows a composing `preflight`, trivially in the thin case: the
-`git-credential` and `vm-site` nodes (`vms/nodes.py`) are the references. (This REVERSES an earlier
-edition of this doc, which said not to grow a preflight on a consuming resource and to call the
-instance's directly; that guidance predated the node model, where the orchestrator drives nodes and
-only nodes, so the composing wrapper is now exactly where readiness belongs.) The shared verbs are
-deliberate: the readiness semantics are identical, and walked-vs-composed lives in the TYPE (the
-presence of `key` / `deps`), not in a renamed verb.
+`git-credential` and `vm-site` nodes (`vms/nodes.py`) are the references, and the session node
+(`sessions/nodes.py`) is the rich one, holding a private `harness` instance whose readiness its
+`preflight` / `runup` fan into and whose declared secrets fold into its `secret_refs`. (This
+REVERSES an earlier edition of this doc, which said not to grow a preflight on a consuming resource
+and to call the instance's directly; that guidance predated the node model, where the orchestrator
+drives nodes and only nodes, so the composing wrapper is now exactly where readiness belongs.) The
+shared verbs are deliberate: the readiness semantics are identical, and walked-vs-composed lives in
+the TYPE (the presence of `key` / `deps`), not in a renamed verb.
 
 Keep the instance a distinct object even in the thin case. It is tempting to collapse a one-to-one
 consuming resource and instance into a single class; resisting that is what lets thin and rich cases

@@ -178,22 +178,6 @@ def test_missing_command_is_a_typed_error(db: Database) -> None:
     assert "--template" in (exc.value.hint or "")
 
 
-def test_absent_target_is_a_loud_error(db: Database) -> None:
-    """Anti-silent-skip: in scope with no target is a selection bug."""
-    from agentworks.sessions.nodes import RequiredCommandsCheck
-
-    check = RequiredCommandsCheck(
-        session_name="s1",
-        template_name="claude",
-        required_commands=("claude",),
-        target=None,
-        admin=False,
-        vm_name="box",
-    )
-    with pytest.raises(StateError, match="refusing to skip"):
-        check.preflight(_ctx())
-
-
 def test_admin_mode_probes_the_admin_target(db: Database) -> None:
     session = _session(db, agent=None, admin=True)
     probe = _Probe()

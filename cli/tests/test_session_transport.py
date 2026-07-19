@@ -174,9 +174,6 @@ def test_create_session_uses_agent_target_for_tmux(
     monkeypatch.setattr(
         "agentworks.agents.grants.add_to_workspace_group", lambda *a, **k: None
     )
-    monkeypatch.setattr(
-        session_manager, "_build_session_command", lambda *a, **k: "true"
-    )
     monkeypatch.setattr(tmux_mod, "deploy_restricted_config", lambda *args, **kwargs: None)
     # _regenerate_tmuxinator fires after create_tmux_session returns; it
     # scps a YAML file which doesn't help this test's transport assertion.
@@ -492,8 +489,6 @@ def test_restart_migrates_legacy_session_to_per_session_socket(
     monkeypatch.setattr(session_manager, "_resolve_session_linux_user", lambda *_a, **_kw: "admin")
     # Restricted-config deploy fires before create; no-op for this test.
     monkeypatch.setattr(tmux_mod, "deploy_restricted_config", lambda *_a, **_kw: None)
-    # The session command is computed from the template; stub returns a literal.
-    monkeypatch.setattr(session_manager, "_build_session_command", lambda *_a, **_kw: "true")
 
     # ``force_kill_tmux_server`` must NOT be called on the legacy path --
     # SIGKILLing the default server's PID would take every other session

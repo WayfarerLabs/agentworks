@@ -36,10 +36,15 @@ if TYPE_CHECKING:
     # reads a target's ``.realized`` / ``.name``, but capabilities/harness/
     # must not import orchestration/ or sessions/ at runtime (layering
     # rule, FRD R1 / HLA package layout). A Protocol keeps the type
-    # without the import edge.
+    # without the import edge. The members are read-only properties (the
+    # harness only READS them): the real agent nodes expose ``name`` /
+    # ``realized`` as read-only ``@property``, which a read-write
+    # attribute Protocol would not structurally satisfy.
     class _Target(Protocol):
-        name: str
-        realized: bool
+        @property
+        def name(self) -> str: ...
+        @property
+        def realized(self) -> bool: ...
 
 
 def require_commands(
@@ -112,12 +117,10 @@ def require_commands(
 class Harness(Capability):
     """Capability: configures, runs, and manages one session's workload.
 
-    A harness owns everything the interim ``RequiredCommandsCheck``
-    stand-in owned (``sessions/nodes.py``): the launch-target readiness
-    fork and the required-commands probe are the harness's own by
-    design. It ADDS the op surface (:meth:`start` / :meth:`restart`, the
-    pane command string) that the interim path built imperatively in
-    ``_build_session_command``.
+    A harness owns the launch-target readiness fork and the
+    required-commands probe, and it ADDS the op surface (:meth:`start` /
+    :meth:`restart`, the pane command string) the session's service layer
+    consumes to build the tmux pane.
 
     Subclasses (``ShellHarness``, ``ClaudeCodeHarness``) implement the
     two ops and :meth:`_probe_target` (their own required-command set);
@@ -145,7 +148,22 @@ class Harness(Capability):
         self._workspace_name = workspace_name
         self._target = target
         self._admin = admin
-        self._probed = False  # single-fire guard (relocated from the interim)
+        self._probed = False  # single-fire guard: the probe runs once per operation
+
+    def secret_refs(self) -> tuple[str, ...]:
+        """The secret names this harness declares (the secret-kind
+        references :meth:`validate_config` returned, bound at construct
+        into ``self._secret_refs``), for the holding session node to fold
+        into its own ``secret_refs`` union.
+
+        Mirrors how :class:`GitCredentialProvider` exposes ``secret_name``
+        to its holder, so the node consumes a public accessor rather than
+        reaching into the base ``Capability._secret_refs`` private field.
+        Empty for both built-ins (``shell`` / ``claude-code`` declare no
+        secrets); the plumbing is here for a future secret-declaring
+        harness.
+        """
+        return tuple(ref.name for ref in self._secret_refs)
 
     @classmethod
     def merge_config(
@@ -198,10 +216,9 @@ class Harness(Capability):
     def _run_readiness(
         self, ctx: RunContext, *, stage: Literal["preflight", "runup"]
     ) -> None:
-        """The skip/defer/probe/error readiness fork, relocated from the
-        interim ``RequiredCommandsCheck._check`` unchanged (including the
-        fifth ``scope is None`` loud branch), with the SESSION-level
-        identity guard added ahead of the single-fire short-circuit."""
+        """The skip/defer/probe/error readiness fork (including the fifth
+        ``scope is None`` loud branch), with the SESSION-level identity
+        guard added ahead of the single-fire short-circuit."""
         scope = ctx.operation_scope
         if scope is None:
             # A scope-less context reaching node readiness is an

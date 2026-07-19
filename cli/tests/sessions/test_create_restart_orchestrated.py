@@ -8,7 +8,7 @@ model: the parity carries the node layer could not prove on its own.
   right after its realization, through the real command;
 - the session's partial-state teardown runs before the ephemeral
   unwind, reproducing the imperative rollback order end to end;
-- the SESSION operation scope reaches the check's readiness.
+- the SESSION operation scope reaches the held harness's readiness.
 
 Same fake surfaces as the imperative oracle tests: SimpleNamespace
 config, stubbed registry/gates/transports; the service-layer functions
@@ -161,9 +161,6 @@ def _restart_fixture(
         tmux_mod, "deploy_restricted_config", lambda *a, **k: None
     )
     monkeypatch.setattr(
-        session_manager, "_build_session_command", lambda *a, **k: "true"
-    )
-    monkeypatch.setattr(
         tmux_mod,
         "create_session",
         lambda *a, **k: events.append("tmux_create") or ("/tmp/s1.sock", 4243),
@@ -237,9 +234,6 @@ def _create_stubs(
         "agentworks.agents.grants.add_to_workspace_group", lambda *a, **k: None
     )
     monkeypatch.setattr(tmux_mod, "deploy_restricted_config", lambda *a, **k: None)
-    monkeypatch.setattr(
-        session_manager, "_build_session_command", lambda *a, **k: "true"
-    )
     monkeypatch.setattr(
         tmux_mod,
         "create_session",
@@ -399,28 +393,28 @@ def test_create_failure_cleans_session_slice_then_unwinds_ephemerals(
     db.close()
 
 
-# -- the operation scope reaches the check -----------------------------------
+# -- the operation scope reaches the harness ---------------------------------
 
 
-def test_session_scope_reaches_the_required_commands_check(
+def test_session_scope_reaches_the_harness(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     from agentworks.capabilities.base import RunContext, ScopeLevel
+    from agentworks.capabilities.harness.base import Harness
     from agentworks.sessions.manager import create_session
-    from agentworks.sessions.nodes import RequiredCommandsCheck
 
     events: list[str] = []
     db = _create_stubs(tmp_path, monkeypatch, events)
     db.insert_agent("a1", "vm1", "agt-a1")
 
     scopes: list[object] = []
-    real_preflight = RequiredCommandsCheck.preflight
+    real_preflight = Harness.preflight
 
-    def _recording(self: RequiredCommandsCheck, ctx: RunContext) -> None:
+    def _recording(self: Harness, ctx: RunContext) -> None:
         scopes.append(ctx.operation_scope)
         real_preflight(self, ctx)
 
-    monkeypatch.setattr(RequiredCommandsCheck, "preflight", _recording)
+    monkeypatch.setattr(Harness, "preflight", _recording)
 
     create_session(
         db,
@@ -436,6 +430,95 @@ def test_session_scope_reaches_the_required_commands_check(
     assert scope.session == "s1"  # type: ignore[attr-defined]
     assert scope.agent == "a1" and scope.admin is False  # type: ignore[attr-defined]
     assert scope.vm == "vm1" and scope.workspace == "ws1"  # type: ignore[attr-defined]
+    db.close()
+
+
+# -- pane-command parity: the harness op string + relocated substitution -----
+#
+# The command reaching tmux is the harness's start/restart output with the
+# {{session_name}} / {{workspace_name}} substitution applied at the CALL
+# SITE (lifted out of the deleted _build_session_command). These pin that
+# every template produces the same pane command it did before the swap.
+
+
+def _template(monkeypatch: pytest.MonkeyPatch, **fields: object) -> None:
+    from agentworks.sessions import manager as session_manager
+
+    base = {
+        "name": "claude",
+        "command": "",
+        "restart_command": None,
+        "required_commands": [],
+        "env": {},
+    }
+    base.update(fields)
+    monkeypatch.setattr(
+        session_manager, "_resolve_template", lambda *a, **k: SimpleNamespace(**base)
+    )
+
+
+def _capture_pane_command(
+    monkeypatch: pytest.MonkeyPatch, captured: dict[str, str]
+) -> None:
+    from agentworks.sessions import tmux as tmux_mod
+
+    def _capture(
+        name: str, ws_path: str, command: str, linux_user: str, **kwargs: object
+    ) -> tuple[str, int]:
+        captured["command"] = command
+        return ("/tmp/s1.sock", 4243)
+
+    monkeypatch.setattr(tmux_mod, "create_session", _capture)
+
+
+def test_create_pane_command_is_the_harness_output_substituted(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """create: the pane command is the shell harness's start() output
+    (the template's ``command``) with BOTH template vars substituted at
+    the call site."""
+    from agentworks.sessions.manager import create_session
+
+    events: list[str] = []
+    db = _create_stubs(tmp_path, monkeypatch, events)
+    db.insert_agent("a1", "vm1", "agt-a1")
+    _template(monkeypatch, command="claude {{session_name}} in {{workspace_name}}")
+    captured: dict[str, str] = {}
+    _capture_pane_command(monkeypatch, captured)
+
+    create_session(
+        db,
+        SimpleNamespace(session=SimpleNamespace(history_limit=1)),  # type: ignore[arg-type]
+        name="s1",
+        workspace="ws1",
+        agent="a1",
+    )
+
+    assert captured["command"] == "claude s1 in ws1"
+    db.close()
+
+
+def test_restart_pane_command_uses_restart_command_and_session_workspace(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """restart: the pane command is the harness's restart() output (the
+    template's ``restart_command``, preferred over ``command``) with
+    ``workspace_name`` sourced from the SESSION ROW, matching the interim
+    path's restart substitution."""
+    from agentworks.sessions.manager import restart_session
+
+    db, _events = _restart_fixture(tmp_path, monkeypatch)
+    _template(
+        monkeypatch,
+        command="claude",
+        restart_command="resume {{session_name}} {{workspace_name}}",
+    )
+    captured: dict[str, str] = {}
+    _capture_pane_command(monkeypatch, captured)
+
+    restart_session(db, SimpleNamespace(session=SimpleNamespace(history_limit=1)), name="s1", yes=True)  # type: ignore[arg-type]
+
+    assert captured["command"] == "resume s1 ws1"
     db.close()
 
 

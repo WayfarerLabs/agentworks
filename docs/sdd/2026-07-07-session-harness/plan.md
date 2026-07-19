@@ -165,7 +165,7 @@ The finish-line phase for `RequiredCommandsCheck` and `_build_session_command`. 
 as `shell` from the resolved flat fields (the surface has not changed yet); everything the interim
 path did moves onto the harness in one slice.
 
-- [ ] **Factory construction** in `sessions/nodes.py`: `pending_session_node` (`390-397`) and
+- [x] **Factory construction** in `sessions/nodes.py`: `pending_session_node` (`390-397`) and
       `live_session_node` (`437-444`) construct `harness_for("shell")(...)` and hand it to the node,
       replacing the `RequiredCommandsCheck`. Positional args are the template name and a `shell`
       blob built from `template.command` / `restart_command` / `required_commands`; keyword args are
@@ -174,7 +174,7 @@ path did moves onto the harness in one slice.
       `target`) carries over unchanged. **Seam:** the flat-blob adapter is temporary (retired P4).
       **Done when:** both factories build a `Harness`, the node holds it, and the one-object
       invariant is preserved (asserted by the existing node-identity test).
-- [ ] **Node reshape** in `sessions/nodes.py`: `LiveSessionNode` / `PendingSessionNode` hold
+- [x] **Node reshape** in `sessions/nodes.py`: `LiveSessionNode` / `PendingSessionNode` hold
       `_harness` instead of `_check`; `preflight`/`runup` delegate to `self._harness`;
       `secret_refs()` folds in the harness's declared secrets (none for built-ins; plumbing
       present). `deps()`, `mark_realized()`, `teardown()`, `key` unchanged. This phase ADDS a public
@@ -183,7 +183,7 @@ path did moves onto the harness in one slice.
       than the node reaching into the base `Capability._secret_refs` private field (P1 review,
       forward catch). **Done when:** delegation compiles, the harness exposes the public accessor,
       and the readiness-fork tests (below) pass against the harness.
-- [ ] **Op call sites** in `sessions/manager.py`: replace `_build_session_command` at `1932` with
+- [x] **Op call sites** in `sessions/manager.py`: replace `_build_session_command` at `1932` with
       `harness.start(ctx)` and at `2483` with `harness.restart(ctx)`, where `ctx` is an op-start
       `RunContext` assembled at the call site carrying the execution targets and scoped secrets. The
       two sites take DIFFERENT anchors: create mirrors the runup ctx at `1873-1880`; restart has no
@@ -196,7 +196,7 @@ path did moves onto the harness in one slice.
       (`_substitute_template_vars`) to the harness's RETURNED string (substitution lifts OUT of the
       former `_build_session_command`). **Done when:** create and restart build the same pane string
       as today for every existing template, and the op ctx exposes `agent_target`/`admin_target`.
-- [ ] **Retire the interim code.** Delete `RequiredCommandsCheck` (`nodes.py:50-200`) and
+- [x] **Retire the interim code.** Delete `RequiredCommandsCheck` (`nodes.py:50-200`) and
       `_build_session_command` (`manager.py:872-897`); the `require_commands` helper in
       `harness/base.py` is now the sole probe copy (seam retired). Land the SESSION-level identity
       guard on the harness's readiness (compare `scope.session/vm/workspace` + agent-or-admin to the
@@ -205,7 +205,7 @@ path did moves onto the harness in one slice.
       harness (or removed) in this same slice so the phase stays green. **Done when:** neither
       symbol exists, `grep` finds no other reader (code or test), and the guard raises on a
       deliberately mis-wired scope in test.
-- [ ] **Docs riding this phase:** `capabilities/README.md` gains the harness as the worked example
+- [x] **Docs riding this phase:** `capabilities/README.md` gains the harness as the worked example
       of a capability HELD by a rich consuming node (this claim becomes true here). The ADR draft
       `adr-session-harness.md` is created in-feature now (unnumbered) covering the model
       formulation, the inline reference+blob shape, and pair-inheritance; kept current through P4.

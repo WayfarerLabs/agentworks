@@ -368,10 +368,10 @@ def _pane_command(command: str, q_path: str) -> str:
 
     Defensive against a caller pre-prepending ``exec``: this function is the
     sole owner of the exec wrapping, so a leading ``exec`` on the input is
-    stripped before re-applying. (A prior version had both
-    ``_build_session_command`` and ``_pane_command`` emitting their own
-    ``exec``, producing ``cd ... && exec exec <cmd>``; that's harmless at
-    runtime but visible in scrollback and confusing.)
+    stripped before re-applying. (A prior version had the command source
+    and ``_pane_command`` both emitting their own ``exec``, producing
+    ``cd ... && exec exec <cmd>``; that's harmless at runtime but visible
+    in scrollback and confusing.)
 
     Env injection is NOT part of this string. Env reaches the pane via
     ``tmux new-session -e KEY=VAL`` (which seeds the session-environment
