@@ -11,5 +11,10 @@
 #  inherits: [default]
 #  repo: https://github.com/org/myproject.git
 #  tmuxinator: true
+#  # Optional git identity stamped into the cloned repo (repo-local config,
+#  # so it applies to any agent, the admin, or a human over VS Code Remote).
+#  # Only takes effect when `repo` is set.
+#  git_user_name: Ada Lovelace
+#  git_user_email: ada@example.com
 #  env:
 #    REPO_REGION: us-east-1

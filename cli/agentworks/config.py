@@ -862,6 +862,16 @@ def _load_catalog_sections(
     )
 
 
+_WORKSPACE_TEMPLATE_KEYS = {
+    "inherits",
+    "repo",
+    "tmuxinator",
+    "git_user_name",
+    "git_user_email",
+    "env",
+}
+
+
 def _load_workspace_templates(
     data: dict[str, object],
     issues: list[str],
@@ -875,6 +885,9 @@ def _load_workspace_templates(
     for name, tdata in raw.items():
         if not isinstance(tdata, dict):
             raise ConfigError(f"workspace_templates.{name} must be a table")
+        _warn_unexpected_keys(
+            tdata, _WORKSPACE_TEMPLATE_KEYS, f"workspace_templates.{name}", issues
+        )
         repo = str(tdata["repo"]) if "repo" in tdata else None
         # Embedded-username advice moved to a provider-owned preflight
         # (git_credentials.remote_advisories, run when a template is
@@ -885,6 +898,12 @@ def _load_workspace_templates(
             inherits=list(tdata.get("inherits", [])),
             repo=repo,
             tmuxinator=bool(tdata["tmuxinator"]) if "tmuxinator" in tdata else None,
+            git_user_name=(
+                str(tdata["git_user_name"]) if "git_user_name" in tdata else None
+            ),
+            git_user_email=(
+                str(tdata["git_user_email"]) if "git_user_email" in tdata else None
+            ),
             env=_parse_env_table(
                 tdata.get("env"),
                 context=f"workspace_templates.{name}",

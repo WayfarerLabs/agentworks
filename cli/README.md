@@ -611,7 +611,8 @@ Resource kinds (YAML manifests; the deprecated TOML section is noted for each):
 - `agent-template` (`[agent_templates.*]`) -- agent user shell, dotfiles, git credentials, user
   install commands, mise
 - `session-template` (`[session_templates.*]`) -- session commands with variable substitution
-- `workspace-template` (`[workspace_templates.*]`) -- workspace templates with inheritance
+- `workspace-template` (`[workspace_templates.*]`): workspace repo, tmuxinator, optional git
+  identity (`git_user_name` / `git_user_email`, stamped into the cloned repo), inheritance
 - `named-console-template` (`[named_console]`) -- named-console layout (tmux preset names +
   `aw-session-vertical`)
 - `git-credential` (`[git_credentials.*]`) -- git credentials; `spec.provider` selects github or
