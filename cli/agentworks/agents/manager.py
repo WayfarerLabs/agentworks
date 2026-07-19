@@ -456,6 +456,24 @@ def delete_agent(
         # this unwind, so we compose no second boundary and resolve
         # nothing; we re-enter only the keepalive hold, reaching the
         # platform through the node's own site edge.
+        #
+        # That hold keeps the NODE's VM active, but the delete body
+        # issues its SSH + DB work against the agent's own VM (``vm``,
+        # the agent row's ``vm_name``). Enforce that they are the same
+        # VM: a mismatched node would silently hold one VM active while
+        # operating on another. Unreachable today (the pending nodes
+        # always pass their own ``self._vm``), so this is a loud guard
+        # on a teardown-wiring bug, not a runtime branch we expect to
+        # take.
+        if vm_node.row.name != vm.name:
+            raise StateError(
+                f"nested teardown of agent '{name}' was handed a VM "
+                f"node for '{vm_node.row.name}', but the agent is on "
+                f"'{vm.name}'; the node handed to a teardown must be the "
+                f"entity's own VM node (teardown-wiring bug).",
+                entity_kind="agent",
+                entity_name=name,
+            )
         boundary = vm_node.hold_active()
     with boundary:
 

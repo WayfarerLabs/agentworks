@@ -94,13 +94,16 @@ def _no_gate(monkeypatch: pytest.MonkeyPatch) -> None:
     _reachable(monkeypatch, False)
 
 
-def _node_holding(db: Database, config: object, platform: object):  # noqa: ANN202
-    """A live VM node for 'box' whose site holds the given platform: the
-    shape a nested teardown hands ``delete_agent`` (it re-enters the
-    hold through ``vm_node.site.platform``)."""
+def _node_holding(
+    db: Database, config: object, platform: object, *, vm_name: str = "box"
+):  # noqa: ANN202
+    """A live VM node for ``vm_name`` (default 'box') whose site holds
+    the given platform: the shape a nested teardown hands
+    ``delete_agent`` (it re-enters the hold through
+    ``vm_node.site.platform``)."""
     from agentworks.vms.nodes import LiveVMNode, VMSiteNode
 
-    row = db.get_vm("box")
+    row = db.get_vm(vm_name)
     assert row is not None
     site = VMSiteNode("proxmox", platform, (), object())  # type: ignore[arg-type]
     return LiveVMNode(db, config, object(), row, site)  # type: ignore[arg-type]
@@ -528,6 +531,41 @@ def test_delete_nested_platform_path_reuses_the_callers_composition(
     assert bound.holds == 1  # the hold was re-entered, nothing else
     assert db.get_agent("a1") is None
     assert any("userdel -r agt-a1" in c for c in target.commands)
+
+
+def test_delete_nested_rejects_a_mismatched_vm_node(
+    db: Database,
+    make_config,  # noqa: ANN001
+    resolve_counter: list[list[str]],
+    synced: list[object],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Enforce-invariants pin: a teardown must hand ``delete_agent`` the
+    agent's OWN vm node. A node for a different VM would hold that VM
+    active while the delete body issues SSH + DB work against the agent's
+    real VM, a silent footgun; the guard raises a typed ``StateError``
+    before the hold is ever entered."""
+    config = make_config()
+    _seed(db)  # a1 on 'box'
+    # A live node for a DIFFERENT VM than a1's ('box').
+    db.insert_vm("other", site="proxmox", hostname="other")
+    db.update_vm_tailscale("other", "100.64.0.10")
+    _no_gate(monkeypatch)  # nothing may probe status or hold the VM
+    vm_node = _node_holding(db, config, object(), vm_name="other")
+
+    with pytest.raises(StateError, match="teardown-wiring bug"):
+        agent_manager.delete_agent(
+            db,
+            config,
+            name="a1",
+            force=True,
+            yes=True,
+            vm_node=vm_node,
+        )
+
+    assert resolve_counter == []  # refused before any resolve
+    assert db.get_agent("a1") is not None  # nothing was deleted
+    assert synced == []  # the SSH-config refresh never ran
 
 
 # -- grant / revoke choreography ----------------------------------------------

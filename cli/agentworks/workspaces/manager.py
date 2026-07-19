@@ -850,6 +850,25 @@ def delete_workspace(
                 # boundary and resolve nothing; we re-enter only the
                 # keepalive hold, reaching the platform through the
                 # node's own site edge.
+                #
+                # That hold keeps the NODE's VM active, but the delete
+                # body issues its SSH + DB work against the workspace's
+                # own VM (``ws.vm_name``). Enforce that they are the same
+                # VM: a mismatched node would silently hold one VM active
+                # while operating on another. Unreachable today (the
+                # pending nodes always pass their own ``self._vm``), so
+                # this is a loud guard on a teardown-wiring bug, not a
+                # runtime branch we expect to take.
+                if vm_node.row.name != ws.vm_name:
+                    raise StateError(
+                        f"nested teardown of workspace '{name}' was "
+                        f"handed a VM node for '{vm_node.row.name}', but "
+                        f"the workspace is on '{ws.vm_name}'; the node "
+                        f"handed to a teardown must be the entity's own "
+                        f"VM node (teardown-wiring bug).",
+                        entity_kind="workspace",
+                        entity_name=name,
+                    )
                 _keepalive_stack.enter_context(vm_node.hold_active())
 
         if vm is not None and vm.tailscale_host is not None:
