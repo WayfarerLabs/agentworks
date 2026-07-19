@@ -190,6 +190,28 @@ def test_descriptor_kind_rejected(tmp_path: Path) -> None:
 
 
 def test_singleton_kind_rejects_non_default_name(tmp_path: Path) -> None:
+    # named-console-template has no selector yet (its half of issue #165
+    # ships separately), so a non-default name is still dead config.
+    root = tmp_path / "resources"
+    _write(
+        root,
+        "a.yaml",
+        """
+        apiVersion: agentworks/v1
+        kind: named-console-template
+        metadata:
+          name: custom
+        spec: {}
+        """,
+    )
+    with pytest.raises(ConfigError, match='accepts only metadata.name "default"'):
+        load_manifests(root)
+
+
+def test_named_admin_template_is_accepted(tmp_path: Path) -> None:
+    # admin-template graduated out of the no-selector set: `vm create
+    # --admin-template` now selects a named admin-template, so a
+    # non-default declaration is live config, not rejected.
     root = tmp_path / "resources"
     _write(
         root,
@@ -198,12 +220,14 @@ def test_singleton_kind_rejects_non_default_name(tmp_path: Path) -> None:
         apiVersion: agentworks/v1
         kind: admin-template
         metadata:
-          name: custom
+          name: work
         spec: {}
         """,
     )
-    with pytest.raises(ConfigError, match='accepts only metadata.name "default"'):
-        load_manifests(root)
+    manifests = load_manifests(root)
+    assert [(e.kind, e.name) for e in manifests.entries] == [
+        ("admin-template", "work")
+    ]
 
 
 def test_unknown_metadata_key_rejected(tmp_path: Path) -> None:

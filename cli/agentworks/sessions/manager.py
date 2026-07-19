@@ -680,7 +680,7 @@ def _resolve_session_env_scopes(
     admin_env: dict[str, EnvEntry] | None
     agent_env: dict[str, EnvEntry] | None
     if mode == SessionMode.ADMIN:
-        admin_env = _admin_template(registry).env
+        admin_env = _admin_template(registry, vm.admin_template or "default").env
         agent_env = None
     else:
         assert agent_name is not None  # caller enforces; agent mode requires an agent
@@ -751,7 +751,7 @@ def _session_secret_target_pre_create(
     agent_env: dict[str, EnvEntry] | None = None
     admin_scope: dict[str, EnvEntry] | None = None
     if is_admin_mode:
-        admin_scope = _admin_template(registry).env
+        admin_scope = _admin_template(registry, vm.admin_template or "default").env
     elif new_agent:
         agent_env = _resolve_agent_tmpl(registry, agent_template).env
     elif existing_agent is not None:

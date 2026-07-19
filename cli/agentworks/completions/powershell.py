@@ -59,6 +59,11 @@ DYNAMIC_SNIPPETS: dict[str, str] = {
         " | ForEach-Object { ($_ -split '/', 2)[1] }"
         ' | Where-Object { $_ -like "$wordToComplete*" })'
     ),
+    "admin_templates": (
+        "(agw resource list --kind admin-template --names-only 2>$null"
+        " | ForEach-Object { ($_ -split '/', 2)[1] }"
+        ' | Where-Object { $_ -like "$wordToComplete*" })'
+    ),
     "secrets": (
         "(agw secret list --names-only 2>$null |"
         ' Where-Object { $_ -like "$wordToComplete*" })'

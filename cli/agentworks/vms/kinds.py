@@ -125,20 +125,16 @@ class _AdminTemplateKind:
     def instances(
         self, db: Database, registry: Registry, resource: Any
     ) -> Iterable[InstanceRef]:
-        """Every VM uses the singleton ``admin-template:default`` -- the
-        admin template defines the admin user on each VM, and there's one
-        admin user per VM. No DB column ties VMs to a non-default admin
-        template yet (the framework was plurified but the operator
-        surface still publishes only ``default``). When/if a future SDD
-        adds ``[admin_templates.<name>]`` parsing plus a ``vm.admin-template``
-        column, this method changes to filter by that column the same way
-        the other template kinds do.
+        """The VMs provisioned from this admin-template. Each VM records
+        its selected admin-template in the ``vms.admin_template`` column
+        (NULL = the reserved ``default``); the admin template defines the
+        admin user on each VM, and there's one admin user per VM. Filter
+        every VM by that column the same way the other template kinds do.
         """
         name = resource.name
-        if name != "default":
-            return
         for vm in db.list_vms():
-            yield InstanceRef(instance_kind="vm", instance_name=vm.name)
+            if (vm.admin_template or "default") == name:
+                yield InstanceRef(instance_kind="vm", instance_name=vm.name)
 
 
 KIND_REGISTRY["admin-template"] = _AdminTemplateKind()

@@ -22,14 +22,16 @@ API_VERSION = "agentworks/v1"
 _ENVELOPE_KEYS = {"apiVersion", "kind", "metadata", "spec"}
 _METADATA_KEYS = {"name", "description"}
 
-# Kinds with no instance selector yet. Both are framework-plurified
-# (named multi-instance) -- only the legacy TOML shape is inherently a
-# singleton -- but no command can SELECT a non-default instance today
-# (no `vm create --admin-template`, no `console create --template`), so
-# a named declaration would be dead config; reject it loudly instead of
-# letting it sit inert. Each kind leaves this set when its selector
-# ships (issue #165).
-_NO_SELECTOR_KINDS = {"admin-template", "named-console-template"}
+# Kinds with no instance selector yet. named-console-template is
+# framework-plurified (named multi-instance) at the envelope layer, but
+# no command can SELECT a non-default instance today (no `console create
+# --template`, and NamedConsoleConfig still needs plurification), so a
+# named declaration would be dead config; reject it loudly instead of
+# letting it sit inert. It leaves this set when its selector ships (the
+# named-console-template half of issue #165, a separate follow-up).
+# admin-template graduated out: `vm create --admin-template` now selects
+# a named admin-template per VM.
+_NO_SELECTOR_KINDS = {"named-console-template"}
 
 
 @dataclass(frozen=True)

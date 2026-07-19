@@ -91,6 +91,7 @@ class CommandSpec:
 #   "agents"          -> agw agent list --names-only
 #   "vm_templates"    -> agw resource list --kind vm-template --names-only
 #   "agent_templates" -> agw resource list --kind agent-template --names-only
+#   "admin_templates" -> agw resource list --kind admin-template --names-only
 #   "consoles"        -> agw console list --names-only
 #   "secrets"         -> agw secret list --names-only
 #                        (sources from the Resource Registry so
@@ -156,6 +157,7 @@ DYNAMIC_COMPLETIONS: dict[tuple[str, str], str] = {
     ("vm.add-git-credential", "name"): "vms",
     ("vm.port-forward", "name"): "vms",
     ("vm.create", "template"): "vm_templates",
+    ("vm.create", "admin_template"): "admin_templates",
     ("vm.create", "site"): "sites",
     ("workspace.copy", "source"): "workspaces",
     ("workspace.copy", "vm"): "vms",

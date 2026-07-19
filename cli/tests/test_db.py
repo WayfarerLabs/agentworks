@@ -66,6 +66,25 @@ def test_vm_resources_nullable(db: Database) -> None:
     assert vm.disk_gib is None
 
 
+def test_vm_admin_template_roundtrip(db: Database) -> None:
+    """A selected admin-template round-trips; NULL (default) reads as None."""
+    db.insert_vm(
+        "work-vm",
+        site="lima",
+        hostname="lima--work-vm",
+        admin_template="work",
+    )
+    vm = db.get_vm("work-vm")
+    assert vm is not None
+    assert vm.admin_template == "work"
+
+    # No selector passed: NULL column reads back as None (the default).
+    db.insert_vm("plain-vm", site="lima", hostname="lima--plain-vm")
+    plain = db.get_vm("plain-vm")
+    assert plain is not None
+    assert plain.admin_template is None
+
+
 def test_roundtrip_workspace(db: Database) -> None:
     db.insert_vm("dev-vm", site="lima", hostname="lima--dev-vm")
     db.insert_vm("other-vm", site="lima", hostname="lima--other-vm")

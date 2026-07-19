@@ -734,12 +734,18 @@ def _load_admin_config(
     data: dict[str, object],
     issues: list[str],
     decls: _SectionLineMap,
+    name: str = "default",
 ) -> AdminConfig | None:
     """Load admin per-user config from [admin.config].
 
     Returns ``None`` when the TOML has no ``[admin.*]`` sections at all:
     the framework auto-declares ``admin-template:default`` instead
     (always-materialize). The manifest decoder always passes the key.
+
+    ``name`` is the resource name for the loaded row. The TOML path is a
+    singleton and never passes it (stays ``default``); the manifest
+    decoder passes the document's ``metadata.name`` so a declared
+    admin-template carries its own name.
     """
     if "admin" not in data:
         return None
@@ -753,6 +759,7 @@ def _load_admin_config(
     _warn_unexpected_keys(raw, _USER_CONFIG_KEYS, "admin.config", issues)
 
     return AdminConfig(
+        name=name,
         username=str(raw.get("username", "agentworks")),
         shell=str(raw.get("shell", "bash")),
         git_credentials=list(raw.get("git_credentials", [])),

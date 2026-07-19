@@ -188,6 +188,7 @@ class TestRegistrySourcedCompleters:
         ("session_templates", "session-template"),
         ("vm_templates", "vm-template"),
         ("agent_templates", "agent-template"),
+        ("admin_templates", "admin-template"),
         ("sites", "vm-site"),
     )
 

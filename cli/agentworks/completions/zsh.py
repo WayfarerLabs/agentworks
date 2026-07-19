@@ -76,6 +76,12 @@ _agentworks_agent_templates() {
     templates=(${(f)"$(agw resource list --kind agent-template --names-only 2>/dev/null | awk -F/ '{print $2}')"})
     _describe 'agent-template' templates
 }""",
+    "admin_templates": """\
+_agentworks_admin_templates() {
+    local -a templates
+    templates=(${(f)"$(agw resource list --kind admin-template --names-only 2>/dev/null | awk -F/ '{print $2}')"})
+    _describe 'admin-template' templates
+}""",
     "secrets": """\
 _agentworks_secrets() {
     local -a secrets
@@ -114,6 +120,7 @@ COMPLETER_FUNC_NAMES: dict[str, str] = {
     "session_templates": "_agentworks_session_templates",
     "vm_templates": "_agentworks_vm_templates",
     "agent_templates": "_agentworks_agent_templates",
+    "admin_templates": "_agentworks_admin_templates",
     "agents": "_agentworks_agents",
     "consoles": "_agentworks_consoles",
     "secrets": "_agentworks_secrets",

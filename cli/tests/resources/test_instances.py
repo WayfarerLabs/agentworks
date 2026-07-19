@@ -162,11 +162,10 @@ def test_session_template_instances_counts_matching_sessions(
     assert {r.instance_name for r in instances} == {"sess-a", "sess-b"}
 
 
-def test_admin_template_instances_counts_every_vm(tmp_path: Path) -> None:
-    """Every VM uses the singleton admin-template:default. The kind is
-    plurified at the framework level (Phase 2a.3) but the operator
-    surface is still singleton, so any name other than ``default``
-    yields no instances.
+def test_admin_template_instances_counts_matching_vms(tmp_path: Path) -> None:
+    """Each VM records its admin-template in the ``vms.admin_template``
+    column (NULL = ``default``); the kind filters VMs by that column.
+    Both seed VMs have a NULL column, so both fall back to ``default``.
     """
     db, registry = _seed_basic(tmp_path)
 
@@ -175,6 +174,49 @@ def test_admin_template_instances_counts_every_vm(tmp_path: Path) -> None:
         _instances("admin-template", db, registry, admin)
     )
     assert {r.instance_name for r in instances} == {"vm-default", "vm-custom"}
+
+
+def test_admin_template_instances_split_by_column(tmp_path: Path) -> None:
+    """A VM on a non-default admin-template projects under that name, not
+    ``default``: the column, not a blanket default, drives the split."""
+    cfg = tmp_path / "config.toml"
+    _write_base(cfg)
+    (tmp_path / "resources").mkdir()
+    (tmp_path / "resources" / "admin.yaml").write_text(
+        dedent("""\
+        apiVersion: agentworks/v1
+        kind: admin-template
+        metadata:
+          name: work
+        spec:
+          username: worker
+        """)
+    )
+    config = load_config(cfg, warn_issues=False)
+    registry = build_registry(config)
+
+    db = Database(tmp_path / "test.db")
+    db.insert_vm("vm-plain", site="lima", hostname="lima--vm-plain")
+    db.insert_vm(
+        "vm-work", site="lima", hostname="lima--vm-work", admin_template="work"
+    )
+    db._conn.commit()
+
+    default_instances = list(
+        _instances(
+            "admin-template", db, registry,
+            registry.lookup("admin-template", "default"),
+        )
+    )
+    work_instances = list(
+        _instances(
+            "admin-template", db, registry,
+            registry.lookup("admin-template", "work"),
+        )
+    )
+    assert {r.instance_name for r in default_instances} == {"vm-plain"}
+    assert {r.instance_name for r in work_instances} == {"vm-work"}
+    assert all(r.instance_kind == "vm" for r in work_instances)
 
 
 def test_named_console_template_instances_counts_every_console(
@@ -232,6 +274,59 @@ def test_secret_instances_finds_sessions_via_admin_env(tmp_path: Path) -> None:
     instances = list(_instances("secret", db, registry, secret))
     assert [r.instance_name for r in instances] == ["sess-1"]
     assert instances[0].instance_kind == "session"
+
+
+def test_secret_instances_follow_per_vm_admin_template(tmp_path: Path) -> None:
+    """An admin-mode session reaches secrets from its VM's admin-template
+    (the ``vms.admin_template`` column), not always ``default``. A session
+    on a VM using a non-default admin-template pulls that template's
+    env-block secret; a session on a default-admin VM does not.
+    """
+    cfg = tmp_path / "config.toml"
+    _write_base(cfg)
+    (tmp_path / "resources").mkdir()
+    (tmp_path / "resources" / "admin.yaml").write_text(
+        dedent("""\
+        apiVersion: agentworks/v1
+        kind: admin-template
+        metadata:
+          name: work
+        spec:
+          env:
+            WORK_KEY: { secret: "work-only-key" }
+        """)
+    )
+    config = load_config(cfg, warn_issues=False)
+    registry = build_registry(config)
+
+    db = Database(tmp_path / "test.db")
+    db.insert_vm(
+        "vm-work", site="lima", hostname="lima--vm-work", admin_template="work"
+    )
+    db.insert_vm("vm-plain", site="lima", hostname="lima--vm-plain")
+    db.insert_workspace(
+        "ws-work", workspace_path="/tmp/ws-work", vm_name="vm-work",
+        linux_group="ws-ws-work",
+    )
+    db.insert_workspace(
+        "ws-plain", workspace_path="/tmp/ws-plain", vm_name="vm-plain",
+        linux_group="ws-ws-plain",
+    )
+    db.insert_session(
+        "sess-work", "ws-work", template="default", mode=SessionMode.ADMIN,
+        socket_path="/tmp/sess-work.sock",
+    )
+    db.insert_session(
+        "sess-plain", "ws-plain", template="default", mode=SessionMode.ADMIN,
+        socket_path="/tmp/sess-plain.sock",
+    )
+    db._conn.commit()
+
+    secret = registry.lookup("secret", "work-only-key")
+    instances = list(_instances("secret", db, registry, secret))
+    # Only the session whose VM selected the ``work`` admin-template
+    # reaches the work-only secret; the default-admin session does not.
+    assert {r.instance_name for r in instances} == {"sess-work"}
 
 
 def test_secret_instances_finds_sessions_via_vm_template_env(

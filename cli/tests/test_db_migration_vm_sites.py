@@ -19,7 +19,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from agentworks.db import MIGRATIONS, Database, MigrationContext
+from agentworks.db import LATEST_VERSION, MIGRATIONS, Database, MigrationContext
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -376,7 +376,7 @@ def test_v28_drops_workspace_last_seen_at_and_preserves_rows(
     conn.commit()
     conn.close()
 
-    db = Database(db_path)  # opening runs migration 28
+    db = Database(db_path)  # opening runs migration 28 (and everything after)
     try:
         cols = {row[1] for row in db._conn.execute("PRAGMA table_info(workspaces)")}
         assert "last_seen_at" not in cols
@@ -391,11 +391,11 @@ def test_v28_drops_workspace_last_seen_at_and_preserves_rows(
         assert db.get_session("s1") is not None
         assert db.has_any_grant("a1", "ws1")
 
-        # No dangling FKs, and the version advanced.
+        # No dangling FKs, and the version advanced to the latest.
         assert db._conn.execute("PRAGMA foreign_key_check").fetchall() == []
         (version,) = db._conn.execute(
             "SELECT MAX(version) FROM schema_version"
         ).fetchone()
-        assert version == 28
+        assert version == LATEST_VERSION
     finally:
         db.close()

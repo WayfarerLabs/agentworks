@@ -149,15 +149,19 @@ hint until you run `agw vm start`, which clears the intent. `agw vm describe` sh
 stopped VM is in: its status reads `stopped (manual)` versus `stopped (idle)`.
 
 `vm create <name>` takes the VM name as a required positional. Optional flags: `--template` (a
-declared vm-template) and `--site` (a declared vm-site; falls back to `defaults.site`, else the one
-ENABLED site is inferred when there is exactly one, several prompt interactively, and
-non-interactive runs error naming the options). Hardware (`cpus`, `memory`, `disk`, `swap`) comes
-from the vm-template and the admin username from the admin-template; there are no per-create
-overrides, so to deviate you declare a new template. On Azure, `cpus` + `memory` select the smallest
-fitting VM size from the site's catalog (built-in B-series, or `platform_config.vm_sizes`); an
-off-ratio request rounds up and warns. These are immutable provisioning parameters stored in the
-database. All initialization behavior (packages, install commands, etc.) is driven by config.
-Templates carry no `site`: placement is per-host, so it never travels inside a shared template.
+declared vm-template), `--admin-template` (a declared admin-template; defaults to the reserved
+`default` admin-template, which always exists), and `--site` (a declared vm-site; falls back to
+`defaults.site`, else the one ENABLED site is inferred when there is exactly one, several prompt
+interactively, and non-interactive runs error naming the options). The selected admin-template is
+stored on the VM row (NULL = `default`) and drives its admin user on every later `vm reinit`,
+`vm shell`, and admin-mode session. An unknown `--admin-template` name fails before any provisioning
+or DB work. Hardware (`cpus`, `memory`, `disk`, `swap`) comes from the vm-template and the admin
+username from the admin-template; there are no per-create overrides, so to deviate you declare a new
+template. On Azure, `cpus` + `memory` select the smallest fitting VM size from the site's catalog
+(built-in B-series, or `platform_config.vm_sizes`); an off-ratio request rounds up and warns. These
+are immutable provisioning parameters stored in the database. All initialization behavior (packages,
+install commands, etc.) is driven by config. Templates carry no `site`: placement is per-host, so it
+never travels inside a shared template.
 
 The first interactive `vm create` asks once for an optional **system slug** (3-20 chars, lowercase
 alphanumeric plus dash, no leading/trailing dash): a short identifier for this agentworks
@@ -811,9 +815,9 @@ VM creation follows a two-phase lifecycle tracked by separate status columns:
    the admin user
 
 Initialization is fully declarative, driven entirely by config. `vm create` only accepts a name,
-`--template`, and `--site`; the immutable provisioning parameters (resources, admin username) come
-from the selected templates. `vm reinit` takes only the VM name and re-runs initialization using the
-current config.
+`--template`, `--admin-template`, and `--site`; the immutable provisioning parameters (resources,
+admin username) come from the selected templates. `vm reinit` takes only the VM name and re-runs
+initialization using the current config.
 
 Non-fatal initialization failures (packages, dotfiles) produce a `partial` status rather than
 aborting. Fatal failures prompt for deletion or reinit. Use `vm describe` to view the full event

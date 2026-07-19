@@ -322,7 +322,10 @@ def _decode_admin_template(doc: Document, spec: dict[str, object], issues: list[
     body = dict(spec)
     env = body.pop("env", {})
     result = _load_admin_config(
-        {"admin": {"config": body, "env": env}}, issues, _decls(doc.location)
+        {"admin": {"config": body, "env": env}},
+        issues,
+        _decls(doc.location),
+        name=doc.name,
     )
     assert result is not None  # the key is always present on this path
     return result

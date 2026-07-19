@@ -452,6 +452,30 @@ def test_manifest_admin_default_is_only_row_when_toml_omits(tmp_path: Path) -> N
     assert registry.lookup("admin-template", "default").username == "ops"
 
 
+def test_manifest_named_admin_template_carries_its_name(tmp_path: Path) -> None:
+    """A non-default admin-template manifest now decodes to an AdminConfig
+    whose ``name`` is the document's ``metadata.name`` (previously the
+    envelope rejected any name but ``default``). It coexists with the
+    always-materialized ``default`` row."""
+    _manifest(
+        tmp_path,
+        """
+        apiVersion: agentworks/v1
+        kind: admin-template
+        metadata:
+          name: work
+        spec:
+          username: worker
+        """,
+    )
+    registry = build_registry(_config(tmp_path))
+    work = registry.lookup("admin-template", "work")
+    assert work.name == "work"
+    assert work.username == "worker"
+    # The reserved default still materializes alongside the named row.
+    assert registry.lookup("admin-template", "default").name == "default"
+
+
 def test_manifest_admin_collides_with_declared_toml_admin(tmp_path: Path) -> None:
     """Dual-window semantics: a real [admin.config] in TOML plus an
     admin manifest is a duplicate."""
