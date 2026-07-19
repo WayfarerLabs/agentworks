@@ -2145,8 +2145,12 @@ def port_forward_vm(
     ports: list[str],
     address: str = "localhost",
     verbose: bool = False,
-) -> None:
+) -> int:
     """Forward one or more local ports to a VM via SSH tunnels.
+
+    Returns the underlying SSH process's exit code; the CLI layer owns the
+    translation to process exit (this service function never calls
+    ``sys.exit``). Mirrors ``exec_vm``'s return-the-code contract.
 
     Each port spec is either REMOTE_PORT (local defaults to same) or
     LOCAL_PORT:REMOTE_PORT, matching kubectl port-forward syntax.
@@ -2161,7 +2165,6 @@ def port_forward_vm(
     """
     import signal
     import subprocess
-    import sys
 
     from agentworks.bootstrap import build_registry
 
@@ -2246,8 +2249,7 @@ def port_forward_vm(
             signal.signal(signal.SIGINT, _handle_signal)
             signal.signal(signal.SIGTERM, _handle_signal)
 
-            rc = proc.wait()
-            sys.exit(rc)
+            return proc.wait()
         except OSError as e:
             raise ConnectivityError(
                 f"failed to start SSH: {e}",

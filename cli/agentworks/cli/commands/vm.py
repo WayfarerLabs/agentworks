@@ -233,7 +233,9 @@ def vm_port_forward(
     from agentworks.config import load_config
     from agentworks.vms.manager import port_forward_vm
 
-    port_forward_vm(get_db(), load_config(), name, ports, address=address, verbose=verbose)
+    raise typer.Exit(
+        port_forward_vm(get_db(), load_config(), name, ports, address=address, verbose=verbose)
+    )
 
 
 @vm_app.command("add-git-credential")
