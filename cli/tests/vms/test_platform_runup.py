@@ -5,19 +5,29 @@ The proxmox platform authenticates its API token with a cheap read
 a definitive rejection (fatal, before any VM exists); a transient error
 or unreachable host warns and continues unverified. lima/wsl2 have no
 token to check, so their runup is the base no-op.
+
+The azure-vm platform's runup is an authenticated, read-only
+resource-group existence check (issue #198 follow-up): the site's
+configured resource group either exists (pass silently) or does not (a
+definitive ``NotFoundError`` raised before ``create`` provisions
+anything). The credential is ambient today, so the tests fake the cached
+resource client on the class rather than building one.
 """
 
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 import pytest
 
 from agentworks.capabilities.base import RunContext
+from agentworks.capabilities.vm_platform.azure_vm import AzureVMPlatform
 from agentworks.capabilities.vm_platform.proxmox import ProxmoxPlatform
 from agentworks.capabilities.vm_platform.proxmox_api import (
     ProxmoxAPI,
     ProxmoxAPIError,
 )
-from agentworks.errors import TokenRejectedError
+from agentworks.errors import NotFoundError, TokenRejectedError
 
 _CONFIG = {
     "api_url": "https://pve:8006",
@@ -99,3 +109,55 @@ def test_proxmox_runup_without_secrets_is_error() -> None:
 
     with pytest.raises(ConfigError, match="resolved secrets"):
         ProxmoxPlatform("px", _CONFIG).runup(RunContext())
+
+
+# -- Azure -----------------------------------------------------------------
+
+_AZURE_CONFIG = {
+    "subscription_id": "sub-123",
+    "resource_group": "rg-dev",
+    "region": "eastus",
+}
+
+
+def _azure_platform() -> AzureVMPlatform:
+    return AzureVMPlatform("az", _AZURE_CONFIG)
+
+
+def _wire_rg(monkeypatch: pytest.MonkeyPatch, *, exists: bool) -> None:
+    """Fake the cached resource client so ``check_existence`` returns
+    ``exists`` without building a credential or touching Azure."""
+    fake_resource = SimpleNamespace(
+        resource_groups=SimpleNamespace(check_existence=lambda *a, **k: exists)
+    )
+    monkeypatch.setattr(
+        AzureVMPlatform, "_resource_client", lambda self, az: fake_resource
+    )
+
+
+def test_azure_runup_ok_when_group_exists(monkeypatch: pytest.MonkeyPatch) -> None:
+    _wire_rg(monkeypatch, exists=True)
+    _azure_platform().runup(RunContext())  # no raise
+
+
+def test_azure_runup_missing_group_is_fatal(monkeypatch: pytest.MonkeyPatch) -> None:
+    _wire_rg(monkeypatch, exists=False)
+    with pytest.raises(NotFoundError) as exc:
+        _azure_platform().runup(RunContext())
+    assert exc.value.entity_kind == "resource-group"
+    assert exc.value.entity_name == "rg-dev"
+    # The hint offers both recoveries: create the group or repoint the site.
+    assert exc.value.hint is not None
+    assert "az group create -n rg-dev -l eastus" in exc.value.hint
+    assert "existing resource group" in exc.value.hint
+
+
+def test_azure_runup_error_names_group_and_subscription(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _wire_rg(monkeypatch, exists=False)
+    with pytest.raises(NotFoundError) as exc:
+        _azure_platform().runup(RunContext())
+    msg = str(exc.value)
+    assert "rg-dev" in msg
+    assert "sub-123" in msg
