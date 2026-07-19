@@ -98,7 +98,7 @@ class VMRow:
     # proxmox vmid/node, lima instance_name).
     platform_metadata: dict[str, str] = field(default_factory=dict)
     # Operator intent flag: the operator explicitly stopped this VM, so
-    # auto-start gates (ensure_active) must not restart it.
+    # the activation gate's auto-start must not restart it.
     operator_stopped: bool = False
 
 
@@ -118,7 +118,6 @@ class WorkspaceRow:
     template: str | None
     workspace_path: str
     created_at: str
-    last_seen_at: str | None
     # Linux group on the VM. Set at create time so legacy workspaces
     # (created when the prefix was "ws--") keep their existing group even
     # after the prefix changed to "ws-".
@@ -735,6 +734,30 @@ MIGRATIONS: dict[int, str | Callable[[sqlite3.Connection, MigrationContext], Non
     # -- and the settings table. Python step: the backfill dispatches ------
     # -- through the platform classes' legacy_platform_metadata hooks. -----
     27: _migrate_vm_sites,
+    # -- Drop the write-dead workspaces.last_seen_at column: it has had ----
+    # -- no writer since update_workspace_last_seen was removed. Rebuild ---
+    # -- the table without it (the project's table-rebuild discipline). ----
+    # -- Every row is preserved and no column any child table references ---
+    # -- (they reference workspaces.name) is touched, so no ----------------
+    # -- delete-from-referencing-tables step is needed; the run's ----------
+    # -- foreign_key_check confirms the name-based FKs still hold.
+    28: """
+        CREATE TABLE workspaces_new (
+            name           TEXT PRIMARY KEY,
+            vm_name        TEXT NOT NULL,
+            template       TEXT,
+            workspace_path TEXT NOT NULL,
+            linux_group    TEXT NOT NULL,
+            created_at     TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+            FOREIGN KEY (vm_name) REFERENCES vms(name)
+        );
+        INSERT INTO workspaces_new
+            (name, vm_name, template, workspace_path, linux_group, created_at)
+            SELECT name, vm_name, template, workspace_path, linux_group, created_at
+            FROM workspaces;
+        DROP TABLE workspaces;
+        ALTER TABLE workspaces_new RENAME TO workspaces;
+    """,
 }
 
 LATEST_VERSION = max(MIGRATIONS)
@@ -932,7 +955,7 @@ class Database:
         self._conn.commit()
 
     def set_operator_stopped(self, name: str, stopped: bool) -> None:
-        """Record operator stop/start intent (gates ensure_active)."""
+        """Record operator stop/start intent (gates the activation gate's auto-start)."""
         self._conn.execute(
             "UPDATE vms SET operator_stopped = ? WHERE name = ?",
             (1 if stopped else 0, name),
@@ -1674,7 +1697,6 @@ def _to_workspace(row: sqlite3.Row) -> WorkspaceRow:
         template=row["template"],
         workspace_path=row["workspace_path"],
         created_at=row["created_at"],
-        last_seen_at=row["last_seen_at"],
         linux_group=row["linux_group"],
     )
 

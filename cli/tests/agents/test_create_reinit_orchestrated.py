@@ -121,7 +121,7 @@ def test_create_graph_derives_from_template_and_row(
     vm_node = live_vm_node(db, config, registry, vm)
     tmpl_node = agent_template_node(registry, resolve_template(registry, None))
     pending = pending_agent_node(
-        db, config, "dev", tmpl_node, vm_node, RunContext
+        db, config, "dev", tmpl_node, vm_node
     )
     nodes = walk(pending)
 

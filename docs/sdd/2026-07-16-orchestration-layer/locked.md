@@ -172,3 +172,15 @@ this directory can be deleted per the SDD lifecycle once its history stops infor
   `capabilities/README.md` and `docs/guides/resources.md` had the same prompted-exactly-once
   overstatement corrected to that invariant (the guide's claim was equally inaccurate before this
   effort, e.g. cross-VM copy's two passes, and was fixed under the docs-reflect-HEAD tiebreaker).
+- **2026-07-18 (`refactor/retire-keep-active`, post-lock):** the last surviving rider from the
+  "Surviving riders" section closed. The three recorded interim holds were retired and the
+  imperative `vms.manager.ensure_active` / `keep_active` pair was deleted. The `delete_agent` /
+  `delete_workspace` nested-teardown paths now take the caller's already-held VM node (`vm_node=`)
+  instead of a bound platform plus op-start context: they trust the session orchestrator's held
+  activation gate (its span covers the unwind), compose no second boundary, resolve nothing, and
+  re-enter only the keepalive hold through the node's site edge. `initialize_vm`'s share-wait hold
+  now receives a hold-span (`platform.vm_active`) threaded from `create_vm`'s composition root
+  rather than gating imperatively; the just-provisioned VM needs no power-state convergence there.
+  `tests/vms/test_ensure_active.py` was deleted (every case has an orchestrated twin in
+  `tests/vms/test_vm_nodes.py`); the gate-stub leak sentinel and its `_GATE_MODULES` machinery went
+  with the pair they guarded.

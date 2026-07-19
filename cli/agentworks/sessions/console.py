@@ -9,7 +9,6 @@ that attaches to the session's locked-down tmux session.
 from __future__ import annotations
 
 import shlex
-import sys
 from typing import TYPE_CHECKING
 
 from agentworks import output
@@ -142,8 +141,11 @@ def attach_console(
     vm_name: str,
     recreate: bool = False,
     allow_nesting: bool = False,
-) -> None:
+) -> int:
     """Attach to (or create) the VM console.
+
+    Returns the interactive attach's exit code; the CLI layer owns the
+    translation to process exit (check 9: no sys.exit in the service).
 
     Orchestrated (``vms.manager.gated_vm_boundary``): the graph
     derives from the VM's row, the activation gate replaces this
@@ -208,7 +210,7 @@ def attach_console(
                 recreate=recreate,
             )
 
-        sys.exit(target.interactive(f"tmux attach -t {CONSOLE_SESSION_NAME}"))
+        return target.interactive(f"tmux attach -t {CONSOLE_SESSION_NAME}")
 
 
 def _get_sessions_for_vm(db: Database, vm: VMRow) -> list[SessionRow]:

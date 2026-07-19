@@ -280,8 +280,8 @@ class VMPlatform(Capability):
         """Hold the VM against the backend's own idle-shutdown mechanism
         for the duration of the context.
 
-        Callers gate first (the orchestrated activation gate, or the
-        manager's interim ``keep_active`` holds), so on
+        Callers converge the power state first (the orchestrated
+        activation gate, or a create's just-provisioned VM), so on
         entry the VM is either running or was just started. Default
         no-op for platforms without an idle-shutdown mechanism (lima,
         azure, proxmox); wsl2 overrides to anchor the distro against

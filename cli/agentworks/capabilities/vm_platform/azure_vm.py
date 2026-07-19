@@ -79,15 +79,26 @@ def _trim_message(message: str) -> str:
     return message
 
 
-def _get_credential() -> object:
-    """Get an Azure credential.
+def _build_credential() -> object:
+    """Build the Azure credential to use, deciding the interactive-browser
+    fallback with a single live probe.
 
     Tries DefaultAzureCredential first (picks up az login, env vars,
-    managed identity, etc.). Falls back to interactive browser login
-    if nothing else works.
+    managed identity, etc.) and probes it once with a real token request:
+    that probe is BOTH the validation and the fallback decision. If it
+    succeeds, the DefaultAzureCredential is the credential to use; if it
+    raises ClientAuthenticationError (nothing in the chain can
+    authenticate), fall back to interactive browser login. The browser
+    credential is returned unprobed (its interaction happens lazily on the
+    first real token request), exactly as before.
 
-    Returns object to avoid a hard import of azure.core at module load time.
-    Callers cast to the appropriate type when constructing SDK clients.
+    Returns object to avoid a hard import of azure.core at module load
+    time. Callers cast to the appropriate type when constructing SDK
+    clients. The credential is subscription-independent, so this is
+    called at most once per platform instance (via the caching
+    :meth:`AzureVMPlatform._get_credential`) even when the instance's
+    SDK clients span multiple subscriptions; the probe's cost, and its
+    browser-fallback decision, are paid once per instance, not per op.
     """
     from azure.core.exceptions import ClientAuthenticationError
     from azure.identity import DefaultAzureCredential, InteractiveBrowserCredential
@@ -99,23 +110,6 @@ def _get_credential() -> object:
     except ClientAuthenticationError:
         output.info("No Azure credentials found, opening browser for login...")
         return InteractiveBrowserCredential()
-
-
-def _compute_client(az: _HasSubscriptionId) -> ComputeManagementClient:
-    """Create a ComputeManagementClient."""
-    from azure.mgmt.compute import ComputeManagementClient
-
-    # _get_credential() returns a TokenCredential-compatible object; the cast
-    # avoids a hard azure.core import at module load time.
-    return ComputeManagementClient(_get_credential(), az.subscription_id)  # type: ignore[arg-type]
-
-
-def _network_client(az: _HasSubscriptionId) -> NetworkManagementClient:
-    """Create a NetworkManagementClient."""
-    from azure.mgmt.network import NetworkManagementClient
-
-    # Same as _compute_client: credential is TokenCredential-compatible at runtime.
-    return NetworkManagementClient(_get_credential(), az.subscription_id)  # type: ignore[arg-type]
 
 
 _AZURE_REQUIRED_KEYS = ("subscription_id", "resource_group", "region")
@@ -221,6 +215,23 @@ class AzureVMPlatform(VMPlatform):
     name: ClassVar[str] = "azure-vm"
     description: ClassVar[str] = "Azure Virtual Machines (subscription + resource group)"
 
+    def __init__(self, owner_name: str, config: Mapping[str, object]) -> None:
+        super().__init__(owner_name, config)
+        # Azure credential and SDK clients, built on FIRST need by the
+        # accessors below and reused for the instance's remaining ops.
+        # The credential is subscription-independent, so it caches once
+        # per instance (one live get_token probe per command, given the
+        # vms/nodes.py site memo shares one instance per site). The
+        # clients are keyed by subscription_id: the site's config names
+        # one subscription, but power ops parse each VM's stored resource
+        # ID, and rows created under an older subscription must keep
+        # operating regardless of what the config says today, so one
+        # instance can legitimately see heterogeneous subscriptions in a
+        # multi-VM batch.
+        self._credential_cached: object | None = None
+        self._compute_cached: dict[str, ComputeManagementClient] = {}
+        self._network_cached: dict[str, NetworkManagementClient] = {}
+
     # No preflight override: azure has no config secrets (the base's
     # prediction pass is a no-op) and no unauthenticated readiness
     # check worth making. A credential probe is deliberately NOT one:
@@ -260,6 +271,45 @@ class AzureVMPlatform(VMPlatform):
         if row["azure_resource_id"]:
             return {"resource_id": str(row["azure_resource_id"])}
         return {}
+
+    def _get_credential(self) -> object:
+        """The Azure credential, built on first need (one live probe, one
+        browser-fallback decision) and reused for the instance's remaining
+        ops. See :func:`_build_credential` for the decision itself."""
+        cred = self._credential_cached
+        if cred is None:
+            cred = _build_credential()
+            self._credential_cached = cred
+        return cred
+
+    def _compute_client(self, az: _HasSubscriptionId) -> ComputeManagementClient:
+        """The compute client for ``az``'s subscription, built on first
+        need from the cached credential and reused for the instance's
+        remaining ops against that subscription (see ``__init__`` for why
+        the cache keys by subscription)."""
+        from azure.mgmt.compute import ComputeManagementClient
+
+        compute = self._compute_cached.get(az.subscription_id)
+        if compute is None:
+            # _get_credential() returns a TokenCredential-compatible object;
+            # the cast avoids a hard azure.core import at module load time.
+            compute = ComputeManagementClient(self._get_credential(), az.subscription_id)  # type: ignore[arg-type]
+            self._compute_cached[az.subscription_id] = compute
+        return compute
+
+    def _network_client(self, az: _HasSubscriptionId) -> NetworkManagementClient:
+        """The network client for ``az``'s subscription, built on first
+        need from the cached credential and reused for the instance's
+        remaining ops against that subscription (see ``__init__`` for why
+        the cache keys by subscription)."""
+        from azure.mgmt.network import NetworkManagementClient
+
+        network = self._network_cached.get(az.subscription_id)
+        if network is None:
+            # Same as _compute_client: credential is TokenCredential-compatible at runtime.
+            network = NetworkManagementClient(self._get_credential(), az.subscription_id)  # type: ignore[arg-type]
+            self._network_cached[az.subscription_id] = network
+        return network
 
     def create(self, request: ProvisionRequest, ctx: RunContext) -> ProvisionResult:
         from types import SimpleNamespace
@@ -309,8 +359,8 @@ class AzureVMPlatform(VMPlatform):
         )
 
         output.detail("Connecting to Azure...")
-        compute = _compute_client(az)
-        network = _network_client(az)
+        compute = self._compute_client(az)
+        network = self._network_client(az)
 
         if self._vm_exists(compute, az.resource_group, vm_name):
             raise StateError(
@@ -557,7 +607,7 @@ class AzureVMPlatform(VMPlatform):
         output.info(f"Starting Azure VM '{vm.name}'...")
         rg, name, az_cfg = _parse_resource_id(_resource_id(vm))
         try:
-            compute = _compute_client(az_cfg)
+            compute = self._compute_client(az_cfg)
             compute.virtual_machines.begin_start(rg, name).result()
         except Exception as exc:
             raise _wrap_azure_error(exc) from exc
@@ -569,7 +619,7 @@ class AzureVMPlatform(VMPlatform):
         output.info(f"Deallocating Azure VM '{vm.name}'...")
         rg, name, az_cfg = _parse_resource_id(_resource_id(vm))
         try:
-            compute = _compute_client(az_cfg)
+            compute = self._compute_client(az_cfg)
             compute.virtual_machines.begin_deallocate(rg, name).result()
         except Exception as exc:
             raise _wrap_azure_error(exc) from exc
@@ -582,8 +632,8 @@ class AzureVMPlatform(VMPlatform):
             return
 
         rg, name, az_cfg = _parse_resource_id(_resource_id(vm))
-        compute = _compute_client(az_cfg)
-        network = _network_client(az_cfg)
+        compute = self._compute_client(az_cfg)
+        network = self._network_client(az_cfg)
 
         # Delete VM first (must complete before dependent resources)
         with contextlib.suppress(Exception):
@@ -596,7 +646,7 @@ class AzureVMPlatform(VMPlatform):
     def attach_public_ip(self, vm: VMRow) -> str:
         """Attach a temporary public IP to the VM's NIC. Returns the IP address."""
         rg, name, az_cfg = _parse_resource_id(_resource_id(vm))
-        network = _network_client(az_cfg)
+        network = self._network_client(az_cfg)
 
         try:
             # Create (or re-create) the public IP
@@ -605,7 +655,7 @@ class AzureVMPlatform(VMPlatform):
                 rg,
                 f"{name}-ip",
                 {
-                    "location": _get_vm_location(vm),
+                    "location": _get_vm_location(self._compute_client(az_cfg), vm),
                     "sku": {"name": "Standard"},
                     "public_ip_allocation_method": "Static",
                     "tags": {"owner": "agentworks"},
@@ -632,7 +682,7 @@ class AzureVMPlatform(VMPlatform):
     def detach_public_ip(self, vm: VMRow) -> None:
         """Detach and delete the public IP from the VM's NIC."""
         rg, name, az_cfg = _parse_resource_id(_resource_id(vm))
-        network = _network_client(az_cfg)
+        network = self._network_client(az_cfg)
 
         output.detail("Removing public IP...")
         # Detach from NIC
@@ -662,7 +712,7 @@ class AzureVMPlatform(VMPlatform):
     ) -> Transport | None:
         rg, name, az_cfg = _parse_resource_id(_resource_id(vm))
         try:
-            compute = _compute_client(az_cfg)
+            compute = self._compute_client(az_cfg)
             vm_info = compute.virtual_machines.get(
                 rg,
                 name,
@@ -677,7 +727,7 @@ class AzureVMPlatform(VMPlatform):
         # StateError; on the canonical path this method is reached only
         # inside the transient_route context manager which guarantees a
         # public IP is attached, so the empty case is a defensive guard.
-        public_ip = _get_vm_public_ip(vm_info, az_cfg)
+        public_ip = _get_vm_public_ip(self._network_client(az_cfg), vm_info)
         import sys
 
         # Include identity file if config is available (needed for SSH auth
@@ -725,7 +775,7 @@ class AzureVMPlatform(VMPlatform):
             return VMStatus.UNKNOWN
         rg, name, az_cfg = _parse_resource_id(_resource_id(vm))
         try:
-            compute = _compute_client(az_cfg)
+            compute = self._compute_client(az_cfg)
             instance = compute.virtual_machines.instance_view(rg, name)
         except Exception:
             return VMStatus.UNKNOWN
@@ -741,10 +791,9 @@ class AzureVMPlatform(VMPlatform):
         return VMStatus.UNKNOWN
 
 
-def _get_vm_public_ip(vm_info: object, az_cfg: _HasSubscriptionId) -> str:
-    """Resolve the public IP address for a VM from its NIC."""
-    network = _network_client(az_cfg)
-
+def _get_vm_public_ip(network: NetworkManagementClient, vm_info: object) -> str:
+    """Resolve the public IP address for a VM from its NIC, using the
+    caller's (cached) network client."""
     nic_refs = (
         getattr(
             getattr(vm_info, "network_profile", None),
@@ -814,10 +863,10 @@ def _resource_id(vm: VMRow) -> str:
     return str(resource_id)
 
 
-def _get_vm_location(vm: VMRow) -> str:
-    """Get the Azure region for a VM by querying the compute API."""
-    rg, name, az_cfg = _parse_resource_id(_resource_id(vm))
-    compute = _compute_client(az_cfg)
+def _get_vm_location(compute: ComputeManagementClient, vm: VMRow) -> str:
+    """Get the Azure region for a VM by querying the compute API, using
+    the caller's (cached) compute client."""
+    rg, name, _az_cfg = _parse_resource_id(_resource_id(vm))
     vm_info = compute.virtual_machines.get(rg, name)
     return vm_info.location or "eastus"
 

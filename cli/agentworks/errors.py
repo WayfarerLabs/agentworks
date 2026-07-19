@@ -21,6 +21,11 @@ Business logic must never import typer, call sys.exit, or format output.
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from collections.abc import Iterable
+
 
 class AgentworksError(Exception):
     """Base exception for all agentworks business logic errors."""
@@ -166,3 +171,35 @@ class UserAbort(AgentworksError):
     Not really an error -- a control flow signal. Caught separately so the
     renderer can use a neutral phrasing instead of "Error: ...".
     """
+
+
+def unknown_template_error(
+    *,
+    kind: str,
+    label: str,
+    name: str,
+    available: Iterable[str],
+) -> NotFoundError:
+    """Build the ``NotFoundError`` for a template name that isn't declared.
+
+    ``kind`` is the registry kind (e.g. ``"workspace-template"``) carried as
+    ``entity_kind``; ``label`` is its human form (e.g. ``"workspace
+    template"``) used in the message and hint. The hint lists the live
+    declared names for that kind so the operator can correct the name in
+    place; when none are declared it says so plainly rather than offering an
+    empty list. It deliberately never points at config.toml, which is
+    deprecated for resources. Shared by the four template resolvers so the
+    four hint shapes stay uniform (they are siblings).
+    """
+    names = sorted(available)
+    hint = (
+        f"available {label}s: {', '.join(names)}"
+        if names
+        else f"no {label}s are declared"
+    )
+    return NotFoundError(
+        f"Unknown {label}: {name}",
+        entity_kind=kind,
+        entity_name=name,
+        hint=hint,
+    )

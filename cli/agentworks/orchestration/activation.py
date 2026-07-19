@@ -13,9 +13,9 @@ is read-only): the gate is the orchestrator driving the live VM node's
 own power-state ops. Power state is VM-node vocabulary, so nothing
 about it touches the thin ``Node`` surface; :class:`GateTarget` is the
 narrow structural slice of that vocabulary this helper drives, exactly
-the ops today's ``vms.manager.ensure_active`` / ``keep_active`` call
-(the parity oracle; the imperative pair keeps serving un-migrated
-commands and retires with them).
+the power-state ops the now-retired imperative
+``vms.manager.ensure_active`` / ``keep_active`` pair once carried (the
+migration's parity oracle for this gate).
 
 Three properties are load-bearing:
 
@@ -27,8 +27,8 @@ Three properties are load-bearing:
 - **The node is the authority on auto-start.** Auto-start applies only
   to an auto-stopped VM; a manually stopped one (``operator_stopped``)
   refuses with a typed error raised within the node's own scope
-  (:meth:`GateTarget.auto_start`), including the re-read-the-flag race
-  guard today's ``ensure_active`` does.
+  (:meth:`GateTarget.auto_start`), including the same re-read-the-flag
+  race guard the retired imperative ``ensure_active`` carried.
 - **Gate secrets resolve JUST-IN-TIME, outside the boundary pass.**
   Observing and starting a stopped VM may need the platform's API
   credential (the common case) or the Tailscale auth key (the rejoin

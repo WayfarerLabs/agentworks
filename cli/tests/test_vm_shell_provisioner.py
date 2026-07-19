@@ -170,13 +170,12 @@ def test_shell_vm_provisioner_flag_bypasses_tailscale_check(
         _stub_provisioner_factory,
     )
 
-    # SystemExit is fine; interactive() is stubbed to return 0 and
-    # shell_vm wraps it in sys.exit().
-    with pytest.raises(SystemExit) as exc_info:
-        vm_manager.shell_vm(  # type: ignore[arg-type]
-            db, _make_config(), "vm1", platform_transport=True,
-        )
-    assert exc_info.value.code == 0
+    # shell_vm returns interactive()'s exit code (0, stubbed); the CLI
+    # layer owns the process exit.
+    rc = vm_manager.shell_vm(  # type: ignore[arg-type]
+        db, _make_config(), "vm1", platform_transport=True,
+    )
+    assert rc == 0
     assert interactive_log == [True], "the interactive shell should have been opened"
     db.close()
 
@@ -238,10 +237,9 @@ def test_shell_vm_provisioner_uses_native_transport(
         _transport_must_not_be_called,
     )
 
-    with pytest.raises(SystemExit):
-        vm_manager.shell_vm(  # type: ignore[arg-type]
-            db, _make_config(), "vm1", platform_transport=True,
-        )
+    assert vm_manager.shell_vm(  # type: ignore[arg-type]
+        db, _make_config(), "vm1", platform_transport=True,
+    ) == 0
 
     assert len(provisioner_calls) == 1
     assert provisioner_calls[0][0] == "vm1"
@@ -356,9 +354,14 @@ def test_provisioner_shell_target_attaches_and_registers_detach_for_azure(
     detach_calls: list[str] = []
 
     class _FakeAzureProvisioner(AzureVMPlatform):
-        # Override the constructor so we don't need a real Azure config.
-        def __init__(self) -> None:  # noqa: D401, ANN001
-            pass
+        # Chain super with a minimal valid config (validate_config re-runs
+        # at construct, so a bare {} would fail) so the base's cache slots
+        # exist even though the overrides below never touch Azure.
+        def __init__(self) -> None:  # noqa: D401
+            super().__init__(
+                "az-test",
+                {"subscription_id": "sub", "resource_group": "rg", "region": "eastus"},
+            )
 
         def attach_public_ip(self, vm: object) -> str:
             attach_calls.append(getattr(vm, "name", "?"))
@@ -418,8 +421,12 @@ def test_provisioner_shell_target_detaches_on_exception_for_azure(
     detach_calls: list[str] = []
 
     class _AzureRaisesAfterAttach(AzureVMPlatform):
+        # Chain super with a minimal valid config; see _FakeAzureProvisioner.
         def __init__(self) -> None:  # noqa: D401
-            pass
+            super().__init__(
+                "az-test",
+                {"subscription_id": "sub", "resource_group": "rg", "region": "eastus"},
+            )
 
         def attach_public_ip(self, vm: object) -> str:
             return "203.0.113.42"
@@ -560,9 +567,8 @@ def test_shell_vm_warns_but_continues_on_failed_init(
     interactive_log: list[bool] = []
     _patch_common(monkeypatch, vm_manager, interactive_log=interactive_log)
 
-    with pytest.raises(SystemExit) as exc_info:
-        vm_manager.shell_vm(db, _make_config(), "vm1")  # type: ignore[arg-type]
-    assert exc_info.value.code == 0
+    rc = vm_manager.shell_vm(db, _make_config(), "vm1")  # type: ignore[arg-type]
+    assert rc == 0
     assert interactive_log == [True], "shell must still open on a failed-init VM"
 
     # The warning should land on stderr (via output.warn) with the reinit hint.

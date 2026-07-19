@@ -145,11 +145,16 @@ def revoke_workspaces(
     ):
 
         if revoke_all:
+            # Snapshot the granted workspaces BEFORE deleting any rows.
+            # Taking it afterwards missed explicitly-granted-only
+            # workspaces (their rows were already gone, so they never
+            # reached the group-removal branch and the on-VM group
+            # membership survived the revoke; issue #189).
+            granted = db.list_granted_workspaces(agent_name)
             db.update_agent_grant_all(agent_name, False)
             db.delete_explicit_grants(agent_name)
-            # Remove from groups where no implicit grants remain
+            # Remove from groups where no grant (implicit or grant-all) remains
             remaining_implicit: list[str] = []
-            granted = db.list_granted_workspaces(agent_name)
             for ws_name in granted:
                 if db.has_any_grant(agent_name, ws_name):
                     remaining_implicit.append(ws_name)

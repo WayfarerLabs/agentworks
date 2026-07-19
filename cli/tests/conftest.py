@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import contextlib
-from collections.abc import Generator, Iterator
+from collections.abc import Generator
 from contextlib import AbstractContextManager
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -169,8 +169,9 @@ class _StubPlatform:
     """Minimal bound-platform stand-in for the vm-sites gates.
 
     ``vm_active`` is a no-op hold and ``status`` reports RUNNING so the
-    gate proceeds without shelling out (the real ``ensure_active`` fast
-    path runs ``tailscale ping``).
+    gate proceeds without shelling out (the gate's real fast path,
+    ``confirmed_active`` / ``_is_tailscale_reachable``, runs
+    ``tailscale ping``).
     """
 
     name = "stub"
@@ -194,46 +195,6 @@ class _StubPlatform:
 
     def post_tailscale_ready(self, vm: object) -> None:
         return None
-
-
-# Every module that imports the vm-sites gates by name; patched
-# per-module because ``from ... import keep_active`` captures the
-# binding at module load.
-_GATE_MODULES = (
-    "agentworks.vms.manager",
-    "agentworks.vms.backup",
-    "agentworks.workspaces.manager",
-    "agentworks.agents.manager",
-    "agentworks.sessions.manager",
-    "agentworks.sessions.multi_console",
-    "agentworks.sessions.console",
-)
-
-
-@pytest.fixture(autouse=True, scope="session")
-def _gate_stub_leak_sentinel() -> Generator[None, None, None]:
-    """Fail the run loudly if a gate stub ever leaks past teardown.
-
-    ``stub_vm_gates`` once poisoned later tests when a gate module was
-    first-imported MID-PATCH-LOOP: its module-level ``from vms.manager
-    import keep_active`` captured the already-patched stub, which
-    monkeypatch then saved as the "original" and re-installed forever
-    at teardown. The pre-import in ``stub_vm_gates`` fixes that class;
-    this sentinel makes any regression of it a loud session-end failure
-    instead of a seed-dependent mystery in unrelated tests.
-    """
-    yield
-    import importlib
-
-    from agentworks.vms import manager as vms_manager
-
-    for mod_name in _GATE_MODULES:
-        mod = importlib.import_module(mod_name)
-        captured = getattr(mod, "keep_active", vms_manager.keep_active)
-        assert captured is vms_manager.keep_active, (
-            f"{mod_name}.keep_active is a leaked test stub ({captured!r}); "
-            "a gate-stubbing helper failed to restore the real function"
-        )
 
 
 def publish_all_platforms(registry: object) -> None:
@@ -275,45 +236,18 @@ def stub_platform_support(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def stub_vm_gates(monkeypatch: pytest.MonkeyPatch) -> _StubPlatform:
-    """Stub the imperative ``ensure_active`` / ``keep_active`` holds in
-    every gate-consuming module.
+    """Stub the orchestrated activation gate so tests that exercise
+    transport / rollback / env plumbing neither construct real platforms
+    nor shell out to Tailscale.
 
-    Tests that exercise transport / rollback / env plumbing don't want
-    the gates building registries, resolving site secrets, or probing
-    Tailscale. Returns the stub platform for assertions.
+    Two seams: the node factories bind their platform through
+    ``resolve_site`` (the only constructor of platform instances), and
+    the activation gate's fast path probes Tailscale reachability. Stub
+    both so the gate fast-paths and holds via the stub platform's no-op
+    ``vm_active``. Returns the stub platform for assertions.
     """
-    import importlib
-
-    # Pre-import every gate module BEFORE patching: a string-form
-    # setattr that first-imports a module mid-loop would let its
-    # module-level ``from vms.manager import keep_active`` capture an
-    # ALREADY-PATCHED stub, which monkeypatch then saves as the
-    # "original": teardown would install the stub permanently and
-    # poison every later test in the session (import-order dependent,
-    # invisible in full-suite runs).
-    for mod in _GATE_MODULES:
-        importlib.import_module(mod)
-
     platform = _StubPlatform()
 
-    @contextlib.contextmanager
-    def _null_hold(*args: object, **kwargs: object) -> Iterator[None]:
-        yield
-
-    for mod in _GATE_MODULES:
-        monkeypatch.setattr(
-            f"{mod}.ensure_active", lambda *a, **k: None, raising=False
-        )
-        monkeypatch.setattr(f"{mod}.keep_active", _null_hold, raising=False)
-
-    # The orchestrated commands' equivalents of the same two seams: the
-    # node factories bind their platform through ``resolve_site`` (the
-    # only constructor of platform instances), and the activation gate's
-    # fast path probes Tailscale reachability. Stub both so orchestrated
-    # commands neither construct real platforms nor shell out to
-    # ``tailscale ping``; the gate then fast-paths (the stub's job, same
-    # scope as the imperative ensure_active stub above) and holds via
-    # the stub platform's no-op ``vm_active``.
     def _fake_resolve_site(name: object, registry: object) -> _StubPlatform:
         return platform
 

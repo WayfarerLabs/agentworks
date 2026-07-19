@@ -16,8 +16,6 @@ from typing import TYPE_CHECKING
 from agentworks.errors import StateError
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
-
     from agentworks.capabilities.base import RunContext
     from agentworks.config import Config
     from agentworks.db import Database, WorkspaceRow
@@ -64,12 +62,12 @@ class PendingWorkspaceNode:
     completes.
 
     ``teardown`` is today's ephemeral-workspace rollback body relocated
-    (a forced ``delete_workspace`` through the VM's bound platform).
-    ``platform_ctx`` is the orchestrator's op-start-context source for
-    that handed-in platform (a callable because teardown runs
-    post-boundary, when the resolved values exist; the node itself
-    holds no secrets); it rides the INTERIM nested-teardown seam and
-    retires with it.
+    (a forced ``delete_workspace`` that hands the delete body the VM
+    NODE this node already holds). The delete body trusts the caller's
+    held activation gate (the session orchestrator runs its unwind
+    INSIDE that gate span, so the VM is already converged and held),
+    reaching the platform for its keepalive hold through the node's site
+    edge and resolving nothing.
     """
 
     def __init__(
@@ -79,14 +77,12 @@ class PendingWorkspaceNode:
         name: str,
         vm: LiveVMNode,
         template: str | None,
-        platform_ctx: Callable[[], RunContext],
     ) -> None:
         self._db = db
         self._config = config
         self._name = name
         self._vm = vm
         self._template = template
-        self._platform_ctx = platform_ctx
         self._realized = False
 
     @property
@@ -133,8 +129,7 @@ class PendingWorkspaceNode:
                 name=self._name,
                 force=True,
                 yes=True,
-                platform=self._vm.site.platform,
-                platform_ctx=self._platform_ctx(),
+                vm_node=self._vm,
             )
         except Exception as exc:
             # The teardown contract: name the artifact left standing.
@@ -160,9 +155,7 @@ def pending_workspace_node(
     name: str,
     vm: LiveVMNode,
     template: str | None,
-    platform_ctx: Callable[[], RunContext],
 ) -> PendingWorkspaceNode:
     """Build the pending ``workspace/<name>`` node with its VM edge
-    attached. ``platform_ctx`` is the teardown's op-start-context
-    source (see :class:`PendingWorkspaceNode`)."""
-    return PendingWorkspaceNode(db, config, name, vm, template, platform_ctx)
+    attached."""
+    return PendingWorkspaceNode(db, config, name, vm, template)

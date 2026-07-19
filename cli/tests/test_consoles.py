@@ -1015,8 +1015,7 @@ def test_attach_console_builds_initial_tmux(
         returncode=0, stdout="_PLACEHOLDER\nalpha\nbeta\n"
     )
 
-    with pytest.raises(SystemExit):
-        attach_console(db, _StubConfig(), name="con", allow_nesting=True)
+    attach_console(db, _StubConfig(), name="con", allow_nesting=True)
 
     cmds = fake_target.commands
     assert any("has-session -t aw-console-con" in c for c in cmds)
@@ -1052,8 +1051,7 @@ def test_attach_console_placeholder_name_cannot_collide_with_session(
         returncode=0, stdout="_PLACEHOLDER\nplaceholder\nreal\n"
     )
 
-    with pytest.raises(SystemExit):
-        attach_console(db, _StubConfig(), name="con", allow_nesting=True)
+    attach_console(db, _StubConfig(), name="con", allow_nesting=True)
 
     kill_windows = [c for c in fake_target.commands if "kill-window" in c]
     # We kill exactly the build placeholder, never the user's window.
@@ -1079,8 +1077,7 @@ def test_attach_console_warns_when_list_windows_fails(
         returncode=255, stderr="transport failure"
     )
 
-    with pytest.raises(SystemExit):
-        attach_console(db, _StubConfig(), name="con", allow_nesting=True)
+    attach_console(db, _StubConfig(), name="con", allow_nesting=True)
 
     assert any("could not list windows" in w for w in captured_output.warnings)
     # No kill-window for the placeholder since we couldn't confirm cleanup.
@@ -1135,8 +1132,7 @@ def test_attach_console_builds_admin_shell_window_without_placeholder(
     )
     fake_target.responses["has-session -t aw-console-con"] = _FakeResult(returncode=1)
 
-    with pytest.raises(SystemExit):
-        attach_console(db, _StubConfig(), name="con", allow_nesting=True)
+    attach_console(db, _StubConfig(), name="con", allow_nesting=True)
 
     cmds = fake_target.commands
     new_sessions = [c for c in cmds if "new-session -d -s aw-console-con" in c]
@@ -1192,8 +1188,7 @@ def test_attach_console_keeps_placeholder_when_all_members_fail(
         returncode=0, stdout="_PLACEHOLDER\n"
     )
 
-    with pytest.raises(SystemExit):
-        attach_console(db, _StubConfig(), name="con", allow_nesting=True)
+    attach_console(db, _StubConfig(), name="con", allow_nesting=True)
 
     assert not any("kill-window -t aw-console-con:_PLACEHOLDER" in c for c in fake_target.commands)
     assert any("placeholder kept" in w for w in captured_output.warnings)
@@ -1214,8 +1209,7 @@ def test_attach_console_announces_build_path(
     )
 
     captured_output.info.clear()
-    with pytest.raises(SystemExit):
-        attach_console(db, _StubConfig(), name="con", allow_nesting=True)
+    attach_console(db, _StubConfig(), name="con", allow_nesting=True)
     assert any("Building console 'con' on first attach" in m for m in captured_output.info)
 
 
@@ -1232,8 +1226,7 @@ def test_attach_console_announces_attach_path(
     fake_target.responses["has-session -t aw-console-con"] = _FakeResult(returncode=0)
 
     captured_output.info.clear()
-    with pytest.raises(SystemExit):
-        attach_console(db, _StubConfig(), name="con", allow_nesting=True)
+    attach_console(db, _StubConfig(), name="con", allow_nesting=True)
     assert any("Attaching to running console 'con'" in m for m in captured_output.info)
     assert not any("Building" in m or "Rebuilding" in m for m in captured_output.info)
 
@@ -1253,8 +1246,7 @@ def test_attach_console_announces_recreate_path(
     )
 
     captured_output.info.clear()
-    with pytest.raises(SystemExit):
-        attach_console(db, _StubConfig(), name="con", recreate=True, allow_nesting=True)
+    attach_console(db, _StubConfig(), name="con", recreate=True, allow_nesting=True)
     assert any("Rebuilding console 'con' (--recreate)" in m for m in captured_output.info)
 
 
@@ -1270,8 +1262,7 @@ def test_attach_console_reuses_existing_tmux(
     # Console exists.
     fake_target.responses["has-session -t aw-console-con"] = _FakeResult(returncode=0)
 
-    with pytest.raises(SystemExit):
-        attach_console(db, _StubConfig(), name="con", allow_nesting=True)
+    attach_console(db, _StubConfig(), name="con", allow_nesting=True)
 
     cmds = fake_target.commands
     assert not any("new-session" in c for c in cmds)
@@ -1291,8 +1282,7 @@ def test_attach_console_recreate_rebuilds_even_if_alive(
         returncode=0, stdout="_PLACEHOLDER\nalpha\n"
     )
 
-    with pytest.raises(SystemExit):
-        attach_console(db, _StubConfig(), name="con", recreate=True, allow_nesting=True)
+    attach_console(db, _StubConfig(), name="con", recreate=True, allow_nesting=True)
 
     cmds = fake_target.commands
     assert any("kill-session -t aw-console-con" in c for c in cmds)
@@ -1320,8 +1310,7 @@ def test_attach_console_iterates_in_position_order(
     fake_target.responses["list-windows -t aw-console-con"] = _FakeResult(
         returncode=0, stdout="_PLACEHOLDER\na\nc\nd\n"
     )
-    with pytest.raises(SystemExit):
-        attach_console(db, _StubConfig(), name="con", allow_nesting=True)
+    attach_console(db, _StubConfig(), name="con", allow_nesting=True)
 
     new_windows = [c for c in fake_target.commands if "new-window -t aw-console-con" in c]
     names = [c.split("-n ")[1].split()[0] for c in new_windows]
@@ -1350,8 +1339,7 @@ def test_attach_console_skips_missing_session_with_warning(
         returncode=0, stdout="_PLACEHOLDER\nalpha\n"
     )
 
-    with pytest.raises(SystemExit):
-        attach_console(db, _StubConfig(), name="con", allow_nesting=True)
+    attach_console(db, _StubConfig(), name="con", allow_nesting=True)
 
     assert any("ghost" in w and "no longer exists" in w for w in captured_output.warnings)
     new_windows = [c for c in fake_target.commands if "new-window -t aw-console-con" in c]
@@ -1390,8 +1378,7 @@ def test_attach_console_skips_window_when_agent_missing(
         returncode=0, stdout="_PLACEHOLDER\ns\n"
     )
 
-    with pytest.raises(SystemExit):
-        attach_console(db, _StubConfig(), name="con", allow_nesting=True)
+    attach_console(db, _StubConfig(), name="con", allow_nesting=True)
 
     assert any("agent for session 's' is missing" in w for w in captured_output.warnings)
     # The window itself was created (new-window happened before the agent check);
@@ -2211,8 +2198,7 @@ def test_split_shell_pane_preserve_probe_warns_once_per_console_build(
     )
     fake_target.responses[_PROBE] = _FakeResult(returncode=1)
     fake_target.commands.clear()
-    with pytest.raises(SystemExit):
-        attach_console(db, _StubConfig(), name="con", allow_nesting=True)
+    attach_console(db, _StubConfig(), name="con", allow_nesting=True)
 
     splits = [c for c in fake_target.commands if "split-window -t aw-console-con" in c]
     assert len(splits) == 4

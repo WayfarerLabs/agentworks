@@ -1,8 +1,15 @@
-"""Migration v27 (the vm-site refactor): fixture databases at the prior schema
-covering all four platforms plus remote-Lima rows, asserting the
-platform_metadata / hostname backfills, the platform -> site rename,
-the printed site-manifest snippets, the NOT NULL table rebuild, the
+"""Migration fixtures against prior schemas.
+
+Migration v27 (the vm-site refactor): fixture databases at the prior
+schema covering all four platforms plus remote-Lima rows, asserting the
+platform_metadata / hostname backfills, the platform -> site rename, the
+printed site-manifest snippets, the NOT NULL table rebuild, the
 empty-legacy behavior, and the settings table.
+
+Migration v28 (the workspaces.last_seen_at drop): a v27 fixture with the
+column populated and child rows keyed on the workspace name, asserting
+the row and its children survive the rebuild, the column is gone, and the
+name-based FKs still hold.
 """
 
 from __future__ import annotations
@@ -12,7 +19,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from agentworks.db import MIGRATIONS, Database
+from agentworks.db import MIGRATIONS, Database, MigrationContext
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -38,6 +45,25 @@ def _create_v26_db(path: str) -> sqlite3.Connection:
             if stmt:
                 conn.execute(stmt)
         conn.execute("INSERT INTO schema_version (version) VALUES (?)", (version,))
+    conn.commit()
+    return conn
+
+
+def _create_v27_db(path: str) -> sqlite3.Connection:
+    """A database at schema version 27 (the last version before the
+    workspaces.last_seen_at drop).
+
+    Runs migrations 1..26 (SQL) then the v27 Python step exactly as
+    ``Database._migrate`` does: FKs off around the rebuild, an empty
+    legacy context (so no vms rows are needed), then record the version.
+    """
+    conn = _create_v26_db(path)
+    step = MIGRATIONS[27]
+    assert callable(step), "v27 is the Python vm-sites step"
+    conn.execute("PRAGMA foreign_keys = OFF")
+    step(conn, MigrationContext(legacy={}))
+    conn.execute("INSERT INTO schema_version (version) VALUES (27)")
+    conn.execute("PRAGMA foreign_keys = ON")
     conn.commit()
     return conn
 
@@ -305,12 +331,71 @@ def test_earlier_versions_checkpoint_when_a_later_one_fails(
 
 
 def test_fresh_database_lands_on_the_new_schema(tmp_path: Path) -> None:
-    """A brand-new DB (no fixture) runs 1..27 cleanly end to end."""
+    """A brand-new DB (no fixture) runs 1..28 cleanly end to end."""
     db = Database(tmp_path / "fresh.db")
     try:
         db.insert_vm("v", site="lima-local", hostname="lima--v")
         vm = db.get_vm("v")
         assert vm is not None
         assert vm.site == "lima-local"
+    finally:
+        db.close()
+
+
+def test_v28_drops_workspace_last_seen_at_and_preserves_rows(
+    tmp_path: Path,
+) -> None:
+    """Migration 28 rebuilds workspaces without last_seen_at. A v27 row
+    with the column populated, plus child rows keyed on workspaces.name (a
+    session and an explicit grant, via an agent), survive the rebuild
+    intact; the column is gone, the name-based FKs still hold, and the
+    version advances to 28.
+    """
+    db_path = tmp_path / "m28.db"
+    conn = _create_v27_db(str(db_path))
+    conn.execute(
+        "INSERT INTO vms (name, site, hostname) VALUES ('box', 'lima-local', 'lima--box')"
+    )
+    conn.execute(
+        "INSERT INTO workspaces "
+        "(name, vm_name, template, workspace_path, linux_group, created_at, last_seen_at) "
+        "VALUES ('ws1', 'box', 'default', '/srv/ws1', 'ws-ws1', "
+        "'2020-01-01T00:00:00Z', '2021-06-06T00:00:00Z')"
+    )
+    conn.execute(
+        "INSERT INTO agents (name, vm_name, linux_user) VALUES ('a1', 'box', 'agt-a1')"
+    )
+    conn.execute(
+        "INSERT INTO sessions (name, workspace_name, template, mode) "
+        "VALUES ('s1', 'ws1', 'default', 'admin')"
+    )
+    conn.execute(
+        "INSERT INTO agent_workspace_grants (agent_name, workspace_name, grant_type) "
+        "VALUES ('a1', 'ws1', 'explicit')"
+    )
+    conn.commit()
+    conn.close()
+
+    db = Database(db_path)  # opening runs migration 28
+    try:
+        cols = {row[1] for row in db._conn.execute("PRAGMA table_info(workspaces)")}
+        assert "last_seen_at" not in cols
+
+        ws = db.get_workspace("ws1")
+        assert ws is not None
+        assert ws.workspace_path == "/srv/ws1"
+        assert ws.created_at == "2020-01-01T00:00:00Z"
+        assert ws.linux_group == "ws-ws1"
+
+        # Child rows keyed on workspaces.name survived the rebuild.
+        assert db.get_session("s1") is not None
+        assert db.has_any_grant("a1", "ws1")
+
+        # No dangling FKs, and the version advanced.
+        assert db._conn.execute("PRAGMA foreign_key_check").fetchall() == []
+        (version,) = db._conn.execute(
+            "SELECT MAX(version) FROM schema_version"
+        ).fetchone()
+        assert version == 28
     finally:
         db.close()

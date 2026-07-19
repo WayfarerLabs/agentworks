@@ -213,12 +213,14 @@ def vm_shell(
     from agentworks.config import load_config
     from agentworks.vms.manager import shell_vm
 
-    shell_vm(
-        get_db(),
-        load_config(),
-        name,
-        platform_transport=platform,
-        workspace_name=workspace,
+    raise typer.Exit(
+        shell_vm(
+            get_db(),
+            load_config(),
+            name,
+            platform_transport=platform,
+            workspace_name=workspace,
+        )
     )
 
 
@@ -233,7 +235,9 @@ def vm_port_forward(
     from agentworks.config import load_config
     from agentworks.vms.manager import port_forward_vm
 
-    port_forward_vm(get_db(), load_config(), name, ports, address=address, verbose=verbose)
+    raise typer.Exit(
+        port_forward_vm(get_db(), load_config(), name, ports, address=address, verbose=verbose)
+    )
 
 
 @vm_app.command("add-git-credential")
@@ -294,10 +298,12 @@ def vm_console(
         "(see 'agw console --help'). This command will be removed in a future release."
     )
 
-    attach_console(
-        get_db(),
-        load_config(),
-        vm_name=name,
-        recreate=recreate,
-        allow_nesting=allow_nesting,
+    raise typer.Exit(
+        attach_console(
+            get_db(),
+            load_config(),
+            vm_name=name,
+            recreate=recreate,
+            allow_nesting=allow_nesting,
+        )
     )

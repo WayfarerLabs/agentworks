@@ -577,6 +577,16 @@ def test_create_stopped_vm_gate_resolves_once_and_seeds_the_boundary(
     assert captured_env["API_KEY"] == "shhh"  # boundary values reached compose
     assert db.get_session("s1") is not None
 
+    # Phased framing (the vm-create model): even this admin + existing-
+    # workspace create, which has no ephemeral stages, reads as a plan
+    # with Preflight, Resolving Secrets, and Starting Session phases.
+    assert "=== Preflight ===" in captured_output.info
+    assert "=== Resolving Secrets ===" in captured_output.info
+    assert "=== Starting Session ===" in captured_output.info
+    assert any(
+        m.startswith("Checking session-template/") for m in captured_output.detail
+    )
+
 
 def test_restart_stopped_vm_gate_seeds_and_env_pass_is_the_only_other(
     db: Database,
