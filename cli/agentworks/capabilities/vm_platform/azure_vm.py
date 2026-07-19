@@ -351,6 +351,15 @@ class AzureVMPlatform(VMPlatform):
         "group missing" verdict: those surface through
         :func:`_wrap_azure_error` exactly as the ops report them, so a bad
         or absent credential never masquerades as an absent resource group.
+
+        Reachability failures are fatal here, which diverges from the
+        proxmox runup on purpose. Proxmox warns and continues unverified on
+        a transient outage because its token check is incidental (the op
+        uses the token directly regardless). Azure's ``create`` makes many
+        Resource Manager calls, so an unreachable RM at runup means the
+        whole create cannot proceed anyway; aborting cleanly here, with
+        nothing realized, beats warning past it into a cryptic mid-provision
+        failure.
         """
         from types import SimpleNamespace
 
