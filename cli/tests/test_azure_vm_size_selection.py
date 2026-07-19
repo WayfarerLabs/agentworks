@@ -4,8 +4,12 @@ site's ``platform_config.vm_sizes`` override (issue #178)."""
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 import pytest
 
+from agentworks.capabilities.base import RunContext
+from agentworks.capabilities.vm_platform import ProvisionRequest
 from agentworks.capabilities.vm_platform.azure_vm import (
     _DEFAULT_VM_SIZES,
     AzureVMPlatform,
@@ -13,6 +17,9 @@ from agentworks.capabilities.vm_platform.azure_vm import (
     _select_vm_size,
 )
 from agentworks.errors import ConfigError
+
+if TYPE_CHECKING:
+    from tests.conftest import CapturedOutput
 
 
 class TestSelectVMSize:
@@ -28,7 +35,8 @@ class TestSelectVMSize:
         over-provisioning memory."""
         size = _select_vm_size(_DEFAULT_VM_SIZES, cpus=4, memory_gib=8)
         assert size.name == "Standard_B4ms"  # 4 vCPU / 16 GiB
-        # over-provisioned on memory, which is what the create() warn keys on
+        # over-provisioned on memory, which is what the create() round-up warn
+        # keys on
         assert size.memory_gib > 8
 
     def test_picks_smallest_across_both_axes(self) -> None:
@@ -111,3 +119,125 @@ class TestValidateConfig:
         cfg = {**self._BASE, "bogus": "x"}
         with pytest.raises(ConfigError, match="unknown"):
             AzureVMPlatform.validate_config("vm-site/az", cfg)
+
+
+class TestCreateProvisioningOutput:
+    """The `vm create` provisioning line always names the selected SKU and
+    its spec; a round-up additionally warns (issue #178 follow-up). The
+    Azure SDK client factories are faked so ``create`` reaches its
+    provisioning line without touching Azure."""
+
+    @staticmethod
+    def _wire(monkeypatch: pytest.MonkeyPatch) -> None:
+        from types import SimpleNamespace
+
+        from agentworks.capabilities.vm_platform import azure_vm
+
+        def _collection(result: object) -> SimpleNamespace:
+            poller = SimpleNamespace(result=lambda: result)
+            return SimpleNamespace(
+                begin_create_or_update=lambda *a, **k: poller,
+                begin_delete=lambda *a, **k: poller,
+            )
+
+        fake_network = SimpleNamespace(
+            public_ip_addresses=_collection(
+                SimpleNamespace(ip_address="10.0.0.4", id="/pip")
+            ),
+            network_security_groups=_collection(SimpleNamespace(id="/nsg")),
+            virtual_networks=_collection(
+                SimpleNamespace(subnets=[SimpleNamespace(id="/subnet")])
+            ),
+            network_interfaces=_collection(SimpleNamespace(id="/nic")),
+        )
+        fake_compute = SimpleNamespace(
+            virtual_machines=_collection(SimpleNamespace(id="/vm-id")),
+        )
+
+        monkeypatch.setattr(azure_vm, "_compute_client", lambda az: fake_compute)
+        monkeypatch.setattr(azure_vm, "_network_client", lambda az: fake_network)
+        monkeypatch.setattr(
+            AzureVMPlatform, "_vm_exists", lambda self, compute, rg, name: False
+        )
+
+    @staticmethod
+    def _request(*, cpus: int, memory: int) -> ProvisionRequest:
+        # tailscale_auth_key=None keeps create() on the minimal-cloud-init
+        # path, so it never waits for a bootstrap that has no VM to reach.
+        return ProvisionRequest(
+            vm_name="dev",
+            hostname="dev",
+            system_slug=None,
+            admin_username="agw",
+            ssh_public_key="ssh-ed25519 AAAA test",
+            ssh_private_key=None,
+            tailscale_auth_key=None,
+            cpus=cpus,
+            memory_gib=memory,
+        )
+
+    @staticmethod
+    def _platform(vm_sizes: list[dict[str, object]] | None = None) -> AzureVMPlatform:
+        config: dict[str, object] = {
+            "subscription_id": "sub",
+            "resource_group": "rg",
+            "region": "eastus",
+        }
+        if vm_sizes is not None:
+            config["vm_sizes"] = vm_sizes
+        return AzureVMPlatform("azure", config)
+
+    @staticmethod
+    def _provisioning_line(captured: CapturedOutput) -> str:
+        return next(
+            m for m in captured.detail if m.startswith("Provisioning Azure VM")
+        )
+
+    def test_exact_match_emits_spec_without_requested(
+        self, monkeypatch: pytest.MonkeyPatch, captured_output: CapturedOutput
+    ) -> None:
+        self._wire(monkeypatch)
+        self._platform().create(self._request(cpus=2, memory=8), RunContext())
+        line = self._provisioning_line(captured_output)
+        assert line == (
+            "Provisioning Azure VM 'dev' in eastus: "
+            "size Standard_B2ms (2 vCPU / 8 GiB)..."
+        )
+        assert "for requested" not in line
+        assert not captured_output.warnings
+
+    def test_round_up_warns_and_line_shows_selected_spec(
+        self, monkeypatch: pytest.MonkeyPatch, captured_output: CapturedOutput
+    ) -> None:
+        self._wire(monkeypatch)
+        # 4 vCPU / 8 GiB has no exact B-series SKU; it rounds up to B4ms.
+        self._platform().create(self._request(cpus=4, memory=8), RunContext())
+        line = self._provisioning_line(captured_output)
+        # The line carries only the selected spec; the round-up detail is in
+        # the warning, not doubled into the line.
+        assert line == (
+            "Provisioning Azure VM 'dev' in eastus: "
+            "size Standard_B4ms (4 vCPU / 16 GiB)..."
+        )
+        assert "for requested" not in line
+        assert captured_output.warnings == [
+            "Rounded up to Standard_B4ms (4 vCPU / 16 GiB) "
+            "for requested 4 vCPU / 8 GiB."
+        ]
+
+    def test_non_burstable_override_selected_and_emitted(
+        self, monkeypatch: pytest.MonkeyPatch, captured_output: CapturedOutput
+    ) -> None:
+        """A site override to a non-burstable SKU (the experiment behind
+        this knob) is selected and its spec surfaced in the same shape."""
+        self._wire(monkeypatch)
+        sizes = [{"cpus": 2, "memory": 8, "size": "Standard_D2s_v5"}]
+        self._platform(vm_sizes=sizes).create(
+            self._request(cpus=2, memory=8), RunContext()
+        )
+        line = self._provisioning_line(captured_output)
+        assert line == (
+            "Provisioning Azure VM 'dev' in eastus: "
+            "size Standard_D2s_v5 (2 vCPU / 8 GiB)..."
+        )
+        assert "for requested" not in line
