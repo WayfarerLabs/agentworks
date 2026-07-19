@@ -38,8 +38,8 @@ post-substitution env dicts (e.g. before or after
 ``_substitute_template_vars_in_env``). The computed union of
 ``SecretDecl``s is invariant under substitution because substitution
 only rewrites ``EnvEntry.value`` (plaintext), never ``EnvEntry.secret``
-(the reference name). This is load-bearing for the Phase 6.2 wiring,
-which builds targets from un-substituted template env dicts.
+(the reference name). This is load-bearing for callers that build
+targets from un-substituted template env dicts.
 
 **Non-interactive errors:** ``resolve_for_command`` raises
 ``SecretUnavailableError`` if the active backends can't satisfy a
@@ -48,8 +48,6 @@ error carries a per-secret hint listing the backends tried. Manager-
 layer callers may catch and re-raise with command-level context
 (``entity_kind`` / ``entity_name``) if useful, but the default error
 shape is already operator-actionable.
-
-See ``docs/sdd/2026-06-05-env-and-secrets/`` for the full design.
 """
 
 from __future__ import annotations
@@ -109,7 +107,8 @@ def compute_needed_secrets(
     """Union of ``SecretDecl``s referenced across the candidate target set.
 
     For each target, merges the per-scope env dicts via ``effective_env``
-    (preserving the FRD R2 precedence ladder), collects which
+    (preserving the scope precedence ladder
+    ``session > (agent | admin) > workspace > vm``), collects which
     declared secrets that merged env references, and unions the results
     across all targets. ``extra_decls`` adds decls that aren't referenced
     by any target's env chain -- a hook for legacy-prompt migrations
@@ -195,7 +194,7 @@ def resolve_for_command(
     new shells. Pure inspection commands (``session attach``,
     ``session list``, ``console attach``, ``vm list``, etc.) MUST NOT
     call it -- they inherit the env captured at shell-create time and
-    consume no secrets per FRD R4 / R5.
+    consume no secrets.
     """
     decls = compute_needed_secrets(targets, registry, extra_decls=extra_decls)
     if not decls:

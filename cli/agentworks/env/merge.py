@@ -1,6 +1,6 @@
 """Scope merge for env entries.
 
-Implements the precedence ladder defined in FRD R2:
+Implements the scope precedence ladder:
 
     session > (agent | admin) > workspace > vm
 
