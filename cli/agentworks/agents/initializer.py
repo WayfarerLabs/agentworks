@@ -159,9 +159,13 @@ def create_agent_on_vm(
     # via scp.
 
     # Git safe.directory wildcard (agents access repos owned by admin).
+    # Resolve the VM's own admin-template (NULL column = reserved
+    # ``default``): agents on a VM provisioned from a non-default
+    # admin-template must honor that template's git_force_safe_directory,
+    # the same value the admin user resolved at provisioning.
     from agentworks.resources.access import admin_template as _admin_template
 
-    if _admin_template(registry).git_force_safe_directory:
+    if _admin_template(registry, vm.admin_template or "default").git_force_safe_directory:
         try:
             agent_target.run("git config --global --add safe.directory '*'")
             output.detail("Git safe.directory configured for agent")

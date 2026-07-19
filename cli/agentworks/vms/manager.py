@@ -385,7 +385,10 @@ def create_vm(
         site=site,
         hostname=hostname,
         template=vm_tmpl.name,
-        admin_template=admin_template,
+        # Store the canonical NULL for the reserved default (whether the
+        # operator omitted the flag or passed it explicitly), so the
+        # column has one encoding per semantic state.
+        admin_template=None if selected_admin_template == "default" else selected_admin_template,
         cpus=resolved_cpus,
         memory_gib=resolved_memory,
         disk_gib=resolved_disk,
@@ -1727,12 +1730,12 @@ def reinit_vm(
             entity_name=name,
         )
 
-    verify_tailscale_available()
     # Resolve the admin-template the VM was created with (NULL column =
     # reserved ``default``), not always ``default``. Mirror create's
     # clean error if the operator has since removed the declaration, so a
     # dropped admin-template surfaces as a typed error naming the selector
-    # rather than a raw KeyError traceback.
+    # rather than a raw KeyError traceback. This cheap row + registry
+    # check bails before the Tailscale probe below.
     from agentworks.resources.access import kind_dict
 
     selected_admin_template = vm.admin_template or "default"
@@ -1745,6 +1748,8 @@ def reinit_vm(
             name=selected_admin_template,
             available=kind_dict(registry, "admin-template"),
         ) from None
+
+    verify_tailscale_available()
     cred_nodes = tuple(
         git_credential_node(registry, cred_name)
         for cred_name in admin.git_credentials
