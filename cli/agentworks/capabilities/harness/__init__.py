@@ -17,6 +17,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from agentworks.capabilities.harness.base import Harness, require_commands
+from agentworks.capabilities.harness.claude_code import ClaudeCodeHarness
 from agentworks.capabilities.harness.shell import ShellHarness
 
 if TYPE_CHECKING:
@@ -24,6 +25,7 @@ if TYPE_CHECKING:
 
 __all__ = [
     "HARNESS_REGISTRY",
+    "ClaudeCodeHarness",
     "Harness",
     "ShellHarness",
     "harness_for",
@@ -38,6 +40,7 @@ __all__ = [
 # through it at resolve; descriptor rows publish from it.
 HARNESS_REGISTRY: dict[str, type[Harness]] = {
     ShellHarness.name: ShellHarness,
+    ClaudeCodeHarness.name: ClaudeCodeHarness,
 }
 
 

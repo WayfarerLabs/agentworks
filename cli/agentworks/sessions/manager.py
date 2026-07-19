@@ -1888,27 +1888,16 @@ def create_session(
                         resolved_agent_name, workspace_name, "implicit", session_name=name
                     )
 
-                # Insert DB record before any tmux work so a crash mid-create
-                # leaves a recoverable row (and the teardown can find it to
-                # delete).
-                db.insert_session(
-                    name,
-                    workspace_name,
-                    template.name,
-                    mode,
-                    agent_name=resolved_agent_name,
-                    created_workspace=pending_workspace is not None,
-                    created_agent=pending_agent is not None,
-                    socket_path=expected_socket,
-                )
-
-                deploy_restricted_config(run_command, history_limit=config.session.history_limit)
                 # Op-start RunContext for the harness's start op: mirrors
                 # the runup readiness ctx above (targets), plus the scoped
                 # secrets (the session node's declared union, empty for the
                 # built-in shell harness; ScopedSecrets never delivers).
                 # Template-var substitution lifts OUT of the harness and
-                # wraps its returned string.
+                # wraps its returned string. The op runs BEFORE the insert
+                # so a freshly minted harness_state (claude-code's session
+                # id) lands with the new row; it does only read-only work
+                # (a login-shell string for shell, a find probe for
+                # claude-code), so it stays ahead of any tmux mutation.
                 start_ctx = RunContext(
                     config=config,
                     operation_scope=scope,
@@ -1920,6 +1909,24 @@ def create_session(
                     session_node.harness.start(start_ctx),
                     {"session_name": name, "workspace_name": workspace_name},
                 )
+
+                # Insert DB record before any tmux work so a crash mid-create
+                # leaves a recoverable row (and the teardown can find it to
+                # delete). The harness's start op ran just above, so its
+                # state blob lands with the new row.
+                db.insert_session(
+                    name,
+                    workspace_name,
+                    template.name,
+                    mode,
+                    agent_name=resolved_agent_name,
+                    created_workspace=pending_workspace is not None,
+                    created_agent=pending_agent is not None,
+                    socket_path=expected_socket,
+                    harness_state=session_node.harness.state,
+                )
+
+                deploy_restricted_config(run_command, history_limit=config.session.history_limit)
                 session_env = _resolve_session_env(
                     registry,
                     values=secret_values,
@@ -2494,6 +2501,14 @@ def restart_session(
             session_node.harness.restart(restart_ctx),
             {"session_name": name, "workspace_name": session.workspace_name},
         )
+        # Persist the harness's state blob after the op (mirrors the
+        # create-path insert). Usually a no-op (the value was stored on
+        # create), but a session predating the harness_state column
+        # (backfilled to {}) mints its id on this first restart. Persisting
+        # BEFORE create_tmux_session is intentional: a stable id that
+        # survives a tmux-recreate retry beats re-minting a new one each
+        # attempt (the id is the session's, whether or not the pane came up).
+        db.update_session_harness_state(name, session_node.harness.state)
         linux_user = _resolve_session_linux_user(db, session, vm)
         session_env = _resolve_session_env(
             registry,

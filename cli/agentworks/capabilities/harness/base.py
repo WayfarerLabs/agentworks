@@ -141,6 +141,7 @@ class Harness(Capability):
         workspace_name: str,  # the session's workspace ancestor
         target: _Target | None,  # the agent node it runs as; None in admin mode
         admin: bool,  # admin mode (uses ctx.admin_target())
+        state: dict[str, object],  # per-session persisted blob (mutated in place)
     ) -> None:
         super().__init__(owner_name, config)
         self._session_name = session_name
@@ -148,7 +149,18 @@ class Harness(Capability):
         self._workspace_name = workspace_name
         self._target = target
         self._admin = admin
+        self._state = state  # mutated in place by the ops; the manager persists it
         self._probed = False  # single-fire guard: the probe runs once per operation
+
+    @property
+    def state(self) -> dict[str, object]:
+        """The harness's per-session state blob. A harness reads and
+        mutates it in place during its ops (``claude-code`` mints and
+        records its Claude session id on the first ``start``); the session
+        manager reads this property after the op and persists it to the
+        session row. Empty for a harness that keeps no state (``shell``).
+        """
+        return self._state
 
     def secret_refs(self) -> tuple[str, ...]:
         """The secret names this harness declares (the secret-kind

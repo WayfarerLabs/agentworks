@@ -235,6 +235,7 @@ def _harness_for_template(
     admin: bool,
     vm: LiveVMNode,
     workspace: WorkspaceNode,
+    state: dict[str, object],
 ) -> Harness:
     """Build the harness the session node holds, from the resolved
     template's ``(harness, harness_config)`` pair.
@@ -246,6 +247,12 @@ def _harness_for_template(
     session's captured identity (``session_name``, ancestors, and the
     one-object ``target``) is the harness's own, distinct from the
     operation scope it later reads a LEVEL off of.
+
+    ``state`` is the harness's per-session blob: ``{}`` for a fresh
+    create (no row yet), or the stored ``harness_state`` on a live
+    session, so a value minted on create (``claude-code``'s session id)
+    survives to restart. The harness mutates it in place; the manager
+    persists it after the op.
     """
     from agentworks.capabilities.harness import harness_for
 
@@ -257,6 +264,7 @@ def _harness_for_template(
         workspace_name=workspace.name,
         target=target,
         admin=admin,
+        state=state,
     )
 
 
@@ -290,6 +298,7 @@ def pending_session_node(
         admin=admin,
         vm=vm,
         workspace=workspace,
+        state={},  # fresh create: no row yet, so the harness starts blank
     )
     return PendingSessionNode(db, config, name, harness, agent, workspace, vm)
 
@@ -337,5 +346,6 @@ def live_session_node(
         admin=row.agent_name is None,
         vm=vm,
         workspace=workspace,
+        state=row.harness_state,  # the stored blob: a create-minted id survives here
     )
     return LiveSessionNode(row, harness, agent, workspace, vm)

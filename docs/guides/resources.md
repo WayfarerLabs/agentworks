@@ -186,6 +186,33 @@ spec:
   (hoisted onto `harness = "shell"`); YAML manifests spell them under `harness_config`.
   `agw resource describe harness/shell` shows the harness row and the templates that reference it.
 
+The `claude-code` harness runs Claude Code as the session. It selects the launch-and-resume
+conventions in one line instead of restating command strings: `session create` starts a new Claude
+session, and `session restart` resumes the same conversation when its transcript still exists (and
+launches fresh when Claude never wrote one), so a restart continues where the session left off:
+
+```yaml
+apiVersion: agentworks/v1
+kind: session-template
+metadata:
+  name: claude
+  description: Claude Code session
+spec:
+  harness: claude-code
+  harness_config:
+    permission_mode: acceptEdits # optional; forwarded to `claude --permission-mode`
+    model: opus # optional; forwarded to `claude --model`
+    extra_args: [--append-system-prompt, "session {{session_name}}"] # optional escape hatch
+```
+
+- `harness_config` is three optional fields: `permission_mode` and `model` forward verbatim to
+  `claude --permission-mode` / `--model` (their choice sets are Claude's, not validated here), and
+  `extra_args` is a list of raw argv tokens appended last, the escape hatch for any flag the harness
+  does not model. Unknown fields are errors. `extra_args` elements support the `{{session_name}}` /
+  `{{workspace_name}}` variables.
+- The only requirement checked on the launch target is that `claude` is installed. The chosen action
+  (resume vs new session) is announced in the pane on start, so it is never silent.
+
 ## Built-ins and overrides
 
 Built-in resources ship with the app and appear in `agw resource list --origin builtin`. Override
@@ -199,12 +226,12 @@ policy is per kind:
   where this host lacks what they need (`agw resource list` marks the row; `describe` and
   `agw doctor` carry the reason); using a disabled site is an error naming the requirement.
 - **Secret backends** (`env-var`, `prompt`), **VM platforms** (`lima`, `wsl2`, `azure-vm`,
-  `proxmox`), and **session harnesses** (`shell`; `claude-code` is on the way): registered
-  capabilities, shown as read-only rows. You cannot declare or override them; secrets customize per
-  secret via `backend_mappings`, platforms configure per site via `platform_config`, and harnesses
-  configure per session-template via `harness_config`. A platform whose host requirements are not
-  met publishes no row at all: `agw doctor` lists installed-but-disabled platforms with the reason,
-  and sites referencing one self-disable rather than erroring.
+  `proxmox`), and **session harnesses** (`shell`, `claude-code`): registered capabilities, shown as
+  read-only rows. You cannot declare or override them; secrets customize per secret via
+  `backend_mappings`, platforms configure per site via `platform_config`, and harnesses configure
+  per session-template via `harness_config`. A platform whose host requirements are not met
+  publishes no row at all: `agw doctor` lists installed-but-disabled platforms with the reason, and
+  sites referencing one self-disable rather than erroring.
 
 ## Secrets: backends and the chain
 

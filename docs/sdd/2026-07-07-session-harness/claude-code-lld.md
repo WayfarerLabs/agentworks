@@ -104,22 +104,28 @@ fully-folded target-side one-liner for two concrete, verified reasons:
    the launch is in-contract; the folded one-liner was only ever an optional strengthening.
 
 The probe command mirrors `RequiredCommandsCheck._probe`'s shape (`nodes.py:141-200`): run through
-`"$SHELL" -lic '<inner>'` with `check=False`, read `.ok`. The inner test is slug-independent, it
-finds the stored uuid's transcript under ANY project directory (uuid uniqueness makes this safe and
-removes the brittle `<cwd-slug>` reconstruction):
+`"$SHELL" -lic '<inner>'` with `check=False`, then branch on the EXIT CODE (not just `.ok`). The
+inner test is slug-independent, it finds the stored uuid's transcript under ANY project directory
+(uuid uniqueness makes this safe and removes the brittle `<cwd-slug>` reconstruction):
 
 ```python
 projects = "${CLAUDE_CONFIG_DIR:-$HOME/.claude}/projects"
 inner = f'find {projects} -name {shlex.quote(sid + ".jsonl")} -print -quit 2>/dev/null | grep -q .'
-found = target.run(f'"$SHELL" -lic {shlex.quote(inner)}', check=False).ok
+result = target.run(f'"$SHELL" -lic {shlex.quote(inner)}', check=False)
 ```
 
-`find ... -print -quit | grep -q .` exits 0 iff at least one transcript matches, and is
-shell-neutral (no glob-nomatch divergence between bash and zsh). `find` is assumed present on the
-target (ubiquitous coreutils/findutils; not worth adding to `required_commands`).
+`grep -q .` exits 0 for a match and 1 for no match, and is shell-neutral (no glob-nomatch divergence
+between bash and zsh). `find` is assumed present on the target (ubiquitous coreutils/findutils; not
+worth adding to `required_commands`, and a missing `find` collapses into the pipeline's `grep` exit
+1). The branch reads `result.returncode`, distinguishing a probe that RAN from one that could not,
+so a transient failure never masquerades as "no transcript" (a P2 review finding):
 
-- `found is True` -> **resume**: `claude --resume <sid> ...`.
-- `found is False` -> **launch fresh**: `claude --session-id <sid> ...`.
+- **`0`** -> **resume**: `claude --resume <sid> ...`.
+- **`1`** -> **launch fresh**: `claude --session-id <sid> ...`.
+- **any other exit** (an SSH failure's 255, a shell that could not start) -> the probe never ran, so
+  RAISE a typed `StateError` naming the target and the exit code rather than guessing. Guessing
+  "fresh" would launch `--session-id <reserved-uuid>`, which Claude rejects as already-in-use on a
+  real session's restart, and the pane then fails to start.
 
 This makes start and restart symmetric: both call one shared `_resume_or_launch(ctx)`; the only
 difference is caller-side (the orchestrator kills the old tmux before `restart`, per R7), not in the
@@ -145,10 +151,10 @@ read-only session-query command in the CLI.)
 
 **Verify at implementation:**
 
-- `${CLAUDE_CONFIG_DIR:-$HOME/.claude}`: the DEFAULT `$HOME/.claude` is empirically confirmed; the
-  override env-var NAME (`CLAUDE_CONFIG_DIR`) could not be confirmed from v2.1.205's `--help` or
-  binary strings. Confirm the exact override name at implementation, or root the probe at
-  `$HOME/.claude/projects` if no override is supported.
+- `${CLAUDE_CONFIG_DIR:-$HOME/.claude}`: RESOLVED at implementation (2026-07-19).
+  `CLAUDE_CONFIG_DIR` is confirmed a real env var in the v2.1.205 binary, so the probe root
+  `${CLAUDE_CONFIG_DIR:-$HOME/.claude}/projects` is correct as written (default `$HOME/.claude` when
+  unset).
 - Flag/behavior parity in a real interactive TUI pane: `--session-id` / `--resume` /
   `--permission-mode` / `--model` were exercised in print mode, and `--resume` also in non-TTY
   interactive mode; none is `--print`-gated in `--help`, so parity is expected. Confirm by launching
@@ -297,5 +303,9 @@ following are NOT built here; `extra_args` is the interim escape hatch for any o
 - [x] Test double specified concretely (`_FakeTarget` substring map, both directions, no real
       binary).
 - [x] Out-of-v1 items recorded.
-- [ ] Items marked "verify at implementation" (discarded-session file retention, `CLAUDE_CONFIG_DIR`
-      override name, interactive-TUI flag parity) re-confirmed when Phase 2 code lands.
+- [x] Items marked "verify at implementation" resolved at P2 (2026-07-19): discarded-session file
+      retention (resolved by the operator experiments, see the detection section);
+      `CLAUDE_CONFIG_DIR` override name (confirmed present in v2.1.205). The one residual is
+      live-tmux-pane flag parity: the flags were exercised in print / non-TTY interactive mode and
+      the P2 tests stub the target (no real `claude`), so identical behavior in a live TUI pane is a
+      first-use smoke-test item, not an automated-test one.

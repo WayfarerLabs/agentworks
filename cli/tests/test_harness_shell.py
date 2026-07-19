@@ -42,6 +42,7 @@ def _harness(
     workspace_name: str = "ws1",
     target: object | None = None,
     admin: bool = True,
+    state: dict[str, object] | None = None,
 ) -> ShellHarness:
     return ShellHarness(
         "claude",
@@ -51,6 +52,7 @@ def _harness(
         workspace_name=workspace_name,
         target=target,  # type: ignore[arg-type]
         admin=admin,
+        state={} if state is None else state,
     )
 
 
@@ -177,6 +179,17 @@ def test_restart_falls_back_to_command() -> None:
 
 def test_restart_empty_config_is_a_login_shell() -> None:
     assert _harness({}).restart(RunContext()) == ""
+
+
+def test_shell_leaves_the_state_blob_untouched() -> None:
+    """``shell`` keeps no per-session state: the blob it is handed stays
+    ``{}`` across both ops, so the manager persists nothing for it."""
+    state: dict[str, object] = {}
+    harness = _harness({"command": "claude"}, state=state)
+    harness.start(RunContext())
+    harness.restart(RunContext())
+    assert state == {}
+    assert harness.state == {}
 
 
 # -- the readiness probe (shared require_commands) ---------------------------

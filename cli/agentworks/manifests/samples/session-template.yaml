@@ -25,6 +25,26 @@
 #  env:
 #    TERM: xterm-256color
 ##
-## The `claude-code` harness selects the Claude Code launch/resume conventions
-## with one line (harness: claude-code) instead of restating command strings.
+## The `claude-code` harness runs Claude Code as the session. It selects the
+## launch/resume conventions with one line (harness: claude-code) instead of
+## restating command strings: `session create` starts a new Claude session and
+## `session restart` resumes the same conversation when its transcript still
+## exists. `harness_config` is three optional fields:
+##   permission_mode -- forwarded to `claude --permission-mode`
+##   model           -- forwarded to `claude --model`
+##   extra_args      -- raw argv tokens appended last (the escape hatch)
+## The only launch-target requirement is that `claude` is installed.
+##
+#---
+#apiVersion: agentworks/v1
+#kind: session-template
+#metadata:
+#  name: claude
+#  description: Claude Code session
+#spec:
+#  harness: claude-code
+#  harness_config:
+#    permission_mode: acceptEdits
+#    model: opus
+##
 ## See `agw resource kinds` for the harnesses available in your installation.

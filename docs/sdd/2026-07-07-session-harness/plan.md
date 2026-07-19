@@ -152,7 +152,7 @@ the "Execution reorder" note). Because P4 already landed the template surface, r
 sample document and the doc example) land in this phase too. This phase also adds the
 general-purpose harness-state blob, which `claude-code` is the first user of.
 
-- [ ] **Harness-state persistence** (harness-api LLD "Harness-state persistence"; a deliberate
+- [x] **Harness-state persistence** (harness-api LLD "Harness-state persistence"; a deliberate
       reversal of "DB unchanged"). A forward-only migration adds a `harness_state` column to the
       `sessions` table (JSON, default `'{}'`, existing rows backfilled) and `SessionRow` gains the
       `harness_state: dict` field; `_harness_for_template` (`sessions/nodes.py`) loads it (or `{}`
@@ -162,7 +162,7 @@ general-purpose harness-state blob, which `claude-code` is the first user of.
       harness-owned and opaque to the core. **Done when:** the migration applies + backfills on a
       pre-existing DB (add the migration-fixture test), a value a harness mutates on create is read
       back on restart (round-trip test), and `shell` (which mutates nothing) leaves it `{}`.
-- [ ] **`claude_code.py`: the `claude-code` harness** per the claude-code LLD. Config vocab
+- [x] **`claude_code.py`: the `claude-code` harness** per the claude-code LLD. Config vocab
       `permission_mode` / `model` / `extra_args`; unknown fields are validation errors naming the
       harness and field; `validate_config` shape-only, returns `()`. `start`/`restart` share one
       `_resume_or_launch`: read/mint the session id in `self._state["session_id"]`, run the
@@ -173,11 +173,11 @@ general-purpose harness-state blob, which `claude-code` is the first user of.
       present->resume and absent->fresh; the minted id persists via the state blob; the flags map to
       the LLD-verified spellings; the visible-decision output is asserted; no test invokes a real
       `claude` binary.
-- [ ] **The deferred claude-code docs (from P4).** Add the `claude-code` sample document to
+- [x] **The deferred claude-code docs (from P4).** Add the `claude-code` sample document to
       `manifests/samples/session-template.yaml` and the worked `claude-code` example to
       `docs/guides/resources.md` (the spots P4 left noted); complete P4's "Samples + sample-config"
       and "Docs riding this phase" items. No `docs/sdd/` path in any permanent doc.
-- [ ] **The P4 claude-code end-to-end carry (from P4's Tests P4).** Drive a `harness: claude-code`
+- [x] **The P4 claude-code end-to-end carry (from P4's Tests P4).** Drive a `harness: claude-code`
       template through session create AND restart via the real orchestrator: op-dispatch produces
       the resume/launch pane string; restart-post-kill end state; the visible decision through the
       real launch; and the substitution-safety case (a generated snippet is not mangled).
@@ -293,13 +293,13 @@ to end. Retires the flat-field and always-shell seams.
       pre-write. **Done when:** migrating a flat TOML template emits the clean YAML shape and the
       per-run registry-equivalence verification passes (hoist and emission land on the identical
       value).
-- [ ] **Samples + sample-config.** Rewrite `manifests/samples/session-template.yaml` leading with a
+- [x] **Samples + sample-config.** Rewrite `manifests/samples/session-template.yaml` leading with a
       commented `shell` + `harness_config` document, followed by the `claude-code` one-line document
       (runtime neutrality). Update `sample-config.toml`'s session-template example to the flat shell
       form (documented default TOML shape) pointing at `agw resource sample session-template`.
       **Done when:** the samples-load-clean test passes and `agw resource sample session-template`
       emits the new shape.
-- [ ] **Docs riding this phase (the model change becomes true here):** top-level `README.md`
+- [x] **Docs riding this phase (the model change becomes true here):** top-level `README.md`
       "Sessions" narrative rewritten to "a session is a specification to run a specific harness as
       an agent in a workspace on a VM" (harness as first-class model concept); `cli/README.md`
       session-template schema (YAML `harness`/`harness_config`, nested TOML keys, flat-field rules,

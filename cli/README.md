@@ -511,12 +511,39 @@ spec top level:
 
 - `command` -- the pane command (empty/omitted is a plain login shell). Supports `{{session_name}}`
   and `{{workspace_name}}` variable substitution (double-brace syntax).
-- `restart_command` -- used by `session restart`, useful for tools like Claude Code where `--resume`
-  picks up the previous conversation. If omitted, `command` is used.
+- `restart_command` -- used by `session restart`, for a tool that needs a different invocation on
+  restart. If omitted, `command` is used. (To run Claude Code, prefer the dedicated `claude-code`
+  harness below, which resumes the previous conversation on its own.)
 - `required_commands` -- executables the command needs, checked on the session's launch target (the
   agent, or the VM admin for admin sessions) before any state mutation, so launching a session whose
   tool is not installed fails fast with a clear error instead of a cryptic downstream tmux failure.
   Merged (de-duped, order-preserving) across template inheritance.
+
+The `claude-code` harness runs Claude Code as the session: `session create` starts a new Claude
+session and `session restart` resumes the same conversation when its transcript still exists on disk
+(launching fresh when Claude never wrote one). It needs only that `claude` is installed on the
+launch target, and announces the chosen action (resume vs new session) in the pane, so the decision
+is never silent. Its `harness_config` vocabulary is three optional fields:
+
+- `permission_mode` -- forwarded verbatim to `claude --permission-mode` (its choice set is Claude's,
+  not validated here).
+- `model` -- forwarded verbatim to `claude --model`.
+- `extra_args` -- a list of raw argv tokens appended last, the escape hatch for any flag the harness
+  does not model. Each element is one argv token (shell-quoted, never re-split), and elements
+  support the `{{session_name}}` / `{{workspace_name}}` variables.
+
+```yaml
+apiVersion: agentworks/v1
+kind: session-template
+metadata:
+  name: claude
+  description: Claude Code session
+spec:
+  harness: claude-code
+  harness_config:
+    permission_mode: acceptEdits
+    model: opus
+```
 
 The `(harness, harness_config)` pair inherits as a unit: a child that restates the same harness
 merges its config block into the parent's (child wins per key; `shell` unions `required_commands`),

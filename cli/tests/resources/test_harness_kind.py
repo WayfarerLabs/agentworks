@@ -116,7 +116,10 @@ def test_resource_list_surfaces_the_shell_row(tmp_path: Path) -> None:
     cfg = load_config(_write_cfg(tmp_path / "config.toml"), warn_issues=False)
     registry = build_registry(cfg)
     listing = list_resources(registry, kinds=("harness",))
-    assert [(r.kind, r.name) for r in listing.rows] == [("harness", "shell")]
+    assert [(r.kind, r.name) for r in listing.rows] == [
+        ("harness", "claude-code"),
+        ("harness", "shell"),
+    ]
 
 
 def test_resource_kinds_lists_harness(tmp_path: Path) -> None:
