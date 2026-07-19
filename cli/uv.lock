@@ -14,6 +14,7 @@ dependencies = [
     { name = "azure-identity" },
     { name = "azure-mgmt-compute" },
     { name = "azure-mgmt-network" },
+    { name = "azure-mgmt-resource" },
     { name = "click" },
     { name = "pyyaml" },
     { name = "tomlkit" },
@@ -33,6 +34,7 @@ requires-dist = [
     { name = "azure-identity", specifier = ">=1.25.1" },
     { name = "azure-mgmt-compute", specifier = ">=37.0.1" },
     { name = "azure-mgmt-network", specifier = ">=29.0.0" },
+    { name = "azure-mgmt-resource", specifier = ">=26.0.0" },
     { name = "click", specifier = ">=8.3" },
     { name = "pyyaml", specifier = ">=6.0.3" },
     { name = "tomlkit", specifier = ">=0.15.0" },
@@ -163,6 +165,20 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/9a/e5/31cf174ef67087532f159083e2e007507fe163f58c58fbd0e08d05209cf4/azure_mgmt_network-30.2.0.tar.gz", hash = "sha256:9b17c259e6344808aaa80a34bbc4b13f16bc01185dd9db137eaa0ae26664861a", size = 708178, upload-time = "2026-02-13T03:45:39.617Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/a0/5a/14c8cfb1655267dfed7529d35e5dd6581746238c9f50d4307b9e2faaacf8/azure_mgmt_network-30.2.0-py3-none-any.whl", hash = "sha256:a87edffd7c38aa9d3494daa8d42914213b0863a9072cf8c7c7e48018b12b6532", size = 631894, upload-time = "2026-02-13T03:45:41.738Z" },
+]
+
+[[package]]
+name = "azure-mgmt-resource"
+version = "26.0.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "azure-mgmt-core" },
+    { name = "isodate" },
+    { name = "typing-extensions" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/61/e1/c6196381cc6bb3eff9e24f5bf31b7fd962651ddbd6120bc2a4c482a7af16/azure_mgmt_resource-26.0.0.tar.gz", hash = "sha256:54227c5db06d3be4dd4b77ad885b273e9eb2606d1de653c5b534066cfbb60c0c", size = 117372, upload-time = "2026-06-24T09:48:29.546Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/e6/6e/3e776a0817ebe3558fbd8d3f98b1bd8fa75a46596e5cf9bb4377960c4611/azure_mgmt_resource-26.0.0-py3-none-any.whl", hash = "sha256:ef36559a4c0843b4272aa584efb455c686e4c3f6357421b38c82f405c01a9a9f", size = 102492, upload-time = "2026-06-24T09:48:30.854Z" },
 ]
 
 [[package]]
