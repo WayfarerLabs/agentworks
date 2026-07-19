@@ -54,8 +54,33 @@ memory: {memory}GiB
 disk: {disk}GiB
 ssh:
   localPort: 0
-mountType: virtiofs
+# No host file sharing: agentworks VMs are self-contained. An explicit empty
+# list guarantees no mounts regardless of Lima's host defaults or _config
+# overrides. (mountType is moot with zero mounts, so it is omitted.)
+mounts: []
 provision:
+  # Cap oversized subordinate uid/gid ranges. Lima's rootless-base boot
+  # script grants the host-matched user a 1 GiB (1073741824) subuid/subgid
+  # range, which overruns login.defs SUB_UID_MAX and starves agent-user
+  # creation (each new agent needs a free 65536 block). 65536 is the standard
+  # rootless allocation and is sufficient. Idempotent, and the boot script's
+  # `grep -qw <user>` guard means this correction sticks across reboots (the
+  # user stays present, so the range is not re-added).
+  - mode: system
+    script: |
+      #!/bin/sh
+      set -eu
+      for f in /etc/subuid /etc/subgid; do
+        [ -e "$f" ] || continue
+        # Atomic replace: write the capped copy to a sibling temp with the
+        # same mode/owner, then rename over the original. A mid-stream awk
+        # failure leaves the original intact rather than truncated, and the
+        # rename is atomic within /etc (never a partially written subid file).
+        awk -F: 'BEGIN{{OFS=":"}} $3+0>65536{{$3=65536}} {{print}}' "$f" >"$f.agw"
+        chmod --reference="$f" "$f.agw"
+        chown --reference="$f" "$f.agw"
+        mv "$f.agw" "$f"
+      done
   - mode: system
     script: |
 {provision_script}
