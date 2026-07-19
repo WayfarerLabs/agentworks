@@ -131,8 +131,6 @@ class TestCreateProvisioningOutput:
     def _wire(monkeypatch: pytest.MonkeyPatch) -> None:
         from types import SimpleNamespace
 
-        from agentworks.capabilities.vm_platform import azure_vm
-
         def _collection(result: object) -> SimpleNamespace:
             poller = SimpleNamespace(result=lambda: result)
             return SimpleNamespace(
@@ -154,8 +152,15 @@ class TestCreateProvisioningOutput:
             virtual_machines=_collection(SimpleNamespace(id="/vm-id")),
         )
 
-        monkeypatch.setattr(azure_vm, "_compute_client", lambda az: fake_compute)
-        monkeypatch.setattr(azure_vm, "_network_client", lambda az: fake_network)
+        # The SDK clients are per-instance cached accessors (keyed by
+        # subscription); patch them on the class so the fakes are returned
+        # without building a credential or touching Azure.
+        monkeypatch.setattr(
+            AzureVMPlatform, "_compute_client", lambda self, az: fake_compute
+        )
+        monkeypatch.setattr(
+            AzureVMPlatform, "_network_client", lambda self, az: fake_network
+        )
         monkeypatch.setattr(
             AzureVMPlatform, "_vm_exists", lambda self, compute, rg, name: False
         )
