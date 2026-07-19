@@ -169,8 +169,9 @@ class _StubPlatform:
     """Minimal bound-platform stand-in for the vm-sites gates.
 
     ``vm_active`` is a no-op hold and ``status`` reports RUNNING so the
-    gate proceeds without shelling out (the real ``ensure_active`` fast
-    path runs ``tailscale ping``).
+    gate proceeds without shelling out (the gate's real fast path,
+    ``confirmed_active`` / ``_is_tailscale_reachable``, runs
+    ``tailscale ping``).
     """
 
     name = "stub"
