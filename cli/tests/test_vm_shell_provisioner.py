@@ -356,9 +356,14 @@ def test_provisioner_shell_target_attaches_and_registers_detach_for_azure(
     detach_calls: list[str] = []
 
     class _FakeAzureProvisioner(AzureVMPlatform):
-        # Override the constructor so we don't need a real Azure config.
-        def __init__(self) -> None:  # noqa: D401, ANN001
-            pass
+        # Chain super with a minimal valid config (validate_config re-runs
+        # at construct, so a bare {} would fail) so the base's cache slots
+        # exist even though the overrides below never touch Azure.
+        def __init__(self) -> None:  # noqa: D401
+            super().__init__(
+                "az-test",
+                {"subscription_id": "sub", "resource_group": "rg", "region": "eastus"},
+            )
 
         def attach_public_ip(self, vm: object) -> str:
             attach_calls.append(getattr(vm, "name", "?"))
@@ -418,8 +423,12 @@ def test_provisioner_shell_target_detaches_on_exception_for_azure(
     detach_calls: list[str] = []
 
     class _AzureRaisesAfterAttach(AzureVMPlatform):
+        # Chain super with a minimal valid config; see _FakeAzureProvisioner.
         def __init__(self) -> None:  # noqa: D401
-            pass
+            super().__init__(
+                "az-test",
+                {"subscription_id": "sub", "resource_group": "rg", "region": "eastus"},
+            )
 
         def attach_public_ip(self, vm: object) -> str:
             return "203.0.113.42"

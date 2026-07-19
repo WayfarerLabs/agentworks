@@ -2030,9 +2030,25 @@ def _require_vm(db: Database, name: str) -> VMRow:
     return vm
 
 
+# Guards the missing-tailscale-binary warning to once per process: the
+# power-state fast path calls _is_tailscale_reachable on every gated
+# command, so an unguarded warn would repeat the same line all run long.
+_warned_tailscale_missing = False
+
+
 def _is_tailscale_reachable(tailscale_host: str) -> bool:
-    """Quick check whether a Tailscale IP is still reachable."""
+    """Quick check whether a Tailscale IP is still reachable.
+
+    Returns False (the degraded answer, which sends the caller down the
+    slower cloud-power-state path) on both a ping timeout and a missing
+    ``tailscale`` binary. The binary being absent is a setup problem, not
+    a transient one: it silently buys a cloud round trip on every gated
+    command, so it warns once per process to name the cause rather than
+    degrading in silence.
+    """
     import subprocess
+
+    global _warned_tailscale_missing  # noqa: PLW0603
 
     try:
         result = subprocess.run(
@@ -2044,7 +2060,16 @@ def _is_tailscale_reachable(tailscale_host: str) -> bool:
             timeout=10,
         )
         return result.returncode == 0
-    except (subprocess.TimeoutExpired, FileNotFoundError):
+    except subprocess.TimeoutExpired:
+        return False
+    except FileNotFoundError:
+        if not _warned_tailscale_missing:
+            _warned_tailscale_missing = True
+            output.warn(
+                "tailscale binary not found on PATH; VM power-state checks "
+                "will fall back to slower cloud API calls. Install tailscale "
+                "(or add it to PATH) to speed them up."
+            )
         return False
 
 
