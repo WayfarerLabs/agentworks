@@ -281,11 +281,17 @@ class AzureVMPlatform(VMPlatform):
         req_memory = request.memory_gib if request.memory_gib is not None else 8
         selected = _select_vm_size(catalog, cpus=req_cpus, memory_gib=req_memory)
         azure_vm_size = selected.name
+        # The provisioning line always names the selected SKU and its spec. A
+        # round-up (an off-ratio request that no SKU matches exactly) also
+        # warns, naming the requested shape as the reason.
+        size_summary = (
+            f"{selected.name} ({selected.cpus} vCPU / {selected.memory_gib} GiB)"
+        )
         if selected.cpus > req_cpus or selected.memory_gib > req_memory:
             output.warn(
-                f"no exact Azure size for {req_cpus} vCPU / {req_memory} GiB; "
-                f"rounding up to {selected.name} "
-                f"({selected.cpus} vCPU / {selected.memory_gib} GiB)"
+                f"Rounded up to {selected.name} "
+                f"({selected.cpus} vCPU / {selected.memory_gib} GiB) "
+                f"for requested {req_cpus} vCPU / {req_memory} GiB."
             )
         disk = request.disk_gib if request.disk_gib is not None else 50
         swap = request.swap_gib if request.swap_gib is not None else 0
@@ -315,7 +321,7 @@ class AzureVMPlatform(VMPlatform):
                 hint="delete it first or pick a different VM name",
             )
 
-        output.detail(f"Provisioning Azure VM '{vm_name}' in {az.region} (size: {azure_vm_size})...")
+        output.detail(f"Provisioning Azure VM '{vm_name}' in {az.region}: size {size_summary}...")
         if swap > 0:
             output.detail(f"Swap: {swap} GiB", indent=2)
 
