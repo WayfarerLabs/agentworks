@@ -2,8 +2,7 @@
 
 Extracted from ``vms/initializer.py`` to keep the initializer focused on
 provisioning orchestration and the hardening rules self-contained
-(constants + pure decision logic + apply functions). Per FRD R4a + R4b
-of the direct-target-user-SSH SDD.
+(constants + pure decision logic + apply functions).
 
 Public surface:
 - ``apply_vm_hardening(target, logger)``: the top-level entry point
@@ -32,7 +31,10 @@ if TYPE_CHECKING:
 HARDENING_SYSCTL_PATH = "/etc/sysctl.d/99-agentworks.conf"
 HARDENING_SYSCTL_CONTENT = """\
 # Managed by agentworks. Do not edit; this file is rewritten on vm reinit.
-# Source: docs/sdd/2026-06-06-direct-user-ssh-access/ R4b.
+# Defense-in-depth baseline for shared multi-user VMs: restrict kernel log
+# and pointer exposure, confine ptrace to descendants, and enable the
+# protected symlink/hardlink/fifo/regular-file guards against symlink and
+# fifo attacks in world-writable dirs.
 kernel.dmesg_restrict = 1
 kernel.kptr_restrict = 1
 kernel.yama.ptrace_scope = 1
