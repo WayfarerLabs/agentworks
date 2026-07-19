@@ -510,8 +510,13 @@ machinery is to stay non-interactive.
 - `agw resource list` shows the two `harness` rows (built-in origin); `agw resource kinds` gains the
   kind with its category and description; `agw resource describe harness/<name>` shows the row, its
   description, and `Referenced by:` (the session templates that declare it).
-- `agw resource describe session-template/<name>` renders `harness` / `harness_config` like any
-  other spec fields, and the reference appears in its references list when declared.
+- `agw resource describe session-template/<name>` surfaces the declared `harness` as a reference
+  (the session template's outbound `harness`-kind reference), consistent with how the shared
+  describe surface already works: it renders the framework-uniform fields (kind, name, description,
+  origin) and the reference graph, NOT kind-specific spec fields (it never rendered the old
+  `command` field either). Rendering the raw `harness_config` blob on describe would mean growing
+  spec-field rendering for every kind, which is out of scope here; if wanted, it is a separate,
+  cross-kind enhancement.
 - No doctor changes beyond what the registry surfaces provide for free. (Doctor already reaches
   session readiness at SYSTEM scope in the merged model; the harness's readiness SKIPS there, per
   the fork above, so no doctor-specific branch is needed.)

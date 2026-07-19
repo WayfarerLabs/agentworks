@@ -330,40 +330,36 @@ ssh_private_key = "~/.ssh/id_ed25519"        # required: used for SSH connection
 #REPO_REGION = "us-east-1"
 
 # --- Session templates ---
-# Define commands that sessions can run. The built-in "default" template runs a
-# login shell. Templates support inheritance via "inherits".
+# A session is a specification to run a specific HARNESS as an agent in a
+# workspace on a VM. The harness owns start/restart and the launch-target
+# readiness check. A template with no harness runs the built-in "default"
+# (a plain login shell via the `shell` harness). Templates support
+# inheritance via "inherits".
 #
-# Template commands support {{session_name}} and {{workspace_name}} variables,
-# using double-brace syntax.
+# The flat command fields below are the `shell` harness's config vocabulary.
+# They keep working here and are hoisted to `harness = "shell"` internally;
+# YAML manifests spell them under `harness_config` instead (the primary
+# authoring surface -- run `agw resource sample session-template`):
 #
-# Templates may define a restart_command for `session restart`. If omitted,
-# the regular command is used. This is useful for tools like Claude Code
-# where --resume picks up the previous conversation.
+# command           -- the pane command; supports {{session_name}} and
+#                      {{workspace_name}} variables (empty = login shell).
+# restart_command   -- used by `agw session restart`; falls back to command.
+#                      Useful for tools like Claude Code where --resume picks
+#                      up the previous conversation.
+# required_commands -- executables the command needs; checked on the launch
+#                      target (the agent, or the VM admin for admin sessions)
+#                      BEFORE the session is created, so a missing binary fails
+#                      fast with a clear error instead of a cryptic tmux
+#                      failure. Unioned during inheritance (de-duplicated).
 #
-# required_commands lists the executables the template's command needs. They
-# are checked on the session's launch target (the agent, or the VM admin for
-# admin sessions) BEFORE the session is created, so launching a "claude"
-# session on an agent that doesn't have claude installed fails fast with a
-# clear error instead of a cryptic tmux failure. required_commands are unioned
-# during inheritance (parents + child, de-duplicated).
-#
-# env maps are merged during inheritance (child wins on key collision).
+# The flat fields cannot combine with a non-`shell` `harness` or an explicit
+# `harness_config` table (one spelling per declaration). env maps merge during
+# inheritance (child wins on key collision).
 
-#[session_templates.default]               # override the built-in default
-#command = "claude --name {{session_name}}"
-#restart_command = "claude --resume {{session_name}}"
-#required_commands = ["claude"]
-#description = "Claude Code interactive session"
-
-#[session_templates.claude]
-#inherits = ["default"]
-#command = "claude --name {{session_name}}"
-#restart_command = "claude --resume {{session_name}}"
-#required_commands = ["claude"]
-#description = "Claude Code interactive session"
-
-#[session_templates.default.env]
-#CLAUDE_LOG_LEVEL = "info"
+#[session_templates.htop]                  # a shell session running one command
+#command = "htop"
+#required_commands = ["htop"]
+#description = "Live process monitor"
 
 #[session_templates.custom-tool]
 #command = "my-tool --flag"

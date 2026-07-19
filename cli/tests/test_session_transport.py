@@ -264,9 +264,8 @@ def test_create_session_aborts_on_missing_required_command(
         "_resolve_template",
         lambda *a, **k: SimpleNamespace(
             name="claude",
-            command="claude",
-            restart_command=None,
-            required_commands=["claude"],
+            harness="shell",
+            harness_config={"command": "claude", "required_commands": ["claude"]},
             env={},
         ),
     )

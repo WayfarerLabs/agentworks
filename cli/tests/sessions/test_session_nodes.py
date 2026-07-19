@@ -75,7 +75,7 @@ def _session(
         db, cast("Config", object()), "ws1", vm_node, None
     )
     template = ResolvedSessionTemplate(
-        name="claude", required_commands=list(required)
+        name="claude", harness_config={"required_commands": list(required)}
     )
     return pending_session_node(
         db,
@@ -573,7 +573,7 @@ def test_live_session_probes_its_realized_agent_at_preflight(
     agent = _live_agent(db, vm)
     session = live_session_node(
         _session_row(agent_name="dev"),  # type: ignore[arg-type]
-        ResolvedSessionTemplate(name="claude", required_commands=["claude"]),
+        ResolvedSessionTemplate(name="claude", harness_config={"required_commands": ["claude"]}),
         agent=agent,
         workspace=_live_workspace(db, vm),
         vm=vm,
@@ -589,7 +589,7 @@ def test_live_session_admin_mode_comes_from_the_row(db: Database) -> None:
     vm = _vm_node(db)
     session = live_session_node(
         _session_row(agent_name=None),  # type: ignore[arg-type]
-        ResolvedSessionTemplate(name="claude", required_commands=["claude"]),
+        ResolvedSessionTemplate(name="claude", harness_config={"required_commands": ["claude"]}),
         agent=None,
         workspace=_live_workspace(db, vm),
         vm=vm,

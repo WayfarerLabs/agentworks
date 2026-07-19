@@ -1,18 +1,30 @@
-## kind: session-template -- defines a command sessions can run.
-## Commands support {{session_name}} and {{workspace_name}} variables.
-## `restart_command` (optional) is used by `agw session restart`;
-## `required_commands` are checked on the launch target before the
-## session is created. Env maps merge during inheritance (child wins).
+## kind: session-template -- selects the harness that runs a session's workload.
+## A session is a specification to run a specific harness as an agent in a
+## workspace on a VM. The harness owns start/restart and the launch-target
+## readiness check; `harness_config` is the blob it validates. An undeclared
+## harness resolves to `shell` (a plain login shell), so a field-less template
+## is still a login shell.
+##
+## `shell`'s config vocabulary is the legacy command fields, now nested:
+##   command           -- the pane command (empty/omitted = login shell)
+##   restart_command   -- used by `agw session restart`; falls back to command
+##   required_commands -- executables checked on the launch target first
+## Commands support the {{session_name}} and {{workspace_name}} variables.
+## Env maps merge during inheritance (child wins); required_commands union.
 ##
 #apiVersion: agentworks/v1
 #kind: session-template
 #metadata:
-#  name: claude
-#  description: Claude Code interactive session
+#  name: htop
+#  description: Live process monitor
 #spec:
-#  inherits: [default]
-#  command: claude --name {{session_name}}
-#  restart_command: claude --resume {{session_name}}
-#  required_commands: [claude]
+#  harness: shell
+#  harness_config:
+#    command: htop
+#    required_commands: [htop]
 #  env:
-#    CLAUDE_LOG_LEVEL: info
+#    TERM: xterm-256color
+##
+## The `claude-code` harness selects the Claude Code launch/resume conventions
+## with one line (harness: claude-code) instead of restating command strings.
+## See `agw resource kinds` for the harnesses available in your installation.

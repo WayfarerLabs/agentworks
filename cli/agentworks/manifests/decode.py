@@ -170,6 +170,37 @@ def _decode_workspace_template(doc: Document, spec: dict[str, object], issues: l
 def _decode_session_template(doc: Document, spec: dict[str, object], issues: list[str]) -> Any:
     from agentworks.config import _load_session_templates
 
+    # The YAML spec is clean (FRD R2): the legacy flat fields are
+    # ``shell``'s config vocabulary and live only under harness_config.
+    # A manifest that spells them top-level is rejected, pointing at the
+    # nested shape -- this tightens the (unreleased) manifest surface.
+    flat = sorted(
+        {"command", "restart_command", "required_commands"} & set(spec)
+    )
+    if flat:
+        raise ConfigError(
+            f"session-template spec field(s) {', '.join(flat)} are the "
+            "'shell' harness's config; set harness: shell and move them "
+            "under spec.harness_config"
+        )
+    harness = spec.get("harness")
+    harness_config = spec.get("harness_config")
+    if harness_config is not None and not isinstance(harness_config, dict):
+        raise ConfigError("spec.harness_config must be a mapping")
+    # Capability validation on the declared blob, with this document's
+    # file:line in the error (decode_document prefixes ``doc.where``).
+    # Unknown harness names defer to the framework's miss policy at
+    # finalize, so they skip invocation here. Mirrors
+    # _decode_git_credential.
+    if isinstance(harness, str):
+        from agentworks.capabilities.harness import HARNESS_REGISTRY
+
+        capability = HARNESS_REGISTRY.get(harness)
+        if capability is not None:
+            capability.validate_config(
+                f"session-template/{doc.name}",
+                harness_config if isinstance(harness_config, dict) else {},
+            )
     result = _load_session_templates(
         {"session_templates": {doc.name: spec}}, issues, _decls(doc.location)
     )

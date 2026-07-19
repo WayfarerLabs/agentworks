@@ -38,6 +38,14 @@ Permanent-doc updates are threaded into the phase that makes each claim true (th
 change" rule), not deferred to a closeout. Only the ADR numbering/promotion and the final lock live
 in the closeout phase.
 
+**Execution reorder (2026-07-19):** P2 (`claude-code`) is blocked on an operator decision (whether a
+no-work Claude session leaves a resumable transcript; see `claude-code-lld.md`). Since P2 and P3 are
+independent, and most of P4 is independent of `claude-code`, the effort ran P1 -> P3 -> P4 (shell
+surface) first and holds P2 for the operator answer. The two P4 sub-items that DO need `claude-code`
+(the claude-code sample document and the claude-code doc example) ride with P2; their P4 checkboxes
+stay unchecked until then. This is safe under the single-PR model: nothing merges until the whole
+effort, P2 included, is complete.
+
 ## Pinned anchors (code at HEAD)
 
 The swap and mirror points, cited so each phase edits the right lines:
@@ -227,7 +235,7 @@ path did moves onto the harness in one slice.
 Reshape the template to the pair and delete the flat fields; `harness:` selection becomes usable end
 to end. Retires the flat-field and always-shell seams.
 
-- [ ] **`SessionTemplate` reshape** (`template.py:41-70`): remove `command`/`restart_command`/
+- [x] **`SessionTemplate` reshape** (`template.py:41-70`): remove `command`/`restart_command`/
       `required_commands`; add `harness: str | None` and `harness_config: dict[str, object] | None`
       (`None` = not declared). `referenced_resources()` emits one `harness`-kind reference (usage
       "the session harness") when `harness` is declared, plus any capability-implied refs from
@@ -237,7 +245,7 @@ to end. Retires the flat-field and always-shell seams.
       DB stores the template NAME) is a green-gate of P4, not deferred to P5. **Done when:** a
       declared `harness` surfaces as a reference, `Referenced by:` lists the template, and no
       flat-field reader remains anywhere in the tree.
-- [ ] **`ResolvedSessionTemplate` reshape** (`templates.py:21-31`): becomes
+- [x] **`ResolvedSessionTemplate` reshape** (`templates.py:21-31`): becomes
       `(name, description,     env, harness: str, harness_config: dict)` defaulting `("shell", {})`;
       delete the Phase 3 flat-blob adapter (the factory now reads `resolved.harness` /
       `resolved.harness_config`). Rework the merge walk to the pair rule (`_merge_pair`):
@@ -246,19 +254,19 @@ to end. Retires the flat-field and always-shell seams.
       the R5 inheritance cases pass (child same/different/silent; `required_commands` union; the
       multi-parent divergence pinned by test) and `validate_config` runs once on the MERGED blob at
       resolve completion.
-- [ ] **TOML loader** (`config.py:1044-1086`): accept `harness` (string) + `harness_config` (table);
+- [x] **TOML loader** (`config.py:1044-1086`): accept `harness` (string) + `harness_config` (table);
       hoist the legacy flat fields to `harness="shell"` + equivalent blob; flat + non-`shell`
       `harness` is a `ConfigError`; flat + explicit `harness_config` is a `ConfigError`; update
       `_SESSION_TEMPLATE_KEYS`. **Done when:** a flat TOML template loads to the identical internal
       value the migrator emits, and both conflict cases raise with a clear message.
-- [ ] **Manifest decoder** (`decode.py:170-177`): reject the flat fields before delegating (clean
+- [x] **Manifest decoder** (`decode.py:170-177`): reject the flat fields before delegating (clean
       YAML spec, R2), error pointing at `harness: shell` + `harness_config`; pass `harness` /
       `harness_config` through; invoke `HARNESS_REGISTRY[name].validate_config` on the declared blob
       with `file:line` framing (unknown names skip invocation so the miss policy reports them at
       finalize). Mirror `_decode_git_credential`. `!`-flag this manifest-surface tightening (R2).
       **Done when:** a flat-field YAML manifest is rejected and a typo'd `harness` name errors at
       finalize naming the template.
-- [ ] **Migration** (`planning.py:450-549`): add a `session-template` branch mirroring
+- [x] **Migration** (`planning.py:450-549`): add a `session-template` branch mirroring
       `git-credential`: pop the flat fields, emit `harness: shell` + a `harness_config` blob when
       present, pass declared `harness`/`harness_config` through; validate the rebuilt blob
       pre-write. **Done when:** migrating a flat TOML template emits the clean YAML shape and the
@@ -277,15 +285,16 @@ to end. Retires the flat-field and always-shell seams.
       legacy-child harness-switch note per R6); `docs/guides/resources.md` harness capability story
       with worked session-template examples in the new shape. No permanent doc cites a `docs/sdd/`
       path.
-- [ ] **Always-consider sweep:** confirm the CLI Typer tree is unchanged (no new commands/flags; the
+- [x] **Always-consider sweep:** confirm the CLI Typer tree is unchanged (no new commands/flags; the
       `harness` kind is data-driven through `resource kinds` / `--kind`), so completions need no
       regeneration; verify `--kind harness` completes via the existing dynamic path. Re-run the docs
       and sample-config rules.
 
 **Tests P4:** hoist parity; flat+non-shell error; flat+blob error; decoder flat rejection; pair
 inheritance (all R5 cases + multi-parent divergence); migration registry-equivalence; samples load
-clean; `describe session-template/<name>` renders `harness`/`harness_config` and lists the
-reference.
+clean; the declared `harness` surfaces as a reference (`referenced_resources()`), and
+`describe harness/shell` lists the declaring template (reconciled R8: describe renders the reference
+graph and framework-uniform fields, not kind-specific spec fields).
 
 - **`claude-code` end-to-end carry (this is the first phase `claude-code` is reachable through the
   real orchestrator; do not leave it pinned only in P2 isolation).** Drive a `harness: claude-code`
@@ -308,9 +317,11 @@ reference.
 - [ ] **Final sweeps.** RE-VERIFY the consumer inventory is empty of flat-field readers across code,
       tests, docs, and samples (the readers are actually cleared in P4, where deleting the fields
       forces it; this is a re-check, not the primary sweep); promote any SDD `.cspell.json` word
-      that now lives in permanent code to the root dictionary; run `./scripts/lint-files.sh --fix`
-      across touched files; full gate green. **Done when:** CI-equivalent gates pass and no
-      `docs/sdd/` reference exists in permanent code or docs.
+      that now lives in permanent code to the root dictionary; reword the newly-authored `--`
+      em-dash-imitations in the P4 samples/docs per the code-style rule (P4 review, deferred here as
+      a prose-polish pass, not a bulk sweep of pre-existing usage); run
+      `./scripts/lint-files.sh     --fix` across touched files; full gate green. **Done when:**
+      CI-equivalent gates pass and no `docs/sdd/` reference exists in permanent code or docs.
 - [ ] **Lock.** Create `locked.md` summarizing the final state (per the SDD lifecycle). **Done
       when:** `locked.md` exists and the effort is closed.
 

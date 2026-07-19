@@ -91,9 +91,8 @@ def _requiring_template(monkeypatch: pytest.MonkeyPatch, *commands: str) -> None
         "_resolve_template",
         lambda *a, **k: SimpleNamespace(
             name="claude",
-            command="claude",
-            restart_command=None,
-            required_commands=list(commands),
+            harness="shell",
+            harness_config={"command": "claude", "required_commands": list(commands)},
             env={},
         ),
     )
@@ -441,19 +440,28 @@ def test_session_scope_reaches_the_harness(
 # every template produces the same pane command it did before the swap.
 
 
-def _template(monkeypatch: pytest.MonkeyPatch, **fields: object) -> None:
+def _template(
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    command: str = "",
+    restart_command: str | None = None,
+    required_commands: list[str] | None = None,
+) -> None:
+    """Stub ``_resolve_template`` with a ``shell``-harness resolved
+    template built from the friendly flat kwargs (the harness now owns
+    the command strings; the pane command is its start/restart output)."""
     from agentworks.sessions import manager as session_manager
 
-    base = {
-        "name": "claude",
-        "command": "",
-        "restart_command": None,
-        "required_commands": [],
-        "env": {},
-    }
-    base.update(fields)
+    config: dict[str, object] = {"command": command}
+    if restart_command is not None:
+        config["restart_command"] = restart_command
+    if required_commands is not None:
+        config["required_commands"] = required_commands
+    resolved = SimpleNamespace(
+        name="claude", harness="shell", harness_config=config, env={}
+    )
     monkeypatch.setattr(
-        session_manager, "_resolve_template", lambda *a, **k: SimpleNamespace(**base)
+        session_manager, "_resolve_template", lambda *a, **k: resolved
     )
 
 

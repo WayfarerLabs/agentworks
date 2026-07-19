@@ -304,6 +304,66 @@ description = "AZDO access"
     assert doc["metadata"]["description"] == "AZDO access"
 
 
+def test_session_template_flat_fields_nest_under_harness_config(
+    tmp_path: Path,
+) -> None:
+    """The migrator emits the clean YAML shape: flat command fields nest
+    under harness_config on the 'shell' harness (mirroring the
+    git-credential provider_config nesting); env stays kind-owned at the
+    spec top level, and the run's registry-equivalence verification
+    proves the hoist and the emission land on the identical value."""
+    cfg = _write_config(
+        tmp_path,
+        resources="""\
+[session_templates.claude]
+command = "claude"
+restart_command = "claude --resume"
+required_commands = ["claude"]
+description = "Claude session"
+
+[session_templates.claude.env]
+CLAUDE_LOG_LEVEL = "info"
+""",
+    )
+    config, plan = _plan(cfg, ["session-template/claude"])
+    execute_plan(plan, config)  # verification passes -> rows equivalent
+    (doc,) = _loaded_docs(tmp_path / "resources" / "session-templates.yaml")
+    assert doc["metadata"]["description"] == "Claude session"
+    assert doc["spec"] == {
+        "harness": "shell",
+        "harness_config": {
+            "command": "claude",
+            "restart_command": "claude --resume",
+            "required_commands": ["claude"],
+        },
+        "env": {"CLAUDE_LOG_LEVEL": "info"},
+    }
+
+
+def test_session_template_declared_pair_passes_through(tmp_path: Path) -> None:
+    """A TOML template already spelling the nested pair migrates
+    verbatim (harness + harness_config pass through, env stays
+    top-level)."""
+    cfg = _write_config(
+        tmp_path,
+        resources="""\
+[session_templates.htop]
+harness = "shell"
+
+[session_templates.htop.harness_config]
+command = "htop"
+required_commands = ["htop"]
+""",
+    )
+    config, plan = _plan(cfg, ["session-template/htop"])
+    execute_plan(plan, config)
+    (doc,) = _loaded_docs(tmp_path / "resources" / "session-templates.yaml")
+    assert doc["spec"] == {
+        "harness": "shell",
+        "harness_config": {"command": "htop", "required_commands": ["htop"]},
+    }
+
+
 def test_singletons_emit_default_documents(tmp_path: Path) -> None:
     cfg = _write_config(tmp_path)
     config, plan = _plan(cfg, ["admin-template", "named-console-template"])

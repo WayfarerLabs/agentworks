@@ -227,7 +227,7 @@ class PendingSessionNode:
                 )
 
 
-def _shell_harness_for_template(
+def _harness_for_template(
     template: ResolvedSessionTemplate,
     *,
     session_name: str,
@@ -236,27 +236,22 @@ def _shell_harness_for_template(
     vm: LiveVMNode,
     workspace: WorkspaceNode,
 ) -> Harness:
-    """Build the ``shell`` harness the session node holds, from the
-    resolved template's still-flat ``command`` / ``restart_command`` /
-    ``required_commands`` fields.
+    """Build the harness the session node holds, from the resolved
+    template's ``(harness, harness_config)`` pair.
 
-    This flat-blob adapter is the P3->P4 interim seam (plan "Named
-    interim seams"): the harness is hardcoded to ``shell`` and its config
-    is assembled from the flat fields here. Phase 4 reshapes the template
-    to the ``(harness, harness_config)`` pair, deletes the flat fields,
-    and this adapter reads ``resolved.harness`` / ``resolved.harness_config``
-    directly instead.
+    The resolver has already collapsed an undeclared template to the
+    ``shell`` default and merged the config, so this reads
+    ``resolved.harness`` / ``resolved.harness_config`` directly; the
+    session-template name is the config owner (error framing), and the
+    session's captured identity (``session_name``, ancestors, and the
+    one-object ``target``) is the harness's own, distinct from the
+    operation scope it later reads a LEVEL off of.
     """
     from agentworks.capabilities.harness import harness_for
 
-    shell_config: dict[str, object] = {
-        "command": template.command,
-        "restart_command": template.restart_command,
-        "required_commands": list(template.required_commands),
-    }
-    return harness_for("shell")(
+    return harness_for(template.harness)(
         template.name,
-        shell_config,
+        template.harness_config,
         session_name=session_name,
         vm_name=vm.row.name,
         workspace_name=workspace.name,
@@ -288,7 +283,7 @@ def pending_session_node(
             f"session '{name}': exactly one of an agent node or "
             f"admin=True must be given (the session runs as one of them)."
         )
-    harness = _shell_harness_for_template(
+    harness = _harness_for_template(
         template,
         session_name=name,
         target=agent,
@@ -335,7 +330,7 @@ def live_session_node(
             f"session '{row.name}' is an admin session but an agent "
             f"node ('{agent.name}') was handed to the factory."
         )
-    harness = _shell_harness_for_template(
+    harness = _harness_for_template(
         template,
         session_name=row.name,
         target=agent,
