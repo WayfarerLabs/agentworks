@@ -1,0 +1,59 @@
+# Built-in apt packages: named apt package sets, each cross-referencing
+# the apt-source(s) that must be installed first. The cross-reference
+# lives in spec.apt_sources (a list of apt-source names); the framework's
+# apt-source miss policy validates it at build_registry time. Published
+# with a built-in origin through the bundled-manifest loader.
+apiVersion: agentworks/v1
+kind: apt-package
+metadata:
+  name: gh
+  description: GitHub CLI
+spec:
+  apt_sources:
+    - github-cli
+  apt:
+    - gh
+---
+apiVersion: agentworks/v1
+kind: apt-package
+metadata:
+  name: terraform
+  description: HashiCorp Terraform
+spec:
+  apt_sources:
+    - hashicorp
+  apt:
+    - terraform
+---
+apiVersion: agentworks/v1
+kind: apt-package
+metadata:
+  name: nodejs
+  description: Node.js 22.x via NodeSource
+spec:
+  apt_sources:
+    - nodesource-v22
+  apt:
+    - nodejs
+---
+apiVersion: agentworks/v1
+kind: apt-package
+metadata:
+  name: ngrok
+  description: ngrok reverse tunnel agent
+spec:
+  apt_sources:
+    - ngrok-agent
+  apt:
+    - ngrok
+---
+apiVersion: agentworks/v1
+kind: apt-package
+metadata:
+  name: tenv
+  description: tenv (Terraform/OpenTofu/Terragrunt version manager)
+spec:
+  apt_sources:
+    - tofuutils-tenv
+  apt:
+    - tenv

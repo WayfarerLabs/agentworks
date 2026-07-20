@@ -77,10 +77,12 @@ def build_registry(config: Config, manifests: ManifestSet | None = None) -> Regi
     # Using a disabled site is a typed error at resolve time;
     # doctor warns on references to one.
     registry = Registry.empty()
-    # Built-in publishers first. The bundled manifests precede the
-    # catalog publisher because catalog.publish_to also publishes the
-    # operator's TOML catalog extensions (operator-declared rows), and
-    # built-in rows must never land on top of operator rows.
+    # Built-in publishers first. The bundled manifests now supply the
+    # built-in catalog entries too (apt sources/packages and install
+    # commands ship as manifests/builtin/*.yaml), so they must precede
+    # catalog.publish_to, which publishes only the operator's deprecated
+    # TOML catalog extensions (operator-declared rows): built-in rows
+    # must never land on top of operator rows.
     builtin_manifests.publish_to(registry)
     catalog.publish_to(registry, config)
     git_credential.publish_to(registry)

@@ -21,9 +21,12 @@ assertions in the Phase 1 registry test.
 
 from __future__ import annotations
 
+from textwrap import dedent
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
+    from pathlib import Path
+
     from agentworks.catalog import (
         AptPackageEntry,
         AptSourceEntry,
@@ -279,3 +282,153 @@ def test_oracle_matches_builtin_catalog() -> None:
         name: install_command_payload(entry)
         for name, entry in catalog.user_install_commands.items()
     } == EXPECTED_USER_INSTALL_COMMANDS
+
+
+# -- Phase 1: bundled built-in manifests resolve to the same payloads ----------
+
+# Which bundled file each kind's built-in rows ship in. The origin's
+# source carries the shipped filename (see manifests/builtin.py).
+_BUNDLED_SOURCE = {
+    "apt-source": "agentworks.manifests.builtin/apt-sources.yaml",
+    "apt-package": "agentworks.manifests.builtin/apt-packages.yaml",
+    "system-install-command": "agentworks.manifests.builtin/install-commands.yaml",
+    "user-install-command": "agentworks.manifests.builtin/install-commands.yaml",
+}
+
+
+def _write_operator_config(
+    tmp_path: Path,
+    *,
+    toml_body: str = "",
+    manifests: dict[str, str] | None = None,
+) -> Path:
+    """Write a minimal operator config (plus optional TOML catalog
+    entries and resources/*.yaml manifests) and return the config path.
+    """
+    pub = tmp_path / "id.pub"
+    priv = tmp_path / "id"
+    pub.write_text("ssh-ed25519 X")
+    priv.write_text("-----BEGIN-----")
+    cfg = tmp_path / "config.toml"
+    cfg.write_text(
+        f'[operator]\nssh_public_key = "{pub}"\nssh_private_key = "{priv}"\n'
+        + toml_body
+    )
+    if manifests:
+        resources = tmp_path / "resources"
+        resources.mkdir()
+        for filename, content in manifests.items():
+            (resources / filename).write_text(content)
+    return cfg
+
+
+def test_bundled_builtin_rows_match_oracle(tmp_path: Path) -> None:
+    """On a config with no operator catalog entries, the Registry's
+    built-in catalog rows come entirely from the bundled manifests and
+    resolve to the Phase 0 oracle payloads byte-for-byte, each carrying a
+    ``built-in`` origin pointed at its bundled file. This is the no-drift
+    proof for the TOML-to-YAML migration.
+    """
+    from agentworks.bootstrap import build_registry
+    from agentworks.config import load_config
+    from agentworks.resources.access import kind_dict
+
+    cfg = load_config(_write_operator_config(tmp_path), warn_issues=False)
+    registry = build_registry(cfg)
+
+    srcs = kind_dict(registry, "apt-source")
+    pkgs = kind_dict(registry, "apt-package")
+    sys_cmds = kind_dict(registry, "system-install-command")
+    usr_cmds = kind_dict(registry, "user-install-command")
+
+    assert {
+        name: apt_source_payload(entry) for name, entry in srcs.items()
+    } == EXPECTED_APT_SOURCES
+    assert {
+        name: apt_package_payload(entry) for name, entry in pkgs.items()
+    } == EXPECTED_APT_PACKAGES
+    assert {
+        name: install_command_payload(entry) for name, entry in sys_cmds.items()
+    } == EXPECTED_SYSTEM_INSTALL_COMMANDS
+    assert {
+        name: install_command_payload(entry) for name, entry in usr_cmds.items()
+    } == EXPECTED_USER_INSTALL_COMMANDS
+
+    # Provenance: every built-in row is a built-in origin pointed at the
+    # bundled file for its kind (not the former agentworks.catalog source).
+    for kind, rows in (
+        ("apt-source", srcs),
+        ("apt-package", pkgs),
+        ("system-install-command", sys_cmds),
+        ("user-install-command", usr_cmds),
+    ):
+        for entry in rows.values():
+            assert entry.origin is not None
+            assert entry.origin.variant == "built-in"
+            assert entry.origin.source == _BUNDLED_SOURCE[kind]
+
+
+def test_operator_toml_override_wins_over_builtin(tmp_path: Path) -> None:
+    """An operator's TOML apt-package with a built-in's name replaces the
+    built-in row (publish order + builtin_override='allow'), carrying the
+    operator payload and an operator-declared origin.
+    """
+    from agentworks.bootstrap import build_registry
+    from agentworks.config import load_config
+    from agentworks.resources.access import kind_dict
+
+    toml_body = dedent(
+        """
+        [apt_packages.gh]
+        description = "Operator gh override"
+        apt = ["gh", "gh-extra"]
+        apt_sources = ["github-cli"]
+        """
+    )
+    cfg = load_config(
+        _write_operator_config(tmp_path, toml_body=toml_body), warn_issues=False
+    )
+    registry = build_registry(cfg)
+
+    gh = kind_dict(registry, "apt-package")["gh"]
+    assert gh.apt == ["gh", "gh-extra"]
+    assert gh.description == "Operator gh override"
+    assert gh.origin is not None
+    assert gh.origin.variant == "operator-declared"
+
+
+def test_operator_manifest_override_wins_over_builtin(tmp_path: Path) -> None:
+    """An operator's YAML apt-package manifest with a built-in's name
+    replaces the built-in row, the same as the TOML path, carrying the
+    operator payload and an operator-declared origin.
+    """
+    from agentworks.bootstrap import build_registry
+    from agentworks.config import load_config
+    from agentworks.resources.access import kind_dict
+
+    manifest = dedent(
+        """
+        apiVersion: agentworks/v1
+        kind: apt-package
+        metadata:
+          name: gh
+          description: Operator gh override
+        spec:
+          apt_sources:
+            - github-cli
+          apt:
+            - gh
+            - gh-extra
+        """
+    )
+    cfg = load_config(
+        _write_operator_config(tmp_path, manifests={"override.yaml": manifest}),
+        warn_issues=False,
+    )
+    registry = build_registry(cfg)
+
+    gh = kind_dict(registry, "apt-package")["gh"]
+    assert gh.apt == ["gh", "gh-extra"]
+    assert gh.description == "Operator gh override"
+    assert gh.origin is not None
+    assert gh.origin.variant == "operator-declared"

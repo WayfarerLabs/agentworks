@@ -285,12 +285,13 @@ def test_build_registry_equivalent_to_manual_steps(
 def test_build_registry_publishes_catalog_before_config(
     example_config: Path,
 ) -> None:
-    """Phase 2b invariant: ``build_registry`` invokes
-    ``catalog.publish_to`` before ``Config.publish_to`` so any
-    operator-declared catalog override layers on top of the
-    built-in base. Verified end-to-end: every catalog kind has
-    at least one row after build_registry, and those rows carry
-    ``Origin.built_in(source="agentworks.catalog")``.
+    """The built-in catalog entries publish before the operator sources so
+    any operator override (TOML or manifest) layers on top of the built-in
+    base. Verified end-to-end: every catalog kind has at least one row
+    after build_registry, and those rows carry ``Origin.built_in`` with a
+    bundled-manifest source (the entries ship as
+    ``manifests/builtin/*.yaml`` now, not the former ``agentworks.catalog``
+    code source).
     """
     from agentworks.bootstrap import build_registry
 
@@ -304,14 +305,16 @@ def test_build_registry_publishes_catalog_before_config(
         "user-install-command",
     ):
         rows = list(r.iter_kind(catalog_kind))
-        assert rows, f"expected at least one {catalog_kind} row from the catalog publisher"
+        assert rows, f"expected at least one {catalog_kind} row from the bundled built-in manifests"
         # The built-in catalog rows are built-in. Operator overrides
         # (if any) would re-publish the same name with operator-declared
         # origin; the test's example_config doesn't exercise that path.
         for row in rows:
             assert row.origin is not None
             assert row.origin.variant == "built-in"
-            assert row.origin.source == "agentworks.catalog"
+            assert row.origin.source is not None
+            assert row.origin.source.startswith("agentworks.manifests.builtin/")
+            assert row.origin.source.endswith(".yaml")
 
 
 def test_unknown_kind_in_requirement_errors_clearly(tmp_path: Path) -> None:

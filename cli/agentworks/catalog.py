@@ -333,52 +333,41 @@ def load_catalog(config: Config) -> ResolvedCatalog:
 
 
 def publish_to(registry: Registry, config: Config | None = None) -> None:
-    """Publish catalog entries into the registry as first-class Resources.
+    """Publish operator-declared TOML catalog entries into the registry.
 
-    Built-in catalog entries are Registry citizens with
-    ``Origin.built_in(source="agentworks.catalog")``. The four
-    catalog kinds (``apt-source``, ``apt-package``,
+    The built-in catalog entries no longer publish here: they ship as
+    bundled YAML manifests under ``manifests/builtin/`` and land via
+    ``builtin_manifests.publish_to`` (which runs first in
+    ``build_registry``), with ``Origin.built_in`` and a shipped-file
+    source, exactly like every other bundled resource. This function now
+    carries only the operator's deprecated TOML surface for these kinds
+    (retired separately under ADR 0016).
+
+    The four catalog kinds (``apt-source``, ``apt-package``,
     ``system-install-command``, ``user-install-command``) use the
     framework's error miss policy, so a typo'd reference from
     ``[vm_templates.*].apt_packages = ["..."]`` etc. surfaces as a
-    framework error citing the reference's source.
-
-    ``apt-source`` is published even though operators don't reference
-    sources directly from templates: apt_packages reference them via
-    their ``apt_sources`` field, so the framework needs the sources in
-    the registry to resolve the ``AptPackageEntry.referenced_resources()``
-    edges cleanly. The dependency graph
-    (apt_package -> apt_source) becomes visible in
-    ``agw resource describe`` via the ``Referenced by:`` section on
-    each apt_source.
+    framework error citing the reference's source. ``apt-source`` is a
+    framework kind (even though operators don't reference sources
+    directly from templates) so the framework can resolve the
+    ``apt_package -> apt_source`` edges emitted by
+    ``AptPackageEntry.referenced_resources()``, making that dependency
+    graph visible in ``agw resource describe``'s ``Referenced by:``
+    section.
 
     When ``config`` is provided, operator-declared catalog entries
     (``[apt_sources.<name>]``, ``[apt_packages.<name>]``,
     ``[system_install_commands.<name>]``,
     ``[user_install_commands.<name>]`` in the operator's TOML) are
-    published on top of the built-in entries with
-    ``Origin.operator_declared(...)``. Publish order + the catalog
-    kinds' ``builtin_override = "allow"`` policy is what lets the
-    operator row replace the built-in at ``Registry.add``: catalog runs
-    first, then Config, then other publishers -- an operator's override
-    lands on top of the built-in base. Config-side publishing lives here (rather than
-    in ``Config.publish_to``) because parsing operator catalog entries
-    is catalog's expertise; Config just stashes the raw TOML dicts.
+    published with ``Origin.operator_declared(...)``. Publish order + the
+    catalog kinds' ``builtin_override = "allow"`` policy is what lets the
+    operator row replace the built-in at ``Registry.add``: the built-in
+    manifests publish first, then this operator publisher, so an
+    operator's override lands on top of the built-in base. Config-side
+    publishing lives here (rather than in ``Config.publish_to``) because
+    parsing operator catalog entries is catalog's expertise; Config just
+    stashes the raw TOML dicts.
     """
-    from agentworks.resources import Origin
-
-    builtin = load_builtin_catalog()
-    code_origin = Origin.built_in(source="agentworks.catalog")
-
-    for src_name, src in builtin.apt_sources.items():
-        registry.add("apt-source", src_name, src, code_origin)
-    for pkg_name, pkg in builtin.apt_packages.items():
-        registry.add("apt-package", pkg_name, pkg, code_origin)
-    for sys_name, sys_cmd in builtin.system_install_commands.items():
-        registry.add("system-install-command", sys_name, sys_cmd, code_origin)
-    for user_name, user_cmd in builtin.user_install_commands.items():
-        registry.add("user-install-command", user_name, user_cmd, code_origin)
-
     if config is None:
         return
 
@@ -401,6 +390,7 @@ def publish_to(registry: Registry, config: Config | None = None) -> None:
     # either at load_config time or via a public ``config.declared_at_for(...)``
     # helper.
     from agentworks.config import CONFIG_PATH
+    from agentworks.resources import Origin
 
     op_origin = Origin.operator_declared(file=CONFIG_PATH, line=0)
     for src_name, src in _load_apt_sources(config.apt_sources).items():
