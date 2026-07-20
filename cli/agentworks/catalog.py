@@ -12,18 +12,20 @@ import tomllib
 from dataclasses import dataclass, field
 from functools import cache
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Literal, TypedDict
+from typing import TYPE_CHECKING, Any, Literal, TypedDict, cast
 
 from agentworks.declared_resource import DeclaredResource
 from agentworks.errors import ExternalError
 from agentworks.resources.kind import KIND_REGISTRY, NoUnreferencedDefaultError
+from agentworks.source_location import synthesized
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
-    from agentworks.config import Config
+    from agentworks.config import Config, _SectionLineMap
     from agentworks.resources import Registry
     from agentworks.resources.reference import ResourceReference
+    from agentworks.source_location import SourceLocation
 
 
 class CatalogError(ExternalError):
@@ -128,6 +130,26 @@ _BUILTIN_CATALOG_PATH = Path(__file__).parent / "catalog.toml"
 _SAFE_FILENAME_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9._-]*$")
 
 
+class _SynthesizedDecls:
+    """Default ``decls`` for the per-entry loaders: every lookup resolves to a
+    synthesized ``SourceLocation``. Duck-typed stand-in for config's
+    ``_SectionLineMap`` (the loaders only call ``lookup``). Used when entries
+    are loaded outside the config loader (the operator-TOML publisher, which
+    does not carry the section-line map), so ``declared_at`` falls back to the
+    synthesized sentinel. Manifest decoders pass a real fixed-location shim
+    (``manifests.decode._decls``) instead, so their entries carry the document
+    location.
+    """
+
+    def lookup(self, *_path: str) -> SourceLocation:
+        return synthesized()
+
+
+# Module-level singleton; the loaders' declared ``decls`` type is config's
+# ``_SectionLineMap``, satisfied structurally (loaders only call ``lookup``).
+_SYNTHESIZED_DECLS = cast("_SectionLineMap", _SynthesizedDecls())
+
+
 def _require_field(data: dict[str, object], key: str, context: str) -> object:
     if key not in data:
         raise CatalogError(f"{context}.{key} is required")
@@ -141,7 +163,10 @@ def _require_list(data: dict[str, object], key: str, context: str) -> list[str]:
     return [str(item) for item in val]
 
 
-def _load_apt_sources(raw: dict[str, object]) -> dict[str, AptSourceEntry]:
+def _load_apt_sources(
+    raw: dict[str, object],
+    decls: _SectionLineMap = _SYNTHESIZED_DECLS,
+) -> dict[str, AptSourceEntry]:
     entries: dict[str, AptSourceEntry] = {}
     for name, data in raw.items():
         if not isinstance(data, dict):
@@ -158,11 +183,15 @@ def _load_apt_sources(raw: dict[str, object]) -> dict[str, AptSourceEntry]:
             source=str(_require_field(data, "source", ctx)),
             source_file=source_file,
             key_dearmor=bool(data.get("key_dearmor", False)),
+            declared_at=decls.lookup("apt_sources", name),
         )
     return entries
 
 
-def _load_apt_packages(raw: dict[str, object]) -> dict[str, AptPackageEntry]:
+def _load_apt_packages(
+    raw: dict[str, object],
+    decls: _SectionLineMap = _SYNTHESIZED_DECLS,
+) -> dict[str, AptPackageEntry]:
     entries: dict[str, AptPackageEntry] = {}
     for name, data in raw.items():
         if not isinstance(data, dict):
@@ -173,6 +202,7 @@ def _load_apt_packages(raw: dict[str, object]) -> dict[str, AptPackageEntry]:
             description=str(data.get("description", "")),
             apt=_require_list(data, "apt", ctx),
             apt_sources=_require_list(data, "apt_sources", ctx) if "apt_sources" in data else [],
+            declared_at=decls.lookup("apt_packages", name),
         )
     return entries
 
@@ -197,7 +227,10 @@ def _load_test_fields(data: dict[str, object], ctx: str) -> _TestFields:
     return fields
 
 
-def _load_system_commands(raw: dict[str, object]) -> dict[str, SystemInstallCommandEntry]:
+def _load_system_commands(
+    raw: dict[str, object],
+    decls: _SectionLineMap = _SYNTHESIZED_DECLS,
+) -> dict[str, SystemInstallCommandEntry]:
     entries: dict[str, SystemInstallCommandEntry] = {}
     for name, data in raw.items():
         if not isinstance(data, dict):
@@ -209,12 +242,16 @@ def _load_system_commands(raw: dict[str, object]) -> dict[str, SystemInstallComm
             description=str(data.get("description", "")),
             command=str(_require_field(data, "command", ctx)),
             path=_require_list(data, "path", ctx) if "path" in data else [],
+            declared_at=decls.lookup("system_install_commands", name),
             **tests,
         )
     return entries
 
 
-def _load_user_commands(raw: dict[str, object]) -> dict[str, UserInstallCommandEntry]:
+def _load_user_commands(
+    raw: dict[str, object],
+    decls: _SectionLineMap = _SYNTHESIZED_DECLS,
+) -> dict[str, UserInstallCommandEntry]:
     entries: dict[str, UserInstallCommandEntry] = {}
     for name, data in raw.items():
         if not isinstance(data, dict):
@@ -226,6 +263,7 @@ def _load_user_commands(raw: dict[str, object]) -> dict[str, UserInstallCommandE
             description=str(data.get("description", "")),
             command=str(_require_field(data, "command", ctx)),
             path=_require_list(data, "path", ctx) if "path" in data else [],
+            declared_at=decls.lookup("user_install_commands", name),
             **tests,
         )
     return entries
@@ -374,21 +412,19 @@ def publish_to(registry: Registry, config: Config | None = None) -> None:
     # Operator-declared catalog entries. Parse the raw TOML dicts Config
     # stashed at load-time, publish each with operator-declared origin.
     #
-    # The entry dataclasses now carry ``declared_at`` (inherited from
-    # ``DeclaredResource``), but it is not yet populated per-entry: the catalog
-    # loaders don't consume ``_SectionLineMap`` and Config stores raw dicts
-    # (not typed entries) for these sections, so ``declared_at`` keeps its
-    # synthesized default. Publishing here uses
+    # The loaders now thread ``declared_at`` from a ``_SectionLineMap`` (used
+    # on the manifest path, where the decoder passes the document location).
+    # Here on the operator-TOML surface the real section-line map is not
+    # available: it is local to ``load_config`` and not stored on ``Config``,
+    # which stashes only the raw section dicts. So these calls fall through to
+    # the loaders' default synthesized shim and ``declared_at`` keeps the
+    # ``line=0`` sentinel. Publishing uses
     # ``Origin.operator_declared(file=CONFIG_PATH, line=0)``, the sentinel for
     # "real file, no single declaration line" (see
-    # ``source_location.synthesized``'s docstring). The renderer drops the
+    # ``source_location.synthesized``'s docstring); the renderer drops the
     # parenthetical for ``line=0``, so operators see "operator-declared"
-    # without file:line for now.
-    #
-    # The remaining follow-up is to populate declared_at (and a real origin
-    # line) by threading ``_SectionLineMap`` into the ``_load_*`` helpers,
-    # either at load_config time or via a public ``config.declared_at_for(...)``
-    # helper.
+    # without file:line. A real line here is a nice-to-have that the deprecated
+    # TOML surface can gain if Config ever carries the map.
     from agentworks.config import CONFIG_PATH
     from agentworks.resources import Origin
 

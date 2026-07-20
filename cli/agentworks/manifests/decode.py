@@ -360,13 +360,13 @@ def _decode_named_console_template(
 def _decode_apt_source(doc: Document, spec: dict[str, object], issues: list[str]) -> Any:
     from agentworks.catalog import _load_apt_sources
 
-    return _load_apt_sources({doc.name: spec})[doc.name]
+    return _load_apt_sources({doc.name: spec}, _decls(doc.location))[doc.name]
 
 
 def _decode_apt_package(doc: Document, spec: dict[str, object], issues: list[str]) -> Any:
     from agentworks.catalog import _load_apt_packages
 
-    return _load_apt_packages({doc.name: spec})[doc.name]
+    return _load_apt_packages({doc.name: spec}, _decls(doc.location))[doc.name]
 
 
 def _decode_system_install_command(
@@ -374,7 +374,7 @@ def _decode_system_install_command(
 ) -> Any:
     from agentworks.catalog import _load_system_commands
 
-    return _load_system_commands({doc.name: spec})[doc.name]
+    return _load_system_commands({doc.name: spec}, _decls(doc.location))[doc.name]
 
 
 def _decode_user_install_command(
@@ -382,7 +382,7 @@ def _decode_user_install_command(
 ) -> Any:
     from agentworks.catalog import _load_user_commands
 
-    return _load_user_commands({doc.name: spec})[doc.name]
+    return _load_user_commands({doc.name: spec}, _decls(doc.location))[doc.name]
 
 
 _DECODERS: dict[str, Callable[[Document, dict[str, object], list[str]], Any]] = {
