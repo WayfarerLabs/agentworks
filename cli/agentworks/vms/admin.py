@@ -12,18 +12,17 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
+from agentworks.declared_resource import DeclaredResource
 from agentworks.env.entry import env_references
 from agentworks.git_credentials.credential import credential_references
-from agentworks.source_location import SourceLocation, synthesized
 
 if TYPE_CHECKING:
     from agentworks.env import EnvEntry
-    from agentworks.resources.origin import Origin
-    from agentworks.resources.reference import ReferenceEntry, ResourceReference
+    from agentworks.resources.reference import ResourceReference
 
 
-@dataclass(frozen=True)
-class AdminConfig:
+@dataclass(frozen=True, kw_only=True)
+class AdminConfig(DeclaredResource):
     """Per-user config for the admin user on VMs.
 
     The underlying ``admin-template`` kind was plurified from
@@ -37,8 +36,9 @@ class AdminConfig:
     the framework.
     """
 
+    # Override the base's required ``name``: the admin-template surface is a
+    # singleton today, so an omitted-name construction defaults to "default".
     name: str = "default"
-    description: str | None = None
     username: str = "agentworks"
     shell: str = "bash"
     git_credentials: list[str] = field(default_factory=list)
@@ -58,9 +58,6 @@ class AdminConfig:
     claude_plugins: list[str] = field(default_factory=list)
     # Env that applies whenever a shell is opened as the admin user.
     env: dict[str, EnvEntry] = field(default_factory=dict)
-    declared_at: SourceLocation = field(default_factory=synthesized)
-    origin: Origin | None = None
-    references: tuple[ReferenceEntry, ...] = ()
 
     def referenced_resources(self) -> list[ResourceReference]:
         from agentworks.resources.reference import (

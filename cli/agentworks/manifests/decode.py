@@ -56,28 +56,6 @@ KIND_SECTIONS: dict[str, tuple[str, ...]] = {
     "user-install-command": ("user_install_commands",),
 }
 
-# Kinds whose Resource dataclass carries a description field; the
-# envelope's metadata.description is injected into the spec for these
-# so the shared loaders validate and attach it exactly as for TOML.
-# This set now covers every declarable kind (description is
-# framework-uniform), so there is no warn-and-ignore fallback.
-_DESCRIPTION_KINDS = {
-    "secret",
-    "vm-template",
-    "agent-template",
-    "workspace-template",
-    "session-template",
-    "git-credential",
-    "admin-template",
-    "named-console-template",
-    "vm-site",
-    "apt-source",
-    "apt-package",
-    "system-install-command",
-    "user-install-command",
-}
-
-
 class _FixedDecls:
     """Duck-typed stand-in for config's ``_SectionLineMap``: every lookup
     resolves to the manifest document's own location.
@@ -108,17 +86,18 @@ def decode_document(doc: Document, issues: list[str]) -> Any:
     """
     decoder = _DECODERS[doc.kind]
     spec = dict(doc.spec)
-    # Every declarable kind carries a description field now, so
-    # _DESCRIPTION_KINDS covers all of them and the injection below always
-    # applies to real manifests.
-    if doc.kind in _DESCRIPTION_KINDS:
-        if "description" in spec:
-            raise ConfigError(
-                f"{doc.where}: description belongs in metadata.description, "
-                "not in spec",
-            )
-        if doc.description is not None:
-            spec["description"] = doc.description
+    # Every declarable kind carries a description field now (the nine
+    # full-shape resources via DeclaredResource, the four catalog entries
+    # on their own), so the envelope's metadata.description is injected
+    # unconditionally: the shared loaders validate and attach it exactly
+    # as for TOML. Description belongs in metadata, never in spec.
+    if "description" in spec:
+        raise ConfigError(
+            f"{doc.where}: description belongs in metadata.description, "
+            "not in spec",
+        )
+    if doc.description is not None:
+        spec["description"] = doc.description
 
     local_issues: list[str] = []
     try:

@@ -12,28 +12,22 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
+from agentworks.declared_resource import DeclaredResource
 from agentworks.env.entry import env_references
-from agentworks.source_location import SourceLocation, synthesized
 
 if TYPE_CHECKING:
     from agentworks.env import EnvEntry
-    from agentworks.resources.origin import Origin
-    from agentworks.resources.reference import ReferenceEntry, ResourceReference
+    from agentworks.resources.reference import ResourceReference
 
 
-@dataclass(frozen=True)
-class WorkspaceTemplate:
-    name: str
+@dataclass(frozen=True, kw_only=True)
+class WorkspaceTemplate(DeclaredResource):
     inherits: list[str] = field(default_factory=list)
-    description: str | None = None
     repo: str | None = None
     tmuxinator: bool | None = None  # None = not explicitly set (inherit/default to True)
     git_user_name: str | None = None  # git user.name for commits in this workspace's repo
     git_user_email: str | None = None  # git user.email for commits in this workspace's repo
     env: dict[str, EnvEntry] = field(default_factory=dict)
-    declared_at: SourceLocation = field(default_factory=synthesized)
-    origin: Origin | None = None
-    references: tuple[ReferenceEntry, ...] = ()
 
     def referenced_resources(self) -> list[ResourceReference]:
         from agentworks.resources.reference import TemplateReference

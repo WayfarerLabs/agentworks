@@ -610,6 +610,7 @@ def _load_named_console(
         )
 
     return NamedConsoleConfig(
+        name="default",
         tmux_layout=str(layout),
         description=str(raw["description"]) if "description" in raw else None,
         declared_at=decls.lookup("named_console"),

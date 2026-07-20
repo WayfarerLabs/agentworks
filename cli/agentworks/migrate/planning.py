@@ -19,7 +19,7 @@ import yaml
 from tomlkit import items as toml_items
 
 from agentworks.errors import ConfigError, ValidationError
-from agentworks.manifests.decode import _DESCRIPTION_KINDS, KIND_SECTIONS
+from agentworks.manifests.decode import KIND_SECTIONS
 from agentworks.manifests.loader import RESOURCES_DIRNAME
 from agentworks.migrate.toml_edit import apply_toml_edits, key_name
 from agentworks.migrate.verify import normalized_rows
@@ -455,17 +455,14 @@ def _emit_document(doc: tomlkit.TOMLDocument, unit: MigrationUnit) -> str:
     # Description moves to metadata BEFORE any kind-specific rebuild --
     # the git-credential branch below sweeps "everything left" into
     # provider_config, and description is kind-owned, not provider-owned.
-    # vm-site is excluded: its flat legacy sections never supported the
+    # Every declarable kind carries a description field now, so the only
+    # exclusion is vm-site: its flat legacy sections never supported the
     # key (the TOML loader silently drops it), so popping it here would
     # smuggle a description past the pre-write stray-key refusal and
     # into a manifest the pre-rows can't match; verification would
     # fail AFTER writing. Left in place, it falls into platform_config
     # and hits the clean pre-write refusal below.
-    if (
-        unit.kind in _DESCRIPTION_KINDS
-        and unit.kind != "vm-site"
-        and "description" in spec
-    ):
+    if unit.kind != "vm-site" and "description" in spec:
         metadata["description"] = spec.pop("description")
 
     if unit.kind == "vm-site":

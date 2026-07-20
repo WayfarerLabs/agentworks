@@ -12,14 +12,12 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
+from agentworks.declared_resource import DeclaredResource
 from agentworks.env.entry import env_references
-from agentworks.source_location import SourceLocation, synthesized
 
 if TYPE_CHECKING:
     from agentworks.env import EnvEntry
-    from agentworks.resources.origin import Origin
     from agentworks.resources.reference import (
-        ReferenceEntry,
         ResourceReference,
         SecretReference,
     )
@@ -45,8 +43,8 @@ def tailscale_secret_reference(
     )
 
 
-@dataclass(frozen=True)
-class VMTemplate:
+@dataclass(frozen=True, kw_only=True)
+class VMTemplate(DeclaredResource):
     """VM template definition. All optional fields use ``None = inherit``
     semantics except ``tailscale_auth_key``, which is a non-optional
     bare-string secret name (default ``"tailscale-auth-key"``). The
@@ -55,9 +53,7 @@ class VMTemplate:
     template set it on the specific template.
     """
 
-    name: str
     inherits: list[str] = field(default_factory=list)
-    description: str | None = None
     # Provisioning. Deliberately NO site field: a template describes
     # WHAT a VM is; placement (--site, defaults.site, or the
     # infer/prompt model) is host/operator-scoped, and a shared
@@ -83,9 +79,6 @@ class VMTemplate:
     # Bare-string only -- no ``{ secret = "..." }`` polymorphism per the
     # SDD; the field IS the secret reference.
     tailscale_auth_key: str | None = None
-    declared_at: SourceLocation = field(default_factory=synthesized)
-    origin: Origin | None = None
-    references: tuple[ReferenceEntry, ...] = ()
 
     def referenced_resources(self) -> list[ResourceReference]:
         from agentworks.resources.reference import (

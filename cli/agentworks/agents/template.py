@@ -1,12 +1,12 @@
-"""``AgentTemplate`` and ``AdminConfig``: the operator-declared agent-shaped
-template dataclasses.
+"""``AgentTemplate``: the operator-declared agent-template dataclass.
 
 Moved out of ``agentworks.config`` so the ``agents`` domain owns its
-declared-resource types next to the resolver
+declared-resource type next to the resolver
 (``agentworks.agents.templates``) and the kinds
-(``agentworks.agents.kinds``). ``AdminConfig`` lives here because its
-field set mirrors ``AgentTemplate`` -- the admin user is agent-shaped.
-``config.py`` keeps only the legacy TOML loaders that construct these.
+(``agentworks.agents.kinds``). The agent-shaped ``AdminConfig`` is homed
+in ``agentworks.vms.admin`` instead (by lifecycle: the admin user is a
+per-VM concept). ``config.py`` keeps only the legacy TOML loader that
+constructs this.
 """
 
 from __future__ import annotations
@@ -14,23 +14,20 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
+from agentworks.declared_resource import DeclaredResource
 from agentworks.env.entry import env_references
 from agentworks.git_credentials.credential import credential_references
-from agentworks.source_location import SourceLocation, synthesized
 
 if TYPE_CHECKING:
     from agentworks.env import EnvEntry
-    from agentworks.resources.origin import Origin
-    from agentworks.resources.reference import ReferenceEntry, ResourceReference
+    from agentworks.resources.reference import ResourceReference
 
 
-@dataclass(frozen=True)
-class AgentTemplate:
+@dataclass(frozen=True, kw_only=True)
+class AgentTemplate(DeclaredResource):
     """Agent template definition. All fields are optional (None = inherit/default)."""
 
-    name: str
     inherits: list[str] = field(default_factory=list)
-    description: str | None = None
     shell: str | None = None
     git_credentials: list[str] | None = None
     user_install_commands: list[str] | None = None
@@ -46,9 +43,6 @@ class AgentTemplate:
     claude_marketplaces: list[str] | None = None
     claude_plugins: list[str] | None = None
     env: dict[str, EnvEntry] = field(default_factory=dict)
-    declared_at: SourceLocation = field(default_factory=synthesized)
-    origin: Origin | None = None
-    references: tuple[ReferenceEntry, ...] = ()
 
     def referenced_resources(self) -> list[ResourceReference]:
         from agentworks.resources.reference import (
