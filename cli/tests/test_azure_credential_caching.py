@@ -86,6 +86,7 @@ def _install_fakes(
         "browser_build": 0,
         "compute_build": 0,
         "network_build": 0,
+        "resource_build": 0,
     }
 
     class _FakeDefaultCred:
@@ -115,10 +116,18 @@ def _install_fakes(
             self.public_ip_addresses = _FakePublicIps()
             self.network_interfaces = _FakeNics()
 
+    class _FakeResource:
+        def __init__(self, credential: object, subscription_id: str) -> None:
+            counters["resource_build"] += 1
+            self.subscription_id = subscription_id
+
     monkeypatch.setattr("azure.identity.DefaultAzureCredential", _FakeDefaultCred)
     monkeypatch.setattr("azure.identity.InteractiveBrowserCredential", _FakeBrowserCred)
     monkeypatch.setattr("azure.mgmt.compute.ComputeManagementClient", _FakeCompute)
     monkeypatch.setattr("azure.mgmt.network.NetworkManagementClient", _FakeNetwork)
+    monkeypatch.setattr(
+        "azure.mgmt.resource.resources.ResourceManagementClient", _FakeResource
+    )
     return counters
 
 
@@ -208,6 +217,36 @@ class TestCredentialCaching:
         assert platform.status(vm_a, RunContext()) is VMStatus.RUNNING
         assert platform.status(vm_b, RunContext()) is VMStatus.RUNNING
         assert counters["compute_build"] == 2
+        assert counters["cred_build"] == 1
+        assert counters["get_token"] == 1
+
+    def test_resource_client_caches_per_subscription(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The resource-management client added by #193 (runup's read-only
+        resource-group existence check) caches exactly like compute/network:
+        built once on first need for a subscription and reused on repeat, a
+        second subscription builds its own client rather than reusing the
+        first's, while the subscription-independent credential still builds
+        exactly once."""
+        counters = _install_fakes(monkeypatch)
+        platform = _platform()
+        az_a = SimpleNamespace(subscription_id="sub-A")
+        az_b = SimpleNamespace(subscription_id="sub-B")
+
+        # First need for sub-A builds one client; the repeat reuses the cache.
+        first = platform._resource_client(az_a)
+        assert platform._resource_client(az_a) is first
+        assert counters["resource_build"] == 1
+
+        # A second subscription builds its own, keyed by subscription.
+        second = platform._resource_client(az_b)
+        assert second is not first
+        assert counters["resource_build"] == 2
+        assert set(platform._resource_cached) == {"sub-A", "sub-B"}
+
+        # The subscription-independent credential (and its probe) built once
+        # across both resource clients.
         assert counters["cred_build"] == 1
         assert counters["get_token"] == 1
 
