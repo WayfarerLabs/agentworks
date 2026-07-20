@@ -13,6 +13,7 @@ import typer
 from agentworks import output
 from agentworks.db import PID_STOPPED, SessionMode, SessionStatus
 from agentworks.errors import (
+    AgentworksError,
     AlreadyExistsError,
     BrokenStateError,
     ConnectivityError,
@@ -592,6 +593,48 @@ def _resolve_template(registry: Registry, template_name: str | None) -> Resolved
             entity_kind="session-template",
             entity_name=template_name,
         ) from None
+
+
+def _display_registry(config: Config) -> Registry | None:
+    """Build the registry for a read-only display column, degrading to
+    ``None`` when config validation fails.
+
+    ``build_registry`` runs ``finalize`` / ``validate_chain`` /
+    ``validate_sites`` and can raise ``AgentworksError`` for reasons
+    unrelated to session templates (a misconfigured secret backend
+    chain, a bad ``defaults.site``, an unrelated resource collision).
+    ``session list`` / ``session describe`` are read-only and never
+    built the registry before the HARNESS column existed, so a bad
+    registry must degrade the HARNESS cell to ``"-"`` for every row
+    rather than abort the whole command. Catching ``AgentworksError``
+    keeps the same breadth as the per-template guard below.
+    """
+    from agentworks.bootstrap import build_registry
+
+    try:
+        return build_registry(config)
+    except AgentworksError:
+        return None
+
+
+def _display_harness(registry: Registry | None, template_name: str) -> str:
+    """Resolve a session template to its concrete harness name for display.
+
+    ``build_registry`` and ``resolve_template`` are config-only (no SSH),
+    so this is cheap enough to show in listings. Returns ``"-"`` when the
+    registry is unavailable (see :func:`_display_registry`) or the
+    template fails to resolve (unknown name, bad harness), so one bad
+    template never aborts a whole listing or a describe. The resolved
+    ``harness`` is always a concrete string (defaulting to ``shell``).
+    """
+    if registry is None:
+        return "-"
+    from agentworks.sessions.templates import resolve_template
+
+    try:
+        return resolve_template(registry, template_name).harness
+    except AgentworksError:
+        return "-"
 
 
 def _substitute_template_vars(text: str, variables: dict[str, str]) -> str:
@@ -2974,6 +3017,15 @@ def describe_session(
     status probes against the idle timer.
     """
     session = _require_session(db, name)
+    # Resolve the harness for the display block (config-only, no
+    # vm/target dependency) before entering the boundary span.
+    # ``_display_registry`` guards the build for consistency with
+    # ``list_sessions``, but note ``_prepare_vm`` below ALSO builds the
+    # registry (for the VM gate) and is not guarded: describe genuinely
+    # needs a valid registry to probe live status, so a truly broken
+    # registry aborts describe there regardless. The "-" fallback here
+    # is thus defensive, not a graceful-degrade path describe can reach.
+    harness_label = _display_harness(_display_registry(config), session.template)
     with _prepare_vm(db, config, session, operation=None) as (
         _ws,
         vm,
@@ -3004,6 +3056,7 @@ def describe_session(
         output.info(f"Workspace:  {session.workspace_name}")
         output.info(f"VM:         {vm.name}")
         output.info(f"Template:   {session.template}")
+        output.info(f"Harness:    {harness_label}")
         output.info(f"Mode:       {mode_label}")
         output.info(f"Status:     {status_label}")
         output.info(f"Created:    {session.created_at}")
@@ -3117,12 +3170,28 @@ def list_sessions(
             sessions = ensure_pids_batch(sessions, db=db, config=config)
             status_map = batch_check_all_sessions(sessions, db=db, config=config)
 
+    # Resolve each session's concrete harness for the HARNESS column.
+    # build_registry and resolve_template are config-only (no SSH), so
+    # this is cheap; still, resolve each DISTINCT template at most once
+    # and guard both the registry build and each resolution so a bad
+    # registry or one bad template shows "-" rather than aborting the
+    # whole listing.
+    registry = _display_registry(config)
+    harness_by_template: dict[str, str] = {}
+
+    def _harness_for(template_name: str) -> str:
+        if template_name not in harness_by_template:
+            harness_by_template[template_name] = _display_harness(registry, template_name)
+        return harness_by_template[template_name]
+
     # Build table rows grouped by workspace
     by_workspace: dict[str, list[SessionRow]] = {}
     for session in sessions:
         by_workspace.setdefault(session.workspace_name, []).append(session)
 
-    rows: list[tuple[str, str, str, str, str, str]] = []
+    rows: list[tuple[str, str, str, str, str, str, str]] = []
+    broken_names = []
+    unknown_names = []
     for ws_name, ws_sessions in sorted(by_workspace.items()):
         ws = db.get_workspace(ws_name)
         vm_name = ws.vm_name if ws else "-"
@@ -3146,33 +3215,29 @@ def list_sessions(
                 # No status available (VM unreachable or SSH failure during batch check)
                 status = "-"
             mode_label = f"agent ({session.agent_name})" if session.agent_name else "admin"
-            rows.append((session.name, ws_name, vm_name, session.template, mode_label, status))
+            rows.append(
+                (
+                    session.name,
+                    ws_name,
+                    vm_name,
+                    session.template,
+                    _harness_for(session.template),
+                    mode_label,
+                    status,
+                )
+            )
+            if status == "broken":
+                broken_names.append(session.name)
+            elif status == "unknown":
+                unknown_names.append(session.name)
 
     if not rows:
         output.info("No sessions found.")
         return
 
-    name_w = max(len("NAME"), max(len(r[0]) for r in rows))
-    ws_w = max(len("WORKSPACE"), max(len(r[1]) for r in rows))
-    vm_w = max(len("VM"), max(len(r[2]) for r in rows))
-    tpl_w = max(len("TEMPLATE"), max(len(r[3]) for r in rows))
-    mode_w = max(len("MODE"), max(len(r[4]) for r in rows))
-
-    header = (
-        f"{'NAME':<{name_w}}  {'WORKSPACE':<{ws_w}}  {'VM':<{vm_w}}  {'TEMPLATE':<{tpl_w}}  {'MODE':<{mode_w}}  STATUS"
-    )
-    output.info(header)
-    output.info("-" * len(header))
-    broken_names = []
-    unknown_names = []
-    for sname, ws_name, vm_col, tpl, mode, status in rows:
-        output.info(
-            f"{sname:<{name_w}}  {ws_name:<{ws_w}}  {vm_col:<{vm_w}}  {tpl:<{tpl_w}}  {mode:<{mode_w}}  {status}"
-        )
-        if status == "broken":
-            broken_names.append(sname)
-        elif status == "unknown":
-            unknown_names.append(sname)
+    headers = ["NAME", "WORKSPACE", "VM", "TEMPLATE", "HARNESS", "MODE", "STATUS"]
+    for line in output.render_table(headers, rows):
+        output.info(line)
 
     if broken_names or unknown_names:
         output.info("")

@@ -12,7 +12,10 @@ from __future__ import annotations
 
 import sys
 import time
-from typing import Protocol
+from typing import TYPE_CHECKING, Protocol
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
 
 # Re-export the kind-based exception hierarchy from agentworks.errors so existing
 # `from agentworks.output import X` users keep working. New code should prefer
@@ -244,6 +247,49 @@ def count(n: int, noun: str, plural: str | None = None) -> str:
     """
     word = noun if n == 1 else (plural or f"{noun}s")
     return f"{n} {word}"
+
+
+def render_table(
+    headers: list[str],
+    rows: Sequence[Sequence[str]],
+    *,
+    max_col_width: int = 20,
+) -> list[str]:
+    """Render a left-justified table into a list of lines.
+
+    Returns the header row, a dashed rule line matching its width, then
+    one line per row. Columns are separated by two spaces. Each column
+    sizes to its widest cell (header included) but is capped at
+    ``max_col_width``; a cell longer than the cap is truncated to
+    ``cell[: max_col_width - 3] + "..."`` (so a 21-char cell becomes 20
+    chars), while a cell of exactly the cap is left intact. Columns whose
+    content all fits under the cap keep their natural, narrower width.
+
+    The caller emits each returned line via :func:`info`.
+    """
+    columns = list(zip(headers, *rows, strict=True))
+    widths = [min(max_col_width, max(len(cell) for cell in column)) for column in columns]
+
+    def _line(cells: Sequence[str]) -> str:
+        rendered = (_truncate_cell(cell, width).ljust(width) for cell, width in zip(cells, widths, strict=True))
+        return "  ".join(rendered).rstrip()
+
+    header_line = _line(headers)
+    lines = [header_line, "-" * len(header_line)]
+    lines.extend(_line(row) for row in rows)
+    return lines
+
+
+def _truncate_cell(cell: str, width: int) -> str:
+    """Truncate ``cell`` to ``width`` with a trailing ``...`` when it
+    overflows; leave a cell that already fits untouched. When ``width``
+    is too small to fit the ellipsis (<= 3), hard-truncate to ``width``
+    so the result never exceeds it."""
+    if len(cell) <= width:
+        return cell
+    if width <= 3:
+        return cell[:width]
+    return cell[: width - 3] + "..."
 
 
 def info(message: str) -> None:
