@@ -283,7 +283,7 @@ Per FRD R4 "Reserved future directions" and the HLA "claude-code config vocabula
 following are NOT built here; `extra_args` is the interim escape hatch for any of them:
 
 - **User-level MCP inheritance** and its non-inheritance default (the one harness-owned security
-  fix; its provisioning face is `agent-harness-prep`, not this SDD).
+  fix; its provisioning face is the `claude-code` `harness-user-provisioner`, not this SDD).
 - **Question-timeout control** (a future `harness_config` field for unattended sessions).
 - **Claude-subscription (OAuth) authentication** (touches the walk-away boundary; deferred until its
   shape is pinned). Note v2.1.205 exposes `claude setup-token` and `claude auth`, but wiring an auth

@@ -47,6 +47,6 @@ research (verified against `claude` v2.1.205); they are historical and may be de
 ## Superseded / forward-looking (NOT built here)
 
 The FRD's "Target state: the harness as a tool adapter" is forward-looking: a session harness has a
-provisioning twin, `agent-harness-prep` (and possible `workspace` / `vm` kin), which would re-home
-`claude_marketplaces` / `claude_plugins` and the user-level MCP security default. None of that is in
-this effort; it is recorded so the v1 boundaries read as deliberate.
+provisioning twin, a `harness-user-provisioner` (and possible `workspace` / `vm` kin), which would
+re-home `claude_marketplaces` / `claude_plugins` and the user-level MCP security default. None of
+that is in this effort; it is recorded so the v1 boundaries read as deliberate.
