@@ -10,7 +10,7 @@ Each phase ends green: from `cli/`,
 
 ## Phase 0: parity oracle
 
-- [ ] Before touching anything, snapshot the 18 built-in entries' resolved payloads (per kind: name
+- [x] Before touching anything, snapshot the 18 built-in entries' resolved payloads (per kind: name
       to payload fields) into a fixture/constants in a new parity test, captured from the current
       `load_builtin_catalog()`. This is the no-drift reference for later phases.
 
@@ -18,13 +18,13 @@ Each phase ends green: from `cli/`,
 
 ## Phase 1: built-in entries become bundled manifests
 
-- [ ] Author the bundled manifests under `cli/agentworks/manifests/builtin/` (`apt-sources.yaml`,
+- [x] Author the bundled manifests under `cli/agentworks/manifests/builtin/` (`apt-sources.yaml`,
       `apt-packages.yaml`, `install-commands.yaml`, `---`-separated documents), faithfully
       transcribing all 18 `catalog.toml` entries (`kind` / `metadata.name` / `metadata.description`
       / `spec`, cross-refs in `spec`).
-- [ ] Remove the built-in half of `catalog.publish_to`; `builtin_manifests.publish_to` (already
+- [x] Remove the built-in half of `catalog.publish_to`; `builtin_manifests.publish_to` (already
       first in `bootstrap.py`) now supplies the built-in entries.
-- [ ] Parity: the Registry's built-in rows (via a Registry read on a no-operator config) match the
+- [x] Parity: the Registry's built-in rows (via a Registry read on a no-operator config) match the
       Phase 0 oracle exactly, with `origin.variant == "built-in"` and a bundled-file source.
       Override test: an operator override (manifest and TOML) still wins.
 
