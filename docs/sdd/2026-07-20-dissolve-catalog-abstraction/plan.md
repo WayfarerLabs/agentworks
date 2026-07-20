@@ -45,14 +45,14 @@ still present (deleted in Phase 4).
 
 ## Phase 3: regroup the kinds into `apt` and `install_commands`
 
-- [ ] Create `agentworks/apt.py` (`AptSourceEntry`, `AptPackageEntry`, their kind strategies, the
+- [x] Create `agentworks/apt.py` (`AptSourceEntry`, `AptPackageEntry`, their kind strategies, the
       apt loaders, the apt cross-reference) and `agentworks/install_commands.py`
       (`SystemInstallCommandEntry`, `UserInstallCommandEntry`, their kind strategies, the
       install-command loaders, `_load_test_fields`). Move the surviving pieces out of `catalog.py`.
-- [ ] Drop `CatalogError`; loaders raise `ConfigError` / `ExternalError` directly. Update the
+- [x] Drop `CatalogError`; loaders raise `ConfigError` / `ExternalError` directly. Update the
       `resources/kinds` self-registration index and the manifest decoders' imports to the new
       modules.
-- [ ] Move the operator-TOML publisher half into the new modules (small `publish_to` per module or
+- [x] Move the operator-TOML publisher half into the new modules (small `publish_to` per module or
       one shared operator publisher); wire `bootstrap.py` to call it after the built-in publishers,
       preserving override ordering.
 
@@ -61,15 +61,15 @@ symbol is imported except the still-present bespoke code (deleted in Phase 4).
 
 ## Phase 4: dissolve `ResolvedCatalog` and delete the bespoke code
 
-- [ ] Re-grep for any remaining consumer of `ResolvedCatalog` / `catalog_from_registry` /
+- [x] Re-grep for any remaining consumer of `ResolvedCatalog` / `catalog_from_registry` /
       `load_catalog` / `load_builtin_catalog` / `catalog.toml` / `_parse_catalog` (expected: the
       initializers plus the functions themselves).
-- [ ] Point the initializers at direct Registry reads (`kind_dict(registry, "apt-package")` etc.) in
+- [x] Point the initializers at direct Registry reads (`kind_dict(registry, "apt-package")` etc.) in
       place of the `ResolvedCatalog` input; the selection / install logic is otherwise unchanged.
-- [ ] Delete `ResolvedCatalog`, `catalog_from_registry`, `catalog.toml`, `_BUILTIN_CATALOG_PATH`,
+- [x] Delete `ResolvedCatalog`, `catalog_from_registry`, `catalog.toml`, `_BUILTIN_CATALOG_PATH`,
       `load_builtin_catalog`, `_parse_catalog`, `load_catalog`, the TOML-file helpers used only by
       them, and the now-empty `catalog.py`.
-- [ ] Migrate `test_catalog.py` and `test_config_resource_read_guard.py`: re-express parse-level
+- [x] Migrate `test_catalog.py` and `test_config_resource_read_guard.py`: re-express parse-level
       assertions against a built Registry; delete tests that only exercised the removed parse
       functions; keep the Phase 0 parity assertion pointed at the Registry.
 
