@@ -93,25 +93,28 @@ def test_secret_decl_description_is_required() -> None:
     assert SecretDecl(name="x", description="d").description == "d"
 
 
-def test_catalog_entry_description_is_required() -> None:
-    """Catalog entries carry the same required-``description`` override as
-    ``SecretDecl`` (same ``field()`` trap). A source without a description is a
-    construction error; one with it round-trips.
-    """
+@pytest.mark.parametrize(
+    ("cls", "kind_kwargs"),
+    [
+        (AptSourceEntry, {"key_url": "u", "key_path": "p", "source": "s", "source_file": "f"}),
+        (AptPackageEntry, {"apt": ["pkg"]}),
+        (SystemInstallCommandEntry, {"command": "c"}),
+        (UserInstallCommandEntry, {"command": "c"}),
+    ],
+)
+def test_catalog_entry_description_is_required(
+    cls: type[DeclaredResource], kind_kwargs: dict[str, object]
+) -> None:
+    """All four catalog entries carry the same required-``description`` override
+    as ``SecretDecl`` (same ``field()`` trap): omitting description is a
+    construction error, providing it round-trips, and the entry gains the base's
+    ``declared_at`` (the field half of a tracked follow-up). Parametrized so a
+    future edit that reverts any one entry to a bare ``description: str`` (which
+    would silently make it optional) is caught."""
     with pytest.raises(TypeError):
-        AptSourceEntry(  # type: ignore[call-arg]
-            name="gh", key_url="u", key_path="p", source="s", source_file="f"
-        )
-    entry = AptSourceEntry(
-        name="gh",
-        description="GitHub apt source",
-        key_url="u",
-        key_path="p",
-        source="s",
-        source_file="f",
-    )
-    assert entry.description == "GitHub apt source"
-    # And it gained the base's declared_at (the tracked follow-up's field half).
+        cls(name="x", **kind_kwargs)  # type: ignore[call-arg]
+    entry = cls(name="x", description="d", **kind_kwargs)
+    assert entry.description == "d"
     assert entry.declared_at == synthesized()
 
 

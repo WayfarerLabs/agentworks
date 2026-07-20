@@ -64,11 +64,12 @@ def resource_list(
     Columns: KIND, NAME, ORIGIN (with detail), REFS (static config
     references count), USED BY (live DB instances depending on this
     resource per current config; ``-`` for kinds with no instance
-    concept), DESCRIPTION. Description is reliably populated --
-    operator-declared resources carry the operator's text,
-    auto-declared resources get a framework-synthesized text (Phase
-    2a's polish), and kinds whose Resource type has no description
-    field show empty.
+    concept), DESCRIPTION. Description is reliably populated:
+    operator-declared resources carry the operator's text, and
+    auto-declared defaults get a framework-synthesized text (the
+    registry's auto-declared polish). Every declarable kind carries a
+    description field (see ``DeclaredResource``); only capability kinds
+    whose registration record has none show empty.
     """
     from agentworks import output
     from agentworks.bootstrap import build_registry

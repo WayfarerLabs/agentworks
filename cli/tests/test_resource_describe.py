@@ -106,6 +106,35 @@ def test_describes_auto_declared_resource_carries_synth_description(
     assert desc.description.startswith("(auto) ")
 
 
+@pytest.mark.parametrize(
+    "kind",
+    [
+        "vm-template",
+        "agent-template",
+        "workspace-template",
+        "admin-template",
+        "named-console-template",
+    ],
+)
+def test_newly_uniform_kinds_auto_declared_default_gets_synth_description(
+    tmp_path: Path, kind: str
+) -> None:
+    """The five kinds that gained a description field via ``DeclaredResource``
+    now get the registry's synthesized text on their auto-declared ``default``
+    row (a bare install, no operator config). Before this branch they had no
+    description field, so the registry's auto-declared polish skipped them and
+    the column showed empty; pin the newly-triggered behavior."""
+    cfg_file = tmp_path / "config.toml"
+    _write_base(cfg_file)
+    registry = _load(cfg_file)
+
+    desc = describe_resource(registry, kind, "default")
+
+    assert desc.origin is not None
+    assert desc.origin.variant == "auto-declared"
+    assert desc.description == f"(auto) auto-declared default {kind}"
+
+
 def test_describe_returns_usage_entries(tmp_path: Path) -> None:
     cfg_file = tmp_path / "config.toml"
     _write_base(
