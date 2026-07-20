@@ -1041,7 +1041,21 @@ def _load_session_config(data: dict[str, object], issues: list[str]) -> SessionC
     )
 
 
-_SESSION_TEMPLATE_KEYS = {"inherits", "command", "description", "restart_command", "required_commands", "env"}
+# The legacy flat fields (``shell``'s config vocabulary) plus the
+# harness pair. The flat fields keep loading verbatim; the loader hoists
+# them into ``harness = "shell"`` + the equivalent ``harness_config``
+# blob (FRD R6), so the internal representation follows the YAML shape.
+_SESSION_TEMPLATE_KEYS = {
+    "inherits",
+    "description",
+    "harness",
+    "harness_config",
+    "command",
+    "restart_command",
+    "required_commands",
+    "env",
+}
+_SHELL_FLAT_FIELDS = ("command", "restart_command", "required_commands")
 
 
 def _load_session_templates(
@@ -1065,16 +1079,13 @@ def _load_session_templates(
                 context=f"session_templates.{name}",
                 issues=issues,
             )
+        harness, harness_config = _session_harness_pair(name, tdata)
         templates[name] = SessionTemplate(
             name=name,
             inherits=list(tdata.get("inherits", [])),
-            command=str(tdata["command"]) if "command" in tdata else None,
             description=str(tdata["description"]) if "description" in tdata else None,
-            restart_command=str(tdata["restart_command"]) if "restart_command" in tdata else None,
-            required_commands=(
-                _require_string_list(tdata, "required_commands", f"session_templates.{name}")
-                if "required_commands" in tdata else None
-            ),
+            harness=harness,
+            harness_config=harness_config,
             env=env,
             declared_at=decls.lookup("session_templates", name),
         )
@@ -1084,6 +1095,82 @@ def _load_session_templates(
     # Registry.finalize's cycle pass). The sessions/templates.py
     # resolver also has its own visited-set guard.
     return templates
+
+
+def _session_harness_pair(
+    name: str, tdata: dict[str, object]
+) -> tuple[str | None, dict[str, object] | None]:
+    """Resolve a TOML session-template's ``(harness, harness_config)``
+    pair, hoisting the legacy flat fields onto the ``shell`` harness
+    (FRD R6). ``None`` on either means "not declared here".
+
+    The flat form is the lone TOML divergence from the YAML shape; it
+    nests into the blob at this boundary, mirroring how the
+    git-credential loader nests ``org`` into ``provider_config``. The
+    two conflict cases (flat + a non-``shell`` harness, flat + an
+    explicit ``harness_config``) are load errors: the flat fields ARE
+    ``shell``'s config, and mixing spellings in one declaration has no
+    operator payoff.
+    """
+    flat_present = [key for key in _SHELL_FLAT_FIELDS if key in tdata]
+    harness_val = tdata.get("harness")
+    if harness_val is not None and not isinstance(harness_val, str):
+        raise ConfigError(f"session_templates.{name}.harness must be a string")
+
+    if flat_present:
+        if harness_val is not None and harness_val != "shell":
+            raise ConfigError(
+                f"session_templates.{name}: the legacy field(s) "
+                f"{', '.join(flat_present)} configure the 'shell' harness "
+                f"and cannot combine with harness = {harness_val!r}; put "
+                f"the workload under [session_templates.{name}.harness_config]"
+            )
+        if "harness_config" in tdata:
+            raise ConfigError(
+                f"session_templates.{name}: the legacy field(s) "
+                f"{', '.join(flat_present)} cannot combine with an explicit "
+                f"harness_config table (one spelling per declaration); put "
+                f"the commands under harness_config instead"
+            )
+        blob: dict[str, object] = {}
+        if "command" in tdata:
+            blob["command"] = str(tdata["command"])
+        if "restart_command" in tdata:
+            blob["restart_command"] = str(tdata["restart_command"])
+        if "required_commands" in tdata:
+            blob["required_commands"] = _require_string_list(
+                tdata, "required_commands", f"session_templates.{name}"
+            )
+        harness: str | None = "shell"
+        harness_config: dict[str, object] | None = blob
+    else:
+        harness = harness_val
+        harness_config = None
+        if "harness_config" in tdata:
+            raw_config = tdata["harness_config"]
+            if not isinstance(raw_config, dict):
+                raise ConfigError(
+                    f"session_templates.{name}.harness_config must be a table"
+                )
+            harness_config = dict(raw_config)
+        if harness is None and harness_config is not None:
+            raise ConfigError(
+                f"session_templates.{name}: harness_config needs a harness "
+                f'(a blob with no owner); add harness = "..."'
+            )
+
+    # Shape-and-vocabulary validation on the declared/hoisted blob, in
+    # the operator's TOML vocabulary (harness-api-lld section 2). Unknown
+    # harness names skip: the kind's miss policy reports them at finalize.
+    if isinstance(harness, str) and harness_config is not None:
+        from agentworks.capabilities.harness import HARNESS_REGISTRY
+
+        capability = HARNESS_REGISTRY.get(harness)
+        if capability is not None:
+            capability.validate_config(
+                f"session-template/{name}", harness_config
+            )
+    return harness, harness_config
 
 
 # The flat legacy [azure] / [proxmox] keys that hoist into the nested

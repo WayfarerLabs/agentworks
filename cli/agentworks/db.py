@@ -157,6 +157,12 @@ class SessionRow:
     socket_path: str | None = None
     pid: int | None = None
     boot_id: str | None = None
+    # The session harness's per-session state blob (harness-owned and
+    # OPAQUE to the core: JSON object stored as TEXT). The harness reads
+    # and mutates it during its ops; the session manager persists it back
+    # after the op. Empty for a harness that keeps no state (``shell``);
+    # ``claude-code`` stores its minted Claude session id here.
+    harness_state: dict[str, object] = field(default_factory=dict)
 
 
 class ShellEntry(TypedDict):
@@ -758,6 +764,14 @@ MIGRATIONS: dict[int, str | Callable[[sqlite3.Connection, MigrationContext], Non
         DROP TABLE workspaces;
         ALTER TABLE workspaces_new RENAME TO workspaces;
     """,
+    # -- Harness-state blob: a per-session, harness-owned JSON object the --
+    # -- harness reads and mutates during its start/restart op (the ------
+    # -- manager persists it after). A pure additive column with a -------
+    # -- default backfills existing rows to '{}' in place, so no table ---
+    # -- rebuild is needed (the additive-column pattern, like v3/v11). ---
+    29: """
+        ALTER TABLE sessions ADD COLUMN harness_state TEXT NOT NULL DEFAULT '{}';
+    """,
 }
 
 LATEST_VERSION = max(MIGRATIONS)
@@ -1242,11 +1256,13 @@ class Database:
         created_workspace: bool = False,
         created_agent: bool = False,
         socket_path: str | None = None,
+        harness_state: dict[str, object] | None = None,
     ) -> SessionRow:
         self._conn.execute(
             "INSERT INTO sessions "
-            "(name, workspace_name, template, mode, agent_name, created_workspace, created_agent, socket_path)"
-            " VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            "(name, workspace_name, template, mode, agent_name, created_workspace, "
+            "created_agent, socket_path, harness_state)"
+            " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 name,
                 workspace_name,
@@ -1256,6 +1272,7 @@ class Database:
                 int(created_workspace),
                 int(created_agent),
                 socket_path,
+                json.dumps(harness_state or {}),
             ),
         )
         self._conn.commit()
@@ -1334,6 +1351,22 @@ class Database:
             "updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now') "
             "WHERE name = ?",
             (pid, boot_id, name),
+        )
+        self._conn.commit()
+
+    def update_session_harness_state(
+        self, name: str, harness_state: dict[str, object]
+    ) -> None:
+        """Persist the harness's per-session state blob (harness-owned,
+        opaque to the core) after the harness op. Usually a no-op on
+        restart (the value was minted and stored on create), but a
+        session predating the ``harness_state`` column (backfilled to
+        ``{}``) mints and stores here on its first restart."""
+        self._conn.execute(
+            "UPDATE sessions SET harness_state = ?, "
+            "updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now') "
+            "WHERE name = ?",
+            (json.dumps(harness_state), name),
         )
         self._conn.commit()
 
@@ -1736,6 +1769,40 @@ def _to_session(row: sqlite3.Row) -> SessionRow:
         socket_path=row["socket_path"],
         pid=row["pid"],
         boot_id=row["boot_id"],
+        harness_state=_parse_harness_state(row["harness_state"], row["name"]),
+    )
+
+
+def _parse_harness_state(raw: str, session_name: str) -> dict[str, object]:
+    """Decode the harness_state JSON column. The blob is harness-owned and
+    opaque to the core, so this only checks it is a JSON object.
+
+    A malformed or non-object blob (a future harness bug, a hand-edited DB)
+    degrades to ``{}`` with a warning rather than raising: ``_to_session``
+    is mapped over every row by ``list_sessions``, so a single corrupt row
+    must not break ``session list`` (and every other read) for all the
+    others. A blank harness starts fresh from ``{}``; a stateful one
+    re-mints on its next op, the same as an unmigrated row.
+    """
+    try:
+        decoded = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        _warn_bad_harness_state(session_name, f"invalid JSON ({exc})")
+        return {}
+    if not isinstance(decoded, dict):
+        _warn_bad_harness_state(
+            session_name, f"expected a JSON object, got {type(decoded).__name__}"
+        )
+        return {}
+    return decoded
+
+
+def _warn_bad_harness_state(session_name: str, detail: str) -> None:
+    from agentworks import output
+
+    output.warn(
+        f"session '{session_name}': ignoring malformed harness_state "
+        f"({detail}); treating it as empty."
     )
 
 
