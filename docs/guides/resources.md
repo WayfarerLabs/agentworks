@@ -213,6 +213,12 @@ spec:
 - The only requirement checked on the launch target is that `claude` is installed. The chosen action
   (resume vs new session) is announced in the pane on start, so it is never silent.
 
+`shell` and `claude-code` are the built-in harnesses, not the whole set the platform is built
+around. The `harness` kind is extensible: another tool or agent runtime, whatever the provider, is
+added as its own harness with its own `harness_config` vocabulary. `claude-code` above (and its
+Claude-specific `model` / `permission_mode` fields) is one worked example; the core assumes no
+particular runtime, and a session runs whatever harness its template selects.
+
 ## Built-ins and overrides
 
 Built-in resources ship with the app and appear in `agw resource list --origin builtin`. Override
