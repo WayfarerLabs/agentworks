@@ -101,7 +101,9 @@ class _NamedConsoleTemplateKind:
         when called that way.
         """
         source = references[0].source if references else ALWAYS_MATERIALIZE_SOURCE
-        return NamedConsoleConfig(origin=Origin.auto_declared(source=source))
+        return NamedConsoleConfig(
+            name="default", origin=Origin.auto_declared(source=source)
+        )
 
     def instances(
         self, db: Database, registry: Registry, resource: Any

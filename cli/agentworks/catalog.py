@@ -14,6 +14,7 @@ from functools import cache
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal, TypedDict
 
+from agentworks.declared_resource import DeclaredResource
 from agentworks.errors import ExternalError
 from agentworks.resources.kind import KIND_REGISTRY, NoUnreferencedDefaultError
 
@@ -21,8 +22,8 @@ if TYPE_CHECKING:
     from collections.abc import Sequence
 
     from agentworks.config import Config
-    from agentworks.resources import Origin, Registry
-    from agentworks.resources.reference import ReferenceEntry, ResourceReference
+    from agentworks.resources import Registry
+    from agentworks.resources.reference import ResourceReference
 
 
 class CatalogError(ExternalError):
@@ -32,38 +33,35 @@ class CatalogError(ExternalError):
 # -- Data classes --------------------------------------------------------------
 
 
-@dataclass(frozen=True)
-class AptSourceEntry:
+@dataclass(frozen=True, kw_only=True)
+class AptSourceEntry(DeclaredResource):
     """One apt repository source. Referenced by ``AptPackageEntry.apt_sources``
     when a package requires a source's key + list stanza before it can be
-    installed. First-class Registry Resource -- ``origin`` set by the
-    catalog publisher, ``references`` attached by the framework's finalize
-    pass from the apt_packages that name it.
+    installed. A first-class, system-declared Registry Resource: inherits the
+    uniform metadata from ``DeclaredResource`` (the catalog publisher stamps
+    ``origin`` as ``built-in`` for shipped entries or ``operator-declared`` for
+    config-added ones; ``references`` is attached by the framework's finalize
+    pass from the apt_packages that name it).
     """
 
-    name: str
-    description: str
+    # Required (the base makes it optional); see SecretDecl for why field().
+    description: str = field()
     key_url: str
     key_path: str
     source: str
     source_file: str
     key_dearmor: bool = False
-    origin: Origin | None = None
-    references: tuple[ReferenceEntry, ...] = ()
 
 
-@dataclass(frozen=True)
-class AptPackageEntry:
-    name: str
-    description: str
+@dataclass(frozen=True, kw_only=True)
+class AptPackageEntry(DeclaredResource):
+    # Catalog entries are first-class, system-declared Registry citizens; the
+    # uniform metadata (name, origin, references, ...) comes from
+    # ``DeclaredResource``. ``description`` is required here (see field() note
+    # on ``AptSourceEntry``).
+    description: str = field()
     apt: list[str]
     apt_sources: list[str] = field(default_factory=list)
-    # Catalog entries are first-class Registry citizens.
-    # ``origin`` is set by the publisher (``built-in by
-    # agentworks.catalog`` for built-in entries); ``references`` is attached
-    # by the framework's finalize pass from incoming references.
-    origin: Origin | None = None
-    references: tuple[ReferenceEntry, ...] = ()
 
     def referenced_resources(self) -> list[ResourceReference]:
         """Emit one ``ResourceReference`` per name in ``apt_sources``. The
@@ -92,30 +90,26 @@ class AptPackageEntry:
         ]
 
 
-@dataclass(frozen=True)
-class SystemInstallCommandEntry:
-    name: str
-    description: str
+@dataclass(frozen=True, kw_only=True)
+class SystemInstallCommandEntry(DeclaredResource):
+    # System-declared catalog entry; uniform metadata from ``DeclaredResource``.
+    description: str = field()  # required (see AptSourceEntry field() note)
     command: str
     path: list[str] = field(default_factory=list)
     test_exec: str | None = None
     test_file: str | None = None
     test_dir: str | None = None
-    origin: Origin | None = None
-    references: tuple[ReferenceEntry, ...] = ()
 
 
-@dataclass(frozen=True)
-class UserInstallCommandEntry:
-    name: str
-    description: str
+@dataclass(frozen=True, kw_only=True)
+class UserInstallCommandEntry(DeclaredResource):
+    # System-declared catalog entry; uniform metadata from ``DeclaredResource``.
+    description: str = field()  # required (see AptSourceEntry field() note)
     command: str
     path: list[str] = field(default_factory=list)
     test_exec: str | None = None
     test_file: str | None = None
     test_dir: str | None = None
-    origin: Origin | None = None
-    references: tuple[ReferenceEntry, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -391,23 +385,21 @@ def publish_to(registry: Registry, config: Config | None = None) -> None:
     # Operator-declared catalog entries. Parse the raw TOML dicts Config
     # stashed at load-time, publish each with operator-declared origin.
     #
-    # Line-level ``declared_at`` isn't attached per-entry yet: catalog
-    # loaders don't consume ``_SectionLineMap`` and Config
-    # stores raw dicts (not typed entries) for these sections. Publishing
-    # here uses ``Origin.operator_declared(file=CONFIG_PATH, line=0)`` --
-    # the sentinel for "real file, no single declaration line" (see
-    # ``source_location.synthesized``'s docstring). The renderer drops
-    # the parenthetical for
-    # ``line=0``, so operators see "operator-declared" without file:line
-    # for now.
+    # The entry dataclasses now carry ``declared_at`` (inherited from
+    # ``DeclaredResource``), but it is not yet populated per-entry: the catalog
+    # loaders don't consume ``_SectionLineMap`` and Config stores raw dicts
+    # (not typed entries) for these sections, so ``declared_at`` keeps its
+    # synthesized default. Publishing here uses
+    # ``Origin.operator_declared(file=CONFIG_PATH, line=0)``, the sentinel for
+    # "real file, no single declaration line" (see
+    # ``source_location.synthesized``'s docstring). The renderer drops the
+    # parenthetical for ``line=0``, so operators see "operator-declared"
+    # without file:line for now.
     #
-    # Plumbing declared_at through catalog entries properly is a small
-    # follow-up (add ``declared_at: SourceLocation`` to the four entry
-    # dataclasses, thread ``_SectionLineMap`` into the ``_load_*``
-    # helpers, either at load_config time or via a public
-    # ``config.declared_at_for(...)`` helper); tracked alongside the
-    # ``named-console-template`` singleton-omitted case in the SDD
-    # follow-ups.
+    # The remaining follow-up is to populate declared_at (and a real origin
+    # line) by threading ``_SectionLineMap`` into the ``_load_*`` helpers,
+    # either at load_config time or via a public ``config.declared_at_for(...)``
+    # helper.
     from agentworks.config import CONFIG_PATH
 
     op_origin = Origin.operator_declared(file=CONFIG_PATH, line=0)

@@ -508,6 +508,36 @@ def test_claude_marketplaces_rejects_string(tmp_path: Path) -> None:
         load_config(config_file)
 
 
+def test_toml_description_stored_for_template_kinds(tmp_path: Path) -> None:
+    """description is framework-uniform: every declarable kind's TOML
+    surface stores it onto the loaded dataclass, with no warnings."""
+    config_file = _minimal_config(tmp_path, """
+        [vm_templates.dev]
+        description = "the dev box"
+
+        [agent_templates.dev]
+        description = "the dev agent"
+
+        [workspace_templates.proj]
+        description = "the proj workspace"
+
+        [admin.config]
+        description = "the admin user"
+
+        [named_console]
+        description = "the default console"
+    """)
+    cfg = load_config(config_file, warn_issues=False)
+    assert not cfg.config_issues
+    assert cfg.vm_templates["dev"].description == "the dev box"
+    assert cfg.agent_templates["dev"].description == "the dev agent"
+    assert cfg.workspace_templates["proj"].description == "the proj workspace"
+    assert cfg.admin is not None
+    assert cfg.admin.description == "the admin user"
+    assert cfg.named_console is not None
+    assert cfg.named_console.description == "the default console"
+
+
 # -- [named_console] section ------------------------------------------------
 
 

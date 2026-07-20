@@ -82,6 +82,7 @@ def _strip(resource: Any) -> Any:
             "dev",
             """
             [vm_templates.dev]
+            description = "dev box"
             cpus = 8
             apt = ["zsh"]
             apt_packages = ["gh"]
@@ -95,6 +96,7 @@ def _strip(resource: Any) -> Any:
             kind: vm-template
             metadata:
               name: dev
+              description: dev box
             spec:
               cpus: 8
               apt: [zsh]
@@ -102,6 +104,24 @@ def _strip(resource: Any) -> Any:
               env:
                 HTTP_PROXY: http://proxy:3128
                 NPM_TOKEN: {secret: npm-token}
+            """,
+        ),
+        (
+            "agent-template",
+            "dev",
+            """
+            [agent_templates.dev]
+            description = "dev agent"
+            shell = "zsh"
+            """,
+            """
+            apiVersion: agentworks/v1
+            kind: agent-template
+            metadata:
+              name: dev
+              description: dev agent
+            spec:
+              shell: zsh
             """,
         ),
         (
@@ -135,6 +155,7 @@ def _strip(resource: Any) -> Any:
             "proj",
             """
             [workspace_templates.proj]
+            description = "the proj workspace"
             repo = "https://github.com/org/proj.git"
             tmuxinator = false
             """,
@@ -143,9 +164,28 @@ def _strip(resource: Any) -> Any:
             kind: workspace-template
             metadata:
               name: proj
+              description: the proj workspace
             spec:
               repo: https://github.com/org/proj.git
               tmuxinator: false
+            """,
+        ),
+        (
+            "named-console-template",
+            "default",
+            """
+            [named_console]
+            description = "the default console"
+            tmux_layout = "aw-session-vertical"
+            """,
+            """
+            apiVersion: agentworks/v1
+            kind: named-console-template
+            metadata:
+              name: default
+              description: the default console
+            spec:
+              tmux_layout: aw-session-vertical
             """,
         ),
         (
@@ -240,6 +280,7 @@ def test_admin_template_flat_spec(tmp_path: Path) -> None:
             toml_dir,
             """
             [admin.config]
+            description = "the admin user"
             username = "ops"
             shell = "zsh"
             git_credentials = ["github"]
@@ -260,6 +301,7 @@ def test_admin_template_flat_spec(tmp_path: Path) -> None:
         kind: admin-template
         metadata:
           name: default
+          description: the admin user
         spec:
           username: ops
           shell: zsh
@@ -400,7 +442,10 @@ def test_description_in_spec_rejected(tmp_path: Path) -> None:
         load_manifests(tmp_path / "resources")
 
 
-def test_description_on_descriptionless_kind_warns(tmp_path: Path) -> None:
+def test_description_stored_for_template_kind_without_warning(tmp_path: Path) -> None:
+    """The formerly template-shaped kinds now store metadata.description
+    like every other declarable kind: it round-trips onto the Resource
+    and the retired "not yet stored" warning does not fire."""
     _manifest(
         tmp_path,
         """
@@ -408,13 +453,45 @@ def test_description_on_descriptionless_kind_warns(tmp_path: Path) -> None:
         kind: vm-template
         metadata:
           name: dev
-          description: not stored yet
+          description: a dev box
         spec: {}
         """,
     )
     manifests = load_manifests(tmp_path / "resources")
-    assert len(manifests.issues) == 1
-    assert "not yet stored" in manifests.issues[0]
+    assert not manifests.issues
+    registry = build_registry(_config(tmp_path))
+    assert registry.lookup("vm-template", "dev").description == "a dev box"
+
+
+@pytest.mark.parametrize(
+    ("kind", "spec_body"),
+    [
+        ("vm-template", "spec: {}"),
+        ("agent-template", "spec: {}"),
+        ("workspace-template", "spec: {}"),
+        ("admin-template", "spec: {}"),
+        ("named-console-template", "spec: {}"),
+    ],
+)
+def test_description_never_warns_for_declarable_kind(
+    tmp_path: Path, kind: str, spec_body: str
+) -> None:
+    """No declarable kind emits the retired "not yet stored" warning:
+    description is framework-uniform, so every kind stores it."""
+    _manifest(
+        tmp_path,
+        f"""
+        apiVersion: agentworks/v1
+        kind: {kind}
+        metadata:
+          name: default
+          description: uniform description
+        {spec_body}
+        """,
+    )
+    manifests = load_manifests(tmp_path / "resources")
+    assert not manifests.issues
+    assert manifests.entries[0].resource.description == "uniform description"
 
 
 def test_catalog_kind_decode_error_carries_location(tmp_path: Path) -> None:

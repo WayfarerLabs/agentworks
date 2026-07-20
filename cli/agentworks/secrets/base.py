@@ -11,26 +11,18 @@ persist on the VM.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Literal
+from typing import Literal
 
+from agentworks.declared_resource import DeclaredResource
 from agentworks.source_location import SourceLocation, synthesized
-
-if TYPE_CHECKING:
-    # Type-only imports to avoid the cycle: agentworks.secrets.kinds
-    # imports SecretDecl from this module to write its synthesize(); having
-    # this module import Origin / ReferenceEntry at runtime would loop.
-    # `from __future__ import annotations` keeps the field types as strings,
-    # so the runtime imports are unnecessary.
-    from agentworks.resources.origin import Origin
-    from agentworks.resources.reference import ReferenceEntry
 
 MappingValue = str | dict[str, object] | Literal[False]
 """One entry in ``SecretDecl.backend_mappings``: an identifier override
 (string or structured), or ``False`` for an explicit opt-out."""
 
 
-@dataclass(frozen=True)
-class SecretDecl:
+@dataclass(frozen=True, kw_only=True)
+class SecretDecl(DeclaredResource):
     """A declared secret. Values are never stored here; only the existence,
     description, and per-backend identifier overrides.
 
@@ -47,16 +39,16 @@ class SecretDecl:
       soft-skip (backend reports as "no mapping" via ``would_attempt``).
     """
 
-    name: str
-    description: str
+    # Override the base's optional ``description``: a secret must carry one
+    # (it is the operator-facing prompt/hint text), so it is required here.
+    # ``= field()`` is load-bearing, NOT decoration: a bare ``description:
+    # str`` would inherit the base's ``description = None`` class attribute as
+    # its default (dataclass reads the default via ``getattr`` up the MRO), so
+    # the field would silently stay optional. ``field()`` with no default
+    # forces MISSING, making the argument required as intended.
+    description: str = field()
     hint: str | None = None
     backend_mappings: dict[str, MappingValue] = field(default_factory=dict)
-    declared_at: SourceLocation = field(default_factory=synthesized)
-    # Registry-layer fields: framework attaches at publish (``origin``) and
-    # ``finalize`` (``usage``). Both default to "not yet attached" for
-    # direct-construction call sites (tests, framework synthesize paths).
-    origin: Origin | None = None
-    references: tuple[ReferenceEntry, ...] = ()
 
 
 DEFAULT_BACKEND_CHAIN: tuple[str, ...] = ("env-var", "prompt")

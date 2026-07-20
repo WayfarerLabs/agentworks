@@ -14,32 +14,33 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
+from agentworks.declared_resource import DeclaredResource
 from agentworks.env.entry import env_references
 from agentworks.sessions.layouts import AW_SESSION_VERTICAL_LAYOUT
-from agentworks.source_location import SourceLocation, synthesized
 
 if TYPE_CHECKING:
     from agentworks.env import EnvEntry
-    from agentworks.resources.origin import Origin
-    from agentworks.resources.reference import ReferenceEntry, ResourceReference
+    from agentworks.resources.reference import ResourceReference
 
 
-@dataclass(frozen=True)
-class NamedConsoleConfig:
+@dataclass(frozen=True, kw_only=True)
+class NamedConsoleConfig(DeclaredResource):
     """Settings for the `console` subcommand group (named multi-session
     consoles). Section is `[named_console]` in the TOML to disambiguate from
     the legacy `vm console` and the workspace console template. Only named
     consoles read these values today.
+
+    Inheriting ``DeclaredResource`` gives this the uniform metadata every
+    declared resource carries, including ``name``. The console surface is a
+    singleton today, so its two construction sites pass ``name="default"``;
+    this is metadata uniformity, not a per-console template selector.
     """
 
     tmux_layout: str = AW_SESSION_VERTICAL_LAYOUT
-    declared_at: SourceLocation = field(default_factory=synthesized)
-    origin: Origin | None = None
-    references: tuple[ReferenceEntry, ...] = ()
 
 
-@dataclass(frozen=True)
-class SessionTemplate:
+@dataclass(frozen=True, kw_only=True)
+class SessionTemplate(DeclaredResource):
     """Session template definition. All fields optional (None = inherit/default).
 
     The workload the session runs is selected by the ``harness`` /
@@ -56,15 +57,10 @@ class SessionTemplate:
     backward compatibility, manifests reject them (FRD R2/R6).
     """
 
-    name: str
     inherits: list[str] = field(default_factory=list)
-    description: str | None = None
     harness: str | None = None
     harness_config: dict[str, object] | None = None
     env: dict[str, EnvEntry] | None = None
-    declared_at: SourceLocation = field(default_factory=synthesized)
-    origin: Origin | None = None
-    references: tuple[ReferenceEntry, ...] = ()
 
     def referenced_resources(self) -> list[ResourceReference]:
         from agentworks.resources.reference import (
