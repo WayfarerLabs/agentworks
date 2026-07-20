@@ -85,6 +85,14 @@ SDD artifacts are considered "locked" and should not be modified except in excep
 circumstances. If changes are needed, the lockfile should be updated with a date and summary of the
 changes.
 
+**The lock takes effect when the SDD lands on `main`, not when `locked.md` is first written.** The
+lockfile is created as part of closeout, which normally happens on the feature branch _before_ it
+merges, so `locked.md` routinely exists on an open branch. While that branch is still unmerged the
+SDD is not yet locked: last-minute pre-merge edits (addressing review, a refinement that lands
+before merge) are ordinary in-flight changes and need no lockfile-update ceremony. Treat the lock as
+binding only once the artifacts are on `main`; a post-merge change is the exceptional case the
+paragraph above governs.
+
 A locked SDD is immutable but not permanent. See [Deleting Stale SDDs](#deleting-stale-sdds) for the
 post-lock lifecycle.
 
