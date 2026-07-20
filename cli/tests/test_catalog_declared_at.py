@@ -21,7 +21,7 @@ from agentworks.source_location import synthesized
 if TYPE_CHECKING:
     from pathlib import Path
 
-    from agentworks.catalog import AptSourceEntry
+    from agentworks.apt import AptSourceEntry
 
 # A well-formed operator apt-source, expressed once as YAML manifest spec and
 # once as a TOML section, so the two operator paths assert against the same

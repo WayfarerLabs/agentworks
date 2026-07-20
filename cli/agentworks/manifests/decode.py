@@ -111,9 +111,10 @@ def decode_document(doc: Document, issues: list[str]) -> Any:
         local_issues.extend(check_deprecated_fields(doc.kind, spec))
         resource = decoder(doc, spec, local_issues)
     except AgentworksError as exc:
-        # Catalog loaders raise CatalogError (an ExternalError subclass);
-        # from a manifest that is an operator-config mistake, so every
-        # spec-level failure re-raises as ConfigError with the document
+        # A spec-level failure from any loader (the apt / install-command
+        # loaders raise ConfigError directly; others raise their own
+        # AgentworksError subtype) is, from a manifest, an operator-config
+        # mistake, so it re-raises as ConfigError with the document
         # location, per the LLD's error catalog.
         raise ConfigError(f"{doc.where}: {exc}", hint=exc.hint) from exc
     issues.extend(f"{doc.where}: {issue}" for issue in local_issues)
@@ -358,13 +359,13 @@ def _decode_named_console_template(
 
 
 def _decode_apt_source(doc: Document, spec: dict[str, object], issues: list[str]) -> Any:
-    from agentworks.catalog import _load_apt_sources
+    from agentworks.apt import _load_apt_sources
 
     return _load_apt_sources({doc.name: spec}, _decls(doc.location))[doc.name]
 
 
 def _decode_apt_package(doc: Document, spec: dict[str, object], issues: list[str]) -> Any:
-    from agentworks.catalog import _load_apt_packages
+    from agentworks.apt import _load_apt_packages
 
     return _load_apt_packages({doc.name: spec}, _decls(doc.location))[doc.name]
 
@@ -372,7 +373,7 @@ def _decode_apt_package(doc: Document, spec: dict[str, object], issues: list[str
 def _decode_system_install_command(
     doc: Document, spec: dict[str, object], issues: list[str]
 ) -> Any:
-    from agentworks.catalog import _load_system_commands
+    from agentworks.install_commands import _load_system_commands
 
     return _load_system_commands({doc.name: spec}, _decls(doc.location))[doc.name]
 
@@ -380,7 +381,7 @@ def _decode_system_install_command(
 def _decode_user_install_command(
     doc: Document, spec: dict[str, object], issues: list[str]
 ) -> Any:
-    from agentworks.catalog import _load_user_commands
+    from agentworks.install_commands import _load_user_commands
 
     return _load_user_commands({doc.name: spec}, _decls(doc.location))[doc.name]
 

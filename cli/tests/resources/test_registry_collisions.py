@@ -48,7 +48,7 @@ def test_operator_over_reserved_builtin_errors() -> None:
 
 
 def test_operator_over_allow_builtin_replaces() -> None:
-    from agentworks.catalog import AptPackageEntry
+    from agentworks.apt import AptPackageEntry
 
     registry = Registry.empty()
     entry = AptPackageEntry(name="gh", description="builtin", apt=["gh"])

@@ -2,12 +2,11 @@
 
 from __future__ import annotations
 
+from types import SimpleNamespace
 from unittest.mock import MagicMock
 
-from agentworks.catalog import (
-    AptPackageEntry,
-    AptSourceEntry,
-    ResolvedCatalog,
+from agentworks.apt import AptPackageEntry, AptSourceEntry
+from agentworks.install_commands import (
     SystemInstallCommandEntry,
     UserInstallCommandEntry,
 )
@@ -20,8 +19,13 @@ from agentworks.vms.initializer import (
 )
 
 
-def _make_catalog() -> ResolvedCatalog:
-    return ResolvedCatalog(
+def _make_catalog() -> SimpleNamespace:
+    """A stand-in for the former ``ResolvedCatalog`` bundle: a namespace
+    with the four name -> entry dicts the initializer helpers read. The
+    helpers now take the specific dicts directly (resolved from the
+    Registry in production), so tests pass e.g. ``catalog.apt_packages``.
+    """
+    return SimpleNamespace(
         apt_sources={
             "test-source": AptSourceEntry(
                 name="test-source",
@@ -134,7 +138,7 @@ def test_configure_apt_sources_installs_key(tmp_path) -> None:
     logger = MagicMock()
     logger.has_warnings = False
 
-    _configure_apt_sources(target, vm_template, catalog, logger)
+    _configure_apt_sources(target, vm_template, catalog.apt_packages, catalog.apt_sources, logger)
 
     # Should have called curl to download the key (now via run with sudo=True)
     curl_calls = [c for c in target.run.call_args_list if "curl" in str(c)]
@@ -151,7 +155,7 @@ def test_configure_apt_sources_skips_existing(tmp_path) -> None:
     logger = MagicMock()
     logger.has_warnings = False
 
-    _configure_apt_sources(target, vm_template, catalog, logger)
+    _configure_apt_sources(target, vm_template, catalog.apt_packages, catalog.apt_sources, logger)
 
     # Should not have run apt-get update (nothing new configured)
     update_calls = [c for c in target.run.call_args_list if "apt-get update" in str(c)]
@@ -164,7 +168,7 @@ def test_configure_apt_sources_no_packages() -> None:
     catalog = _make_catalog()
     logger = MagicMock()
 
-    _configure_apt_sources(target, vm_template, catalog, logger)
+    _configure_apt_sources(target, vm_template, catalog.apt_packages, catalog.apt_sources, logger)
 
     # No calls at all
     target.run.assert_not_called()
@@ -177,7 +181,7 @@ def test_configure_apt_sources_resolves_arch() -> None:
     logger = MagicMock()
     logger.has_warnings = False
 
-    _configure_apt_sources(target, vm_template, catalog, logger)
+    _configure_apt_sources(target, vm_template, catalog.apt_packages, catalog.apt_sources, logger)
 
     # The source line written should have arm64, not {arch}
     write_calls = [str(c) for c in target.run.call_args_list if "sources.list.d" in str(c)]
@@ -196,7 +200,7 @@ def test_install_apt_packages_combines_sources() -> None:
     logger = MagicMock()
     logger.has_warnings = False
 
-    _install_apt_packages(target, vm_template, catalog, logger)
+    _install_apt_packages(target, vm_template, catalog.apt_packages, logger)
 
     # Should have a single apt-get install with all packages
     install_calls = [str(c) for c in target.run.call_args_list if "apt-get install" in str(c)]
@@ -212,7 +216,7 @@ def test_install_apt_packages_empty() -> None:
     catalog = _make_catalog()
     logger = MagicMock()
 
-    _install_apt_packages(target, vm_template, catalog, logger)
+    _install_apt_packages(target, vm_template, catalog.apt_packages, logger)
 
     target.run.assert_not_called()
 

@@ -854,10 +854,11 @@ def _load_catalog_sections(
     dict[str, object],
     dict[str, object],
 ]:
-    """Load the four user-defined catalog sections as raw dicts.
+    """Load the four user-defined apt / install-command sections as raw dicts.
 
-    Actual parsing into typed entries happens in catalog.py during merge.
-    Here we just validate that each section is a table of tables.
+    Actual parsing into typed entries happens in the ``apt`` and
+    ``install_commands`` operator publishers. Here we just validate that
+    each section is a table of tables.
     """
     sections = {}
     for section_name in ("apt_sources", "apt_packages", "system_install_commands", "user_install_commands"):

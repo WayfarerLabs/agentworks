@@ -495,8 +495,8 @@ def test_description_never_warns_for_declarable_kind(
 
 
 def test_catalog_kind_decode_error_carries_location(tmp_path: Path) -> None:
-    """Catalog loaders raise CatalogError; from a manifest it must
-    surface as ConfigError with the document's file:line."""
+    """The install-command loader raises ConfigError on a bad spec; from a
+    manifest it must surface with the document's file:line."""
     _manifest(
         tmp_path,
         """

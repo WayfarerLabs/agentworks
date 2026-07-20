@@ -1,16 +1,14 @@
 """Parity oracle for the built-in catalog (dissolve-catalog SDD).
 
-This module pins the resolved payloads of all 18 built-in catalog
-entries as constants, captured from ``load_builtin_catalog()`` before the
-built-in definition path moves off ``catalog.toml``. It is the no-drift
-reference for the migration: later phases move these entries to bundled
-YAML manifests, and the parity tests here assert the Registry still
-resolves byte-for-byte identical payloads.
+This module pins the resolved payloads of all 18 built-in apt /
+install-command entries as constants, captured from the pre-migration
+built-in definition path. It is the permanent no-drift reference: the
+built-in entries now ship as bundled YAML manifests, and the parity test
+here asserts the Registry still resolves byte-for-byte identical payloads.
 
 The constants are the oracle. They are hand-transcribed (not derived from
-the loader) on purpose: if a payload silently changes on either side
-(``catalog.toml`` or the bundled manifests), the constant no longer
-matches and the test fails.
+the loader) on purpose: if a payload silently changes in the bundled
+manifests, the constant no longer matches and the test fails.
 
 Payload scope: only the kind-specific fields plus ``name`` and
 ``description`` are compared. Provenance fields on ``DeclaredResource``
@@ -27,9 +25,8 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from pathlib import Path
 
-    from agentworks.catalog import (
-        AptPackageEntry,
-        AptSourceEntry,
+    from agentworks.apt import AptPackageEntry, AptSourceEntry
+    from agentworks.install_commands import (
         SystemInstallCommandEntry,
         UserInstallCommandEntry,
     )
@@ -253,38 +250,7 @@ def install_command_payload(
     }
 
 
-# -- Phase 0: the oracle matches the current TOML definition path --------------
-
-
-def test_oracle_matches_builtin_catalog() -> None:
-    """The oracle constants reproduce the payloads that
-    ``load_builtin_catalog()`` resolves from ``catalog.toml`` today. This
-    anchors the oracle to the pre-migration behavior; the Phase 1 test
-    then holds the bundled-manifest Registry rows against the same oracle.
-    """
-    from agentworks.catalog import load_builtin_catalog
-
-    catalog = load_builtin_catalog()
-
-    assert {
-        name: apt_source_payload(entry)
-        for name, entry in catalog.apt_sources.items()
-    } == EXPECTED_APT_SOURCES
-    assert {
-        name: apt_package_payload(entry)
-        for name, entry in catalog.apt_packages.items()
-    } == EXPECTED_APT_PACKAGES
-    assert {
-        name: install_command_payload(entry)
-        for name, entry in catalog.system_install_commands.items()
-    } == EXPECTED_SYSTEM_INSTALL_COMMANDS
-    assert {
-        name: install_command_payload(entry)
-        for name, entry in catalog.user_install_commands.items()
-    } == EXPECTED_USER_INSTALL_COMMANDS
-
-
-# -- Phase 1: bundled built-in manifests resolve to the same payloads ----------
+# -- Bundled built-in manifests resolve to the oracle payloads -----------------
 
 # Which bundled file each kind's built-in rows ship in. The origin's
 # source carries the shipped filename (see manifests/builtin.py).

@@ -18,9 +18,9 @@ from agentworks.transports import transport
 
 if TYPE_CHECKING:
     from agentworks.agents.templates import ResolvedAgentTemplate
-    from agentworks.catalog import UserInstallCommandEntry
     from agentworks.config import Config
     from agentworks.db import VMRow
+    from agentworks.install_commands import UserInstallCommandEntry
     from agentworks.resources import Registry
     from agentworks.ssh import SSHLogger
     from agentworks.transports import Transport
@@ -410,17 +410,17 @@ def _run_agent_install_commands(
     """
     import shlex
 
-    from agentworks.catalog import catalog_from_registry
+    from agentworks.resources.access import kind_dict
     from agentworks.ssh import SSHError
 
-    catalog = catalog_from_registry(registry)
+    user_install_commands = kind_dict(registry, "user-install-command")
     shell = agent_tmpl.shell
     path_additions: list[str] = []
     command_names = agent_tmpl.user_install_commands
     total = len(command_names)
 
     for i, name in enumerate(command_names, 1):
-        entry = catalog.user_install_commands.get(name)
+        entry = user_install_commands.get(name)
         if entry is None:
             output.warn(f"install command '{name}' not found in catalog")
             continue

@@ -2,8 +2,9 @@
 standard set of publishers.
 
 The "standard set of publishers" -- the bundled built-in manifests, the
-catalog, the git-credential-provider and secret-backend capability resources, the TOML
-``Config``, and the operator's YAML ``ManifestSet`` -- is application
+apt and install-command operator publishers, the git-credential-provider
+and secret-backend capability resources, the TOML ``Config``, and the
+operator's YAML ``ManifestSet`` -- is application
 knowledge, not Registry knowledge and not Config knowledge. This module
 is its legitimate home: it imports the publishers and orchestrates
 them. Registry stays publisher-agnostic; Config stays unaware of the
@@ -33,8 +34,9 @@ if TYPE_CHECKING:
 def build_registry(config: Config, manifests: ManifestSet | None = None) -> Registry:
     """Build a finalized ``Registry`` from the standard set of publishers.
 
-    Publisher order: built-in publishers first (``catalog``,
-    ``git_credentials``, ``secrets``, the bundled manifests), then the
+    Publisher order: built-in publishers first (the bundled manifests,
+    then the ``apt`` / ``install_commands`` operator publishers,
+    ``git_credentials``, ``secrets``), then the
     operator sources (``Config.publish_to`` for TOML, then the YAML
     ``ManifestSet``). Operator rows may replace built-in rows only where
     the kind's ``builtin_override`` allows; operator-vs-operator
@@ -47,7 +49,7 @@ def build_registry(config: Config, manifests: ManifestSet | None = None) -> Regi
     ``load_config``'s ``config_issues`` behavior). Pass an explicit
     ``ManifestSet`` (e.g. ``ManifestSet.empty()``) to skip the auto-load.
     """
-    from agentworks import catalog, output, secrets
+    from agentworks import apt, install_commands, output, secrets
     from agentworks.capabilities import git_credential, harness
     from agentworks.capabilities import vm_platform as vm_platforms
     from agentworks.errors import StateError
@@ -78,13 +80,14 @@ def build_registry(config: Config, manifests: ManifestSet | None = None) -> Regi
     # doctor warns on references to one.
     registry = Registry.empty()
     # Built-in publishers first. The bundled manifests now supply the
-    # built-in catalog entries too (apt sources/packages and install
-    # commands ship as manifests/builtin/*.yaml), so they must precede
-    # catalog.publish_to, which publishes only the operator's deprecated
-    # TOML catalog extensions (operator-declared rows): built-in rows
-    # must never land on top of operator rows.
+    # built-in apt/install-command entries too (apt sources/packages and
+    # install commands ship as manifests/builtin/*.yaml), so they must
+    # precede the apt / install_commands operator publishers, which publish
+    # only the operator's deprecated TOML extensions (operator-declared
+    # rows): built-in rows must never land on top of operator rows.
     builtin_manifests.publish_to(registry)
-    catalog.publish_to(registry, config)
+    apt.publish_to(registry, config)
+    install_commands.publish_to(registry, config)
     git_credential.publish_to(registry)
     harness.publish_to(registry)
     secrets.publish_to(registry)

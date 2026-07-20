@@ -37,11 +37,15 @@ if TYPE_CHECKING:
     from collections.abc import Mapping
     from contextlib import AbstractContextManager
 
+    from agentworks.apt import AptPackageEntry, AptSourceEntry
     from agentworks.capabilities.git_credential.base import GitCredentialProvider
     from agentworks.capabilities.vm_platform import VMPlatform
-    from agentworks.catalog import AptSourceEntry, SystemInstallCommandEntry, UserInstallCommandEntry
     from agentworks.config import Config
     from agentworks.db import Database
+    from agentworks.install_commands import (
+        SystemInstallCommandEntry,
+        UserInstallCommandEntry,
+    )
     from agentworks.resources.registry import Registry
     from agentworks.vms.admin import AdminConfig
     from agentworks.vms.templates import ResolvedVMTemplate
@@ -983,23 +987,20 @@ def _apply_sve_mask(target: Transport, logger: SSHLogger) -> None:
 def _configure_apt_sources(
     target: Transport,
     vm_template: ResolvedVMTemplate,
-    catalog: object,
+    apt_packages: Mapping[str, AptPackageEntry],
+    apt_sources: Mapping[str, AptSourceEntry],
     logger: SSHLogger,
 ) -> None:
     """Configure apt sources required by selected apt_packages. Idempotent."""
-    from agentworks.catalog import ResolvedCatalog
-
-    assert isinstance(catalog, ResolvedCatalog)
-
     # Collect all apt sources needed by selected apt_packages
     required_sources: dict[str, AptSourceEntry] = {}
     for pkg_name in vm_template.apt_packages:
-        pkg = catalog.apt_packages.get(pkg_name)
+        pkg = apt_packages.get(pkg_name)
         if pkg is None:
             continue
         for src_name in pkg.apt_sources:
             if src_name not in required_sources:
-                src = catalog.apt_sources.get(src_name)
+                src = apt_sources.get(src_name)
                 if src is not None:
                     required_sources[src_name] = src
 
@@ -1132,18 +1133,14 @@ def _install_system_packages(
 def _install_apt_packages(
     target: Transport,
     vm_template: ResolvedVMTemplate,
-    catalog: object,
+    apt_packages: Mapping[str, AptPackageEntry],
     logger: SSHLogger,
 ) -> None:
-    """Install apt packages from both direct list and catalog entries."""
-    from agentworks.catalog import ResolvedCatalog
-
-    assert isinstance(catalog, ResolvedCatalog)
-
-    # Collect all apt packages: direct list + catalog entries
+    """Install apt packages from both direct list and apt-package entries."""
+    # Collect all apt packages: direct list + apt-package entries
     all_apt: list[str] = list(vm_template.apt)
     for pkg_name in vm_template.apt_packages:
-        pkg = catalog.apt_packages.get(pkg_name)
+        pkg = apt_packages.get(pkg_name)
         if pkg is not None:
             all_apt.extend(pkg.apt)
 
@@ -1813,14 +1810,18 @@ def _phase_b_setup(
     ``git_tokens`` is required: every provider listed in
     ``providers`` must have a pre-resolved token value in the dict.
     """
-    from agentworks.catalog import catalog_from_registry
+    from agentworks.resources.access import kind_dict
 
     output.detail(f"vm: {vm_name}")
     db.update_vm_init_status(vm_name, InitStatus.IN_PROGRESS)
-    # Catalog reference validation lives in the framework
-    # (catalog kinds' error miss policy fires at build_registry time,
-    # which the manager-entry hoist runs before reaching this point).
-    catalog = catalog_from_registry(registry)
+    # Reference validation lives in the framework (the apt / install-command
+    # kinds' error miss policy fires at build_registry time, which the
+    # manager-entry hoist runs before reaching this point). Read the kinds
+    # this phase drives directly from the finalized registry.
+    apt_sources = kind_dict(registry, "apt-source")
+    apt_packages = kind_dict(registry, "apt-package")
+    system_install_commands = kind_dict(registry, "system-install-command")
+    user_install_commands = kind_dict(registry, "user-install-command")
 
     # Non-fatal: ensure cloud-init won't regenerate SSH host keys on reboot.
     # Runs first so VMs predating the Phase A step are repaired on reinit
@@ -1904,10 +1905,10 @@ def _phase_b_setup(
     _install_system_packages(ts_target, logger)
 
     # Non-fatal: apt sources required by selected apt_packages
-    _configure_apt_sources(ts_target, vm_template, catalog, logger)
+    _configure_apt_sources(ts_target, vm_template, apt_packages, apt_sources, logger)
 
-    # Non-fatal: apt packages (direct list + catalog entries)
-    _install_apt_packages(ts_target, vm_template, catalog, logger)
+    # Non-fatal: apt packages (direct list + apt-package entries)
+    _install_apt_packages(ts_target, vm_template, apt_packages, logger)
 
     # Identity profile fragments. Runs AFTER apt install because apt uses
     # `--force-confnew`, which would replace the agentworks block in
@@ -1951,7 +1952,7 @@ def _phase_b_setup(
     system_path = _run_catalog_commands(
         ts_target,
         vm_template.system_install_commands,
-        catalog.system_install_commands,
+        system_install_commands,
         admin_shell,
         home,
         logger,
@@ -2108,7 +2109,7 @@ def _phase_b_setup(
     user_path = _run_catalog_commands(
         ts_target,
         admin.user_install_commands,
-        catalog.user_install_commands,
+        user_install_commands,
         admin_shell,
         home,
         logger,

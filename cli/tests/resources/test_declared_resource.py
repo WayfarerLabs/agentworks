@@ -17,14 +17,13 @@ from dataclasses import dataclass
 import pytest
 
 from agentworks.agents.template import AgentTemplate
-from agentworks.catalog import (
-    AptPackageEntry,
-    AptSourceEntry,
+from agentworks.apt import AptPackageEntry, AptSourceEntry
+from agentworks.declared_resource import DeclaredResource
+from agentworks.git_credentials.credential import GitCredentialConfig
+from agentworks.install_commands import (
     SystemInstallCommandEntry,
     UserInstallCommandEntry,
 )
-from agentworks.declared_resource import DeclaredResource
-from agentworks.git_credentials.credential import GitCredentialConfig
 from agentworks.secrets.base import SecretDecl
 from agentworks.sessions.template import NamedConsoleConfig, SessionTemplate
 from agentworks.source_location import synthesized
