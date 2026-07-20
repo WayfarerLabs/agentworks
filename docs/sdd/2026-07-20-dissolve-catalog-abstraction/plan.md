@@ -33,11 +33,11 @@ still present (deleted in Phase 4).
 
 ## Phase 2: `declared_at` threading
 
-- [ ] Give the per-entry loaders an optional `decls: _SectionLineMap` param (default synthesized
+- [x] Give the per-entry loaders an optional `decls: _SectionLineMap` param (default synthesized
       shim); set `declared_at=decls.lookup(<section>, name)` per entry. Manifest decoders pass
       `_decls(doc.location)`; the operator TOML publisher passes the real map if handy, else
       default.
-- [ ] Test: a bundled built-in entry and an operator YAML entry both resolve with a real
+- [x] Test: a bundled built-in entry and an operator YAML entry both resolve with a real
       `declared_at`; describe output surfaces the location. Remove the stale `declared_at` follow-up
       comment.
 
