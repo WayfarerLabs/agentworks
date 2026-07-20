@@ -171,12 +171,20 @@ massive scale for decades.
 
 ### Sessions - the Workloads
 
-A session is the primary way of running interactive **workloads** in Agentworks (e.g. a Claude Code
-instance). It provides the mechanism by which an agent can execute commands within the context of a
-workspace. A unique name and a persistent tmux session allow the operator to have any number of
-concurrent workloads running across their VMs, workspaces, and agents. Agentworks allows the
-operator to attach to and detach from them as needed to monitor progress or interact with the
-workload, and then to stop, restart, and delete them to manage their lifecycle.
+A session is a specification to run a specific **harness** as an agent in a workspace on a VM. The
+harness is the piece that knows how to run a particular tool (e.g. a Claude Code instance, or just a
+plain login shell): it owns starting and restarting the workload and checking that the tool's
+required executables are present on the launch target. A session template selects a harness with one
+line (`harness: claude-code`) and hands it a config block, rather than restating the tool's launch
+commands as opaque strings; a template that names no harness runs the built-in `shell` harness (a
+login shell or an operator-supplied command). The harness joins the model's core vocabulary
+alongside VM, workspace, agent, and session.
+
+A unique name and a persistent tmux session allow the operator to have any number of concurrent
+workloads running across their VMs, workspaces, and agents. Agentworks allows the operator to attach
+to and detach from them as needed to monitor progress or interact with the workload, and then to
+stop, restart, and delete them to manage their lifecycle. Whatever the harness, tmux always owns the
+pane and its tty; the harness only decides what runs inside it.
 
 For day-to-day work across many sessions, see [Named consoles](cli/README.md#named-consoles):
 curated tmux views that group the sessions you're actively focused on, optionally with extra shell

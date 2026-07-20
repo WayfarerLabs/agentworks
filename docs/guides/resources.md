@@ -150,6 +150,75 @@ spec:
 - The legacy flat `[azure]` / `[proxmox]` TOML sections keep loading as deprecated vm-site
   declarations; `agw resource migrate vm-site` moves them to manifests.
 
+## Session harnesses
+
+What a session runs is declared as a **harness**: the capability (registered code) that knows how a
+particular tool is started, restarted, and what executables it needs. A session template pairs a
+harness with that harness's configuration, exactly the way a vm-site pairs a platform with its
+config:
+
+```yaml
+apiVersion: agentworks/v1
+kind: session-template
+metadata:
+  name: htop
+  description: Live process monitor
+spec:
+  harness: shell
+  harness_config:
+    command: htop
+    required_commands: [htop]
+```
+
+- `spec.harness` names a `harness` capability row; `spec.harness_config` is the block that harness
+  owns and validates (unknown keys are errors). A template that names no harness resolves to the
+  built-in `shell` harness (a plain login shell, or an operator command), which is the built-in
+  `default` template.
+- The `shell` harness's config vocabulary is `command` (the pane command; empty is a login shell),
+  `restart_command` (used by `session restart`, falling back to `command`), and `required_commands`
+  (executables checked on the launch target before any state mutation). `command` /
+  `restart_command` support the `{{session_name}}` and `{{workspace_name}}` variables.
+- The `(harness, harness_config)` pair inherits as a unit: a child restating the same harness merges
+  its block into the parent's (child wins per key; `shell` unions `required_commands`), while a
+  child naming a _different_ harness starts fresh. `env`, `inherits`, and the description merge as
+  usual.
+- The legacy flat `command` / `restart_command` / `required_commands` keys keep loading in TOML
+  (hoisted onto `harness = "shell"`); YAML manifests spell them under `harness_config`.
+  `agw resource describe harness/shell` shows the harness row and the templates that reference it.
+
+The `claude-code` harness runs Claude Code as the session. It selects the launch-and-resume
+conventions in one line instead of restating command strings: `session create` starts a new Claude
+session, and `session restart` resumes the same conversation when its transcript still exists (and
+launches fresh when Claude never wrote one), so a restart continues where the session left off:
+
+```yaml
+apiVersion: agentworks/v1
+kind: session-template
+metadata:
+  name: claude
+  description: Claude Code session
+spec:
+  harness: claude-code
+  harness_config:
+    permission_mode: acceptEdits # optional; forwarded to `claude --permission-mode`
+    model: opus # optional; forwarded to `claude --model`
+    extra_args: [--append-system-prompt, "session {{session_name}}"] # optional escape hatch
+```
+
+- `harness_config` is three optional fields: `permission_mode` and `model` forward verbatim to
+  `claude --permission-mode` / `--model` (their choice sets are Claude's, not validated here), and
+  `extra_args` is a list of raw argv tokens appended last, the escape hatch for any flag the harness
+  does not model. Unknown fields are errors. `extra_args` elements support the `{{session_name}}` /
+  `{{workspace_name}}` variables.
+- The only requirement checked on the launch target is that `claude` is installed. The chosen action
+  (resume vs new session) is announced in the pane on start, so it is never silent.
+
+`shell` and `claude-code` are the built-in harnesses, not the whole set the platform is built
+around. The `harness` kind is extensible: another tool or agent runtime, whatever the provider, is
+added as its own harness with its own `harness_config` vocabulary. `claude-code` above (and its
+Claude-specific `model` / `permission_mode` fields) is one worked example; the core assumes no
+particular runtime, and a session runs whatever harness its template selects.
+
 ## Built-ins and overrides
 
 Built-in resources ship with the app and appear in `agw resource list --origin builtin`. Override
@@ -162,12 +231,13 @@ policy is per kind:
   a sibling site instead. Like every vm-site they register on every host and disable themselves
   where this host lacks what they need (`agw resource list` marks the row; `describe` and
   `agw doctor` carry the reason); using a disabled site is an error naming the requirement.
-- **Secret backends** (`env-var`, `prompt`) and **VM platforms** (`lima`, `wsl2`, `azure-vm`,
-  `proxmox`): registered capabilities, shown as read-only rows. You cannot declare or override them;
-  secrets customize per secret via `backend_mappings`, platforms configure per site via
-  `platform_config`. A platform whose host requirements are not met publishes no row at all:
-  `agw doctor` lists installed-but-disabled platforms with the reason, and sites referencing one
-  self-disable rather than erroring.
+- **Secret backends** (`env-var`, `prompt`), **VM platforms** (`lima`, `wsl2`, `azure-vm`,
+  `proxmox`), and **session harnesses** (`shell`, `claude-code`): registered capabilities, shown as
+  read-only rows. You cannot declare or override them; secrets customize per secret via
+  `backend_mappings`, platforms configure per site via `platform_config`, and harnesses configure
+  per session-template via `harness_config`. A platform whose host requirements are not met
+  publishes no row at all: `agw doctor` lists installed-but-disabled platforms with the reason, and
+  sites referencing one self-disable rather than erroring.
 
 ## Secrets: backends and the chain
 

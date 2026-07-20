@@ -613,10 +613,11 @@ def _substitute_template_vars_in_env(
     """Apply ``{{session_name}}`` / ``{{workspace_name}}`` substitution to
     plaintext env entry values.
 
-    Preserves the legacy template-variable hook that ``_build_session_command``
-    carried before the EnvEntry migration. Secret-ref entries pass through
-    unchanged (variable substitution applies to the resolved string at
-    backend time, not the secret name).
+    Preserves the legacy template-variable hook the session-command build
+    carried before the EnvEntry migration (the pane command itself now
+    substitutes at the harness op call site). Secret-ref entries pass
+    through unchanged (variable substitution applies to the resolved
+    string at backend time, not the secret name).
     """
     from agentworks.env import EnvEntry as _EnvEntry
 
@@ -867,33 +868,6 @@ def _resolve_session_env(
         agent=scopes.agent,
         session=scopes.session,
     )
-
-
-def _build_session_command(
-    template: ResolvedSessionTemplate,
-    *,
-    session_name: str,
-    workspace_name: str,
-    restart: bool = False,
-) -> str:
-    """Build the command for a session from its template.
-
-    Returns an empty string when the template has no command (login shell
-    only). Uses restart_command (if defined) when restart=True. The
-    ``exec`` wrapping that lets the command replace the login shell is
-    applied downstream in ``sessions/tmux._pane_command``; this function
-    just returns the operator's command string (after template-var
-    substitution). Env injection is a separate concern handled by the
-    SSH layer (SetEnv) and tmux's ``-e`` flag on new-session; see
-    ``sessions/tmux.create_session``.
-    """
-    variables = {
-        "session_name": session_name,
-        "workspace_name": workspace_name,
-    }
-
-    raw_command = template.restart_command if restart and template.restart_command else template.command
-    return _substitute_template_vars(raw_command, variables)
 
 
 # -- Liveness checks -------------------------------------------------------
@@ -1783,11 +1757,10 @@ def create_session(
                 from agentworks.workspaces.realize import realize_workspace
 
                 assert workspace_tmpl is not None  # resolved at build above
+                # The realizer emits its own "Creating workspace ..." line
+                # (used by the standalone `workspace create` path too), so the
+                # session flow must not echo it a second time here.
                 output.phase("Creating Workspace")
-                output.detail(
-                    f"Creating workspace '{workspace_name}' on VM '{vm.name}' "
-                    f"(template: {workspace_tmpl.name})..."
-                )
                 realize_workspace(
                     db,
                     config,
@@ -1914,9 +1887,34 @@ def create_session(
                         resolved_agent_name, workspace_name, "implicit", session_name=name
                     )
 
+                # Op-start RunContext for the harness's start op: mirrors
+                # the runup readiness ctx above (targets), plus the scoped
+                # secrets (the session node's declared union, empty for the
+                # built-in shell harness; ScopedSecrets never delivers).
+                # Template-var substitution lifts OUT of the harness and
+                # wraps its returned string. The op runs BEFORE the insert
+                # so a freshly minted harness_state (claude-code's session
+                # id) lands with the new row; it does only read-only work
+                # (a login-shell string for shell, a find probe for
+                # claude-code), so it stays ahead of any tmux mutation.
+                start_ctx = RunContext(
+                    config=config,
+                    operation_scope=scope,
+                    admin_target=target,
+                    agent_target=agent_target,
+                    secrets=ScopedSecrets(secret_values, session_node.secret_refs()),
+                )
+                command = _substitute_template_vars(
+                    session_node.harness.start(start_ctx),
+                    {"session_name": name, "workspace_name": workspace_name},
+                )
+                if (note := session_node.harness.launch_note()) is not None:
+                    output.detail(note)
+
                 # Insert DB record before any tmux work so a crash mid-create
                 # leaves a recoverable row (and the teardown can find it to
-                # delete).
+                # delete). The harness's start op ran just above, so its
+                # state blob lands with the new row.
                 db.insert_session(
                     name,
                     workspace_name,
@@ -1926,12 +1924,10 @@ def create_session(
                     created_workspace=pending_workspace is not None,
                     created_agent=pending_agent is not None,
                     socket_path=expected_socket,
+                    harness_state=session_node.harness.state,
                 )
 
                 deploy_restricted_config(run_command, history_limit=config.session.history_limit)
-                command = _build_session_command(
-                    template, session_name=name, workspace_name=workspace_name
-                )
                 session_env = _resolve_session_env(
                     registry,
                     values=secret_values,
@@ -2262,7 +2258,7 @@ def restart_session(
         gate_secret_resolver,
     )
     from agentworks.orchestration.readiness import preflight_all
-    from agentworks.orchestration.secrets import secret_union
+    from agentworks.orchestration.secrets import ScopedSecrets, secret_union
     from agentworks.orchestration.walk import walk
     from agentworks.secrets.resolver import Resolver
     from agentworks.sessions.nodes import live_session_node
@@ -2380,6 +2376,14 @@ def restart_session(
             ),
         )
         resolver.resolve()
+        # Capture the graph boundary union for the harness's op-start
+        # context (matching the create path, which captures
+        # ``resolver.values`` at its boundary). Inert for the built-in
+        # shell harness (empty ``secret_refs()``), but keeps the restart
+        # op ctx shape-correct for a future secret-declaring harness; the
+        # later env-chain resolve (``resolve_for_command`` below) is a
+        # SEPARATE pass, not this graph union.
+        graph_secret_values = resolver.values
 
         # Bail-before-prompt: refuse the operation up front in the cases
         # where the operator either lacks the right flag (BROKEN + no
@@ -2479,13 +2483,35 @@ def restart_session(
 
         deploy_restricted_config(run_command, history_limit=config.session.history_limit)
 
-        # Use restart_command if available, otherwise fall back to command
-        command = _build_session_command(
-            template,
-            session_name=name,
-            workspace_name=session.workspace_name,
-            restart=True,
+        # Op-start RunContext for the harness's restart op, assembled
+        # AFTER the kill (a state-aware harness decides resume-vs-launch
+        # with the old process already dead). Mirrors the preflight
+        # readiness ctx above (the restart path builds no runup ctx), plus
+        # the scoped graph secrets (empty for the built-in shell harness).
+        # Template-var substitution wraps the returned string; restart
+        # sources ``workspace_name`` from the session row, as the interim
+        # path did.
+        restart_ctx = RunContext(
+            config=config,
+            operation_scope=scope,
+            admin_target=admin_target,
+            agent_target=None if is_admin else session_target,
+            secrets=ScopedSecrets(graph_secret_values, session_node.secret_refs()),
         )
+        command = _substitute_template_vars(
+            session_node.harness.restart(restart_ctx),
+            {"session_name": name, "workspace_name": session.workspace_name},
+        )
+        if (note := session_node.harness.launch_note()) is not None:
+            output.detail(note)
+        # Persist the harness's state blob after the op (mirrors the
+        # create-path insert). Usually a no-op (the value was stored on
+        # create), but a session predating the harness_state column
+        # (backfilled to {}) mints its id on this first restart. Persisting
+        # BEFORE create_tmux_session is intentional: a stable id that
+        # survives a tmux-recreate retry beats re-minting a new one each
+        # attempt (the id is the session's, whether or not the pane came up).
+        db.update_session_harness_state(name, session_node.harness.state)
         linux_user = _resolve_session_linux_user(db, session, vm)
         session_env = _resolve_session_env(
             registry,

@@ -549,6 +549,58 @@ def _emit_document(doc: tomlkit.TOMLDocument, unit: MigrationUnit) -> str:
                 ) from exc
         spec = rebuilt
 
+    if unit.kind == "session-template":
+        # The legacy flat command fields nest under harness_config on
+        # the 'shell' harness (mirroring the git-credential
+        # provider_config nesting); a declared harness / harness_config
+        # passes through. env and inherits are kind-owned and stay at
+        # the spec top level. The TOML loader's hoist (config.py) and
+        # this emission land on the identical internal value, which the
+        # post-run registry-equivalence verification proves; validate
+        # the rebuilt blob pre-write so a bad blob fails BEFORE anything
+        # is written, in the operator's TOML vocabulary, rather than
+        # failing verification after the write.
+        flat = {
+            key: spec.pop(key)
+            for key in ("command", "restart_command", "required_commands")
+            if key in spec
+        }
+        harness = spec.pop("harness", None)
+        harness_config = spec.pop("harness_config", None)
+        if flat:
+            # The loader guarantees flat fields never coexist with a
+            # non-shell harness or an explicit harness_config, so this
+            # is unambiguously the shell-hoist case.
+            harness = "shell"
+            harness_config = dict(flat)
+        rebuilt_session: dict[str, Any] = {}
+        if "inherits" in spec:
+            rebuilt_session["inherits"] = spec.pop("inherits")
+        if harness is not None:
+            rebuilt_session["harness"] = harness
+        if harness_config is not None:
+            rebuilt_session["harness_config"] = dict(harness_config)
+        rebuilt_session.update(spec)  # env and any remaining kind-owned keys
+        if isinstance(harness, str) and harness_config is not None:
+            from agentworks.capabilities.harness import HARNESS_REGISTRY
+
+            harness_cap = HARNESS_REGISTRY.get(harness)
+            if harness_cap is not None:
+                try:
+                    harness_cap.validate_config(
+                        f"session-template/{unit.name}", harness_config
+                    )
+                except ConfigError as exc:
+                    raise ConfigError(
+                        f"cannot migrate session-template/{unit.name}: {exc}",
+                        hint=(
+                            "The flat TOML section carries key(s) its harness "
+                            "does not accept (silently ignored by the TOML "
+                            "loader). Remove them from config.toml, then re-run."
+                        ),
+                    ) from exc
+        spec = rebuilt_session
+
     envelope: dict[str, Any] = {
         "apiVersion": "agentworks/v1",
         "kind": unit.kind,

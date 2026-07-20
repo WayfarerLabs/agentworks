@@ -391,7 +391,8 @@ def test_v28_drops_workspace_last_seen_at_and_preserves_rows(
         assert db.get_session("s1") is not None
         assert db.has_any_grant("a1", "ws1")
 
-        # No dangling FKs, and the version advanced to the latest.
+        # No dangling FKs, and the version advanced to the latest (opening
+        # the DB always migrates all the way forward).
         assert db._conn.execute("PRAGMA foreign_key_check").fetchall() == []
         (version,) = db._conn.execute(
             "SELECT MAX(version) FROM schema_version"

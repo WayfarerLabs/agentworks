@@ -75,7 +75,7 @@ def _session(
         db, cast("Config", object()), "ws1", vm_node, None
     )
     template = ResolvedSessionTemplate(
-        name="claude", required_commands=list(required)
+        name="claude", harness_config={"required_commands": list(required)}
     )
     return pending_session_node(
         db,
@@ -176,22 +176,6 @@ def test_missing_command_is_a_typed_error(db: Database) -> None:
         session.preflight(_ctx(agent_target=probe))
     assert "agent 'dev'" in str(exc.value)
     assert "--template" in (exc.value.hint or "")
-
-
-def test_absent_target_is_a_loud_error(db: Database) -> None:
-    """Anti-silent-skip: in scope with no target is a selection bug."""
-    from agentworks.sessions.nodes import RequiredCommandsCheck
-
-    check = RequiredCommandsCheck(
-        session_name="s1",
-        template_name="claude",
-        required_commands=("claude",),
-        target=None,
-        admin=False,
-        vm_name="box",
-    )
-    with pytest.raises(StateError, match="refusing to skip"):
-        check.preflight(_ctx())
 
 
 def test_admin_mode_probes_the_admin_target(db: Database) -> None:
@@ -589,7 +573,7 @@ def test_live_session_probes_its_realized_agent_at_preflight(
     agent = _live_agent(db, vm)
     session = live_session_node(
         _session_row(agent_name="dev"),  # type: ignore[arg-type]
-        ResolvedSessionTemplate(name="claude", required_commands=["claude"]),
+        ResolvedSessionTemplate(name="claude", harness_config={"required_commands": ["claude"]}),
         agent=agent,
         workspace=_live_workspace(db, vm),
         vm=vm,
@@ -605,7 +589,7 @@ def test_live_session_admin_mode_comes_from_the_row(db: Database) -> None:
     vm = _vm_node(db)
     session = live_session_node(
         _session_row(agent_name=None),  # type: ignore[arg-type]
-        ResolvedSessionTemplate(name="claude", required_commands=["claude"]),
+        ResolvedSessionTemplate(name="claude", harness_config={"required_commands": ["claude"]}),
         agent=None,
         workspace=_live_workspace(db, vm),
         vm=vm,

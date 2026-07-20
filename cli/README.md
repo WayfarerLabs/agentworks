@@ -490,34 +490,96 @@ via `--workspace <ws>`). Use these when you just need a terminal without the con
 
 ### Session Templates
 
-Templates define the command a session runs. The built-in `default` template runs a login shell
-(`$SHELL --login`), respecting whatever shell the user (admin or agent) is configured with. Define
-custom templates as `session-template` resources:
+A session template selects the **harness** that runs the session's workload. The harness is a
+[capability](../docs/guides/resources.md#session-harnesses) that owns starting/restarting the tool
+and checking its required executables; the template names one with `spec.harness` and hands it a
+`spec.harness_config` block it validates. A template that names no harness runs the built-in `shell`
+harness (a login shell, `$SHELL --login`, or an operator-supplied command), which is the built-in
+`default` template's behavior. Define custom templates as `session-template` resources:
 
 ```yaml
 apiVersion: agentworks/v1
 kind: session-template
 metadata:
-  name: default # override the built-in default
-  description: Claude Code interactive session
+  name: htop
+  description: Live process monitor
 spec:
-  command: claude --name {{session_name}}
-  restart_command: claude --resume {{session_name}}
-  required_commands: [claude]
+  harness: shell
+  harness_config:
+    command: htop
+    required_commands: [htop]
 ```
 
-(TOML equivalent: `[session_templates.default]` in `config.toml`, deprecated but supported.)
+`shell`'s `harness_config` vocabulary is the command surface every template used to spell at the
+spec top level:
 
-Template commands support `{{session_name}}` and `{{workspace_name}}` variable substitution
-(double-brace syntax). The optional `restart_command` is used by `session restart` -- useful for
-tools like Claude Code where `--resume` picks up the previous conversation. If omitted, the regular
-`command` is used.
+- `command`: the pane command (empty/omitted is a plain login shell). Supports `{{session_name}}`
+  and `{{workspace_name}}` variable substitution (double-brace syntax).
+- `restart_command`: used by `session restart`, for a tool that needs a different invocation on
+  restart. If omitted, `command` is used. (To run Claude Code, prefer the dedicated `claude-code`
+  harness below, which resumes the previous conversation on its own.)
+- `required_commands`: executables the command needs, checked on the session's launch target (the
+  agent, or the VM admin for admin sessions) before any state mutation, so launching a session whose
+  tool is not installed fails fast with a clear error instead of a cryptic downstream tmux failure.
+  Merged (de-duped, order-preserving) across template inheritance.
 
-The optional `required_commands` list names executables the template needs. They are checked on the
-session's launch target (the agent, or the VM admin for admin sessions) before any state mutation,
-so launching a `claude` session on an agent that doesn't have `claude` installed fails fast with a
-clear error instead of a cryptic downstream tmux failure. `required_commands` is merged (de-duped,
-order-preserving) across template inheritance.
+In a YAML manifest these three keys live only under `harness_config`; spelling any of them at the
+`spec` top level is a load error that points you at the nested shape. That check is one instance of
+a general deprecated-field notice: any resource kind can flag retired or relocated spec fields with
+an actionable message (a hard load error when ignoring the field would change behavior, otherwise a
+warning that `agw doctor` also surfaces). It is separate from the TOML flat-field handling below,
+which is a permanent supported spelling, not a deprecation.
+
+The `claude-code` harness runs Claude Code as the session: `session create` starts a new Claude
+session and `session restart` resumes the same conversation when its transcript still exists on disk
+(launching fresh when Claude never wrote one). It needs only that `claude` is installed on the
+launch target, and announces the chosen action (resume vs new session) in the pane, so the decision
+is never silent. Its `harness_config` vocabulary is three optional fields:
+
+- `permission_mode`: forwarded verbatim to `claude --permission-mode` (its choice set is Claude's,
+  not validated here).
+- `model`: forwarded verbatim to `claude --model`.
+- `extra_args`: a list of raw argv tokens appended last, the escape hatch for any flag the harness
+  does not model. Each element is one argv token (shell-quoted, never re-split), and elements
+  support the `{{session_name}}` / `{{workspace_name}}` variables.
+
+```yaml
+apiVersion: agentworks/v1
+kind: session-template
+metadata:
+  name: claude
+  description: Claude Code session
+spec:
+  harness: claude-code
+  harness_config:
+    permission_mode: acceptEdits
+    model: opus
+```
+
+The `(harness, harness_config)` pair inherits as a unit: a child that restates the same harness
+merges its config block into the parent's (child wins per key; `shell` unions `required_commands`),
+while a child naming a _different_ harness starts from a fresh config (the parent's block was
+addressed to a different tool). `env`, `inherits`, and the description merge as usual.
+
+**TOML** (`[session_templates.<name>]` in `config.toml`, deprecated but supported): the same
+`harness` string and a nested `harness_config` table are accepted:
+
+```toml
+[session_templates.htop]
+harness = "shell"
+[session_templates.htop.harness_config]
+command = "htop"
+required_commands = ["htop"]
+```
+
+For `shell`, the legacy flat keys `command` / `restart_command` / `required_commands` keep working
+at the section top level and are hoisted into `harness = "shell"` + the equivalent `harness_config`.
+The flat form is the documented default TOML shape; YAML manifests are the primary authoring surface
+(run `agw resource sample session-template`). The flat fields cannot be combined with a non-`shell`
+`harness` or with an explicit `harness_config` table (one spelling per declaration), and both
+conflicts are load errors. One inheritance interaction worth noting: a legacy flat-field child under
+a `harness: claude-code` parent hoists to `harness = "shell"`, which (per the different-harness
+rule) switches the lineage back to `shell` with a fresh config.
 
 ### Config
 

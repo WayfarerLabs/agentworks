@@ -290,12 +290,15 @@ def fake_target(monkeypatch: pytest.MonkeyPatch) -> _FakeTarget:
 
 
 class _StubSessionTemplate:
-    """Minimal stand-in for ``ResolvedSessionTemplate`` used by the helper below."""
+    """Minimal stand-in for ``ResolvedSessionTemplate`` used by the helper below.
+
+    Carries the ``(harness, harness_config)`` pair the session-node
+    factory builds the harness from: the default is the ``shell`` harness
+    with an empty config (a plain login shell)."""
 
     name = "default"
-    command = ""
-    restart_command = None
-    required_commands: list[str] = []  # noqa: RUF012 - mutable class attr is fine for a stub
+    harness = "shell"
+    harness_config: dict[str, object] = {}  # noqa: RUF012 - mutable class attr is fine for a stub
     env: dict[str, str] = {}  # noqa: RUF012 - mutable class attr is fine for a stub
 
 

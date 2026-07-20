@@ -386,17 +386,33 @@ def _check_config() -> tuple[HealthGroup, Config | None, Registry | None]:
     # the report: the TOML issue rows, deprecation rows, and SSH checks
     # below still render (doctor's job is maximal visibility in one run);
     # only the registry-dependent tail is skipped.
+    resources_dir = config.source_path.parent / RESOURCES_DIRNAME
     manifests = None
     try:
-        manifests = load_manifests(config.source_path.parent / RESOURCES_DIRNAME)
+        manifests = load_manifests(resources_dir)
     except ConfigError as e:
         g.fail("Manifest", str(e), hint=e.hint)
+
+    # Deprecated-field usage (FRD R11) is surfaced as its own proactive
+    # finding: warn-level fields load with a notice and are ignored, so
+    # without this they only emit an easily-missed ambient log line.
+    # These notices match the strings the loader puts in
+    # ``manifests.issues`` verbatim, so they are pulled out of the generic
+    # Manifest rows below rather than reported twice.
+    from agentworks.manifests.deprecated_fields import manifest_deprecation_notices
+
+    deprecated_field_notices = manifest_deprecation_notices(resources_dir)
 
     for issue in config.config_issues:
         g.warn("Config", issue)
     if manifests is not None:
+        deprecated_set = set(deprecated_field_notices)
         for issue in manifests.issues:
+            if issue in deprecated_set:
+                continue
             g.warn("Manifest", issue)
+    for notice in deprecated_field_notices:
+        g.warn("Deprecated manifest field", notice)
     if not config.config_issues and manifests is not None and not manifests.issues:
         g.ok("Config is valid")
     # Deprecation nudges ride their own channel (so --no-deprecations

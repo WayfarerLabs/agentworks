@@ -46,6 +46,7 @@ def test_capability_kinds_are_exactly_the_code_backed_ones() -> None:
         "secret-backend",
         "git-credential-provider",
         "vm-platform",
+        "harness",
     }
 
 

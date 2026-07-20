@@ -99,4 +99,4 @@ def test_sample_config_env_tables_live_with_their_resources() -> None:
     assert "env" in parsed["admin"]
     assert "env" in parsed["agent_templates"]["default"]
     assert "env" in parsed["workspace_templates"]["default"]
-    assert "env" in parsed["session_templates"]["default"]
+    assert "env" in parsed["session_templates"]["custom-tool"]

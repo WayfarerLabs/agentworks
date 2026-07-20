@@ -11,7 +11,7 @@ from agentworks.capabilities.vm_platform.base import ProvisionRequest, Provision
 from agentworks.capabilities.vm_platform.bootstrap_script import generate_bootstrap_script
 from agentworks.capabilities.vm_platform.cloud_init import PROVISIONING_PACKAGES, generate_cloud_init
 from agentworks.db import VMStatus
-from agentworks.errors import ConfigError, ProvisioningError, StateError
+from agentworks.errors import ConfigError, NotFoundError, ProvisioningError, StateError
 from agentworks.ssh import SSHError
 from agentworks.transports import SSHTransport
 
@@ -20,6 +20,7 @@ if TYPE_CHECKING:
 
     from azure.mgmt.compute import ComputeManagementClient
     from azure.mgmt.network import NetworkManagementClient
+    from azure.mgmt.resource.resources import ResourceManagementClient
 
     from agentworks.capabilities.base import RunContext
     from agentworks.config import Config
@@ -231,6 +232,7 @@ class AzureVMPlatform(VMPlatform):
         self._credential_cached: object | None = None
         self._compute_cached: dict[str, ComputeManagementClient] = {}
         self._network_cached: dict[str, NetworkManagementClient] = {}
+        self._resource_cached: dict[str, ResourceManagementClient] = {}
 
     # No preflight override: azure has no config secrets (the base's
     # prediction pass is a no-op) and no unauthenticated readiness
@@ -311,6 +313,81 @@ class AzureVMPlatform(VMPlatform):
             self._network_cached[az.subscription_id] = network
         return network
 
+    def _resource_client(self, az: _HasSubscriptionId) -> ResourceManagementClient:
+        """The resource-management client for ``az``'s subscription, built
+        on first need from the cached credential and reused for the
+        instance's remaining ops against that subscription (see
+        ``__init__`` for why the cache keys by subscription). Used by
+        ``runup`` for the read-only resource-group existence check. In
+        azure-mgmt-resource the client lives under the ``.resources``
+        subpackage (the top-level ``azure.mgmt.resource`` namespace does
+        not re-export it), and the import stays function-local like the
+        other SDK imports so azure modules never load at CLI startup."""
+        from azure.mgmt.resource.resources import ResourceManagementClient
+
+        resource = self._resource_cached.get(az.subscription_id)
+        if resource is None:
+            # Same as _compute_client: credential is TokenCredential-compatible at runtime.
+            resource = ResourceManagementClient(self._get_credential(), az.subscription_id)  # type: ignore[arg-type]
+            self._resource_cached[az.subscription_id] = resource
+        return resource
+
+    def runup(self, ctx: RunContext) -> None:
+        """Provisioning-phase runup: an authenticated, read-only check that
+        the site's configured resource group exists before ``create``
+        provisions into it. A missing group is a definitive rejection
+        (fatal, before the DB row or any Azure resource exists), so
+        ``vm create`` aborts here with a clear message instead of failing
+        partway through creating a public IP / NSG / VNet / NIC in a group
+        that was never there. Unconditional (there is nothing to gate it
+        on): every azure-vm site targets a resource group.
+
+        Post-resolve and authenticated: the credential is whatever
+        :meth:`_get_credential` resolves (ambient ``DefaultAzureCredential``
+        today; issue #199 will make it a framework secret and plug it in
+        here, which is why runup declares no secret of its own). The
+        existence probe (``resource_groups.check_existence``) is read-only
+        and mutates nothing. A credential or reachability failure is NOT a
+        "group missing" verdict: those surface through
+        :func:`_wrap_azure_error` exactly as the ops report them, so a bad
+        or absent credential never masquerades as an absent resource group.
+
+        Reachability failures are fatal here, which diverges from the
+        proxmox runup on purpose. Proxmox warns and continues unverified on
+        a transient outage because its token check is incidental (the op
+        uses the token directly regardless). Azure's ``create`` makes many
+        Resource Manager calls, so an unreachable RM at runup means the
+        whole create cannot proceed anyway; aborting cleanly here, with
+        nothing realized, beats warning past it into a cryptic mid-provision
+        failure.
+        """
+        from types import SimpleNamespace
+
+        az = SimpleNamespace(
+            subscription_id=str(self.platform_config["subscription_id"]),
+            resource_group=str(self.platform_config["resource_group"]),
+            region=str(self.platform_config["region"]),
+        )
+        output.detail(f"Performing runup test for vm-site/{self.site_name}...")
+        try:
+            exists = self._resource_client(az).resource_groups.check_existence(
+                az.resource_group
+            )
+        except Exception as exc:
+            raise _wrap_azure_error(exc) from exc
+        if not exists:
+            raise NotFoundError(
+                f"Azure resource group '{az.resource_group}' does not exist in "
+                f"subscription '{az.subscription_id}' (vm-site '{self.site_name}')",
+                entity_kind="resource-group",
+                entity_name=az.resource_group,
+                hint=(
+                    f"create it with 'az group create -n {az.resource_group} "
+                    f"-l {az.region}', or point vm-site '{self.site_name}' at an "
+                    f"existing resource group"
+                ),
+            )
+
     def create(self, request: ProvisionRequest, ctx: RunContext) -> ProvisionResult:
         from types import SimpleNamespace
 
@@ -331,11 +408,17 @@ class AzureVMPlatform(VMPlatform):
         req_memory = request.memory_gib if request.memory_gib is not None else 8
         selected = _select_vm_size(catalog, cpus=req_cpus, memory_gib=req_memory)
         azure_vm_size = selected.name
+        # The provisioning line always names the selected SKU and its spec. A
+        # round-up (an off-ratio request that no SKU matches exactly) also
+        # warns, naming the requested shape as the reason.
+        size_summary = (
+            f"{selected.name} ({selected.cpus} vCPU / {selected.memory_gib} GiB)"
+        )
         if selected.cpus > req_cpus or selected.memory_gib > req_memory:
             output.warn(
-                f"no exact Azure size for {req_cpus} vCPU / {req_memory} GiB; "
-                f"rounding up to {selected.name} "
-                f"({selected.cpus} vCPU / {selected.memory_gib} GiB)"
+                f"Rounded up to {selected.name} "
+                f"({selected.cpus} vCPU / {selected.memory_gib} GiB) "
+                f"for requested {req_cpus} vCPU / {req_memory} GiB."
             )
         disk = request.disk_gib if request.disk_gib is not None else 50
         swap = request.swap_gib if request.swap_gib is not None else 0
@@ -365,7 +448,7 @@ class AzureVMPlatform(VMPlatform):
                 hint="delete it first or pick a different VM name",
             )
 
-        output.detail(f"Provisioning Azure VM '{vm_name}' in {az.region} (size: {azure_vm_size})...")
+        output.detail(f"Provisioning Azure VM '{vm_name}' in {az.region}: size {size_summary}...")
         if swap > 0:
             output.detail(f"Swap: {swap} GiB", indent=2)
 

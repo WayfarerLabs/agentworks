@@ -105,6 +105,10 @@ def _strip(resource: Any) -> Any:
             """,
         ),
         (
+            # The deliberate shape divergence for the harness pair: flat
+            # TOML (command/required_commands top-level) and clean YAML
+            # (nested under harness_config on the shell harness) decode to
+            # the same row -- the loader hoists, manifests nest.
             "session-template",
             "claude",
             """
@@ -120,8 +124,10 @@ def _strip(resource: Any) -> Any:
               name: claude
               description: Claude session
             spec:
-              command: claude
-              required_commands: [claude]
+              harness: shell
+              harness_config:
+                command: claude
+                required_commands: [claude]
             """,
         ),
         (

@@ -1,0 +1,397 @@
+# Session harness capability: implementation plan
+
+**Status:** Draft **Repo:** `agentworks` **Path:** `cli/agentworks/`
+
+Read `frd.md` and `hla.md` first; this plan pins the phasing, the exact swap anchors, and the
+definition of done per item. The orchestration layer is merged and locked (`orchestration/`,
+`capabilities/base.py`, `sessions/nodes.py`); the harness plugs into it and never modifies it.
+
+## How this plan is phased
+
+The work is cut into always-green vertical slices. Every merged phase is complete and honest on its
+own: it either adds a fully-formed capability nothing yet consumes (the git-credential precedent),
+or it moves a consumer wholesale so no half-reshaped representation ever lands on `main`.
+
+The single load-bearing sequencing decision (ratified by the lead, see "Decisions"): the node and
+orchestrator **swap lands BEFORE the template-surface change**. Phase 3 wires the session node onto
+a `shell` harness built from `ResolvedSessionTemplate`'s still-flat fields, retiring
+`RequiredCommandsCheck` and `_build_session_command`; Phase 4 then reshapes the template to the
+`(harness, harness_config)` pair and deletes the flat fields. This keeps the risky orchestrator
+wiring isolated from the dataclass reshape, and each is its own green slice. The alternative (one
+combined surface-plus-swap phase) is larger and mixes two unrelated risk surfaces; swap-first is the
+recommendation.
+
+Named interim seams and the phase that retires each:
+
+| Seam                                                                                                         | Introduced | Retired                                               |
+| ------------------------------------------------------------------------------------------------------------ | ---------- | ----------------------------------------------------- |
+| `require_commands` probe helper duplicates `RequiredCommandsCheck._probe` (copy, not move)                   | P1         | P3 (delete `RequiredCommandsCheck`)                   |
+| Harness hardcoded to `shell`, built from `ResolvedSessionTemplate`'s flat fields via a small factory adapter | P3         | P4 (build from the resolved pair; delete flat fields) |
+| `harness/claude-code` row published but not selectable from any template                                     | P2         | P4 (template `harness:` selection lands)              |
+
+Both built-in rows render via `resource describe` with an empty `Referenced by:` for the phases
+before a template can select them (`shell` P1 through P3, `claude-code` P2 through P3). This is the
+standard additive-capability pattern (git-credential rows behave the same before any consumer), a
+consciously accepted bit of interim operator-facing emptiness, not a defect.
+
+Permanent-doc updates are threaded into the phase that makes each claim true (the SDD "docs ride the
+change" rule), not deferred to a closeout. Only the ADR numbering/promotion and the final lock live
+in the closeout phase.
+
+**Execution reorder (2026-07-19):** P2 (`claude-code`) is blocked on an operator decision (whether a
+no-work Claude session leaves a resumable transcript; see `claude-code-lld.md`). Since P2 and P3 are
+independent, and most of P4 is independent of `claude-code`, the effort ran P1 -> P3 -> P4 (shell
+surface) first and holds P2 for the operator answer. The two P4 sub-items that DO need `claude-code`
+(the claude-code sample document and the claude-code doc example) ride with P2; their P4 checkboxes
+stay unchecked until then. This is safe under the single-PR model: nothing merges until the whole
+effort, P2 included, is complete.
+
+## Pinned anchors (code at HEAD)
+
+The swap and mirror points, cited so each phase edits the right lines:
+
+- Interim readiness stand-in: `sessions/nodes.py:50-200` (`RequiredCommandsCheck`; four-way fork at
+  `_check` `93-139`, plus a fifth `scope is None` loud branch at `97-106`; probe body `_probe`
+  `141-200`). Node delegation: `LiveSessionNode.preflight/runup` `241-245`,
+  `PendingSessionNode.preflight/runup` `290-295`. Construction: `pending_session_node` `390-397`,
+  `live_session_node` `437-444` (both take `session_name`, `template_name`, `required_commands`,
+  `target`, `admin`, `vm_name`; neither takes `workspace_name` today).
+- Interim pane path: `sessions/manager.py:872-897` (`_build_session_command`); call sites
+  `1932-1934` (create, op-time) and `2483-2488` (restart, op-time). Op-start `RunContext` assembled
+  for runup at `1873-1880` (create; carries `admin_target`/`agent_target`); restart readiness runs
+  via `preflight_all` with the ctx at `2373-2381` (no runup ctx on the restart path). `scoped_ctx`
+  secrets-only ctx at `1764-1769`. `OperationScope` build at `1665-1673` (create) / `2302-2310`
+  (restart).
+- Template dataclass: `sessions/template.py:41-70` (`SessionTemplate`, flat fields `48-51`;
+  `referenced_resources()` `56-70`).
+- Resolver: `sessions/templates.py:21-31` (`ResolvedSessionTemplate`), merge walk `_merge` `112-119`
+  and `_merge_template` `122-135`.
+- TOML loader: `config.py:1044-1086` (`_load_session_templates`, `_SESSION_TEMPLATE_KEYS` `1044`).
+- Manifest decoder: `manifests/decode.py:170-177` (`_decode_session_template`); mirror
+  `_decode_git_credential` `179-257` (its flat-field rejection + `validate_config` invocation).
+- Migration: `migrate/planning.py:450-549` (`_emit_document`; mirror the `git-credential` branch
+  `506-549`).
+- Capability mirror: `capabilities/git_credential/{__init__.py,kinds.py,base.py}`. Kind index:
+  `resources/kinds/__init__.py`. Publisher block: `bootstrap.py:51` (import) and `84-90`
+  (`publish_to` calls; add `harness.publish_to` alongside `git_credential.publish_to` at `86`).
+
+## LLDs (write early, before the code they pin)
+
+- [x] **Write `harness-api-lld.md`** (before Phase 1). Pins: the `Harness(Capability)` constructor
+      and `owner_kind`; `validate_config` shape-only-at-load vs completeness-on-merged-blob split;
+      the `merge_config` classmethod hook and `shell`'s `required_commands` union override; the
+      readiness fork relocation including the fifth `scope is None` branch and the new SESSION-level
+      identity guard (raise vs warn; which fields compared); the `require_commands` probe helper
+      signature; the op-start `RunContext` assembly at the op call sites (targets + scoped secrets)
+      and the relocation of template-variable substitution to wrap the harness's returned string;
+      the `ResolvedSessionTemplate` reshape and `_merge_pair` walk. **Done when:** every Phase 1-4
+      interface question in the HLA "Open questions / for LLD" list has a pinned answer or an
+      explicit deferral, reviewed.
+- [x] **Write `claude-code-lld.md`** (before Phase 2). Pins: the resume-vs-launch detection
+      mechanism (prefer folding the check into the launch snippet per the HLA decision), verified
+      against the latest stable Claude Code CLI at implementation time (latest-stable rule); exact
+      flag spellings for `permission_mode` / `model` / `extra_args`; the visible-decision mechanism
+      (output line vs pane first output); the fixture/stubbing strategy for testing without a real
+      `claude` binary. **Done when:** detection and every flag are verified against the current CLI
+      and the test double is specified, reviewed.
+
+## Phase 1: Harness capability + `shell` built-in (unconsumed infrastructure)
+
+Stand up `capabilities/harness/` mirroring `capabilities/git_credential/`. Nothing in `sessions/`
+changes; the rows appear in the registry and are inert until Phase 3 consumes them.
+
+- [x] **Package skeleton** `capabilities/harness/{__init__.py,base.py,kinds.py,shell.py}`.
+      `__init__.py` exports `HARNESS_REGISTRY` (name -> class), `harness_for(name)` (registry lookup
+      with typed framing), and `publish_to(registry)`. Pure Python; no import of `sessions/` or
+      `orchestration/` (layering rule R1). **Done when:** `import agentworks.capabilities.harness`
+      succeeds and the module imports neither forbidden package (assert by a layering test).
+- [x] **`base.py`: `Harness(Capability)` ABC** per the harness-api LLD. `owner_kind` is
+      `"session-template"`; the constructor takes
+      `(owner_name, config, *, session_name, vm_name, workspace_name, target, admin)`; abstract
+      `start(ctx)` / `restart(ctx)` return the raw pane string; the optional `merge_config`
+      classmethod hook (default shallow `{**base, **child}`); and a shared `require_commands(...)`
+      helper carrying the relocated `_probe` body (the `$SHELL -lic 'command -v <cmd>'` loop,
+      `check=False`, missing-command error + label parity from `nodes.py:141-200`). **Seam:** this
+      helper is a COPY; `RequiredCommandsCheck._probe` stays until Phase 3. **Done when:** `Harness`
+      is abstract, the helper reproduces the probe error shape verbatim, and unit tests cover a
+      present/missing command against a stub transport.
+- [x] **`kinds.py`: `_HarnessKind` + `HarnessEntry`** mirroring `_GitCredentialProviderKind`
+      (`category="capability"`, `miss_policy="error"`, `builtin_override="reserved"`,
+      `auto_declare_names=None`, `synthesize` raising `NoUnreferencedDefaultError`); frozen
+      `HarnessEntry(name, origin, references)`. Self-registers
+      `KIND_REGISTRY["harness"] =     _HarnessKind()` at import. **Done when:** the kind is in
+      `KIND_REGISTRY` after importing the module and a `kind: harness` manifest document gets the
+      standard capability-kind envelope rejection.
+- [x] **Index + publisher wiring.** Add `import agentworks.capabilities.harness.kinds  # noqa: F401`
+      to `resources/kinds/__init__.py`; add the `harness` import at `bootstrap.py:51` and
+      `harness.publish_to(registry)` in the built-in block near `bootstrap.py:86`. `publish_to` adds
+      one `HarnessEntry` per registered harness with
+      `Origin.built_in(source="agentworks.capabilities.harness")`. **Done when:**
+      `agw resource     list` shows the `harness/shell` row, `agw resource kinds` lists `harness`
+      with its category/description, and `agw resource describe harness/shell` renders.
+- [x] **`shell.py`: the `shell` harness.** Config vocab `command` / `restart_command` /
+      `required_commands` (all optional); `validate_config` accepts exactly these, shape-only,
+      returns `()`; `start` returns `command` (empty = login shell), `restart` returns
+      `restart_command` or `command`; `merge_config` unions `required_commands` (append-dedupe) and
+      child-wins the scalars; `preflight`/`runup` call `require_commands`. **Done when:** unit tests
+      cover start/restart strings, empty-config login shell, `merge_config` union + scalar override,
+      and unknown-field rejection.
+- [x] **Docs riding this phase:** none of the model-narrative docs are true yet (nothing consumes
+      the harness), so they wait. The SDD `.cspell.json` gains any new permanent-code vocabulary
+      introduced here (P1 needed none).
+
+**Tests P1:** kind registration + envelope rejection; `publish_to` row/origin;
+`resource list/kinds/describe` surfaces; `shell` start/restart/merge/validate; the layering-import
+guard.
+
+## Phase 2: `claude-code` built-in (plus harness-state persistence and the deferred claude-code docs)
+
+Runs LAST in execution order (the claude-code detection needed operator research, now resolved, see
+the "Execution reorder" note). Because P4 already landed the template surface, registering
+`claude-code` here makes it immediately selectable, so P4's two deferred claude-code sub-items (the
+sample document and the doc example) land in this phase too. This phase also adds the
+general-purpose harness-state blob, which `claude-code` is the first user of.
+
+- [x] **Harness-state persistence** (harness-api LLD "Harness-state persistence"; a deliberate
+      reversal of "DB unchanged"). A forward-only migration adds a `harness_state` column to the
+      `sessions` table (JSON, default `'{}'`, existing rows backfilled) and `SessionRow` gains the
+      `harness_state: dict` field; `_harness_for_template` (`sessions/nodes.py`) loads it (or `{}`
+      for a fresh create) and passes it as the harness constructor's `state=` kwarg; `Harness` gains
+      the `state` property; the session manager persists `harness.state` to the row after the
+      `start` / `restart` op (folded into the create INSERT and the restart UPDATE). The blob is
+      harness-owned and opaque to the core. **Done when:** the migration applies + backfills on a
+      pre-existing DB (add the migration-fixture test), a value a harness mutates on create is read
+      back on restart (round-trip test), and `shell` (which mutates nothing) leaves it `{}`.
+- [x] **`claude_code.py`: the `claude-code` harness** per the claude-code LLD. Config vocab
+      `permission_mode` / `model` / `extra_args`; unknown fields are validation errors naming the
+      harness and field; `validate_config` shape-only, returns `()`. `start`/`restart` share one
+      `_resume_or_launch`: read/mint the session id in `self._state["session_id"]`, run the
+      slug-independent `find <uuid>.jsonl` existence probe on the launch target, then
+      `--resume     <uuid>` if present else `--session-id <uuid> --name <session>`; the pane string
+      is a single `sh -c` with a prepended visible-decision `echo`; required executable `claude` via
+      `require_commands`. Register in `HARNESS_REGISTRY`. **Done when:** with a stubbed target,
+      present->resume and absent->fresh; the minted id persists via the state blob; the flags map to
+      the LLD-verified spellings; the visible-decision output is asserted; no test invokes a real
+      `claude` binary.
+- [x] **The deferred claude-code docs (from P4).** Add the `claude-code` sample document to
+      `manifests/samples/session-template.yaml` and the worked `claude-code` example to
+      `docs/guides/resources.md` (the spots P4 left noted); complete P4's "Samples + sample-config"
+      and "Docs riding this phase" items. No `docs/sdd/` path in any permanent doc.
+- [x] **The P4 claude-code end-to-end carry (from P4's Tests P4).** Drive a `harness: claude-code`
+      template through session create AND restart via the real orchestrator: op-dispatch produces
+      the resume/launch pane string; restart-post-kill end state; the visible decision through the
+      real launch; and the substitution-safety case (a generated snippet is not mangled).
+      Deterministic stubbing, no real `claude` binary.
+
+**Tests P2:** harness-state migration + backfill + round-trip; detection both directions
+(present/absent) via deterministic stubbing; config vocab validation + unknown-field error;
+`extra_args` verbatim passthrough; visible-decision output; required-command probe uses `claude`;
+the end-to-end carry above.
+
+## Phase 3: Swap the session node onto the harness (retire the interim seams)
+
+The finish-line phase for `RequiredCommandsCheck` and `_build_session_command`. The harness is built
+as `shell` from the resolved flat fields (the surface has not changed yet); everything the interim
+path did moves onto the harness in one slice.
+
+- [x] **Factory construction** in `sessions/nodes.py`: `pending_session_node` (`390-397`) and
+      `live_session_node` (`437-444`) construct `harness_for("shell")(...)` and hand it to the node,
+      replacing the `RequiredCommandsCheck`. Positional args are the template name and a `shell`
+      blob built from `template.command` / `restart_command` / `required_commands`; keyword args are
+      the captured identity (`session_name`, `vm_name=vm.row.name`, `workspace_name=workspace.name`,
+      `target=agent`, `admin`). The one-object target wiring (same agent node as dep and as
+      `target`) carries over unchanged. **Seam:** the flat-blob adapter is temporary (retired P4).
+      **Done when:** both factories build a `Harness`, the node holds it, and the one-object
+      invariant is preserved (asserted by the existing node-identity test).
+- [x] **Node reshape** in `sessions/nodes.py`: `LiveSessionNode` / `PendingSessionNode` hold
+      `_harness` instead of `_check`; `preflight`/`runup` delegate to `self._harness`;
+      `secret_refs()` folds in the harness's declared secrets (none for built-ins; plumbing
+      present). `deps()`, `mark_realized()`, `teardown()`, `key` unchanged. This phase ADDS a public
+      accessor on `Harness` (e.g. `secret_refs() -> tuple[str, ...]`, mirroring how
+      `GitCredentialProvider` exposes `secret_name` to its holder) for the node to fold in, rather
+      than the node reaching into the base `Capability._secret_refs` private field (P1 review,
+      forward catch). **Done when:** delegation compiles, the harness exposes the public accessor,
+      and the readiness-fork tests (below) pass against the harness.
+- [x] **Op call sites** in `sessions/manager.py`: replace `_build_session_command` at `1932` with
+      `harness.start(ctx)` and at `2483` with `harness.restart(ctx)`, where `ctx` is an op-start
+      `RunContext` assembled at the call site carrying the execution targets and scoped secrets. The
+      two sites take DIFFERENT anchors: create mirrors the runup ctx at `1873-1880`; restart has no
+      runup ctx, so it mirrors the preflight ctx built for `preflight_all` at `2373-2381`
+      (`admin_target=admin_target`, `agent_target=None if is_admin else session_target`) and the ctx
+      is assembled AFTER the kill (the claude-code sequencing requirement). The op ctx's scoped
+      secrets are scoped to the session node's `secret_refs()` union (the harness's contribution
+      included, empty for the built-ins), not raw `secret_values`, preserving declare-and-receive;
+      the harness-api LLD pins the exact assembly. Apply core template-variable substitution
+      (`_substitute_template_vars`) to the harness's RETURNED string (substitution lifts OUT of the
+      former `_build_session_command`). **Done when:** create and restart build the same pane string
+      as today for every existing template, and the op ctx exposes `agent_target`/`admin_target`.
+- [x] **Retire the interim code.** Delete `RequiredCommandsCheck` (`nodes.py:50-200`) and
+      `_build_session_command` (`manager.py:872-897`); the `require_commands` helper in
+      `harness/base.py` is now the sole probe copy (seam retired). Land the SESSION-level identity
+      guard on the harness's readiness (compare `scope.session/vm/workspace` + agent-or-admin to the
+      harness's captured identity; raise on mismatch) and preserve the fifth `scope is None` loud
+      branch. Any existing test that imports `RequiredCommandsCheck` directly is ported onto the
+      harness (or removed) in this same slice so the phase stays green. **Done when:** neither
+      symbol exists, `grep` finds no other reader (code or test), and the guard raises on a
+      deliberately mis-wired scope in test.
+- [x] **Docs riding this phase:** `capabilities/README.md` gains the harness as the worked example
+      of a capability HELD by a rich consuming node (this claim becomes true here). The ADR draft
+      `adr-session-harness.md` is created in-feature now (unnumbered) covering the model
+      formulation, the inline reference+blob shape, and pair-inheritance; kept current through P4.
+
+**Tests P3 (the reviewer-expected carry, via deterministic stubbing, no real `claude` binary):**
+
+- Orchestration gate-prompt parity: one boundary burst, nothing resolved or prompted twice;
+  graph-derivation of the secret union; zero-resolve / zero-gate refusal when a pre-boundary
+  validation fails (the walk-away discipline).
+- Readiness-fork coverage: skip (out-of-level / system scan), defer (pending target), probe
+  (realized target + every restart), loud error (in-scope target absent), the fifth `scope is None`
+  loud branch, and the SESSION-level scope-mismatch guard.
+- Parity: every template that loads today produces an identical pane command and identical readiness
+  behavior; restart post-kill end state (row survives, old tmux gone, cleanly retryable, error names
+  the failed step).
+
+## Phase 4: Template surface (`harness` / `harness_config`), inheritance, TOML, migration, samples
+
+Reshape the template to the pair and delete the flat fields; `harness:` selection becomes usable end
+to end. Retires the flat-field and always-shell seams.
+
+- [x] **`SessionTemplate` reshape** (`template.py:41-70`): remove `command`/`restart_command`/
+      `required_commands`; add `harness: str | None` and `harness_config: dict[str, object] | None`
+      (`None` = not declared). `referenced_resources()` emits one `harness`-kind reference (usage
+      "the session harness") when `harness` is declared, plus any capability-implied refs from
+      `validate_config` (none for built-ins). Deleting the flat fields here forces every flat-field
+      READER to be handled in this phase (or the tree will not compile), so clearing the consumer
+      inventory (per the HLA: session node/orchestrator only; `env/show.py` touches only `env`; the
+      DB stores the template NAME) is a green-gate of P4, not deferred to P5. **Done when:** a
+      declared `harness` surfaces as a reference, `Referenced by:` lists the template, and no
+      flat-field reader remains anywhere in the tree.
+- [x] **`ResolvedSessionTemplate` reshape** (`templates.py:21-31`): becomes
+      `(name, description,     env, harness: str, harness_config: dict)` defaulting `("shell", {})`;
+      delete the Phase 3 flat-blob adapter (the factory now reads `resolved.harness` /
+      `resolved.harness_config`). Rework the merge walk to the pair rule (`_merge_pair`):
+      child-silent leaves the pair untouched; a different `harness` starts a fresh blob; the same
+      `harness` merges via `merge_config`; post-walk `(None, {})` -> `("shell", {})`. **Done when:**
+      the R5 inheritance cases pass (child same/different/silent; `required_commands` union; the
+      multi-parent divergence pinned by test) and `validate_config` runs once on the MERGED blob at
+      resolve completion.
+- [x] **TOML loader** (`config.py:1044-1086`): accept `harness` (string) + `harness_config` (table);
+      hoist the legacy flat fields to `harness="shell"` + equivalent blob; flat + non-`shell`
+      `harness` is a `ConfigError`; flat + explicit `harness_config` is a `ConfigError`; update
+      `_SESSION_TEMPLATE_KEYS`. **Done when:** a flat TOML template loads to the identical internal
+      value the migrator emits, and both conflict cases raise with a clear message.
+- [x] **Manifest decoder** (`decode.py:170-177`): reject the flat fields before delegating (clean
+      YAML spec, R2), error pointing at `harness: shell` + `harness_config`; pass `harness` /
+      `harness_config` through; invoke `HARNESS_REGISTRY[name].validate_config` on the declared blob
+      with `file:line` framing (unknown names skip invocation so the miss policy reports them at
+      finalize). Mirror `_decode_git_credential`. `!`-flag this manifest-surface tightening (R2).
+      **Done when:** a flat-field YAML manifest is rejected and a typo'd `harness` name errors at
+      finalize naming the template.
+- [x] **Migration** (`planning.py:450-549`): add a `session-template` branch mirroring
+      `git-credential`: pop the flat fields, emit `harness: shell` + a `harness_config` blob when
+      present, pass declared `harness`/`harness_config` through; validate the rebuilt blob
+      pre-write. **Done when:** migrating a flat TOML template emits the clean YAML shape and the
+      per-run registry-equivalence verification passes (hoist and emission land on the identical
+      value).
+- [x] **Samples + sample-config.** Rewrite `manifests/samples/session-template.yaml` leading with a
+      commented `shell` + `harness_config` document, followed by the `claude-code` one-line document
+      (runtime neutrality). Update `sample-config.toml`'s session-template example to the flat shell
+      form (documented default TOML shape) pointing at `agw resource sample session-template`.
+      **Done when:** the samples-load-clean test passes and `agw resource sample session-template`
+      emits the new shape.
+- [x] **Docs riding this phase (the model change becomes true here):** top-level `README.md`
+      "Sessions" narrative rewritten to "a session is a specification to run a specific harness as
+      an agent in a workspace on a VM" (harness as first-class model concept); `cli/README.md`
+      session-template schema (YAML `harness`/`harness_config`, nested TOML keys, flat-field rules,
+      legacy-child harness-switch note per R6); `docs/guides/resources.md` harness capability story
+      with worked session-template examples in the new shape. No permanent doc cites a `docs/sdd/`
+      path.
+- [x] **Always-consider sweep:** confirm the CLI Typer tree is unchanged (no new commands/flags; the
+      `harness` kind is data-driven through `resource kinds` / `--kind`), so completions need no
+      regeneration; verify `--kind harness` completes via the existing dynamic path. Re-run the docs
+      and sample-config rules.
+
+**Tests P4:** hoist parity; flat+non-shell error; flat+blob error; decoder flat rejection; pair
+inheritance (all R5 cases + multi-parent divergence); migration registry-equivalence; samples load
+clean; the declared `harness` surfaces as a reference (`referenced_resources()`), and
+`describe harness/shell` lists the declaring template (reconciled R8: describe renders the reference
+graph and framework-uniform fields, not kind-specific spec fields).
+
+- **`claude-code` end-to-end carry (this is the first phase `claude-code` is reachable through the
+  real orchestrator; do not leave it pinned only in P2 isolation).** Drive a `harness: claude-code`
+  template through session create AND restart via the actual op call sites, asserting: (a)
+  op-dispatch produces the claude launch/resume pane string through create and restart (not just the
+  stubbed unit); (b) restart-post-kill detection and end state with a `claude-code` target (R7: row
+  survives, old tmux gone, cleanly retryable, error names the failed step), which the P3 parity
+  carry only exercised for `shell`; (c) the visible-decision requirement (R4, never silent) through
+  the real launch. All via deterministic stubbing, no real `claude` binary.
+- **Substitution-safety carry:** `claude-code`'s returned snippet is the first harness output that
+  can carry literal braces, so assert the relocated template-variable substitution (P3) does not
+  mangle a generated snippet, per the harness-api LLD's escaping decision.
+
+## Phase 5: Closeout
+
+- [x] **Promote the ADR.** Move `adr-session-harness.md` into `docs/adrs/` as the next number
+      (`0020-...` at this writing; confirm the max at promotion), referencing ADR 0016 (capability
+      collapse) and ADR 0019 (orchestration layer) for the node/readiness model. **Done when:** the
+      numbered ADR exists in `docs/adrs/` and the in-feature draft is removed.
+- [x] **Final sweeps.** RE-VERIFY the consumer inventory is empty of flat-field readers across code,
+      tests, docs, and samples (the readers are actually cleared in P4, where deleting the fields
+      forces it; this is a re-check, not the primary sweep); promote any SDD `.cspell.json` word
+      that now lives in permanent code to the root dictionary; reword the newly-authored `--`
+      em-dash-imitations in the P4 samples/docs per the code-style rule (P4 review, deferred here as
+      a prose-polish pass, not a bulk sweep of pre-existing usage); run
+      `./scripts/lint-files.sh     --fix` across touched files; full gate green. **Done when:**
+      CI-equivalent gates pass and no `docs/sdd/` reference exists in permanent code or docs.
+- [x] **Lock.** Create `locked.md` summarizing the final state (per the SDD lifecycle). **Done
+      when:** `locked.md` exists and the effort is closed.
+
+## Phase 6: Deprecated-field notices (post-closeout increment)
+
+Added after Phase 5 closeout, pre-merge (the SDD is not locked until it lands on `main`). Rationale:
+the Phase 4 manifest surface change retired the flat fields that released tooling had itself emitted
+(`agw resource migrate` wrote flat-field session-template YAML), so operators already on manifests
+hit a hard load error with no automated path. The TOML hoist (R6) covered TOML but not YAML. This
+phase adds the general, decoupled deprecated-field facility (FRD R11) and seeds it with the
+session-template flat fields as `error`.
+
+- [x] **Deprecated-field table + checker.** New standalone module holding a `DeprecatedField` record
+      (`name`, `level: "error" | "warn"`, `message`) and a per-kind table keyed by kind string, plus
+      one generic check function. `decode_document` (`manifests/decode.py`) invokes it before
+      per-kind delegation. No hooks into schema validation; removal later = delete the module and
+      the one call site. **Done when:** a manifest carrying an `error` field fails with the table's
+      message and a `warn` field loads with a notice, both driven purely by the table.
+- [x] **Retire the bespoke reject.** Replace the hardcoded flat-field rejection in
+      `_decode_session_template` with session-template's table entries (`command`,
+      `restart_command`, `required_commands`, all `error`, message pointing at `harness: shell` +
+      `harness_config`). **Done when:** `_decode_session_template` no longer hand-checks the flat
+      fields and the operator-facing error is unchanged.
+- [x] **Doctor surfacing.** `agw doctor` reports deprecated-field usage as a finding (chiefly the
+      `warn` level; `error` level already fails the load and is reported by the config-load check).
+      **Done when:** doctor lists a `warn`-level deprecated field found in a manifest.
+- [x] **Tests.** Table-driven: `error` fails load with the message, `warn` loads plus notice, a
+      clean manifest is unaffected, the session-template entries behave exactly as the old reject
+      did, and the doctor finding fires. **Done when:** the suite covers all dispositions and
+      passes.
+- [x] **Docs + always-consider sweep.** Update `cli/README.md` where the manifest flat-field rules
+      are described (the reject is now a general facility); confirm no sample-config / completions /
+      CLI-tree impact (no new commands or flags). **Done when:** docs reflect the mechanism and the
+      gates are green.
+- [x] **Reconcile SDD artifacts.** Confirm FRD R11, the HLA manifest-decoder section, and
+      `locked.md`'s shipped summary match the final implementation. **Done when:** the artifacts
+      describe the facility as shipped.
+
+## Decisions (resolved by the lead, 2026-07-19)
+
+These are internal phasing/mechanics calls, resolved by the lead per the development process
+(surfaced to the operator for visibility; not blocking). The operator can override any of them.
+
+1. **Swap-before-surface phasing (P3 before P4): RATIFIED.** It teaches the better interim lesson
+   (the harness mechanism is real and swapped in, only the template selector is pending) and
+   isolates orchestrator risk from the dataclass reshape. The interim `main` state (harness always
+   `shell`, built from flat fields) is complete and honest on its own.
+2. **Probe helper copy-then-delete: RATIFIED.** Keeps Phase 1 purely additive (zero `sessions/`
+   edits); the duplication is short-lived and retired in Phase 3.
+3. **`ResolvedSessionTemplate.description` default: DEFERRED to the harness-api LLD.** Cosmetic;
+   decide whether to keep "Login shell" or source it from the resolved harness when the LLD is
+   written.
