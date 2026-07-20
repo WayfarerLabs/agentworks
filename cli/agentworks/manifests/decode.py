@@ -59,10 +59,17 @@ KIND_SECTIONS: dict[str, tuple[str, ...]] = {
 # Kinds whose Resource dataclass carries a description field; the
 # envelope's metadata.description is injected into the spec for these
 # so the shared loaders validate and attach it exactly as for TOML.
+# This set now covers every declarable kind (description is
+# framework-uniform), so there is no warn-and-ignore fallback.
 _DESCRIPTION_KINDS = {
     "secret",
+    "vm-template",
+    "agent-template",
+    "workspace-template",
     "session-template",
     "git-credential",
+    "admin-template",
+    "named-console-template",
     "vm-site",
     "apt-source",
     "apt-package",
@@ -101,6 +108,9 @@ def decode_document(doc: Document, issues: list[str]) -> Any:
     """
     decoder = _DECODERS[doc.kind]
     spec = dict(doc.spec)
+    # Every declarable kind carries a description field now, so
+    # _DESCRIPTION_KINDS covers all of them and the injection below always
+    # applies to real manifests.
     if doc.kind in _DESCRIPTION_KINDS:
         if "description" in spec:
             raise ConfigError(
@@ -109,14 +119,6 @@ def decode_document(doc: Document, issues: list[str]) -> Any:
             )
         if doc.description is not None:
             spec["description"] = doc.description
-    elif doc.description is not None:
-        # Warn-and-ignore rather than error: the FRD wants description to
-        # become framework-uniform, so a declared description should not
-        # block loading a kind that simply hasn't grown the field yet.
-        issues.append(
-            f"{doc.where}: metadata.description is not yet stored for "
-            f"{doc.kind} (the kind's schema has no description field); ignored"
-        )
 
     local_issues: list[str] = []
     try:

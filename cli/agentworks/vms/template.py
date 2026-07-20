@@ -57,6 +57,7 @@ class VMTemplate:
 
     name: str
     inherits: list[str] = field(default_factory=list)
+    description: str | None = None
     # Provisioning. Deliberately NO site field: a template describes
     # WHAT a VM is; placement (--site, defaults.site, or the
     # infer/prompt model) is host/operator-scoped, and a shared

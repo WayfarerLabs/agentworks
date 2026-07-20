@@ -65,6 +65,25 @@ def test_describes_operator_declared_resource(tmp_path: Path) -> None:
     assert desc.origin.variant == "operator-declared"
 
 
+def test_describes_template_kind_description(tmp_path: Path) -> None:
+    """A formerly template-shaped kind (vm-template) now carries a stored
+    description that the generic describe path surfaces."""
+    cfg_file = tmp_path / "config.toml"
+    _write_base(
+        cfg_file,
+        extras="""
+        [vm_templates.dev]
+        description = "the dev box"
+        cpus = 4
+        """,
+    )
+    registry = _load(cfg_file)
+
+    desc = describe_resource(registry, "vm-template", "dev")
+
+    assert desc.description == "the dev box"
+
+
 def test_describes_auto_declared_resource_carries_synth_description(
     tmp_path: Path,
 ) -> None:

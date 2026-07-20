@@ -25,6 +25,7 @@ if TYPE_CHECKING:
 class WorkspaceTemplate:
     name: str
     inherits: list[str] = field(default_factory=list)
+    description: str | None = None
     repo: str | None = None
     tmuxinator: bool | None = None  # None = not explicitly set (inherit/default to True)
     git_user_name: str | None = None  # git user.name for commits in this workspace's repo

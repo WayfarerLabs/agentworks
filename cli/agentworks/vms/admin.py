@@ -38,6 +38,7 @@ class AdminConfig:
     """
 
     name: str = "default"
+    description: str | None = None
     username: str = "agentworks"
     shell: str = "bash"
     git_credentials: list[str] = field(default_factory=list)

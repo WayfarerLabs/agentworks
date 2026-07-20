@@ -33,6 +33,7 @@ class NamedConsoleConfig:
     """
 
     tmux_layout: str = AW_SESSION_VERTICAL_LAYOUT
+    description: str | None = None
     declared_at: SourceLocation = field(default_factory=synthesized)
     origin: Origin | None = None
     references: tuple[ReferenceEntry, ...] = ()

@@ -582,7 +582,7 @@ def _load_defaults(
     )
 
 
-_NAMED_CONSOLE_KEYS = {"tmux_layout"}
+_NAMED_CONSOLE_KEYS = {"description", "tmux_layout"}
 
 
 def _load_named_console(
@@ -611,12 +611,14 @@ def _load_named_console(
 
     return NamedConsoleConfig(
         tmux_layout=str(layout),
+        description=str(raw["description"]) if "description" in raw else None,
         declared_at=decls.lookup("named_console"),
     )
 
 
 _VM_TEMPLATE_KEYS = {
     "inherits",
+    "description",
     "cpus",
     "memory",
     "disk",
@@ -684,6 +686,7 @@ def _load_vm_templates(
         templates[name] = VMTemplate(
             name=name,
             inherits=list(tdata.get("inherits", [])),
+            description=str(tdata["description"]) if "description" in tdata else None,
             cpus=int(tdata["cpus"]) if "cpus" in tdata else None,
             memory=int(tdata["memory"]) if "memory" in tdata else None,
             disk=int(tdata["disk"]) if "disk" in tdata else None,
@@ -711,6 +714,7 @@ def _load_vm_templates(
 
 
 _USER_CONFIG_KEYS = {
+    "description",
     "username",
     "shell",
     "git_credentials",
@@ -760,6 +764,7 @@ def _load_admin_config(
 
     return AdminConfig(
         name=name,
+        description=str(raw["description"]) if "description" in raw else None,
         username=str(raw.get("username", "agentworks")),
         shell=str(raw.get("shell", "bash")),
         git_credentials=list(raw.get("git_credentials", [])),
@@ -807,6 +812,7 @@ def _load_agent_templates(
         templates[name] = AgentTemplate(
             name=name,
             inherits=list(tdata.get("inherits", [])),
+            description=str(tdata["description"]) if "description" in tdata else None,
             shell=str(tdata["shell"]) if "shell" in tdata else None,
             git_credentials=list(tdata["git_credentials"]) if "git_credentials" in tdata else None,
             user_install_commands=(list(tdata["user_install_commands"]) if "user_install_commands" in tdata else None),
@@ -871,6 +877,7 @@ def _load_catalog_sections(
 
 _WORKSPACE_TEMPLATE_KEYS = {
     "inherits",
+    "description",
     "repo",
     "tmuxinator",
     "git_user_name",
@@ -903,6 +910,7 @@ def _load_workspace_templates(
         templates[name] = WorkspaceTemplate(
             name=name,
             inherits=list(tdata.get("inherits", [])),
+            description=str(tdata["description"]) if "description" in tdata else None,
             repo=repo,
             tmuxinator=bool(tdata["tmuxinator"]) if "tmuxinator" in tdata else None,
             git_user_name=(

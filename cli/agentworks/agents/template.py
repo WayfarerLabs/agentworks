@@ -30,6 +30,7 @@ class AgentTemplate:
 
     name: str
     inherits: list[str] = field(default_factory=list)
+    description: str | None = None
     shell: str | None = None
     git_credentials: list[str] | None = None
     user_install_commands: list[str] | None = None

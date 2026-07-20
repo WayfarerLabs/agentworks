@@ -203,6 +203,7 @@ ssh_private_key = "~/.ssh/id_ed25519"        # required: used for SSH connection
 # curl, sudo, ca-certificates, gnupg) installed at VM create time.
 
 #[vm_templates.default]
+#description = "Default VM template"        # optional, shown in prompts and logs
 # -- Provisioning (set once at create time) --
 # (Templates carry no `site`: placement is per-host; use `--site` or
 # defaults.site above.)
