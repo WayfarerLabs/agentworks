@@ -127,14 +127,14 @@ def test_launch_note_reports_resume() -> None:
     harness = _harness()
     assert harness.launch_note() is None  # nothing decided before the op
     harness.start(_op_ctx(target))
-    assert harness.launch_note() == "Existing session found. Resuming..."
+    assert harness.launch_note() == "Existing Claude Code session found. Resuming..."
 
 
 def test_launch_note_reports_fresh_start() -> None:
     target = _FakeTarget({f"{_SID}.jsonl": _FakeResult(1)})  # not found
     harness = _harness()
     harness.start(_op_ctx(target))
-    assert harness.launch_note() == "No existing session. Starting a new one..."
+    assert harness.launch_note() == "No existing Claude Code session. Starting a new one..."
 
 
 def test_start_and_restart_are_symmetric() -> None:

@@ -101,9 +101,9 @@ class ClaudeCodeHarness(Harness):
         if self._resumed is None:
             return None
         return (
-            "Existing session found. Resuming..."
+            "Existing Claude Code session found. Resuming..."
             if self._resumed
-            else "No existing session. Starting a new one..."
+            else "No existing Claude Code session. Starting a new one..."
         )
 
     def _resume_or_launch(self, ctx: RunContext) -> str:
