@@ -122,13 +122,29 @@ apply directly.
   exception is the SDD pre-implementation artifact review, which the `sdd` skill runs as a draft PR
   on purpose (section 2).
 
-## 7. Mind the automated review
+## 7. Get a fresh-eyes pass: Copilot if available, else a generic review here
 
-Copilot will often review new pushes to a **ready** (non-draft) PR automatically. Read those
-comments. They are not always right and not always worth acting on, but there are frequently hidden
-gems in them, so triage them rather than ignoring them, and apply the same finding stance as
-section 5. This is one more reason the default is a ready PR, not a draft: a draft may not get the
-automated pass.
+Alongside the `agentworks-reviewer` (which reviews against the project's own values and
+conventions), a code-heavy change also wants a **fresh-eyes generic review**: a reviewer reading the
+diff cold, with no house-style priors, hunting for plain correctness bugs, edge cases, and security
+issues. The two lenses are complementary, not redundant, and the generic one earns its keep, in
+practice it catches robustness gaps the values-checklist waves through (a malformed-input crash, a
+swallowed error), while the project reviewer catches conventions and docs-sync the generic pass
+misses.
+
+- **Copilot when available.** It reviews new pushes to a **ready** (non-draft) PR automatically.
+  Read those comments: not always right, but frequently hidden gems, so triage them rather than
+  ignoring them. (One more reason the default is a ready PR, not a draft: a draft may not get the
+  automated pass.)
+- **When Copilot is unavailable** (quota exhausted, feature off, or you want the pass before
+  pushing), substitute a **vanilla generic review right here**: a `general-purpose` subagent on a
+  **lower model (e.g. Sonnet)**, prompted to review the diff as a senior engineer reading it cold,
+  no project-specific checklist. Run it in parallel with the `agentworks-reviewer` and triage both
+  together.
+
+Either way, apply the same finding stance as section 5 (push back on the wrong, fix the valid).
+Reserve this for **code-heavy** slices; a doc-only or closeout change has little for a fresh-eyes
+pass to catch, so a lead review is enough there.
 
 ## 8. Escalate the big stuff; otherwise keep moving
 
