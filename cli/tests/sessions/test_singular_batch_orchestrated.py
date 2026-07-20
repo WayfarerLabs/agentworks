@@ -597,6 +597,40 @@ def test_describe_session_holds_across_the_probe(
     assert any("Status:     stopped" in m for m in captured_output.info)
 
 
+def test_describe_session_shows_harness_line(
+    db: Database,
+    make_config,  # noqa: ANN001
+    resolve_counter: list[list[str]],
+    target: _FakeTarget,
+    monkeypatch: pytest.MonkeyPatch,
+    captured_output,  # noqa: ANN001
+) -> None:
+    """Describe carries a Harness line (the session's resolved concrete
+    harness) between Template and Mode, at the block's 12-char label
+    alignment. The default template resolves to the built-in shell."""
+    config = make_config()
+    _seed_singular(db)
+    _reachable(monkeypatch, True)
+
+    from agentworks.db import SessionStatus
+
+    monkeypatch.setattr(
+        session_manager,
+        "check_session_status",
+        lambda session, *, target: SessionStatus.STOPPED,
+    )
+
+    session_manager.describe_session(db, config, name="s1")
+
+    info = captured_output.info
+    assert "Harness:    shell" in info
+    # The Harness line sits after Template and before Mode.
+    template_idx = next(i for i, m in enumerate(info) if m.startswith("Template:"))
+    harness_idx = next(i for i, m in enumerate(info) if m.startswith("Harness:"))
+    mode_idx = next(i for i, m in enumerate(info) if m.startswith("Mode:"))
+    assert template_idx < harness_idx < mode_idx
+
+
 def test_describe_session_stopped_vm_gate_burst_seeds_the_boundary(
     db: Database,
     make_config,  # noqa: ANN001
