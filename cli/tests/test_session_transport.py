@@ -272,7 +272,10 @@ def test_create_session_aborts_on_missing_required_command(
 
     config = SimpleNamespace(session=SimpleNamespace(history_limit=50000))
 
-    with pytest.raises(StateError, match="requires 'claude'.*agent 'a1'"):
+    with pytest.raises(
+        StateError,
+        match="'shell' harness.*session-template 'claude'.*requires 'claude'.*agent 'a1'",
+    ):
         session_manager.create_session(
             db,
             config,  # type: ignore[arg-type]

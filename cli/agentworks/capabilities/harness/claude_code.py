@@ -50,6 +50,10 @@ class ClaudeCodeHarness(Harness):
     name: ClassVar[str] = "claude-code"
     description: ClassVar[str] = "Run Claude Code, resuming its session when one exists"
 
+    # Set by _resume_or_launch on each start/restart; drives launch_note().
+    # None until the op runs (nothing decided yet).
+    _resumed: bool | None = None
+
     @classmethod
     def validate_config(
         cls, owner: str, config: Mapping[str, object]
@@ -93,6 +97,15 @@ class ClaudeCodeHarness(Harness):
         process already dead."""
         return self._resume_or_launch(ctx)
 
+    def launch_note(self) -> str | None:
+        if self._resumed is None:
+            return None
+        return (
+            "Existing session found. Resuming..."
+            if self._resumed
+            else "No existing session. Starting a new one..."
+        )
+
     def _resume_or_launch(self, ctx: RunContext) -> str:
         """Read (or mint) the stored session id, probe the launch target
         for its transcript, and return the single ``sh -c`` pane command
@@ -100,6 +113,7 @@ class ClaudeCodeHarness(Harness):
         sid = self._session_id()
         launch_target = ctx.admin_target() if self._admin else ctx.agent_target()
         resume = launch_target is not None and self._transcript_exists(launch_target, sid)
+        self._resumed = resume
 
         if resume:
             identity = ["--resume", sid]
@@ -199,6 +213,7 @@ class ClaudeCodeHarness(Harness):
         require_commands(
             ("claude",),
             transport,
+            harness_name=self.name,
             template_name=self.owner_name,
             session_name=self._session_name,
             target_label=self._target_label,

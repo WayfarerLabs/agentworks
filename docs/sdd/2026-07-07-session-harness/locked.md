@@ -16,11 +16,21 @@ record is [ADR 0020](../../adrs/0020-session-harness.md); the capability lifecyc
     resolves to a plain `shell` login shell, so the default session is unchanged.
   - **`claude-code`** launches or resumes a Claude Code session, deciding resume-vs-launch by an
     op-time file-presence probe (does the stored session id's transcript exist on the target),
-    empirically confirmed to equal Claude's own resume boundary.
+    empirically confirmed to equal Claude's own resume boundary. The decision is surfaced to the
+    operator in the CLI op output via the base `launch_note` hook (rendered by the session manager),
+    not only in the pane's first line.
 - **The template surface** is `harness` + `harness_config` (an inline reference-plus-blob). The
   legacy flat fields are accepted only as TOML backward-compat (hoisted to `harness_config` at load)
   and rejected in manifests. `harness` / `harness_config` inherit as a pair (`_merge_pair`), fixing
   a multi-parent divergence where a harness-silent parent wiped a sibling's config.
+- **Deprecated-field notices** (`manifests/`, a general facility; FRD R11 / Phase 6): a decoupled,
+  removable per-kind table (`{name, error|warn, message}`) consulted by one check in
+  `decode_document`, seeded with session-template's retired flat fields as `error`. It replaces the
+  bespoke reject in `_decode_session_template`, closes the YAML-manifest gap the flat-field
+  retirement opened (the TOML hoist covered TOML only), and surfaces `warn`-level usage through
+  `agw doctor`. `warn`-level fields are stripped from the forwarded spec so the "ignore" guarantee
+  is self-contained (not dependent on a downstream decoder's tolerance). Added as a post-closeout,
+  pre-merge increment; distinct from the permanent TOML hoist.
 - **The session node holds the harness and composes it.** The node's `preflight` / `runup` fan into
   the harness's; the readiness fork (skip / defer / probe / loud-error on the operation scope's
   LEVEL) plus the required-commands probe moved onto the harness, with a new SESSION-level identity

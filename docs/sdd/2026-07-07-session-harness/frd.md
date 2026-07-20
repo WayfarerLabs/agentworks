@@ -357,8 +357,9 @@ spec:
     escape hatch that keeps the harness from needing a field per flag.
 - Unknown config fields are validation errors naming the harness and the field.
 - The chosen path is visible to the operator: the launch surfaces whether it resumed the existing
-  Claude session or launched fresh (mechanism at LLD, an output line or the pane's first visible
-  output). The decision must never be silent (review finding, 2026-07-08; operator-control spirit).
+  Claude session or started fresh, both as a CLI op-output line (the harness's `launch_note`,
+  rendered by the session manager) and as the pane's first visible output. The decision must never
+  be silent (review finding, 2026-07-08; operator-control spirit).
 - `claude_marketplaces` / `claude_plugins` stay on the agent/admin templates: they are
   provision-time (VM/agent setup) concerns, not session-start concerns. Their eventual home is the
   `claude-code` `harness-user-provisioner` (see the target-state subsection above); v1 leaves them
@@ -576,6 +577,37 @@ The model change (Background) lands in the permanent docs, not just in code and 
   session node, not a graph node, worth stating in the consequences).
 - Per the SDD lifecycle rules, each doc change rides the commits that make its claims true; nothing
   here waits for a closeout pass, and nothing permanent cites this SDD's path.
+
+### R11: Deprecated-field notices (general, decoupled, removable)
+
+When a formerly-valid spec field is retired or relocated, an operator whose manifests still carry it
+must get a clear, actionable message rather than a silent success or an opaque schema error. This is
+a general facility, not a session-template special case: the harness surface change is simply its
+first client.
+
+- Each declarable kind may declare a list of deprecated field names, each with a disposition of
+  `error` (fail the load, pointing at the new shape) or `warn` (emit a notice and ignore the field).
+  The mechanism only detects the field's presence and emits the message; it does NOT relocate values
+  (no move semantics), so it never inspects where the field should go. Disposition is chosen
+  per-field: `error` whenever ignoring the field would silently change runtime behavior, `warn` only
+  for genuinely vestigial fields.
+- Session-template's retired flat fields (`command`, `restart_command`, `required_commands`) are the
+  first entries, all `error` (dropping them would silently downgrade a template to a bare shell),
+  with the message pointing at `harness: shell` + `harness_config`. This replaces the bespoke reject
+  in `_decode_session_template` (R2) with a data-driven entry; operator-facing behavior is unchanged
+  (still a loud error with the same guidance).
+- This is a transitional compatibility shim, kept decoupled so it can be removed wholesale later: a
+  standalone per-kind table plus one generic check invoked before per-kind decoding, with no hooks
+  into the real schema validation. It is distinct from, and does not touch, the permanent TOML
+  flat-field hoist (R6), which is an intentional remapping with a different lifecycle.
+- `agw doctor` surfaces deprecated-field usage as a proactive finding. `error`-level fields already
+  fail the load (reported by doctor's config-load check); the doctor finding's value is catching
+  `warn`-level usage, which otherwise only emits an easily-missed log line.
+
+Motivation: the manifest surface change retired flat fields that released tooling had itself emitted
+(`agw resource migrate` wrote flat-field session-template YAML before this effort), so operators
+already on manifests hit a hard load error with no automated path. The TOML hoist (R6) covered TOML
+declarations but not YAML manifests; this requirement closes that asymmetry generally.
 
 ## Non-goals
 

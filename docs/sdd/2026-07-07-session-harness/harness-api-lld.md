@@ -85,6 +85,10 @@ class Harness(Capability):
 
     @abstractmethod
     def restart(self, ctx: RunContext) -> str: ...
+
+    # Optional one-line op-output note (None default; the session manager
+    # renders it after start/restart). claude-code reports resume-vs-new.
+    def launch_note(self) -> str | None: ...
 ```
 
 Pinned points:
@@ -202,7 +206,8 @@ def require_commands(
     commands: tuple[str, ...],
     transport: Transport,
     *,
-    template_name: str,   # error framing: "template '<name>' requires ..."
+    harness_name: str,    # error subject: "the '<harness>' harness ..."
+    template_name: str,   # invoker ref: "(session-template '<name>') requires ..."
     session_name: str,    # StateError entity_name
     target_label: str,    # "VM '<vm>'" (admin/no-target) or "agent '<name>'"
 ) -> None: ...

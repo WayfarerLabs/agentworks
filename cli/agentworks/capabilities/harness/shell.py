@@ -127,6 +127,7 @@ class ShellHarness(Harness):
         require_commands(
             tuple(_as_str_list(self.config.get("required_commands"))),
             transport,
+            harness_name=self.name,
             template_name=self.owner_name,
             session_name=self._session_name,
             target_label=self._target_label,

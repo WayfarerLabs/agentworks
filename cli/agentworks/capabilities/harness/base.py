@@ -51,6 +51,7 @@ def require_commands(
     commands: tuple[str, ...],
     transport: Transport,
     *,
+    harness_name: str,
     template_name: str,
     session_name: str,
     target_label: str,
@@ -102,8 +103,9 @@ def require_commands(
     joined = ", ".join(repr(c) for c in missing)
     verb = "is" if len(missing) == 1 else "are"
     raise StateError(
-        f"template '{template_name}' requires {joined}, which "
-        f"{verb} not installed or not on PATH for {target_label}.",
+        f"the '{harness_name}' harness (session-template "
+        f"'{template_name}') requires {joined}, which {verb} not "
+        f"installed or not on PATH for {target_label}.",
         entity_kind="session",
         entity_name=session_name,
         hint=(
@@ -189,6 +191,15 @@ class Harness(Capability):
         :meth:`validate_config` does.
         """
         return {**base, **child}
+
+    def launch_note(self) -> str | None:
+        """A human-facing one-line note about what the last ``start`` /
+        ``restart`` decided, surfaced by the session manager in its op
+        output. ``None`` (the default) means the harness has nothing to
+        add, so ``shell`` stays silent; ``claude-code`` reports whether it
+        resumed an existing session or started a new one.
+        """
+        return None
 
     @abstractmethod
     def start(self, ctx: RunContext) -> str:

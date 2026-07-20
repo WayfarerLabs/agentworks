@@ -93,6 +93,11 @@ def test_validate_accepts_empty_config() -> None:
     assert ShellHarness.validate_config("session-template/claude", {}) == ()
 
 
+def test_shell_launch_note_is_silent() -> None:
+    # shell has no resume-vs-new notion, so it adds no op-output note.
+    assert _harness().launch_note() is None
+
+
 def test_validate_rejects_unknown_field() -> None:
     with pytest.raises(ConfigError, match="unknown shell harness field"):
         ShellHarness.validate_config(

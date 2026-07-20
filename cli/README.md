@@ -519,6 +519,13 @@ spec top level:
   tool is not installed fails fast with a clear error instead of a cryptic downstream tmux failure.
   Merged (de-duped, order-preserving) across template inheritance.
 
+In a YAML manifest these three keys live only under `harness_config`; spelling any of them at the
+`spec` top level is a load error that points you at the nested shape. That check is one instance of
+a general deprecated-field notice: any resource kind can flag retired or relocated spec fields with
+an actionable message (a hard load error when ignoring the field would change behavior, otherwise a
+warning that `agw doctor` also surfaces). It is separate from the TOML flat-field handling below,
+which is a permanent supported spelling, not a deprecation.
+
 The `claude-code` harness runs Claude Code as the session: `session create` starts a new Claude
 session and `session restart` resumes the same conversation when its transcript still exists on disk
 (launching fresh when Claude never wrote one). It needs only that `claude` is installed on the

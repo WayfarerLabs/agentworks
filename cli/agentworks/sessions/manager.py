@@ -1757,11 +1757,10 @@ def create_session(
                 from agentworks.workspaces.realize import realize_workspace
 
                 assert workspace_tmpl is not None  # resolved at build above
+                # The realizer emits its own "Creating workspace ..." line
+                # (used by the standalone `workspace create` path too), so the
+                # session flow must not echo it a second time here.
                 output.phase("Creating Workspace")
-                output.detail(
-                    f"Creating workspace '{workspace_name}' on VM '{vm.name}' "
-                    f"(template: {workspace_tmpl.name})..."
-                )
                 realize_workspace(
                     db,
                     config,
@@ -1909,6 +1908,8 @@ def create_session(
                     session_node.harness.start(start_ctx),
                     {"session_name": name, "workspace_name": workspace_name},
                 )
+                if (note := session_node.harness.launch_note()) is not None:
+                    output.detail(note)
 
                 # Insert DB record before any tmux work so a crash mid-create
                 # leaves a recoverable row (and the teardown can find it to
@@ -2501,6 +2502,8 @@ def restart_session(
             session_node.harness.restart(restart_ctx),
             {"session_name": name, "workspace_name": session.workspace_name},
         )
+        if (note := session_node.harness.launch_note()) is not None:
+            output.detail(note)
         # Persist the harness's state blob after the op (mirrors the
         # create-path insert). Usually a no-op (the value was stored on
         # create), but a session predating the harness_state column

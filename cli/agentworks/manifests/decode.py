@@ -120,6 +120,14 @@ def decode_document(doc: Document, issues: list[str]) -> Any:
 
     local_issues: list[str] = []
     try:
+        # General deprecated-field notices (FRD R11), run before per-kind
+        # delegation and kept decoupled from schema validation so the
+        # whole shim is removable (delete deprecated_fields.py and this
+        # call). Error-level fields raise here, never reaching the loader;
+        # warn-level fields add a notice and fall through, ignored.
+        from agentworks.manifests.deprecated_fields import check_deprecated_fields
+
+        local_issues.extend(check_deprecated_fields(doc.kind, spec))
         resource = decoder(doc, spec, local_issues)
     except AgentworksError as exc:
         # Catalog loaders raise CatalogError (an ExternalError subclass);
@@ -172,17 +180,10 @@ def _decode_session_template(doc: Document, spec: dict[str, object], issues: lis
 
     # The YAML spec is clean (FRD R2): the legacy flat fields are
     # ``shell``'s config vocabulary and live only under harness_config.
-    # A manifest that spells them top-level is rejected, pointing at the
-    # nested shape -- this tightens the (unreleased) manifest surface.
-    flat = sorted(
-        {"command", "restart_command", "required_commands"} & set(spec)
-    )
-    if flat:
-        raise ConfigError(
-            f"session-template spec field(s) {', '.join(flat)} are the "
-            "'shell' harness's config; set harness: shell and move them "
-            "under spec.harness_config"
-        )
+    # A manifest that spells them top-level is rejected (pointing at the
+    # nested shape) by the general deprecated-field table (FRD R11),
+    # consulted in decode_document before this decoder runs, so no
+    # bespoke check lives here.
     harness = spec.get("harness")
     harness_config = spec.get("harness_config")
     if harness_config is not None and not isinstance(harness_config, dict):

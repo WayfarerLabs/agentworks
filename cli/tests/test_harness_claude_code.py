@@ -18,7 +18,6 @@ import pytest
 from agentworks.capabilities.base import OperationScope, RunContext, ScopeLevel
 from agentworks.capabilities.harness import ClaudeCodeHarness
 from agentworks.errors import ConfigError, StateError
-
 from tests.conftest import _FakeResult, _FakeTarget
 
 if TYPE_CHECKING:
@@ -121,6 +120,21 @@ def test_absent_transcript_launches_fresh() -> None:
     assert f"--session-id {_SID}" in command
     assert "--resume" not in command
     assert "starting new session s1" in command
+
+
+def test_launch_note_reports_resume() -> None:
+    target = _FakeTarget({f"{_SID}.jsonl": _FakeResult(0)})  # found
+    harness = _harness()
+    assert harness.launch_note() is None  # nothing decided before the op
+    harness.start(_op_ctx(target))
+    assert harness.launch_note() == "Existing session found. Resuming..."
+
+
+def test_launch_note_reports_fresh_start() -> None:
+    target = _FakeTarget({f"{_SID}.jsonl": _FakeResult(1)})  # not found
+    harness = _harness()
+    harness.start(_op_ctx(target))
+    assert harness.launch_note() == "No existing session. Starting a new one..."
 
 
 def test_start_and_restart_are_symmetric() -> None:
@@ -254,5 +268,5 @@ def test_readiness_missing_claude_is_a_typed_error() -> None:
     harness = _harness()
     target = _FakeTarget({"command -v claude": _FakeResult(1)})
     ctx = RunContext(operation_scope=_session_scope(), admin_target=target)
-    with pytest.raises(StateError, match="requires 'claude'"):
+    with pytest.raises(StateError, match="'claude-code' harness.*requires 'claude'"):
         harness.preflight(ctx)

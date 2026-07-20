@@ -346,6 +346,41 @@ graph and framework-uniform fields, not kind-specific spec fields).
 - [x] **Lock.** Create `locked.md` summarizing the final state (per the SDD lifecycle). **Done
       when:** `locked.md` exists and the effort is closed.
 
+## Phase 6: Deprecated-field notices (post-closeout increment)
+
+Added after Phase 5 closeout, pre-merge (the SDD is not locked until it lands on `main`). Rationale:
+the Phase 4 manifest surface change retired the flat fields that released tooling had itself emitted
+(`agw resource migrate` wrote flat-field session-template YAML), so operators already on manifests
+hit a hard load error with no automated path. The TOML hoist (R6) covered TOML but not YAML. This
+phase adds the general, decoupled deprecated-field facility (FRD R11) and seeds it with the
+session-template flat fields as `error`.
+
+- [x] **Deprecated-field table + checker.** New standalone module holding a `DeprecatedField` record
+      (`name`, `level: "error" | "warn"`, `message`) and a per-kind table keyed by kind string, plus
+      one generic check function. `decode_document` (`manifests/decode.py`) invokes it before
+      per-kind delegation. No hooks into schema validation; removal later = delete the module and
+      the one call site. **Done when:** a manifest carrying an `error` field fails with the table's
+      message and a `warn` field loads with a notice, both driven purely by the table.
+- [x] **Retire the bespoke reject.** Replace the hardcoded flat-field rejection in
+      `_decode_session_template` with session-template's table entries (`command`,
+      `restart_command`, `required_commands`, all `error`, message pointing at `harness: shell` +
+      `harness_config`). **Done when:** `_decode_session_template` no longer hand-checks the flat
+      fields and the operator-facing error is unchanged.
+- [x] **Doctor surfacing.** `agw doctor` reports deprecated-field usage as a finding (chiefly the
+      `warn` level; `error` level already fails the load and is reported by the config-load check).
+      **Done when:** doctor lists a `warn`-level deprecated field found in a manifest.
+- [x] **Tests.** Table-driven: `error` fails load with the message, `warn` loads plus notice, a
+      clean manifest is unaffected, the session-template entries behave exactly as the old reject
+      did, and the doctor finding fires. **Done when:** the suite covers all dispositions and
+      passes.
+- [x] **Docs + always-consider sweep.** Update `cli/README.md` where the manifest flat-field rules
+      are described (the reject is now a general facility); confirm no sample-config / completions /
+      CLI-tree impact (no new commands or flags). **Done when:** docs reflect the mechanism and the
+      gates are green.
+- [x] **Reconcile SDD artifacts.** Confirm FRD R11, the HLA manifest-decoder section, and
+      `locked.md`'s shipped summary match the final implementation. **Done when:** the artifacts
+      describe the facility as shipped.
+
 ## Decisions (resolved by the lead, 2026-07-19)
 
 These are internal phasing/mechanics calls, resolved by the lead per the development process

@@ -299,10 +299,15 @@ best-representations rule (internal shape = YAML shape):
 
 ### Manifest decoder (`manifests/decode.py`)
 
-`_decode_session_template` rejects the flat fields before delegating (the clean-spec rule, FRD R2),
-error pointing at `harness: shell` + `harness_config`; `harness` / `harness_config` pass through to
-the shared TOML loader. Same pre-check-then-delegate shape as `_decode_git_credential`'s `type`
-rejection.
+`decode_document` runs a generic deprecated-field check (FRD R11) before per-kind delegation: a
+standalone per-kind table (`{name, level: error | warn, message}`) consulted by one checker, kept
+decoupled from schema validation so the whole shim is removable later. Session-template's retired
+flat fields are its first entries, all `error`, pointing at `harness: shell` + `harness_config`;
+this replaces the bespoke reject that formerly lived in `_decode_session_template` (the clean-spec
+rule, FRD R2). `harness` / `harness_config` pass through to the shared TOML loader. The table is
+distinct from the permanent TOML hoist (`_session_harness_pair`), which stays as-is. `agw doctor`
+reads the same notion to surface deprecated-field usage proactively, chiefly the `warn` level, which
+does not fail the load.
 
 ### Template resolver (`sessions/templates.py`)
 
