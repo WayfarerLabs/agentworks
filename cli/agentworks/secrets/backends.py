@@ -30,6 +30,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Protocol
 
 from agentworks.secrets.env_var import EnvVarBackend
+from agentworks.secrets.onepassword import OnePasswordBackend
 from agentworks.secrets.prompt import PromptBackend
 
 if TYPE_CHECKING:
@@ -60,8 +61,17 @@ class SecretBackend(Protocol):
     error). Transport / auth failures raise ``ConnectivityError`` /
     ``ExternalError``.
 
-    ``interactive`` marks backends whose ``batch_get`` IS an operator
-    interaction (prompt); inspection previews never probe those.
+    ``interactive`` means "do not probe this backend in
+    ``preview_resolution``": inspection previews report it optimistically
+    instead of calling ``batch_get`` to confirm a value. It is set for two
+    distinct reasons that the flag currently fuses: probing IS the operator
+    interaction (prompt), OR probing merely bothers the operator without
+    being a human decision (onepassword, where probing fires a biometric).
+    Guardrail: a future ``--non-interactive`` / controller path must NOT
+    filter the active chain on ``interactive`` without first splitting out a
+    separate "cannot run unattended" axis, or it would wrongly drop
+    onepassword in the headless context it is meant for. Today nothing reads
+    the flag outside ``preview_resolution``, so this is latent.
     """
 
     @property
@@ -118,6 +128,7 @@ class SecretBackend(Protocol):
 SECRET_BACKEND_REGISTRY: dict[str, SecretBackend] = {
     "env-var": EnvVarBackend(),
     "prompt": PromptBackend(),
+    "onepassword": OnePasswordBackend(),
 }
 """The capability registry. Future plugins register here (and publish
 their own capability resources with plugin origins)."""
