@@ -1,10 +1,10 @@
 """Application-level glue: assemble a finalized ``Registry`` from the
 standard set of publishers.
 
-The "standard set of publishers" -- the bundled built-in manifests, the
+The "standard set of publishers" (the bundled built-in manifests, the
 apt and install-command operator publishers, the git-credential-provider
 and secret-backend capability resources, the TOML ``Config``, and the
-operator's YAML ``ManifestSet`` -- is application
+operator's YAML ``ManifestSet``) is application
 knowledge, not Registry knowledge and not Config knowledge. This module
 is its legitimate home: it imports the publishers and orchestrates
 them. Registry stays publisher-agnostic; Config stays unaware of the
@@ -34,14 +34,15 @@ if TYPE_CHECKING:
 def build_registry(config: Config, manifests: ManifestSet | None = None) -> Registry:
     """Build a finalized ``Registry`` from the standard set of publishers.
 
-    Publisher order: built-in publishers first (the bundled manifests,
-    then the ``apt`` / ``install_commands`` operator publishers,
-    ``git_credentials``, ``secrets``), then the
-    operator sources (``Config.publish_to`` for TOML, then the YAML
-    ``ManifestSet``). Operator rows may replace built-in rows only where
-    the kind's ``builtin_override`` allows; operator-vs-operator
-    collisions (a resource declared in both TOML and a manifest) error
-    at ``Registry.add``.
+    Publisher order: the bundled manifests and the built-in capability
+    rows first (``builtin_manifests``, ``git_credentials``, ``harness``,
+    ``secrets``, ``vm_platforms``), then the ``apt`` / ``install_commands``
+    operator publishers (the deprecated TOML surface for those two
+    kinds), then the operator sources (``Config.publish_to`` for TOML,
+    then the YAML ``ManifestSet``). Operator rows may replace built-in
+    rows only where the kind's ``builtin_override`` allows;
+    operator-vs-operator collisions (a resource declared in both TOML and
+    a manifest) error at ``Registry.add``.
 
     When ``manifests`` is None (the standard path), the resources
     directory next to the loaded config file (``<config-dir>/resources/``)

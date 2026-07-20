@@ -86,9 +86,9 @@ class ResourceKind(Protocol):
     - ``description``: one operator-facing line for ``agw resource
       kinds``.
     - ``builtin_override``: what happens when an operator manifest
-      collides with an app-published built-in row. ``"allow"`` keeps
-      today's catalog behavior (operator row replaces the built-in);
-      ``"reserved"`` makes the collision a ``ConfigError``.
+      collides with an app-published built-in row. ``"allow"`` lets the
+      operator row replace the built-in; ``"reserved"`` makes the
+      collision a ``ConfigError``.
     - ``synthesize(references)``: called when an auto-declare-allowed
       missing name is being synthesized. Receives all matching references
       known so far (in config-load walk order). Returns the synthesized
@@ -147,9 +147,10 @@ class ResourceKind(Protocol):
     # method is intentionally NOT declared on this Protocol. Kinds with a
     # per-instance lifecycle concept (the four named template kinds plus
     # ``admin-template`` plus ``secret``) implement it; kinds without
-    # (catalog, ``git-credential-provider``, ``secret-backend``) omit it
-    # entirely. The framework's consumer (``agentworks.resources.inspect``)
-    # uses ``getattr(handler, "instances", None)`` to gate the call, so
+    # (the apt / install-command kinds, ``git-credential-provider``,
+    # ``secret-backend``) omit it entirely. The framework's consumer
+    # (``agentworks.resources.inspect``) uses
+    # ``getattr(handler, "instances", None)`` to gate the call, so
     # absent-on-class IS the "no instance concept" signal. Declaring the
     # method on the Protocol would force every kind to either implement
     # it (Liskov violation for kinds where it's meaningless) or use

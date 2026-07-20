@@ -1,8 +1,6 @@
 """Tests for ``Registry`` lifecycle: empty -> add -> finalize -> queryable.
 
-Also covers ``build_registry(config)`` convenience and the Phase-1-specific
-assertion that ``build_registry`` only runs ``config.publish_to`` (no catalog
-publisher yet; Phase 2b will extend ``build_registry`` and update this test).
+Also covers ``build_registry(config)`` convenience.
 """
 
 from __future__ import annotations
@@ -282,33 +280,32 @@ def test_build_registry_equivalent_to_manual_steps(
     assert manual.lookup("secret", "api-key").name == "api-key"
 
 
-def test_build_registry_publishes_catalog_before_config(
+def test_build_registry_publishes_builtin_apt_and_install_entries(
     example_config: Path,
 ) -> None:
-    """The built-in catalog entries publish before the operator sources so
-    any operator override (TOML or manifest) layers on top of the built-in
-    base. Verified end-to-end: every catalog kind has at least one row
-    after build_registry, and those rows carry ``Origin.built_in`` with a
-    bundled-manifest source (the entries ship as
-    ``manifests/builtin/*.yaml`` now, not the former ``agentworks.catalog``
-    code source).
+    """The built-in apt / install-command entries publish before the
+    operator sources so any operator override (TOML or manifest) layers
+    on top of the built-in base. Verified end-to-end: every apt /
+    install-command kind has at least one row after build_registry, and
+    those rows carry ``Origin.built_in`` with a bundled-manifest source
+    (the entries ship as ``manifests/builtin/*.yaml``).
     """
     from agentworks.bootstrap import build_registry
 
     cfg = load_config(example_config, warn_issues=False)
     r = build_registry(cfg)
 
-    for catalog_kind in (
+    for kind in (
         "apt-source",
         "apt-package",
         "system-install-command",
         "user-install-command",
     ):
-        rows = list(r.iter_kind(catalog_kind))
-        assert rows, f"expected at least one {catalog_kind} row from the bundled built-in manifests"
-        # The built-in catalog rows are built-in. Operator overrides
-        # (if any) would re-publish the same name with operator-declared
-        # origin; the test's example_config doesn't exercise that path.
+        rows = list(r.iter_kind(kind))
+        assert rows, f"expected at least one {kind} row from the bundled built-in manifests"
+        # The built-in rows are built-in. Operator overrides (if any)
+        # would re-publish the same name with operator-declared origin;
+        # the test's example_config doesn't exercise that path.
         for row in rows:
             assert row.origin is not None
             assert row.origin.variant == "built-in"

@@ -4,7 +4,7 @@ Covers the per-entry loaders in ``agentworks.apt`` (parse-level shape
 validation) plus the framework integration: an apt-package referencing an
 unknown apt-source is caught at ``build_registry`` time by the
 ``apt-source`` kind's ``error`` miss policy, not by the loader. Built-in
-payload parity lives in ``test_builtin_catalog_parity.py``.
+payload parity lives in ``test_builtin_entries_parity.py``.
 """
 
 from __future__ import annotations

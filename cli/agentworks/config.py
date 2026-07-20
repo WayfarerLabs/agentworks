@@ -846,7 +846,7 @@ def _load_agent_templates(
     return templates
 
 
-def _load_catalog_sections(
+def _load_apt_and_install_sections(
     data: dict[str, object],
 ) -> tuple[
     dict[str, object],
@@ -1563,7 +1563,7 @@ def load_config(
     resource_data = data if resources else {}
 
     git_credentials = _load_git_credentials(resource_data, issues, decls)
-    apt_sources, apt_packages, system_cmds, user_cmds = _load_catalog_sections(resource_data)
+    apt_sources, apt_packages, system_cmds, user_cmds = _load_apt_and_install_sections(resource_data)
 
     session_config = _load_session_config(data, issues)
     session_templates = _load_session_templates(resource_data, issues, decls)

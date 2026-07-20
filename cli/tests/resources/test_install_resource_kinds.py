@@ -1,4 +1,4 @@
-"""Tests for Phase 2b's catalog kinds: ``apt-source``, ``apt-package``,
+"""Tests for the apt / install-command kinds: ``apt-source``, ``apt-package``,
 ``system-install-command``, ``user-install-command``.
 
 Coverage:
@@ -6,7 +6,7 @@ Coverage:
 - Each kind's shape (``miss_policy == "error"``, no auto-declare names).
 - The error miss policy fires with the reference's source on typo'd
   references from operator config.
-- Known catalog names resolve.
+- Known apt / install-command entries resolve.
 - ``synthesize`` raises ``NoUnreferencedDefaultError`` per Phase 2a's
   empty-references contract (the kinds never auto-declare; the
   contract is still defined).
@@ -28,7 +28,7 @@ from agentworks.config import load_config
 from agentworks.errors import ConfigError
 from agentworks.resources import KIND_REGISTRY, NoUnreferencedDefaultError
 
-CATALOG_KINDS = (
+APT_AND_INSTALL_KINDS = (
     "apt-source",
     "apt-package",
     "system-install-command",
@@ -56,17 +56,17 @@ def _write_cfg(path: Path, body: str = "") -> Path:
 # -- Kind shape -------------------------------------------------------------
 
 
-@pytest.mark.parametrize("kind_name", CATALOG_KINDS)
-def test_catalog_kind_attributes(kind_name: str) -> None:
+@pytest.mark.parametrize("kind_name", APT_AND_INSTALL_KINDS)
+def test_install_resource_kind_attributes(kind_name: str) -> None:
     kind = KIND_REGISTRY[kind_name]
     assert kind.kind == kind_name
     assert kind.miss_policy == "error"
     assert kind.auto_declare_names is None
 
 
-@pytest.mark.parametrize("kind_name", CATALOG_KINDS)
-def test_catalog_kind_synthesize_raises(kind_name: str) -> None:
-    """Catalog kinds have ``miss_policy == "error"``; ``synthesize`` is
+@pytest.mark.parametrize("kind_name", APT_AND_INSTALL_KINDS)
+def test_install_resource_kind_synthesize_raises(kind_name: str) -> None:
+    """These kinds have ``miss_policy == "error"``; ``synthesize`` is
     never called by the framework in practice but the empty-requirements
     contract still applies (Phase 2a). Raises ``NoUnreferencedDefaultError``.
     """
@@ -146,8 +146,8 @@ def test_user_install_command_typo_in_agent_errors(tmp_path: Path) -> None:
 
 
 def test_known_apt_package_reference_resolves(tmp_path: Path) -> None:
-    """A reference to a known built-in catalog entry (``gh`` in the
-    built-in catalog today) finalizes cleanly.
+    """A reference to a known built-in entry (``gh`` among the built-in
+    apt-package entries today) finalizes cleanly.
     """
     cfg = load_config(
         _write_cfg(
@@ -162,7 +162,7 @@ def test_known_apt_package_reference_resolves(tmp_path: Path) -> None:
     registry = build_registry(cfg)
     gh = registry.lookup("apt-package", "gh")
     assert gh.name == "gh"
-    # Cross-check: the catalog publisher attached built-in origin
+    # Cross-check: the bundled-manifest publisher attached built-in origin
     # and the framework's finalize attached the inbound reference from
     # vm-template:default.
     assert gh.origin.variant == "built-in"
@@ -174,10 +174,10 @@ def test_known_apt_package_reference_resolves(tmp_path: Path) -> None:
 # -- apt-package -> apt-source edges ---------------------------------------
 
 
-def test_apt_source_kind_published_from_builtin_catalog(tmp_path: Path) -> None:
-    """The catalog publisher emits ``apt-source`` Resources with
+def test_apt_source_kind_published_from_builtin_manifest(tmp_path: Path) -> None:
+    """The bundled-manifest publisher emits ``apt-source`` Resources with
     ``built-in`` origin, parallel to ``apt-package`` / the
-    install-command kinds. The built-in catalog ships at least one
+    install-command kinds. The built-in manifests ship at least one
     apt-source (``github`` today), so the registry has it after
     ``build_registry``.
     """
@@ -187,7 +187,7 @@ def test_apt_source_kind_published_from_builtin_catalog(tmp_path: Path) -> None:
     )
     registry = build_registry(cfg)
     names = [name for name, _ in registry.iter_kind_items("apt-source")]
-    assert names, "built-in catalog should publish at least one apt_source"
+    assert names, "the built-in manifests should publish at least one apt_source"
     for name in names:
         src = registry.lookup("apt-source", name)
         assert src.origin.variant == "built-in"
@@ -213,8 +213,8 @@ def test_apt_package_references_flow_to_apt_source(tmp_path: Path) -> None:
         warn_issues=False,
     )
     registry = build_registry(cfg)
-    # ``gh`` depends on the ``github-cli`` apt-source in the built-in
-    # catalog; check the inbound edge lands on the source.
+    # ``gh`` depends on the ``github-cli`` apt-source among the built-in
+    # entries; check the inbound edge lands on the source.
     github = registry.lookup("apt-source", "github-cli")
     referencing_pkgs = [
         entry.source for entry in github.references
@@ -255,12 +255,13 @@ def test_unknown_apt_source_reference_errors_via_framework(
 def test_operator_declared_apt_source_layers_over_builtin(
     tmp_path: Path,
 ) -> None:
-    """Operator-declared ``[apt_sources.<name>]`` in config.toml
-    re-publishes the source with ``operator-declared`` origin (the
-    catalog publisher runs before ``Config.publish_to`` per the
-    build_registry publisher chain, so the operator's declaration
-    overrides the built-in for the same name). The same layering
-    pattern that already covers apt_packages.
+    """Operator-declared ``[apt_sources.<name>]`` in config.toml is
+    parsed and published by ``apt.publish_to`` with ``operator-declared``
+    origin. Publish order (the bundled manifests first, then
+    ``apt.publish_to``) plus the kind's ``builtin_override = "allow"``
+    policy is what lets the operator's declaration override the built-in
+    for the same name. The same layering pattern that already covers
+    apt_packages.
     """
     cfg = load_config(
         _write_cfg(

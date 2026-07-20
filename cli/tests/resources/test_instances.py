@@ -11,9 +11,9 @@ column and the ``Used by:`` describe section. This module covers:
 - ``secret``: per-session subgraph walk via ``collect_secrets_for``,
   emits InstanceRef per session whose subgraph reaches the secret
   (env-block, system secret, git-credential paths all covered).
-- Kinds with no instance concept (catalog, providers, backends):
-  inherit the default-empty fallback in ``inspect._count_used_by``;
-  list rows render ``USED BY`` as ``-``.
+- Kinds with no instance concept (apt / install-commands, providers,
+  backends): inherit the default-empty fallback in
+  ``inspect._count_used_by``; list rows render ``USED BY`` as ``-``.
 """
 
 from __future__ import annotations
@@ -675,9 +675,9 @@ def test_list_view_renders_dash_for_no_instance_kinds(
 
 
 def test_kinds_without_instances_hook_inherit_dash(tmp_path: Path) -> None:
-    """Catalog kinds, git_credential_provider, and secret_backend don't
-    implement ``instances`` -- ``inspect._count_used_by`` returns
-    ``None`` for them, which the list view renders as ``-``.
+    """Apt / install-command kinds, git_credential_provider, and
+    secret_backend don't implement ``instances``: ``inspect._count_used_by``
+    returns ``None`` for them, which the list view renders as ``-``.
     """
 
     expected_no_instances = (

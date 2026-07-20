@@ -1,10 +1,11 @@
-"""``declared_at`` threading for catalog entries (dissolve-catalog SDD, Phase 2).
+"""``declared_at`` threading for apt entries (dissolve-catalog SDD, Phase 2).
 
-The catalog per-entry loaders now accept a ``decls`` section-line map and
-stamp each entry's ``declared_at`` from it. The manifest decoders pass the
-document's own location, so manifest-loaded catalog entries (the migrated
-built-ins under ``manifests/builtin/`` and operator-declared ``resources/*.yaml``
-entries) carry a real source location instead of the synthesized sentinel.
+The apt / install-command per-entry loaders now accept a ``decls``
+section-line map and stamp each entry's ``declared_at`` from it. The
+manifest decoders pass the document's own location, so manifest-loaded
+entries (the migrated built-ins under ``manifests/builtin/`` and
+operator-declared ``resources/*.yaml`` entries) carry a real source
+location instead of the synthesized sentinel.
 
 The operator-TOML surface stays on the loaders' default synthesized shim (the
 real section-line map is local to ``load_config`` and not carried on ``Config``);
@@ -59,7 +60,7 @@ def _write_operator_config(
     toml_body: str = "",
     manifests: dict[str, str] | None = None,
 ) -> Path:
-    """Write a minimal operator config (plus optional TOML catalog entries
+    """Write a minimal operator config (plus optional TOML apt-source entries
     and ``resources/*.yaml`` manifests) and return the config path.
     """
     pub = tmp_path / "id.pub"
@@ -98,9 +99,10 @@ def _apt_sources(
 
 
 def test_builtin_entry_declared_at_points_at_bundled_manifest(tmp_path: Path) -> None:
-    """A built-in catalog entry (resolved from the Registry on a no-operator
-    config) carries a real ``declared_at`` pointing at its bundled
-    ``manifests/builtin/*.yaml`` file, not the synthesized sentinel.
+    """A built-in apt-source entry (resolved from the Registry on a
+    no-operator config) carries a real ``declared_at`` pointing at its
+    bundled ``manifests/builtin/*.yaml`` file, not the synthesized
+    sentinel.
     """
     src = _apt_sources(tmp_path)["github-cli"]
 
@@ -112,7 +114,7 @@ def test_builtin_entry_declared_at_points_at_bundled_manifest(tmp_path: Path) ->
 def test_operator_yaml_entry_declared_at_points_at_operator_file(
     tmp_path: Path,
 ) -> None:
-    """An operator-declared YAML catalog entry carries a ``declared_at``
+    """An operator-declared YAML apt-source entry carries a ``declared_at``
     pointing at that operator ``resources/*.yaml`` file.
     """
     src = _apt_sources(
@@ -124,9 +126,9 @@ def test_operator_yaml_entry_declared_at_points_at_operator_file(
 
 
 def test_operator_toml_entry_declared_at_stays_synthesized(tmp_path: Path) -> None:
-    """Sanity: an operator-TOML catalog entry still loads; its ``declared_at``
-    stays synthesized (the deprecated TOML surface does not carry the
-    section-line map), which is acceptable.
+    """Sanity: an operator-TOML apt-source entry still loads; its
+    ``declared_at`` stays synthesized (the deprecated TOML surface does
+    not carry the section-line map), which is acceptable.
     """
     src = _apt_sources(tmp_path, toml_body=_CUSTOM_APT_SOURCE_TOML)["custom-repo"]
 
@@ -135,8 +137,8 @@ def test_operator_toml_entry_declared_at_stays_synthesized(tmp_path: Path) -> No
 
 
 def test_describe_surfaces_location_for_manifest_entry(tmp_path: Path) -> None:
-    """The describe path surfaces the location for a manifest catalog entry:
-    a built-in apt-source's origin points at its bundled file.
+    """The describe path surfaces the location for a manifest-loaded
+    entry: a built-in apt-source's origin points at its bundled file.
     """
     from agentworks.bootstrap import build_registry
     from agentworks.config import load_config

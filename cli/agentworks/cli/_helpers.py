@@ -77,7 +77,7 @@ def prompt_vm(db: Database, vm_name: str | None) -> VMRow:
 
 
 class HasDescription(Protocol):
-    """Structural protocol for catalog entries that have a description."""
+    """Structural protocol for resource entries that have a description."""
 
     @property
     def description(self) -> str: ...

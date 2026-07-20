@@ -1,6 +1,6 @@
 ## kind: apt-package -- a named package set, optionally depending on
 ## apt-source entries. Referenced by name from vm-template
-## `apt_packages`. Same name as a built-in catalog entry overrides it.
+## `apt_packages`. Same name as a built-in entry overrides it.
 ## The `apt_sources: [my-repo]` reference pairs with the apt-source
 ## sample -- declare that resource too (or drop the field) or loading
 ## will fail on the missing reference.

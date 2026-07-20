@@ -5,7 +5,7 @@ Two guarantees are pinned here. First, the base itself carries the five
 metadata fields with the right defaults and an empty ``referenced_resources``,
 and a plain subclass inherits that override-free. Second, every concrete
 declared-resource dataclass (the operator-declared templates plus the
-system-declared catalog entries) actually descends from the base, so the
+apt / install-command entries) actually descends from the base, so the
 "metadata (including ``description``) exists by construction" promise cannot
 silently regress for any one kind.
 """
@@ -54,7 +54,7 @@ def test_plain_subclass_inherits_empty_referenced_resources() -> None:
 # Every concrete declared-resource dataclass (all carrying name + description +
 # declared_at + origin + references via the base). Pinning the subclass
 # relationship is what keeps a kind from silently dropping a metadata field
-# again. The last four are the system-declared catalog entries.
+# again. The last four are the apt / install-command entries.
 _FULL_SHAPE_RESOURCES = [
     VMTemplate,
     AgentTemplate,
@@ -101,15 +101,16 @@ def test_secret_decl_description_is_required() -> None:
         (UserInstallCommandEntry, {"command": "c"}),
     ],
 )
-def test_catalog_entry_description_is_required(
+def test_apt_and_install_entry_description_is_required(
     cls: type[DeclaredResource], kind_kwargs: dict[str, object]
 ) -> None:
-    """All four catalog entries carry the same required-``description`` override
-    as ``SecretDecl`` (same ``field()`` trap): omitting description is a
-    construction error, providing it round-trips, and the entry gains the base's
-    ``declared_at`` (the field half of a tracked follow-up). Parametrized so a
-    future edit that reverts any one entry to a bare ``description: str`` (which
-    would silently make it optional) is caught."""
+    """All four apt / install-command entries carry the same
+    required-``description`` override as ``SecretDecl`` (same ``field()``
+    trap): omitting description is a construction error, providing it
+    round-trips, and the entry gains the base's ``declared_at``.
+    Parametrized so a future edit that reverts any one entry to a bare
+    ``description: str`` (which would silently make it optional) is
+    caught."""
     with pytest.raises(TypeError):
         cls(name="x", **kind_kwargs)  # type: ignore[call-arg]
     entry = cls(name="x", description="d", **kind_kwargs)

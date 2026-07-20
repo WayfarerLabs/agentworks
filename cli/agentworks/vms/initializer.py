@@ -1183,7 +1183,7 @@ def _build_test_command(
     return None
 
 
-def _run_catalog_commands(
+def _run_install_commands(
     target: Transport,
     command_names: list[str],
     entries: Mapping[str, SystemInstallCommandEntry | UserInstallCommandEntry],
@@ -1193,7 +1193,7 @@ def _run_catalog_commands(
     *,
     label: str = "Install command",
 ) -> list[str]:
-    """Run install commands from a catalog entry dict. Returns PATH additions.
+    """Run install commands from an install-command entry dict. Returns PATH additions.
 
     Runs without env injection: provisioning is hermetic. Install commands
     see static identity via the on-disk profile fragments (login-shell
@@ -1209,7 +1209,7 @@ def _run_catalog_commands(
     for i, name in enumerate(command_names, 1):
         entry = entries.get(name)
         if entry is None:
-            msg = f"{label.lower()} '{name}' not found in catalog"
+            msg = f"'{name}' is not a declared {label.lower()}"
             logger.warning(msg)
             output.warn(msg)
             continue
@@ -1949,7 +1949,7 @@ def _phase_b_setup(
     # the VM section: they run via ``{admin_shell} -lc`` explicitly, so
     # they do not depend on the login-shell usermod, and they install
     # system-wide tools rather than touching the admin's rc.
-    system_path = _run_catalog_commands(
+    system_path = _run_install_commands(
         ts_target,
         vm_template.system_install_commands,
         system_install_commands,
@@ -2106,7 +2106,7 @@ def _phase_b_setup(
             pass
 
     # Non-fatal: user install commands for admin user (may depend on mise tools)
-    user_path = _run_catalog_commands(
+    user_path = _run_install_commands(
         ts_target,
         admin.user_install_commands,
         user_install_commands,

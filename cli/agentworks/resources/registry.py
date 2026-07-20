@@ -1,11 +1,12 @@
 """``Registry``: the framework's typed, queryable Resource store.
 
 The Registry is a publish destination, not a parser. Publishers
-(``agentworks.config``, ``agentworks.catalog``, future plugin / YAML
-manifest publishers) push composed Resources in via
-``Registry.add(kind, name, resource, origin)``. After all publishers have
-contributed, ``Registry.finalize()`` runs the framework pass: walks the
-reference graph, dispatches per-kind miss policies (auto-declare may
+(``agentworks.config``, ``agentworks.apt``, ``agentworks.install_commands``,
+the bundled built-in manifests, future plugin / YAML manifest publishers)
+push composed Resources in via ``Registry.add(kind, name, resource,
+origin)``. After all publishers have contributed, ``Registry.finalize()``
+runs the framework pass: walks the reference graph, dispatches per-kind
+miss policies (auto-declare may
 synthesize new Resources; error raises ``ConfigError``), attaches
 ``usage`` lists, detects cycles, and freezes the Registry. After
 ``finalize`` returns, the Registry is read-only and queryable via
@@ -87,8 +88,8 @@ class Registry:
           resource declared in both TOML and a manifest (a permanent
           dual-path condition).
         - operator row over built-in row: consults the kind's
-          ``builtin_override`` flag. ``"allow"`` keeps the catalog
-          behavior (operator row replaces the built-in); ``"reserved"``
+          ``builtin_override`` flag. ``"allow"`` keeps the operator
+          override (operator row replaces the built-in); ``"reserved"``
           raises ``ConfigError`` naming the reserved built-in.
         - built-in row over built-in row: replaces (idempotent
           republish).

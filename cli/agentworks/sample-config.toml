@@ -5,8 +5,9 @@
 # commented out -- uncomment and change only what you need.
 #
 # RESOURCES ARE YAML-FIRST: declare secrets, templates, git credentials, and
-# catalog entries as YAML manifests in the resources/ directory next to this
-# file (`agw resource sample <kind>` prints a commented starter; --all for every kind).
+# apt / install-command entries as YAML manifests in the resources/ directory
+# next to this file (`agw resource sample <kind>` prints a commented starter;
+# --all for every kind).
 # The TOML resource sections below keep working, but they are deprecated --
 # they load with a deprecation warning, and `agw resource migrate` moves them to
 # YAML whenever you're ready. This file remains the permanent home for
@@ -231,9 +232,9 @@ ssh_private_key = "~/.ssh/id_ed25519"        # required: used for SSH connection
 #    "fzf",
 #    "fd-find",
 #]
-#apt_packages = ["gh", "docker"]            # named apt package sets from catalog
+#apt_packages = ["gh", "docker"]            # named apt-package entries from the registry
 #snap = []                                  # direct snap packages
-#system_install_commands = ["az-cli"]       # system-level commands from catalog
+#system_install_commands = ["az-cli"]       # system-install-command entries from the registry
 
 #[vm_templates.heavy]
 #inherits = ["default"]
@@ -254,7 +255,7 @@ ssh_private_key = "~/.ssh/id_ed25519"        # required: used for SSH connection
 #username = "agentworks"                    # admin username on VMs (default: agentworks)
 #shell = "bash"                             # admin shell (default: bash, matches Debian's user-default; "zsh" also supported)
 #git_credentials = ["github"]              # git credential providers to configure
-#user_install_commands = ["bun"]             # per-user commands from catalog
+#user_install_commands = ["bun"]             # user-install-command entries from the registry
 # -- Dotfiles (source refs: local path or git::, see docs/guides/source-refs.md) --
 #dotfiles_source = "git::https://github.com/user/dotfiles"
 #dotfiles_destination = "~/.dotfiles"       # where to put them on the VM
@@ -283,7 +284,7 @@ ssh_private_key = "~/.ssh/id_ed25519"        # required: used for SSH connection
 #description = "Default agent template"     # optional, shown in prompts and logs
 #shell = "bash"                             # agent shell (default: bash)
 #git_credentials = []                       # git credential providers (default: none)
-#user_install_commands = []                 # per-user commands from catalog
+#user_install_commands = []                 # user-install-command entries from the registry
 # -- Dotfiles --
 #dotfiles_source = "git::https://github.com/user/agent-dotfiles"
 #dotfiles_destination = "~/.dotfiles"
@@ -395,13 +396,15 @@ ssh_private_key = "~/.ssh/id_ed25519"        # required: used for SSH connection
 #history_limit = 50000                     # tmux scrollback buffer lines per session
 
 # =============================================================================
-# Catalog extensions
+# Apt / install-command extensions (deprecated TOML surface)
 # =============================================================================
 #
-# Operator-defined entries extend the built-in catalog. Entries with the same name
-# as a built-in entry override it. Run `agw resource list --kind apt-package` (or
-# apt-source / system-install-command / user-install-command) to see all available
-# entries (built-in and operator-defined).
+# Operator-defined entries extend the built-in apt-source, apt-package,
+# system-install-command, and user-install-command entries. Entries with the
+# same name as a built-in entry override it. Run `agw resource list --kind
+# apt-package` (or apt-source / system-install-command /
+# user-install-command) to see all available entries (built-in and
+# operator-defined).
 
 # --- Custom apt sources ---
 # Third-party apt repositories.

@@ -87,10 +87,11 @@ def decode_document(doc: Document, issues: list[str]) -> Any:
     decoder = _DECODERS[doc.kind]
     spec = dict(doc.spec)
     # Every declarable kind carries a description field now (the nine
-    # full-shape resources via DeclaredResource, the four catalog entries
-    # on their own), so the envelope's metadata.description is injected
-    # unconditionally: the shared loaders validate and attach it exactly
-    # as for TOML. Description belongs in metadata, never in spec.
+    # full-shape resources via DeclaredResource, the four apt /
+    # install-command entries on their own), so the envelope's
+    # metadata.description is injected unconditionally: the shared
+    # loaders validate and attach it exactly as for TOML. Description
+    # belongs in metadata, never in spec.
     if "description" in spec:
         raise ConfigError(
             f"{doc.where}: description belongs in metadata.description, "

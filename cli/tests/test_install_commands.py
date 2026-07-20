@@ -3,7 +3,7 @@
 Covers the per-entry loaders in ``agentworks.install_commands``: the
 test-field parsing/validation (``_load_test_fields``) and the required
 ``command`` field. Built-in payload parity lives in
-``test_builtin_catalog_parity.py``; Registry-level override behavior lives
+``test_builtin_entries_parity.py``; Registry-level override behavior lives
 there too.
 """
 

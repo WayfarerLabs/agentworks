@@ -1,4 +1,4 @@
-"""Parity oracle for the built-in catalog (dissolve-catalog SDD).
+"""Parity oracle for the built-in apt / install-command entries (dissolve-catalog SDD).
 
 This module pins the resolved payloads of all 18 built-in apt /
 install-command entries as constants, captured from the pre-migration
@@ -268,8 +268,9 @@ def _write_operator_config(
     toml_body: str = "",
     manifests: dict[str, str] | None = None,
 ) -> Path:
-    """Write a minimal operator config (plus optional TOML catalog
-    entries and resources/*.yaml manifests) and return the config path.
+    """Write a minimal operator config (plus optional TOML apt /
+    install-command entries and resources/*.yaml manifests) and return
+    the config path.
     """
     pub = tmp_path / "id.pub"
     priv = tmp_path / "id"
@@ -289,8 +290,8 @@ def _write_operator_config(
 
 
 def test_bundled_builtin_rows_match_oracle(tmp_path: Path) -> None:
-    """On a config with no operator catalog entries, the Registry's
-    built-in catalog rows come entirely from the bundled manifests and
+    """On a config with no operator apt / install-command entries, the
+    Registry's built-in rows come entirely from the bundled manifests and
     resolve to the Phase 0 oracle payloads byte-for-byte, each carrying a
     ``built-in`` origin pointed at its bundled file. This is the no-drift
     proof for the TOML-to-YAML migration.
