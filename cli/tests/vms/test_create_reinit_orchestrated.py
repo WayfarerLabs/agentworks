@@ -294,6 +294,104 @@ def test_reinit_runs_initialization_through_the_gate(
     assert any("reinitialized successfully" in m for m in captured_output.info)
 
 
+def test_reinit_resolves_the_stored_admin_template(
+    make_config,
+    db: Database,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    captured_output,
+) -> None:
+    """Reinit reads the VM's stored admin-template column, not always
+    ``default``: a VM created on the ``work`` admin-template (whose only
+    git credential is ``gh``) reinitializes with that credential. The
+    default admin-template declares none, so seeing ``gh`` proves the
+    column, not the default, drove resolution."""
+    from textwrap import dedent
+
+    from agentworks.capabilities.vm_platform.lima import LimaPlatform
+    from agentworks.db import ProvisioningStatus
+
+    (tmp_path / "resources").mkdir()
+    (tmp_path / "resources" / "admin.yaml").write_text(
+        dedent("""\
+        apiVersion: agentworks/v1
+        kind: admin-template
+        metadata:
+          name: work
+        spec:
+          git_credentials: ["gh"]
+        """)
+    )
+    config = make_config(GIT_CRED_SECTION)
+    db.insert_vm(
+        "rvm", site="lima-local", hostname="rvm", admin_template="work"
+    )
+    db.update_vm_tailscale("rvm", "100.64.0.9")
+    db.update_vm_provisioning_status("rvm", ProvisioningStatus.COMPLETE)
+    monkeypatch.setattr(vm_manager, "_is_tailscale_reachable", lambda host: True)
+
+    import contextlib as _contextlib
+
+    @_contextlib.contextmanager
+    def _hold(self: LimaPlatform, vm: object, *, config: object | None = None):
+        yield
+
+    monkeypatch.setattr(LimaPlatform, "vm_active", _hold)
+    captured: dict[str, object] = {}
+
+    def _fake_init(*args: object, **kwargs: object) -> None:
+        captured["git_tokens"] = kwargs["git_tokens"]
+        captured["providers"] = args[7]
+
+    monkeypatch.setattr(vm_manager, "run_initialization", _fake_init)
+    import agentworks.transports as transports
+
+    monkeypatch.setattr(
+        transports, "transport", lambda vm, config, **kw: SimpleNamespace()
+    )
+
+    vm_manager.reinit_vm(db, config, "rvm")
+
+    # The work admin-template's git credential flowed through: reinit
+    # resolved ``work``, not the credential-less ``default``.
+    assert captured["git_tokens"] == {"gh": "ghtok"}
+    assert list(captured["providers"]) == ["gh"]  # type: ignore[call-overload]
+
+
+def test_reinit_errors_cleanly_when_the_stored_admin_template_is_gone(
+    make_config,
+    db: Database,
+    monkeypatch: pytest.MonkeyPatch,
+    captured_output,
+) -> None:
+    """A VM whose stored admin-template was since removed from config
+    reinitializes into a clean typed error naming the selector, not a raw
+    ``KeyError`` traceback (parity with create's unknown-template error).
+    The error fires before any initialization work."""
+    from agentworks.db import ProvisioningStatus
+    from agentworks.errors import NotFoundError
+
+    # No admin manifest declares ``work``; the column points at a name the
+    # registry no longer knows.
+    config = make_config()
+    db.insert_vm("rvm", site="lima-local", hostname="rvm", admin_template="work")
+    db.update_vm_tailscale("rvm", "100.64.0.9")
+    db.update_vm_provisioning_status("rvm", ProvisioningStatus.COMPLETE)
+    monkeypatch.setattr(vm_manager, "_is_tailscale_reachable", lambda host: True)
+
+    called = False
+
+    def _fake_init(*args: object, **kwargs: object) -> None:
+        nonlocal called
+        called = True
+
+    monkeypatch.setattr(vm_manager, "run_initialization", _fake_init)
+
+    with pytest.raises(NotFoundError, match="work"):
+        vm_manager.reinit_vm(db, config, "rvm")
+    assert not called  # errored before initialization
+
+
 def test_reinit_refuses_an_operator_stopped_vm_at_the_gate(
     make_config,
     db: Database,

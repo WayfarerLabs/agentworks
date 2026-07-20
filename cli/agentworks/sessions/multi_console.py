@@ -1239,7 +1239,7 @@ def _pane_secret_target(
         return SecretTarget(
             vm=vm_tmpl.env,
             workspace=ws_tmpl.env,
-            admin=admin_template(registry).env,
+            admin=admin_template(registry, vm.admin_template or "default").env,
             label=f"console-pane:{session.name}/admin",
         )
 
@@ -1280,7 +1280,7 @@ def _admin_only_secret_target(
     vm_tmpl = _resolve_vm_template(registry, vm.template)
     return SecretTarget(
         vm=vm_tmpl.env,
-        admin=admin_template(registry).env,
+        admin=admin_template(registry, vm.admin_template or "default").env,
         label=label,
     )
 
@@ -1440,7 +1440,7 @@ def _resolve_pane_env(
             ctx=ctx,
             vm=vm_tmpl.env,
             workspace=ws_tmpl.env,
-            admin=admin_template(registry).env,
+            admin=admin_template(registry, vm.admin_template or "default").env,
         )
 
     if session.agent_name is None:

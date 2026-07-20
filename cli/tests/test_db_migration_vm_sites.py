@@ -376,7 +376,7 @@ def test_v28_drops_workspace_last_seen_at_and_preserves_rows(
     conn.commit()
     conn.close()
 
-    db = Database(db_path)  # opening runs migration 28
+    db = Database(db_path)  # opening runs migration 28 (and everything after)
     try:
         cols = {row[1] for row in db._conn.execute("PRAGMA table_info(workspaces)")}
         assert "last_seen_at" not in cols

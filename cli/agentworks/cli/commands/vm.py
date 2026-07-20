@@ -22,6 +22,17 @@ app.add_typer(vm_app)
 def vm_create(
     name: Annotated[str, typer.Argument(help="VM name")],
     template: Annotated[str | None, typer.Option("--template", help="VM template")] = None,
+    admin_template: Annotated[
+        str | None,
+        typer.Option(
+            "--admin-template",
+            help=(
+                "admin-template to provision the VM's admin user from (a "
+                "declared admin-template resource; default: the 'default' "
+                "admin-template)"
+            ),
+        ),
+    ] = None,
     site: Annotated[
         str | None,
         typer.Option(
@@ -38,8 +49,10 @@ def vm_create(
     """Create a new VM (provision + initialize).
 
     Hardware (cpus, memory, disk, swap) and the admin username come from
-    the selected vm-template and admin-template. To deviate, declare a
-    new template rather than overriding on the command line.
+    the selected vm-template and admin-template. Use --admin-template to
+    provision the admin user from a declared, non-default admin-template.
+    To deviate otherwise, declare a new template rather than overriding on
+    the command line.
     """
     from agentworks.config import load_config
     from agentworks.vms.manager import create_vm
@@ -50,6 +63,7 @@ def vm_create(
         config,
         name=name,
         template=template,
+        admin_template=admin_template,
         site=site,
     )
 

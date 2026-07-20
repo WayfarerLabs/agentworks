@@ -79,6 +79,9 @@ class VMRow:
     # a bound platform via agentworks.vms.sites).
     site: str
     template: str | None
+    # The admin-template the VM's admin user was provisioned from (the
+    # resource name). NULL means the reserved ``default`` admin-template.
+    admin_template: str | None
     extra_packages: list[str]
     provisioning_status: str
     init_status: str
@@ -772,6 +775,14 @@ MIGRATIONS: dict[int, str | Callable[[sqlite3.Connection, MigrationContext], Non
     29: """
         ALTER TABLE sessions ADD COLUMN harness_state TEXT NOT NULL DEFAULT '{}';
     """,
+    # -- Per-VM admin-template selector: which admin-template the VM's -----
+    # -- admin user was provisioned from. Nullable; NULL means the --------
+    # -- reserved ``default`` admin-template (mirrors the vms.template -----
+    # -- column added in migration 11). Renumbered to 30 on merge with -----
+    # -- main's harness_state migration, which took 29. -------------------
+    30: """
+        ALTER TABLE vms ADD COLUMN admin_template TEXT;
+    """,
 }
 
 LATEST_VERSION = max(MIGRATIONS)
@@ -907,6 +918,7 @@ class Database:
         site: str,
         hostname: str,
         template: str | None = None,
+        admin_template: str | None = None,
         cpus: int | None = None,
         memory_gib: int | None = None,
         disk_gib: int | None = None,
@@ -915,14 +927,15 @@ class Database:
     ) -> VMRow:
         self._conn.execute(
             "INSERT INTO vms "
-            "(name, site, hostname, template, cpus, memory_gib, disk_gib, "
-            "swap_gib, admin_username) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "(name, site, hostname, template, admin_template, cpus, "
+            "memory_gib, disk_gib, swap_gib, admin_username) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 name,
                 site,
                 hostname,
                 template,
+                admin_template,
                 cpus,
                 memory_gib,
                 disk_gib,
@@ -1706,6 +1719,7 @@ def _to_vm(row: sqlite3.Row) -> VMRow:
         name=row["name"],
         site=row["site"],
         template=row["template"],
+        admin_template=row["admin_template"],
         extra_packages=json.loads(extra) if extra else [],
         provisioning_status=row["provisioning_status"],
         init_status=row["init_status"],

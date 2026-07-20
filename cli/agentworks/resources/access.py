@@ -32,14 +32,18 @@ def kind_dict(registry: Registry, kind: str) -> dict[str, Any]:
     return dict(registry.iter_kind_items(kind))
 
 
-def admin_template(registry: Registry) -> AdminConfig:
-    """The single ``admin-template`` row (reserved name ``default``).
+def admin_template(registry: Registry, name: str = "default") -> AdminConfig:
+    """One ``admin-template`` row by name (default: reserved ``default``).
 
-    ``lookup`` raises ``KeyError`` on a miss; the always-materialize
-    pre-step guarantees this row exists after ``finalize``, so a miss
-    here means the registry didn't come from ``build_registry``.
+    ``lookup`` raises ``KeyError`` on a miss. The always-materialize
+    pre-step guarantees the ``default`` row exists after ``finalize``, so
+    a miss on ``default`` means the registry didn't come from
+    ``build_registry``. A non-default name resolves only when the
+    operator declared that admin-template (via manifest); a miss there is
+    an operator-typed bad name, and callers wrap the ``KeyError`` in a
+    typed error naming the selector.
     """
-    return cast("AdminConfig", registry.lookup("admin-template", "default"))
+    return cast("AdminConfig", registry.lookup("admin-template", name))
 
 
 def named_console_template(registry: Registry) -> NamedConsoleConfig:

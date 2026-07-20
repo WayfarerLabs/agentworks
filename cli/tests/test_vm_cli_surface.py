@@ -45,6 +45,20 @@ def test_vm_create_site_flag_forwards(monkeypatch: pytest.MonkeyPatch) -> None:
     assert captured["site"] == "azure-dev"
 
 
+def test_vm_create_admin_template_flag_forwards(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, Any] = {}
+    result = _invoke(
+        monkeypatch,
+        ["vm", "create", "box", "--admin-template", "work"],
+        "agentworks.vms.manager.create_vm",
+        captured,
+    )
+    assert result.exit_code == 0, result.output
+    assert captured["admin_template"] == "work"
+
+
 @pytest.mark.parametrize(
     "flag",
     ["--cpus", "--memory", "--disk", "--azure-vm-size", "--admin-username"],

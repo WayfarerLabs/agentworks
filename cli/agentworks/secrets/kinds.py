@@ -40,7 +40,7 @@ from agentworks.secrets.base import SecretDecl
 if TYPE_CHECKING:
     from collections.abc import Iterable, Sequence
 
-    from agentworks.db import Database, SessionRow
+    from agentworks.db import Database, SessionRow, VMRow
     from agentworks.resources.reference import ReferenceEntry, ResourceReference
     from agentworks.resources.registry import Registry
 
@@ -168,6 +168,10 @@ class _SecretKind:
         """
         roots: list[tuple[str, str]] = []
         roots.append(("session-template", session.template))
+        # Hoisted so the admin branch below can read the VM's
+        # admin-template column (the workspace block is the only place the
+        # VM row resolves).
+        vm: VMRow | None = None
         workspace = db.get_workspace(session.workspace_name)
         if workspace is not None:
             roots.append(
@@ -176,12 +180,14 @@ class _SecretKind:
             vm = db.get_vm(workspace.vm_name)
             if vm is not None:
                 roots.append(("vm-template", vm.template or "default"))
-        # Mode picks exactly one of admin-template / agent-template.
-        # When/if a future SDD plurifies admin-template's operator
-        # surface, replace the hardcoded ``"default"`` here with a
-        # per-VM column read (e.g. ``vm.admin-template or "default"``).
+        # Mode picks exactly one of admin-template / agent-template. Admin
+        # mode reads the VM's per-VM admin-template column (NULL column =
+        # reserved ``default``); a session whose VM row is missing falls
+        # back to ``default``.
         if session.mode == "admin":
-            roots.append(("admin-template", "default"))
+            roots.append(
+                ("admin-template", (vm.admin_template if vm else None) or "default")
+            )
         elif session.mode == "agent" and session.agent_name is not None:
             agent = db.get_agent(session.agent_name)
             if agent is not None:

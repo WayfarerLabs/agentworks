@@ -25,6 +25,7 @@ from agentworks.errors import (
     StateError,
     UserAbort,
     ValidationError,
+    unknown_template_error,
 )
 from agentworks.vms.initializer import (
     announce_git_credentials,
@@ -92,7 +93,11 @@ def _resolve_vm_admin_env_scopes(
 
     from agentworks.resources.access import admin_template
 
-    return _VmAdminEnvScopes(vm=vm_env, workspace=ws_env, admin=admin_template(registry).env)
+    return _VmAdminEnvScopes(
+        vm=vm_env,
+        workspace=ws_env,
+        admin=admin_template(registry, vm.admin_template or "default").env,
+    )
 
 
 def _vm_secret_target(
@@ -203,6 +208,7 @@ def create_vm(
     *,
     name: str,
     template: str | None = None,
+    admin_template: str | None = None,
     site: str | None = None,
 ) -> None:
     """Create a new VM: provision + initialize.
@@ -210,6 +216,11 @@ def create_vm(
     Hardware and the admin username are template-owned: the vm-template
     supplies cpus/memory/disk/swap and the admin-template the username.
     There are no per-create overrides; deviations are new templates.
+
+    ``admin_template`` selects which admin-template provisions the admin
+    user (None = the reserved ``default``). A non-default name must be a
+    declared admin-template resource; an unknown name fails here, before
+    any DB or backend work.
     """
 
     from agentworks.bootstrap import build_registry
@@ -249,9 +260,23 @@ def create_vm(
     resolved_cpus = vm_tmpl.cpus
     resolved_memory = vm_tmpl.memory
     resolved_disk = vm_tmpl.disk
-    from agentworks.resources.access import admin_template
+    from agentworks.resources.access import admin_template as access_admin_template
+    from agentworks.resources.access import kind_dict
 
-    admin = admin_template(registry)
+    # Resolve the selected admin-template (None = reserved ``default``,
+    # which always materializes). A non-default name that the operator
+    # never declared raises here, before any DB or backend work, with the
+    # framework's uniform unknown-template error naming the bad selector.
+    selected_admin_template = admin_template or "default"
+    try:
+        admin = access_admin_template(registry, selected_admin_template)
+    except KeyError:
+        raise unknown_template_error(
+            kind="admin-template",
+            label="admin template",
+            name=selected_admin_template,
+            available=kind_dict(registry, "admin-template"),
+        ) from None
     resolved_admin_username = admin.username
     validate_admin_username(resolved_admin_username)
 
@@ -360,6 +385,10 @@ def create_vm(
         site=site,
         hostname=hostname,
         template=vm_tmpl.name,
+        # Store the canonical NULL for the reserved default (whether the
+        # operator omitted the flag or passed it explicitly), so the
+        # column has one encoding per semantic state.
+        admin_template=None if selected_admin_template == "default" else selected_admin_template,
         cpus=resolved_cpus,
         memory_gib=resolved_memory,
         disk_gib=resolved_disk,
@@ -1701,8 +1730,26 @@ def reinit_vm(
             entity_name=name,
         )
 
+    # Resolve the admin-template the VM was created with (NULL column =
+    # reserved ``default``), not always ``default``. Mirror create's
+    # clean error if the operator has since removed the declaration, so a
+    # dropped admin-template surfaces as a typed error naming the selector
+    # rather than a raw KeyError traceback. This cheap row + registry
+    # check bails before the Tailscale probe below.
+    from agentworks.resources.access import kind_dict
+
+    selected_admin_template = vm.admin_template or "default"
+    try:
+        admin = admin_template(registry, selected_admin_template)
+    except KeyError:
+        raise unknown_template_error(
+            kind="admin-template",
+            label="admin template",
+            name=selected_admin_template,
+            available=kind_dict(registry, "admin-template"),
+        ) from None
+
     verify_tailscale_available()
-    admin = admin_template(registry)
     cred_nodes = tuple(
         git_credential_node(registry, cred_name)
         for cred_name in admin.git_credentials

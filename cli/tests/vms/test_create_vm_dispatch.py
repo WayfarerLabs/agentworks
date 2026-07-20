@@ -6,6 +6,7 @@ config-secret resolve pass end to end (no env-read shadow path).
 from __future__ import annotations
 
 from pathlib import Path
+from textwrap import dedent
 from types import SimpleNamespace
 from typing import TYPE_CHECKING
 
@@ -14,7 +15,7 @@ import pytest
 from agentworks.capabilities.base import RunContext
 from agentworks.capabilities.vm_platform import ProvisionResult
 from agentworks.config import load_config
-from agentworks.errors import ProvisioningError
+from agentworks.errors import NotFoundError, ProvisioningError
 from agentworks.vms import manager as vm_manager
 
 if TYPE_CHECKING:
@@ -102,6 +103,86 @@ def test_create_vm_request_shape_and_row(
     assert vm.hostname == "dvm"
     assert vm.platform_metadata == {"instance_name": "dvm"}
     assert vm.operator_stopped is False
+
+
+def test_create_vm_stores_and_provisions_selected_admin_template(
+    db: Database,
+    make_config,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    captured_output: object,
+) -> None:
+    """``--admin-template work`` (a declared, non-default admin-template)
+    is stored on the VM row and drives the provisioned admin user: the
+    request's admin_username comes from that template, not ``default``."""
+    from agentworks.capabilities.vm_platform import ProvisionRequest
+    from agentworks.capabilities.vm_platform.lima import LimaPlatform
+
+    (tmp_path / "resources").mkdir()
+    (tmp_path / "resources" / "admin.yaml").write_text(
+        dedent("""\
+        apiVersion: agentworks/v1
+        kind: admin-template
+        metadata:
+          name: work
+        spec:
+          username: worker
+        """)
+    )
+    config = make_config()
+    captured: list[ProvisionRequest] = []
+
+    def _fake_create(
+        self: LimaPlatform, request: ProvisionRequest, ctx: object
+    ) -> ProvisionResult:
+        captured.append(request)
+        return ProvisionResult(
+            native_transport=SimpleNamespace(),  # type: ignore[arg-type]
+            platform_metadata={"instance_name": "wvm"},
+            bootstrap_complete=True,
+            tailscale_ip="100.64.0.9",
+        )
+
+    monkeypatch.setattr(LimaPlatform, "create", _fake_create)
+    monkeypatch.setattr(vm_manager, "initialize_vm", lambda *a, **k: None)
+
+    vm_manager.create_vm(db, config, name="wvm", admin_template="work")
+
+    (request,) = captured
+    assert request.admin_username == "worker"  # from the work admin-template
+    vm = db.get_vm("wvm")
+    assert vm is not None
+    assert vm.admin_template == "work"
+    assert vm.admin_username == "worker"
+
+
+def test_unknown_admin_template_errors_before_any_work(
+    db: Database,
+    make_config,
+    monkeypatch: pytest.MonkeyPatch,
+    captured_output: object,
+) -> None:
+    """An undeclared ``--admin-template`` name fails with the typed
+    unknown-template error before any slug prompt, secret resolve, DB row,
+    or platform create() runs."""
+    from agentworks.capabilities.vm_platform.lima import LimaPlatform
+
+    config = make_config()
+
+    def _no_create(self: LimaPlatform, request: object, ctx: object) -> object:
+        raise AssertionError("provisioning reached for an unknown admin-template")
+
+    def _no_slug(db_: object) -> None:
+        raise AssertionError("slug prompt reached for an unknown admin-template")
+
+    monkeypatch.setattr(LimaPlatform, "create", _no_create)
+    monkeypatch.setattr(vm_manager, "_resolve_system_slug", _no_slug)
+
+    with pytest.raises(NotFoundError) as exc:
+        vm_manager.create_vm(db, config, name="nvm", admin_template="ghost")
+    assert exc.value.entity_kind == "admin-template"
+    assert exc.value.entity_name == "ghost"
+    assert db.get_vm("nvm") is None
 
 
 def test_disabled_site_errors_before_tailscale_and_slug_prompt(

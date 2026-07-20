@@ -292,7 +292,9 @@ def _resolve_scope_envs(
         )
         agent_env = agent_template.env
     else:
-        admin_env = _admin_template(registry).env
+        admin_env = _admin_template(
+            registry, ctx.vm.admin_template or "default"
+        ).env
 
     session_env: dict[str, EnvEntry] | None = None
     if ctx.session is not None:

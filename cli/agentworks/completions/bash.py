@@ -38,6 +38,10 @@ DYNAMIC_SNIPPETS: dict[str, str] = {
         "$(agw resource list --kind agent-template --names-only 2>/dev/null"
         " | awk -F/ '{print $2}')"
     ),
+    "admin_templates": (
+        "$(agw resource list --kind admin-template --names-only 2>/dev/null"
+        " | awk -F/ '{print $2}')"
+    ),
     "secrets": ("$(agw secret list --names-only 2>/dev/null)"),
     "resource_kinds": (
         "$(agw resource kinds --names-only 2>/dev/null)"
