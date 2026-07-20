@@ -38,9 +38,14 @@ _OP_BINARY = "op"
 # codes for "not signed in" vs "no such item", so we classify by matching
 # stderr substrings. To keep that classification honest we check sign-in
 # ONCE per batch_get (``op whoami``); after a clean whoami, a failing
-# ``op read`` is confidently a lookup problem, not an auth problem. An
-# unrecognized stderr is surfaced as an ``ExternalError`` (which halts the
-# chain) rather than guessed into a soft miss: the safer classification.
+# ``op read`` is usually a lookup problem, but a transport failure can still
+# happen mid-batch. So the not-found markers are deliberately NARROW and
+# item/field-specific: a broad marker like "no such" would also match a
+# Go-style transport error ("dial tcp: lookup ...: no such host") and
+# mislabel connectivity as a hard mapping error with a misleading
+# vault/item/field hint. Anything not matched by the signed-out or
+# not-found markers falls through to ``ExternalError`` (which halts the
+# chain and surfaces the raw stderr): the safer classification.
 _SIGNED_OUT_MARKERS = (
     "not currently signed in",
     "no account found",
@@ -50,10 +55,8 @@ _SIGNED_OUT_MARKERS = (
 _NOT_FOUND_MARKERS = (
     "isn't an item",
     "isn't a field",
-    "not found",
-    "no such",
-    "doesn't exist",
-    "could not find",
+    "no such item",
+    "no such field",
 )
 
 
@@ -246,6 +249,11 @@ class OnePasswordBackend:
         self,
         wants: list[tuple[SecretDecl, MappingValue | None]],
     ) -> dict[str, str]:
+        # Self-safe on an empty batch: no work means no `op whoami`.
+        # (would_attempt gating already guarantees non-empty from the
+        # resolve loop; this makes a direct call cheap too.)
+        if not wants:
+            return {}
         # Amortize the sign-in / availability check once for the whole
         # batch, not per secret.
         self._ensure_signed_in()
@@ -275,9 +283,15 @@ class OnePasswordBackend:
     def _read_one(secret: SecretDecl, uri: str) -> str:
         result = _op(["read", "--no-newline", uri])
         if result.returncode == 0:
-            # Faithful value: no trailing-newline stripping (--no-newline
-            # already omits it). The resolve loop guards embedded control
-            # characters that would corrupt SSH SetEnv transport.
+            # ``--no-newline`` only suppresses the newline ``op`` appends to
+            # its OWN output; it does not touch the stored field value. A
+            # field whose value ends in ``\n`` still arrives with it. We do
+            # NOT rstrip that (unlike env-var, which defensively strips the
+            # \r\n copy-paste artifact): for a vault a trailing newline is
+            # arguably part of the value, so surfacing it (the resolve
+            # loop's control-character guard rejects it) is safer than
+            # silently mangling it. The asymmetry with env-var is
+            # deliberate; do not "fix" it into an rstrip.
             return result.stdout
         lowered = result.stderr.lower()
         if _matches(lowered, _SIGNED_OUT_MARKERS):

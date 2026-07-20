@@ -245,10 +245,10 @@ Two layers, one rule each:
 
 - A **secret backend** is a capability resource: a read-only `secret-backend` row whose
   implementation is registered code (`env-var`, `prompt`, `onepassword`; later plugins, ...). You
-  cannot declare one -- the app (and later plugins) registers them -- but they list and describe
-  like every other resource. Per-secret behavior -- identifier overrides, structured store
-  addressing like `{ vault = "Work", item = "npm", field = "password" }`, and opt-outs -- lives in
-  each secret's `backend_mappings.<backend>`. The `onepassword` backend reads via the 1Password CLI
+  cannot declare one (the app, and later plugins, registers them), but they list and describe like
+  every other resource. Per-secret behavior (identifier overrides, structured store addressing like
+  `{ vault = "Work", item = "npm", field = "password" }`, and opt-outs) lives in each secret's
+  `backend_mappings.<backend>`. The `onepassword` backend reads via the 1Password CLI
   (`op read op://vault/item/field`); it needs a per-secret `backend_mappings.onepassword` address
   (an `op://` string or a `{ vault, item, field }` table) and you must be signed in (`op signin`) at
   command time.

@@ -285,6 +285,41 @@ def test_batch_get_signed_out_raises_connectivity_error(
         backend.batch_get([(secret, secret.backend_mappings["onepassword"])])
 
 
+def test_read_signed_out_mid_batch_raises_connectivity_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """whoami passed, but the session lapsed before the read: a signed-out
+    marker on the failing `op read` (not `op whoami`) is classified as
+    ConnectivityError, not a hard mapping miss."""
+    _install_runner(
+        monkeypatch,
+        _fake_op(
+            read_errors={
+                "op://Work/npm/token": (
+                    1,
+                    "[ERROR] You are not currently signed in.",
+                )
+            }
+        ),
+    )
+    backend = OnePasswordBackend()
+    secret = _decl("npm", backend_mappings={"onepassword": "op://Work/npm/token"})
+    with pytest.raises(ConnectivityError, match="signed in"):
+        backend.batch_get([(secret, secret.backend_mappings["onepassword"])])
+
+
+def test_batch_get_empty_wants_does_not_run_op(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An empty batch returns {} without firing `op whoami`."""
+
+    def exploding(args: list[str]) -> _OpResult:
+        raise AssertionError("empty batch must not run op")
+
+    _install_runner(monkeypatch, exploding)
+    assert OnePasswordBackend().batch_get([]) == {}
+
+
 def test_signin_check_amortized_once_per_batch(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
