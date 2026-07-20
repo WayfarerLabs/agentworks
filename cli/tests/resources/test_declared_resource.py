@@ -3,8 +3,9 @@ dataclass inherits.
 
 Two guarantees are pinned here. First, the base itself carries the five
 metadata fields with the right defaults and an empty ``referenced_resources``,
-and a plain subclass inherits that override-free. Second, every one of the
-nine full-shape resource dataclasses actually descends from the base, so the
+and a plain subclass inherits that override-free. Second, every concrete
+declared-resource dataclass (the operator-declared templates plus the
+system-declared catalog entries) actually descends from the base, so the
 "metadata (including ``description``) exists by construction" promise cannot
 silently regress for any one kind.
 """
@@ -16,6 +17,12 @@ from dataclasses import dataclass
 import pytest
 
 from agentworks.agents.template import AgentTemplate
+from agentworks.catalog import (
+    AptPackageEntry,
+    AptSourceEntry,
+    SystemInstallCommandEntry,
+    UserInstallCommandEntry,
+)
 from agentworks.declared_resource import DeclaredResource
 from agentworks.git_credentials.credential import GitCredentialConfig
 from agentworks.secrets.base import SecretDecl
@@ -45,9 +52,10 @@ def test_plain_subclass_inherits_empty_referenced_resources() -> None:
     assert _NoOverride(name="x").referenced_resources() == []
 
 
-# The nine full-shape resource dataclasses (all carrying name + description +
-# declared_at + origin + references). Pinning the subclass relationship is
-# what keeps a kind from silently dropping a metadata field again.
+# Every concrete declared-resource dataclass (all carrying name + description +
+# declared_at + origin + references via the base). Pinning the subclass
+# relationship is what keeps a kind from silently dropping a metadata field
+# again. The last four are the system-declared catalog entries.
 _FULL_SHAPE_RESOURCES = [
     VMTemplate,
     AgentTemplate,
@@ -58,6 +66,10 @@ _FULL_SHAPE_RESOURCES = [
     SecretDecl,
     GitCredentialConfig,
     VMSiteDecl,
+    AptSourceEntry,
+    AptPackageEntry,
+    SystemInstallCommandEntry,
+    UserInstallCommandEntry,
 ]
 
 
@@ -79,6 +91,28 @@ def test_secret_decl_description_is_required() -> None:
     with pytest.raises(TypeError):
         SecretDecl(name="x")  # type: ignore[call-arg]
     assert SecretDecl(name="x", description="d").description == "d"
+
+
+def test_catalog_entry_description_is_required() -> None:
+    """Catalog entries carry the same required-``description`` override as
+    ``SecretDecl`` (same ``field()`` trap). A source without a description is a
+    construction error; one with it round-trips.
+    """
+    with pytest.raises(TypeError):
+        AptSourceEntry(  # type: ignore[call-arg]
+            name="gh", key_url="u", key_path="p", source="s", source_file="f"
+        )
+    entry = AptSourceEntry(
+        name="gh",
+        description="GitHub apt source",
+        key_url="u",
+        key_path="p",
+        source="s",
+        source_file="f",
+    )
+    assert entry.description == "GitHub apt source"
+    # And it gained the base's declared_at (the tracked follow-up's field half).
+    assert entry.declared_at == synthesized()
 
 
 def test_optional_description_still_defaults_to_none() -> None:
