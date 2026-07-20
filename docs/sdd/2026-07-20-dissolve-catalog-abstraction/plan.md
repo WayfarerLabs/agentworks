@@ -78,11 +78,11 @@ Registry; suite green.
 
 ## Phase 5: docs, close-out, lock
 
-- [ ] Update docs referencing the built-in catalog as `catalog.toml` or the "catalog" concept (grep
+- [x] Update docs referencing the built-in catalog as `catalog.toml` or the "catalog" concept (grep
       `docs/`, ADR 0016 if it names the mechanism, module docstrings).
-- [ ] agentworks-reviewer round; then a fresh-eyes senior-dev (Sonnet) pass (Copilot quota-limited);
+- [x] agentworks-reviewer round; then a fresh-eyes senior-dev (Sonnet) pass (Copilot quota-limited);
       address findings.
-- [ ] Non-draft PR; on merge write `locked.md` (what shipped; permanent homes: `apt.py` /
+- [x] Non-draft PR; on merge write `locked.md` (what shipped; permanent homes: `apt.py` /
       `install_commands.py` and the bundled manifests are self-documenting, the built-in-manifest
       mechanism is described in `manifests/builtin.py`), noting the operator-TOML surface for these
       kinds remains until the broader TOML retirement.
