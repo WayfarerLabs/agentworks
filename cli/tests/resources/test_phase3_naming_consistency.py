@@ -22,7 +22,8 @@ from types import ModuleType
 import pytest
 
 import agentworks.resources as resources_pkg
-from agentworks import catalog as catalog_mod
+from agentworks import apt as apt_mod
+from agentworks import install_commands as install_commands_mod
 from agentworks.agents import kinds as agents_kinds_mod
 from agentworks.capabilities.git_credential import kinds as git_credentials_kinds_mod
 from agentworks.env.entry import EnvEntry
@@ -51,7 +52,8 @@ def _public_names(module: ModuleType) -> list[str]:
         walk_mod,
         inspect_mod,
         agents_kinds_mod,
-        catalog_mod,
+        apt_mod,
+        install_commands_mod,
         git_credentials_kinds_mod,
         secrets_kinds_mod,
         sessions_kinds_mod,
@@ -115,13 +117,12 @@ def test_resource_kinds_have_references_field_not_usage() -> None:
     collection field as ``references``, not the pre-rename ``usage``.
     """
     from agentworks.agents.template import AgentTemplate
-    from agentworks.catalog import (
-        AptPackageEntry,
-        AptSourceEntry,
+    from agentworks.apt import AptPackageEntry, AptSourceEntry
+    from agentworks.git_credentials.credential import GitCredentialConfig
+    from agentworks.install_commands import (
         SystemInstallCommandEntry,
         UserInstallCommandEntry,
     )
-    from agentworks.git_credentials.credential import GitCredentialConfig
     from agentworks.secrets.base import SecretDecl
     from agentworks.sessions.template import NamedConsoleConfig, SessionTemplate
     from agentworks.vms.admin import AdminConfig

@@ -105,10 +105,10 @@ class VMTemplate(DeclaredResource):
                     source=source,
                 )
             )
-        # Catalog references: each name in apt_packages /
-        # system_install_commands resolves to a built-in catalog
-        # Resource via the framework's miss policy (error on typo,
-        # citing this template's source).
+        # Apt / install-command references: each name in apt_packages /
+        # system_install_commands resolves to a declared Resource via
+        # the framework's miss policy (error on typo, citing this
+        # template's source).
         for pkg in self.apt_packages or []:
             refs.append(
                 _ResourceReq(

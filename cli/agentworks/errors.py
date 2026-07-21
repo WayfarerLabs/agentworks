@@ -139,7 +139,7 @@ class ExternalError(AgentworksError):
     """An external system failed in a non-connectivity way.
 
     Examples: a platform API rejected a request, tar exited nonzero, a
-    catalog file was malformed, a source ref could not be resolved.
+    manifest file was malformed, a source ref could not be resolved.
     """
 
 

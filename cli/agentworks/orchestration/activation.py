@@ -36,7 +36,13 @@ Three properties are load-bearing:
   boundary pass: narrow, known names, resolved through the normal
   backend chain, entirely pre-walk-away, and skipped altogether on the
   fast path (a confirmed-active VM costs no resolution and no
-  interaction). The two cases resolve at DIFFERENT moments, matching
+  interaction). Resolving here, ahead of the preflight sweep, is
+  INHERENT rather than a resolve/preflight-ordering gap (issue #202):
+  on-target preflight needs a live target, and bringing the target up
+  can need these very secrets. Each name also resolves as its own
+  single-declaration pass, so the multi-secret "prompt for A, then fail
+  on an already-doomed B" class does not arise at the gate. The two
+  cases resolve at DIFFERENT moments, matching
   HEAD (``vms.manager._ensure_tailscale``'s documented
   conditional-need exception): the observe/start credentials
   (:meth:`GateTarget.gate_secret_refs`) resolve eagerly once the fast
@@ -210,6 +216,16 @@ def gate_secret_resolver(
         from agentworks.orchestration.secrets import secret_declarations
         from agentworks.secrets.resolve import active_backends, resolve_secrets
 
+        # Ordering note (issue #202): gate secrets resolve BEFORE preflight
+        # by necessity, not as a resolve/preflight-ordering gap. On-target
+        # preflight requires a live, active target, and activating a
+        # stopped target can require exactly these gate secrets, so the
+        # gate must open (and resolve) ahead of the preflight sweep. It is
+        # inherent, not an oversight. And it is a SINGLE-declaration
+        # resolve (``[decl]``), so the multi-secret "prompt for A, then
+        # fail on an already-doomed B" class the before-interactive doom
+        # check guards against cannot arise here: there is only ever one
+        # secret in flight per call.
         (decl,) = secret_declarations([secret_name], registry)
         value = resolve_secrets([decl], active_backends(config, registry))[
             secret_name

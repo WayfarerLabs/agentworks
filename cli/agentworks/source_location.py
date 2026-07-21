@@ -38,9 +38,9 @@ class SourceLocation:
 
     - **No-declaration-site fallback** (``file=<real path>``, ``line=0``):
       the Resource carries a real file but no single declaration line -- the
-      catalog publisher's rows, and ``_SectionLineMap.lookup``'s no-match
-      fallback. The path lets downstream Origin rendering still name the
-      source file.
+      apt / install-commands operator publisher's rows, and
+      ``_SectionLineMap.lookup``'s no-match fallback. The path lets
+      downstream Origin rendering still name the source file.
     - **Code/test-synthesized Resource** (``file=Path("<synthesized>")``,
       ``line=0``): produced by ``synthesized()`` below; used as the dataclass
       default so direct Resource construction in tests / framework synthesize

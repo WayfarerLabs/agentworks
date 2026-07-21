@@ -4,8 +4,8 @@ The consumer repoint moved every resource read from ``Config``
 attributes to Registry queries so the operator source can swap from
 TOML to YAML manifests without touching consumers. The only sanctioned
 readers of Config resource attributes are the publishers
-(``Config.publish_to`` in config.py and ``catalog.publish_to`` /
-``load_catalog`` in catalog.py).
+(``Config.publish_to`` in config.py and the ``publish_to`` operator
+publishers in apt.py / install_commands.py).
 
 This is a source-level scan (same spirit as the Phase 0 vocabulary
 guard): any ``config.<resource-attr>`` / ``cfg.<resource-attr>`` read
@@ -25,7 +25,8 @@ _AGENTWORKS_ROOT = Path(agentworks.__file__).parent
 
 _PUBLISHER_ALLOWLIST = {
     Path("config.py"),
-    Path("catalog.py"),
+    Path("apt.py"),
+    Path("install_commands.py"),
 }
 
 _RESOURCE_ATTRS = (

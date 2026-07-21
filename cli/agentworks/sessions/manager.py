@@ -2407,8 +2407,8 @@ def restart_session(
         # check's target (an existing agent, or the admin) is realized,
         # so it probes NOW, pre-resolve and PRE-KILL, and a missing
         # binary aborts the restart with the old session still running.
-        # Then the boundary resolve for the graph's union (gate-resolved
-        # values are already seeded, so nothing resolves twice).
+        # Preflight is read-only (no prompt), so it stays ahead of the
+        # gates below; both secret-resolving passes run AFTER them.
         preflight_all(
             nodes,
             RunContext(
@@ -2418,21 +2418,14 @@ def restart_session(
                 agent_target=None if is_admin else session_target,
             ),
         )
-        resolver.resolve()
-        # Capture the graph boundary union for the harness's op-start
-        # context (matching the create path, which captures
-        # ``resolver.values`` at its boundary). Inert for the built-in
-        # shell harness (empty ``secret_refs()``), but keeps the restart
-        # op ctx shape-correct for a future secret-declaring harness; the
-        # later env-chain resolve (``resolve_for_command`` below) is a
-        # SEPARATE pass, not this graph union.
-        graph_secret_values = resolver.values
 
         # Bail-before-prompt: refuse the operation up front in the cases
         # where the operator either lacks the right flag (BROKEN + no
-        # --force) or declines the confirm (OK + interactive 'no').
-        # Eager-resolve of the env chain runs AFTER these checks so we
-        # don't ask for secrets the command was about to discard.
+        # --force) or declines the confirm (OK + interactive 'no'). BOTH
+        # secret-resolving passes (the graph-union boundary resolve and
+        # the env-chain resolve below) run AFTER these checks so a
+        # refused or declined restart never prompts for secrets it was
+        # about to discard.
         # UNKNOWN is impossible here (_ensure_pid raises on unresolvable
         # sessions). Legacy sessions short-circuit at ``status =
         # SessionStatus.STOPPED`` above, so neither gate fires for them;
@@ -2449,18 +2442,32 @@ def restart_session(
         ):
             raise UserAbort("restart cancelled")
 
-        # Eager-prompting orchestration: resolve every secret referenced
-        # by this session's env chain BEFORE any kill / destructive step.
-        # Non-interactive failures surface as SecretUnavailableError with
-        # no partial state to clean up. This is the recorded
-        # bail-before-prompt exception to the one-boundary-resolve
-        # contract: the graph's union (the site's config secrets)
-        # resolved at the preflight boundary above, but the env chain
-        # deliberately resolves HERE (after the BROKEN/--force refusal
-        # and the "Restart?" confirm) so a declined restart never
-        # prompts for secrets it was about to discard. Folding it into
-        # the boundary would trade that operator protection for one
-        # fewer prompt session on proxmox only.
+        # The graph-union boundary resolve (pass 1). Placed AFTER the
+        # gates above, symmetric with the env-chain pass below, so a
+        # refused or declined restart never prompts. Gate-resolved values
+        # are already seeded, so nothing resolves twice.
+        resolver.resolve()
+        # Capture the graph boundary union for the harness's op-start
+        # context (matching the create path, which captures
+        # ``resolver.values`` at its boundary). Inert for the built-in
+        # shell harness (empty ``secret_refs()``), but keeps the restart
+        # op ctx shape-correct for a future secret-declaring harness; the
+        # env-chain resolve (``resolve_for_command`` below) is a SEPARATE
+        # pass, not this graph union.
+        graph_secret_values = resolver.values
+
+        # Eager-prompting orchestration (pass 2): resolve every secret
+        # referenced by this session's env chain BEFORE any kill /
+        # destructive step. Non-interactive failures surface as
+        # SecretUnavailableError with no partial state to clean up. This
+        # is the recorded bail-before-prompt exception to the
+        # one-boundary-resolve contract: the graph's union (the site's
+        # config secrets) and this env chain BOTH resolve here, after the
+        # BROKEN/--force refusal and the "Restart?" confirm, so a declined
+        # restart never prompts for secrets it was about to discard.
+        # Folding the env chain into the boundary would trade that
+        # operator protection for one fewer prompt session on proxmox
+        # only.
 
         from agentworks.secrets import resolve_for_command
 

@@ -3,7 +3,8 @@
 Kind definitions do NOT live here. Each kind is defined and registered in
 the domain package next to the code that implements it (the declarable
 row dataclasses AND the capability kinds live together with their
-domain): ``agentworks.catalog`` (the catalog kinds),
+domain): ``agentworks.apt`` (the apt-source / apt-package kinds),
+``agentworks.install_commands`` (the system/user install-command kinds),
 ``agentworks.secrets.kinds``, ``agentworks.capabilities.git_credential.kinds``,
 ``agentworks.capabilities.harness.kinds``,
 ``agentworks.vms.kinds``, ``agentworks.agents.kinds``,
@@ -20,9 +21,10 @@ domain, no logic.
 from __future__ import annotations
 
 import agentworks.agents.kinds  # noqa: F401
+import agentworks.apt  # noqa: F401
 import agentworks.capabilities.git_credential.kinds  # noqa: F401
 import agentworks.capabilities.harness.kinds  # noqa: F401
-import agentworks.catalog  # noqa: F401
+import agentworks.install_commands  # noqa: F401
 import agentworks.secrets.kinds  # noqa: F401
 import agentworks.sessions.kinds  # noqa: F401
 import agentworks.vms.kinds  # noqa: F401

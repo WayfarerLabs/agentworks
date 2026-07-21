@@ -595,10 +595,10 @@ rule) switches the lineage back to `shell` with a fresh config.
 
 Cross-kind inspection of the Resource Registry. The registry is the framework that owns every
 operator-declared, auto-declared, and built-in resource the CLI knows about: secrets, VM templates,
-agent templates, workspace templates, catalog entries, git credential providers, secret backends,
-etc. The two commands below stop at the framework-uniform fields (`kind`, `name`, `origin`,
-`references`, `used_by`, `description`). For kind-specific detail -- secret backend mappings,
-template inheritance chains, resolution previews -- reach for the per-kind command (e.g.
+agent templates, workspace templates, apt / install-command entries, git credential providers,
+secret backends, etc. The two commands below stop at the framework-uniform fields (`kind`, `name`,
+`origin`, `references`, `used_by`, `description`). For kind-specific detail (secret backend
+mappings, template inheritance chains, resolution previews), reach for the per-kind command (e.g.
 `agw secret describe`).
 
 | Command                              | Description                                                          |
@@ -645,12 +645,12 @@ Configuration splits into two surfaces:
 - **Settings** live in `~/.config/agentworks/config.toml`: your identity, paths, defaults, and the
   secret backend chain. Run `agw config init` to generate a sample; see
   [sample-config.toml](agentworks/sample-config.toml) for the full reference.
-- **Resources** (secrets, templates, git credentials, vm-sites, catalog entries) are declared as
-  YAML manifests under `~/.config/agentworks/resources/`, auto-loaded whenever a command needs them.
-  `agw resource sample <kind>` prints a commented starter (`--all` for every kind). The classic TOML
-  resource sections keep working (deprecated, with one aggregated load warning naming the sections
-  present; silence it with the global `--no-deprecations` flag); `agw resource migrate` moves them
-  to YAML whenever you like. See [docs/guides/resources.md](../docs/guides/resources.md).
+- **Resources** (secrets, templates, git credentials, vm-sites, apt / install-command entries) are
+  declared as YAML manifests under `~/.config/agentworks/resources/`, auto-loaded whenever a command
+  needs them. `agw resource sample <kind>` prints a commented starter (`--all` for every kind). The
+  classic TOML resource sections keep working (deprecated, with one aggregated load warning naming
+  the sections present; silence it with the global `--no-deprecations` flag); `agw resource migrate`
+  moves them to YAML whenever you like. See [docs/guides/resources.md](../docs/guides/resources.md).
 
 Settings sections (`config.toml`, permanent):
 
@@ -685,7 +685,7 @@ Resource kinds (YAML manifests; the deprecated TOML section is noted for each):
   azdo (TOML also accepts the legacy `type`)
 - `secret` (`[secrets.*]`) -- secret declarations referenced by `{secret: name}` env entries
 - `apt-source` / `apt-package` / `system-install-command` / `user-install-command`
-  (`[apt_sources.*]` etc.) -- catalog extensions
+  (`[apt_sources.*]` etc.): apt / install-command extensions
 - Env vars ride their owning resource: an `env` map in the template's `spec` (TOML: `[<scope>.env]`
   subsections) at vm / workspace / admin / agent / session scope
 
@@ -854,12 +854,13 @@ spec:
 
 (TOML equivalent: `[admin.config]` in `config.toml`, deprecated but supported.)
 
-### Built-in Catalog
+### Built-in Apt / Install-Command Entries
 
-Agentworks ships a built-in catalog of common tools (apt sources, apt packages, system install
-commands, and user install commands). Run
+Agentworks ships built-in entries for common tools (apt sources, apt packages, system install
+commands, and user install commands), bundled as YAML manifests under
+`agentworks/manifests/builtin/`. Run
 `agw resource list --kind apt-package,system-install-command,user-install-command,apt-source` to see
-what is available (or filter to any single kind). Reference catalog entries by name from VM, admin,
+what is available (or filter to any single kind). Reference these entries by name from VM, admin,
 and agent templates. User-defined entries override built-in entries with the same name.
 
 ## VM Initialization

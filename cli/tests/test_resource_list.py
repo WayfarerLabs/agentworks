@@ -65,9 +65,10 @@ def test_lists_every_kind_present_when_no_kind_filter(tmp_path: Path) -> None:
     kinds_seen = {row.kind for row in listing.rows}
     # vm-template (operator-declared default), secret (operator + auto),
     # secret-backend (active env-var), agent-template (default built-in),
-    # apt-package (catalog publisher), git-credential-provider (catalog),
-    # etc. We assert presence of the key cross-kind expectations rather
-    # than the full set, since publishers may add more.
+    # apt-package (built-in manifest), git-credential-provider (built-in
+    # capability row), etc. We assert presence of the key cross-kind
+    # expectations rather than the full set, since publishers may add
+    # more.
     assert "vm-template" in kinds_seen
     assert "secret" in kinds_seen
     assert "secret-backend" in kinds_seen

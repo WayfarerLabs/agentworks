@@ -11,8 +11,9 @@ Three variants today:
   int`` for traceability. Built from the Config-layer ``SourceLocation``
   during ``Config.publish_to``.
 - ``built-in``: shipped with the app itself, inseparable from it (the
-  catalog publisher and other app-bundled publishers). Carries
-  ``source: str`` -- a code-source identifier like ``"agentworks.catalog"``.
+  bundled-manifest publisher and other app-bundled publishers). Carries
+  ``source: str``, a code-source identifier like
+  ``"agentworks.manifests.builtin/apt-sources.yaml"``.
 - ``auto-declared``: synthesized by a kind's miss policy during
   ``Registry.finalize()`` to satisfy a reference that didn't resolve to
   any published Resource. Carries ``source: tuple[str, str]`` -- the first
@@ -76,11 +77,13 @@ class Origin:
 
     @classmethod
     def built_in(cls, *, source: str) -> Origin:
-        """Resource shipped with the app itself (catalog publisher,
-        app-bundled publishers). ``source`` is a code-source identifier
-        like ``"agentworks.catalog"``. Plugin-shipped resources will NOT
-        use this variant; they get the reserved ``system-plugin`` /
-        ``external-plugin`` variants when the plugin system lands.
+        """Resource shipped with the app itself (the bundled-manifest
+        publisher, other app-bundled publishers). ``source`` is a
+        code-source identifier like
+        ``"agentworks.manifests.builtin/apt-sources.yaml"``.
+        Plugin-shipped resources will NOT use this variant; they get the
+        reserved ``system-plugin`` / ``external-plugin`` variants when
+        the plugin system lands.
         """
         return cls(variant="built-in", source=source)
 

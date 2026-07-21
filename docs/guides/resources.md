@@ -1,7 +1,7 @@
 # Resources: YAML Manifests, TOML, and the Registry
 
-How agentworks models the things you declare -- secrets, templates, git credentials, catalog entries
--- and how to work with them day to day.
+How agentworks models the things you declare: secrets, templates, git credentials, apt /
+install-command entries, and how to work with them day to day.
 
 ## The split: config vs resources
 
@@ -21,9 +21,10 @@ agw resource kinds                      # every kind: category, counts, purpose
 ```
 
 Resources come from three origins: **operator-declared** (you wrote them, in YAML or TOML),
-**built-in** (shipped with agentworks, e.g. the `env-var` and `prompt` secret backends and the tool
-catalog), and **auto-declared** (the framework filled in a referenced-but-undeclared resource, e.g.
-the `tailscale-auth-key` secret or `git-token-<name>` secrets).
+**built-in** (shipped with agentworks, e.g. the `env-var` and `prompt` secret backends and the
+built-in apt / install-command entries), and **auto-declared** (the framework filled in a
+referenced-but-undeclared resource, e.g. the `tailscale-auth-key` secret or `git-token-<name>`
+secrets).
 
 ## Declaring resources: YAML manifests
 
@@ -224,9 +225,9 @@ particular runtime, and a session runs whatever harness its template selects.
 Built-in resources ship with the app and appear in `agw resource list --origin builtin`. Override
 policy is per kind:
 
-- **Catalog kinds** (`apt-source`, `apt-package`, `system-install-command`, `user-install-command`):
-  declaring the same name overrides the built-in -- the name is the interface, and same-name
-  override is how you customize what `gh` installs.
+- **Apt / install-command kinds** (`apt-source`, `apt-package`, `system-install-command`,
+  `user-install-command`): declaring the same name overrides the built-in, the name is the
+  interface, and same-name override is how you customize what `gh` installs.
 - **Bundled vm-sites** (`lima-local`, `wsl2`): reserved names. Redeclaring one is an error; declare
   a sibling site instead. Like every vm-site they register on every host and disable themselves
   where this host lacks what they need (`agw resource list` marks the row; `describe` and

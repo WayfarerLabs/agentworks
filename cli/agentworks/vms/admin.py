@@ -69,7 +69,7 @@ class AdminConfig(DeclaredResource):
             env_references(self.env, source)
         )
         refs.extend(credential_references(self.git_credentials, source))
-        # Catalog references for user_install_commands.
+        # Install-command references for user_install_commands.
         for cmd in self.user_install_commands:
             refs.append(
                 _ResourceReq(
