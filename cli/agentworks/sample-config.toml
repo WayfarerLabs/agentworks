@@ -149,10 +149,16 @@ ssh_private_key = "~/.ssh/id_ed25519"        # required: used for SSH connection
 #[secrets.registry-password]
 #description = "container registry password"
 # onepassword needs an explicit per-secret address (no name-based default).
-# String form is an `op://vault/item/field` reference:
+# The address is the `op://vault/item/field` reference 1Password's
+# "Copy Secret Reference" produces (an optional `.../section/field` segment
+# is allowed). This uses op's signed-in account (or the one named by
+# OP_ACCOUNT):
 #backend_mappings.onepassword = "op://Work/registry/password"
-# Structured form (same result) is a table:
-#   backend_mappings.onepassword = { vault = "Work", item = "registry", field = "password" }
+# To pin a specific account, use the table form: `reference` is the same
+# op:// string, `account` is an op account selector (shorthand, sign-in
+# address, account ID, or user ID). Only needed to override the default
+# account:
+#   backend_mappings.onepassword = { account = "my.1password.com", reference = "op://Work/registry/password" }
 
 # Backends are activated by listing them in `[secret_config].backends` in
 # precedence order. The built-in backends ship with agentworks:

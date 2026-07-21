@@ -247,11 +247,12 @@ Two layers, one rule each:
   implementation is registered code (`env-var`, `prompt`, `onepassword`; later plugins, ...). You
   cannot declare one (the app, and later plugins, registers them), but they list and describe like
   every other resource. Per-secret behavior (identifier overrides, structured store addressing like
-  `{ vault = "Work", item = "npm", field = "password" }`, and opt-outs) lives in each secret's
-  `backend_mappings.<backend>`. The `onepassword` backend reads via the 1Password CLI
-  (`op read op://vault/item/field`); it needs a per-secret `backend_mappings.onepassword` address
-  (an `op://` string or a `{ vault, item, field }` table) and you must be signed in (`op signin`) at
-  command time.
+  `{ account = "my.1password.com", reference = "op://Work/npm/password" }`, and opt-outs) lives in
+  each secret's `backend_mappings.<backend>`. The `onepassword` backend reads via the 1Password CLI
+  (`op read op://vault/item/field`); it needs a per-secret `backend_mappings.onepassword` address in
+  one of two forms: a bare `op://vault/item/field` string (using op's signed-in account, or
+  `OP_ACCOUNT`), or a `{ account, reference }` table when a specific account must be pinned. You
+  must be signed in (`op signin`) at command time.
 - The **chain** is a setting: `[secret_config].backends` in `config.toml` lists the active backends
   in precedence order (default `["env-var", "prompt"]`). Registered backends absent from the chain
   are dormant.
