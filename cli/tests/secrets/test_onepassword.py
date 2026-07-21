@@ -241,19 +241,20 @@ def test_validate_mapping_rejects_bad_forms(mapping: Any) -> None:
         backend.validate_mapping("secret 's'", mapping)
 
 
-def test_validate_mapping_rejects_legacy_table_with_migration_hint() -> None:
-    """The removed {vault, item, field} table raises a ConfigError that
-    points at the two supported forms, so anyone on the old shape gets a
-    migration error rather than a generic unknown-key message."""
+def test_validate_mapping_rejects_vault_item_field_table() -> None:
+    """A {vault, item, field} table is rejected as a plain unknown-key
+    ConfigError (naming the keys), with no migration language: those keys
+    never shipped, so there is nothing to migrate from."""
     backend = OnePasswordBackend()
-    with pytest.raises(ConfigError, match="reference") as excinfo:
+    with pytest.raises(ConfigError, match="unknown key") as excinfo:
         backend.validate_mapping(
             "secret 's'",
             {"vault": "Work", "item": "npm", "field": "token"},
         )
     message = str(excinfo.value)
-    assert "op://vault/item/field" in message
-    assert "account, reference" in message
+    assert "'field', 'item', 'vault'" in message
+    for word in ("no longer", "migrat", "legacy"):
+        assert word not in message.lower()
 
 
 def _config(tmp_path: Path, body: str = "") -> Any:

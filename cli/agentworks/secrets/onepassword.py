@@ -74,10 +74,6 @@ _FORMS_HINT = (
     "use an 'op://vault/item/field' string, or a "
     "{account, reference} table when a specific account must be pinned"
 )
-# The old structured form, removed. A table still using these keys gets a
-# migration error pointing at the two supported forms rather than a generic
-# unknown-key message.
-_LEGACY_TABLE_KEYS = ("vault", "item", "field")
 _TABLE_KEYS = ("account", "reference")
 
 
@@ -178,18 +174,9 @@ def _ref_from_table(owner: str, mapping: dict[str, object]) -> _OpRef:
     """Validate a ``{account, reference}`` table and return the resolved
     ``_OpRef``. ``owner`` is display context for errors.
 
-    A table still using the old ``{vault, item, field}`` keys gets a
-    migration error pointing at the two supported forms; any other unknown
-    key is named; ``reference`` must be a valid ``op://`` string and
-    ``account`` a non-empty selector."""
-    legacy = [key for key in _LEGACY_TABLE_KEYS if key in mapping]
-    if legacy:
-        raise ConfigError(
-            f"{owner}: the onepassword backend no longer accepts a "
-            f"{{vault, item, field}} table (found {legacy}); {_FORMS_HINT}. "
-            f"The reference is the op:// string 1Password's "
-            f"'Copy Secret Reference' produces."
-        )
+    Any key other than ``account`` and ``reference`` is rejected and named;
+    ``reference`` must be a valid ``op://`` string and ``account`` a
+    non-empty selector."""
     unknown = sorted(set(mapping) - set(_TABLE_KEYS))
     if unknown:
         raise ConfigError(
