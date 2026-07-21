@@ -47,12 +47,16 @@ def _ok_whoami() -> _OpResult:
 def _fake_op(
     *,
     signed_in: bool = True,
+    signed_out_accounts: tuple[str | None, ...] = (),
     values: dict[str, str] | None = None,
     read_errors: dict[str, tuple[int, str]] | None = None,
 ) -> Any:
     """A ``_run_op`` double. ``whoami`` succeeds unless ``signed_in`` is
-    False; ``read <uri>`` returns the mapped value, or the mapped
-    (returncode, stderr) failure, or a generic not-found."""
+    False or the checked account is in ``signed_out_accounts`` (a bare
+    ``op://`` string checks the ``None`` default account); ``read <uri>``
+    returns the mapped value, or the mapped (returncode, stderr) failure,
+    or a generic not-found. The op:// reference is always the last argv
+    element, in both the bare and ``--account`` forms."""
     values = values or {}
     read_errors = read_errors or {}
     calls: list[list[str]] = []
@@ -60,10 +64,13 @@ def _fake_op(
     def run(args: list[str]) -> _OpResult:
         calls.append(args)
         if args[0] == "whoami":
-            if signed_in:
-                return _ok_whoami()
-            return _OpResult(1, "", "[ERROR] You are not currently signed in.")
-        # op read --no-newline <uri>
+            account = args[2] if "--account" in args else None
+            if not signed_in or account in signed_out_accounts:
+                return _OpResult(
+                    1, "", "[ERROR] You are not currently signed in."
+                )
+            return _ok_whoami()
+        # op read --no-newline [--account <acct>] <uri>
         uri = args[-1]
         if uri in read_errors:
             code, stderr = read_errors[uri]
@@ -95,41 +102,85 @@ def test_would_attempt_only_for_mapped_secret() -> None:
 # -- mapping resolution / describe_lookup ------------------------------------
 
 
-def test_string_and_dict_mappings_resolve_to_same_uri(
+def test_bare_string_resolves_without_account_flag(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     runner = _fake_op(values={"op://Work/npm/token": "secret-value"})
     _install_runner(monkeypatch, runner)
     backend = OnePasswordBackend()
 
-    string_secret = _decl(
-        "s-str", backend_mappings={"onepassword": "op://Work/npm/token"}
+    uri = "op://Work/npm/token"
+    secret = _decl("s-str", backend_mappings={"onepassword": uri})
+    assert (
+        backend.describe_lookup(secret, secret.backend_mappings["onepassword"])
+        == uri
     )
-    dict_secret = _decl(
-        "s-dict",
+    got = backend.batch_get([(secret, secret.backend_mappings["onepassword"])])
+    assert got == {"s-str": "secret-value"}
+    # The bare string uses op's default account: no --account flag anywhere.
+    assert all("--account" not in c for c in runner.calls)
+    read_calls = [c for c in runner.calls if c[0] == "read"]
+    assert read_calls == [["read", "--no-newline", uri]]
+
+
+def test_table_form_resolves_with_account_flag(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The {account, reference} table passes --account <acct> to `op read`
+    and reads the native op:// reference."""
+    uri = "op://Work/npm/token"
+    runner = _fake_op(values={uri: "secret-value"})
+    _install_runner(monkeypatch, runner)
+    backend = OnePasswordBackend()
+
+    mapping = {"account": "my.1password.com", "reference": uri}
+    secret = _decl("s-tbl", backend_mappings={"onepassword": mapping})
+    got = backend.batch_get([(secret, secret.backend_mappings["onepassword"])])
+    assert got == {"s-tbl": "secret-value"}
+    read_calls = [c for c in runner.calls if c[0] == "read"]
+    assert read_calls == [
+        ["read", "--no-newline", "--account", "my.1password.com", uri]
+    ]
+    whoami_calls = [c for c in runner.calls if c[0] == "whoami"]
+    assert whoami_calls == [["whoami", "--account", "my.1password.com"]]
+
+
+def test_section_bearing_reference_validates_and_resolves(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A reference carrying the optional section segment (which the removed
+    {vault, item, field} table could not express) validates and reads."""
+    uri = "op://Work/npm/section/token"
+    runner = _fake_op(values={uri: "sectioned-value"})
+    _install_runner(monkeypatch, runner)
+    backend = OnePasswordBackend()
+
+    backend.validate_mapping("secret 's'", uri)
+    secret = _decl("s-sec", backend_mappings={"onepassword": uri})
+    got = backend.batch_get([(secret, secret.backend_mappings["onepassword"])])
+    assert got == {"s-sec": "sectioned-value"}
+
+
+def test_describe_lookup_includes_account_when_set() -> None:
+    backend = OnePasswordBackend()
+    uri = "op://Work/npm/token"
+    with_account = _decl(
+        "s-acct",
         backend_mappings={
-            "onepassword": {"vault": "Work", "item": "npm", "field": "token"}
+            "onepassword": {"account": "my.1password.com", "reference": uri}
         },
     )
-    uri = "op://Work/npm/token"
-    assert backend.describe_lookup(
-        string_secret, string_secret.backend_mappings["onepassword"]
-    ) == uri
-    assert backend.describe_lookup(
-        dict_secret, dict_secret.backend_mappings["onepassword"]
-    ) == uri
-
-    got_str = backend.batch_get(
-        [(string_secret, string_secret.backend_mappings["onepassword"])]
+    bare = _decl("s-bare", backend_mappings={"onepassword": uri})
+    assert (
+        backend.describe_lookup(
+            with_account, with_account.backend_mappings["onepassword"]
+        )
+        == f"{uri} (account my.1password.com)"
     )
-    got_dict = backend.batch_get(
-        [(dict_secret, dict_secret.backend_mappings["onepassword"])]
+    assert (
+        backend.describe_lookup(bare, bare.backend_mappings["onepassword"])
+        == uri
     )
-    assert got_str == {"s-str": "secret-value"}
-    assert got_dict == {"s-dict": "secret-value"}
-    # Both forms reached the runner as the same op:// URI.
-    read_calls = [c for c in runner.calls if c[0] == "read"]
-    assert all(c[-1] == uri for c in read_calls)
 
 
 def test_describe_lookup_none_when_unmapped() -> None:
@@ -144,10 +195,15 @@ def test_validate_mapping_accepts_valid_forms() -> None:
     backend = OnePasswordBackend()
     backend.validate_mapping("secret 's'", "op://Work/npm/token")
     backend.validate_mapping(
-        "secret 's'", {"vault": "Work", "item": "npm", "field": "token"}
+        "secret 's'",
+        {"account": "my.1password.com", "reference": "op://Work/npm/token"},
     )
-    # A section segment (4 parts) is allowed.
+    # A section segment (4 parts) is allowed, in both forms.
     backend.validate_mapping("secret 's'", "op://Work/npm/section/token")
+    backend.validate_mapping(
+        "secret 's'",
+        {"account": "acct", "reference": "op://Work/npm/section/token"},
+    )
 
 
 @pytest.mark.parametrize(
@@ -158,9 +214,24 @@ def test_validate_mapping_accepts_valid_forms() -> None:
         pytest.param("Work/npm/token", id="missing-scheme"),
         pytest.param("op://Work/token", id="too-few-segments"),
         pytest.param("op://Work//token", id="blank-segment"),
-        pytest.param({"vault": "Work", "item": "npm"}, id="dict-missing-field"),
         pytest.param(
-            {"vault": "Work", "item": "npm", "field": ""}, id="dict-blank-field"
+            {"reference": "op://Work/npm/token"}, id="table-missing-account"
+        ),
+        pytest.param(
+            {"account": "", "reference": "op://Work/npm/token"},
+            id="table-blank-account",
+        ),
+        pytest.param({"account": "acct"}, id="table-missing-reference"),
+        pytest.param(
+            {"account": "acct", "reference": ""}, id="table-blank-reference"
+        ),
+        pytest.param(
+            {"account": "acct", "reference": "not-a-ref"},
+            id="table-bad-reference",
+        ),
+        pytest.param(
+            {"account": "acct", "reference": "op://Work/npm/token", "x": 1},
+            id="table-unknown-key",
         ),
     ],
 )
@@ -168,6 +239,21 @@ def test_validate_mapping_rejects_bad_forms(mapping: Any) -> None:
     backend = OnePasswordBackend()
     with pytest.raises(ConfigError):
         backend.validate_mapping("secret 's'", mapping)
+
+
+def test_validate_mapping_rejects_legacy_table_with_migration_hint() -> None:
+    """The removed {vault, item, field} table raises a ConfigError that
+    points at the two supported forms, so anyone on the old shape gets a
+    migration error rather than a generic unknown-key message."""
+    backend = OnePasswordBackend()
+    with pytest.raises(ConfigError, match="reference") as excinfo:
+        backend.validate_mapping(
+            "secret 's'",
+            {"vault": "Work", "item": "npm", "field": "token"},
+        )
+    message = str(excinfo.value)
+    assert "op://vault/item/field" in message
+    assert "account, reference" in message
 
 
 def _config(tmp_path: Path, body: str = "") -> Any:
@@ -323,6 +409,7 @@ def test_batch_get_empty_wants_does_not_run_op(
 def test_signin_check_amortized_once_per_batch(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """Two secrets on the same (default) account share one whoami check."""
     runner = _fake_op(
         values={"op://Work/a/f": "va", "op://Work/b/f": "vb"}
     )
@@ -338,6 +425,87 @@ def test_signin_check_amortized_once_per_batch(
     )
     whoami_calls = [c for c in runner.calls if c[0] == "whoami"]
     assert len(whoami_calls) == 1
+
+
+def test_signin_check_amortized_once_per_distinct_account(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A batch spanning two accounts plus the default runs `op whoami` once
+    per distinct account, not once per secret. Two secrets share account
+    'acct-x', one is on 'acct-y', and one is on the default account: three
+    distinct whoami checks across four secrets."""
+    runner = _fake_op(
+        values={
+            "op://Work/x1/f": "vx1",
+            "op://Work/x2/f": "vx2",
+            "op://Work/y/f": "vy",
+            "op://Work/d/f": "vd",
+        }
+    )
+    _install_runner(monkeypatch, runner)
+    backend = OnePasswordBackend()
+    wants = [
+        _decl(
+            "x1",
+            backend_mappings={
+                "onepassword": {"account": "acct-x", "reference": "op://Work/x1/f"}
+            },
+        ),
+        _decl(
+            "x2",
+            backend_mappings={
+                "onepassword": {"account": "acct-x", "reference": "op://Work/x2/f"}
+            },
+        ),
+        _decl(
+            "y",
+            backend_mappings={
+                "onepassword": {"account": "acct-y", "reference": "op://Work/y/f"}
+            },
+        ),
+        _decl("d", backend_mappings={"onepassword": "op://Work/d/f"}),
+    ]
+    backend.batch_get([(s, s.backend_mappings["onepassword"]) for s in wants])
+    whoami_calls = [c for c in runner.calls if c[0] == "whoami"]
+    # One whoami per distinct account (default = bare `whoami`), four reads.
+    assert {tuple(c) for c in whoami_calls} == {
+        ("whoami",),
+        ("whoami", "--account", "acct-x"),
+        ("whoami", "--account", "acct-y"),
+    }
+    assert len(whoami_calls) == 3
+
+
+def test_signed_out_for_specific_account_raises_naming_it(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """When one account in the batch is signed out, the ConnectivityError
+    names that account (the default account is fine)."""
+    runner = _fake_op(
+        signed_out_accounts=("acct-y",),
+        values={"op://Work/x/f": "vx", "op://Work/y/f": "vy"},
+    )
+    _install_runner(monkeypatch, runner)
+    backend = OnePasswordBackend()
+    x = _decl(
+        "x",
+        backend_mappings={
+            "onepassword": {"account": "acct-x", "reference": "op://Work/x/f"}
+        },
+    )
+    y = _decl(
+        "y",
+        backend_mappings={
+            "onepassword": {"account": "acct-y", "reference": "op://Work/y/f"}
+        },
+    )
+    with pytest.raises(ConnectivityError, match="acct-y"):
+        backend.batch_get(
+            [
+                (x, x.backend_mappings["onepassword"]),
+                (y, y.backend_mappings["onepassword"]),
+            ]
+        )
 
 
 def test_batch_get_missing_binary_raises_connectivity_error(
