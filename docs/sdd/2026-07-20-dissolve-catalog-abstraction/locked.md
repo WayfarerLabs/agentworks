@@ -61,8 +61,9 @@ pass since Copilot was quota-limited. Both reviews confirmed the reorg is behavi
 findings were folded into the Phase 5 sweep. The FRD, HLA, and plan are accurate as-built and are
 now locked.
 
-### Recorded follow-up
+### Also cleaned up
 
-- `cli/agentworks/cli/_helpers.py`'s `HasDescription` Protocol appears to have no call sites
-  (possible dead code), surfaced incidentally during the vocabulary sweep. Unrelated to this effort;
-  left for whoever owns that area.
+- Removed the dead `HasDescription` Protocol from `cli/agentworks/cli/_helpers.py` (no call sites;
+  orphaned once `DeclaredResource` unified `description` and the display path moved to generic
+  `getattr`). Surfaced incidentally during the vocabulary sweep and pulled into this PR as a
+  leave-it-better cleanup.
