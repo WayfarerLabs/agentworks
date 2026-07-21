@@ -470,7 +470,10 @@ def test_preview_reports_onepassword_without_probing(
 
     _install_runner(monkeypatch, exploding)
     secret = _decl("npm", backend_mappings={"onepassword": "op://Work/npm/token"})
-    assert preview_resolution(secret, _backend_chain()) == "onepassword"
+    assert (
+        preview_resolution(secret, _backend_chain(), interactive_available=True)
+        == "onepassword"
+    )
 
 
 def test_preview_returns_none_for_unmapped_secret(
@@ -481,7 +484,12 @@ def test_preview_returns_none_for_unmapped_secret(
 
     _install_runner(monkeypatch, exploding)
     # Unmapped: would_attempt is False, so onepassword is skipped entirely.
-    assert preview_resolution(_decl("npm"), _backend_chain()) is None
+    assert (
+        preview_resolution(
+            _decl("npm"), _backend_chain(), interactive_available=True
+        )
+        is None
+    )
 
 
 # -- registry ----------------------------------------------------------------
