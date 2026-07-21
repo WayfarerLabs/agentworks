@@ -151,6 +151,20 @@ def _restart_fixture(
 
     monkeypatch.setattr(Resolver, "resolve", _marking_resolve)
 
+    # Instrument pass 2 (the env-chain resolve) with its own marker so
+    # the refusal tests can prove BOTH secret passes stay behind the
+    # gates, not just pass 1 (``Resolver.resolve``). ``restart_session``
+    # imports ``resolve_for_command`` function-locally from
+    # ``agentworks.secrets``, so patch it there, overriding the no-op the
+    # conftest ``stub_session_resolvers`` installed.
+    def _marking_resolve_env(*a: object, **k: object) -> dict[str, str]:
+        events.append("resolve_env")
+        return {}
+
+    monkeypatch.setattr(
+        "agentworks.secrets.resolve_for_command", _marking_resolve_env
+    )
+
     def _spy_kill(name: str, **kwargs: object) -> bool:
         events.append("kill")
         return True
@@ -188,8 +202,11 @@ def test_restart_probe_fires_at_preflight_before_the_kill(
         f"the probe must fire BEFORE the kill; got {events}"
     )
     # Literal pin of the whole order: the probe fires at preflight,
-    # BEFORE the boundary resolve, which precedes the kill.
-    assert events == ["probe", "resolve", "kill", "tmux_create"]
+    # BEFORE both secret passes (the graph-union boundary resolve, then
+    # the env-chain resolve), which precede the kill. Pinning "resolve_env"
+    # here proves the pass-2 marker fires, so its ABSENCE in the refusal
+    # tests below is meaningful.
+    assert events == ["probe", "resolve", "resolve_env", "kill", "tmux_create"]
     db.close()
 
 
@@ -209,6 +226,60 @@ def test_restart_missing_binary_aborts_with_the_old_session_running(
     assert events == ["probe"]  # no resolve, no kill, no create
     refreshed = db.get_session("s1")
     assert refreshed is not None and refreshed.pid == 4242
+    db.close()
+
+
+# -- restart: both secret passes run AFTER the refusal/confirm gates ---------
+
+
+def test_restart_broken_without_force_refuses_before_the_resolve(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A BROKEN session without --force is refused up front. The pass-1
+    graph-union resolve must NOT run first (issue #202): a refused
+    restart never prompts. Preflight (read-only) still runs."""
+    from agentworks.errors import BrokenStateError
+    from agentworks.sessions import manager as session_manager
+    from agentworks.sessions.manager import restart_session
+
+    db, events = _restart_fixture(tmp_path, monkeypatch)
+    monkeypatch.setattr(
+        session_manager, "check_session_status", lambda *a, **k: SessionStatus.BROKEN
+    )
+
+    with pytest.raises(BrokenStateError):
+        restart_session(db, SimpleNamespace(session=SimpleNamespace(history_limit=1)), name="s1")  # type: ignore[arg-type]
+
+    # Preflight probed, but neither secret pass ran and nothing was
+    # killed: pass 1 (graph-union boundary) and pass 2 (env chain) both
+    # stayed behind the refusal.
+    assert "resolve" not in events
+    assert "resolve_env" not in events
+    assert "kill" not in events
+    db.close()
+
+
+def test_restart_declined_confirm_refuses_before_the_resolve(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An OK session whose "Restart?" confirm is declined is refused up
+    front. The pass-1 graph-union resolve must NOT run first (issue
+    #202): a declined restart never prompts for secrets it was about to
+    discard."""
+    from agentworks import output
+    from agentworks.errors import UserAbort
+    from agentworks.sessions.manager import restart_session
+
+    db, events = _restart_fixture(tmp_path, monkeypatch)  # status OK
+    monkeypatch.setattr(output, "confirm", lambda *a, **k: False)
+
+    with pytest.raises(UserAbort):
+        restart_session(db, SimpleNamespace(session=SimpleNamespace(history_limit=1)), name="s1", yes=False)  # type: ignore[arg-type]
+
+    # Both secret passes stayed behind the declined confirm.
+    assert "resolve" not in events
+    assert "resolve_env" not in events
+    assert "kill" not in events
     db.close()
 
 

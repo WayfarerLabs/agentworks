@@ -192,6 +192,121 @@ def test_unsatisfied_hint_per_secret_listing() -> None:
     assert "b: tried env-var, prompt" in hint
 
 
+# -- fail before prompting (issue #202) --------------------------------------
+
+
+class _PromptFake(_FakeBackend):
+    """A prompt-shaped interactive backend that mirrors the real
+    ``PromptBackend.batch_get``: it no-ops (resolves nothing) when
+    ``output.is_interactive()`` is False, so the non-interactive path is
+    exercised faithfully. ``resolve_calls`` still records the reach."""
+
+    def resolve(self, secrets: list[SecretDecl]) -> dict[str, str]:
+        from agentworks import output
+
+        self.resolve_calls.append([s.name for s in secrets])
+        if not output.is_interactive():
+            return {}
+        return {s.name: self._values[s.name] for s in secrets if s.name in self._values}
+
+
+def _set_interactive(monkeypatch: pytest.MonkeyPatch, value: bool) -> None:
+    from agentworks import output
+
+    monkeypatch.setattr(output, "is_interactive", lambda: value)
+
+
+def test_doomed_secret_raises_before_any_interactive_prompt(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The reported bug: chain (env-var, prompt); A will be resolved by
+    prompt, B is env-var-mapped-but-unset AND opts out of prompt. B is
+    doomed the moment env-var soft-misses, so it must raise BEFORE the
+    prompt for A fires (the operator is never asked for A)."""
+    _set_interactive(monkeypatch, True)
+    env = _FakeBackend("env-var")  # no values: both secrets soft-miss
+    prompt = _PromptFake("prompt", values={"a": "typed"}, interactive=True)
+    a = _decl("a")
+    b = _decl("b", backend_mappings={"prompt": False})
+    with pytest.raises(SecretUnavailableError) as exc:
+        resolve_secrets([a, b], _chain(env, prompt))
+    # The prompt never ran: no operator interaction was wasted.
+    assert prompt.resolve_calls == []
+    # Only B is named (attributed to env-var, which DID attempt-and-miss);
+    # A is not dragged into the failure.
+    assert str(exc.value) == "no active backend could resolve secret(s): b"
+    assert "b: tried env-var" in (exc.value.hint or "")
+    assert "a:" not in (exc.value.hint or "")
+
+
+def test_non_interactive_lets_end_of_loop_raise_stand(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Same setup under --non-interactive: the prompt backend no-ops, so
+    there is no prompt to get ahead of. The doom check does NOT fire
+    early; the prompt is still reached (and resolves nothing), and the
+    end-of-loop raise names both unresolved secrets."""
+    _set_interactive(monkeypatch, False)
+    env = _FakeBackend("env-var")
+    prompt = _PromptFake("prompt", values={"a": "typed"}, interactive=True)
+    a = _decl("a")
+    b = _decl("b", backend_mappings={"prompt": False})
+    with pytest.raises(SecretUnavailableError) as exc:
+        resolve_secrets([a, b], _chain(env, prompt))
+    # No early raise: the loop reached the prompt for A (which no-op'd).
+    assert prompt.resolve_calls == [["a"]]
+    # Both secrets are unresolved at loop end.
+    assert "a" in str(exc.value)
+    assert "b" in str(exc.value)
+
+
+def test_prompt_attemptable_secret_is_not_falsely_doomed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A secret prompt WILL attempt must not be flagged doomed: env-var
+    soft-misses, the doom check clears it (prompt would_attempt), and the
+    prompt resolves it normally."""
+    _set_interactive(monkeypatch, True)
+    env = _FakeBackend("env-var")  # no value: soft-miss
+    prompt = _PromptFake("prompt", values={"x": "typed"}, interactive=True)
+    out = resolve_secrets([_decl("x")], _chain(env, prompt))
+    assert out == {"x": "typed"}
+    assert prompt.resolve_calls == [["x"]]
+
+
+def test_doom_check_catches_structurally_unreachable_secret(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A secret that opts out of every backend in the chain is doomed;
+    the before-interactive check raises it before the prompt fires."""
+    _set_interactive(monkeypatch, True)
+    env = _FakeBackend("env-var")
+    prompt = _PromptFake("prompt", interactive=True)
+    decl = _decl("x", backend_mappings={"env-var": False, "prompt": False})
+    with pytest.raises(SecretUnavailableError):
+        resolve_secrets([decl], _chain(env, prompt))
+    assert prompt.resolve_calls == []
+
+
+def test_hard_miss_halts_before_interactive_doom_check(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A hard miss (SecretMappingError) from a non-interactive store still
+    halts the chain even in interactive mode: the store raises before the
+    interactive backend (and its doom check) is ever reached."""
+    _set_interactive(monkeypatch, True)
+
+    class _StrictMissBackend(_FakeBackend):
+        def resolve(self, secrets: list[SecretDecl]) -> dict[str, str]:
+            raise SecretMappingError("store has no item")
+
+    strict = _StrictMissBackend("strict")
+    prompt = _PromptFake("prompt", values={"x": "typed"}, interactive=True)
+    with pytest.raises(SecretMappingError, match="store has no item"):
+        resolve_secrets([_decl("x")], _chain(strict, prompt))
+    assert prompt.resolve_calls == []
+
+
 # -- collect mode (errors out-param) -----------------------------------------
 
 
@@ -258,15 +373,48 @@ def test_collect_mode_default_is_unchanged_raise_behavior() -> None:
 def test_preview_reports_first_backend_with_value() -> None:
     b1 = _FakeBackend("env-var", values={"x": "from-env"})
     b2 = _FakeBackend("prompt", interactive=True)
-    assert preview_resolution(_decl("x"), _chain(b1, b2)) == "env-var"
+    assert (
+        preview_resolution(_decl("x"), _chain(b1, b2), interactive_available=True)
+        == "env-var"
+    )
 
 
 def test_preview_falls_through_to_interactive() -> None:
     """env-var would_attempt is True but has no value; prompt is the
-    next backend and is not opted out, so preview reports prompt."""
+    next backend and is not opted out, so preview reports prompt when
+    interactive input is available this run."""
     b1 = _FakeBackend("env-var")  # no values
     b2 = _FakeBackend("prompt", interactive=True)
-    assert preview_resolution(_decl("x"), _chain(b1, b2)) == "prompt"
+    assert (
+        preview_resolution(_decl("x"), _chain(b1, b2), interactive_available=True)
+        == "prompt"
+    )
+
+
+def test_preview_interactive_unavailable_does_not_report_prompt() -> None:
+    """Under --non-interactive / no TTY (issue #202) the prompt backend
+    no-ops, so a prompt-only secret is genuinely unresolvable: preview
+    walks PAST the interactive backend and returns None."""
+    b1 = _FakeBackend("env-var")  # no values
+    b2 = _FakeBackend("prompt", interactive=True)
+    assert (
+        preview_resolution(_decl("x"), _chain(b1, b2), interactive_available=False)
+        is None
+    )
+
+
+def test_preview_interactive_unavailable_still_reports_later_backend() -> None:
+    """When interactive input is unavailable the walk continues past the
+    prompt to any later non-interactive backend that would resolve."""
+    b1 = _FakeBackend("env-var")  # no values
+    b2 = _FakeBackend("prompt", interactive=True)
+    b3 = _FakeBackend("vault", values={"x": "from-vault"})
+    assert (
+        preview_resolution(
+            _decl("x"), _chain(b1, b2, b3), interactive_available=False
+        )
+        == "vault"
+    )
 
 
 def test_preview_never_probes_interactive_backends() -> None:
@@ -280,7 +428,10 @@ def test_preview_never_probes_interactive_backends() -> None:
 
     b1 = _FakeBackend("env-var")
     b2 = _ExplodingPrompt("prompt", interactive=True)
-    assert preview_resolution(_decl("x"), _chain(b1, b2)) == "prompt"
+    assert (
+        preview_resolution(_decl("x"), _chain(b1, b2), interactive_available=True)
+        == "prompt"
+    )
 
 
 def test_preview_skips_opted_out_backend() -> None:
@@ -289,7 +440,10 @@ def test_preview_skips_opted_out_backend() -> None:
     b1 = _FakeBackend("env-var", values={"x": "from-env"})
     b2 = _FakeBackend("prompt", interactive=True)
     decl = _decl("x", backend_mappings={"env-var": False})
-    assert preview_resolution(decl, _chain(b1, b2)) == "prompt"
+    assert (
+        preview_resolution(decl, _chain(b1, b2), interactive_available=True)
+        == "prompt"
+    )
 
 
 def test_preview_honors_opt_out_for_interactive_backend() -> None:
@@ -299,9 +453,11 @@ def test_preview_honors_opt_out_for_interactive_backend() -> None:
     b1 = _FakeBackend("env-var")  # no values; falls through
     b2 = _FakeBackend("prompt", interactive=True)
     decl = _decl("x", backend_mappings={"prompt": False})
-    assert preview_resolution(decl, _chain(b1, b2)) is None
+    assert (
+        preview_resolution(decl, _chain(b1, b2), interactive_available=True) is None
+    )
 
 
 def test_preview_returns_none_when_no_backend_attempts() -> None:
     b1 = _FakeBackend("env-var", attempts=set())  # never attempts anything
-    assert preview_resolution(_decl("x"), _chain(b1)) is None
+    assert preview_resolution(_decl("x"), _chain(b1), interactive_available=True) is None
