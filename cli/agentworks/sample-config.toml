@@ -78,6 +78,7 @@ ssh_private_key = "~/.ssh/id_ed25519"        # required: used for SSH connection
 # live console) is enough to switch layouts.
 
 #[named_console]
+#description = "Default console layout"     # optional, shown in prompts and logs
 #tmux_layout = "aw-session-vertical"
 # Valid values:
 #   aw-session-vertical  - single column; session pane takes the top 50%
@@ -216,6 +217,7 @@ ssh_private_key = "~/.ssh/id_ed25519"        # required: used for SSH connection
 # curl, sudo, ca-certificates, gnupg) installed at VM create time.
 
 #[vm_templates.default]
+#description = "Default VM template"        # optional, shown in prompts and logs
 # -- Provisioning (set once at create time) --
 # (Templates carry no `site`: placement is per-host; use `--site` or
 # defaults.site above.)
@@ -261,6 +263,7 @@ ssh_private_key = "~/.ssh/id_ed25519"        # required: used for SSH connection
 # init/reinit. This is not a template; there is one admin config.
 
 #[admin.config]
+#description = "Default admin template"     # optional, shown in prompts and logs
 #username = "agentworks"                    # admin username on VMs (default: agentworks)
 #shell = "bash"                             # admin shell (default: bash, matches Debian's user-default; "zsh" also supported)
 #git_credentials = ["github"]              # git credential providers to configure
@@ -290,6 +293,7 @@ ssh_private_key = "~/.ssh/id_ed25519"        # required: used for SSH connection
 # --template. Agents default to nothing unless explicitly configured.
 
 #[agent_templates.default]
+#description = "Default agent template"     # optional, shown in prompts and logs
 #shell = "bash"                             # agent shell (default: bash)
 #git_credentials = []                       # git credential providers (default: none)
 #user_install_commands = []                 # per-user commands from catalog
@@ -325,6 +329,7 @@ ssh_private_key = "~/.ssh/id_ed25519"        # required: used for SSH connection
 # without credentials.
 
 #[workspace_templates.default]
+#description = "Default workspace template" # optional, shown in prompts and logs
 #repo = "https://github.com/org/repo.git"  # git repo to clone into workspace
 #tmuxinator = true                          # generate tmuxinator config
 #inherits = []                              # list of parent template names

@@ -25,19 +25,18 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
+from agentworks.declared_resource import DeclaredResource
 from agentworks.errors import ConfigError
-from agentworks.source_location import SourceLocation, synthesized
 
 if TYPE_CHECKING:
     from agentworks.capabilities.vm_platform import VMPlatform
     from agentworks.config import Config
-    from agentworks.resources.origin import Origin
-    from agentworks.resources.reference import ReferenceEntry, ResourceReference
+    from agentworks.resources.reference import ResourceReference
     from agentworks.resources.registry import Registry
 
 
-@dataclass(frozen=True)
-class VMSiteDecl:
+@dataclass(frozen=True, kw_only=True)
+class VMSiteDecl(DeclaredResource):
     """The declared ``vm-site`` resource.
 
     The internal representation follows the YAML manifest shape (ADR
@@ -47,13 +46,8 @@ class VMSiteDecl:
     fields sit at a top level; their loader nests at the boundary.
     """
 
-    name: str
     platform: str
     platform_config: dict[str, object] = field(default_factory=dict)
-    description: str | None = None
-    declared_at: SourceLocation = field(default_factory=synthesized)
-    origin: Origin | None = None
-    references: tuple[ReferenceEntry, ...] = ()
 
     def referenced_resources(self) -> list[ResourceReference]:
         from agentworks.resources.reference import (

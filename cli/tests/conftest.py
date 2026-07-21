@@ -409,7 +409,7 @@ class _StubRegistry:
             if name != "default":
                 raise KeyError(name)
             console = getattr(self._config, "named_console", None)
-            return console if console is not None else NamedConsoleConfig()
+            return console if console is not None else NamedConsoleConfig(name="default")
         if kind == "vm-site":
             # Serve the built-in same-named sites so resolve_site /
             # lookup_site work against namespace configs (a stubbed

@@ -14,14 +14,10 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
-from agentworks.source_location import SourceLocation, synthesized
+from agentworks.declared_resource import DeclaredResource
 
 if TYPE_CHECKING:
-    from agentworks.resources.origin import Origin
-    from agentworks.resources.reference import (
-        ReferenceEntry,
-        ResourceReference,
-    )
+    from agentworks.resources.reference import ResourceReference
 
 
 def credential_references(
@@ -50,9 +46,8 @@ def credential_references(
     ]
 
 
-@dataclass(frozen=True)
-class GitCredentialConfig:
-    name: str
+@dataclass(frozen=True, kw_only=True)
+class GitCredentialConfig(DeclaredResource):
     # The internal representation follows the YAML manifest shape (ADR
     # 0016): field name ``provider``, matching ``spec.provider``. Only
     # the TOML section still spells ``type`` (with ``provider`` as the
@@ -72,10 +67,6 @@ class GitCredentialConfig:
     # level; the loader nests them here so the internal representation
     # matches the YAML manifest shape.
     provider_config: dict[str, object] = field(default_factory=dict)
-    description: str | None = None
-    declared_at: SourceLocation = field(default_factory=synthesized)
-    origin: Origin | None = None
-    references: tuple[ReferenceEntry, ...] = ()
 
     def referenced_resources(self) -> list[ResourceReference]:
         from agentworks.resources.reference import (

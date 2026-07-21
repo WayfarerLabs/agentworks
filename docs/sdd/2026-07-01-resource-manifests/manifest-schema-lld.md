@@ -46,15 +46,16 @@ Envelope rules (all violations are `ConfigError` with `file:line` of the documen
   rejected with a clear error: dropped by YAML 1.2, and manifests stay literal (Kubernetes
   precedent). An explicit `spec:` with a null value is treated as an empty mapping; only a MISSING
   `spec` key errors.
-- `metadata.description` on a kind whose schema has no description field is a warning and the value
-  is dropped (not an error: the FRD wants description to become framework-uniform, so a declared
-  description should not block loading a kind that simply hasn't grown the field yet).
-- Singleton kinds (`admin-template`, `named-console-template`) accept only `metadata.name: default`.
+- `metadata.description` is framework-uniform: every declarable kind carries a `description` field
+  and stores it (the earlier transitional warn-and-ignore for template-shaped kinds without the
+  field is retired now that all kinds have grown it).
+- `named-console-template` accepts only `metadata.name: default` (no command selects a named console
+  yet; `admin-template` graduated out once `vm create --admin-template` shipped).
 
-`metadata.description` maps to the kind's `description` field where one exists (`secret`,
-`session-template`, `git-credential`, the four catalog kinds); a `description` key inside `spec` is
-treated as an unknown spec key for those kinds (it moved to metadata). For `secret`,
-`metadata.description` is REQUIRED (parity: the TOML loader hard-requires it).
+`metadata.description` maps to the kind's `description` field on every declarable kind; a
+`description` key inside `spec` is rejected with an error pointing at `metadata.description` (it
+moved to metadata). For `secret`, `metadata.description` is REQUIRED (parity: the TOML loader
+hard-requires it).
 
 **Name validation parity**: `metadata.name` is validated with `validate_name` (NAME_RE, max 30) only
 for `secret`, exactly as the TOML loader does today. Other kinds accept names as-is (the TOML loader
