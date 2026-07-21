@@ -11,7 +11,7 @@ The framework/domain split: ``resources/`` owns the framework
 Each domain package defines AND registers its own kinds -- both the
 declarable row dataclasses and the capability kinds live next to the
 code that implements them (``agentworks.vms.kinds``,
-``agentworks.secrets.kinds``, ``agentworks.catalog``, etc.). Every kind
+``agentworks.secrets.kinds``, ``agentworks.apt``, etc.). Every kind
 self-registers a single instance into ``KIND_REGISTRY`` at import.
 ``resources/kinds/__init__`` is only the registration index: it imports
 each domain's kind module so a single ``from agentworks.resources import
@@ -86,9 +86,9 @@ class ResourceKind(Protocol):
     - ``description``: one operator-facing line for ``agw resource
       kinds``.
     - ``builtin_override``: what happens when an operator manifest
-      collides with an app-published built-in row. ``"allow"`` keeps
-      today's catalog behavior (operator row replaces the built-in);
-      ``"reserved"`` makes the collision a ``ConfigError``.
+      collides with an app-published built-in row. ``"allow"`` lets the
+      operator row replace the built-in; ``"reserved"`` makes the
+      collision a ``ConfigError``.
     - ``synthesize(references)``: called when an auto-declare-allowed
       missing name is being synthesized. Receives all matching references
       known so far (in config-load walk order). Returns the synthesized
@@ -147,9 +147,10 @@ class ResourceKind(Protocol):
     # method is intentionally NOT declared on this Protocol. Kinds with a
     # per-instance lifecycle concept (the four named template kinds plus
     # ``admin-template`` plus ``secret``) implement it; kinds without
-    # (catalog, ``git-credential-provider``, ``secret-backend``) omit it
-    # entirely. The framework's consumer (``agentworks.resources.inspect``)
-    # uses ``getattr(handler, "instances", None)`` to gate the call, so
+    # (the apt / install-command kinds, ``git-credential-provider``,
+    # ``secret-backend``) omit it entirely. The framework's consumer
+    # (``agentworks.resources.inspect``) uses
+    # ``getattr(handler, "instances", None)`` to gate the call, so
     # absent-on-class IS the "no instance concept" signal. Declaring the
     # method on the Protocol would force every kind to either implement
     # it (Liskov violation for kinds where it's meaningless) or use
@@ -201,6 +202,28 @@ class NoUnreferencedDefaultError(Exception):
     """
 
 
+def synthesize_no_default(kind: str, references: Sequence[ResourceReference]) -> Any:
+    """Shared ``synthesize`` body for kinds under the ``error`` miss policy.
+
+    Unreachable in normal operation: ``Registry.finalize`` raises
+    ``ConfigError`` before dispatching to ``synthesize`` for error-policy
+    kinds. Honors the empty-references contract by raising the typed
+    framework error so a hypothetical future change that gives such a
+    kind a reserved default has an obvious landing pad. Shared by the
+    ``apt`` and ``install_commands`` declarable kinds, all four of which
+    use ``miss_policy='error'``.
+    """
+    if not references:
+        raise NoUnreferencedDefaultError(
+            f"the {kind} kind has no reserved default name; "
+            f"synthesize is never invoked under the error miss policy"
+        )
+    raise NoUnreferencedDefaultError(
+        f"the {kind} kind has miss_policy='error'; synthesize should "
+        f"never be invoked (the framework raises ConfigError first)"
+    )
+
+
 # Reserved Origin source kind for always-materialized rows. The string
 # "framework" must not be used as a real kind name in ``KIND_REGISTRY``.
 ALWAYS_MATERIALIZE_SOURCE: tuple[str, str] = ("framework", "always-materialize")
@@ -210,7 +233,7 @@ KIND_REGISTRY: dict[str, ResourceKind] = {}
 """Module-level registry mapping kind identifier -> ``ResourceKind`` instance.
 
 Populated by side-effect: each domain's kind module (``agentworks.vms.kinds``,
-``agentworks.secrets.kinds``, ``agentworks.catalog``, etc.) instantiates its
+``agentworks.secrets.kinds``, ``agentworks.apt``, etc.) instantiates its
 kind and writes ``KIND_REGISTRY[<kind>] = <instance>`` at module-load.
 ``resources/kinds/__init__.py`` is the registration index that imports every
 domain kind module so the registry is populated after

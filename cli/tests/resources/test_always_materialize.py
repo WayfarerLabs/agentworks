@@ -97,9 +97,9 @@ def test_polish_empty_usage_format() -> None:
     """The description-polish step's empty-usage branch reads as
     ``"(auto) auto-declared default <kind>"``. Exercised here directly
     against the helper because no current kind has both a ``description``
-    field and a reserved auto-declare name; future kinds (catalog
-    entries, plugin-published resources) inherit this behavior
-    automatically because the polish is kind-agnostic.
+    field and a reserved auto-declare name; future kinds (plugin-published
+    resources, etc.) inherit this behavior automatically because the
+    polish is kind-agnostic.
     """
     from dataclasses import dataclass
 

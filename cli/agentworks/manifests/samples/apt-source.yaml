@@ -1,6 +1,6 @@
 ## kind: apt-source -- a third-party apt repository, referenced by name
 ## from apt-package entries. {arch} is a placeholder for the VM
-## architecture (amd64 or arm64). Same name as a built-in catalog entry
+## architecture (amd64 or arm64). Same name as a built-in entry
 ## overrides it.
 ##
 #apiVersion: agentworks/v1

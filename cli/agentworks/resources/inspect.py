@@ -59,8 +59,9 @@ class ResourceSummary:
     - ``used_by_count`` is the number of live DB instances that depend
       on this Resource per the current config, computed via the kind's
       ``instances(db, registry, resource)`` hook. ``None`` for kinds
-      with no instance concept (catalog, providers, backends); the
-      list view renders ``None`` as ``-`` in the USED BY column.
+      with no instance concept (apt / install-commands, providers,
+      backends); the list view renders ``None`` as ``-`` in the USED BY
+      column.
     - ``disabled_reason`` is the kind's generic disabled hook's answer
       (``None`` = enabled, or the kind has no disabled concept). The
       list view marks disabled rows; describe shows the reason.
@@ -245,10 +246,10 @@ def used_by_for(
 ) -> tuple[InstanceRef, ...] | None:
     """Project ``(kind, resource) -> tuple[InstanceRef, ...] | None`` via
     the kind's ``instances`` hook. ``None`` for kinds that don't
-    implement the hook (catalog, providers, backends) or when ``db``
-    isn't available; callers treat ``None`` as ``-`` rather than ``0``
-    to distinguish "kind has no instance concept" from "kind has zero
-    instances right now."
+    implement the hook (apt / install-commands, providers, backends) or
+    when ``db`` isn't available; callers treat ``None`` as ``-`` rather
+    than ``0`` to distinguish "kind has no instance concept" from "kind
+    has zero instances right now."
 
     The ``instances`` method is intentionally NOT on the ``ResourceKind``
     Protocol; absent-on-class IS the "no instance concept" signal (see
@@ -473,8 +474,9 @@ def render_resource_table(listing: ResourceListing) -> None:
     rendered: list[tuple[str, ...]] = []
     for row in listing.rows:
         # ``used_by_count`` is None for kinds with no instance concept
-        # (catalog, providers, backends); render as ``-`` to distinguish
-        # "no instance concept" from "zero instances right now."
+        # (apt / install-commands, providers, backends); render as ``-``
+        # to distinguish "no instance concept" from "zero instances
+        # right now."
         used_by_cell = "-" if row.used_by_count is None else str(row.used_by_count)
         # Disabled rows are marked in the DESCRIPTION cell, never the
         # NAME cell: the rendered name must stay the exact selector an

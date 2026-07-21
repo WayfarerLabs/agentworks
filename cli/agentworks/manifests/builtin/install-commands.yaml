@@ -1,0 +1,89 @@
+# Built-in install commands: shell commands that install tooling, split
+# into system-install-command (system-wide, run once per VM as root) and
+# user-install-command (per-user, run for each user). Both kinds share
+# the same shape and differ only in execution scope. Published with a
+# built-in origin through the bundled-manifest loader.
+#
+# Commands may be re-run (e.g. during reinit) so they should be
+# idempotent. An optional installed-check short-circuits installation
+# when the tool is already present; at most one may be set per entry:
+#   test_exec: skip if this command is on PATH (uses `command -v`)
+#   test_file: skip if this file exists (~ resolves to the user's home)
+#   test_dir:  skip if this directory exists (~ resolves to the user's home)
+# path: directories to add to the user's PATH, needed only when the
+# install command does not update the PATH itself.
+apiVersion: agentworks/v1
+kind: system-install-command
+metadata:
+  name: az-cli
+  description: Azure CLI
+spec:
+  command: "curl -sL https://aka.ms/InstallAzureCLIDeb | sudo bash"
+  test_exec: az
+---
+apiVersion: agentworks/v1
+kind: user-install-command
+metadata:
+  name: oh-my-zsh
+  description: Oh My Zsh
+spec:
+  command: 'sh -c "$(curl -fsSL https://raw.githubusercontent.com/ohmyzsh/ohmyzsh/master/tools/install.sh)" -- --unattended'
+  test_dir: ~/.oh-my-zsh
+---
+apiVersion: agentworks/v1
+kind: user-install-command
+metadata:
+  name: bun
+  description: Bun JavaScript runtime
+spec:
+  command: "curl -fsSL https://bun.sh/install | bash"
+  test_exec: bun
+---
+apiVersion: agentworks/v1
+kind: user-install-command
+metadata:
+  name: fnm
+  description: Fast Node Manager
+spec:
+  command: "curl -fsSL https://fnm.vercel.app/install | bash"
+  test_exec: fnm
+---
+apiVersion: agentworks/v1
+kind: user-install-command
+metadata:
+  name: nvm
+  description: Node Version Manager
+spec:
+  command: "curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.4/install.sh | bash"
+  test_file: ~/.nvm/nvm.sh
+---
+apiVersion: agentworks/v1
+kind: user-install-command
+metadata:
+  name: claude
+  description: Claude Code CLI
+spec:
+  command: "curl -fsSL https://claude.ai/install.sh | bash"
+  path:
+    - ~/.local/bin
+  test_exec: claude
+---
+apiVersion: agentworks/v1
+kind: user-install-command
+metadata:
+  name: starship
+  description: Starship cross-shell prompt
+spec:
+  command: "curl -sS https://starship.rs/install.sh | sh -s -- -y -b ~/.local/bin"
+  path:
+    - ~/.local/bin
+  test_exec: starship
+---
+apiVersion: agentworks/v1
+kind: user-install-command
+metadata:
+  name: uv
+  description: uv Python version manager
+spec:
+  command: "curl -LsSf https://astral.sh/uv/install.sh | sh"
+  test_exec: uv

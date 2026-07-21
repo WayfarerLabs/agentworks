@@ -494,9 +494,9 @@ def test_description_never_warns_for_declarable_kind(
     assert manifests.entries[0].resource.description == "uniform description"
 
 
-def test_catalog_kind_decode_error_carries_location(tmp_path: Path) -> None:
-    """Catalog loaders raise CatalogError; from a manifest it must
-    surface as ConfigError with the document's file:line."""
+def test_install_command_kind_decode_error_carries_location(tmp_path: Path) -> None:
+    """The install-command loader raises ConfigError on a bad spec; from a
+    manifest it must surface with the document's file:line."""
     _manifest(
         tmp_path,
         """
@@ -584,9 +584,10 @@ def test_manifest_admin_collides_with_declared_toml_admin(tmp_path: Path) -> Non
         build_registry(config)
 
 
-def test_toml_catalog_extension_vs_manifest_is_duplicate(tmp_path: Path) -> None:
-    """The line-0 exemption is singleton-only: a TOML catalog extension
-    colliding with a manifest errors like any operator duplicate."""
+def test_toml_apt_extension_vs_manifest_is_duplicate(tmp_path: Path) -> None:
+    """The line-0 exemption is singleton-only: a TOML apt-package
+    extension colliding with a manifest errors like any operator
+    duplicate."""
     _manifest(
         tmp_path,
         """
@@ -634,7 +635,7 @@ def test_cross_source_duplicate_errors_at_build(tmp_path: Path) -> None:
         build_registry(config)
 
 
-def test_manifest_overrides_builtin_catalog_entry(tmp_path: Path) -> None:
+def test_manifest_overrides_builtin_apt_entry(tmp_path: Path) -> None:
     _manifest(
         tmp_path,
         """

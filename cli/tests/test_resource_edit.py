@@ -91,8 +91,8 @@ def test_builtin_capability_has_no_file_to_edit(tmp_path: Path) -> None:
 
 
 def test_builtin_declarable_resource_points_at_sample(tmp_path: Path) -> None:
-    """Declarable kinds with built-in rows (catalog) keep the sample
-    pointer."""
+    """Declarable kinds with built-in rows (apt / install-commands) keep
+    the sample pointer."""
     registry = _registry(tmp_path)
     with pytest.raises(ValidationError, match="built-in") as exc:
         edit_location(registry, "apt-package", "gh")

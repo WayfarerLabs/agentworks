@@ -1,7 +1,5 @@
 """Tests for ``Origin`` -- variant invariants and immutability across all
-three variants. The ``built-in`` factory is exercised here even though
-its first real producer (the catalog publisher) doesn't land until Phase 2b;
-the type is defined in Phase 1a, so its invariants are pinned here.
+three variants.
 """
 
 from __future__ import annotations
@@ -23,9 +21,9 @@ def test_operator_declared_factory_populates_file_and_line() -> None:
 
 
 def test_built_in_factory_populates_source_str() -> None:
-    o = Origin.built_in(source="agentworks.catalog")
+    o = Origin.built_in(source="agentworks.manifests.builtin/apt-sources.yaml")
     assert o.variant == "built-in"
-    assert o.source == "agentworks.catalog"
+    assert o.source == "agentworks.manifests.builtin/apt-sources.yaml"
     assert o.file is None
     assert o.line is None
 
@@ -51,8 +49,8 @@ def test_origin_equality_per_variant() -> None:
     assert a == b
     assert a != c
 
-    d = Origin.built_in(source="agentworks.catalog")
-    e = Origin.built_in(source="agentworks.catalog")
+    d = Origin.built_in(source="agentworks.manifests.builtin/apt-sources.yaml")
+    e = Origin.built_in(source="agentworks.manifests.builtin/apt-sources.yaml")
     f = Origin.built_in(source="other")
     assert d == e
     assert d != f
@@ -68,7 +66,7 @@ def test_variants_do_not_cross_compare_equal() -> None:
     # An operator-declared and auto-declared with same-looking incidental
     # data still differ by variant.
     op = Origin.operator_declared(file=Path("/x"), line=1)
-    code = Origin.built_in(source="agentworks.catalog")
+    code = Origin.built_in(source="agentworks.manifests.builtin/apt-sources.yaml")
     auto = Origin.auto_declared(source=("vm-template", "default"))
     assert op != code
     assert op != auto

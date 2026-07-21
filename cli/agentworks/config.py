@@ -846,7 +846,7 @@ def _load_agent_templates(
     return templates
 
 
-def _load_catalog_sections(
+def _load_apt_and_install_sections(
     data: dict[str, object],
 ) -> tuple[
     dict[str, object],
@@ -854,10 +854,11 @@ def _load_catalog_sections(
     dict[str, object],
     dict[str, object],
 ]:
-    """Load the four user-defined catalog sections as raw dicts.
+    """Load the four user-defined apt / install-command sections as raw dicts.
 
-    Actual parsing into typed entries happens in catalog.py during merge.
-    Here we just validate that each section is a table of tables.
+    Actual parsing into typed entries happens in the ``apt`` and
+    ``install_commands`` operator publishers. Here we just validate that
+    each section is a table of tables.
     """
     sections = {}
     for section_name in ("apt_sources", "apt_packages", "system_install_commands", "user_install_commands"):
@@ -1562,7 +1563,7 @@ def load_config(
     resource_data = data if resources else {}
 
     git_credentials = _load_git_credentials(resource_data, issues, decls)
-    apt_sources, apt_packages, system_cmds, user_cmds = _load_catalog_sections(resource_data)
+    apt_sources, apt_packages, system_cmds, user_cmds = _load_apt_and_install_sections(resource_data)
 
     session_config = _load_session_config(data, issues)
     session_templates = _load_session_templates(resource_data, issues, decls)

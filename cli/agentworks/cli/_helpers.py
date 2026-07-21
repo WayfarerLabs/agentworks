@@ -10,8 +10,6 @@ being module-private.
 
 from __future__ import annotations
 
-from typing import Protocol
-
 import typer
 
 from agentworks.cli._app import require_interactive
@@ -74,13 +72,6 @@ def prompt_vm(db: Database, vm_name: str | None) -> VMRow:
     options = [f"{v.name}  ({v.site})" for v in vms]
     idx = output.choose("Select a VM:", options)
     return vms[idx]
-
-
-class HasDescription(Protocol):
-    """Structural protocol for catalog entries that have a description."""
-
-    @property
-    def description(self) -> str: ...
 
 
 def parse_csv_filter(value: str | None) -> str | list[str] | None:

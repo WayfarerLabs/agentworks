@@ -104,8 +104,9 @@ def build_secret_table(config: Config, registry: Registry) -> SecretTable:
             operator_count += 1
         elif variant == "auto-declared":
             auto_count += 1
-        # built-in is not yet a path for secrets; the catalog
-        # publisher emits built-in origins but only for non-secret kinds.
+        # built-in is not yet a path for secrets; other publishers emit
+        # built-in origins (bundled manifests, capability rows) but only
+        # for non-secret kinds.
 
         cells = tuple(
             SecretCell(

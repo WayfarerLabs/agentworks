@@ -18,9 +18,9 @@ from agentworks.transports import transport
 
 if TYPE_CHECKING:
     from agentworks.agents.templates import ResolvedAgentTemplate
-    from agentworks.catalog import UserInstallCommandEntry
     from agentworks.config import Config
     from agentworks.db import VMRow
+    from agentworks.install_commands import UserInstallCommandEntry
     from agentworks.resources import Registry
     from agentworks.ssh import SSHLogger
     from agentworks.transports import Transport
@@ -125,7 +125,7 @@ def create_agent_on_vm(
     # install commands run -- so that AGENTWORKS_AGENT is visible to
     # those commands via the login-shell sourcing chain. The fragment
     # gets rewritten at the end of _run_agent_install_commands with
-    # accumulated PATH entries from catalog install commands.
+    # accumulated PATH entries from user install commands.
     from agentworks.env import ResourceContext, per_user_identity_env
     from agentworks.vms.sites import site_platform_name
 
@@ -400,8 +400,8 @@ def _run_agent_install_commands(
 
     The profile fragment is rewritten unconditionally (even when there
     are no install commands and no PATH additions) so that reinit can
-    clear previously set paths. Catalog install commands add their
-    ``path`` entries on top.
+    clear previously set paths. Install commands add their ``path``
+    entries on top.
 
     Install commands run without any env= injection -- provisioning is
     hermetic. Static identity (``AGENTWORKS_AGENT``, etc.) reaches the
@@ -410,19 +410,19 @@ def _run_agent_install_commands(
     """
     import shlex
 
-    from agentworks.catalog import catalog_from_registry
+    from agentworks.resources.access import kind_dict
     from agentworks.ssh import SSHError
 
-    catalog = catalog_from_registry(registry)
+    user_install_commands = kind_dict(registry, "user-install-command")
     shell = agent_tmpl.shell
     path_additions: list[str] = []
     command_names = agent_tmpl.user_install_commands
     total = len(command_names)
 
     for i, name in enumerate(command_names, 1):
-        entry = catalog.user_install_commands.get(name)
+        entry = user_install_commands.get(name)
         if entry is None:
-            output.warn(f"install command '{name}' not found in catalog")
+            output.warn(f"'{name}' is not a declared user install command")
             continue
         # Skip if already installed for this user (short timeout)
         test_cmd = _build_agent_test_command(entry, home, shell)

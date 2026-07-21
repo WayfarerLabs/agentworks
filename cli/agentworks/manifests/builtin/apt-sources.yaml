@@ -1,0 +1,66 @@
+# Built-in apt sources: third-party apt repositories shipped with the
+# package. These are ordinary apt-source resources, published with a
+# built-in origin through the bundled-manifest loader (the same path
+# operators use for resources/*.yaml). Operators override an entry by
+# declaring a same-named apt-source; the built-in row is the base.
+#
+# The {arch} placeholder in `source` is resolved at install time via
+# `dpkg --print-architecture` (amd64 or arm64).
+apiVersion: agentworks/v1
+kind: apt-source
+metadata:
+  name: github-cli
+  description: GitHub CLI official apt repository
+spec:
+  key_url: https://cli.github.com/packages/githubcli-archive-keyring.gpg
+  key_path: /etc/apt/keyrings/githubcli-archive-keyring.gpg
+  source: "deb [arch={arch} signed-by=/etc/apt/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main"
+  source_file: github-cli.list
+---
+apiVersion: agentworks/v1
+kind: apt-source
+metadata:
+  name: hashicorp
+  description: HashiCorp official apt repository
+spec:
+  key_url: https://apt.releases.hashicorp.com/gpg
+  key_path: /etc/apt/keyrings/hashicorp-archive-keyring.gpg
+  key_dearmor: true
+  source: "deb [arch={arch} signed-by=/etc/apt/keyrings/hashicorp-archive-keyring.gpg] https://apt.releases.hashicorp.com bookworm main"
+  source_file: hashicorp.list
+---
+apiVersion: agentworks/v1
+kind: apt-source
+metadata:
+  name: nodesource-v22
+  description: NodeSource Node.js 22.x apt repository
+spec:
+  key_url: https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key
+  key_path: /etc/apt/keyrings/nodesource.gpg
+  key_dearmor: true
+  source: "deb [arch={arch} signed-by=/etc/apt/keyrings/nodesource.gpg] https://deb.nodesource.com/node_22.x nodistro main"
+  source_file: nodesource.list
+---
+apiVersion: agentworks/v1
+kind: apt-source
+metadata:
+  name: ngrok-agent
+  description: ngrok agent apt repository
+spec:
+  key_url: https://ngrok-agent.s3.amazonaws.com/ngrok.asc
+  key_path: /etc/apt/keyrings/ngrok.gpg
+  key_dearmor: true
+  source: "deb [arch={arch} signed-by=/etc/apt/keyrings/ngrok.gpg] https://ngrok-agent.s3.amazonaws.com bookworm main"
+  source_file: ngrok.list
+---
+apiVersion: agentworks/v1
+kind: apt-source
+metadata:
+  name: tofuutils-tenv
+  description: tofuutils tenv apt repository (Cloudsmith)
+spec:
+  key_url: https://dl.cloudsmith.io/public/tofuutils/tenv/gpg.8ACD4386ADD982F6.key
+  key_path: /etc/apt/keyrings/tofuutils-tenv-archive-keyring.gpg
+  key_dearmor: true
+  source: "deb [signed-by=/etc/apt/keyrings/tofuutils-tenv-archive-keyring.gpg] https://dl.cloudsmith.io/public/tofuutils/tenv/deb/debian bookworm main"
+  source_file: tofuutils-tenv.list
