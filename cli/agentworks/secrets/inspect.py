@@ -327,9 +327,15 @@ def describe_secret(
 
     # Resolution preview: which active backend would actually yield a
     # value right now. ``preview_resolution`` reflects runtime presence
-    # (e.g. is the env var set?), not just configuration shape --
-    # interactive backends are reported without probing.
-    resolved_by = preview_resolution(decl, backends)
+    # (e.g. is the env var set?), not just configuration shape;
+    # interactive backends are reported without probing. Describe is a
+    # pure inspection surface (FRD R10) that never prompts, so its
+    # preview stays optimistic about interactive availability
+    # (``interactive_available=True``): it describes the secret's
+    # configured capability, not whether THIS invocation happens to have
+    # a TTY. The preflight prediction, which must match a specific run's
+    # mode, is the caller that gates on ``output.is_interactive()``.
+    resolved_by = preview_resolution(decl, backends, interactive_available=True)
     available = resolved_by is not None
 
     return SecretDescription(

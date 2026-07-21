@@ -158,12 +158,30 @@ def test_prediction_none_when_nothing_would_resolve() -> None:
     }
 
 
-def test_interactive_backend_is_optimistic_without_probing() -> None:
-    """``preview_resolution``'s exact semantics survive
-    centralization: a prompt backend reports
-    resolvable without probing, because probing would BE the prompt."""
+def test_interactive_backend_predicted_resolvable_when_interactive(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A prompt backend reports resolvable without probing (probing would
+    BE the prompt) WHEN interactive input is available this run."""
+    from agentworks import output
+
+    monkeypatch.setattr(output, "is_interactive", lambda: True)
     prompt = _FakeBackend("prompt", interactive=True)
     assert predict_resolution([_decl("a")], _chain(prompt)) == {"a": "prompt"}
+    assert prompt.resolve_calls == []
+
+
+def test_interactive_backend_predicted_unresolvable_when_non_interactive(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Under --non-interactive / no TTY the prompt backend no-ops at
+    resolve time, so preflight prediction must call a prompt-only secret
+    unresolvable and fail fast (issue #202), still without probing."""
+    from agentworks import output
+
+    monkeypatch.setattr(output, "is_interactive", lambda: False)
+    prompt = _FakeBackend("prompt", interactive=True)
+    assert predict_resolution([_decl("a")], _chain(prompt)) == {"a": None}
     assert prompt.resolve_calls == []
 
 
@@ -204,6 +222,47 @@ def _env_only_setup(tmp_path: Path) -> tuple[Config, Registry]:
         tmp_path, '[secret_config]\nbackends = ["env-var"]\n'
     )
     return config, build_registry(config)
+
+
+def _env_and_prompt_setup(tmp_path: Path) -> tuple[Config, Registry]:
+    """A real config whose chain is env-var THEN prompt, so an unset env
+    var falls through to the interactive backend."""
+    from agentworks.bootstrap import build_registry
+    from tests.orchestrated_fixtures import write_operator_config
+
+    config = write_operator_config(
+        tmp_path, '[secret_config]\nbackends = ["env-var", "prompt"]\n'
+    )
+    return config, build_registry(config)
+
+
+def test_require_predicted_refs_prompt_only_passes_when_interactive(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """env-var unset, prompt in the chain, interactive input available:
+    the ref is predicted resolvable (via prompt), so preflight passes and
+    the value check defers to resolve time."""
+    from agentworks import output
+
+    config, registry = _env_and_prompt_setup(tmp_path)
+    monkeypatch.delenv("AW_SECRET_PROXMOX_TOKEN", raising=False)
+    monkeypatch.setattr(output, "is_interactive", lambda: True)
+    require_predicted_refs("vm-site/px", (_px_ref(),), config, registry)
+
+
+def test_require_predicted_refs_prompt_only_fails_fast_when_non_interactive(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Same setup under --non-interactive: prompt cannot resolve, so
+    preflight prediction fails fast (issue #202) instead of deferring to a
+    harmless resolve-end failure."""
+    from agentworks import output
+
+    config, registry = _env_and_prompt_setup(tmp_path)
+    monkeypatch.delenv("AW_SECRET_PROXMOX_TOKEN", raising=False)
+    monkeypatch.setattr(output, "is_interactive", lambda: False)
+    with pytest.raises(ConfigError, match="not resolvable by any active backend"):
+        require_predicted_refs("vm-site/px", (_px_ref(),), config, registry)
 
 
 def test_require_predicted_refs_passes_when_resolvable(

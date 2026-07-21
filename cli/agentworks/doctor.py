@@ -559,7 +559,13 @@ def _check_secrets(config: Config, registry: Registry) -> HealthGroup:
             )
             continue
 
-        resolved_by = preview_resolution(decl, backends)
+        # Doctor is a pure inspection sweep, so its preview stays
+        # optimistic about interactive availability
+        # (``interactive_available=True``): it reports the secret's
+        # configured capability, not whether this doctor run has a TTY.
+        # Preflight prediction is the caller that gates on the run's mode
+        # (issue #202).
+        resolved_by = preview_resolution(decl, backends, interactive_available=True)
         if resolved_by is not None:
             g.ok(label, f"would resolve via {resolved_by}")
         else:

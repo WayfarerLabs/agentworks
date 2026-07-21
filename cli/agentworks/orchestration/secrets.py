@@ -5,13 +5,15 @@ Replaces the per-instance bound resolver's orchestration-shaped jobs:
 the union of a command's secrets comes from the plan's
 declared ``secret_refs`` (not construct-time registration), and
 resolvability prediction is computed centrally over declarations (not
-by each instance). Prediction's MEANING is unchanged by
-centralization: it is :func:`~agentworks.secrets.resolve
-.preview_resolution` applied per declaration, including the optimistic
-interactive-backend answer (a prompt backend reports resolvable
-without probing; probing would BE the prompt). Doctor's all-resources
-sweep and a command's union are two callers of the same computation,
-which is why the prediction helper takes declarations, not a walk.
+by each instance). Prediction is
+:func:`~agentworks.secrets.resolve.preview_resolution` applied per
+declaration (a prompt backend is reported without probing; probing
+would BE the prompt), with the preflight caller gating the interactive
+answer on ``output.is_interactive()`` so a prompt-only secret fails
+fast at preflight under ``--non-interactive`` rather than at resolve
+end (issue #202). Doctor's all-resources sweep and a command's union
+are two callers of the same computation, which is why the prediction
+helper takes declarations, not a walk.
 
 Resolution itself is untouched here: the single resolve pass at the
 preflight boundary stays :class:`~agentworks.secrets.resolver
@@ -88,14 +90,25 @@ def predict_resolution(
     each declaration, the name of the first active backend that would
     resolve it, or ``None`` when nothing would.
 
-    Exactly :func:`~agentworks.secrets.resolve.preview_resolution` per
-    declaration; the semantics (non-prompting, a non-interactive
-    backend must actually produce a value, the interactive backend
-    reported without probing) are that function's, unchanged.
+    :func:`~agentworks.secrets.resolve.preview_resolution` per
+    declaration; the semantics (non-prompting, a non-interactive backend
+    must actually produce a value) are that function's. This is the
+    PREFLIGHT prediction, so it must match resolve-time reality: an
+    interactive backend counts as resolving only when interactive input
+    is actually available this run (``output.is_interactive()``), so a
+    prompt-only secret fails fast at preflight under ``--non-interactive``
+    rather than reaching a resolve-end failure (issue #202).
     """
+    from agentworks import output
     from agentworks.secrets.resolve import preview_resolution
 
-    return {decl.name: preview_resolution(decl, backends) for decl in decls}
+    interactive_available = output.is_interactive()
+    return {
+        decl.name: preview_resolution(
+            decl, backends, interactive_available=interactive_available
+        )
+        for decl in decls
+    }
 
 
 def require_predicted_refs(

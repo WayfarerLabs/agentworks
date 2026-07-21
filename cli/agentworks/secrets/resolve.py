@@ -181,6 +181,48 @@ def validate_chain(config: Config, registry: Registry) -> None:
         )
 
 
+def _fail_unavailable(
+    missing: list[SecretDecl],
+    backends: list[ActiveBackend],
+    errors: dict[str, str] | None,
+) -> None:
+    """Attribute every unresolved secret to the backends that DID attempt
+    it, then fail per the active policy: raise the all-or-nothing
+    ``SecretUnavailableError`` (command path, ``errors is None``) or record
+    a per-secret failure line into ``errors`` (inspection path).
+
+    Shared by both callers in :func:`resolve_secrets`: the end-of-loop
+    fall-through and the before-interactive doom check (issue #202), so
+    both build the SAME per-secret attribution and message.
+    """
+    sorted_missing = sorted(missing, key=lambda d: d.name)
+    # Per-secret backend list: only backends that actually attempted
+    # (would_attempt == True) appear, so a secret with a backend
+    # opted out via backend_mappings doesn't get told it was tried.
+    per_secret: dict[str, str] = {}
+    for d in sorted_missing:
+        attempted = [b.name for b in backends if b.would_attempt(d)]
+        tried = ", ".join(attempted) if attempted else "(none; secret unreachable)"
+        per_secret[d.name] = f"{d.name}: tried {tried}"
+    if errors is None:
+        names = [d.name for d in sorted_missing]
+        # Always name a REAL secret in the example command: an
+        # `<name>` placeholder isn't paste-safe (angle brackets are
+        # shell redirection) and the first missing name is exactly
+        # what the operator wants to inspect.
+        raise SecretUnavailableError(
+            f"no active backend could resolve secret(s): {', '.join(names)}",
+            hint=(
+                "; ".join(per_secret.values())
+                + f". `agw secret describe {names[0]}` shows how each "
+                "backend looks a secret up (e.g. which environment "
+                "variable it reads)."
+            ),
+        )
+    for name, line in per_secret.items():
+        errors[name] = f"no active backend could resolve the secret ({line})"
+
+
 def resolve_secrets(
     secrets: list[SecretDecl],
     backends: list[ActiveBackend],
@@ -196,20 +238,26 @@ def resolve_secrets(
     halt the chain so a misconfigured store doesn't quietly fall
     through to a prompt.
 
-    ``errors`` selects the failure policy (one loop, both policies --
+    ``errors`` selects the failure policy (one loop, both policies;
     same shape as the config loaders' ``issues`` out-param):
 
     - ``None`` (commands): all-or-nothing. Hard misses and
       control-character values raise immediately; anything still
       unresolved after every backend raises ``SecretUnavailableError``
-      with a per-secret list of the backends that attempted.
+      with a per-secret list of the backends that attempted. To spare a
+      wasted prompt, that same failure is raised EARLY (issue #202),
+      before an interactive backend that would actually prompt this run
+      (``output.is_interactive()``), for any still-missing secret no
+      remaining backend would attempt; in ``--non-interactive`` mode the
+      prompt no-ops, so there is nothing to get ahead of and the
+      end-of-loop raise stands.
     - a dict (inspection surfaces, e.g. ``env show --reveal-secrets``):
       partial success. Per-secret failures land in ``errors`` keyed by
       secret name, successfully-resolved values are RETURNED rather
       than discarded (prompt answers are never re-asked), and a
       backend-level exception is recorded against every secret that
       backend was attempting (batch-level attribution) without
-      forwarding them to later backends -- preserving the hard-miss
+      forwarding them to later backends, preserving the hard-miss
       "don't mask a store misconfiguration with a prompt" semantics.
     """
     resolved: dict[str, str] = {}
@@ -221,9 +269,32 @@ def resolve_secrets(
             deduped.append(s)
 
     missing = deduped
-    for backend in backends:
+    for index, backend in enumerate(backends):
         if not missing:
             break
+        # Fail before an interactive backend prompts (issue #202). Once
+        # the non-interactive backends ahead of it have run, their soft
+        # misses are known, so any still-missing secret that NO remaining
+        # backend (this one and every later one) would even attempt is
+        # already doomed. Raising it HERE, before the prompt fires,
+        # spares the operator a prompt for one secret that a different,
+        # already-unresolvable secret would abort the command over
+        # anyway. The attribution and raise reuse the end-of-loop
+        # implementation, so the two failure sites are identical.
+        #
+        # Command path only: the inspection path (errors is not None)
+        # never runs interactive backends, and in --non-interactive mode
+        # the prompt backend no-ops, so there is no prompt to get ahead
+        # of and the end-of-loop raise stands.
+        if errors is None and backend.interactive and output.is_interactive():
+            remaining = backends[index:]
+            doomed = [
+                s
+                for s in missing
+                if not any(b.would_attempt(s) for b in remaining)
+            ]
+            if doomed:
+                _fail_unavailable(doomed, backends, errors)
         attemptable = [s for s in missing if backend.would_attempt(s)]
         if not attemptable:
             continue
@@ -274,37 +345,15 @@ def resolve_secrets(
         missing = [s for s in missing if s.name not in got]
 
     if missing:
-        sorted_missing = sorted(missing, key=lambda d: d.name)
-        # Per-secret backend list: only backends that actually attempted
-        # (would_attempt == True) appear, so a secret with a backend
-        # opted out via backend_mappings doesn't get told it was tried.
-        per_secret: dict[str, str] = {}
-        for d in sorted_missing:
-            attempted = [b.name for b in backends if b.would_attempt(d)]
-            tried = ", ".join(attempted) if attempted else "(none; secret unreachable)"
-            per_secret[d.name] = f"{d.name}: tried {tried}"
-        if errors is None:
-            names = [d.name for d in sorted_missing]
-            # Always name a REAL secret in the example command: an
-            # `<name>` placeholder isn't paste-safe (angle brackets are
-            # shell redirection) and the first missing name is exactly
-            # what the operator wants to inspect.
-            raise SecretUnavailableError(
-                f"no active backend could resolve secret(s): {', '.join(names)}",
-                hint=(
-                    "; ".join(per_secret.values())
-                    + f". `agw secret describe {names[0]}` shows how each "
-                    "backend looks a secret up (e.g. which environment "
-                    "variable it reads)."
-                ),
-            )
-        for name, line in per_secret.items():
-            errors[name] = f"no active backend could resolve the secret ({line})"
+        _fail_unavailable(missing, backends, errors)
     return resolved
 
 
 def preview_resolution(
-    secret: SecretDecl, backends: list[ActiveBackend]
+    secret: SecretDecl,
+    backends: list[ActiveBackend],
+    *,
+    interactive_available: bool,
 ) -> str | None:
     """The name of the first backend that would resolve ``secret``, or
     ``None`` if nothing in the chain would.
@@ -314,13 +363,25 @@ def preview_resolution(
     (probing would BE the operator interaction); every other backend
     must actually produce a value to be reported.
 
+    ``interactive_available`` is the caller's policy for whether an
+    interactive backend counts as resolving (issue #202): the preflight
+    prediction passes ``output.is_interactive()`` so a prompt-only secret
+    reads as unresolvable under ``--non-interactive`` / no TTY (matching
+    resolve-time reality, where the prompt backend no-ops); the pure
+    inspection surfaces (``describe``, ``doctor``) pass ``True`` to keep
+    their optimistic, config-shape preview. When it is ``False`` the walk
+    CONTINUES past the interactive backend to any later non-interactive
+    one rather than stopping.
+
     Used by ``agw doctor`` and the describe view's resolution preview.
     """
     for backend in backends:
         if not backend.would_attempt(secret):
             continue
         if backend.interactive:
-            return backend.name
+            if interactive_available:
+                return backend.name
+            continue
         try:
             resolved = backend.resolve([secret])
         except AgentworksError:
