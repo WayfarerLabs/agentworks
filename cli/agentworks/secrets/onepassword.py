@@ -2,11 +2,21 @@
 1Password ``op`` CLI (v2). A capability implementation, consumed by the
 resolution loop through the ``SecretBackend`` API.
 
-Transport is a subprocess shell-out to ``op read op://<vault>/<item>/<field>``
+Transport is a subprocess shell-out to
+``op read --no-newline [--account <acct>] op://<vault>/<item>/<field>``
 (explicit argv, never a shell string; resolved values are never logged).
 1Password Connect and any Python SDK are deliberately out of scope: the
 backend depends only on the operator's own signed-in ``op`` state and its
 ambient env, so there is no backend-level config channel today (ADR 0016).
+
+The ``--account`` selection path (the flag name, that it may precede the
+positional reference, and that ``op whoami --account <acct>`` reports a live
+session) matches 1Password CLI v2 docs but is asserted from docs, not
+exercised: there is no ``op`` binary in the dev environment, so the tests
+fake the subprocess seam. Confirm it against a real multi-account ``op``
+before relying on the table form in a release. A wrong flag degrades safely
+(a nonzero exit with non-marker stderr surfaces as ``ExternalError``, not a
+silent wrong value).
 
 Mapping-required (no derive-from-name convention): a secret is attempted
 only when it carries a ``backend_mappings.onepassword`` entry, in one of
@@ -342,13 +352,23 @@ class OnePasswordBackend:
             args += ["--account", account]
         result = _op(args)
         if result.returncode != 0:
-            raise ConnectivityError(
-                _signed_out_message(account),
-                hint=(
+            if account is None:
+                # A bare op:// string uses op's default account. With several
+                # accounts signed in, `op whoami` (no --account) can fail on
+                # ambiguity even though the operator IS signed in, so the
+                # remedy is to name an account, not to sign in again.
+                hint = (
+                    "run `op signin` (or enable the 1Password app's CLI "
+                    "integration). If several accounts are signed in, set "
+                    "OP_ACCOUNT or pin the account per secret with a "
+                    "{account, reference} mapping."
+                )
+            else:
+                hint = (
                     "run `op signin` (or enable the 1Password app's CLI "
                     "integration) and retry"
-                ),
-            )
+                )
+            raise ConnectivityError(_signed_out_message(account), hint=hint)
 
     @staticmethod
     def _read_one(secret: SecretDecl, ref: _OpRef) -> str:

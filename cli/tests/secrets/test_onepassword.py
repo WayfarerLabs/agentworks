@@ -507,6 +507,10 @@ def test_signed_out_for_specific_account_raises_naming_it(
                 (y, y.backend_mappings["onepassword"]),
             ]
         )
+    # Fail-fast: once any account's whoami fails, no `op read` fires. The
+    # whoami-all-then-read-all order guarantees it; pin it against a future
+    # refactor that might interleave whoami and read.
+    assert not [c for c in runner.calls if c[0] == "read"]
 
 
 def test_batch_get_missing_binary_raises_connectivity_error(
