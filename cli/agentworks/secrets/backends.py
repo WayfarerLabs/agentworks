@@ -11,18 +11,30 @@ distinct is the design (ADR 0016):
   uniform machinery and the backends list/describe like every other
   resource.
 - IMPLEMENTATIONS: this module. ``SECRET_BACKEND_REGISTRY`` holds the
-  code behind those rows (``env-var``, ``prompt``; later
-  ``onepassword``, plugin-registered backends). Capability kinds have
-  no declarable form; ``SecretBackend`` is an ordinary well-defined API
+  code behind those rows (``env-var``, ``prompt``, ``onepassword``;
+  later plugin-registered backends). Capability kinds have no
+  declarable form; ``SecretBackend`` is an ordinary well-defined API
   abstracting where secrets actually come from, consumed by the
   resolution loop (``agentworks.secrets.resolve``).
 
 There is no instantiation layer between the chain and the capability
 (ADR 0016): resources and config reference backends directly,
-many-to-one. Per-secret behavior lives in
-``backend_mappings`` (keyed by backend name); if a backend someday
-genuinely needs multiple configured instances, a declarable instance
-kind for that backend is an additive graduation.
+many-to-one. That makes secret-backend the one capability whose
+consumers name it directly, with no intermediate declarable to hold
+shared config: contrast vm-platform (fronted by vm-site) and
+git-credential-provider (fronted by git-credential), where a declarable
+resource homes the capability config and the many consumers reference
+it. Here the per-secret ``backend_mappings`` (keyed by backend name) is
+the only config surface, so it substitutes for that missing per-instance
+layer. That substitution holds only while backends carry no account-level
+config: env-var, prompt, and the onepassword CLI backend (which reads the
+operator's ambient ``op`` state) need none. When a backend needs config
+SHARED across many secrets (a store account, a transport, a Connect
+host), the per-secret mapping is the wrong home for it (vastly
+many-to-one): that is the signal to graduate the backend to a declarable
+instance kind, the secret-backend analog of vm-site. The graduation is
+additive (ADR 0016 sanctions it for, e.g., multiple 1Password accounts),
+so nothing here needs it until then.
 """
 
 from __future__ import annotations
@@ -61,17 +73,18 @@ class SecretBackend(Protocol):
     error). Transport / auth failures raise ``ConnectivityError`` /
     ``ExternalError``.
 
-    ``interactive`` means "do not probe this backend in
-    ``preview_resolution``": inspection previews report it optimistically
-    instead of calling ``batch_get`` to confirm a value. It is set for two
-    distinct reasons that the flag currently fuses: probing IS the operator
-    interaction (prompt), OR probing merely bothers the operator without
-    being a human decision (onepassword, where probing fires a biometric).
-    Guardrail: a future ``--non-interactive`` / controller path must NOT
-    filter the active chain on ``interactive`` without first splitting out a
-    separate "cannot run unattended" axis, or it would wrongly drop
-    onepassword in the headless context it is meant for. Today nothing reads
-    the flag outside ``preview_resolution``, so this is latent.
+    ``interactive`` marks a backend whose resolution may involve operator
+    interaction: ``batch_get`` can block on the operator (the prompt
+    backend asks for the value; the onepassword backend may trigger a
+    biometric or re-auth through ``op``). Inspection previews never probe
+    an interactive backend, since probing would BE that interaction; they
+    report it optimistically on ``would_attempt`` alone.
+
+    A resolution that needs an operator present cannot run headless, so a
+    fully non-interactive path resolves by dropping interactive backends
+    from its chain. A future 1Password transport that authenticates without
+    a human (Connect, a service account) would not be interactive; that is
+    a separate backend or config, not this one.
     """
 
     @property

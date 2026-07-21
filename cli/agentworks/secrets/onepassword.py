@@ -171,19 +171,18 @@ class OnePasswordBackend:
     name = "onepassword"
     description = "resolves via the 1Password CLI (op read op://vault/item/field)"
 
-    # interactive = True means "do not probe this backend in
-    # preview_resolution". Probing would run `op` (firing a biometric and
-    # tens of seconds of latency) at every preflight and once per secret in
-    # `agw doctor`, so preview treats onepassword optimistically instead.
+    # interactive = True: resolving a onepassword secret may involve
+    # operator interaction, because `op read` can trigger a biometric or
+    # re-auth prompt. That is the same property the prompt backend has (it
+    # asks the operator for the value), so onepassword carries the flag for
+    # the same reason, not as a special case.
     #
-    # The flag currently fuses two ideas: "probing bothers the user" (TRUE
-    # here) and "cannot run unattended" (FALSE here: the biometric is auth,
-    # not a human decision). onepassword sets the flag for the first reason
-    # only. Guardrail: a future --non-interactive / controller path must NOT
-    # filter the active chain on `interactive` without first splitting out a
-    # separate "cannot run unattended" axis, or it would wrongly drop
-    # onepassword in the headless context it is meant for. Today nothing
-    # reads `interactive` outside preview_resolution, so this is latent.
+    # The practical effect: preview_resolution never probes this backend
+    # (probing would fire the biometric at every preflight and once per
+    # secret in `agw doctor`); it reports onepassword optimistically on
+    # would_attempt alone. A non-interactive transport that authenticates
+    # without a human (1Password Connect, a service account; not built
+    # here) would not be interactive.
     interactive = True
 
     def validate_mapping(self, owner: str, mapping: MappingValue) -> None:
