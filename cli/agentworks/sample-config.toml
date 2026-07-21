@@ -168,9 +168,10 @@ ssh_private_key = "~/.ssh/id_ed25519"        # required: used for SSH connection
 #                 `[secrets.<name>].backend_mappings.env-var`.
 #   onepassword : reads via the 1Password CLI (`op read op://...`). Requires
 #                 a per-secret `backend_mappings.onepassword` address (string
-#                 or table, above); unmapped secrets are skipped. You must be
-#                 signed in (`op signin`) at command time; a mapping that
-#                 points at a missing item is a hard error, not a fall-through.
+#                 or table, above); unmapped secrets are skipped. `op` must be
+#                 able to read at command time (the 1Password app's CLI
+#                 integration enabled, or `op signin`); a mapping that points
+#                 at a missing item is a hard error, not a fall-through.
 #   prompt      : interactive prompt. Always applies; you are never asked for
 #                 the same secret twice in one command, and all prompting
 #                 happens before the command starts changing anything.

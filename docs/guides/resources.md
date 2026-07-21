@@ -250,9 +250,10 @@ Two layers, one rule each:
   `{ account = "my.1password.com", reference = "op://Work/npm/password" }`, and opt-outs) lives in
   each secret's `backend_mappings.<backend>`. The `onepassword` backend reads via the 1Password CLI
   (`op read op://vault/item/field`); it needs a per-secret `backend_mappings.onepassword` address in
-  one of two forms: a bare `op://vault/item/field` string (using op's signed-in account, or
-  `OP_ACCOUNT`), or a `{ account, reference }` table when a specific account must be pinned. You
-  must be signed in (`op signin`) at command time.
+  one of two forms: a bare `op://vault/item/field` string (using op's default account, or
+  `OP_ACCOUNT`), or a `{ account, reference }` table when a specific account must be pinned. `op`
+  must be able to read at command time, meaning either the 1Password app's CLI integration is
+  enabled or you have run `op signin`.
 - The **chain** is a setting: `[secret_config].backends` in `config.toml` lists the active backends
   in precedence order (default `["env-var", "prompt"]`). Registered backends absent from the chain
   are dormant.

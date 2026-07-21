@@ -6,17 +6,24 @@ Transport is a subprocess shell-out to
 ``op read --no-newline [--account <acct>] op://<vault>/<item>/<field>``
 (explicit argv, never a shell string; resolved values are never logged).
 1Password Connect and any Python SDK are deliberately out of scope: the
-backend depends only on the operator's own signed-in ``op`` state and its
-ambient env, so there is no backend-level config channel today (ADR 0016).
+backend depends only on the operator's own ``op`` read access (whether from
+``op signin`` or the 1Password app's CLI integration) and its ambient env,
+so there is no backend-level config channel today (ADR 0016).
 
-The ``--account`` selection path (the flag name, that it may precede the
-positional reference, and that ``op whoami --account <acct>`` reports a live
-session) matches 1Password CLI v2 docs but is asserted from docs, not
-exercised: there is no ``op`` binary in the dev environment, so the tests
-fake the subprocess seam. Confirm it against a real multi-account ``op``
-before relying on the table form in a release. A wrong flag degrades safely
-(a nonzero exit with non-marker stderr surfaces as ``ExternalError``, not a
-silent wrong value).
+There is no separate sign-in pre-check: the actual ``op read`` is the only
+liveness probe. ``op whoami`` is not reliable for this, because under the
+1Password app's CLI integration it can report "not signed in" even when
+``op read`` works (the app holds auth and there is no CLI session token for
+whoami to report). A signed-out state is therefore detected from a failing
+``op read`` (see the marker classification below).
+
+The ``--account`` selection path (the flag name, and that it may precede the
+positional reference) matches 1Password CLI v2 docs but is asserted from
+docs, not exercised: there is no ``op`` binary in the dev environment, so
+the tests fake the subprocess seam. Confirm it against a real multi-account
+``op`` before relying on the table form in a release. A wrong flag degrades
+safely (a nonzero exit with non-marker stderr surfaces as ``ExternalError``,
+not a silent wrong value).
 
 Mapping-required (no derive-from-name convention): a secret is attempted
 only when it carries a ``backend_mappings.onepassword`` entry, in one of
@@ -54,17 +61,20 @@ _OP_BINARY = "op"
 
 # ``op`` exposes a flat exit status: 0 on success, 1 for essentially every
 # failure (auth, missing item, transport). It does NOT give distinct exit
-# codes for "not signed in" vs "no such item", so we classify by matching
-# stderr substrings. To keep that classification honest we check sign-in
-# ONCE per distinct account in batch_get (``op whoami``); after a clean
-# whoami, a failing ``op read`` is usually a lookup problem, but a transport
-# failure can still happen mid-batch. So the not-found markers are
-# deliberately NARROW and item/field-specific: a broad marker like "no such"
-# would also match a Go-style transport error ("dial tcp: lookup ...: no
-# such host") and mislabel connectivity as a hard mapping error with a
-# misleading vault/item/field hint. Anything not matched by the signed-out
-# or not-found markers falls through to ``ExternalError`` (which halts the
-# chain and surfaces the raw stderr): the safer classification.
+# codes for "not signed in" vs "no such item", so we classify a failing
+# ``op read`` by matching stderr substrings. There is NO sign-in pre-check:
+# ``op whoami`` is not a reliable liveness probe, because under the 1Password
+# app's CLI integration it reports "not signed in" even when ``op read``
+# works, so a whoami gate would abort a working setup. Classification of a
+# failing read: signed-out markers -> ConnectivityError; the narrow not-found
+# markers -> SecretMappingError; anything else -> ExternalError (the fail-safe
+# halt). The not-found markers are deliberately NARROW and item/field-specific:
+# a broad marker like "no such" would also match a Go-style transport error
+# ("dial tcp: lookup ...: no such host") and mislabel connectivity as a hard
+# mapping error with a misleading vault/item/field hint. Anything not matched
+# by the signed-out or not-found markers falls through to ``ExternalError``
+# (which halts the chain and surfaces the raw stderr): the safer
+# classification.
 _SIGNED_OUT_MARKERS = (
     "not currently signed in",
     "no account found",
@@ -151,8 +161,8 @@ def _matches(lowered_stderr: str, markers: tuple[str, ...]) -> bool:
 
 def _signed_out_message(account: str | None) -> str:
     """The ConnectivityError message for a signed-out ``op``, naming the
-    account when the mapping pinned one (an empty default bucket reads as
-    the generic phrasing)."""
+    account when the mapping pinned one (the default account, ``None``, reads
+    as the generic phrasing)."""
     if account is not None:
         return f"not signed in to the 1Password CLI account {account}"
     return "not signed in to the 1Password CLI"
@@ -319,56 +329,20 @@ class OnePasswordBackend:
         self,
         wants: list[tuple[SecretDecl, MappingValue | None]],
     ) -> dict[str, str]:
-        # Self-safe on an empty batch: no work means no `op whoami`.
-        # (would_attempt gating already guarantees non-empty from the
-        # resolve loop; this makes a direct call cheap too.)
+        # Self-safe on an empty batch: no work, no subprocess. (would_attempt
+        # gating already guarantees non-empty from the resolve loop; this
+        # makes a direct call cheap too.)
         if not wants:
             return {}
-        resolved = [
-            (secret, self._resolved_ref(secret, mapping))
-            for secret, mapping in wants
-        ]
-        # Amortize the sign-in check once per DISTINCT account, not per
-        # secret. The None bucket is op's default account. Every account the
-        # batch touches is checked, so a signed-out state is reported once
-        # for that account (as a ConnectivityError) instead of being misread
-        # per secret as a missing item. Sorted for deterministic order
-        # (default account first).
-        accounts = {ref.account for _, ref in resolved}
-        for account in sorted(accounts, key=lambda a: (a is not None, a or "")):
-            self._ensure_signed_in(account)
+        # No sign-in pre-check: `op read` is the only liveness probe (see the
+        # module docstring and the marker block; `op whoami` is unreliable
+        # under app integration). A signed-out state surfaces from the read
+        # itself, and the first such read halts the batch.
         out: dict[str, str] = {}
-        for secret, ref in resolved:
+        for secret, mapping in wants:
+            ref = self._resolved_ref(secret, mapping)
             out[secret.name] = self._read_one(secret, ref)
         return out
-
-    @staticmethod
-    def _ensure_signed_in(account: str | None) -> None:
-        """Confirm ``op`` is present and has a live session for ``account``
-        before reading any secret against it. ``account is None`` checks
-        op's default / ``OP_ACCOUNT`` account."""
-        args = ["whoami"]
-        if account is not None:
-            args += ["--account", account]
-        result = _op(args)
-        if result.returncode != 0:
-            if account is None:
-                # A bare op:// string uses op's default account. With several
-                # accounts signed in, `op whoami` (no --account) can fail on
-                # ambiguity even though the operator IS signed in, so the
-                # remedy is to name an account, not to sign in again.
-                hint = (
-                    "run `op signin` (or enable the 1Password app's CLI "
-                    "integration). If several accounts are signed in, set "
-                    "OP_ACCOUNT or pin the account per secret with a "
-                    "{account, reference} mapping."
-                )
-            else:
-                hint = (
-                    "run `op signin` (or enable the 1Password app's CLI "
-                    "integration) and retry"
-                )
-            raise ConnectivityError(_signed_out_message(account), hint=hint)
 
     @staticmethod
     def _read_one(secret: SecretDecl, ref: _OpRef) -> str:
@@ -390,11 +364,23 @@ class OnePasswordBackend:
             return result.stdout
         lowered = result.stderr.lower()
         if _matches(lowered, _SIGNED_OUT_MARKERS):
-            # Session lapsed between the whoami check and this read.
-            raise ConnectivityError(
-                _signed_out_message(ref.account),
-                hint="run `op signin` and retry",
-            )
+            # The read itself is the sign-in probe (no whoami gate). A bare
+            # op:// string uses op's default account, where a signed-out (or,
+            # with several accounts, ambiguous) state is fixed by naming an
+            # account; a pinned account just needs read access for it.
+            if ref.account is None:
+                hint = (
+                    "run `op signin` (or enable the 1Password app's CLI "
+                    "integration). If several accounts are signed in, set "
+                    "OP_ACCOUNT or pin the account per secret with a "
+                    "{account, reference} mapping."
+                )
+            else:
+                hint = (
+                    "run `op signin` (or enable the 1Password app's CLI "
+                    "integration) and retry"
+                )
+            raise ConnectivityError(_signed_out_message(ref.account), hint=hint)
         if _matches(lowered, _NOT_FOUND_MARKERS):
             raise SecretMappingError(
                 f"secret {secret.name!r}: 1Password has no value at "

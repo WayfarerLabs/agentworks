@@ -2,9 +2,9 @@
 
 The subprocess boundary is faked: every ``op`` call in the module goes
 through the module-level ``_run_op`` seam, which these tests monkeypatch
-so no real ``op`` binary is ever invoked. Fakes dispatch on the argv's
-first element (``whoami`` for the amortized sign-in check, ``read`` for a
-per-secret lookup).
+so no real ``op`` binary is ever invoked. The only call the backend makes
+is ``op read`` (there is no ``op whoami`` sign-in pre-check; the read is
+the liveness probe), so the fake dispatches on the ``read`` argv.
 """
 
 from __future__ import annotations
@@ -40,36 +40,21 @@ def _install_runner(
     monkeypatch.setattr(op_mod, "_run_op", runner)
 
 
-def _ok_whoami() -> _OpResult:
-    return _OpResult(returncode=0, stdout="me@example.com\n", stderr="")
-
-
 def _fake_op(
     *,
-    signed_in: bool = True,
-    signed_out_accounts: tuple[str | None, ...] = (),
     values: dict[str, str] | None = None,
     read_errors: dict[str, tuple[int, str]] | None = None,
 ) -> Any:
-    """A ``_run_op`` double. ``whoami`` succeeds unless ``signed_in`` is
-    False or the checked account is in ``signed_out_accounts`` (a bare
-    ``op://`` string checks the ``None`` default account); ``read <uri>``
-    returns the mapped value, or the mapped (returncode, stderr) failure,
-    or a generic not-found. The op:// reference is always the last argv
-    element, in both the bare and ``--account`` forms."""
+    """A ``_run_op`` double for ``op read``. ``read <uri>`` returns the
+    mapped value, or the mapped (returncode, stderr) failure, or a generic
+    not-found. The op:// reference is always the last argv element, in both
+    the bare and ``--account`` forms."""
     values = values or {}
     read_errors = read_errors or {}
     calls: list[list[str]] = []
 
     def run(args: list[str]) -> _OpResult:
         calls.append(args)
-        if args[0] == "whoami":
-            account = args[2] if "--account" in args else None
-            if not signed_in or account in signed_out_accounts:
-                return _OpResult(
-                    1, "", "[ERROR] You are not currently signed in."
-                )
-            return _ok_whoami()
         # op read --no-newline [--account <acct>] <uri>
         uri = args[-1]
         if uri in read_errors:
@@ -141,8 +126,6 @@ def test_table_form_resolves_with_account_flag(
     assert read_calls == [
         ["read", "--no-newline", "--account", "my.1password.com", uri]
     ]
-    whoami_calls = [c for c in runner.calls if c[0] == "whoami"]
-    assert whoami_calls == [["whoami", "--account", "my.1password.com"]]
 
 
 def test_section_bearing_reference_validates_and_resolves(
@@ -362,155 +345,87 @@ def test_hard_miss_halts_chain_before_prompt(
         resolve_secrets([secret], [op_chain, later])
 
 
-def test_batch_get_signed_out_raises_connectivity_error(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    _install_runner(monkeypatch, _fake_op(signed_in=False))
-    backend = OnePasswordBackend()
-    secret = _decl("npm", backend_mappings={"onepassword": "op://Work/npm/token"})
-    with pytest.raises(ConnectivityError, match="signed in"):
-        backend.batch_get([(secret, secret.backend_mappings["onepassword"])])
-
-
-def test_read_signed_out_mid_batch_raises_connectivity_error(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """whoami passed, but the session lapsed before the read: a signed-out
-    marker on the failing `op read` (not `op whoami`) is classified as
-    ConnectivityError, not a hard mapping miss."""
-    _install_runner(
-        monkeypatch,
-        _fake_op(
-            read_errors={
-                "op://Work/npm/token": (
-                    1,
-                    "[ERROR] You are not currently signed in.",
-                )
-            }
-        ),
+def _signed_out_read(uri: str) -> Any:
+    """A ``_run_op`` double whose `op read` for ``uri`` fails with a
+    signed-out marker (the real-world app-integration failure mode: no
+    whoami gate, the read itself reports it)."""
+    return _fake_op(
+        read_errors={uri: (1, "[ERROR] account is not signed in.")}
     )
+
+
+def test_signed_out_read_default_account_raises_connectivity_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A bare op:// string reads against op's default account. A signed-out
+    `op read` (there is no whoami pre-check) raises ConnectivityError with
+    the generic message and a hint pointing at OP_ACCOUNT / the table form."""
+    uri = "op://Work/npm/token"
+    _install_runner(monkeypatch, _signed_out_read(uri))
     backend = OnePasswordBackend()
-    secret = _decl("npm", backend_mappings={"onepassword": "op://Work/npm/token"})
-    with pytest.raises(ConnectivityError, match="signed in"):
+    secret = _decl("npm", backend_mappings={"onepassword": uri})
+    with pytest.raises(ConnectivityError) as excinfo:
         backend.batch_get([(secret, secret.backend_mappings["onepassword"])])
+    err = excinfo.value
+    assert str(err) == "not signed in to the 1Password CLI"
+    assert "OP_ACCOUNT" in (err.hint or "")
+    assert "{account, reference}" in (err.hint or "")
+
+
+def test_signed_out_read_pinned_account_names_it(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A {account, reference} table reads against the pinned account; a
+    signed-out `op read` raises ConnectivityError naming that account."""
+    uri = "op://Work/npm/token"
+    _install_runner(monkeypatch, _signed_out_read(uri))
+    backend = OnePasswordBackend()
+    secret = _decl(
+        "npm",
+        backend_mappings={
+            "onepassword": {"account": "my.1password.com", "reference": uri}
+        },
+    )
+    with pytest.raises(ConnectivityError, match="my.1password.com"):
+        backend.batch_get([(secret, secret.backend_mappings["onepassword"])])
+
+
+def test_signed_out_read_halts_before_later_reads(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A signed-out read on the first want halts the batch: the second
+    secret's `op read` never fires (the read is the only probe, and its
+    ConnectivityError propagates)."""
+    first, second = "op://Work/a/f", "op://Work/b/f"
+    runner = _fake_op(
+        values={second: "vb"},
+        read_errors={first: (1, "[ERROR] account is not signed in.")},
+    )
+    _install_runner(monkeypatch, runner)
+    backend = OnePasswordBackend()
+    a = _decl("a", backend_mappings={"onepassword": first})
+    b = _decl("b", backend_mappings={"onepassword": second})
+    with pytest.raises(ConnectivityError):
+        backend.batch_get(
+            [
+                (a, a.backend_mappings["onepassword"]),
+                (b, b.backend_mappings["onepassword"]),
+            ]
+        )
+    read_calls = [c for c in runner.calls if c[0] == "read"]
+    assert read_calls == [["read", "--no-newline", first]]
 
 
 def test_batch_get_empty_wants_does_not_run_op(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """An empty batch returns {} without firing `op whoami`."""
+    """An empty batch returns {} without running op at all."""
 
     def exploding(args: list[str]) -> _OpResult:
         raise AssertionError("empty batch must not run op")
 
     _install_runner(monkeypatch, exploding)
     assert OnePasswordBackend().batch_get([]) == {}
-
-
-def test_signin_check_amortized_once_per_batch(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Two secrets on the same (default) account share one whoami check."""
-    runner = _fake_op(
-        values={"op://Work/a/f": "va", "op://Work/b/f": "vb"}
-    )
-    _install_runner(monkeypatch, runner)
-    backend = OnePasswordBackend()
-    a = _decl("a", backend_mappings={"onepassword": "op://Work/a/f"})
-    b = _decl("b", backend_mappings={"onepassword": "op://Work/b/f"})
-    backend.batch_get(
-        [
-            (a, a.backend_mappings["onepassword"]),
-            (b, b.backend_mappings["onepassword"]),
-        ]
-    )
-    whoami_calls = [c for c in runner.calls if c[0] == "whoami"]
-    assert len(whoami_calls) == 1
-
-
-def test_signin_check_amortized_once_per_distinct_account(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """A batch spanning two accounts plus the default runs `op whoami` once
-    per distinct account, not once per secret. Two secrets share account
-    'acct-x', one is on 'acct-y', and one is on the default account: three
-    distinct whoami checks across four secrets."""
-    runner = _fake_op(
-        values={
-            "op://Work/x1/f": "vx1",
-            "op://Work/x2/f": "vx2",
-            "op://Work/y/f": "vy",
-            "op://Work/d/f": "vd",
-        }
-    )
-    _install_runner(monkeypatch, runner)
-    backend = OnePasswordBackend()
-    wants = [
-        _decl(
-            "x1",
-            backend_mappings={
-                "onepassword": {"account": "acct-x", "reference": "op://Work/x1/f"}
-            },
-        ),
-        _decl(
-            "x2",
-            backend_mappings={
-                "onepassword": {"account": "acct-x", "reference": "op://Work/x2/f"}
-            },
-        ),
-        _decl(
-            "y",
-            backend_mappings={
-                "onepassword": {"account": "acct-y", "reference": "op://Work/y/f"}
-            },
-        ),
-        _decl("d", backend_mappings={"onepassword": "op://Work/d/f"}),
-    ]
-    backend.batch_get([(s, s.backend_mappings["onepassword"]) for s in wants])
-    whoami_calls = [c for c in runner.calls if c[0] == "whoami"]
-    # One whoami per distinct account (default = bare `whoami`), four reads.
-    assert {tuple(c) for c in whoami_calls} == {
-        ("whoami",),
-        ("whoami", "--account", "acct-x"),
-        ("whoami", "--account", "acct-y"),
-    }
-    assert len(whoami_calls) == 3
-
-
-def test_signed_out_for_specific_account_raises_naming_it(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """When one account in the batch is signed out, the ConnectivityError
-    names that account (the default account is fine)."""
-    runner = _fake_op(
-        signed_out_accounts=("acct-y",),
-        values={"op://Work/x/f": "vx", "op://Work/y/f": "vy"},
-    )
-    _install_runner(monkeypatch, runner)
-    backend = OnePasswordBackend()
-    x = _decl(
-        "x",
-        backend_mappings={
-            "onepassword": {"account": "acct-x", "reference": "op://Work/x/f"}
-        },
-    )
-    y = _decl(
-        "y",
-        backend_mappings={
-            "onepassword": {"account": "acct-y", "reference": "op://Work/y/f"}
-        },
-    )
-    with pytest.raises(ConnectivityError, match="acct-y"):
-        backend.batch_get(
-            [
-                (x, x.backend_mappings["onepassword"]),
-                (y, y.backend_mappings["onepassword"]),
-            ]
-        )
-    # Fail-fast: once any account's whoami fails, no `op read` fires. The
-    # whoami-all-then-read-all order guarantees it; pin it against a future
-    # refactor that might interleave whoami and read.
-    assert not [c for c in runner.calls if c[0] == "read"]
 
 
 def test_batch_get_missing_binary_raises_connectivity_error(
