@@ -17,6 +17,7 @@ venv/
 # IDE
 .idea/
 .vscode/
+*.code-workspace
 *.swp
 *.swo
 *~
@@ -53,6 +54,7 @@ GEMINI.md
 # OS
 .DS_Store
 Thumbs.db
+desktop.ini
 
 # mypy
 .mypy_cache/
