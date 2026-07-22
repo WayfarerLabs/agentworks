@@ -249,21 +249,26 @@ it after the sweep.
 
 ### 9a. ERROR role and `_entry.py` error rendering (Phase 5)
 
-R13 wants a red `Error:` on a TTY, but `_entry.py` renders errors through bespoke
-`typer.echo(..., err=True)` calls in several shapes, so the wiring is non-mechanical and is pinned
-here:
+R13 wants a red `Error:` on a TTY, mirroring the yellow `Warning:`. `_entry.py` renders errors
+through bespoke `typer.echo(..., err=True)` calls in several shapes, so the wiring is non-mechanical
+and is pinned here:
 
-- **The ERROR role colors its message red on stderr at level 0 and does _not_ auto-add a prefix**
-  (unlike `WARNING`, which centralizes its `Warning:` over ~207 uniform callers). `_entry.py`
-  deliberately composes several distinct labels, so the entry catch keeps composing the label as
-  plain text and routes the composed one-liner through `emit(Role.ERROR, line, 0)`; the handler
-  applies red (no ANSI in the composed string). This covers `Error: {e}`,
-  `Error: {type(e).__name__}: {e}`, and `Configuration error: {e}` without a one-size prefix
-  fighting the varied labels.
+- **The ERROR role auto-adds a red `Error:` prefix + default-color message on stderr at level 0**,
+  exactly mirroring how `WARNING` centralizes its yellow `Warning:` prefix (sec 5). The entry catch
+  routes its `Error:`-labeled branches through `emit(Role.ERROR, message, 0)`, passing the message
+  **without** the `Error:` prefix: `str(e)` for the domain/`AgentworksError` branches, and
+  `f"{type(e).__name__}: {e}"` for the connectivity/external/unhandled branches (so the rendered
+  line is `Error: SSHError: ...`). Prefix-only coloring (not whole-line) matches WARNING's visual
+  weight and avoids parsing a caller-supplied prefix.
+- **`ConfigError` keeps its distinct `Configuration error:` label as a plain `typer.echo`** (not
+  routed through the ERROR role, whose prefix is fixed to `Error:`). It is a deliberately different
+  category (the operator is looking at the wrong file, not a runtime state problem) and is rare;
+  leaving it uncolored is the bounded choice rather than parameterizing the ERROR prefix. A red
+  `Configuration error:` is a trivial future refinement if wanted.
 - **Ancillary and abort lines stay plain.** `Aborted.`, `Cancelled.`, and the
   `(full traceback written to ...)` / `(could not write ...)` notes are not errors and are not in
   R13's colorization set; they remain plain `typer.echo(..., err=True)`. This bounds the Phase 5
-  change to the error one-liner.
+  change to the `Error:` one-liner.
 - No public `output.error()` free function is added (operator decision 1); the entry catch is the
   only `ERROR` emitter for now.
 
