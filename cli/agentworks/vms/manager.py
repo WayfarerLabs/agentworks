@@ -540,7 +540,11 @@ def create_vm(
     try:
         from agentworks.ssh_config import sync_ssh_config
 
-        sync_ssh_config(config, db)
+        # Re-sync for correctness (the Tailscale IP is settled), but stay
+        # silent: the "Connecting via Tailscale" section during Phase A
+        # already emitted "SSH config synced", so announcing it again here
+        # would double the line right before the "VM is ready!" outcome.
+        sync_ssh_config(config, db, announce=False)
     except Exception as e:
         output.warn(f"SSH config sync failed: {e}")
         output.info("VM is likely still usable.")

@@ -406,3 +406,40 @@ def test_declined_slug_keeps_default_file_name(tmp_path: Path) -> None:
     assert (ssh_dir / "config.d" / _MANAGED_CONF).exists()
 
 
+# -- announce flag ---------------------------------------------------------
+
+
+def _sync_db(tmp_path: Path) -> MagicMock:
+    db = MagicMock()
+    db.get_setting.return_value = None
+    db.list_vms.return_value = [_mock_vm("dev-vm", "100.64.0.1")]
+    db.list_agents.return_value = []
+    return db
+
+
+def test_sync_ssh_config_announces_by_default(tmp_path: Path, captured_output) -> None:  # noqa: ANN001
+    """The default announce=True emits the "SSH config synced" status line."""
+    from agentworks.ssh_config import sync_ssh_config
+
+    config, _ = _mock_config(tmp_path)
+
+    sync_ssh_config(config, _sync_db(tmp_path))
+
+    assert "SSH config synced" in captured_output.info
+
+
+def test_sync_ssh_config_announce_false_is_silent(tmp_path: Path, captured_output) -> None:  # noqa: ANN001
+    """announce=False re-syncs for correctness but emits no status line, so a
+    redundant second sync in the same flow does not double the operator line."""
+    from agentworks.ssh_config import sync_ssh_config
+
+    config, ssh_dir = _mock_config(tmp_path)
+    db = _sync_db(tmp_path)
+
+    sync_ssh_config(config, db, announce=False)
+
+    assert "SSH config synced" not in captured_output.info
+    # The re-sync still ran: the managed file was written.
+    assert (ssh_dir / "config.d" / _MANAGED_CONF).exists()
+
+

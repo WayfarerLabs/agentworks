@@ -233,6 +233,49 @@ def test_create_init_failure_keeps_the_row(
     assert db.get_vm("kvm") is not None
 
 
+def test_create_post_init_resync_is_silent(
+    make_config,
+    db: Database,
+    monkeypatch: pytest.MonkeyPatch,
+    captured_output,
+) -> None:
+    """The post-init SSH re-sync runs but stays silent.
+
+    ``create_vm`` re-syncs the SSH config after init (the Tailscale IP has
+    settled), but the "Connecting via Tailscale" section during Phase A
+    already emitted "SSH config synced". This pins that the post-init call
+    passes ``announce=False`` so the line is not doubled before the "VM is
+    ready!" outcome. Phase A's own announcing sync lives inside the faked
+    ``initialize_vm`` here; the initializer test covers that it fires once.
+    """
+    from agentworks.capabilities.vm_platform.lima import LimaPlatform
+
+    def _fake_create(self: LimaPlatform, request: object, ctx: object) -> ProvisionResult:
+        return ProvisionResult(
+            native_transport=SimpleNamespace(),  # type: ignore[arg-type]
+            platform_metadata={},
+            bootstrap_complete=True,
+            tailscale_ip="100.64.0.7",
+        )
+
+    monkeypatch.setattr(LimaPlatform, "create", _fake_create)
+    monkeypatch.setattr(vm_manager, "initialize_vm", lambda *a, **k: None)
+
+    sync_calls: list[bool] = []
+
+    def _record_sync(config: object, database: object, *, announce: bool = True) -> None:
+        sync_calls.append(announce)
+
+    monkeypatch.setattr("agentworks.ssh_config.sync_ssh_config", _record_sync)
+
+    vm_manager.create_vm(db, make_config(), name="svm")
+
+    # create_vm's only sync is the post-init one (Phase A's is inside the
+    # faked initialize_vm), and it is silent.
+    assert sync_calls == [False]
+    assert "SSH config synced" not in captured_output.info
+
+
 # -- vm reinit: the orchestrated path ----------------------------------------
 
 

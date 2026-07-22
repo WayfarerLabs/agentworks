@@ -1090,6 +1090,74 @@ def test_vm_initialization_step_and_subresult_roles(captured_output) -> None:  #
     )
 
 
+# -- Phase A "Connecting via Tailscale" section shape (regression guard) -------
+
+
+def test_phase_a_connectivity_tail_is_its_own_section(
+    monkeypatch,  # noqa: ANN001
+    captured_output,  # noqa: ANN001
+) -> None:
+    """Pin the fixed shape for Phase A's Tailscale-connectivity tail.
+
+    Regression guard for the column-0 bug: ``sync_ssh_config`` emitted
+    "SSH config synced" at level 0 (flush-left, sticking out of the 2-space
+    sectioned content). The fix wraps the connectivity tail in a
+    ``section("Connecting via Tailscale")`` so its status lines render at
+    the section body level. The header is at level 0, and both the synced
+    line and the verify step are BODY at level 1 (2 spaces); the line
+    appears exactly once (the redundant post-init re-sync is silenced via
+    announce=False, covered in test_ssh_config).
+    """
+    from unittest.mock import MagicMock
+
+    from agentworks import output
+    from agentworks.output import Role
+    from agentworks.vms import initializer
+
+    # Stand in for the real sync: mirror its announce=True status line so
+    # the section-placement assertion is exercised without touching the
+    # operator's ssh config on disk. The real announce behavior lives in
+    # test_ssh_config.
+    def _fake_sync(config: object, db: object, *, announce: bool = True) -> None:
+        if announce:
+            output.info("SSH config synced")
+
+    monkeypatch.setattr("agentworks.ssh_config.sync_ssh_config", _fake_sync)
+
+    # Tailscale SSH verifies on the first attempt (no retry line).
+    ts_target = MagicMock()
+    ts_target.run.return_value = MagicMock(ok=True, returncode=0)
+    monkeypatch.setattr(initializer, "SSHTransport", lambda **kwargs: ts_target)
+
+    logger = MagicMock()
+    result = initializer._phase_a_bootstrap(
+        MagicMock(),  # db
+        MagicMock(),  # config
+        MagicMock(),  # vm_template
+        "ttvm1",
+        MagicMock(),  # exec_target
+        "/home/agentworks",
+        "agentworks",
+        "ttvm1",
+        logger,
+        tailscale_auth_key="tskey-test",
+        script_swap=0,
+        bootstrap_complete=True,
+        tailscale_ip="100.80.78.31",
+    )
+
+    assert result is ts_target
+    # The connectivity tail is its own top-level section.
+    assert (Role.HEADER, 0, "Connecting via Tailscale") in captured_output.lines
+    # Both status lines sit at the section body level (2 spaces), not column 0.
+    assert (Role.BODY, 1, "SSH config synced") in captured_output.lines
+    assert (Role.BODY, 1, "Verifying Tailscale SSH...") in captured_output.lines
+    # "SSH config synced" is announced exactly once in the create flow.
+    assert sum(msg == "SSH config synced" for _r, _l, msg in captured_output.lines) == 1
+    # Neither status line leaks back to column 0 (the bug this guards).
+    assert (Role.BODY, 0, "SSH config synced") not in captured_output.lines
+
+
 # -- Pure function tests for the fstab editor ----------------------------------
 
 

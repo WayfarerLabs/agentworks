@@ -1639,37 +1639,40 @@ def _phase_a_bootstrap(
     # as the VM is reachable.
     from agentworks.ssh_config import sync_ssh_config
 
-    sync_ssh_config(config, db)
+    with output.section("Connecting via Tailscale"):
+        sync_ssh_config(config, db)
 
-    # Switch to Tailscale SSH, carrying over the SSH logger.
-    # On Windows, force TTY to prevent zsh/login shell pipe hangs.
-    import sys
+        # Switch to Tailscale SSH, carrying over the SSH logger.
+        # On Windows, force TTY to prevent zsh/login shell pipe hangs.
+        import sys
 
-    ts_target = SSHTransport(
-        host=tailscale_ip,
-        user=admin_username,
-        identity_file=config.operator.ssh_private_key,
-        force_tty=sys.platform == "win32",
-        default_timeout=60,
-        logger=logger,
-    )
+        ts_target = SSHTransport(
+            host=tailscale_ip,
+            user=admin_username,
+            identity_file=config.operator.ssh_private_key,
+            force_tty=sys.platform == "win32",
+            default_timeout=60,
+            logger=logger,
+        )
 
-    # Verify Tailscale SSH works (retry -- peer connection may take time)
-    logger.step("Verify Tailscale SSH")
-    output.detail("Verifying Tailscale SSH...")
-    import time
+        # Verify Tailscale SSH works (retry; peer connection may take time)
+        logger.step("Verify Tailscale SSH")
+        output.info("Verifying Tailscale SSH...")
+        import time
 
-    for attempt in range(5):
-        try:
-            ts_target.run("echo ok", timeout=15)
-            break
-        except SSHError:
-            if attempt == 4:
-                raise
-            output.detail(f"Tailscale SSH not ready, retrying ({attempt + 1}/5)...")
-            time.sleep(3)
+        for attempt in range(5):
+            try:
+                ts_target.run("echo ok", timeout=15)
+                break
+            except SSHError:
+                if attempt == 4:
+                    raise
+                output.detail(f"Tailscale SSH not ready, retrying ({attempt + 1}/5)...")
+                time.sleep(3)
 
-    return ts_target
+        # Returning from inside the section is fine: section() restores the
+        # ambient level on exit (including on this early return).
+        return ts_target
 
 
 def _run_bootstrap_script(

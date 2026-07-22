@@ -66,13 +66,21 @@ def ssh_agent_alias(agent_name: str, prefix: str = "awagent--") -> str:
     return f"{prefix}{agent_name}"
 
 
-def sync_ssh_config(config: Config, db: Database) -> None:
-    """Rebuild SSH config from current DB state."""
+def sync_ssh_config(config: Config, db: Database, *, announce: bool = True) -> None:
+    """Rebuild SSH config from current DB state.
+
+    Emits an "SSH config synced" status line when ``announce`` is True
+    (the default). Callers that re-sync purely for correctness, where the
+    operator was already told the config synced (e.g. vm create's post-init
+    re-sync after the "Connecting via Tailscale" section already announced
+    it), pass ``announce=False`` to suppress the duplicate line.
+    """
     if config.operator.ssh_config_dir:
         _rebuild_config_dir(config, db)
     else:
         _legacy_rebuild(config, db)
-    output.info("SSH config synced")
+    if announce:
+        output.info("SSH config synced")
 
 
 def _legacy_rebuild(config: Config, db: Database) -> None:
