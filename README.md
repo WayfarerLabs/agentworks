@@ -14,11 +14,12 @@ straightforward to have it all.
 
 The operator runs the `agw` CLI on their workstation. VMs are created at declared **vm-sites**
 (configured places to create VMs), each backed by a **vm-platform** that knows how to work with a
-given provider (e.g. Lima, WSL2, Proxmox, Azure VMs, Amazon EC2, ...). Regardless of the platform,
-every VM runs the same base operating system (Debian Bookworm), is joined to the same Tailscale
-tailnet, and is accessible over SSH at its Tailscale IP address using the operator's keys.
+given provider (Lima, WSL2, Proxmox, and Azure VMs today; the platform layer is built for more, e.g.
+Amazon EC2). Regardless of the platform, every VM runs the same base operating system (Debian
+Bookworm), is joined to the same Tailscale tailnet, and is accessible over SSH at its Tailscale IP
+address using the operator's keys.
 
-![Agentworks topology: the operator's workstation runs the agw CLI, which creates VMs at declared sites across local platforms (Lima or WSL2), a remote Lima host, Azure, and Proxmox. Every VM and the workstation itself join a shared Tailnet overlay, which is how the CLI reaches them all.](docs/images/agw-topology.png)
+![Agentworks topology: the operator's workstation runs the agw CLI, which creates VMs at declared sites across local platforms (Lima or WSL2), a remote SSH VM site (e.g. Lima), Azure, and Proxmox, with room reserved for future platforms. Every VM and the workstation itself join a shared Tailnet overlay, which is how the CLI reaches them all.](docs/images/agw-topology.png)
 
 Beyond the VMs themselves, Agentworks provides several layered primitives for organizing agentic
 workloads:
@@ -29,10 +30,11 @@ workloads:
 - Agentic workloads (Claude Code, etc.) can be run as persistent **sessions** including an
   associated tmux session, which can be attached to and detached from as needed.
 - Each session launches a **harness** that knows how to run a particular tool (e.g. a Claude Code
-  instance, or just a plain login shell). The harness owns start/restart semantics (to pick up
-  exactly where you left off) as well as validating the target environment for its tooling.
-  Additionally, since each harness is tightly coupled to its target tooling, it is the perfect place
-  to grow further tool-specific functionality (authentication handling, deeper integrations, ...).
+  instance, or just a plain login shell). The harness owns start/restart semantics (e.g. resuming a
+  Claude Code conversation right where it left off) as well as validating the target environment for
+  its tooling. Additionally, since each harness is tightly coupled to its target tooling, it is the
+  perfect place to grow further tool-specific functionality (authentication handling, deeper
+  integrations, ...).
 - Sessions can be organized into **named consoles**: curated tmux views that organize active
   sessions along with optional extra shell panes.
 - Both **config** and **secrets** (together with **secret backends**) can be managed and securely
@@ -43,7 +45,7 @@ for operators to define, evolve, and scale their infrastructure over time.
 
 Zooming in on a single VM, the diagram below shows how these primitives fit together inside one
 machine: sessions (each running a harness and drawing on injected secrets/config) run as isolated
-agent users, work in workspaces, and can be grouped into named consoles, all reachable over the
+Linux users, work in workspaces, and can be grouped into named consoles, all reachable over the
 tailnet.
 
 ![Agentworks VM internals: an Agentworks VM at a vm-site runs sessions, each pairing a tmux session and harness with injected secrets and config. Sessions run as fully isolated Linux users (an admin user plus per-agent users) and work inside workspaces backed by git repos. Any number of sessions can be organized into named consoles, and a tailnet NIC connects the VM directly to the tailnet regardless of platform. The VM sits on a configured platform instance, alongside other VMs in the site and other vm-sites.](docs/images/agw-vm-internals.png)
@@ -185,13 +187,13 @@ massive scale for decades.
 ### Sessions and Harnesses - The Workloads
 
 A **session** is a specification to run a specific **harness** as an agent in a workspace on a VM.
-The session is the shell (including the tmux session, config/secret specifications, etc.) while the
+The session is the outer wrapper (the tmux session, config/secret specifications, etc.) while the
 harness is the piece that knows how to run a particular tool (e.g. a Claude Code instance, or just a
 plain login shell): it owns starting and restarting the workload and checking that the tool's
 required executables are present on the launch target. A session template selects a harness (e.g.
 `harness: claude-code`) for a default experience and can further customize the behavior with a
-`harness_config` block. For even greater flexibility (e.g. the ability to run a not-yet-supported
-harness, custom app, etc.), the default `shell` harness simply runs a login shell, optionally
+`harness_config` block. For even greater flexibility (e.g. the ability to run a tool that doesn't
+yet have a dedicated harness), the default `shell` harness simply runs a login shell, optionally
 executing a command or just leaving it in interactive mode; a template that names no harness runs
 this built-in `shell` harness.
 
@@ -208,11 +210,11 @@ pane and its tty; the harness only decides what runs inside it.
 ### Named Consoles - Organizing Active Work
 
 Once more than a handful of sessions are running, the operator needs a way to focus on just the ones
-that matter right now. A **named console** is a curated tmux view that groups the sessions the
-operator is actively working across, optionally with extra shell panes pre-opened in each session's
-window. Each console is its own persistent tmux session (one window per included session) that is
-built once and attached to and detached from at will, independent of the underlying sessions' own
-lifecycles.
+that matter right now. A **named console** is a curated tmux view that groups the sessions (on a VM)
+the operator is actively working across, optionally with extra shell panes pre-opened in each
+session's window. Each console is its own persistent tmux session (one window per included session)
+that is built once and attached to and detached from at will, independent of the underlying
+sessions' own lifecycles.
 
 Consoles are purely an organizing layer: they reference sessions without owning them. A session can
 appear in any number of consoles (or none), and adding or removing it from a console never affects
@@ -301,7 +303,7 @@ Ephemeral auth keys (with `?ephemeral=true` appended) are fully supported. The T
 automatically removed from the tailnet when the VM goes offline. Agentworks handles re-joining
 gracefully on `vm start` by re-resolving the same secret through the chain.
 
-### Tmux
+### tmux
 
 [tmux](https://github.com/tmux/tmux) provides the persistence layer. Every Agentworks session maps
 1:1 to a tmux session on the VM with the same lifecycle, and agent sessions run on per-agent sockets
