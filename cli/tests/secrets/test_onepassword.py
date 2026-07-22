@@ -154,11 +154,12 @@ def test_describe_lookup_includes_account_when_set() -> None:
         },
     )
     bare = _decl("s-bare", backend_mappings={"onepassword": uri})
+    # Account-first: "<account>: <reference>" (position conveys "account").
     assert (
         backend.describe_lookup(
             with_account, with_account.backend_mappings["onepassword"]
         )
-        == f"{uri} (account my.1password.com)"
+        == f"my.1password.com: {uri}"
     )
     assert (
         backend.describe_lookup(bare, bare.backend_mappings["onepassword"])

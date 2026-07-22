@@ -315,14 +315,16 @@ class OnePasswordBackend:
         mapping: MappingValue | None,
     ) -> str | None:
         # The op:// reference, for the operator-facing "Resolved X via
-        # onepassword (op://...)" line. When an account is pinned it is
-        # appended so the operator can tell two accounts apart. Never a
+        # onepassword (...)" line. When an account is pinned it is prefixed
+        # account-FIRST ("<account>: <reference>"): the position conveys
+        # "account" without spending the word, and a long op:// reference
+        # then truncates before the account does in the list view. Never a
         # value.
         if mapping is None:
             return None
         ref = self._resolved_ref(secret, mapping)
         if ref.account is not None:
-            return f"{ref.reference} (account {ref.account})"
+            return f"{ref.account}: {ref.reference}"
         return ref.reference
 
     def batch_get(
