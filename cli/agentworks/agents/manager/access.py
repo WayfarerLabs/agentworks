@@ -9,17 +9,21 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+import agentworks.agents.manager as _mgr
 from agentworks.errors import NotFoundError
 from agentworks.vms.manager import gated_vm_boundary
 
 from ._common import (
-    _agent_direct_secret_target,
-    _assert_agent_ssh_works,
     _require_vm,
-    _resolve_agent_direct_env_scopes,
     _resolve_workspace_for_agent,
     agent_scope,
 )
+
+# ``_assert_agent_ssh_works``, ``_resolve_agent_direct_env_scopes``, and
+# ``_agent_direct_secret_target`` are referenced through the package object
+# (``_mgr.NAME``) at call time rather than imported by value, because tests
+# monkeypatch them on ``agentworks.agents.manager``; a by-value import here
+# would freeze a copy the patch could not reach.
 
 if TYPE_CHECKING:
     from agentworks.config import Config
@@ -73,14 +77,14 @@ def shell_agent(
     from agentworks.bootstrap import build_registry
 
     registry = build_registry(config)
-    scopes = _resolve_agent_direct_env_scopes(registry, vm, agent, ws=ws)
+    scopes = _mgr._resolve_agent_direct_env_scopes(registry, vm, agent, ws=ws)
 
     with gated_vm_boundary(
         db,
         config,
         registry,
         vm,
-        targets=[_agent_direct_secret_target(scopes, label=f"agent-shell={agent.name}")],
+        targets=[_mgr._agent_direct_secret_target(scopes, label=f"agent-shell={agent.name}")],
         scope=agent_scope(db, vm.name, agent.name),
     ) as (_vm_node, resolver):
         from agentworks.vms.sites import site_platform_name
@@ -110,7 +114,7 @@ def shell_agent(
         # authorized_keys was never populated) get an actionable error
         # rather than dropping into a remote shell that immediately exits
         # on Permission denied.
-        _assert_agent_ssh_works(target, agent)
+        _mgr._assert_agent_ssh_works(target, agent)
 
         if ws is not None:
             import shlex
@@ -180,14 +184,14 @@ def exec_agent(
     from agentworks.bootstrap import build_registry
 
     registry = build_registry(config)
-    scopes = _resolve_agent_direct_env_scopes(registry, vm, agent, ws=ws)
+    scopes = _mgr._resolve_agent_direct_env_scopes(registry, vm, agent, ws=ws)
 
     with gated_vm_boundary(
         db,
         config,
         registry,
         vm,
-        targets=[_agent_direct_secret_target(scopes, label=f"agent-exec={agent.name}")],
+        targets=[_mgr._agent_direct_secret_target(scopes, label=f"agent-exec={agent.name}")],
         scope=agent_scope(db, vm.name, agent.name),
     ) as (_vm_node, resolver):
         from agentworks.vms.sites import site_platform_name
@@ -213,7 +217,7 @@ def exec_agent(
 
         # Probe direct agent SSH first so pre-rollout agents (whose
         # authorized_keys was never populated) get an actionable error.
-        _assert_agent_ssh_works(target, agent)
+        _mgr._assert_agent_ssh_works(target, agent)
 
         remote_cmd = command[0] if len(command) == 1 else shlex.join(command)
         if ws is not None:
