@@ -339,8 +339,8 @@ def create_vm(
     # own composition roots), which is why the template node's
     # secret_refs carry only the Tailscale key.
     with output.section("Preflight"):
-        output.detail(f"Checking vm-site/{site}...")
-        output.detail(f"Checking vm-template/{vm_tmpl.name}...")
+        output.info(f"Checking vm-site/{site}...")
+        output.info(f"Checking vm-template/{vm_tmpl.name}...")
         announce_git_credentials(providers)
         preflight_all(nodes, RunContext(config=config, operation_scope=scope))
 
@@ -1796,7 +1796,7 @@ def reinit_vm(
         # prompted at reinit; they get prompted at the use site (vm
         # shell, session create, etc.).
         with output.section("Preflight"):
-            output.detail(f"Checking vm-site/{vm.site}...")
+            output.info(f"Checking vm-site/{vm.site}...")
             announce_git_credentials(providers)
             preflight_all(nodes, RunContext(config=config, operation_scope=scope))
 

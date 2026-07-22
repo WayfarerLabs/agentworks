@@ -634,10 +634,10 @@ def test_announce_git_credentials_reinforces_names(
     announce_git_credentials(
         {"github": _gh("github", owner="acme"), "azdo_ifc": _azdo("azdo_ifc", "org")}
     )
-    assert "Checking git-credential/github..." in captured_output.detail
-    assert "Checking git-credential/azdo_ifc..." in captured_output.detail
+    assert "Checking git-credential/github..." in captured_output.info
+    assert "Checking git-credential/azdo_ifc..." in captured_output.info
     # Not the old friendly-label / display-name form.
-    assert not any(m.startswith("Git credentials:") for m in captured_output.detail)
+    assert not any(m.startswith("Git credentials:") for m in captured_output.info)
 
 
 # -- real git against the generated materials ----------------------------------

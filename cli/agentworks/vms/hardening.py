@@ -177,10 +177,10 @@ def _apply_hardening_sysctl(target: Transport, logger: SSHLogger) -> None:
         getattr(existing, "ok", False)
         and getattr(existing, "stdout", "") == HARDENING_SYSCTL_CONTENT
     ):
-        output.detail("Sysctl baseline already applied; no change.")
+        output.info("Sysctl baseline already applied; no change.")
         return
 
-    output.detail("Applying sysctl baseline...")
+    output.info("Applying sysctl baseline...")
     mktemp_result = target.run("mktemp --tmpdir agw-sysctl.XXXXXX")
     staging = (getattr(mktemp_result, "stdout", "") or "").strip()
     if not staging:
@@ -204,7 +204,7 @@ def _apply_hardening_fstab(target: Transport, logger: SSHLogger) -> None:
     Preserves admin-set ``hidepid=2`` (stricter than agentworks's default).
     Always live-remounts /proc to the effective value at the end.
     """
-    output.detail("Ensuring hidepid=1 on /proc...")
+    output.info("Ensuring hidepid=1 on /proc...")
 
     result = target.run(f"cat {HARDENING_FSTAB_PATH}", sudo=True, check=False)
     if not getattr(result, "ok", False):

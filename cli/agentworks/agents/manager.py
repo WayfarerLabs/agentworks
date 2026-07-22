@@ -337,7 +337,7 @@ def create_agent(
         # any prompt, then git tokens and any site config secret
         # (proxmox's API token) resolve in one prompt session.
         with output.section("Preflight"):
-            output.detail(f"Checking agent-template/{agent_tmpl.name}...")
+            output.info(f"Checking agent-template/{agent_tmpl.name}...")
             announce_git_credentials(providers)
             preflight_all(nodes, RunContext(config=config, operation_scope=scope))
 
@@ -644,7 +644,7 @@ def reinit_agent(
         # resolve in one prompt session. Provisioning is hermetic: no
         # operator-env secrets are prompted at reinit.
         with output.section("Preflight"):
-            output.detail(f"Checking agent-template/{agent_tmpl.name}...")
+            output.info(f"Checking agent-template/{agent_tmpl.name}...")
             announce_git_credentials(providers)
             preflight_all(nodes, RunContext(config=config, operation_scope=scope))
 

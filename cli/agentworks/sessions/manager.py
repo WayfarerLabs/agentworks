@@ -1726,13 +1726,13 @@ def create_session(
         # sweep. Framed as a phase so session create reads like a plan
         # executing, matching vm create.
         with output.section("Preflight"):
-            output.detail(f"Checking session-template/{template.name}...")
+            output.info(f"Checking session-template/{template.name}...")
             if new_workspace:
                 assert workspace_tmpl is not None  # resolved at build above
-                output.detail(f"Checking workspace-template/{workspace_tmpl.name}...")
+                output.info(f"Checking workspace-template/{workspace_tmpl.name}...")
             if new_agent:
                 assert agent_tmpl is not None  # resolved at build above
-                output.detail(f"Checking agent-template/{agent_tmpl.name}...")
+                output.info(f"Checking agent-template/{agent_tmpl.name}...")
             if agent_tmpl_node is not None:
                 from agentworks.vms.initializer import announce_git_credentials
 
@@ -1906,7 +1906,7 @@ def create_session(
 
             mode_label = f"agent: {resolved_agent_name}" if resolved_agent_name else "admin"
             with output.section("Starting Session"):
-                output.detail(
+                output.info(
                     f"Starting session '{name}' on workspace '{workspace_name}' "
                     f"({mode_label}, template: {template.name})..."
                 )

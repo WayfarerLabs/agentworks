@@ -747,17 +747,18 @@ def test_create_stopped_vm_gate_resolves_once_and_seeds_the_boundary(
     assert "=== Resolving Secrets ===" in captured_output.info
     assert "=== Starting Session ===" in captured_output.info
     assert any(
-        m.startswith("Checking session-template/") for m in captured_output.detail
+        m.startswith("Checking session-template/") for m in captured_output.info
     )
 
     # Nesting, not just substrings: each phase header sits at level 0, the
-    # Preflight "Checking ..." lines nest one deeper (level 1), and the
-    # terminal result line dedents to column 0 (Role.RESULT, level 0) even
-    # though it is emitted from inside the Starting Session section.
+    # Preflight "Checking ..." lines are primary steps at the section level
+    # (Role.BODY, level 1, 2 spaces), and the terminal result line dedents
+    # to column 0 (Role.RESULT, level 0) even though it is emitted from
+    # inside the Starting Session section.
     assert (Role.HEADER, 0, "Preflight") in captured_output.lines
     assert (Role.HEADER, 0, "Starting Session") in captured_output.lines
     assert any(
-        role is Role.DETAIL and level == 1 and msg.startswith("Checking session-template/")
+        role is Role.BODY and level == 1 and msg.startswith("Checking session-template/")
         for role, level, msg in captured_output.lines
     )
     assert any(

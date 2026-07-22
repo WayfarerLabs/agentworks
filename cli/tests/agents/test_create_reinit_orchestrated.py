@@ -208,12 +208,14 @@ def test_create_stopped_vm_gate_resolves_once_and_seeds_the_boundary(
     assert "=== Preflight ===" in captured_output.info
     assert "=== Resolving Secrets ===" in captured_output.info
     assert "=== Agent Initialization ===" in captured_output.info
-    assert "Checking agent-template/default..." in captured_output.detail
-    assert "Checking git-credential/gh..." in captured_output.detail
+    assert "Checking agent-template/default..." in captured_output.info
+    assert "Checking git-credential/gh..." in captured_output.info
     # The phases are real sections now: headers at level 0, their body
-    # lines nested one level deeper.
+    # step lines at level 1. Preflight's "Checking ..." lines are primary
+    # steps, so they render as Role.BODY at the section level (2 spaces),
+    # not de-emphasized detail one notch deeper.
     assert (Role.HEADER, 0, "Preflight") in captured_output.lines
-    assert (Role.DETAIL, 1, "Checking agent-template/default...") in captured_output.lines
+    assert (Role.BODY, 1, "Checking agent-template/default...") in captured_output.lines
 
 
 def test_reinit_stopped_vm_gate_resolves_once_and_seeds_the_boundary(
@@ -247,7 +249,7 @@ def test_reinit_stopped_vm_gate_resolves_once_and_seeds_the_boundary(
     assert "=== Preflight ===" in captured_output.info
     assert "=== Resolving Secrets ===" in captured_output.info
     assert "=== Agent Initialization ===" in captured_output.info
-    assert "Checking agent-template/default..." in captured_output.detail
+    assert "Checking agent-template/default..." in captured_output.info
 
 
 def test_create_reachable_vm_fast_path_costs_no_gate_resolve(

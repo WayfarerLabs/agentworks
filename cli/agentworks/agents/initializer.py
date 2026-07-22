@@ -71,7 +71,7 @@ def create_agent_on_vm(
 
     admin_target = transport(vm, config, logger=logger)
 
-    output.detail(f"Creating user '{linux_user}' on VM '{vm.name}'...")
+    output.info(f"Creating user '{linux_user}' on VM '{vm.name}'...")
     home = f"/home/{linux_user}"
 
     agent_cfg = agent_tmpl
@@ -168,7 +168,7 @@ def create_agent_on_vm(
     if _admin_template(registry, vm.admin_template or "default").git_force_safe_directory:
         try:
             agent_target.run("git config --global --add safe.directory '*'")
-            output.detail("Git safe.directory configured for agent")
+            output.info("Git safe.directory configured for agent")
         except Exception as e:
             output.warn(f"agent git safe.directory setup failed: {e}")
 
@@ -182,7 +182,7 @@ def create_agent_on_vm(
     if agent_cfg.git_credentials:
         from agentworks.vms.initializer import resolve_git_credential_providers
 
-        output.detail("Configuring git credentials...")
+        output.info("Configuring git credentials...")
         providers = resolve_git_credential_providers(registry, agent_cfg.git_credentials)
         missing = [
             cred_name for cred_name in providers
@@ -252,7 +252,7 @@ def create_agent_on_vm(
 
     # Dotfiles.
     if agent_cfg.dotfiles_source:
-        output.detail(f"Syncing agent dotfiles from {agent_cfg.dotfiles_source}...")
+        output.info(f"Syncing agent dotfiles from {agent_cfg.dotfiles_source}...")
         try:
             import shlex as _shlex
 
@@ -314,7 +314,7 @@ def create_agent_on_vm(
                 # dance. fetch_dir handles existing-dest overwrite.
                 fetch_dir(ref, agent_target, dest)
 
-            output.detail(f"Running agent dotfiles install: {agent_cfg.dotfiles_install_cmd}")
+            output.info(f"Running agent dotfiles install: {agent_cfg.dotfiles_install_cmd}")
             # Wrap in a login shell so the dotfiles install command sees
             # static identity (AGENTWORKS_AGENT via the per-user profile
             # fragment written earlier this phase) and any PATH the agent
@@ -430,14 +430,14 @@ def _run_agent_install_commands(
             try:
                 check = agent_target.run(test_cmd, check=False, timeout=10)
                 if check.returncode == 0:
-                    output.detail(f"Agent install command {i}/{total} ({name}): already installed, skipping")
+                    output.info(f"Agent install command {i}/{total} ({name}): already installed, skipping")
                     path_additions.extend(entry.path)
                     continue
             except SSHError as e:
                 output.warn(f"install check for '{name}' failed ({e}), assuming not installed")
 
         truncated = entry.command[:60]
-        output.detail(f"Agent install command {i}/{total} ({name}): {truncated}...")
+        output.info(f"Agent install command {i}/{total} ({name}): {truncated}...")
         try:
             # Run the install command in a login shell to source the agent's
             # profile (provides AGENTWORKS_AGENT + PATH adds from earlier).
@@ -455,7 +455,7 @@ def _run_agent_install_commands(
     # AGENTWORKS_AGENT via login-shell sourcing); the rewrite here adds
     # the PATH entries those install commands contributed.
     if path_additions:
-        output.detail(f"Adding {len(path_additions)} PATH entries for agent...")
+        output.info(f"Adding {len(path_additions)} PATH entries for agent...")
     _write_agent_profile(
         agent_target,
         home=home,
@@ -598,7 +598,7 @@ def _run_agent_mise_setup(
 
     # Write mise config if packages declared
     if has_packages:
-        output.detail(f"Writing mise config for agent ({len(agent_cfg.mise_packages)} packages)...")
+        output.info(f"Writing mise config for agent ({len(agent_cfg.mise_packages)} packages)...")
         settings_lines = ["[settings]", f'install_before = "{agent_cfg.mise_install_before}"', ""]
         tools_lines = ["[tools]"]
         for pkg in agent_cfg.mise_packages:
@@ -617,7 +617,7 @@ def _run_agent_mise_setup(
 
     # Copy lockfile if configured
     if has_lockfile and agent_cfg.mise_lockfile:
-        output.detail(f"Fetching agent mise lockfile from {agent_cfg.mise_lockfile}...")
+        output.info(f"Fetching agent mise lockfile from {agent_cfg.mise_lockfile}...")
         try:
             from agentworks.sources import SourceRefError, fetch_file, parse_source_ref
 
@@ -644,7 +644,7 @@ def _run_agent_mise_setup(
             f"{agent_shell} -lc {shlex.quote(f'mise install {install_flags}')}",
             timeout=300,
         )
-        output.detail("Agent mise packages installed")
+        output.info("Agent mise packages installed")
         installed = True
     except SSHError as e:
         if lockfile_exists and agent_cfg.mise_allow_unlocked:
@@ -654,7 +654,7 @@ def _run_agent_mise_setup(
                     f"{agent_shell} -lc {shlex.quote('mise install -y')}",
                     timeout=300,
                 )
-                output.detail("Agent mise packages installed (unlocked)")
+                output.info("Agent mise packages installed (unlocked)")
                 installed = True
             except SSHError as e2:
                 output.warn(f"agent mise install failed: {e2}")

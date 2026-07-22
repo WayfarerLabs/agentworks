@@ -146,7 +146,7 @@ def _write_agentworks_profile(
             unique_paths.append(p)
 
     logger.step("Shell profile")
-    output.detail(
+    output.info(
         f"Writing agentworks profile ({output.count(len(unique_paths), 'PATH entry', 'PATH entries')})..."
     )
 
@@ -249,7 +249,7 @@ def _write_skel_seeds(
     ``.agentworks-rc.sh`` substring the grep matches against.
     """
     logger.step("Shell rc skel")
-    output.detail(f"Writing {SKEL_BASHRC_PATH} and {SKEL_ZSHRC_PATH}...")
+    output.info(f"Writing {SKEL_BASHRC_PATH} and {SKEL_ZSHRC_PATH}...")
 
     try:
         for path, content in (
@@ -289,7 +289,7 @@ def _write_agentworks_identity_profile(
     markers is opting in to having that content overwritten.
     """
     logger.step("Identity profile")
-    output.detail(
+    output.info(
         f"Writing {AGENTWORKS_IDENTITY_PROFILE_PATH} ({output.count(len(identity_env), 'var')})..."
     )
 
@@ -397,7 +397,7 @@ def _write_sshd_accept_env(
     Idempotent on reinit.
     """
     logger.step("sshd AcceptEnv")
-    output.detail(f"Writing {AGENTWORKS_SSHD_ACCEPT_ENV_PATH}...")
+    output.info(f"Writing {AGENTWORKS_SSHD_ACCEPT_ENV_PATH}...")
 
     body = (
         "# Managed by agentworks -- do not edit.\n"
@@ -501,7 +501,7 @@ def _write_sudoers_env_keep(
     docs/adrs/0017-console-pane-preserve-env.md.
     """
     logger.step("sudoers env_keep")
-    output.detail(f"Writing {AGENTWORKS_SUDOERS_ENV_KEEP_PATH}...")
+    output.info(f"Writing {AGENTWORKS_SUDOERS_ENV_KEEP_PATH}...")
 
     body = (
         "# Managed by agentworks -- do not edit.\n"
@@ -546,7 +546,7 @@ def _write_sudoers_console_setenv(
     achieve. See docs/adrs/0017-console-pane-preserve-env.md.
     """
     logger.step("sudoers console setenv")
-    output.detail(f"Writing {AGENTWORKS_SUDOERS_CONSOLE_SETENV_PATH}...")
+    output.info(f"Writing {AGENTWORKS_SUDOERS_CONSOLE_SETENV_PATH}...")
 
     body = (
         "# Managed by agentworks -- do not edit.\n"
@@ -584,7 +584,7 @@ def _write_agentworks_rc(
     Always written (even if empty) so that reinit can clear previously set hooks.
     """
     logger.step("Shell rc")
-    output.detail("Writing agentworks rc...")
+    output.info("Writing agentworks rc...")
 
     try:
         lines = ["# Managed by agentworks -- do not edit"]
@@ -643,7 +643,7 @@ def _write_mise_config(
         return
 
     logger.step("Mise config")
-    output.detail(f"Writing mise config with {output.count(len(packages), 'package')}...")
+    output.info(f"Writing mise config with {output.count(len(packages), 'package')}...")
 
     settings_lines = ["[settings]", f'install_before = "{install_before}"', ""]
     tools_lines = ["[tools]"]
@@ -677,7 +677,7 @@ def _fetch_mise_lockfile(
     from agentworks.sources import SourceRefError, fetch_file, parse_source_ref
 
     logger.step("Mise lockfile")
-    output.detail(f"Fetching mise lockfile from {lockfile_source}...")
+    output.info(f"Fetching mise lockfile from {lockfile_source}...")
 
     try:
         ref = parse_source_ref(lockfile_source, default_filename="mise.lock")
@@ -742,7 +742,7 @@ def _run_mise_install(
     installed = False
 
     if has_lockfile:
-        output.detail("Running mise install (locked)...")
+        output.info("Running mise install (locked)...")
         try:
             target.run(
                 f"{shell} -lc 'mise install -y --locked'",
@@ -763,7 +763,7 @@ def _run_mise_install(
             output.warn("Retrying unlocked...")
 
     if not installed:
-        output.detail("Running mise install...")
+        output.info("Running mise install...")
         try:
             target.run(
                 f"{shell} -lc 'mise install -y'",
@@ -833,7 +833,7 @@ def _reconcile_authorized_keys(
     label = f"1 primary + {extra_count} extra" if extra_count else "1 primary"
     if owner is not None:
         label = f"{label} for {owner}"
-    output.detail(f"Reconciling authorized_keys ({label})...")
+    output.info(f"Reconciling authorized_keys ({label})...")
 
     content = AUTHORIZED_KEYS_HEADER + "\n".join(keys) + "\n"
 
@@ -895,7 +895,7 @@ def _preserve_ssh_host_keys(
     from agentworks.capabilities.vm_platform.bootstrap_script import SSH_PRESERVE_KEYS_LINES, SSH_PRESERVE_KEYS_PATH
 
     logger.step("Preserve SSH host keys")
-    output.detail("Ensuring SSH host key preservation...")
+    output.info("Ensuring SSH host key preservation...")
 
     parent = str(PurePosixPath(SSH_PRESERVE_KEYS_PATH).parent)
     printf_args = " ".join(shlex.quote(line) for line in SSH_PRESERVE_KEYS_LINES)
@@ -951,7 +951,7 @@ def _apply_sve_mask(target: Transport, logger: SSHLogger) -> None:
     if not gate.ok:
         return
 
-    output.detail("Masking unusable SVE (arm64.nosve)...")
+    output.info("Masking unusable SVE (arm64.nosve)...")
     parent = str(PurePosixPath(SVE_NOSVE_GRUB_PATH).parent)
     printf_args = " ".join(shlex.quote(line) for line in SVE_NOSVE_GRUB_LINES)
     try:
@@ -1019,7 +1019,7 @@ def _configure_apt_sources(
         key_exists = target.run(f"test -f {shlex.quote(src.key_path)}", check=False).returncode == 0
 
         if not key_exists:
-            output.detail(f"Configuring apt source '{name}'...")
+            output.info(f"Configuring apt source '{name}'...")
             try:
                 # Ensure parent directory for key_path exists
                 from pathlib import PurePosixPath
@@ -1058,12 +1058,12 @@ def _configure_apt_sources(
         current = target.run(f"cat {shlex.quote(source_path)}", check=False)
         if current.returncode == 0 and current.stdout == expected:
             if key_exists:
-                output.detail(f"Apt source '{name}': already configured, skipping")
+                output.info(f"Apt source '{name}': already configured, skipping")
                 logger.output(f"apt source {name}: key and source list up to date, skipping")
             continue
 
         if key_exists:
-            output.detail(f"Apt source '{name}': updating source list...")
+            output.info(f"Apt source '{name}': updating source list...")
             logger.output(f"apt source {name}: key exists but source list needs update")
 
         try:
@@ -1078,7 +1078,7 @@ def _configure_apt_sources(
             output.warn(msg)
 
     if newly_configured:
-        output.detail("Running apt-get update...")
+        output.info("Running apt-get update...")
         try:
             target.run("apt-get update -qq", sudo=True, timeout=120)
         except SSHError as e:
@@ -1108,7 +1108,7 @@ def _install_system_packages(
         logger.warning(msg)
         output.warn(msg)
 
-    output.detail("Running apt-get update...")
+    output.info("Running apt-get update...")
     try:
         target.run("apt-get update -qq", sudo=True, timeout=120)
     except SSHError as e:
@@ -1116,7 +1116,7 @@ def _install_system_packages(
         logger.warning(msg)
         output.warn(msg)
 
-    output.detail(f"Installing {output.count(len(INIT_SYSTEM_PACKAGES), 'system package')}...")
+    output.info(f"Installing {output.count(len(INIT_SYSTEM_PACKAGES), 'system package')}...")
     apt_str = " ".join(shlex.quote(p) for p in INIT_SYSTEM_PACKAGES)
     try:
         target.run(
@@ -1148,7 +1148,7 @@ def _install_apt_packages(
         return
 
     logger.step("Apt packages")
-    output.detail(f"Installing {output.count(len(all_apt), 'apt package')}...")
+    output.info(f"Installing {output.count(len(all_apt), 'apt package')}...")
     apt_str = " ".join(shlex.quote(p) for p in all_apt)
     try:
         target.run(
@@ -1221,7 +1221,7 @@ def _run_install_commands(
             try:
                 check = target.run(test_cmd, check=False, timeout=10)
                 if check.returncode == 0:
-                    output.detail(f"{label} {i}/{total} ({name}): already installed, skipping")
+                    output.info(f"{label} {i}/{total} ({name}): already installed, skipping")
                     logger.output(f"{name}: already installed ({test_cmd}), skipping")
                     path_additions.extend(entry.path)
                     continue
@@ -1230,7 +1230,7 @@ def _run_install_commands(
                 logger.output(f"{name}: install check failed ({e}), assuming not installed")
 
         truncated = entry.command[:60]
-        output.detail(f"{label} {i}/{total} ({name}): {truncated}...")
+        output.info(f"{label} {i}/{total} ({name}): {truncated}...")
         try:
             target.run(
                 f"{shlex.quote(shell)} -lc {shlex.quote(entry.command)}",
@@ -1331,7 +1331,7 @@ def announce_git_credentials(providers: dict[str, GitCredentialProvider]) -> Non
     ``SecretUnavailableError`` at collect time.)
     """
     for name in providers:
-        output.detail(f"Checking git-credential/{name}...")
+        output.info(f"Checking git-credential/{name}...")
 
 
 def rejoin_tailscale(
@@ -1812,7 +1812,7 @@ def _phase_b_setup(
     with output.section("VM Initialization"):
         from agentworks.resources.access import kind_dict
 
-        output.detail(f"vm: {vm_name}")
+        output.info(f"vm: {vm_name}")
         db.update_vm_init_status(vm_name, InitStatus.IN_PROGRESS)
         # Reference validation lives in the framework (the apt / install-command
         # kinds' error miss policy fires at build_registry time, which the
@@ -1931,7 +1931,7 @@ def _phase_b_setup(
         # Non-fatal: snap packages
         if vm_template.snap:
             logger.step("Snap packages")
-            output.detail(f"Installing {output.count(len(vm_template.snap), 'snap package')}...")
+            output.info(f"Installing {output.count(len(vm_template.snap), 'snap package')}...")
             for pkg in vm_template.snap:
                 try:
                     ts_target.run(f"snap install {shlex.quote(pkg)}", sudo=True, timeout=120)
@@ -1971,7 +1971,7 @@ def _phase_b_setup(
             )
 
             logger.step("Agent tmux socket directories")
-            output.detail("Setting up agent tmux socket infrastructure...")
+            output.info("Setting up agent tmux socket infrastructure...")
 
             ensure_agent_socket_root(ts_target, admin_username, warn_if_missing=not is_first_init)
             for agent in db.list_agents(vm_name=vm_name):
@@ -1991,7 +1991,7 @@ def _phase_b_setup(
         # those installers write to the correct rc file). The zsh
         # ``zsh-newuser-install`` first-run wizard is pre-empted by the skel seed.
         logger.step("Shell configuration")
-        output.detail(f"Setting shell to {admin_shell}...")
+        output.info(f"Setting shell to {admin_shell}...")
         try:
             ts_target.run(
                 f"usermod -s $(which {shlex.quote(admin_shell)}) {shlex.quote(admin_username)}",
@@ -2049,7 +2049,7 @@ def _phase_b_setup(
         if admin.git_force_safe_directory:
             try:
                 ts_target.run("git config --global --add safe.directory '*'")
-                output.detail("Git safe.directory wildcard configured")
+                output.info("Git safe.directory wildcard configured")
             except SSHError as e:
                 msg = f"git safe.directory setup failed: {e}"
                 logger.warning(msg)
@@ -2069,10 +2069,10 @@ def _phase_b_setup(
                 from agentworks.sources import SourceRefError, fetch_dir, parse_source_ref
 
                 ref = parse_source_ref(admin.dotfiles_source)
-                output.detail(f"Syncing dotfiles from {admin.dotfiles_source}...")
+                output.info(f"Syncing dotfiles from {admin.dotfiles_source}...")
                 fetch_dir(ref, ts_target, dest, logger=logger)
 
-                output.detail(f"Running dotfiles install: {admin.dotfiles_install_cmd}")
+                output.info(f"Running dotfiles install: {admin.dotfiles_install_cmd}")
                 ts_target.run(
                     f"cd {dest} && {admin.dotfiles_install_cmd}",
                     timeout=120,
@@ -2181,11 +2181,11 @@ def install_claude_plugins(
 
     try:
         for source in marketplaces:
-            output.detail(f"Registering Claude marketplace: {source}")
+            output.info(f"Registering Claude marketplace: {source}")
             run_cmd(f"claude plugin marketplace add {shlex.quote(source)}", 60)
 
         for plugin in plugins:
-            output.detail(f"Installing Claude plugin: {plugin}")
+            output.info(f"Installing Claude plugin: {plugin}")
             run_cmd(f"claude plugin install {shlex.quote(plugin)} --scope user", 60)
     except SSHError as e:
         msg = f"Claude plugin install failed: {e}"
@@ -2225,7 +2225,7 @@ def _configure_git_credentials(
     credential config as a whole rather than shipping a partial store.
     """
     logger.step("Git credentials")
-    output.detail("Configuring git credentials...")
+    output.info("Configuring git credentials...")
 
     missing = [name for name in providers if name not in git_tokens]
     if missing:
