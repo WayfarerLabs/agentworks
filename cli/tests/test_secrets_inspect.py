@@ -271,9 +271,9 @@ def test_render_secret_table_caps_long_backend_identifier(
     captured_output: CapturedOutput,
 ) -> None:
     """The LIST view truncates a long backend identifier to
-    ``_BACKEND_CELL_WIDTH`` (30) with a trailing ``...`` so it cannot blow
-    the table width out. Built directly (no op wiring): the account-first
-    onepassword identifier here is 45 chars."""
+    ``_BACKEND_CELL_WIDTH`` with a trailing ``...`` so it cannot blow the
+    table width out. Built directly (no op wiring): the account-first
+    onepassword identifier here comfortably exceeds the cap."""
     long_ident = "my.1password.com: op://Employee/Registry/token"
     assert len(long_ident) > _BACKEND_CELL_WIDTH
     table = SecretTable(
@@ -300,7 +300,7 @@ def test_render_secret_table_caps_long_backend_identifier(
     assert len(truncated) == _BACKEND_CELL_WIDTH
     joined = "\n".join(captured_output.info)
     # The identifier appears truncated, and the full form never does, so the
-    # onepassword column width is bounded by the 30-char cap.
+    # onepassword column width is bounded by ``_BACKEND_CELL_WIDTH``.
     assert truncated in joined
     assert long_ident not in joined
     data_line = next(

@@ -132,7 +132,7 @@ def build_secret_table(config: Config, registry: Registry) -> SecretTable:
     )
 
 
-_BACKEND_CELL_WIDTH = 30
+_BACKEND_CELL_WIDTH = 40
 """Cap for the per-backend identifier columns in the LIST view, so a long
 ``op://`` reference (optionally account-prefixed) or env-var name does not
 blow the table width out. The single-secret DETAIL view is left uncapped."""
