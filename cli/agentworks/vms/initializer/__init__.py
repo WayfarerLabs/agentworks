@@ -44,19 +44,27 @@ from .driver import (
     install_claude_plugins,
     run_initialization,
 )
-from .mise import MISE_ACTIVATE_LINES
+from .mise import (
+    MISE_ACTIVATE_LINES,
+    MISE_GPG_KEY_PATH,
+    MISE_GPG_KEY_URL,
+    MISE_SOURCE_FILE,
+    MISE_SOURCE_LINE,
+)
 from .packages import (
     _configure_apt_sources,
     _install_apt_packages,
     _run_install_commands,
 )
 from .shell_env import (
+    AGENTWORKS_IDENTITY_PROFILE_PATH,
     AGENTWORKS_PROFILE,
     AGENTWORKS_RC,
     AGENTWORKS_SSHD_ACCEPT_ENV_PATH,
     AGENTWORKS_SUDOERS_CONSOLE_SETENV_PATH,
     AGENTWORKS_SUDOERS_ENV_KEEP_PATH,
     AGENTWORKS_SUDOERS_ENV_KEEP_PATTERNS,
+    AGENTWORKS_ZPROFILE_PATH,
     SKEL_BASHRC_PATH,
     SKEL_ZSHRC_PATH,
     _ensure_agentworks_files_sourced,
@@ -71,14 +79,20 @@ from .shell_env import (
 from .ssh_keys import AUTHORIZED_KEYS_HEADER, _apply_sve_mask, _preserve_ssh_host_keys, _reconcile_authorized_keys
 
 __all__ = [
+    "AGENTWORKS_IDENTITY_PROFILE_PATH",
     "AGENTWORKS_PROFILE",
     "AGENTWORKS_RC",
     "AGENTWORKS_SSHD_ACCEPT_ENV_PATH",
     "AGENTWORKS_SUDOERS_CONSOLE_SETENV_PATH",
     "AGENTWORKS_SUDOERS_ENV_KEEP_PATH",
     "AGENTWORKS_SUDOERS_ENV_KEEP_PATTERNS",
+    "AGENTWORKS_ZPROFILE_PATH",
     "AUTHORIZED_KEYS_HEADER",
     "MISE_ACTIVATE_LINES",
+    "MISE_GPG_KEY_PATH",
+    "MISE_GPG_KEY_URL",
+    "MISE_SOURCE_FILE",
+    "MISE_SOURCE_LINE",
     "SKEL_BASHRC_PATH",
     "SKEL_ZSHRC_PATH",
     "_apply_sve_mask",
