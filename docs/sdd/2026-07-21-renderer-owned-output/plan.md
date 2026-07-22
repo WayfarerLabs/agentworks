@@ -212,15 +212,22 @@ Status-column coloring is explicitly deferred to a fast-follow.
 Definition of done: the presentation conventions (sections, level, roles, result-line, color policy)
 live in a permanent home; gates green; SDD locked.
 
-- [ ] Promote the output conventions into a permanent home (the `output.py` module docstring and/or
-      a `docs/` page), so nothing load-bearing depends on this SDD surviving.
-- [ ] Update any existing output/CLI docs and the README to match HEAD; check
-      `always-consider-docs`.
-- [ ] Confirm no impact to `sample-config.toml` (no new settings; palette is fixed) and to
-      completions (no CLI surface change) per the always-consider rules; note the conclusion.
-- [ ] `.cspell.json` additions scoped to the SDD dir if any new vocabulary; else none.
-- [ ] Full lint/type/test gate green from repo root (`./scripts/lint-files.sh`).
-- [ ] Write `locked.md` summarizing the as-built state, the permanent homes, and the deferred status
+- [x] Promote the output conventions into a permanent home: the `output.py` module docstring is
+      rewritten to authoritatively describe the role model, ambient section level,
+      handler-owns-presentation, and color policy (backed by the `Role` enum and the
+      `section`/`result`/`error`/`info`/`detail`/`warn` docstrings). Nothing load-bearing depends on
+      this SDD surviving.
+- [x] Docs synced: `cli/README.md` documents the color convention + `NO_COLOR` (Phase 5). No
+      permanent operator doc describes the output/section shape (the only `output.phase`/`=== ===`
+      references outside this SDD are historical entries in other locked SDDs), so nothing else was
+      stale (`always-consider-docs`).
+- [x] No impact to `sample-config.toml` (no new settings; the palette is fixed and non-configurable
+      by design) and none to completions (no CLI command/flag surface changed; only rendering).
+- [x] `.cspell.json`: SDD-scoped additions cover the SDD vocabulary; the permanent-code vocabulary
+      (`contextvars`, `isatty`, ...) is already accepted by the root config (code lint is green).
+- [x] Full lint/type/test gate green from repo root: `./scripts/lint-files.sh` ok, `ruff check` ok,
+      `mypy` ok (348 files), full suite 2288 passed.
+- [x] Write `locked.md` summarizing the as-built state, the permanent homes, and the deferred status
       fast-follow.
 
 ## Deliberately out of scope (recorded)

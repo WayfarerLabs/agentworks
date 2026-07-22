@@ -1,11 +1,38 @@
 """Output contract between business logic and the presentation layer.
 
-Business logic reports data through the handler (info, detail, warn, progress)
-and signals errors by raising exceptions from the hierarchy below. The
-presentation layer (CLI, web, test) sets the handler implementation and
-catches exceptions.
+Business logic describes *what* it is saying; the handler decides *how* it
+looks. Every line carries a semantic **role**, never baked-in presentation:
 
-Business logic must never import typer, call sys.exit, or format output.
+- ``info`` -> body (a normal step/status line)
+- ``detail`` -> de-emphasized / secondary body (a supporting aside)
+- ``warn`` / ``error`` -> a warning / a failed-outcome line (both on stderr)
+- ``result`` -> a command's terminal outcome line
+- ``section(title)`` -> a header that groups the lines emitted inside its
+  ``with`` block
+
+See :class:`Role` for the full vocabulary. Business logic never formats
+output: it puts no indentation, no ``=== ... ===`` decoration, and no ANSI
+color into a message string, and it must not import typer or call sys.exit.
+Errors are signalled by raising from the exception hierarchy below; the CLI
+entry point catches them and renders them through the ERROR role.
+
+**Section level is ambient.** ``section()`` opens a section whose header
+renders at the current depth and whose body renders one level deeper; the
+depth is carried in a ``contextvars`` variable, so a callee emitting output
+while a caller holds an open section nests automatically, with no output
+handle threaded through the call tree. The level is per-flow (each thread /
+task reads its own); the active handler is a module global. ``result()``
+always renders at level 0 so a command's closing line stays flush-left even
+inside nested sections.
+
+**The handler owns all presentation.** Indentation, header decoration, and
+color are the handler's job, so the same output stream renders as a colored,
+indented terminal transcript (``TyperHandler``), as plain text
+(``_DefaultHandler``), as structured test capture (the test handler), or, in
+future, as web markup, with the business logic unchanged. Set the handler
+once at the entry point via :func:`set_handler`. Color lives only in the
+terminal handler and only on an interactive TTY (suppressed under
+``NO_COLOR``, on a pipe/redirect, and under ``--non-interactive``).
 """
 
 from __future__ import annotations
