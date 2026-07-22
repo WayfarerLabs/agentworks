@@ -29,9 +29,10 @@ workloads:
 - Agentic workloads (Claude Code, etc.) can be run as persistent **sessions** including an
   associated tmux session, which can be attached to and detached from as needed.
 - Each session launches a **harness** that knows how to run a particular tool (e.g. a Claude Code
-  instance, or just a plain login shell). The harness owns starting/restart semantics (to pick up
-  exactly where you left off), authentication, target environment validation, and any other
-  tool-specific behavior.
+  instance, or just a plain login shell). The harness owns start/restart semantics (to pick up
+  exactly where you left off) as well as validating the target environment for its tooling.
+  Additionally, since each harness is tightly coupled to its target tooling, it is the perfect place
+  to grow further tool-specific functionality (authentication handling, deeper integrations, ...).
 - Sessions can be organized into **named consoles**: curated tmux views that organize active
   sessions along with optional extra shell panes.
 - Both **config** and **secrets** (together with **secret backends**) can be managed and securely
@@ -120,7 +121,7 @@ exclusive. A good platform should make it possible and straightforward to have b
 
 ## Core Concepts
 
-Agentworks organizes work into six core concepts. Each maps to a group of commands documented in the
+Agentworks organizes work into six core concepts. Most map to a group of commands documented in the
 [CLI reference](cli/README.md#commands):
 
 ### The Operator - The Person in Control
@@ -217,7 +218,8 @@ Consoles are purely an organizing layer: they reference sessions without owning 
 appear in any number of consoles (or none), and adding or removing it from a console never affects
 the session itself. This lets the operator slice the same pool of running work into whatever
 task-focused views make sense at a given moment (e.g. one console per feature, incident, or review)
-without disturbing anything that's running.
+without disturbing anything that's running. See [Named Consoles](cli/README.md#named-consoles) in
+the CLI reference for the command surface and semantics.
 
 ## Key Principles
 
