@@ -86,6 +86,7 @@ def _session(
         admin=admin,
         workspace=workspace,
         vm=vm_node,
+        registry=cast("Registry", object()),
     )
 
 
@@ -283,6 +284,7 @@ def test_session_create_graph_shares_one_vm_node(db: Database) -> None:
         admin=False,
         workspace=workspace,
         vm=vm,
+        registry=cast("Registry", object()),
     )
 
     nodes = walk(session)
@@ -577,6 +579,7 @@ def test_live_session_probes_its_realized_agent_at_preflight(
         agent=agent,
         workspace=_live_workspace(db, vm),
         vm=vm,
+        registry=cast("Registry", object()),
     )
     probe = _Probe()
     session.preflight(_ctx(agent_target=probe))
@@ -593,6 +596,7 @@ def test_live_session_admin_mode_comes_from_the_row(db: Database) -> None:
         agent=None,
         workspace=_live_workspace(db, vm),
         vm=vm,
+        registry=cast("Registry", object()),
     )
     probe = _Probe(missing={"claude"})
     with pytest.raises(StateError, match="for VM 'box'"):
@@ -615,6 +619,7 @@ def test_live_session_agent_row_with_no_agent_node_is_loud(
             agent=None,
             workspace=_live_workspace(db, vm),
             vm=vm,
+            registry=cast("Registry", object()),
         )
 
 
@@ -631,6 +636,7 @@ def test_live_session_admin_row_with_an_agent_node_is_loud(
             agent=_live_agent(db, vm),
             workspace=_live_workspace(db, vm),
             vm=vm,
+            registry=cast("Registry", object()),
         )
 
 
@@ -645,6 +651,7 @@ def test_live_session_agent_name_mismatch_is_loud(db: Database) -> None:
             agent=_live_agent(db, vm, name="other"),
             workspace=_live_workspace(db, vm),
             vm=vm,
+            registry=cast("Registry", object()),
         )
 
 

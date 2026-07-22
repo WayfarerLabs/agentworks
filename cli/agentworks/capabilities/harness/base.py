@@ -30,6 +30,7 @@ if TYPE_CHECKING:
     from collections.abc import Mapping
 
     from agentworks.capabilities.base import OperationScope, RunContext
+    from agentworks.resources.reference import ConfigReference
     from agentworks.transports import Transport
 
     # Structural, TYPE_CHECKING-only: the harness satisfies Readiness and
@@ -179,6 +180,16 @@ class Harness(Capability):
         secret-declaring harness.
         """
         return tuple(ref.name for ref in self._secret_refs)
+
+    def config_secret_refs(self) -> tuple[ConfigReference, ...]:
+        """The full secret-kind config references (name AND usage) this
+        harness declared, for the holding node to run central
+        resolvability prediction over at preflight (``secret_refs`` is the
+        names-only view of the same set). Sourceless by design: the
+        session template hosting the harness config is the implicit
+        source, so the node runs prediction without re-attaching it.
+        """
+        return self._secret_refs
 
     @classmethod
     def merge_config(

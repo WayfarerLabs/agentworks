@@ -27,12 +27,12 @@ from typing import TYPE_CHECKING, ClassVar
 
 from agentworks.capabilities.harness.base import Harness, require_commands
 from agentworks.errors import ConfigError, StateError
-from agentworks.resources.reference import ConfigReference
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
 
     from agentworks.capabilities.base import RunContext
+    from agentworks.resources.reference import ConfigReference
     from agentworks.transports import Transport
 
 _CLAUDE_CODE_FIELDS = {
@@ -137,6 +137,12 @@ class ClaudeCodeHarness(Harness):
                 f"oauth_token_secret."
             )
         if pass_oauth_token is True:
+            # Function-local runtime import (the layering pattern the other
+            # secret-declaring capabilities use, e.g. proxmox): importing
+            # the resources package at module load would pull sessions in
+            # transitively and trip the capability-layer import guard.
+            from agentworks.resources.reference import ConfigReference
+
             return (
                 ConfigReference(
                     kind="secret",

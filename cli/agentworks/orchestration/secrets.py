@@ -33,7 +33,7 @@ if TYPE_CHECKING:
     from collections.abc import Iterable, Mapping
 
     from agentworks.config import Config
-    from agentworks.resources.reference import ResourceReference
+    from agentworks.resources.reference import ConfigReference, ResourceReference
     from agentworks.resources.registry import Registry
     from agentworks.secrets.base import SecretDecl
     from agentworks.secrets.resolve import ActiveBackend
@@ -113,7 +113,7 @@ def predict_resolution(
 
 def require_predicted_refs(
     owner: str,
-    refs: Iterable[ResourceReference],
+    refs: Iterable[ConfigReference | ResourceReference],
     config: Config | None,
     registry: Registry,
 ) -> None:
@@ -126,6 +126,12 @@ def require_predicted_refs(
     error framing the per-instance prediction produced; ``owner`` is
     the node's ``<kind>/<name>`` key, which IS the instance's owner
     display.
+
+    ``refs`` need only carry ``name`` and ``usage``: the git-credential
+    and vm nodes pass source-bearing ``ResourceReference``s; the session
+    node passes the harness's sourceless ``ConfigReference``s directly
+    (the source is implicit, it is the session template hosting the
+    harness config).
     """
     from agentworks.errors import ConfigError
     from agentworks.secrets.resolve import active_backends

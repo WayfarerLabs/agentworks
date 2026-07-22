@@ -43,7 +43,8 @@ if TYPE_CHECKING:
         PendingAgentNode,
     )
     from agentworks.agents.templates import ResolvedAgentTemplate
-    from agentworks.capabilities.base import OperationScope
+    from agentworks.capabilities.base import OperationScope, RunContext
+    from agentworks.capabilities.harness import Harness
     from agentworks.config import Config
     from agentworks.db import AgentRow, Database, SessionRow, VMRow, WorkspaceRow
     from agentworks.env import EnvEntry
@@ -913,6 +914,37 @@ def _resolve_session_env(
     )
 
 
+def _merge_harness_env(
+    session_env: dict[str, str],
+    *,
+    harness: Harness,
+    ctx: RunContext,
+    session_name: str,
+) -> dict[str, str]:
+    """Merge the harness's env contributions over the composed session
+    env, in place, and return it. The ONE shared helper both launch sites
+    (create and restart) route through.
+
+    Precedence (operator ruling, issue #220): a harness contribution is
+    the more specific, workload-owned setting, so it WINS a key collision
+    with an operator env directive; the collision emits a warning naming
+    the variable and the winning source. The contributions are
+    value-level (already resolved via ``ctx.secret``), so this merge
+    touches neither the env-chain resolve nor ``compose_env``'s drift
+    guard. Identity vars (``AGENTWORKS_*``) need no carve-out: a harness
+    contributes none, so the merge never shadows one.
+    """
+    for key, value in harness.env_contributions(ctx).items():
+        if key in session_env:
+            output.warn(
+                f"session '{session_name}': the '{harness.name}' harness "
+                f"sets {key}, overriding the operator-configured env value "
+                f"for it."
+            )
+        session_env[key] = value
+    return session_env
+
+
 # -- Liveness checks -------------------------------------------------------
 
 
@@ -1649,6 +1681,7 @@ def create_session(
         admin=agent_name is None,
         workspace=workspace_node,
         vm=vm_node,
+        registry=registry,
     )
     nodes = walk(session_node)
 
@@ -1982,6 +2015,16 @@ def create_session(
                         mode=mode,
                         agent_name=resolved_agent_name,
                         linux_user=linux_user,
+                    )
+                    # Merge the harness's env contributions (e.g. claude-code's
+                    # CLAUDE_CODE_OAUTH_TOKEN) over the composed env, reusing the
+                    # op-start ctx assembled for the start op above so the token
+                    # value comes from the same graph-scoped secrets.
+                    _merge_harness_env(
+                        session_env,
+                        harness=session_node.harness,
+                        ctx=start_ctx,
+                        session_name=name,
                     )
                     # Pick the SSH transport for tmux operations:
                     # - admin sessions: admin's run_command (unchanged)
@@ -2350,6 +2393,7 @@ def restart_session(
         agent=agent_node,
         workspace=workspace_node,
         vm=vm_node,
+        registry=registry,
     )
     nodes = walk(session_node)
     # The walk supplies the boundary union (the site's config secrets;
@@ -2599,6 +2643,15 @@ def restart_session(
                 mode=SessionMode(session.mode),
                 agent_name=session.agent_name,
                 linux_user=linux_user,
+            )
+            # Merge the harness's env contributions over the composed env,
+            # reusing the post-kill restart ctx so the token value comes from
+            # the graph-scoped secrets (NOT the env-chain secret_values).
+            _merge_harness_env(
+                session_env,
+                harness=session_node.harness,
+                ctx=restart_ctx,
+                session_name=name,
             )
 
             try:
