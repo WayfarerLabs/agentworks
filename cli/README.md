@@ -102,7 +102,7 @@ exits with the conventional SIGINT exit code (130).
 
 ## Commands
 
-### Top-level
+### Top-Level
 
 | Command                    | Description                              |
 | -------------------------- | ---------------------------------------- |
@@ -279,7 +279,7 @@ confirmation prompt.
 agent (e.g. from VS Code Remote-SSH or `scp`), use the `awagent--<agent>` alias documented under
 [Direct SSH aliases](#direct-ssh-aliases).
 
-### Direct SSH aliases
+### Direct SSH Aliases
 
 Agentworks maintains operator-side SSH config entries for both VMs and agents under
 `~/.ssh/config.d/agentworks.conf` (or inline in `~/.ssh/config` if `ssh_config_dir = false`):
@@ -351,7 +351,7 @@ has no other sessions and no explicit grants.
 
 <!-- Linked from the top-level README; rename only if you also update README.md. -->
 
-### Named consoles
+### Named Consoles
 
 Named consoles are persistent, curated tmux views over sessions on a VM. Each console is its own
 tmux session (`aw-console-<name>`) containing one window per included session, plus any extra shell
@@ -432,7 +432,7 @@ with sessions, at different scopes:
 | `console`                 | Curated subset across workspaces | `aw-console-<name>` | Operator's machine |
 | `vm console` (deprecated) | All sessions on the VM           | `vm-console`        | Operator's machine |
 
-#### Session tmux sessions
+#### Session tmux Sessions
 
 Each session gets a locked-down tmux session using the session name directly as the tmux session
 name. The user's `~/.tmux.conf` (customizable via dotfiles) is loaded first so that familiar
@@ -442,13 +442,12 @@ creation, session management, and the command prompt are selectively unbound.
 Agent-mode sessions run on a per-agent tmux socket so the agent's shell connects directly to the
 tmux pane PTY. The socket path is persisted in the database.
 
-#### Named console
+#### Named Console
 
-`console attach <name>` creates or attaches to the `aw-console-<name>` tmux session. Membership and
-per-session shell layout are stored in the database. Each member session becomes a window running
-the same wrapper used by the VM console, plus a configurable number of extra shell panes (default
-user = session's agent user, default cwd = workspace root; override per pane with `--cwd` /
-`--admin` on `console add-shell`).
+`console attach <name>` creates or attaches to the `aw-console-<name>` tmux session. Each member
+session becomes a window running the same wrapper used by the VM console, plus a configurable number
+of extra shell panes (default user = session's agent user, default cwd = workspace root; override
+per pane with `--cwd` / `--admin` on `console add-shell`).
 
 ```text
 aw-console-backend
@@ -457,14 +456,13 @@ aw-console-backend
   Window 3: docs                       attached session only
 ```
 
-The tmux session is built lazily on first `attach` (or rebuilt with `--recreate`). Adding or
-removing sessions/shells while the console is attached updates tmux immediately; when offline, only
-the DB is touched and changes appear on next attach. The mutation commands (`add-sessions`,
-`remove-sessions`, `reorder-sessions`, `add-shell`) never auto-boot the VM; the explicit
-attach/repair commands (`attach`, `restore-session`) do start a stopped VM, since their job is to
-bring live state up.
+Membership and per-session shell layout are stored in the database; see
+[Named Consoles](#named-consoles) above for the lazy-build and live-update semantics. Of note here
+is the VM-boot behavior: the mutation commands (`add-sessions`, `remove-sessions`,
+`reorder-sessions`, `add-shell`) never auto-boot the VM, whereas the explicit attach/repair commands
+(`attach`, `restore-session`) do start a stopped VM, since their job is to bring live state up.
 
-#### Workspace tmuxinator config
+#### Workspace tmuxinator Config
 
 Workspaces with tmuxinator enabled in their template (the default) carry a tmuxinator config
 (`.tmuxinator.yml` in the workspace root, symlinked as `~/.config/tmuxinator/ws-<name>-console.yml`)
@@ -473,7 +471,7 @@ regenerated whenever sessions change. The `agw workspace console` command that a
 removed (superseded by named consoles); the config remains usable directly on the VM via
 `tmuxinator start ws-<name>-console` (e.g. inside VS Code's integrated terminal).
 
-#### VM console (deprecated)
+#### VM Console (deprecated)
 
 `vm console` creates or attaches to the `vm-console` session, which spans all sessions on the VM.
 Built dynamically (not via tmuxinator). Superseded by named consoles, which let you curate which
@@ -485,7 +483,7 @@ future release.
 `vm shell` and `agent shell` open plain login shells with no tmux (optionally rooted in a workspace
 via `--workspace <ws>`). Use these when you just need a terminal without the console structure.
 
-#### Key behaviors
+#### Key Behaviors
 
 - **Direct attach** (`session attach`): the user's prefix key, detach, copy mode, and scroll all
   work normally. Status bar is hidden since there is only one pane.
