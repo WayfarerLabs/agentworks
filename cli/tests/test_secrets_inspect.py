@@ -1,14 +1,25 @@
-"""Tests for ``agentworks.secrets.inspect`` -- the table builder behind
+"""Tests for ``agentworks.secrets.inspect``: the table builder behind
 ``agw secret list``."""
 
 from __future__ import annotations
 
 from pathlib import Path
 from textwrap import dedent
+from typing import TYPE_CHECKING
 
 from agentworks.bootstrap import build_registry
 from agentworks.config import load_config
-from agentworks.secrets.inspect import build_secret_table
+from agentworks.secrets.inspect import (
+    _BACKEND_CELL_WIDTH,
+    SecretCell,
+    SecretRow,
+    SecretTable,
+    build_secret_table,
+    render_secret_table,
+)
+
+if TYPE_CHECKING:
+    from tests.conftest import CapturedOutput
 
 
 def _build_table(cfg_file: Path):
@@ -254,3 +265,45 @@ def test_empty_backend_chain_yields_no_columns(tmp_path: Path) -> None:
     # there are no backend columns).
     assert all(r.cells == () for r in table.rows)
     assert table.operator_count == 0
+
+
+def test_render_secret_table_caps_long_backend_identifier(
+    captured_output: CapturedOutput,
+) -> None:
+    """The LIST view truncates a long backend identifier to
+    ``_BACKEND_CELL_WIDTH`` with a trailing ``...`` so it cannot blow the
+    table width out. Built directly (no op wiring): the account-first
+    onepassword identifier here comfortably exceeds the cap."""
+    long_ident = "my.1password.com: op://Employee/Registry/token"
+    assert len(long_ident) > _BACKEND_CELL_WIDTH
+    table = SecretTable(
+        backends=("onepassword",),
+        rows=(
+            SecretRow(
+                name="reg",
+                description="registry token",
+                cells=(
+                    SecretCell(
+                        backend="onepassword",
+                        would_attempt=True,
+                        identifier=long_ident,
+                    ),
+                ),
+            ),
+        ),
+        operator_count=1,
+        auto_count=0,
+    )
+    render_secret_table(table)
+
+    truncated = long_ident[: _BACKEND_CELL_WIDTH - 3] + "..."
+    assert len(truncated) == _BACKEND_CELL_WIDTH
+    joined = "\n".join(captured_output.info)
+    # The identifier appears truncated, and the full form never does, so the
+    # onepassword column width is bounded by ``_BACKEND_CELL_WIDTH``.
+    assert truncated in joined
+    assert long_ident not in joined
+    data_line = next(
+        line for line in captured_output.info if line.startswith("reg ")
+    )
+    assert truncated in data_line

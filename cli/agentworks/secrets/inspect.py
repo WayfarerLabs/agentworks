@@ -132,6 +132,12 @@ def build_secret_table(config: Config, registry: Registry) -> SecretTable:
     )
 
 
+_BACKEND_CELL_WIDTH = 40
+"""Cap for the per-backend identifier columns in the LIST view, so a long
+``op://`` reference (optionally account-prefixed) or env-var name does not
+blow the table width out. The single-secret DETAIL view is left uncapped."""
+
+
 def render_secret_table(table: SecretTable) -> None:
     """Emit the table as operator-friendly output.
 
@@ -178,7 +184,12 @@ def render_secret_table(table: SecretTable) -> None:
             if not cell.would_attempt:
                 cells.append("disabled")
             elif cell.identifier is not None:
-                cells.append(cell.identifier)
+                # Cap the identifier column so a long op:// ref (or
+                # account-prefixed one) does not blow the table out. The
+                # DETAIL view keeps the full identifier.
+                cells.append(
+                    output.truncate(cell.identifier, _BACKEND_CELL_WIDTH)
+                )
             else:
                 cells.append("enabled")
         rendered.append(tuple(cells))

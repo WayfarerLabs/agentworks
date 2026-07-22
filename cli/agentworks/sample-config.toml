@@ -147,21 +147,41 @@ ssh_private_key = "~/.ssh/id_ed25519"        # required: used for SSH connection
 #description = "OpenAI API key"
 #backend_mappings.env-var = "OPENAI_API_KEY"    # override default convention
 
+#[secrets.registry-password]
+#description = "container registry password"
+# onepassword needs an explicit per-secret address (no name-based default).
+# The address is the `op://vault/item/field` reference 1Password's
+# "Copy Secret Reference" produces (an optional `.../section/field` segment
+# is allowed). This uses op's signed-in account (or the one named by
+# OP_ACCOUNT):
+#backend_mappings.onepassword = "op://Work/registry/password"
+# To pin a specific account, use the table form: `reference` is the same
+# op:// string, `account` is an op account selector (shorthand, sign-in
+# address, account ID, or user ID). Only needed to override the default
+# account:
+#   backend_mappings.onepassword = { account = "my.1password.com", reference = "op://Work/registry/password" }
+
 # Backends are activated by listing them in `[secret_config].backends` in
 # precedence order. The built-in backends ship with agentworks:
-#   env-var -- reads from process env. Default convention is
-#              AW_SECRET_<UPPER_SNAKE_CASE>, so secret "npm-token" reads from
-#              AW_SECRET_NPM_TOKEN unless overridden via
-#              `[secrets.<name>].backend_mappings.env-var`.
-#   prompt  -- interactive prompt. Always applies; you are never asked for
-#              the same secret twice in one command, and all prompting
-#              happens before the command starts changing anything.
+#   env-var     : reads from process env. Default convention is
+#                 AW_SECRET_<UPPER_SNAKE_CASE>, so secret "npm-token" reads
+#                 from AW_SECRET_NPM_TOKEN unless overridden via
+#                 `[secrets.<name>].backend_mappings.env-var`.
+#   onepassword : reads via the 1Password CLI (`op read op://...`). Requires
+#                 a per-secret `backend_mappings.onepassword` address (string
+#                 or table, above); unmapped secrets are skipped. `op` must be
+#                 able to read at command time (the 1Password app's CLI
+#                 integration enabled, or `op signin`); a mapping that points
+#                 at a missing item is a hard error, not a fall-through.
+#   prompt      : interactive prompt. Always applies; you are never asked for
+#                 the same secret twice in one command, and all prompting
+#                 happens before the command starts changing anything.
 # Backends are registered code capabilities (agw resource list --kind
 # secret-backend); their names are the valid chain entries here. (The old
 # `[secret_backends.*]` TOML sections are deprecated no-ops.)
 
 #[secret_config]
-#backends = ["env-var", "prompt"]    # the default chain; explicit configuration overrides.
+#backends = ["env-var", "onepassword", "prompt"]    # example chain; the default is ["env-var", "prompt"].
 # Declared backends absent from this list are dormant. Order is resolution
 # precedence: the first backend that produces a value wins. An explicit
 # empty list `backends = []` disables resolution entirely.

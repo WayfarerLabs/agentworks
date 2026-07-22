@@ -31,8 +31,9 @@ class SecretDecl(DeclaredResource):
     forms per the env-and-secrets SDD:
 
     - ``str``: backend's identifier for this secret (env var name, op:// URI, etc.).
-    - ``dict[str, object]``: structured identifier (for backends whose ID has
-      multiple fields, e.g. 1Password ``{vault, item, field}``).
+    - ``dict[str, object]``: structured identifier (for backends whose ID
+      carries more than the bare reference, e.g. 1Password's
+      ``{account, reference}`` for pinning a specific account).
     - ``False``: opt out; skip this backend for this secret regardless of any
       default convention the backend would otherwise apply.
     - key absent: use the backend's default convention if it has one, else

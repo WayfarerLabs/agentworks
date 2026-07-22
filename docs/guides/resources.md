@@ -232,24 +232,29 @@ policy is per kind:
   a sibling site instead. Like every vm-site they register on every host and disable themselves
   where this host lacks what they need (`agw resource list` marks the row; `describe` and
   `agw doctor` carry the reason); using a disabled site is an error naming the requirement.
-- **Secret backends** (`env-var`, `prompt`), **VM platforms** (`lima`, `wsl2`, `azure-vm`,
-  `proxmox`), and **session harnesses** (`shell`, `claude-code`): registered capabilities, shown as
-  read-only rows. You cannot declare or override them; secrets customize per secret via
-  `backend_mappings`, platforms configure per site via `platform_config`, and harnesses configure
-  per session-template via `harness_config`. A platform whose host requirements are not met
-  publishes no row at all: `agw doctor` lists installed-but-disabled platforms with the reason, and
-  sites referencing one self-disable rather than erroring.
+- **Secret backends** (`env-var`, `onepassword`, `prompt`), **VM platforms** (`lima`, `wsl2`,
+  `azure-vm`, `proxmox`), and **session harnesses** (`shell`, `claude-code`): registered
+  capabilities, shown as read-only rows. You cannot declare or override them; secrets customize per
+  secret via `backend_mappings`, platforms configure per site via `platform_config`, and harnesses
+  configure per session-template via `harness_config`. A platform whose host requirements are not
+  met publishes no row at all: `agw doctor` lists installed-but-disabled platforms with the reason,
+  and sites referencing one self-disable rather than erroring.
 
 ## Secrets: backends and the chain
 
 Two layers, one rule each:
 
 - A **secret backend** is a capability resource: a read-only `secret-backend` row whose
-  implementation is registered code (`env-var`, `prompt`; later `onepassword`, ...). You cannot
-  declare one -- the app (and later plugins) registers them -- but they list and describe like every
-  other resource. Per-secret behavior -- identifier overrides, structured store addressing like
-  `{ vault = "Work", item = "npm" }`, and opt-outs -- lives in each secret's
-  `backend_mappings.<backend>`.
+  implementation is registered code (`env-var`, `prompt`, `onepassword`; later plugins, ...). You
+  cannot declare one (the app, and later plugins, registers them), but they list and describe like
+  every other resource. Per-secret behavior (identifier overrides, structured store addressing like
+  `{ account = "my.1password.com", reference = "op://Work/npm/password" }`, and opt-outs) lives in
+  each secret's `backend_mappings.<backend>`. The `onepassword` backend reads via the 1Password CLI
+  (`op read op://vault/item/field`); it needs a per-secret `backend_mappings.onepassword` address in
+  one of two forms: a bare `op://vault/item/field` string (using op's default account, or
+  `OP_ACCOUNT`), or a `{ account, reference }` table when a specific account must be pinned. `op`
+  must be able to read at command time, meaning either the 1Password app's CLI integration is
+  enabled or you have run `op signin`.
 - The **chain** is a setting: `[secret_config].backends` in `config.toml` lists the active backends
   in precedence order (default `["env-var", "prompt"]`). Registered backends absent from the chain
   are dormant.

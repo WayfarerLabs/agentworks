@@ -54,15 +54,29 @@ def test_render_table_exact_cap_cell_not_truncated() -> None:
     assert lines[2] == exact
 
 
-def test_truncate_cell_degenerate_widths_never_overflow() -> None:
+def test_truncate_returns_fitting_text_unchanged() -> None:
+    # Text at or under the width is returned as-is (no ellipsis).
+    assert output.truncate("abcde", 5) == "abcde"
+    assert output.truncate("abc", 5) == "abc"
+
+
+def test_truncate_overflow_is_exactly_width_with_ellipsis() -> None:
+    # An overflowing string becomes text[: width - 3] + "..." and is
+    # exactly ``width`` characters long.
+    result = output.truncate("abcdefghij", 6)
+    assert result == "abc..."
+    assert len(result) == 6
+
+
+def test_truncate_degenerate_widths_never_overflow() -> None:
     # width <= 3 cannot fit the "..." marker; hard-truncate instead of
     # producing a negative slice (which would over-long the cell).
-    assert output._truncate_cell("abcde", 3) == "abc"
-    assert output._truncate_cell("abcde", 2) == "ab"
-    assert output._truncate_cell("abcde", 1) == "a"
-    assert output._truncate_cell("abcde", 0) == ""
+    assert output.truncate("abcde", 3) == "abc"
+    assert output.truncate("abcde", 2) == "ab"
+    assert output.truncate("abcde", 1) == "a"
+    assert output.truncate("abcde", 0) == ""
     for width in range(0, 6):
-        assert len(output._truncate_cell("abcde", width)) <= width
+        assert len(output.truncate("abcde", width)) <= width
 
 
 def test_render_table_degenerate_max_col_width() -> None:

@@ -13,6 +13,7 @@ from pathlib import Path
 from textwrap import dedent
 
 from agentworks.resources import KIND_REGISTRY
+from agentworks.secrets import SECRET_BACKEND_REGISTRY
 
 
 def _write_base(cfg_path: Path) -> None:
@@ -80,13 +81,14 @@ def test_table_shows_categories_and_counts(tmp_path: Path, monkeypatch) -> None:
     assert result.exit_code == 0, result.output
     out = result.output
     assert "KIND" in out and "CATEGORY" in out and "RESOURCES" in out
-    # The capability rows carry their classifier and real counts (both
+    # The capability rows carry their classifier and real counts (all
     # built-in backends registered).
     (backend_line,) = [
         line for line in out.splitlines() if line.startswith("secret-backend ")
     ]
     assert backend_line.split()[1] == "capability"
-    assert backend_line.split()[2] == "2"  # both built-in backends
+    # env-var, prompt, onepassword.
+    assert backend_line.split()[2] == str(len(SECRET_BACKEND_REGISTRY))
     (secret_line,) = [
         line
         for line in out.splitlines()
