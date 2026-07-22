@@ -597,8 +597,8 @@ def test_shell_vm_passes_workspace_scope_to_secret_target(
     """``vm shell --workspace`` must include workspace-template env in
     the ``SecretTarget`` so workspace-scope secrets get eager-resolved
     before SSH. Mirrors ``test_shell_agent_passes_workspace_scope_to_
-    secret_target`` (in test_secrets_eager_resolve.py) on the admin
-    side."""
+    secret_target`` (in test_secrets_eager_resolve_vm_agent.py) on the
+    admin side."""
     from agentworks.vms import manager as vm_manager
 
     db = _seed_db(tmp_path)
