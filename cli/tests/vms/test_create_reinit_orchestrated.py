@@ -9,6 +9,7 @@ surfaces the imperative oracle tests use.
 
 from __future__ import annotations
 
+import contextlib
 from types import SimpleNamespace
 from typing import TYPE_CHECKING
 
@@ -192,15 +193,24 @@ def test_create_rollback_failure_warns_and_never_masks(
     assert "db locked" in warning  # chains the cause
 
 
+@contextlib.contextmanager
+def _noop_hold(self: object, vm: object, *, config: object | None = None):
+    """Stand-in for ``platform.vm_active``: create_vm enters this into its
+    ExitStack across both init phases; the lima default is already a
+    nullcontext, but pinning it keeps these tests off any real hold."""
+    yield
+
+
 def test_create_init_failure_keeps_the_row(
     make_config,
     db: Database,
     monkeypatch: pytest.MonkeyPatch,
     captured_output,
 ) -> None:
-    """The non-rollbackable window: once provisioning succeeded, an
-    initialization failure keeps the VM (debuggable, reinit-able),
-    exactly as before."""
+    """The non-rollbackable window: once provisioning (platform create +
+    Phase A) succeeded, a Phase B initialization failure keeps the VM
+    (debuggable, reinit-able) and maps to an ExternalError with reinit
+    guidance."""
     from agentworks.capabilities.vm_platform.lima import LimaPlatform
     from agentworks.errors import ExternalError
 
@@ -213,14 +223,188 @@ def test_create_init_failure_keeps_the_row(
         )
 
     monkeypatch.setattr(LimaPlatform, "create", _fake_create)
+    monkeypatch.setattr(LimaPlatform, "vm_active", _noop_hold)
+    # Phase A succeeds (its steps are exercised elsewhere); Phase B explodes.
+    monkeypatch.setattr(
+        vm_manager,
+        "bootstrap_vm",
+        lambda *a, **k: (SimpleNamespace(), SimpleNamespace(), "/home/agentworks"),
+    )
 
     def _init_boom(*a: object, **k: object) -> None:
         raise RuntimeError("init exploded")
 
-    monkeypatch.setattr(vm_manager, "initialize_vm", _init_boom)
+    monkeypatch.setattr(vm_manager, "run_initialization", _init_boom)
     with pytest.raises(ExternalError, match="init exploded"):
         vm_manager.create_vm(db, make_config(), name="kvm")
     assert db.get_vm("kvm") is not None
+
+
+def test_create_phase_a_failure_maps_to_provisioning_error(
+    make_config,
+    db: Database,
+    monkeypatch: pytest.MonkeyPatch,
+    captured_output,
+) -> None:
+    """A Phase A (provisioning bootstrap/connectivity) failure marks the VM
+    provisioning 'failed', maps to a ProvisioningError with delete guidance,
+    keeps the row (past the platform-create unwind window), and never reaches
+    Phase B."""
+    from agentworks.capabilities.vm_platform.lima import LimaPlatform
+    from agentworks.db import ProvisioningStatus
+    from agentworks.errors import ProvisioningError
+
+    def _fake_create(self: LimaPlatform, request: object, ctx: object) -> ProvisionResult:
+        return ProvisionResult(
+            native_transport=SimpleNamespace(),  # type: ignore[arg-type]
+            platform_metadata={},
+            bootstrap_complete=True,
+            tailscale_ip="100.64.0.7",
+        )
+
+    monkeypatch.setattr(LimaPlatform, "create", _fake_create)
+    monkeypatch.setattr(LimaPlatform, "vm_active", _noop_hold)
+
+    def _boom_bootstrap(db_: Database, config_: object, tmpl: object, vm_name: str, *a: object, **k: object) -> None:
+        # Mirror the real bootstrap_vm's fatal path: mark provisioning
+        # failed, then raise for create_vm's mapping to pick up.
+        db_.update_vm_provisioning_status(vm_name, ProvisioningStatus.FAILED)
+        raise RuntimeError("bootstrap exploded")
+
+    monkeypatch.setattr(vm_manager, "bootstrap_vm", _boom_bootstrap)
+
+    def _no_phase_b(*a: object, **k: object) -> None:
+        raise AssertionError("Phase B ran despite a Phase A failure")
+
+    monkeypatch.setattr(vm_manager, "run_initialization", _no_phase_b)
+
+    with pytest.raises(ProvisioningError, match="bootstrap exploded") as exc:
+        vm_manager.create_vm(db, make_config(), name="fvm")
+    assert "vm delete fvm" in (exc.value.hint or "")
+    row = db.get_vm("fvm")
+    assert row is not None  # kept: past the unwind window
+    assert row.provisioning_status == ProvisioningStatus.FAILED.value
+
+
+def test_create_phase_a_sync_failure_is_non_fatal(
+    make_config,
+    db: Database,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    captured_output,
+) -> None:
+    """A local SSH-config write failure at the end of Phase A is non-fatal:
+    the bootstrapped VM is reachable, so it is NOT marked FAILED (it stays
+    reinit-able), Phase B still runs, and create completes with a warning
+    rather than raising. Only the bootstrap/verify is fatal to provisioning."""
+    import agentworks.ssh_config as ssh_config_mod
+    import agentworks.vms.initializer.driver as driver
+    from agentworks.capabilities.vm_platform.lima import LimaPlatform
+    from agentworks.db import ProvisioningStatus
+
+    config = make_config(f'ssh_config = "{tmp_path / "ssh_config"}"\n')
+
+    def _fake_create(self: LimaPlatform, request: object, ctx: object) -> ProvisionResult:
+        return ProvisionResult(
+            native_transport=SimpleNamespace(describe=lambda: "lima:vm", logger=None),  # type: ignore[arg-type]
+            platform_metadata={},
+            bootstrap_complete=True,
+            tailscale_ip="100.64.0.7",
+        )
+
+    monkeypatch.setattr(LimaPlatform, "create", _fake_create)
+    monkeypatch.setattr(LimaPlatform, "vm_active", _noop_hold)
+
+    class _FakeTS:
+        def __init__(self, **kwargs: object) -> None:
+            self.host = kwargs.get("host")
+            self.logger = kwargs.get("logger")
+
+        def run(self, cmd: str, timeout: int | None = None) -> object:
+            return SimpleNamespace(ok=True, stdout="ok", returncode=0)
+
+    monkeypatch.setattr(driver, "SSHTransport", _FakeTS)
+
+    # The SSH-config sync fails (e.g. read-only home) at the end of Phase A
+    # (and again on the post-init re-sync); both sites handle it non-fatally.
+    def _boom_sync(*a: object, **k: object) -> None:
+        raise RuntimeError("read-only home")
+
+    monkeypatch.setattr(ssh_config_mod, "sync_ssh_config", _boom_sync)
+
+    phase_b_ran: list[bool] = []
+    monkeypatch.setattr(vm_manager, "run_initialization", lambda *a, **k: phase_b_ran.append(True))
+
+    # Does not raise: the sync failure is non-fatal.
+    vm_manager.create_vm(db, config, name="svm")
+
+    row = db.get_vm("svm")
+    assert row is not None
+    # Reachable VM stays COMPLETE (not FAILED), so `vm reinit` remains open.
+    assert row.provisioning_status == ProvisioningStatus.COMPLETE.value
+    assert phase_b_ran == [True]  # Phase B ran despite the sync failure
+    assert any("SSH config sync failed" in w for w in captured_output.warnings)
+
+
+def test_create_provisioning_section_ends_with_ssh_config_synced(
+    make_config,
+    db: Database,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    captured_output,
+) -> None:
+    """The Provisioning section now spans platform create + Phase A
+    bootstrap/connectivity, and its last body line is the announced
+    'SSH config synced' (emitted exactly once, from Phase A's real sync; the
+    post-init re-sync is silent). Phase A runs for real here with the
+    Tailscale transport faked; Phase B is a no-op."""
+    import agentworks.vms.initializer.driver as driver
+    from agentworks.capabilities.vm_platform.lima import LimaPlatform
+
+    # Contain the real SSH-config write inside the test's tmp dir.
+    config = make_config(f'ssh_config = "{tmp_path / "ssh_config"}"\n')
+
+    def _fake_create(self: LimaPlatform, request: object, ctx: object) -> ProvisionResult:
+        return ProvisionResult(
+            native_transport=SimpleNamespace(describe=lambda: "lima:vm", logger=None),  # type: ignore[arg-type]
+            platform_metadata={},
+            bootstrap_complete=True,
+            tailscale_ip="100.64.0.7",
+        )
+
+    monkeypatch.setattr(LimaPlatform, "create", _fake_create)
+    monkeypatch.setattr(LimaPlatform, "vm_active", _noop_hold)
+
+    class _FakeTS:
+        """Stand-in for the Tailscale SSHTransport: the verify and the
+        reconnect wait both call ``run`` and it just succeeds."""
+
+        def __init__(self, **kwargs: object) -> None:
+            self.host = kwargs.get("host")
+            self.logger = kwargs.get("logger")
+
+        def run(self, cmd: str, timeout: int | None = None) -> object:
+            return SimpleNamespace(ok=True, stdout="ok", returncode=0)
+
+    monkeypatch.setattr(driver, "SSHTransport", _FakeTS)
+    monkeypatch.setattr(vm_manager, "run_initialization", lambda *a, **k: None)
+
+    vm_manager.create_vm(db, config, name="pvm")
+
+    # Provisioning is a real level-0 section.
+    assert (Role.HEADER, 0, "Provisioning") in captured_output.lines
+    # 'SSH config synced' is a level-1 body line, emitted exactly once.
+    synced = [ln for ln in captured_output.lines if ln == (Role.BODY, 1, "SSH config synced")]
+    assert len(synced) == 1
+    # It is the LAST level-1 body line of the Provisioning section: after the
+    # header, the section's body lines end with the sync (Phase B is faked and
+    # the post-init re-sync is silent, so nothing else at level 1 follows).
+    prov_idx = captured_output.lines.index((Role.HEADER, 0, "Provisioning"))
+    body_l1 = [msg for (role, lvl, msg) in captured_output.lines[prov_idx + 1 :] if role is Role.BODY and lvl == 1]
+    assert body_l1[-1] == "SSH config synced"
+    # The connectivity step reads as a primary (info) step at the section body
+    # level, not a de-emphasized detail.
+    assert "Verifying Tailscale SSH..." in body_l1
 
 
 # -- vm reinit: the orchestrated path ----------------------------------------

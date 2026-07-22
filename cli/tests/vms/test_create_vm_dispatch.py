@@ -81,7 +81,14 @@ def test_create_vm_request_shape_and_row(
         )
 
     monkeypatch.setattr(LimaPlatform, "create", _fake_create)
-    monkeypatch.setattr(vm_manager, "initialize_vm", lambda *a, **k: None)
+    # Phase A / Phase B are faked here: this suite pins the create()
+    # request shape and the persisted row, not the init sequence.
+    monkeypatch.setattr(
+        vm_manager,
+        "bootstrap_vm",
+        lambda *a, **k: (SimpleNamespace(), SimpleNamespace(), "/home/agentworks"),
+    )
+    monkeypatch.setattr(vm_manager, "run_initialization", lambda *a, **k: None)
 
     vm_manager.create_vm(db, config, name="dvm")
 
@@ -139,7 +146,14 @@ def test_create_vm_stores_and_provisions_selected_admin_template(
         )
 
     monkeypatch.setattr(LimaPlatform, "create", _fake_create)
-    monkeypatch.setattr(vm_manager, "initialize_vm", lambda *a, **k: None)
+    # Phase A / Phase B are faked here: this suite pins the create()
+    # request shape and the persisted row, not the init sequence.
+    monkeypatch.setattr(
+        vm_manager,
+        "bootstrap_vm",
+        lambda *a, **k: (SimpleNamespace(), SimpleNamespace(), "/home/agentworks"),
+    )
+    monkeypatch.setattr(vm_manager, "run_initialization", lambda *a, **k: None)
 
     vm_manager.create_vm(db, config, name="wvm", admin_template="work")
 
@@ -237,7 +251,14 @@ def test_create_vm_composes_r11_hostname_with_slug(
         )
 
     monkeypatch.setattr(LimaPlatform, "create", _fake_create)
-    monkeypatch.setattr(vm_manager, "initialize_vm", lambda *a, **k: None)
+    # Phase A / Phase B are faked here: this suite pins the create()
+    # request shape and the persisted row, not the init sequence.
+    monkeypatch.setattr(
+        vm_manager,
+        "bootstrap_vm",
+        lambda *a, **k: (SimpleNamespace(), SimpleNamespace(), "/home/agentworks"),
+    )
+    monkeypatch.setattr(vm_manager, "run_initialization", lambda *a, **k: None)
 
     vm_manager.create_vm(db, config, name="svm")
 

@@ -134,9 +134,11 @@ and the operator-facing command banners that the rest of the codebase calls "pha
   the provisioning transport during initialization instead, and structurally never joins Tailscale
   at create time (its `create()` does not branch on `tailscale_auth_key` at all). **This stage runs
   once, at create.**
-- **Initialization** is `initialize_vm` / `run_initialization` (`agentworks.vms.initializer`) plus
-  VM hardening (`agentworks.vms.hardening`), run over a `Transport` against the created VM. It is
-  platform-agnostic. **It is re-runnable and is exactly what `agw vm reinit` re-runs.**
+- **Initialization** is `run_initialization` (`agentworks.vms.initializer`) plus VM hardening
+  (`agentworks.vms.hardening`), run over a `Transport` against the created VM. It is
+  platform-agnostic. **It is re-runnable and is exactly what `agw vm reinit` re-runs.** (The Phase A
+  bootstrap/connectivity driver `bootstrap_vm` is provisioning, not this stage, and runs only at
+  create.)
 
 `request.tailscale_auth_key` is the seam control: when present, the platform joins Tailscale during
 create-time bootstrap; when `None`, every platform defers the join to initialization.
@@ -294,7 +296,8 @@ A new `Transport` subclass belongs under `cli/tests/transports/` alongside the p
 - `base.py`: the `VMPlatform` ABC, `ProvisionRequest`, `ProvisionResult`.
 - `../base.py`: the `Capability` base and `RunContext`.
 - `bootstrap_script.py`, `cloud_init.py`, `skel.py`: shared create-time payload.
-- `agentworks.vms.initializer`: the initialization driver (`initialize_vm`, `run_initialization`).
+- `agentworks.vms.initializer`: the two-phase init driver (`bootstrap_vm` for Phase A provisioning
+  bootstrap/connectivity, `run_initialization` for Phase B initialization).
 - `agentworks.vms.hardening`: the hardening steps, and the model for idempotent reconciliation that
   reaches existing VMs via `reinit`.
 - `agentworks.vms.sites`: how a `vm-site` binds a platform to config.

@@ -1,8 +1,18 @@
 """The two-phase init driver: Phase A (bootstrap, over the provisioning
 transport, fatal-on-failure) and Phase B (setup, over Tailscale SSH,
-non-fatal-on-failure). ``initialize_vm`` runs both for a freshly
-provisioned VM; ``run_initialization`` runs Phase B alone for
-``vm reinit``.
+non-fatal-on-failure).
+
+Phase A is provisioning: ``bootstrap_vm`` runs it (bootstrap + Tailscale
+connectivity + SSH-config sync) for a freshly provisioned VM and returns
+the Tailscale transport, logger, and home for Phase B. Phase B is
+initialization: ``run_initialization`` runs it, both after ``bootstrap_vm``
+on ``vm create`` and standalone on ``vm reinit``.
+
+``create_vm`` (in ``vms.manager.lifecycle``) drives ``bootstrap_vm`` inside
+its ``Provisioning`` output section and ``run_initialization`` after it, so
+the phase boundary matches the section boundary; it also owns the keepalive
+hold spanning both phases and the create-vs-init error mapping. This driver
+owns only the per-phase step sequences and status/event bookkeeping.
 """
 
 from __future__ import annotations
@@ -45,8 +55,6 @@ from .shell_env import (
 from .ssh_keys import _apply_sve_mask, _preserve_ssh_host_keys, _reconcile_authorized_keys
 
 if TYPE_CHECKING:
-    from contextlib import AbstractContextManager
-
     from agentworks.capabilities.git_credential.base import GitCredentialProvider
     from agentworks.capabilities.vm_platform import VMPlatform
     from agentworks.config import Config
@@ -56,37 +64,42 @@ if TYPE_CHECKING:
     from agentworks.vms.templates import ResolvedVMTemplate
 
 
-def initialize_vm(
+def bootstrap_vm(
     db: Database,
     config: Config,
-    registry: Registry,
     vm_template: ResolvedVMTemplate,
-    admin: AdminConfig,
     vm_name: str,
     exec_target: Transport,
-    providers: dict[str, GitCredentialProvider],
     platform: VMPlatform,
     *,
-    hold_active: AbstractContextManager[None],
     admin_username: str = "agentworks",
     tailscale_auth_key: str,
     git_tokens: dict[str, str],
     bootstrap_complete: bool = False,
     tailscale_ip: str | None = None,
     on_tailscale_ready: Callable[[], None] | None = None,
-) -> None:
-    """Run the full initialization sequence on a newly provisioned VM.
+) -> tuple[Transport, SSHLogger, str]:
+    """Run Phase A (provisioning bootstrap + connectivity) on a fresh VM.
 
-    Phase A (bootstrap) steps are fatal: any failure aborts initialization.
-    Phase B (setup) steps are non-fatal: failures are logged as warnings
-    and the VM gets 'partial' status instead of 'complete'.
+    Runs over the provisioning transport: bootstrap (WSL2 script or the
+    platform's own native mechanism), Tailscale-SSH verification, the
+    post-Tailscale-ready hook plus reconnect wait, and finally the SSH-config
+    sync (the last line of the caller's ``Provisioning`` section). Only the
+    bootstrap/verify is fatal to provisioning: a failure there means the VM is
+    unreachable, so it marks provisioning ``failed``, records the
+    ``provisioning_failed`` event, closes the log, points at it, and re-raises
+    for ``create_vm`` to map to a ProvisioningError (delete guidance). The
+    connectivity cleanup and the SSH-config sync are non-fatal: they cannot
+    make an already-bootstrapped VM unhealthy, so a failure there warns and
+    continues into Phase B rather than stranding a reachable VM as FAILED.
 
-    Both ``tailscale_auth_key`` and ``git_tokens`` are required;
-    ``create_vm`` resolves them via the framework at manager-entry and
-    threads them in. ``hold_active`` is the keepalive span built at
-    ``create_vm``'s composition root (``platform.vm_active``), anchoring
-    the VM active for the whole init; ``platform`` still rides along for
-    the WSL2 swap check below.
+    Returns ``(ts_target, logger, home)`` for Phase B (``run_initialization``).
+    The caller owns the keepalive hold spanning both phases (this function
+    does not open it) and the ``Provisioning`` output section (this function
+    emits into the ambient section, opening none of its own). ``platform``
+    rides along for the WSL2 swap check; both ``tailscale_auth_key`` and
+    ``git_tokens`` are required (``create_vm`` resolves them via the framework
+    and threads them in), the latter only to seed the log's redactions.
     """
     from agentworks.ssh import SSHLogger
 
@@ -103,77 +116,79 @@ def initialize_vm(
 
     transport = exec_target.describe()
 
-    # Anchor the VM in an active state for the full init span. No-op for
-    # Lima/Azure/Proxmox; WSL2 holds a wsl.exe subprocess open so the distro
-    # doesn't idle-shut between Phase A (wsl.exe transport) and Phase B
-    # (Tailscale SSH). The span is built at create_vm's composition root
-    # and handed in; the VM was just provisioned and is running, so no
-    # power-state convergence happens here, only the hold.
     vm_row = db.get_vm(vm_name)
     assert vm_row is not None, "create_vm inserts the row before init"
-    with hold_active:
-        try:
-            db.insert_vm_event(vm_name, "provisioning_started", transport)
-            ts_target = _phase_a_bootstrap(
-                db,
-                config,
-                vm_template,
-                vm_name,
-                exec_target,
-                home,
-                admin_username,
-                vm_row.hostname,
-                logger,
-                tailscale_auth_key=tailscale_auth_key,
-                # WSL2 handles swap natively before bootstrap; every
-                # other platform lets the script create the swapfile.
-                script_swap=0 if platform.name == "wsl2" else vm_template.swap,
-                bootstrap_complete=bootstrap_complete,
-                tailscale_ip=tailscale_ip,
-            )
-            db.insert_vm_event(
-                vm_name,
-                "provisioning_complete",
-                ts_target.host if isinstance(ts_target, SSHTransport) else None,
-            )
-        except Exception as e:
-            db.update_vm_provisioning_status(vm_name, ProvisioningStatus.FAILED)
-            db.insert_vm_event(vm_name, "provisioning_failed", str(e))
-            logger.close()
-            output.warn(f"Log: {logger.path}")
-            raise
-
-        # Tailscale is up; caller can clean up provisioning-only resources
-        # (e.g., detach Azure public IP since Phase B uses Tailscale SSH).
-        # Removing the public IP can destabilize the network stack briefly,
-        # so we wait for Tailscale SSH to be reliably reachable before
-        # proceeding with Phase B.
-        if on_tailscale_ready is not None:
-            try:
-                on_tailscale_ready()
-            except Exception as e:
-                output.warn(f"post-provisioning cleanup failed: {e}")
-
-            # Wait for Tailscale SSH to reconnect after network changes
-            from agentworks.transports import wait_for_reconnect
-
-            wait_for_reconnect(ts_target)
-
-        run_initialization(
+    # The fatal span is ONLY the bootstrap itself: a bootstrap/verify failure
+    # means the VM is unreachable, so it is marked provisioning ``failed`` and
+    # routed to delete. The connectivity cleanup and the SSH-config sync below
+    # sit OUTSIDE this span deliberately: they cannot make an already-bootstrapped
+    # VM unhealthy, so a failure there must not flip a reachable VM to FAILED
+    # (which would foreclose ``vm reinit``, since reinit requires COMPLETE).
+    try:
+        db.insert_vm_event(vm_name, "provisioning_started", transport)
+        ts_target = _phase_a_bootstrap(
             db,
             config,
-            registry,
             vm_template,
-            admin,
             vm_name,
-            ts_target,
-            providers,
+            exec_target,
             home,
             admin_username,
+            vm_row.hostname,
             logger,
-            git_tokens=git_tokens,
-            is_first_init=True,
+            tailscale_auth_key=tailscale_auth_key,
+            # WSL2 handles swap natively before bootstrap; every
+            # other platform lets the script create the swapfile.
+            script_swap=0 if platform.name == "wsl2" else vm_template.swap,
+            bootstrap_complete=bootstrap_complete,
+            tailscale_ip=tailscale_ip,
         )
+        db.insert_vm_event(
+            vm_name,
+            "provisioning_complete",
+            ts_target.host if isinstance(ts_target, SSHTransport) else None,
+        )
+    except Exception as e:
+        db.update_vm_provisioning_status(vm_name, ProvisioningStatus.FAILED)
+        db.insert_vm_event(vm_name, "provisioning_failed", str(e))
+        logger.close()
+        output.warn(f"Log: {logger.path}")
+        raise
+
+    # Tailscale is up; caller can clean up provisioning-only resources
+    # (e.g., detach Azure public IP since Phase B uses Tailscale SSH).
+    # Removing the public IP can destabilize the network stack briefly,
+    # so we wait for Tailscale SSH to be reliably reachable before
+    # proceeding. Already non-fatal (its own try / a bounded wait); kept
+    # outside the FAILED-marking span above, as in the pre-split driver.
+    if on_tailscale_ready is not None:
+        try:
+            on_tailscale_ready()
+        except Exception as e:
+            output.warn(f"post-provisioning cleanup failed: {e}")
+
+        # Wait for Tailscale SSH to reconnect after network changes
+        from agentworks.transports import wait_for_reconnect
+
+        wait_for_reconnect(ts_target)
+
+    # Sync the operator's SSH config now that connectivity is verified. This is
+    # the last step of Phase A (and the last line of the caller's Provisioning
+    # section): the VM's Tailscale IP is recorded and the connection is
+    # confirmed, so operator-facing ``ssh awvm--<name>`` aliases are in place
+    # before Phase B's many SSH calls. Non-fatal: a local ``~/.ssh/config``
+    # write failure (permissions, read-only home) has nothing to do with VM
+    # health, so it warns and continues into Phase B rather than failing the
+    # create. Matches the caller's post-init re-sync handling.
+    try:
+        from agentworks.ssh_config import sync_ssh_config
+
+        sync_ssh_config(config, db)
+    except Exception as e:
+        output.warn(f"SSH config sync failed: {e}")
+        output.info("VM is likely still usable.")
+
+    return ts_target, logger, home
 
 
 def run_initialization(
@@ -194,10 +209,10 @@ def run_initialization(
 ) -> None:
     """Run Phase B (initialization) with status tracking and event logging.
 
-    This is called both from initialize_vm() after provisioning and
-    from reinit_vm() for repeatable re-initialization. Pass
-    ``is_first_init=True`` from initialize_vm so steps that expect prior
-    state (e.g. tmux socket dirs) can skip warnings on missing state.
+    This is called both from ``create_vm`` (after ``bootstrap_vm``) and
+    from ``reinit_vm`` for repeatable re-initialization. Pass
+    ``is_first_init=True`` on create so steps that expect prior state
+    (e.g. tmux socket dirs) can skip warnings on missing state.
     ``git_tokens`` is required (no provider-side fallback);
     callers must thread the framework-resolved dict in.
     """
@@ -286,14 +301,6 @@ def _phase_a_bootstrap(
             script_swap=script_swap,
         )
 
-    # Sync the operator's SSH config now that the VM's Tailscale IP is
-    # known. Phase B issues many SSH calls; having the managed aliases in
-    # place first means operator-facing ``ssh awvm--<name>`` works as soon
-    # as the VM is reachable.
-    from agentworks.ssh_config import sync_ssh_config
-
-    sync_ssh_config(config, db)
-
     # Switch to Tailscale SSH, carrying over the SSH logger.
     # On Windows, force TTY to prevent zsh/login shell pipe hangs.
     import sys
@@ -307,9 +314,9 @@ def _phase_a_bootstrap(
         logger=logger,
     )
 
-    # Verify Tailscale SSH works (retry -- peer connection may take time)
+    # Verify Tailscale SSH works (retry: peer connection may take time)
     logger.step("Verify Tailscale SSH")
-    output.detail("Verifying Tailscale SSH...")
+    output.info("Verifying Tailscale SSH...")
     import time
 
     for attempt in range(5):
@@ -343,7 +350,7 @@ def _run_bootstrap_script(
     Used for WSL2 where the bootstrap cannot be embedded in a platform's
     native mechanism (Lima provision block, Azure cloud-init).
     ``tailscale_auth_key`` is required; the framework-resolved value
-    arrives from ``create_vm`` -> ``initialize_vm`` -> ``_phase_a_bootstrap``.
+    arrives from ``create_vm`` -> ``bootstrap_vm`` -> ``_phase_a_bootstrap``.
     """
     import tempfile
 
@@ -532,7 +539,7 @@ def _phase_b_setup(
         # Pairs with the --preserve-env in _split_shell_pane's agent-pane branch.
         _write_sudoers_console_setenv(ts_target, logger, admin_username)
         vm_row = db.get_vm(vm_name)
-        # Init runs against a VM that exists in the DB (initialize_vm fetches the
+        # Init runs against a VM that exists in the DB (bootstrap_vm fetches the
         # row up front). A None here is an internal invariant violation, not a
         # recoverable state, so surface it loudly.
         assert vm_row is not None, f"VM '{vm_name}' missing from DB mid-init"

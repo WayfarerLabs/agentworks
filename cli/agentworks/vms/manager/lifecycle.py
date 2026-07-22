@@ -1,10 +1,19 @@
 """The two full-initialization VM flows: create and reinit.
 
-Both call into ``agentworks.vms.initializer`` (``initialize_vm`` /
+Both call into ``agentworks.vms.initializer`` (``bootstrap_vm`` /
 ``run_initialization`` / ``announce_git_credentials`` /
 ``verify_tailscale_available``); see the module-level note near the
 imports below for why those calls are routed through the package object
 rather than a plain top-level import.
+
+``create_vm`` splits the initializer's two phases across its output
+sections: Phase A (``bootstrap_vm``: bootstrap + Tailscale connectivity +
+SSH-config sync) is the tail of the ``Provisioning`` section, and Phase B
+(``run_initialization``) runs after it as the ``VM Initialization`` /
+``Admin Initialization`` sections. A single keepalive hold (an
+``ExitStack`` entered before Phase A, released after Phase B) spans both,
+and ``_warn_init_cancel`` / ``_raise_init_failure`` map a failure in
+either phase to the same operator-facing outcome.
 """
 
 from __future__ import annotations
@@ -27,11 +36,13 @@ from agentworks.errors import (
 from ._helpers import _require_vm
 
 if TYPE_CHECKING:
+    from typing import NoReturn
+
     from agentworks.config import Config
     from agentworks.db import Database
 
 # NOTE on the initializer imports (``verify_tailscale_available``,
-# ``announce_git_credentials``, ``initialize_vm``, ``run_initialization``):
+# ``announce_git_credentials``, ``bootstrap_vm``, ``run_initialization``):
 # tests monkeypatch these as attributes of the PACKAGE
 # (``agentworks.vms.manager.verify_tailscale_available`` etc, set by
 # ``manager/__init__.py``'s top-level import from
@@ -45,6 +56,55 @@ if TYPE_CHECKING:
 # same treatment for ``verify_tailscale_available`` / ``rejoin_tailscale``
 # (it is not only ``lifecycle.py`` that consumes these names, despite
 # there being one canonical import site in ``manager/__init__.py``).
+
+
+def _warn_init_cancel(vm_name: str) -> None:
+    """Warn that a create was cancelled mid-initialization.
+
+    Shared by ``create_vm``'s Phase A and Phase B cancellation handlers so
+    an operator abort (``KeyboardInterrupt`` / ``UserAbort``) in either
+    phase surfaces the same recovery guidance before the exception
+    propagates unchanged (never downgraded to a Provisioning/External
+    error, matching ``delete_vm``'s best-effort discipline).
+    """
+    output.warn(
+        f"Cancelling vm create '{vm_name}' during initialization. "
+        f"The VM exists but is partially initialized. "
+        f"Use 'vm reinit {vm_name}' to retry, or 'vm delete {vm_name} --force' to remove it."
+    )
+
+
+def _raise_init_failure(db: Database, vm_name: str, cause: Exception) -> NoReturn:
+    """Map a non-cancellation failure in either init phase to its outcome.
+
+    A VM whose provisioning is ``failed`` (Phase A marked it so) raises a
+    ``ProvisioningError`` with delete guidance; otherwise the VM provisioned
+    but a later step failed, so it raises an ``ExternalError`` (the VM may
+    still be usable, reinit guidance). Both carry the ``Details:`` pointer to
+    the most recent ``vm-create`` log when one exists. Shared by Phase A and
+    Phase B so both fail identically.
+    """
+    from agentworks.ssh import LOG_DIR
+
+    log_hint = ""
+    logs = sorted(LOG_DIR.glob(f"{vm_name}-*-vm-create.log"), reverse=True)
+    if logs:
+        log_hint = f"\nDetails: {logs[0]}"
+
+    vm = db.get_vm(vm_name)
+    if vm is not None and vm.provisioning_status == ProvisioningStatus.FAILED.value:
+        raise ProvisioningError(
+            f"provisioning failed: {cause}{log_hint}",
+            entity_kind="vm",
+            entity_name=vm_name,
+            hint=f"VM '{vm_name}' is in a failed state. Use 'vm delete {vm_name}' to clean up.",
+        ) from cause
+    raise ExternalError(
+        f"initialization failed: {cause}{log_hint}",
+        entity_kind="vm",
+        entity_name=vm_name,
+        hint=f"VM '{vm_name}' may still be usable. Use 'vm reinit {vm_name}' to retry.",
+    ) from cause
 
 
 def create_vm(
@@ -189,111 +249,6 @@ def create_vm(
     with output.section("Resolving Secrets"):
         resolver.resolve()
 
-    with output.section("Provisioning"):
-        # Provisioning-phase runup: authenticate the platform's own
-        # credential (proxmox API token) before create() mutates anything. A
-        # definitive rejection aborts here, before the DB row or any backend
-        # resource exists (the FATAL policy: nothing realized, nothing to
-        # unwind). Runup is deferred and announced inline (no phase of its
-        # own); lima/wsl2/azure have no token, so this is a silent no-op for
-        # them. The credentials' write-step runup stays deferred into
-        # initialization, under the skip-and-degrade policy.
-        site_node.runup(scoped_ctx(site_node.secret_refs()))
-        tailscale_auth_key = scoped_ctx(template_node.secret_refs()).secret(vm_tmpl.tailscale_auth_key)
-        # Each credential's token, read through its node's SCOPED delivery.
-        git_tokens = {
-            node.provider.owner_name: scoped_ctx(node.secret_refs()).secret(node.provider.secret_name)
-            for node in cred_nodes
-        }
-
-        # The VM's OS hostname, computed once at create time and recorded on the
-        # row: {slug}-{name} with a slug, the bare name without. Bounded by
-        # construction: slug max 20 + dash + name max 30 = 51 characters,
-        # inside the 63-char hostname-label and Azure 64-char limits.
-        hostname = f"{slug}-{vm_name}" if slug else vm_name
-
-        # Create DB record with as-provisioned resource values. This is the
-        # pending VM's realization artifact (what teardown deletes), so the
-        # log records it the moment the row exists: a provisioning failure
-        # below unwinds exactly the row (today's rollback, relocated onto
-        # the node), and nothing past provisioning is rollback-tracked (an
-        # initialized-but-partial VM is kept, debuggable, reinit-able).
-        db.insert_vm(
-            vm_name,
-            site=site,
-            hostname=hostname,
-            template=vm_tmpl.name,
-            # Store the canonical NULL for the reserved default (whether the
-            # operator omitted the flag or passed it explicitly), so the
-            # column has one encoding per semantic state.
-            admin_template=None if selected_admin_template == "default" else selected_admin_template,
-            cpus=resolved_cpus,
-            memory_gib=resolved_memory,
-            disk_gib=resolved_disk,
-            swap_gib=vm_tmpl.swap,
-            admin_username=resolved_admin_username,
-        )
-        log = RealizationLog()
-        log.mark_realized(pending_vm)
-
-        # The platform instance was bound (and preflighted, and its secrets
-        # resolved) at the composition root above; dispatch is just ops now.
-        platform_obj = site_node.platform
-        from agentworks.capabilities.vm_platform import ProvisionRequest
-
-        request = ProvisionRequest(
-            vm_name=vm_name,
-            hostname=hostname,
-            system_slug=slug,
-            admin_username=resolved_admin_username,
-            ssh_public_key=config.operator.ssh_public_key.read_text().strip(),
-            ssh_private_key=config.operator.ssh_private_key,
-            tailscale_auth_key=tailscale_auth_key,
-            cpus=resolved_cpus,
-            memory_gib=resolved_memory,
-            disk_gib=resolved_disk,
-            swap_gib=vm_tmpl.swap,
-        )
-
-        # The op-start context for the platform's create op: secrets scoped
-        # to the site's declared names.
-        platform_ctx = scoped_ctx(site_node.secret_refs())
-
-        # The primary provisioning step: promoted to info so it sits at
-        # the section body level (the platform's own sub-steps render as
-        # detail one notch deeper).
-        output.info(f"Creating VM '{vm_name}' on vm-site '{site}'...")
-        try:
-            result = platform_obj.create(request, platform_ctx)
-        except KeyboardInterrupt:
-            output.warn(f"Cancelling vm create '{vm_name}'... rolling back.")
-            log.unwind()
-            raise
-        except UserAbort:
-            # No prompt lives in this span today (the boundary resolve ran
-            # at the composition root above), but an operator abort must
-            # never downgrade to a ProvisioningError; roll back like the
-            # KeyboardInterrupt twin above.
-            log.unwind()
-            raise
-        except Exception as e:
-            log.unwind()
-            raise ProvisioningError(
-                f"provisioning failed: {e}",
-                entity_kind="vm",
-                entity_name=vm_name,
-            ) from e
-        # The unwind window closes here: provisioning succeeded, the VM
-        # exists, and initialization failures keep it (with recovery
-        # guidance), exactly as before.
-
-        # Persist the platform's opaque identifiers verbatim; the owning
-        # platform is the column's only reader.
-        db.update_vm_platform_metadata(vm_name, result.platform_metadata)
-
-    # -- Initialization --
-    # If this fails, the VM exists on the remote host and may be debuggable.
-    # Keep the DB record so the user can reinit or delete.
     # Polymorphic post-Tailscale-ready hook. Azure overrides to detach
     # the cloud-init public IP (closing the public-exposure window the
     # instant Tailscale becomes reachable); other platforms are no-op.
@@ -302,88 +257,196 @@ def create_vm(
         assert refreshed is not None
         platform_obj.post_tailscale_ready(refreshed)
 
-    # The keepalive hold for the whole init span, built at this
-    # composition root and handed down: WSL2 anchors its distro against
-    # idle shutdown between Phase A (wsl.exe transport) and Phase B
-    # (Tailscale SSH); the other platforms' hold is a no-op. The VM was
-    # just provisioned and is running, so no power-state convergence is
-    # threaded, only the hold-span.
-    init_row = db.get_vm(vm_name)
-    assert init_row is not None, "create_vm inserted the row before init"
+    # The keepalive hold spans BOTH init phases: WSL2 anchors its distro
+    # against idle shutdown between Phase A (wsl.exe transport) and Phase B
+    # (Tailscale SSH); the other platforms' hold is a no-op. It is entered
+    # (into ``init_stack``) just before Phase A and released when the stack
+    # exits, after Phase B, on every path. Provisioning (platform create +
+    # Phase A bootstrap/connectivity) and Initialization (Phase B) are
+    # sibling output sections either side of the stack's Phase-A/Phase-B
+    # split; ``_warn_init_cancel`` / ``_raise_init_failure`` map a failure
+    # in either phase to the same operator-facing outcome.
+    from contextlib import ExitStack
 
-    try:
-        _mgr.initialize_vm(
-            db,
-            config,
-            registry,
-            vm_tmpl,
-            admin,
-            vm_name,
-            exec_target=result.native_transport,
-            providers=providers,
-            platform=platform_obj,
-            hold_active=platform_obj.vm_active(init_row, config=config),
-            admin_username=resolved_admin_username,
-            tailscale_auth_key=tailscale_auth_key,
-            git_tokens=git_tokens,
-            bootstrap_complete=result.bootstrap_complete,
-            tailscale_ip=result.tailscale_ip,
-            on_tailscale_ready=_on_tailscale_ready,
-        )
-    except KeyboardInterrupt:
-        output.warn(
-            f"Cancelling vm create '{vm_name}' during initialization. "
-            f"The VM exists but is partially initialized. "
-            f"Use 'vm reinit {vm_name}' to retry, or 'vm delete {vm_name} --force' to remove it."
-        )
-        raise
-    except UserAbort:
-        # No prompt lives in this span today (the boundary resolve ran
-        # at the composition root above), but the catch-all below must
-        # never downgrade an operator abort to a Provisioning/External
-        # error (same discipline as delete_vm's best-effort spans).
-        # Same recovery guidance as the KeyboardInterrupt twin: the VM
-        # exists and must not be stranded silently.
-        output.warn(
-            f"Cancelling vm create '{vm_name}' during initialization. "
-            f"The VM exists but is partially initialized. "
-            f"Use 'vm reinit {vm_name}' to retry, or 'vm delete {vm_name} --force' to remove it."
-        )
-        raise
-    except Exception as e:
-        from agentworks.ssh import LOG_DIR
+    with ExitStack() as init_stack:
+        with output.section("Provisioning"):
+            # Provisioning-phase runup: authenticate the platform's own
+            # credential (proxmox API token) before create() mutates anything. A
+            # definitive rejection aborts here, before the DB row or any backend
+            # resource exists (the FATAL policy: nothing realized, nothing to
+            # unwind). Runup is deferred and announced inline (no phase of its
+            # own); lima/wsl2/azure have no token, so this is a silent no-op for
+            # them. The credentials' write-step runup stays deferred into
+            # initialization, under the skip-and-degrade policy.
+            site_node.runup(scoped_ctx(site_node.secret_refs()))
+            tailscale_auth_key = scoped_ctx(template_node.secret_refs()).secret(vm_tmpl.tailscale_auth_key)
+            # Each credential's token, read through its node's SCOPED delivery.
+            git_tokens = {
+                node.provider.owner_name: scoped_ctx(node.secret_refs()).secret(node.provider.secret_name)
+                for node in cred_nodes
+            }
 
-        log_hint = ""
-        logs = sorted(LOG_DIR.glob(f"{vm_name}-*-vm-create.log"), reverse=True)
-        if logs:
-            log_hint = f"\nDetails: {logs[0]}"
+            # The VM's OS hostname, computed once at create time and recorded on the
+            # row: {slug}-{name} with a slug, the bare name without. Bounded by
+            # construction: slug max 20 + dash + name max 30 = 51 characters,
+            # inside the 63-char hostname-label and Azure 64-char limits.
+            hostname = f"{slug}-{vm_name}" if slug else vm_name
 
-        vm = db.get_vm(vm_name)
-        if vm is not None and vm.provisioning_status == ProvisioningStatus.FAILED.value:
-            raise ProvisioningError(
-                f"provisioning failed: {e}{log_hint}",
-                entity_kind="vm",
-                entity_name=vm_name,
-                hint=f"VM '{vm_name}' is in a failed state. Use 'vm delete {vm_name}' to clean up.",
-            ) from e
-        else:
-            raise ExternalError(
-                f"initialization failed: {e}{log_hint}",
-                entity_kind="vm",
-                entity_name=vm_name,
-                hint=f"VM '{vm_name}' may still be usable. Use 'vm reinit {vm_name}' to retry.",
-            ) from e
+            # Create DB record with as-provisioned resource values. This is the
+            # pending VM's realization artifact (what teardown deletes), so the
+            # log records it the moment the row exists: a provisioning failure
+            # below unwinds exactly the row (today's rollback, relocated onto
+            # the node), and nothing past provisioning is rollback-tracked (an
+            # initialized-but-partial VM is kept, debuggable, reinit-able).
+            db.insert_vm(
+                vm_name,
+                site=site,
+                hostname=hostname,
+                template=vm_tmpl.name,
+                # Store the canonical NULL for the reserved default (whether the
+                # operator omitted the flag or passed it explicitly), so the
+                # column has one encoding per semantic state.
+                admin_template=None if selected_admin_template == "default" else selected_admin_template,
+                cpus=resolved_cpus,
+                memory_gib=resolved_memory,
+                disk_gib=resolved_disk,
+                swap_gib=vm_tmpl.swap,
+                admin_username=resolved_admin_username,
+            )
+            log = RealizationLog()
+            log.mark_realized(pending_vm)
 
-    # -- Post-init: SSH config --
+            # The platform instance was bound (and preflighted, and its secrets
+            # resolved) at the composition root above; dispatch is just ops now.
+            platform_obj = site_node.platform
+            from agentworks.capabilities.vm_platform import ProvisionRequest
+
+            request = ProvisionRequest(
+                vm_name=vm_name,
+                hostname=hostname,
+                system_slug=slug,
+                admin_username=resolved_admin_username,
+                ssh_public_key=config.operator.ssh_public_key.read_text().strip(),
+                ssh_private_key=config.operator.ssh_private_key,
+                tailscale_auth_key=tailscale_auth_key,
+                cpus=resolved_cpus,
+                memory_gib=resolved_memory,
+                disk_gib=resolved_disk,
+                swap_gib=vm_tmpl.swap,
+            )
+
+            # The op-start context for the platform's create op: secrets scoped
+            # to the site's declared names.
+            platform_ctx = scoped_ctx(site_node.secret_refs())
+
+            # The primary provisioning step: promoted to info so it sits at
+            # the section body level (the platform's own sub-steps render as
+            # detail one notch deeper).
+            output.info(f"Creating VM '{vm_name}' on vm-site '{site}'...")
+            try:
+                result = platform_obj.create(request, platform_ctx)
+            except KeyboardInterrupt:
+                output.warn(f"Cancelling vm create '{vm_name}'... rolling back.")
+                log.unwind()
+                raise
+            except UserAbort:
+                # No prompt lives in this span today (the boundary resolve ran
+                # at the composition root above), but an operator abort must
+                # never downgrade to a ProvisioningError; roll back like the
+                # KeyboardInterrupt twin above.
+                log.unwind()
+                raise
+            except Exception as e:
+                log.unwind()
+                raise ProvisioningError(
+                    f"provisioning failed: {e}",
+                    entity_kind="vm",
+                    entity_name=vm_name,
+                ) from e
+            # The unwind window closes here: provisioning succeeded, the VM
+            # exists, and initialization failures keep it (with recovery
+            # guidance), exactly as before.
+
+            # Persist the platform's opaque identifiers verbatim; the owning
+            # platform is the column's only reader.
+            db.update_vm_platform_metadata(vm_name, result.platform_metadata)
+
+            # -- Phase A: bootstrap + connectivity (the tail of Provisioning) --
+            # Past the unwind window: if anything below fails, the VM exists on
+            # the remote host and is kept (debuggable, reinit-able). The hold is
+            # entered here so it spans Phase A and Phase B; the row exists (the
+            # insert above), so no power-state convergence is threaded, only the
+            # hold-span. Phase A closes the Provisioning section with the
+            # announced "SSH config synced" line.
+            init_row = db.get_vm(vm_name)
+            assert init_row is not None, "create_vm inserted the row before init"
+            try:
+                # Enter the hold inside the mapped span (first, before Phase A)
+                # so a failure to open it maps like any other init failure, as
+                # it did when the hold was entered inside the old initialize_vm.
+                init_stack.enter_context(platform_obj.vm_active(init_row, config=config))
+                ts_target, logger, home = _mgr.bootstrap_vm(
+                    db,
+                    config,
+                    vm_tmpl,
+                    vm_name,
+                    result.native_transport,
+                    platform_obj,
+                    admin_username=resolved_admin_username,
+                    tailscale_auth_key=tailscale_auth_key,
+                    git_tokens=git_tokens,
+                    bootstrap_complete=result.bootstrap_complete,
+                    tailscale_ip=result.tailscale_ip,
+                    on_tailscale_ready=_on_tailscale_ready,
+                )
+            except (KeyboardInterrupt, UserAbort):
+                # An operator abort must never downgrade to a
+                # Provisioning/External error; re-raise as itself after the
+                # recovery-guidance warning.
+                _warn_init_cancel(vm_name)
+                raise
+            except Exception as e:
+                _raise_init_failure(db, vm_name, e)
+
+        # -- Initialization (Phase B) --
+        # Sibling of Provisioning: runs after the section closes, over
+        # Tailscale SSH, with the same failure mapping as Phase A.
+        try:
+            _mgr.run_initialization(
+                db,
+                config,
+                registry,
+                vm_tmpl,
+                admin,
+                vm_name,
+                ts_target,
+                providers,
+                home,
+                resolved_admin_username,
+                logger,
+                git_tokens=git_tokens,
+                is_first_init=True,
+            )
+        except (KeyboardInterrupt, UserAbort):
+            _warn_init_cancel(vm_name)
+            raise
+        except Exception as e:
+            _raise_init_failure(db, vm_name, e)
+
+    # -- Post-init: SSH config re-sync --
+    # Phase A already synced and announced "SSH config synced" as the last
+    # line of Provisioning; this re-sync captures any state Phase B changed
+    # (nothing today) and stays silent (announce=False) to avoid a duplicate
+    # line.
     try:
         from agentworks.ssh_config import sync_ssh_config
 
-        sync_ssh_config(config, db)
+        sync_ssh_config(config, db, announce=False)
     except Exception as e:
         output.warn(f"SSH config sync failed: {e}")
         output.info("VM is likely still usable.")
 
-    # Final status is set by initialize_vm (COMPLETE or PARTIAL). The
+    # Final status is set by run_initialization (COMPLETE or PARTIAL). The
     # terminal outcome line renders at column 0 via result().
     vm = db.get_vm(vm_name)
     assert vm is not None
