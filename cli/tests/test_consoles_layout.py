@@ -1,13 +1,12 @@
 """Tests for the aw-session-vertical layout and the session-pane focus
 behavior added in the same change. Carved out of test_consoles.py to
-keep that file navigable; the helper imports below mirror the originals
-to keep the test bodies identical to how they read in-tree."""
+keep that file navigable; shared seed helpers / stub Config classes /
+the autouse Registry-stub fixture now live in
+``tests/_consoles_support.py``."""
 
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
-
-import pytest
 
 from agentworks.db import Database
 from agentworks.sessions.multi_console import (
@@ -15,21 +14,11 @@ from agentworks.sessions.multi_console import (
     create_console,
     restore_session,
 )
-from tests.conftest import _FakeResult, _FakeTarget, stub_build_registry
-from tests.test_consoles import (
-    _seed_sessions,
-    _seed_vm,
-    _StubConfig,
-)
+from tests._consoles_support import _seed_sessions, _seed_vm, _stub_build_registry, _StubConfig  # noqa: F401
+from tests.conftest import _FakeResult, _FakeTarget
 
 if TYPE_CHECKING:
     from tests.conftest import CapturedOutput
-
-
-@pytest.fixture(autouse=True)
-def _stub_build_registry(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Serve Registry reads from the module's namespace configs."""
-    stub_build_registry(monkeypatch)
 
 
 class _StubVerticalLayoutConfig(_StubConfig):

@@ -1,8 +1,8 @@
 """Tests for ``agw console restore-session`` -- argument and live-state
 validation, strict failure paths, and happy paths. Carved out of
 test_consoles.py to keep that file under the project's file-length
-guidance; helpers / fixtures are imported from the original location
-and from conftest."""
+guidance; shared seed helpers / stub Config classes / the autouse
+Registry-stub fixture now live in ``tests/_consoles_support.py``."""
 
 from __future__ import annotations
 
@@ -17,24 +17,14 @@ from agentworks.sessions.multi_console import (
     restore_session,
 )
 from agentworks.sessions.multi_console_layout import SHELL_INDEX_OPTION
-from tests.conftest import _FakeResult, _FakeTarget, stub_build_registry
-from tests.test_consoles import (
-    _seed_sessions,
-    _seed_vm,
-    _StubConfig,
-)
+from tests._consoles_support import _seed_sessions, _seed_vm, _stub_build_registry, _StubConfig  # noqa: F401
+from tests.conftest import _FakeResult, _FakeTarget
 
 if TYPE_CHECKING:
     from tests.conftest import CapturedOutput
 
 
 # -- restore-session: argument and live-state validation -------------------
-
-
-@pytest.fixture(autouse=True)
-def _stub_build_registry(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Serve Registry reads from the module's namespace configs."""
-    stub_build_registry(monkeypatch)
 
 
 def test_restore_session_errors_when_console_missing(db: Database) -> None:
