@@ -285,9 +285,12 @@ following are NOT built here; `extra_args` is the interim escape hatch for any o
 - **User-level MCP inheritance** and its non-inheritance default (the one harness-owned security
   fix; its provisioning face is the `claude-code` `harness-user-provisioner`, not this SDD).
 - **Question-timeout control** (a future `harness_config` field for unattended sessions).
-- **Claude-subscription (OAuth) authentication** (touches the walk-away boundary; deferred until its
-  shape is pinned). Note v2.1.205 exposes `claude setup-token` and `claude auth`, but wiring an auth
-  mode is out of v1.
+- **Claude-subscription (OAuth) authentication** IMPLEMENTED (issue #220): the shape pinned as a
+  provision-time credential, not an interactive step, so it never touches the walk-away boundary.
+  The operator runs `claude setup-token` (one-year token) and maps it to a declared secret; the
+  `harness_config` fields `pass_oauth_token` / `oauth_token_secret` declare that secret, and the
+  harness delivers its resolved value as the `CLAUDE_CODE_OAUTH_TOKEN` session env var (the
+  value-level `env_contributions` hook, never the pane command string).
 - **Remote-control enablement** (v2.1.205 has `--remote-control [name]`; a plain opt-in toggle, off
   by default, no special harness responsibility, exposed only when its field is added).
 

@@ -474,15 +474,16 @@ logic.
 
 ### claude-code config vocabulary: pinned v1, reserved future
 
-v1 is `permission_mode` / `model` / `extra_args` (FRD R4). Four further concerns are reserved (not
-built): user-level MCP inheritance, a question-timeout field, a Claude-subscription OAuth auth mode,
-and remote-control enablement. Only ONE is a harness-owned security fix: MCP inheritance, because
-authenticating an agent with the operator's own Claude account SILENTLY hands it that account's
-user-level MCP servers, so the harness must default to not inheriting. Remote control is a
-well-defined feature that is off unless enabled (the harness's default), so exposing the toggle is
-the whole job and securing the feature is Anthropic's. The OAuth mode would touch the contract (any
-auth interactivity must precede the boundary resolve), so it is deferred until its shape is pinned;
-`extra_args` is the escape hatch in the meantime.
+v1 is `permission_mode` / `model` / `extra_args` (FRD R4). Three further concerns remain reserved
+(not built): user-level MCP inheritance, a question-timeout field, and remote-control enablement.
+Only ONE is a harness-owned security fix: MCP inheritance, because authenticating an agent with the
+operator's own Claude account SILENTLY hands it that account's user-level MCP servers, so the
+harness must default to not inheriting. Remote control is a well-defined feature that is off unless
+enabled (the harness's default), so exposing the toggle is the whole job and securing the feature is
+Anthropic's. The Claude-subscription OAuth auth mode, a fourth reserved concern at v1, is now
+IMPLEMENTED (issue #220): its shape was pinned as a provision-time credential (`pass_oauth_token` /
+`oauth_token_secret` declaring a token secret the harness delivers as `CLAUDE_CODE_OAUTH_TOKEN`),
+which never touches the walk-away boundary because nothing about it is interactive.
 
 ## Open questions / for LLD
 

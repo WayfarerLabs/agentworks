@@ -399,8 +399,9 @@ ssh_private_key = "~/.ssh/id_ed25519"        # required: used for SSH connection
 # A non-`shell` harness is selected with the nested `harness` key, and its
 # block is a `harness_config` table (never the flat fields above). The
 # `claude-code` harness runs Claude Code, resuming the session's previous
-# conversation on `agw session restart`. Its config is three optional fields:
-# permission_mode / model (forwarded to `claude`) and extra_args (raw tokens).
+# conversation on `agw session restart`. Its config is five optional fields:
+# permission_mode / model (forwarded to `claude`), extra_args (raw tokens),
+# and the OAuth-token pair below.
 #[session_templates.claude]
 #harness = "claude-code"
 #description = "Claude Code session"
@@ -408,6 +409,25 @@ ssh_private_key = "~/.ssh/id_ed25519"        # required: used for SSH connection
 #[session_templates.claude.harness_config]
 #permission_mode = "acceptEdits"
 #model = "opus"
+#
+# OAuth token passing. When `pass_oauth_token = true`, the harness wires a
+# long-lived Claude Code OAuth token into the launched session as the
+# `CLAUDE_CODE_OAUTH_TOKEN` env var, so the session skips the interactive
+# login step. You generate the token yourself with `claude setup-token` (a
+# one-year lifetime) and map it to the declared secret named below (default
+# `claude-code-oauth-token`) via your secret backend, e.g. the env-var
+# backend reads `AW_SECRET_CLAUDE_CODE_OAUTH_TOKEN`. Notes:
+#   - Subscription accounts only (Pro / Max / Team / Enterprise), NOT
+#     Console API accounts.
+#   - The token rides the env channel, never the pane command string, so it
+#     does not leak through `ps` / `/proc` / tmux.
+#   - Precedence footgun: if the target env already carries
+#     `ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN`, or a cloud-provider auth
+#     var, those SILENTLY win over the OAuth token.
+#   - Setting `oauth_token_secret` WITHOUT `pass_oauth_token = true` is a
+#     config error (a secret name with nothing consuming it).
+#pass_oauth_token = true
+#oauth_token_secret = "claude-code-oauth-token"   # optional; this is the default
 
 # --- Session configuration ---
 # Non-template session settings.

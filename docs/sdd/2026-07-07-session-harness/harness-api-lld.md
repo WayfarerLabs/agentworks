@@ -342,10 +342,13 @@ command = harness.start(ctx)
 `secret_values` is already captured at `manager.py:1762` (`resolver.values`). This is the same
 scoping the create path already uses for `scoped_ctx` (`manager.py:1764-1769`) and
 `credential_tokens` (`manager.py:1814`): declare-and-receive, scoped to the node's own
-`secret_refs()` union. The session node's `secret_refs()` returns `()` for both built-ins today
-(`sessions/nodes.py:238-239`, `287-288`), so `ScopedSecrets` never delivers anything and `.get`
-never fires; the plumbing is present for a future secret-declaring harness (HLA "Node reshape":
-`secret_refs()` folds in the harness's declared secrets).
+`secret_refs()` union. The session node's `secret_refs()` returns `()` for `shell` and for
+`claude-code` in its default shape; `claude-code` declares the OAuth token secret when
+`pass_oauth_token` is enabled (issue #220, the first secret-declaring harness), and then
+`ScopedSecrets` delivers exactly that token to the harness's `env_contributions` hook. (Issue #220
+also wired the session node's preflight to run `require_predicted_refs` over the harness's declared
+config secrets, matching the git-credential / vm nodes, so an unresolvable token fails at
+preflight.)
 
 **Restart (`restart`), replacing `_build_session_command` at `manager.py:2483-2488`.** Mirror the
 preflight ctx at `manager.py:2373-2381` (`admin_target=admin_target`,
@@ -570,7 +573,8 @@ not open:
   DECIDED by the lead (2026-07-19): capture `resolver.values` after the boundary resolve now, so the
   restart op-ctx is shape-correct and matches the create path. It is inert for the built-ins (empty
   `secret_refs()`), so there is no behavior risk, and it avoids a future secret-declaring harness
-  discovering the gap. P3 does the capture.
+  discovering the gap. P3 does the capture. (That harness arrived: issue #220's `claude-code` OAuth
+  token uses exactly this restart op-ctx to deliver `CLAUDE_CODE_OAUTH_TOKEN`.)
 
 No other sub-question remained un-pinnable from the code.
 

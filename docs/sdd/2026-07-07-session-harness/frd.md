@@ -382,11 +382,13 @@ spec:
     waits on a prompt before it proceeds or fails) is a candidate `harness_config` field, so an
     unattended/walk-away session can pin the timeout policy the operator wants rather than the CLI
     default.
-  - **Claude-subscription (OAuth) authentication.** Authenticating a launched Claude Code session
-    via a Claude subscription OAuth flow, as an alternative to an API key, is a future auth mode the
-    harness would own (a first interactive step at launch, or a provision-time credential the
-    harness consumes). It interacts with the walk-away invariant (any interactivity must precede the
-    boundary resolve) and with the secret model, so it is deferred until its shape is pinned.
+  - **Claude-subscription (OAuth) authentication.** IMPLEMENTED (issue #220): the shape is now
+    pinned as a provision-time credential the harness consumes, not a launch-time interactive step,
+    so it never touches the walk-away invariant. The operator generates a long-lived token
+    (`claude setup-token`) and maps it to a declared secret; the `claude-code` `harness_config`
+    fields `pass_oauth_token` / `oauth_token_secret` declare that secret, and the harness delivers
+    its resolved value into the session env as `CLAUDE_CODE_OAUTH_TOKEN` via the value-level
+    `env_contributions` hook.
   - **Remote-control enablement.** Claude Code has a well-defined remote-control feature (a running
     session can be attached-to and driven from a remote surface, the Claude app or web). It fits the
     walk-away model, so exposing it is a candidate `harness_config` field: whether a launched
