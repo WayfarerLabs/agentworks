@@ -123,10 +123,7 @@ def runup_and_filter(
     ctx = RunContext(config=config, secrets=_MappedSecrets(by_secret))
 
     def announce(provider: GitCredentialProvider) -> None:
-        output.detail(
-            f"Performing runup test for git-credential/{provider.owner_name}...",
-            indent=2,
-        )
+        output.detail(f"Performing runup test for git-credential/{provider.owner_name}...")
 
     def on_reject(provider: GitCredentialProvider, exc: TokenRejectedError) -> None:
         msg = (

@@ -448,9 +448,13 @@ class AzureVMPlatform(VMPlatform):
                 hint="delete it first or pick a different VM name",
             )
 
-        output.detail(f"Provisioning Azure VM '{vm_name}' in {az.region}: size {size_summary}...")
+        # The primary provisioning step (promoted to info); the concrete
+        # resource-creation sub-steps below render as detail one notch
+        # deeper. This runs inside vm create's "Provisioning" section, so
+        # info sits at the section body level and detail one level under.
+        output.info(f"Provisioning Azure VM '{vm_name}' in {az.region}: size {size_summary}...")
         if swap > 0:
-            output.detail(f"Swap: {swap} GiB", indent=2)
+            output.detail(f"Swap: {swap} GiB")
 
         # Generate the same bootstrap script used by Lima, wrapped in
         # cloud-init write_files + runcmd for delivery via Azure custom_data.
@@ -471,7 +475,7 @@ class AzureVMPlatform(VMPlatform):
 
         try:
             # Create public IP
-            output.detail("Creating public IP...", indent=2)
+            output.detail("Creating public IP...")
             ip_poller = network.public_ip_addresses.begin_create_or_update(  # type: ignore[call-overload]
                 az.resource_group,
                 f"{vm_name}-ip",
@@ -486,7 +490,7 @@ class AzureVMPlatform(VMPlatform):
             public_ip = ip_result.ip_address or ""
 
             # Create NSG with SSH rule
-            output.detail("Creating network security group...", indent=2)
+            output.detail("Creating network security group...")
             nsg_poller = network.network_security_groups.begin_create_or_update(  # type: ignore[call-overload]
                 az.resource_group,
                 f"{vm_name}-nsg",
@@ -511,7 +515,7 @@ class AzureVMPlatform(VMPlatform):
             nsg_result = nsg_poller.result()
 
             # Create NIC
-            output.detail("Creating network interface...", indent=2)
+            output.detail("Creating network interface...")
 
             # Need a subnet: use default VNet or create one
             vnet_name = f"{vm_name}-vnet"
@@ -553,7 +557,7 @@ class AzureVMPlatform(VMPlatform):
             nic_result = nic_poller.result()
 
             # Create VM
-            output.detail("Creating VM...", indent=2)
+            output.detail("Creating VM...")
             vm_poller = compute.virtual_machines.begin_create_or_update(  # type: ignore[call-overload]
                 az.resource_group,
                 vm_name,
@@ -599,11 +603,11 @@ class AzureVMPlatform(VMPlatform):
             resource_id = vm_result.id or ""
 
         except Exception as exc:
-            output.detail("Cleaning up resources...", indent=2)
+            output.detail("Cleaning up resources...")
             _cleanup_vm_resources(compute, network, az.resource_group, vm_name)
             raise _wrap_azure_error(exc) from exc
 
-        output.detail(f"Azure VM '{vm_name}' provisioned (IP: {public_ip})", indent=2)
+        output.detail(f"Azure VM '{vm_name}' provisioned (IP: {public_ip})")
 
         import sys
 

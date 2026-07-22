@@ -194,8 +194,10 @@ class TestCreateProvisioningOutput:
 
     @staticmethod
     def _provisioning_line(captured: CapturedOutput) -> str:
+        # The provisioning announcement is a primary (info/BODY) line; the
+        # concrete resource-creation sub-steps are the DETAIL lines below it.
         return next(
-            m for m in captured.detail if m.startswith("Provisioning Azure VM")
+            m for m in captured.info if m.startswith("Provisioning Azure VM")
         )
 
     def test_exact_match_emits_spec_without_requested(

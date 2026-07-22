@@ -164,17 +164,22 @@ def test_primitives_capture_role_and_ambient_level(
         output.warn("careful")
     assert (Role.HEADER, 0, "Preflight") in captured_output.lines
     assert (Role.BODY, 1, "step") in captured_output.lines
-    # detail(indent=1) at level 1 -> level + indent - 1 = 1.
+    # detail() records the DETAIL role at the ambient section level (the
+    # handler renders it one notch deeper than a sibling info line).
     assert (Role.DETAIL, 1, "sub") in captured_output.lines
     assert (Role.WARNING, 1, "careful") in captured_output.lines
 
 
-def test_detail_indent_param_maps_to_relative_level(
+def test_detail_nests_via_headerless_section(
     captured_output: CapturedOutput,
 ) -> None:
-    # The deprecated indent= shim: at level 0, indent=2 -> level 0 + 2 - 1 = 1.
-    output.detail("x", indent=2)
-    assert (Role.DETAIL, 1, "x") in captured_output.lines
+    # The old indent= argument is gone; a headerless section() is the
+    # sanctioned way to nest a group of detail lines one level deeper.
+    output.detail("shallow")
+    with output.section():
+        output.detail("deep")
+    assert (Role.DETAIL, 0, "shallow") in captured_output.lines
+    assert (Role.DETAIL, 1, "deep") in captured_output.lines
 
 
 def test_result_always_reports_level_zero(captured_output: CapturedOutput) -> None:
@@ -219,10 +224,10 @@ def test_default_handler_body_indents_with_level(
 def test_default_handler_detail_matches_legacy_indent(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    # detail(x) today == 2 spaces; detail(x, indent=2) == 4 spaces.
+    # DETAIL renders at pad(level + 1): 2 spaces at level 0, 4 at level 1.
     handler = output._DefaultHandler()
-    handler.emit(Role.DETAIL, "one", 0)  # detail(x) -> rendered level 0
-    handler.emit(Role.DETAIL, "two", 1)  # detail(x, indent=2) -> rendered level 1
+    handler.emit(Role.DETAIL, "one", 0)  # detail at section level 0
+    handler.emit(Role.DETAIL, "two", 1)  # detail at section level 1
     assert capsys.readouterr().out == "  one\n    two\n"
 
 

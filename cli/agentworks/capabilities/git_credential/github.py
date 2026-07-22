@@ -175,10 +175,7 @@ class GitHubCredentialProvider(GitCredentialProvider):
         if expires is not None:
             extras.append(f"expires {expires.isoformat()}")
         suffix = f" ({', '.join(extras)})" if extras else ""
-        output.detail(
-            f"Verified git token for git-credential/{self.owner_name}{suffix}",
-            indent=2,
-        )
+        output.detail(f"Verified git token for git-credential/{self.owner_name}{suffix}")
 
     @property
     def store_username(self) -> str:

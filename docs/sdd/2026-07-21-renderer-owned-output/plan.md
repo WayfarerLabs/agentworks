@@ -128,18 +128,43 @@ Definition of done: every command that emits multi-step output opens explicit se
 emits incidentally mis-indented output; the remaining 17 `phase()` sites are converted and every
 explicit `detail(..., indent=N)` call is rewritten, so the `indent=` parameter can be deleted.
 
-- [ ] Inventory the remaining `phase()` sites (`agents/manager.py`, `vms/initializer.py`,
-      `vms/manager.py`, and any others) and convert each to `section()`.
-- [ ] Convert the remaining commands file-group by file-group (vms, agents, workspaces, consoles,
-      secrets, sessions-not-covered, capabilities) as always-green commits.
-- [ ] Rewrite every explicit `detail(x, indent=N>1)` (e.g. `azure_vm.py indent=2`) -> a nested
+- [x] Inventory the remaining `phase()` sites (`agents/manager.py`, `vms/initializer.py`,
+      `vms/manager.py`, and any others) and convert each to `section()`. (13 sites: agent
+      create/reinit x3, vm create x3 + reinit x2, and `vms/initializer.py`'s `VM Initialization` /
+      `Admin Initialization`, converted to sibling level-0 sections inside `_phase_b_setup`.)
+- [x] Convert the remaining commands file-group by file-group (vms, agents, workspaces, consoles,
+      secrets, sessions-not-covered, capabilities). Audited: the remaining candidates (`rekey_vm`,
+      `delete_vm`, `rehome_workspace`, `reinit_workspace`, `copy_workspace`, `_execute_stop`,
+      `delete_session`/`delete_agent`, `realize_workspace`) are single-operation linear sequences
+      (announce -> steps -> terminal) with no internal grouping the section model clarifies, and
+      several terminals sit in shared/cascaded/batch helpers; deliberately left flat and
+      byte-identical per "do not force sections". The multi-phase commands (the `phase()` sites) are
+      the ones that benefit and are all converted.
+- [x] Rewrite every explicit `detail(x, indent=N>1)` (e.g. `azure_vm.py indent=2`) -> a nested
       `section()`; plain `detail("x")` calls carry over as the de-emphasis role; promote any
-      clearly-primary line to `info`.
-- [ ] Delete the `indent=` parameter from `detail`, `output.py`, and the handler protocol once no
-      caller passes it (grep-clean). `detail` itself stays.
-- [ ] Route terminal result lines through `result()` and error rendering through the error role.
-- [ ] Spot-check representative commands per group; extend/adjust tests where level now matters.
-- [ ] `agentworks-reviewer` + fresh-eyes pass over the sweep.
+      clearly-primary line to `info`. (16 sites, not 10: `azure_vm.py` x7 + the `azdo`/`github`/
+      `git_credentials` verify/runup lines carry over as plain `detail` under their now-sectioned
+      command; `backup.py` x3 and `describe_vm` x3 use headerless `section()`s; the two primary
+      "Provisioning/Creating VM" lines promoted to `info`.)
+- [x] Delete the `indent=` parameter from `detail`, `output.py`, and the handler protocol once no
+      caller passes it (grep-clean). `detail` itself stays. (The handler `emit` never carried
+      `indent`; only the `detail` free function did.)
+- [x] Route terminal result lines through `result()` for the converted commands (vm create/reinit,
+      agent reinit; agent create keeps `realize_agent`'s shared `info` line per the Phase 3
+      realize-workspace precedent). Error rendering stays as-is; the ERROR role is wired in Phase 5.
+      Promoting flat single-operation commands' terminals to `result()` is deferred to Phase 5
+      (rendering-identical until color lands, and entangled with the shared/cascade/batch cases).
+- [x] Spot-check representative commands per group; extend/adjust tests where level now matters.
+      (Updated `test_output.py` for the removed shim + the headerless-nesting idiom, the azure size
+      tests for the promoted `info` line, and added Role+level nesting/`result()` assertions to the
+      agent and vm create/reinit orchestrated tests.)
+- [x] `agentworks-reviewer` + fresh-eyes (Sonnet) pass over the sweep; both approved, no blockers.
+      Accepted deviations: (a) `create_agent`'s terminal stays `info` (shared `realize_agent`,
+      session precedent) so create/reinit are slightly asymmetric; (b) flat-command terminals
+      (`delete`, etc.) left as `info` and their `result()`-role decision deferred to Phase 5
+      (identical rendering until color); (c) sibling `VM Initialization`/`Admin Initialization`
+      sections covered by the `git diff -w` structural check + `section()` unit tests (an end-to-end
+      assertion needs disproportionate SSH mocking).
 
 ## Phase 5: Colorization (#145, easy roles)
 

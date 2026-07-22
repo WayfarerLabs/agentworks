@@ -338,117 +338,120 @@ def create_vm(
     # prompted here (they are runtime inputs, resolved at the shells'
     # own composition roots), which is why the template node's
     # secret_refs carry only the Tailscale key.
-    output.phase("Preflight")
-    output.detail(f"Checking vm-site/{site}...")
-    output.detail(f"Checking vm-template/{vm_tmpl.name}...")
-    announce_git_credentials(providers)
-    preflight_all(nodes, RunContext(config=config, operation_scope=scope))
+    with output.section("Preflight"):
+        output.detail(f"Checking vm-site/{site}...")
+        output.detail(f"Checking vm-template/{vm_tmpl.name}...")
+        announce_git_credentials(providers)
+        preflight_all(nodes, RunContext(config=config, operation_scope=scope))
 
-    output.phase("Resolving Secrets")
-    resolver.resolve()
+    with output.section("Resolving Secrets"):
+        resolver.resolve()
 
-    output.phase("Provisioning")
-    # Provisioning-phase runup: authenticate the platform's own
-    # credential (proxmox API token) before create() mutates anything. A
-    # definitive rejection aborts here, before the DB row or any backend
-    # resource exists (the FATAL policy: nothing realized, nothing to
-    # unwind). Runup is deferred and announced inline (no phase of its
-    # own); lima/wsl2/azure have no token, so this is a silent no-op for
-    # them. The credentials' write-step runup stays deferred into
-    # initialization, under the skip-and-degrade policy.
-    site_node.runup(scoped_ctx(site_node.secret_refs()))
-    tailscale_auth_key = scoped_ctx(template_node.secret_refs()).secret(
-        vm_tmpl.tailscale_auth_key
-    )
-    # Each credential's token, read through its node's SCOPED delivery.
-    git_tokens = {
-        node.provider.owner_name: scoped_ctx(node.secret_refs()).secret(
-            node.provider.secret_name
+    with output.section("Provisioning"):
+        # Provisioning-phase runup: authenticate the platform's own
+        # credential (proxmox API token) before create() mutates anything. A
+        # definitive rejection aborts here, before the DB row or any backend
+        # resource exists (the FATAL policy: nothing realized, nothing to
+        # unwind). Runup is deferred and announced inline (no phase of its
+        # own); lima/wsl2/azure have no token, so this is a silent no-op for
+        # them. The credentials' write-step runup stays deferred into
+        # initialization, under the skip-and-degrade policy.
+        site_node.runup(scoped_ctx(site_node.secret_refs()))
+        tailscale_auth_key = scoped_ctx(template_node.secret_refs()).secret(
+            vm_tmpl.tailscale_auth_key
         )
-        for node in cred_nodes
-    }
+        # Each credential's token, read through its node's SCOPED delivery.
+        git_tokens = {
+            node.provider.owner_name: scoped_ctx(node.secret_refs()).secret(
+                node.provider.secret_name
+            )
+            for node in cred_nodes
+        }
 
-    # The VM's OS hostname, computed once at create time and recorded on the
-    # row: {slug}-{name} with a slug, the bare name without. Bounded by
-    # construction: slug max 20 + dash + name max 30 = 51 characters,
-    # inside the 63-char hostname-label and Azure 64-char limits.
-    hostname = f"{slug}-{vm_name}" if slug else vm_name
+        # The VM's OS hostname, computed once at create time and recorded on the
+        # row: {slug}-{name} with a slug, the bare name without. Bounded by
+        # construction: slug max 20 + dash + name max 30 = 51 characters,
+        # inside the 63-char hostname-label and Azure 64-char limits.
+        hostname = f"{slug}-{vm_name}" if slug else vm_name
 
-    # Create DB record with as-provisioned resource values. This is the
-    # pending VM's realization artifact (what teardown deletes), so the
-    # log records it the moment the row exists: a provisioning failure
-    # below unwinds exactly the row (today's rollback, relocated onto
-    # the node), and nothing past provisioning is rollback-tracked (an
-    # initialized-but-partial VM is kept, debuggable, reinit-able).
-    db.insert_vm(
-        vm_name,
-        site=site,
-        hostname=hostname,
-        template=vm_tmpl.name,
-        # Store the canonical NULL for the reserved default (whether the
-        # operator omitted the flag or passed it explicitly), so the
-        # column has one encoding per semantic state.
-        admin_template=None if selected_admin_template == "default" else selected_admin_template,
-        cpus=resolved_cpus,
-        memory_gib=resolved_memory,
-        disk_gib=resolved_disk,
-        swap_gib=vm_tmpl.swap,
-        admin_username=resolved_admin_username,
-    )
-    log = RealizationLog()
-    log.mark_realized(pending_vm)
+        # Create DB record with as-provisioned resource values. This is the
+        # pending VM's realization artifact (what teardown deletes), so the
+        # log records it the moment the row exists: a provisioning failure
+        # below unwinds exactly the row (today's rollback, relocated onto
+        # the node), and nothing past provisioning is rollback-tracked (an
+        # initialized-but-partial VM is kept, debuggable, reinit-able).
+        db.insert_vm(
+            vm_name,
+            site=site,
+            hostname=hostname,
+            template=vm_tmpl.name,
+            # Store the canonical NULL for the reserved default (whether the
+            # operator omitted the flag or passed it explicitly), so the
+            # column has one encoding per semantic state.
+            admin_template=None if selected_admin_template == "default" else selected_admin_template,
+            cpus=resolved_cpus,
+            memory_gib=resolved_memory,
+            disk_gib=resolved_disk,
+            swap_gib=vm_tmpl.swap,
+            admin_username=resolved_admin_username,
+        )
+        log = RealizationLog()
+        log.mark_realized(pending_vm)
 
-    # The platform instance was bound (and preflighted, and its secrets
-    # resolved) at the composition root above; dispatch is just ops now.
-    platform_obj = site_node.platform
-    from agentworks.capabilities.vm_platform import ProvisionRequest
+        # The platform instance was bound (and preflighted, and its secrets
+        # resolved) at the composition root above; dispatch is just ops now.
+        platform_obj = site_node.platform
+        from agentworks.capabilities.vm_platform import ProvisionRequest
 
-    request = ProvisionRequest(
-        vm_name=vm_name,
-        hostname=hostname,
-        system_slug=slug,
-        admin_username=resolved_admin_username,
-        ssh_public_key=config.operator.ssh_public_key.read_text().strip(),
-        ssh_private_key=config.operator.ssh_private_key,
-        tailscale_auth_key=tailscale_auth_key,
-        cpus=resolved_cpus,
-        memory_gib=resolved_memory,
-        disk_gib=resolved_disk,
-        swap_gib=vm_tmpl.swap,
-    )
+        request = ProvisionRequest(
+            vm_name=vm_name,
+            hostname=hostname,
+            system_slug=slug,
+            admin_username=resolved_admin_username,
+            ssh_public_key=config.operator.ssh_public_key.read_text().strip(),
+            ssh_private_key=config.operator.ssh_private_key,
+            tailscale_auth_key=tailscale_auth_key,
+            cpus=resolved_cpus,
+            memory_gib=resolved_memory,
+            disk_gib=resolved_disk,
+            swap_gib=vm_tmpl.swap,
+        )
 
-    # The op-start context for the platform's create op: secrets scoped
-    # to the site's declared names.
-    platform_ctx = scoped_ctx(site_node.secret_refs())
+        # The op-start context for the platform's create op: secrets scoped
+        # to the site's declared names.
+        platform_ctx = scoped_ctx(site_node.secret_refs())
 
-    output.detail(f"Creating VM '{vm_name}' on vm-site '{site}'...")
-    try:
-        result = platform_obj.create(request, platform_ctx)
-    except KeyboardInterrupt:
-        output.warn(f"Cancelling vm create '{vm_name}'... rolling back.")
-        log.unwind()
-        raise
-    except UserAbort:
-        # No prompt lives in this span today (the boundary resolve ran
-        # at the composition root above), but an operator abort must
-        # never downgrade to a ProvisioningError; roll back like the
-        # KeyboardInterrupt twin above.
-        log.unwind()
-        raise
-    except Exception as e:
-        log.unwind()
-        raise ProvisioningError(
-            f"provisioning failed: {e}",
-            entity_kind="vm",
-            entity_name=vm_name,
-        ) from e
-    # The unwind window closes here: provisioning succeeded, the VM
-    # exists, and initialization failures keep it (with recovery
-    # guidance), exactly as before.
+        # The primary provisioning step: promoted to info so it sits at
+        # the section body level (the platform's own sub-steps render as
+        # detail one notch deeper).
+        output.info(f"Creating VM '{vm_name}' on vm-site '{site}'...")
+        try:
+            result = platform_obj.create(request, platform_ctx)
+        except KeyboardInterrupt:
+            output.warn(f"Cancelling vm create '{vm_name}'... rolling back.")
+            log.unwind()
+            raise
+        except UserAbort:
+            # No prompt lives in this span today (the boundary resolve ran
+            # at the composition root above), but an operator abort must
+            # never downgrade to a ProvisioningError; roll back like the
+            # KeyboardInterrupt twin above.
+            log.unwind()
+            raise
+        except Exception as e:
+            log.unwind()
+            raise ProvisioningError(
+                f"provisioning failed: {e}",
+                entity_kind="vm",
+                entity_name=vm_name,
+            ) from e
+        # The unwind window closes here: provisioning succeeded, the VM
+        # exists, and initialization failures keep it (with recovery
+        # guidance), exactly as before.
 
-    # Persist the platform's opaque identifiers verbatim; the owning
-    # platform is the column's only reader.
-    db.update_vm_platform_metadata(vm_name, result.platform_metadata)
+        # Persist the platform's opaque identifiers verbatim; the owning
+        # platform is the column's only reader.
+        db.update_vm_platform_metadata(vm_name, result.platform_metadata)
 
     # -- Initialization --
     # If this fails, the VM exists on the remote host and may be debuggable.
@@ -542,13 +545,14 @@ def create_vm(
         output.warn(f"SSH config sync failed: {e}")
         output.detail("VM is likely still usable.")
 
-    # Final status is set by initialize_vm (COMPLETE or PARTIAL)
+    # Final status is set by initialize_vm (COMPLETE or PARTIAL). The
+    # terminal outcome line renders at column 0 via result().
     vm = db.get_vm(vm_name)
     assert vm is not None
     if vm.init_status == InitStatus.PARTIAL.value:
-        output.info(f"VM '{vm_name}' is ready (with warnings, see above)")
+        output.result(f"VM '{vm_name}' is ready (with warnings, see above)")
     else:
-        output.info(f"VM '{vm_name}' is ready!")
+        output.result(f"VM '{vm_name}' is ready!")
 
 
 def list_vms(db: Database, *, names_only: bool = False) -> None:
@@ -742,13 +746,19 @@ def describe_vm(db: Database, config: Config, name: str) -> None:
             output.detail(f"{ws.name}  ({ws.workspace_path})")
 
             sessions = db.list_sessions(workspace_name=ws.name)
-            if sessions:
-                output.detail(f"Sessions ({len(sessions)}):", indent=2)
-                for s in sessions:
-                    mode_label = f"agent:{s.agent_name}" if s.agent_name else "admin"
-                    output.detail(f"{s.name}  [{s.template}]  {mode_label}", indent=3)
-            else:
-                output.detail("(no sessions)", indent=2)
+            # Headerless sections carry the per-workspace session listing's
+            # indentation (was detail(indent=2)/detail(indent=3)): the
+            # "Sessions" line sits one level under the workspace, each
+            # session one level under that.
+            with output.section():
+                if sessions:
+                    output.detail(f"Sessions ({len(sessions)}):")
+                    with output.section():
+                        for s in sessions:
+                            mode_label = f"agent:{s.agent_name}" if s.agent_name else "admin"
+                            output.detail(f"{s.name}  [{s.template}]  {mode_label}")
+                else:
+                    output.detail("(no sessions)")
     else:
         output.detail("(none)")
 
@@ -1785,13 +1795,13 @@ def reinit_vm(
         # Provisioning is hermetic: no operator-env secrets are
         # prompted at reinit; they get prompted at the use site (vm
         # shell, session create, etc.).
-        output.phase("Preflight")
-        output.detail(f"Checking vm-site/{vm.site}...")
-        announce_git_credentials(providers)
-        preflight_all(nodes, RunContext(config=config, operation_scope=scope))
+        with output.section("Preflight"):
+            output.detail(f"Checking vm-site/{vm.site}...")
+            announce_git_credentials(providers)
+            preflight_all(nodes, RunContext(config=config, operation_scope=scope))
 
-        output.phase("Resolving Secrets")
-        resolver.resolve()
+        with output.section("Resolving Secrets"):
+            resolver.resolve()
 
         # No command-root runup at reinit: reinit reaches the VM over
         # Tailscale SSH and never calls the platform API in its planned
@@ -1849,11 +1859,12 @@ def reinit_vm(
 
     refreshed_vm = db.get_vm(name)
     assert refreshed_vm is not None
+    # Terminal outcome line at column 0 via result().
     if refreshed_vm.init_status == InitStatus.PARTIAL.value:
-        output.info(f"VM '{name}' reinitialized (with warnings, see above)")
+        output.result(f"VM '{name}' reinitialized (with warnings, see above)")
         output.detail(f"Log: {logger.path}")
     else:
-        output.info(f"VM '{name}' reinitialized successfully!")
+        output.result(f"VM '{name}' reinitialized successfully!")
 
 
 def _tailscale_logout(vm: VMRow, config: Config, platform: VMPlatform) -> None:

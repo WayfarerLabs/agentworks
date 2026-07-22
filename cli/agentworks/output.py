@@ -393,15 +393,16 @@ def info(message: str) -> None:
     _handler.emit(Role.BODY, message, _current_level())
 
 
-def detail(message: str, indent: int = 1) -> None:
-    """Emit an indented detail/sub-step message.
+def detail(message: str) -> None:
+    """Emit a de-emphasized detail / secondary body line.
 
-    The ``detail`` role (de-emphasized body) is permanent; the ``indent``
-    parameter is a temporary compatibility shim. Explicit ``indent=N``
-    callers are converted to nested :func:`section` blocks and the
-    parameter is removed in a later phase.
+    The ``DETAIL`` role renders one notch deeper than a sibling
+    :func:`info` line at the ambient section level. To nest a group of
+    detail lines further (the old ``indent=`` argument's job), wrap them
+    in a :func:`section` block; a headerless ``section()`` pushes a level
+    with no header line.
     """
-    _handler.emit(Role.DETAIL, message, _current_level() + indent - 1)
+    _handler.emit(Role.DETAIL, message, _current_level())
 
 
 def warn(message: str) -> None:
