@@ -12,11 +12,11 @@ straightforward to have it all.
 
 ## Architecture at a Glance
 
-The operator runs the `agw` CLI on their workstation. VMs are created at declared **vm-sites* (
-configured places to create VMs) each backed by a **vm-platform** that knows how to work with a given provider (e.g. Lima, WSL2, Proxmox, Azure VMS, Amazon EC2, ...).
-Regardless of the platform, every VM runs the same base operating system (Debian Bookworm), is
-joined to the same Tailscale tailnet, and is accessible over SSH at its Tailscale IP address using
-the operator's keys.
+The operator runs the `agw` CLI on their workstation. VMs are created at declared **vm-sites**
+(configured places to create VMs), each backed by a **vm-platform** that knows how to work with a
+given provider (e.g. Lima, WSL2, Proxmox, Azure VMs, Amazon EC2, ...). Regardless of the platform,
+every VM runs the same base operating system (Debian Bookworm), is joined to the same Tailscale
+tailnet, and is accessible over SSH at its Tailscale IP address using the operator's keys.
 
 ![Agentworks topology: the operator's workstation runs the agw CLI, which creates VMs at declared sites across local platforms (Lima or WSL2), a remote Lima host, Azure, and Proxmox. Every VM and the workstation itself join a shared Tailnet overlay, which is how the CLI reaches them all.](docs/images/agw-topology.png)
 
@@ -28,12 +28,14 @@ workloads:
   capabilities and access.
 - Agentic workloads (Claude Code, etc.) can be run as persistent **sessions** including an
   associated tmux session, which can be attached to and detached from as needed.
-- Each session launches a **harness** that knows how to run a particular tool (e.g. a Claude Code instance, or just
-  a plain login shell). The harness owns starting/restart semantics (to pick up exactly where you left off), authentication, target environment validation, and any other tool-specific behavior.
+- Each session launches a **harness** that knows how to run a particular tool (e.g. a Claude Code
+  instance, or just a plain login shell). The harness owns starting/restart semantics (to pick up
+  exactly where you left off), authentication, target environment validation, and any other
+  tool-specific behavior.
 - Sessions can be organized into **named consoles**: curated tmux views that organize active
   sessions along with optional extra shell panes.
-- Both **config** and **secrets** (together with **secret backends**) can be managed and securely injected at any level (VM, workspace,
-  agent, session) to control access and behavior.
+- Both **config** and **secrets** (together with **secret backends**) can be managed and securely
+  injected at any level (VM, workspace, agent, session) to control access and behavior.
 
 And all of this is managed via a **declarative, idempotent configuration system** that makes it easy
 for operators to define, evolve, and scale their infrastructure over time.
@@ -181,14 +183,20 @@ massive scale for decades.
 
 ### Sessions and Harnesses - The Workloads
 
-A **session** is a specification to run a specific **harness** as an agent in a workspace on a VM. The session is the shell (including the tmux session, config/secret specifications, etc.) while the
+A **session** is a specification to run a specific **harness** as an agent in a workspace on a VM.
+The session is the shell (including the tmux session, config/secret specifications, etc.) while the
 harness is the piece that knows how to run a particular tool (e.g. a Claude Code instance, or just a
 plain login shell): it owns starting and restarting the workload and checking that the tool's
-required executables are present on the launch target. A session template selects a harness
-(e.g. `harness: claude-code`) for a default experience and can further customize the behavior with a `harness_config` block.
-For even greater flexibility (e.g. the ability to run a not-yet-supported harness, custom app, etc.), the default `shell` harness simply runs a login shell, optionally executing a command or just leaving it in interactive mode; a template that names no harness runs this built-in `shell` harness.
+required executables are present on the launch target. A session template selects a harness (e.g.
+`harness: claude-code`) for a default experience and can further customize the behavior with a
+`harness_config` block. For even greater flexibility (e.g. the ability to run a not-yet-supported
+harness, custom app, etc.), the default `shell` harness simply runs a login shell, optionally
+executing a command or just leaving it in interactive mode; a template that names no harness runs
+this built-in `shell` harness.
 
-Because harnesses are a distinct extension layer, they can be built to integrate tightly with their target tool (e.g. Claude Code), maximizing the functionality and value of running that tool in Agentworks.
+Because harnesses are a distinct extension layer, they can be built to integrate tightly with their
+target tool (e.g. Claude Code), maximizing the functionality and value of running that tool in
+Agentworks.
 
 A unique name and a persistent tmux session allow the operator to have any number of concurrent
 workloads running across their VMs, workspaces, and agents. Agentworks allows the operator to attach
