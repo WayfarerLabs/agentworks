@@ -45,9 +45,7 @@ def _vm_node(db: Database, name: str = "box") -> LiveVMNode:
     row = db.get_vm(name)
     assert row is not None
     site = VMSiteNode("stub", cast("VMPlatform", _Platform()), (), cast("Registry", object()))
-    return LiveVMNode(
-        db, cast("Config", object()), cast("Registry", object()), row, site
-    )
+    return LiveVMNode(db, cast("Config", object()), cast("Registry", object()), row, site)
 
 
 def _pending_agent(db: Database, vm: LiveVMNode, name: str = "dev"):
@@ -55,9 +53,7 @@ def _pending_agent(db: Database, vm: LiveVMNode, name: str = "dev"):
     from agentworks.agents.templates import ResolvedAgentTemplate
 
     template = AgentTemplateNode(ResolvedAgentTemplate(name="default"), ())
-    return pending_agent_node(
-        db, cast("Config", object()), name, template, vm
-    )
+    return pending_agent_node(db, cast("Config", object()), name, template, vm)
 
 
 def _session(
@@ -71,12 +67,8 @@ def _session(
     from agentworks.workspaces.nodes import pending_workspace_node
 
     vm_node = vm if vm is not None else _vm_node(db)
-    workspace = pending_workspace_node(
-        db, cast("Config", object()), "ws1", vm_node, None
-    )
-    template = ResolvedSessionTemplate(
-        name="claude", harness_config={"required_commands": list(required)}
-    )
+    workspace = pending_workspace_node(db, cast("Config", object()), "ws1", vm_node, None)
+    template = ResolvedSessionTemplate(name="claude", harness_config={"required_commands": list(required)})
     return pending_session_node(
         db,
         cast("Config", object()),
@@ -99,8 +91,12 @@ def _ctx(
 ) -> RunContext:
     if level is ScopeLevel.SESSION:
         scope = OperationScope(
-            level=level, vm="box", workspace="ws1", session="s1",
-            agent=agent, admin=admin,
+            level=level,
+            vm="box",
+            workspace="ws1",
+            session="s1",
+            agent=agent,
+            admin=admin,
         )
     else:
         scope = OperationScope(level=level)
@@ -196,9 +192,7 @@ def test_admin_mode_error_names_the_vm(db: Database) -> None:
 
 
 @pytest.mark.parametrize("admin_mode", [False, True])
-def test_missing_transport_defers_at_preflight_and_is_loud_at_runup(
-    db: Database, admin_mode: bool
-) -> None:
+def test_missing_transport_defers_at_preflight_and_is_loud_at_runup(db: Database, admin_mode: bool) -> None:
     """A probe-ready target with no transport on the command-start
     context defers (the stage's timing did not carry it); the op-start
     context must carry it, so runup without one is a loud error. Same
@@ -256,8 +250,10 @@ def test_session_create_graph_shares_one_vm_node(db: Database) -> None:
 
     vm = _vm_node(db)
     provider = SimpleNamespace(
-        owner_name="gh", secret_name="git-token-gh",
-        preflight=lambda ctx: None, runup=lambda ctx: None,
+        owner_name="gh",
+        secret_name="git-token-gh",
+        preflight=lambda ctx: None,
+        runup=lambda ctx: None,
     )
     cred = GitCredentialNode(
         "gh",
@@ -265,15 +261,9 @@ def test_session_create_graph_shares_one_vm_node(db: Database) -> None:
         (SimpleNamespace(name="git-token-gh", usage="the auth token"),),  # type: ignore[arg-type]
         cast("Registry", object()),
     )
-    template = AgentTemplateNode(
-        ResolvedAgentTemplate(name="default", git_credentials=["gh"]), (cred,)
-    )
-    agent = pending_agent_node(
-        db, cast("Config", object()), "dev", template, vm
-    )
-    workspace = pending_workspace_node(
-        db, cast("Config", object()), "ws1", vm, None
-    )
+    template = AgentTemplateNode(ResolvedAgentTemplate(name="default", git_credentials=["gh"]), (cred,))
+    agent = pending_agent_node(db, cast("Config", object()), "dev", template, vm)
+    workspace = pending_workspace_node(db, cast("Config", object()), "ws1", vm, None)
     session = pending_session_node(
         db,
         cast("Config", object()),
@@ -303,9 +293,7 @@ def test_session_create_graph_shares_one_vm_node(db: Database) -> None:
 # -- the relocated ephemeral teardown bodies ---------------------------------
 
 
-def test_pending_agent_teardown_is_todays_rollback_body(
-    db: Database, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_pending_agent_teardown_is_todays_rollback_body(db: Database, monkeypatch: pytest.MonkeyPatch) -> None:
     from agentworks.agents import manager as agents_manager
 
     calls: list[dict[str, object]] = []
@@ -324,9 +312,7 @@ def test_pending_agent_teardown_is_todays_rollback_body(
     assert call["vm_node"] is vm
 
 
-def test_pending_agent_teardown_failure_names_the_artifact(
-    db: Database, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_pending_agent_teardown_failure_names_the_artifact(db: Database, monkeypatch: pytest.MonkeyPatch) -> None:
     from agentworks.agents import manager as agents_manager
 
     def _boom(*a: object, **k: object) -> None:
@@ -342,9 +328,7 @@ def test_pending_agent_teardown_failure_names_the_artifact(
     assert "agw agent delete --force dev" in str(exc.value)
 
 
-def test_pending_workspace_teardown_is_todays_rollback_body(
-    db: Database, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_pending_workspace_teardown_is_todays_rollback_body(db: Database, monkeypatch: pytest.MonkeyPatch) -> None:
     from agentworks.workspaces import manager as workspaces_manager
     from agentworks.workspaces.nodes import pending_workspace_node
 
@@ -355,9 +339,7 @@ def test_pending_workspace_teardown_is_todays_rollback_body(
         lambda db_, config, **kw: calls.append(dict(kw)),
     )
     vm = _vm_node(db)
-    workspace = pending_workspace_node(
-        db, cast("Config", object()), "ws1", vm, None
-    )
+    workspace = pending_workspace_node(db, cast("Config", object()), "ws1", vm, None)
     workspace.mark_realized()
     workspace.teardown()
     (call,) = calls
@@ -366,9 +348,7 @@ def test_pending_workspace_teardown_is_todays_rollback_body(
     assert call["vm_node"] is vm
 
 
-def _seed_session_partial_state(
-    db: Database, *, with_grant: bool = True
-) -> None:
+def _seed_session_partial_state(db: Database, *, with_grant: bool = True) -> None:
     """Seed the artifacts a mid-slice failure can leave behind: the
     workspace row (pre-existing), the agent row, the implicit grant,
     and the session row."""
@@ -383,14 +363,16 @@ def _seed_session_partial_state(
     if with_grant:
         db.insert_agent_grant("dev", "ws1", "implicit", session_name="s1")
     db.insert_session(
-        "s1", "ws1", "claude", SessionMode.AGENT,
-        agent_name="dev", socket_path="/tmp/s1.sock",
+        "s1",
+        "ws1",
+        "claude",
+        SessionMode.AGENT,
+        agent_name="dev",
+        socket_path="/tmp/s1.sock",
     )
 
 
-def test_pending_session_teardown_is_todays_rollback_body(
-    db: Database, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_pending_session_teardown_is_todays_rollback_body(db: Database, monkeypatch: pytest.MonkeyPatch) -> None:
     """The session's partial-state cleaner: delete the row, revoke the
     implicit grant, and (no other grant remaining) remove the agent
     from the workspace group, exactly the imperative session-internal
@@ -401,9 +383,7 @@ def test_pending_session_teardown_is_todays_rollback_body(
     monkeypatch.setattr(
         agents_grants,
         "remove_from_workspace_group",
-        lambda vm, config, db_, linux_user, ws, **k: removed.append(
-            (linux_user, ws)
-        ),
+        lambda vm, config, db_, linux_user, ws, **k: removed.append((linux_user, ws)),
     )
     vm = _vm_node(db)
     agent = _pending_agent(db, vm)
@@ -417,9 +397,7 @@ def test_pending_session_teardown_is_todays_rollback_body(
     assert removed == [("agt-dev", "ws1")]
 
 
-def test_pending_session_teardown_keeps_group_with_other_grants(
-    db: Database, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_pending_session_teardown_keeps_group_with_other_grants(db: Database, monkeypatch: pytest.MonkeyPatch) -> None:
     """An explicit grant survives the implicit revoke, so the group
     membership stays (it backs the remaining grant)."""
     from agentworks.agents import grants as agents_grants
@@ -483,9 +461,7 @@ def test_pending_session_teardown_warns_and_never_raises(
     assert "db locked" in warning
 
 
-def test_reverse_realization_order_reproduces_rollback_order(
-    db: Database, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_reverse_realization_order_reproduces_rollback_order(db: Database, monkeypatch: pytest.MonkeyPatch) -> None:
     """The unwind oracle for the ephemeral fold: agent BEFORE workspace
     (reverse of workspace-then-agent creation), so the agent's
     workspace-group membership is cleaned before the group goes away."""
@@ -506,9 +482,7 @@ def test_reverse_realization_order_reproduces_rollback_order(
         lambda *a, **k: order.append("workspace"),
     )
     vm = _vm_node(db)
-    workspace = pending_workspace_node(
-        db, cast("Config", object()), "ws1", vm, None
-    )
+    workspace = pending_workspace_node(db, cast("Config", object()), "ws1", vm, None)
     agent = _pending_agent(db, vm)
     log = RealizationLog()
     log.mark_realized(workspace)  # creation order: workspace, then agent
@@ -525,8 +499,12 @@ def _live_agent(db: Database, vm: LiveVMNode, name: str = "dev"):
     from agentworks.db import AgentRow
 
     row = AgentRow(
-        name=name, vm_name=vm.row.name, linux_user=f"agw-{name}",
-        template=None, grant_all=False, created_at="",
+        name=name,
+        vm_name=vm.row.name,
+        linux_user=f"agw-{name}",
+        template=None,
+        grant_all=False,
+        created_at="",
     )
     return live_agent_node(row, vm)
 
@@ -535,9 +513,13 @@ def _session_row(*, agent_name: str | None) -> object:
     from agentworks.db import SessionRow
 
     return SessionRow(
-        name="s1", workspace_name="ws1", template="claude",
+        name="s1",
+        workspace_name="ws1",
+        template="claude",
         mode="agent" if agent_name else "admin",
-        created_at="", updated_at="", agent_name=agent_name,
+        created_at="",
+        updated_at="",
+        agent_name=agent_name,
     )
 
 
@@ -546,8 +528,11 @@ def _live_workspace(db: Database, vm: LiveVMNode):
     from agentworks.workspaces.nodes import live_workspace_node
 
     row = WorkspaceRow(
-        name="ws1", vm_name=vm.row.name, template=None,
-        workspace_path="/srv/ws1", created_at="",
+        name="ws1",
+        vm_name=vm.row.name,
+        template=None,
+        workspace_path="/srv/ws1",
+        created_at="",
         linux_group="ws-ws1",
     )
     return live_workspace_node(row, vm)
@@ -651,9 +636,7 @@ def test_live_session_agent_name_mismatch_is_loud(db: Database) -> None:
 # -- the agent-template factory (declared references become edges) -----------
 
 
-def test_agent_template_node_derives_credential_edges(
-    tmp_path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_agent_template_node_derives_credential_edges(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
     """The factory obligation, proven through real declared resources:
     one git-credential node per declared name, in declaration order,
     each carrying its token secret."""

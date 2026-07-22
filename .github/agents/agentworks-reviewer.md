@@ -281,8 +281,8 @@ runner.
   already have in a derivable form, the migration backfills them with the _old_ derived shape, not
   the new one. Existing entities continue to work; new entities use the new shape.
 - **Migrations are forward-only, idempotent, and run automatically** at the start of every
-  `Database()` open. Each migration in `cli/agentworks/db.py:MIGRATIONS` must be safe to apply on
-  any pre-existing DB at the prior version and produce a consistent post-migration state.
+  `Database()` open. Each migration in `cli/agentworks/db/migrations.py:MIGRATIONS` must be safe to
+  apply on any pre-existing DB at the prior version and produce a consistent post-migration state.
 - **Table rebuilds follow the SQLite-recommended pattern.** Because the migration runner runs with
   `PRAGMA foreign_keys = OFF` and verifies via `PRAGMA foreign_key_check` at the end, rebuild
   migrations must explicitly delete from referencing tables (sessions, agent_workspace_grants, etc.)
@@ -370,8 +370,8 @@ failure to whichever client is calling it.
 - Produces user-facing output and feedback through the `agentworks.output` module, never through
   `typer.echo`, `print`, or by formatting strings into return values.
 - Must not import `typer`. This is enforced by a CI check; the only allowlisted exceptions are the
-  CLI layer (`cli.py`, `doctor.py`, `completions/`) and `sessions/manager.py` (which uses typer
-  purely as a raw data-pipe; see the comment in that file).
+  CLI layer (`cli.py`, `doctor.py`, `completions/`) and `sessions/manager/_logs.py` (which uses
+  typer purely as a raw data-pipe; see the comment in that file).
 
 **CLI layer** (`cli.py`, the completion subsystem, `doctor.py`):
 

@@ -111,26 +111,19 @@ class LimaPlatform(VMPlatform):
         return None
 
     @classmethod
-    def validate_config(
-        cls, owner: str, config: Mapping[str, object]
-    ) -> tuple[ConfigReference, ...]:
+    def validate_config(cls, owner: str, config: Mapping[str, object]) -> tuple[ConfigReference, ...]:
         vm_host = config.get("vm_host")
         if vm_host is not None and (not isinstance(vm_host, str) or not vm_host):
             raise ConfigError(
-                f"{owner}.vm_host must be a non-empty SSH host string "
-                f"(e.g. 'user@host'), got {vm_host!r}"
+                f"{owner}.vm_host must be a non-empty SSH host string (e.g. 'user@host'), got {vm_host!r}"
             )
         unknown = sorted(set(config) - {"vm_host"})
         if unknown:
-            raise ConfigError(
-                f"{owner}: unknown lima platform field(s): {', '.join(unknown)}"
-            )
+            raise ConfigError(f"{owner}: unknown lima platform field(s): {', '.join(unknown)}")
         return ()
 
     @classmethod
-    def legacy_platform_metadata(
-        cls, row: Mapping[str, Any], legacy: Mapping[str, Any]
-    ) -> dict[str, str]:
+    def legacy_platform_metadata(cls, row: Mapping[str, Any], legacy: Mapping[str, Any]) -> dict[str, str]:
         # Legacy Lima ops keyed off vm.name directly; the instance name
         # IS the VM name for every existing row.
         return {"instance_name": str(row["name"])}
@@ -148,8 +141,7 @@ class LimaPlatform(VMPlatform):
         name = vm.platform_metadata.get("instance_name")
         if not name:
             raise StateError(
-                f"VM '{vm.name}' has no lima instance_name in its platform "
-                f"metadata; the DB row is incomplete",
+                f"VM '{vm.name}' has no lima instance_name in its platform metadata; the DB row is incomplete",
                 entity_kind="vm",
                 entity_name=vm.name,
             )
@@ -202,10 +194,7 @@ class LimaPlatform(VMPlatform):
             # than a state mismatch on a managed entity.
             raise ConnectivityError(
                 "'limactl' not found. Lima is not installed on this machine.",
-                hint=(
-                    "For remote Lima VMs, declare a vm-site with "
-                    "platform_config.vm_host and pass it via --site."
-                ),
+                hint=("For remote Lima VMs, declare a vm-site with platform_config.vm_host and pass it via --site."),
             )
 
     def create(self, request: ProvisionRequest, ctx: RunContext) -> ProvisionResult:
@@ -224,29 +213,19 @@ class LimaPlatform(VMPlatform):
         # the namespacing token. Pre-flight collision check (lima
         # instance names are the primary identifier: error, never
         # suffix).
-        instance_name = (
-            f"{request.system_slug}-{request.vm_name}"
-            if request.system_slug
-            else request.vm_name
-        )
+        instance_name = f"{request.system_slug}-{request.vm_name}" if request.system_slug else request.vm_name
         if self._instance_exists(instance_name):
             raise StateError(
                 f"a Lima instance named '{instance_name}' already exists"
                 + (f" on '{self._vm_host_ssh}'" if self.is_remote else ""),
                 entity_kind="vm",
                 entity_name=request.vm_name,
-                hint=(
-                    "delete it first (limactl delete) or pick a different "
-                    "VM name"
-                ),
+                hint=("delete it first (limactl delete) or pick a different VM name"),
             )
 
         if self.is_remote:
             output.info(f"Connecting to VM host '{self._vm_host_ssh}'...")
-        output.info(
-            f"Creating Lima VM '{instance_name}' "
-            f"({'remote' if self.is_remote else 'local'})..."
-        )
+        output.info(f"Creating Lima VM '{instance_name}' ({'remote' if self.is_remote else 'local'})...")
         output.detail(f"Resources: {cpus} CPUs, {memory} GiB memory, {disk} GiB disk")
         if swap > 0:
             output.detail(f"Swap: {swap} GiB")
@@ -294,19 +273,13 @@ class LimaPlatform(VMPlatform):
         try:
             restart_pending = self._restart_sentinel_present(instance_name)
         except SSHError as e:
+            output.warn(f"could not check whether '{instance_name}' needs a restart to finish provisioning: {e}")
             output.warn(
-                f"could not check whether '{instance_name}' needs a restart to "
-                f"finish provisioning: {e}"
-            )
-            output.warn(
-                f"if the VM misbehaves, 'limactl restart {instance_name}' "
-                "reapplies any deferred bootstrap step."
+                f"if the VM misbehaves, 'limactl restart {instance_name}' reapplies any deferred bootstrap step."
             )
             restart_pending = False
         if restart_pending:
-            output.detail(
-                f"A bootstrap step needs a reboot; restarting '{instance_name}'..."
-            )
+            output.detail(f"A bootstrap step needs a reboot; restarting '{instance_name}'...")
             self._run_lima(f"limactl restart {instance_name}")
 
         # If Tailscale was provisioned via the provision block, extract the IP
@@ -315,9 +288,7 @@ class LimaPlatform(VMPlatform):
         if request.tailscale_auth_key:
             output.detail("Retrieving Tailscale IP...")
             try:
-                ip_output = self._run_lima(
-                    f"limactl shell {instance_name} sudo tailscale ip -4"
-                )
+                ip_output = self._run_lima(f"limactl shell {instance_name} sudo tailscale ip -4")
                 tailscale_ip = ip_output.strip()
                 bootstrap_complete = True
                 output.detail(f"Tailscale IP: {tailscale_ip}")
@@ -360,9 +331,7 @@ class LimaPlatform(VMPlatform):
     def _instance_exists(self, instance_name: str) -> bool:
         """Pre-flight: does a Lima instance with this name exist?"""
         try:
-            listing = self._run_lima(
-                f"limactl list --json {instance_name}", check=False
-            )
+            listing = self._run_lima(f"limactl list --json {instance_name}", check=False)
         except SSHError:
             return False
         for line in listing.strip().splitlines():
@@ -377,9 +346,7 @@ class LimaPlatform(VMPlatform):
     def _transport_for(self, instance_name: str) -> Transport:
         if self.is_remote:
             assert self._vm_host_ssh is not None
-            return RemoteLimaTransport(
-                vm_name=instance_name, vm_host_ssh=self._vm_host_ssh
-            )
+            return RemoteLimaTransport(vm_name=instance_name, vm_host_ssh=self._vm_host_ssh)
         return LimaTransport(vm_name=instance_name)
 
     def _create_local(self, instance_name: str, lima_yaml: str) -> None:
@@ -389,9 +356,7 @@ class LimaPlatform(VMPlatform):
             template_path = f.name
 
         try:
-            self._run_lima(
-                f"limactl create --name {instance_name} --tty=false {template_path}"
-            )
+            self._run_lima(f"limactl create --name {instance_name} --tty=false {template_path}")
             self._run_lima(f"limactl start {instance_name}")
         except SSHError:
             self._log_provision_errors(instance_name)
@@ -425,8 +390,7 @@ class LimaPlatform(VMPlatform):
             logger=ssh_logger,
         )
         lima_cmd = (
-            f"limactl create --name {instance_name} --tty=false {remote_template} "
-            f"&& limactl start {instance_name}"
+            f"limactl create --name {instance_name} --tty=false {remote_template} && limactl start {instance_name}"
         )
         output.detail("Starting and provisioning VM via Lima (this may take several minutes)...")
         # reuse_completed=False: creation is one-shot, so a leftover
@@ -502,9 +466,7 @@ class LimaPlatform(VMPlatform):
 
     def delete(self, vm: VMRow, ctx: RunContext) -> None:
         output.info(f"Deleting Lima VM '{vm.name}'...")
-        self._run_lima(
-            f"limactl delete --force {self._instance_name(vm)}", check=False
-        )
+        self._run_lima(f"limactl delete --force {self._instance_name(vm)}", check=False)
         output.info(f"Lima VM '{vm.name}' deleted")
 
     def display_backend_name(self, vm: VMRow) -> str:
@@ -514,16 +476,17 @@ class LimaPlatform(VMPlatform):
         return instance
 
     def native_transport(
-        self, vm: VMRow, *, config: Config | None = None,
+        self,
+        vm: VMRow,
+        *,
+        config: Config | None = None,
     ) -> Transport | None:
         return self._transport_for(self._instance_name(vm))
 
     def status(self, vm: VMRow, ctx: RunContext) -> VMStatus:
         instance_name = self._instance_name(vm)
         try:
-            listing = self._run_lima(
-                f"limactl list --json {instance_name}", check=False
-            )
+            listing = self._run_lima(f"limactl list --json {instance_name}", check=False)
         except SSHError:
             return VMStatus.UNKNOWN
 

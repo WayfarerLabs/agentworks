@@ -114,8 +114,7 @@ class PendingWorkspaceNode:
     def mark_realized(self) -> None:
         if self._realized:
             raise StateError(
-                f"{self.key} was already marked realized; the "
-                f"pending-to-realized flip is one-way and once."
+                f"{self.key} was already marked realized; the pending-to-realized flip is one-way and once."
             )
         self._realized = True
 

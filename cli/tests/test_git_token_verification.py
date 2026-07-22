@@ -70,7 +70,7 @@ def test_github_200_verifies_with_login_and_expiry(
     assert "Verified git token for git-credential/gh" in out
     assert "login wfscot" in out
     assert "expires 2026-10-01" in out
-    (url, headers), = fake.calls  # type: ignore[attr-defined]
+    ((url, headers),) = fake.calls  # type: ignore[attr-defined]
     assert url == "https://api.github.com/user"
     assert headers["Authorization"] == "Bearer tok"
 
@@ -78,9 +78,7 @@ def test_github_200_verifies_with_login_and_expiry(
 def test_github_401_is_definitive_rejection(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(
-        "agentworks.capabilities.git_credential.base._http_probe", _probe(401)
-    )
+    monkeypatch.setattr("agentworks.capabilities.git_credential.base._http_probe", _probe(401))
     p = GitHubCredentialProvider("gh", {"token": "my-secret"})
     with pytest.raises(TokenRejectedError, match="rejected the token") as exc:
         p.runup(RunContext(secrets=_StubReader({"my-secret": "bogus"})))
@@ -92,9 +90,7 @@ def test_github_401_is_definitive_rejection(
 def test_github_other_status_warns_and_continues(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    monkeypatch.setattr(
-        "agentworks.capabilities.git_credential.base._http_probe", _probe(503)
-    )
+    monkeypatch.setattr("agentworks.capabilities.git_credential.base._http_probe", _probe(503))
     p = GitHubCredentialProvider("gh", {})
     p.runup(RunContext(secrets=_StubReader({"git-token-gh": "tok"})))
     assert "could not verify" in capsys.readouterr().err
@@ -137,26 +133,20 @@ def test_github_runup_without_secrets_is_error() -> None:
 
 
 @pytest.mark.parametrize("status", [401, 203])
-def test_azdo_rejection_statuses(
-    monkeypatch: pytest.MonkeyPatch, status: int
-) -> None:
-    monkeypatch.setattr(
-        "agentworks.capabilities.git_credential.base._http_probe", _probe(status)
-    )
+def test_azdo_rejection_statuses(monkeypatch: pytest.MonkeyPatch, status: int) -> None:
+    monkeypatch.setattr("agentworks.capabilities.git_credential.base._http_probe", _probe(status))
     p = AzDOCredentialProvider("ado", {"org": "my-org"})
     with pytest.raises(TokenRejectedError, match="Azure DevOps rejected"):
         p.runup(RunContext(secrets=_StubReader({"git-token-ado": "bogus"})))
 
 
-def test_azdo_200_verifies(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
-) -> None:
+def test_azdo_200_verifies(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
     fake = _probe(200)
     monkeypatch.setattr("agentworks.capabilities.git_credential.base._http_probe", fake)
     p = AzDOCredentialProvider("ado", {"org": "my-org"})
     p.runup(RunContext(secrets=_StubReader({"git-token-ado": "tok"})))
     assert "Verified git token for git-credential/ado" in capsys.readouterr().out
-    (url, headers), = fake.calls  # type: ignore[attr-defined]
+    ((url, headers),) = fake.calls  # type: ignore[attr-defined]
     assert url == "https://dev.azure.com/my-org/_apis/connectionData"
     assert headers["Authorization"].startswith("Basic ")
 
@@ -183,9 +173,7 @@ def _config_with_github_cred(tmp_path: Path, *, extra: str = ""):  # noqa: ANN20
     return load_config(cfg, warn_issues=False)
 
 
-def test_collect_git_tokens_does_not_probe(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_collect_git_tokens_does_not_probe(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Collection only reads resolved values; the runup (the network
     probe) is deferred to the write step (``runup_and_filter``), so
     collecting tokens never touches the network."""
@@ -207,9 +195,7 @@ def test_collect_git_tokens_does_not_probe(
     for secret_name in secret_union([node]):
         resolver.register_name(secret_name)
     resolver.resolve()
-    token = ScopedSecrets(resolver.values, node.secret_refs()).get(
-        node.provider.secret_name
-    )
+    token = ScopedSecrets(resolver.values, node.secret_refs()).get(node.provider.secret_name)
     assert token == "goodtok"
 
 
@@ -224,9 +210,7 @@ def _runup_config(*, enabled: bool = True) -> object:
     return cfg
 
 
-def test_runup_and_filter_keeps_verified(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
-) -> None:
+def test_runup_and_filter_keeps_verified(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
     from agentworks.git_credentials import runup_and_filter
 
     monkeypatch.setattr(
@@ -241,17 +225,13 @@ def test_runup_and_filter_keeps_verified(
     assert "login wfscot" in out
 
 
-def test_runup_and_filter_skips_rejected(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
-) -> None:
+def test_runup_and_filter_skips_rejected(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
     """A definitively rejected token is SKIPPED (dropped from the result)
     with a warning; provisioning continues to a partial result rather
     than aborting."""
     from agentworks.git_credentials import runup_and_filter
 
-    monkeypatch.setattr(
-        "agentworks.capabilities.git_credential.base._http_probe", _probe(401)
-    )
+    monkeypatch.setattr("agentworks.capabilities.git_credential.base._http_probe", _probe(401))
     providers = {"gh": GitHubCredentialProvider("gh", {})}
     passed = runup_and_filter(providers, {"gh": "bogus"}, _runup_config())  # type: ignore[arg-type]
     assert passed == {}
@@ -267,9 +247,7 @@ def test_runup_and_filter_logs_skip_for_partial(
 
     from agentworks.git_credentials import runup_and_filter
 
-    monkeypatch.setattr(
-        "agentworks.capabilities.git_credential.base._http_probe", _probe(401)
-    )
+    monkeypatch.setattr("agentworks.capabilities.git_credential.base._http_probe", _probe(401))
     logger = MagicMock()
     passed = runup_and_filter(
         {"gh": GitHubCredentialProvider("gh", {})},
@@ -292,6 +270,8 @@ def test_runup_and_filter_disabled_keeps_all(
     monkeypatch.setattr("agentworks.capabilities.git_credential.base._http_probe", _explode)
     providers = {"gh": GitHubCredentialProvider("gh", {})}
     passed = runup_and_filter(
-        providers, {"gh": "x"}, _runup_config(enabled=False)  # type: ignore[arg-type]
+        providers,
+        {"gh": "x"},
+        _runup_config(enabled=False),  # type: ignore[arg-type]
     )
     assert set(passed) == {"gh"}

@@ -44,10 +44,7 @@ def create_vm_workspace(
             f"directory {workspace_path} already exists on the VM.",
             entity_kind="workspace",
             entity_name=ws_name,
-            hint=(
-                f"Remove it manually (ssh to the VM and 'sudo rm -rf {workspace_path}') "
-                "or choose a different name."
-            ),
+            hint=(f"Remove it manually (ssh to the VM and 'sudo rm -rf {workspace_path}') or choose a different name."),
         )
 
     # Create workspace group (idempotent), add admin, and set up directory with setgid
@@ -86,10 +83,7 @@ def create_vm_workspace(
                     # --local is explicit so the write can only ever land in
                     # the checkout's .git/config, never the admin's global
                     # ~/.gitconfig (git config defaults to global outside a repo).
-                    target.run(
-                        f"git -C {shlex.quote(workspace_path)} config --local "
-                        f"{git_key} {shlex.quote(value)}"
-                    )
+                    target.run(f"git -C {shlex.quote(workspace_path)} config --local {git_key} {shlex.quote(value)}")
 
             # Ensure cloned files inherit the workspace group and subdirectories
             # have SGID so new files (including atomic writes) get the right group

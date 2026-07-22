@@ -22,10 +22,7 @@ from agentworks.db import VMStatus
 if TYPE_CHECKING:
     from agentworks.db import VMRow
 
-_RESOURCE_ID = (
-    "/subscriptions/sub-A/resourceGroups/rg1/providers/"
-    "Microsoft.Compute/virtualMachines/vm1"
-)
+_RESOURCE_ID = "/subscriptions/sub-A/resourceGroups/rg1/providers/Microsoft.Compute/virtualMachines/vm1"
 _CONFIG = {"subscription_id": "sub-A", "resource_group": "rg1", "region": "eastus"}
 
 
@@ -72,9 +69,7 @@ class _FakeNics:
         return _Poller(None)
 
 
-def _install_fakes(
-    monkeypatch: pytest.MonkeyPatch, *, auth_fails: bool = False
-) -> dict[str, int]:
+def _install_fakes(monkeypatch: pytest.MonkeyPatch, *, auth_fails: bool = False) -> dict[str, int]:
     """Patch the Azure SDK symbols azure_vm imports, returning a counter
     dict the tests assert on. ``auth_fails`` drives the DefaultAzureCredential
     probe down the ClientAuthenticationError browser-fallback path."""
@@ -125,9 +120,7 @@ def _install_fakes(
     monkeypatch.setattr("azure.identity.InteractiveBrowserCredential", _FakeBrowserCred)
     monkeypatch.setattr("azure.mgmt.compute.ComputeManagementClient", _FakeCompute)
     monkeypatch.setattr("azure.mgmt.network.NetworkManagementClient", _FakeNetwork)
-    monkeypatch.setattr(
-        "azure.mgmt.resource.resources.ResourceManagementClient", _FakeResource
-    )
+    monkeypatch.setattr("azure.mgmt.resource.resources.ResourceManagementClient", _FakeResource)
     return counters
 
 
@@ -136,9 +129,7 @@ def _platform() -> AzureVMPlatform:
 
 
 class TestCredentialCaching:
-    def test_one_build_across_ops_and_per_instance(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_one_build_across_ops_and_per_instance(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Multiple ops on one instance (status + start + attach, which
         together touch both SDK clients and the credential) build the
         credential and each client exactly once; a second instance builds
@@ -165,9 +156,7 @@ class TestCredentialCaching:
         assert counters["cred_build"] == 2
         assert counters["compute_build"] == 2
 
-    def test_probe_runs_once_per_instance(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_probe_runs_once_per_instance(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """The eager get_token probe fires at most once per instance: it
         is the validation step of the first credential build, not a
         per-op cost, and the accessor hands back the same cached object."""
@@ -184,9 +173,7 @@ class TestCredentialCaching:
         assert counters["get_token"] == 1
         assert counters["cred_build"] == 1
 
-    def test_second_subscription_builds_own_clients_not_credential(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_second_subscription_builds_own_clients_not_credential(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """One instance serving VMs whose stored resource IDs name
         different subscriptions (a site whose subscription changed after
         older VMs were created) builds a client per subscription, never
@@ -220,9 +207,7 @@ class TestCredentialCaching:
         assert counters["cred_build"] == 1
         assert counters["get_token"] == 1
 
-    def test_resource_client_caches_per_subscription(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_resource_client_caches_per_subscription(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """The resource-management client added by #193 (runup's read-only
         resource-group existence check) caches exactly like compute/network:
         built once on first need for a subscription and reused on repeat, a
@@ -250,9 +235,7 @@ class TestCredentialCaching:
         assert counters["cred_build"] == 1
         assert counters["get_token"] == 1
 
-    def test_browser_fallback_preserved_and_cached(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_browser_fallback_preserved_and_cached(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """When the DefaultAzureCredential probe raises
         ClientAuthenticationError, the decision lands on the interactive
         browser credential, and it is that credential which is cached: the

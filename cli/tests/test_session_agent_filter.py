@@ -156,7 +156,8 @@ def test_session_restart_agent_filter_flows_to_manager(
     monkeypatch.setattr("agentworks.config.load_config", lambda: object())
 
     result = CliRunner().invoke(
-        app, ["session", "restart", "--all-stopped", "--agent", "a1"],
+        app,
+        ["session", "restart", "--all-stopped", "--agent", "a1"],
     )
     assert result.exit_code == 0, result.output
     assert captured.get("agent_name") == "a1"
@@ -198,7 +199,9 @@ def test_stop_all_sessions_passes_agent_name_to_filter(
     monkeypatch.setattr(session_manager, "filter_sessions", _capture_filter)
 
     session_manager.stop_all_sessions(  # type: ignore[arg-type]
-        db=None, config=None, agent_name="a1",
+        db=None,
+        config=None,
+        agent_name="a1",
     )
     assert captured.get("agent_name") == "a1"
 
@@ -217,7 +220,9 @@ def test_restart_all_sessions_passes_agent_name_to_filter(
     monkeypatch.setattr(session_manager, "filter_sessions", _capture_filter)
 
     session_manager.restart_all_sessions(  # type: ignore[arg-type]
-        db=None, config=None, agent_name="a1",
+        db=None,
+        config=None,
+        agent_name="a1",
     )
     assert captured.get("agent_name") == "a1"
 
@@ -252,7 +257,8 @@ def test_session_stop_admin_and_agent_are_mutually_exclusive(
     monkeypatch.setattr("agentworks.config.load_config", lambda: object())
 
     result = CliRunner().invoke(
-        app, ["session", "stop", "--all", "--admin", "--agent", "a1"],
+        app,
+        ["session", "stop", "--all", "--admin", "--agent", "a1"],
     )
     assert result.exit_code != 0
     assert "--admin" in _plain(result.output)
@@ -288,7 +294,8 @@ def test_session_restart_admin_filter_flows_to_manager(
     monkeypatch.setattr("agentworks.config.load_config", lambda: object())
 
     result = CliRunner().invoke(
-        app, ["session", "restart", "--all-stopped", "--admin"],
+        app,
+        ["session", "restart", "--all-stopped", "--admin"],
     )
     assert result.exit_code == 0, result.output
     assert captured.get("admin_only") is True
@@ -331,7 +338,9 @@ def test_stop_all_sessions_passes_admin_only_to_filter(
     monkeypatch.setattr(session_manager, "filter_sessions", _capture_filter)
 
     session_manager.stop_all_sessions(  # type: ignore[arg-type]
-        db=None, config=None, admin_only=True,
+        db=None,
+        config=None,
+        admin_only=True,
     )
     assert captured.get("admin_only") is True
 
@@ -350,6 +359,8 @@ def test_restart_all_sessions_passes_admin_only_to_filter(
     monkeypatch.setattr(session_manager, "filter_sessions", _capture_filter)
 
     session_manager.restart_all_sessions(  # type: ignore[arg-type]
-        db=None, config=None, admin_only=True,
+        db=None,
+        config=None,
+        admin_only=True,
     )
     assert captured.get("admin_only") is True

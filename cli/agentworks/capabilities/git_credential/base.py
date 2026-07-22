@@ -27,9 +27,7 @@ if TYPE_CHECKING:
     from agentworks.resources.reference import ConfigReference
 
 
-def _http_probe(
-    url: str, headers: dict[str, str], *, timeout: float = 5.0
-) -> tuple[int, bytes, dict[str, str]]:
+def _http_probe(url: str, headers: dict[str, str], *, timeout: float = 5.0) -> tuple[int, bytes, dict[str, str]]:
     """GET ``url``; returns (status, body, lowercased-headers).
 
     HTTP error statuses are returned, not raised; network-level
@@ -63,9 +61,7 @@ def default_token_secret(credential_name: str) -> str:
     return f"git-token-{credential_name}"
 
 
-def token_config_reference(
-    owner: str, config: Mapping[str, object]
-) -> ConfigReference:
+def token_config_reference(owner: str, config: Mapping[str, object]) -> ConfigReference:
     """The token-secret reference a token-sourcing provider implies from
     its ``provider_config``: the ``token`` field names the secret
     (default ``git-token-<name>``). Shared by github and azdo (both
@@ -77,12 +73,8 @@ def token_config_reference(
 
     raw = config.get("token")
     if raw is not None and (not isinstance(raw, str) or not raw):
-        raise ConfigError(
-            f"{owner}.token must be a non-empty secret name (a string)"
-        )
-    name = raw if isinstance(raw, str) and raw else default_token_secret(
-        credential_name_from_owner(owner)
-    )
+        raise ConfigError(f"{owner}.token must be a non-empty secret name (a string)")
+    name = raw if isinstance(raw, str) and raw else default_token_secret(credential_name_from_owner(owner))
     return ConfigReference(kind="secret", name=name, usage="the auth token")
 
 
@@ -217,15 +209,11 @@ class GitCredentialProvider(Capability):
         try:
             status, body, resp_headers = _http_probe(url, headers)
         except OSError as exc:
-            output.warn(
-                f"could not verify git credential {self.owner_name!r} "
-                f"(network: {exc}); continuing unverified"
-            )
+            output.warn(f"could not verify git credential {self.owner_name!r} (network: {exc}); continuing unverified")
             return None
         if status in reject_statuses:
             raise TokenRejectedError(
-                f"{host_label} rejected the token for git credential "
-                f"{self.owner_name!r} (secret {self.secret_name!r})",
+                f"{host_label} rejected the token for git credential {self.owner_name!r} (secret {self.secret_name!r})",
                 entity_kind="git-credential",
                 entity_name=self.owner_name,
                 hint=(

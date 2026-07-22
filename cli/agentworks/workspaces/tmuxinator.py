@@ -73,7 +73,7 @@ def generate_config(
         )
         lines.extend(
             [
-                f"  - \"{session.name}\":",
+                f'  - "{session.name}":',
                 "      panes:",
                 f"        - {wrapper}",
             ]

@@ -185,9 +185,7 @@ def test_user_abort_inside_an_op_span_aborts_the_delete(
     counts = _fake_backend(monkeypatch)
     monkeypatch.setattr(vm_manager, "_tailscale_logout", lambda *a, **k: None)
 
-    def _aborting_delete(
-        self: ProxmoxPlatform, row: VMRow, ctx: object
-    ) -> None:
+    def _aborting_delete(self: ProxmoxPlatform, row: VMRow, ctx: object) -> None:
         counts["delete"] += 1
         raise UserAbort("cancelled mid-op")
 

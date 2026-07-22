@@ -63,9 +63,7 @@ def test_vm_create_admin_template_flag_forwards(
     "flag",
     ["--cpus", "--memory", "--disk", "--azure-vm-size", "--admin-username"],
 )
-def test_vm_create_template_override_flags_removed(
-    monkeypatch: pytest.MonkeyPatch, flag: str
-) -> None:
+def test_vm_create_template_override_flags_removed(monkeypatch: pytest.MonkeyPatch, flag: str) -> None:
     """Hardware and admin-username overrides are gone from `vm create`:
     those values live in the vm-template / admin-template now."""
     captured: dict[str, Any] = {}
@@ -139,14 +137,10 @@ def _config_stub(default_site: str | None = None) -> Any:
     """The slice of Config that _check_vm_sites reads."""
     from types import SimpleNamespace
 
-    return cast(
-        "Config", SimpleNamespace(defaults=SimpleNamespace(site=default_site))
-    )
+    return cast("Config", SimpleNamespace(defaults=SimpleNamespace(site=default_site)))
 
 
-def test_doctor_vm_sites_defers_on_pending_migration(
-    db: Database, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_doctor_vm_sites_defers_on_pending_migration(db: Database, monkeypatch: pytest.MonkeyPatch) -> None:
     """A pending DB migration must NOT run inside the VM-sites group
     (opening the Database auto-migrates, interleaving migration output
     into the report and stealing the Database group's deliberate
@@ -190,9 +184,7 @@ def test_doctor_vm_sites_defers_on_pending_migration(
     assert "pending database migration" in (system.message or "")
 
 
-def test_doctor_system_group(
-    db: Database, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
+def test_doctor_system_group(db: Database, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """The install slug leads the report under its own System header
     (it namespaces install-wide, not per-site): a set slug is ok,
     unset and declined are informational."""
@@ -229,17 +221,13 @@ def test_doctor_system_group(
 
     # No database at all (fresh install): nothing has ever set the
     # slug, so the same unset row renders without opening the DB.
-    monkeypatch.setattr(
-        _DbFactory, "check_schema", staticmethod(lambda p=None: (False, 0, 0))
-    )
+    monkeypatch.setattr(_DbFactory, "check_schema", staticmethod(lambda p=None: (False, 0, 0)))
     fresh = {c.name: c for c in doctor._check_system().checks}["System slug"]
     assert fresh.status is doctor.Status.INFO
     assert "will ask" in (fresh.message or "")
 
 
-def test_doctor_vm_sites_group(
-    db: Database, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
+def test_doctor_vm_sites_group(db: Database, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """Declared sites report ok; a stranded VM row fails with the
     paste-ready manifest hint."""
     from agentworks import doctor
@@ -379,9 +367,7 @@ def test_doctor_warns_on_references_to_disabled_sites(
             return db
 
     monkeypatch.setattr("agentworks.db.Database", _DbFactory)
-    monkeypatch.setattr(
-        LimaPlatform, "disabled_reason", lambda self: "limactl not installed"
-    )
+    monkeypatch.setattr(LimaPlatform, "disabled_reason", lambda self: "limactl not installed")
     monkeypatch.setattr("shutil.which", lambda name: f"/usr/bin/{name}")
 
     group = doctor._check_vm_sites(_config_stub("lima-local"), registry)

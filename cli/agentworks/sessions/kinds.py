@@ -57,13 +57,9 @@ class _SessionTemplateKind:
         the non-empty-``references`` path is preserved.
         """
         source = references[0].source if references else ALWAYS_MATERIALIZE_SOURCE
-        return SessionTemplate(
-            name="default", origin=Origin.auto_declared(source=source)
-        )
+        return SessionTemplate(name="default", origin=Origin.auto_declared(source=source))
 
-    def instances(
-        self, db: Database, registry: Registry, resource: Any
-    ) -> Iterable[InstanceRef]:
+    def instances(self, db: Database, registry: Registry, resource: Any) -> Iterable[InstanceRef]:
         """Every session whose ``template`` column matches this
         SessionTemplate's name. ``SessionRow.template`` is non-optional,
         so the NULL-as-default fallback used by other template kinds
@@ -101,13 +97,9 @@ class _NamedConsoleTemplateKind:
         when called that way.
         """
         source = references[0].source if references else ALWAYS_MATERIALIZE_SOURCE
-        return NamedConsoleConfig(
-            name="default", origin=Origin.auto_declared(source=source)
-        )
+        return NamedConsoleConfig(name="default", origin=Origin.auto_declared(source=source))
 
-    def instances(
-        self, db: Database, registry: Registry, resource: Any
-    ) -> Iterable[InstanceRef]:
+    def instances(self, db: Database, registry: Registry, resource: Any) -> Iterable[InstanceRef]:
         """Every console implicitly uses the singleton
         ``named-console-template:default`` -- there's no per-console
         template column on the operator surface yet, and

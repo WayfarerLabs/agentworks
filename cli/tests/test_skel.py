@@ -116,8 +116,8 @@ def test_seeds_mode_coded_colors() -> None:
     shell. ADMIN uses cyan (``\\e[36m`` / ``%F{cyan}``); AGENT
     uses bold yellow (``\\e[1;33m`` / ``%F{yellow}%B``)."""
     # bash: ANSI escape sequences in PS1.
-    assert "\\e[36m" in BASHRC      # cyan for ADMIN
-    assert "\\e[1;33m" in BASHRC    # bold yellow for AGENT
+    assert "\\e[36m" in BASHRC  # cyan for ADMIN
+    assert "\\e[1;33m" in BASHRC  # bold yellow for AGENT
     # zsh: prompt-escape color names.
     assert "%F{cyan}" in ZSHRC
     assert "%F{yellow}%B" in ZSHRC

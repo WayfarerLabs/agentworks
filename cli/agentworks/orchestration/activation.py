@@ -177,9 +177,7 @@ class _GateSecrets:
         )
 
 
-def ensure_active(
-    target: GateTarget, resolve_secret: Callable[[str], str]
-) -> dict[str, str]:
+def ensure_active(target: GateTarget, resolve_secret: Callable[[str], str]) -> dict[str, str]:
     """Converge ``target``'s power state: the gate's point half.
 
     Fast path first (no secret touched); otherwise resolve the
@@ -194,15 +192,11 @@ def ensure_active(
         return {}
     values = {name: resolve_secret(name) for name in target.gate_secret_refs()}
     if target.observed_stopped(ScopedSecrets(values, values.keys())):
-        target.auto_start(
-            _GateSecrets(values, target.repair_secret_refs, resolve_secret)
-        )
+        target.auto_start(_GateSecrets(values, target.repair_secret_refs, resolve_secret))
     return values
 
 
-def gate_secret_resolver(
-    config: Config, registry: Registry, resolver: Resolver
-) -> Callable[[str], str]:
+def gate_secret_resolver(config: Config, registry: Registry, resolver: Resolver) -> Callable[[str], str]:
     """The gate's just-in-time resolve callback, shared by every
     command whose gate opens BEFORE its boundary resolve: resolve
     through the normal backend chain and SEED the boundary resolver as
@@ -227,9 +221,7 @@ def gate_secret_resolver(
         # check guards against cannot arise here: there is only ever one
         # secret in flight per call.
         (decl,) = secret_declarations([secret_name], registry)
-        value = resolve_secrets([decl], active_backends(config, registry))[
-            secret_name
-        ]
+        value = resolve_secrets([decl], active_backends(config, registry))[secret_name]
         resolver.seed({secret_name: value})
         return value
 
@@ -237,9 +229,7 @@ def gate_secret_resolver(
 
 
 @contextlib.contextmanager
-def activation_gate(
-    target: GateTarget, resolve_secret: Callable[[str], str]
-) -> Iterator[dict[str, str]]:
+def activation_gate(target: GateTarget, resolve_secret: Callable[[str], str]) -> Iterator[dict[str, str]]:
     """The gate as the orchestrator opens it: :func:`ensure_active`,
     then the held-active span for the body's duration.
 

@@ -229,12 +229,14 @@ def test_framework_cycle_detector_catches_registry_cycles(tmp_path: Path) -> Non
     registry = Registry.empty()
     fake_origin = Origin.operator_declared(file=tmp_path / "c.toml", line=1)
     registry.add(
-        "vm-template", "a",
+        "vm-template",
+        "a",
         VMTemplate(name="a", inherits=["b"]),
         fake_origin,
     )
     registry.add(
-        "vm-template", "b",
+        "vm-template",
+        "b",
         VMTemplate(name="b", inherits=["a"]),
         fake_origin,
     )

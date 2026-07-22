@@ -67,11 +67,7 @@ def test_framework_module_has_no_old_vocabulary(module: ModuleType) -> None:
     a public-surface change; a future edit that re-introduces either
     word is a regression.
     """
-    offenders = [
-        name
-        for name in _public_names(module)
-        if any(banned in name for banned in _BANNED_SUBSTRINGS)
-    ]
+    offenders = [name for name in _public_names(module) if any(banned in name for banned in _BANNED_SUBSTRINGS)]
     assert offenders == [], (
         f"{module.__name__} exposes legacy-named symbols: {offenders}. "
         f"Rename to the Phase 3a vocabulary (Reference / ReferenceEntry)."
@@ -147,12 +143,8 @@ def test_resource_kinds_have_references_field_not_usage() -> None:
 
     for cls in resource_types:
         fields = {f.name for f in dataclasses.fields(cls)}
-        assert "references" in fields, (
-            f"{cls.__name__} missing `references` field after Phase 3a rename"
-        )
-        assert "usage" not in fields, (
-            f"{cls.__name__} still carries pre-rename `usage` collection field"
-        )
+        assert "references" in fields, f"{cls.__name__} missing `references` field after Phase 3a rename"
+        assert "usage" not in fields, f"{cls.__name__} still carries pre-rename `usage` collection field"
 
 
 def test_resources_package_has_no_old_vocabulary_in_source() -> None:
@@ -187,6 +179,5 @@ def test_resources_package_has_no_old_vocabulary_in_source() -> None:
             if bad in text:
                 offenders.append(f"{py_file.relative_to(pkg_root)}: {bad}")
     assert offenders == [], (
-        f"agentworks.resources still carries pre-rename vocabulary in "
-        f"comments/docstrings: {offenders}"
+        f"agentworks.resources still carries pre-rename vocabulary in comments/docstrings: {offenders}"
     )

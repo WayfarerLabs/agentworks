@@ -113,8 +113,7 @@ class Registry:
                 f"{kind} name {name!r} contains '/', which is not allowed "
                 f"in resource names ({format_origin_line(origin)})",
                 hint=(
-                    "Rename the resource: '/' is reserved for kind/name "
-                    "selectors and per-resource manifest filenames."
+                    "Rename the resource: '/' is reserved for kind/name selectors and per-resource manifest filenames."
                 ),
             )
         existing = self._resources.get(kind, {}).get(name)
@@ -124,9 +123,7 @@ class Registry:
         self._resources.setdefault(kind, {})[name] = stamped
 
     @staticmethod
-    def _check_collision(
-        kind: str, name: str, existing: Any, incoming: Origin
-    ) -> None:
+    def _check_collision(kind: str, name: str, existing: Any, incoming: Origin) -> None:
         """Raise unless the incoming publish may replace ``existing``.
 
         Built-in over built-in replaces unconditionally: republish is
@@ -147,10 +144,7 @@ class Registry:
                 f'{kind} "{name}" is a built-in resource with a reserved '
                 f"name; declare a differently-named {kind} instead",
             )
-        if (
-            existing_variant == "operator-declared"
-            and incoming.variant == "operator-declared"
-        ):
+        if existing_variant == "operator-declared" and incoming.variant == "operator-declared":
             raise ConfigError(
                 f'duplicate {kind} "{name}": declared at '
                 f"{format_origin_line(existing_origin)} and "
@@ -260,9 +254,7 @@ class Registry:
             for name in list(self._resources[kind].keys()):
                 existing = self._resources[kind][name]
                 refs = all_refs.get((kind, name), [])
-                polished = dataclasses.replace(
-                    existing, references=_references_tuple(refs)
-                )
+                polished = dataclasses.replace(existing, references=_references_tuple(refs))
                 polished = _polish_auto_declared_description(polished, kind)
                 self._resources[kind][name] = polished
 
@@ -301,9 +293,7 @@ class Registry:
             for name in kind_handler.auto_declare_names:
                 if name in self._resources.get(kind, {}):
                     continue
-                self._resources.setdefault(kind, {})[name] = (
-                    kind_handler.synthesize(())
-                )
+                self._resources.setdefault(kind, {})[name] = kind_handler.synthesize(())
 
     def _collect_new_references(
         self,
@@ -356,13 +346,9 @@ class Registry:
             return
         if kind_handler.miss_policy == "error":
             raise ConfigError(
-                f"{first.source[0]} {first.source[1]!r} references "
-                f"unknown {kind} {name!r} ({first.usage})"
+                f"{first.source[0]} {first.source[1]!r} references unknown {kind} {name!r} ({first.usage})"
             )
-        raise RuntimeError(
-            f"unexpected miss_policy {kind_handler.miss_policy!r} on "
-            f"KIND_REGISTRY[{kind!r}]"
-        )
+        raise RuntimeError(f"unexpected miss_policy {kind_handler.miss_policy!r} on KIND_REGISTRY[{kind!r}]")
 
     # -- Query phase ---------------------------------------------------
 
@@ -427,10 +413,7 @@ def _lookup_kind(kind: str, req: ResourceReference) -> Any:
     try:
         return KIND_REGISTRY[kind]
     except KeyError:
-        raise ConfigError(
-            f"{req.source[0]} {req.source[1]!r} references "
-            f"unregistered kind {kind!r}"
-        ) from None
+        raise ConfigError(f"{req.source[0]} {req.source[1]!r} references unregistered kind {kind!r}") from None
 
 
 def _polish_auto_declared_description(resource: Any, kind: str) -> Any:
@@ -472,9 +455,7 @@ def _polish_auto_declared_description(resource: Any, kind: str) -> Any:
         # guarantees the shape at finalize time. No runtime guard.
         distinct_other = {entry.source for entry in references} - {first.source}
         suffix = f" (and {len(distinct_other)} more)" if distinct_other else ""
-        description = (
-            f"(auto) {first.usage} for {first.source[0]}/{first.source[1]}{suffix}"
-        )
+        description = f"(auto) {first.usage} for {first.source[0]}/{first.source[1]}{suffix}"
     return dataclasses.replace(resource, description=description)
 
 
@@ -523,9 +504,7 @@ def _detect_cycles(resources: dict[str, dict[str, Any]]) -> None:
             # color the node BLACK and pop.
             color[start_node] = GRAY
             path: list[tuple[str, str]] = [start_node]
-            edge_stack: list[Any] = [
-                iter(_edges_from(resources, start_node))
-            ]
+            edge_stack: list[Any] = [iter(_edges_from(resources, start_node))]
             while edge_stack:
                 edges = edge_stack[-1]
                 try:
@@ -537,11 +516,9 @@ def _detect_cycles(resources: dict[str, dict[str, Any]]) -> None:
                     continue
                 target_color = color.get(target, WHITE)
                 if target_color == GRAY:
-                    cycle = path[path.index(target):] + [target]
+                    cycle = path[path.index(target) :] + [target]
                     cycle_path = " -> ".join(f"{k}/{n}" for k, n in cycle)
-                    raise ConfigError(
-                        f"resource reference cycle detected: {cycle_path}"
-                    )
+                    raise ConfigError(f"resource reference cycle detected: {cycle_path}")
                 if target_color == BLACK:
                     continue
                 color[target] = GRAY

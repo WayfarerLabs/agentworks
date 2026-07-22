@@ -43,15 +43,9 @@ def _fake_power(monkeypatch: pytest.MonkeyPatch, status: VMStatus) -> list[str]:
         "status",
         lambda self, row, ctx: events.append("status") or status,
     )
-    monkeypatch.setattr(
-        ProxmoxPlatform, "start", lambda self, row, ctx: events.append("start")
-    )
-    monkeypatch.setattr(
-        ProxmoxPlatform, "stop", lambda self, row, ctx: events.append("stop")
-    )
-    monkeypatch.setattr(
-        vm_manager, "_ensure_tailscale", lambda *a, **k: events.append("tailscale")
-    )
+    monkeypatch.setattr(ProxmoxPlatform, "start", lambda self, row, ctx: events.append("start"))
+    monkeypatch.setattr(ProxmoxPlatform, "stop", lambda self, row, ctx: events.append("stop"))
+    monkeypatch.setattr(vm_manager, "_ensure_tailscale", lambda *a, **k: events.append("tailscale"))
     return events
 
 
@@ -59,7 +53,8 @@ def _fake_power(monkeypatch: pytest.MonkeyPatch, status: VMStatus) -> list[str]:
 
 
 def test_lifecycle_graph_derives_from_row(
-    db: Database, make_config  # noqa: ANN001
+    db: Database,
+    make_config,  # noqa: ANN001
 ) -> None:
     """The lifecycle commands' shared graph (start / stop / delete all
     build it through ``_live_vm_boundary``): the live VM whose row's

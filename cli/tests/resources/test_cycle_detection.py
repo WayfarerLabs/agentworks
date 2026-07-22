@@ -58,6 +58,7 @@ def node_kind_registered(monkeypatch: pytest.MonkeyPatch) -> None:
     which is safer than try/finally if test execution is ever parallelized.
     """
     from agentworks.resources.kind import KIND_REGISTRY
+
     monkeypatch.setitem(KIND_REGISTRY, "node", _StubKind())
 
 

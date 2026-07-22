@@ -63,9 +63,7 @@ def mutation(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
         captured["agent_name"] = kwargs["agent_name"]
 
     monkeypatch.setattr(agent_initializer, "create_agent_on_vm", _fake_mutation)
-    monkeypatch.setattr(
-        "agentworks.ssh_config.sync_ssh_config", lambda *a, **k: None
-    )
+    monkeypatch.setattr("agentworks.ssh_config.sync_ssh_config", lambda *a, **k: None)
     return captured
 
 
@@ -87,20 +85,14 @@ def _stop_the_vm(monkeypatch: pytest.MonkeyPatch, events: list[str]) -> None:
         "status",
         lambda self, row, ctx: events.append("status") or _VMStatus.STOPPED,
     )
-    monkeypatch.setattr(
-        ProxmoxPlatform, "start", lambda self, row, ctx: events.append("start")
-    )
-    monkeypatch.setattr(
-        vm_manager, "_ensure_tailscale", lambda *a, **k: events.append("tailscale")
-    )
+    monkeypatch.setattr(ProxmoxPlatform, "start", lambda self, row, ctx: events.append("start"))
+    monkeypatch.setattr(vm_manager, "_ensure_tailscale", lambda *a, **k: events.append("tailscale"))
 
 
 # -- the derived graph --------------------------------------------------------
 
 
-def test_create_graph_derives_from_template_and_row(
-    db: Database, make_config, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_create_graph_derives_from_template_and_row(db: Database, make_config, monkeypatch: pytest.MonkeyPatch) -> None:
     """The pending agent's graph: its edges are the resolved template
     (whose declared credentials become git-credential nodes) and the
     VM's row (whose site field is the vm-site edge); the union is the
@@ -121,9 +113,7 @@ def test_create_graph_derives_from_template_and_row(
 
     vm_node = live_vm_node(db, config, registry, vm)
     tmpl_node = agent_template_node(registry, resolve_template(registry, None))
-    pending = pending_agent_node(
-        db, config, "dev", tmpl_node, vm_node
-    )
+    pending = pending_agent_node(db, config, "dev", tmpl_node, vm_node)
     nodes = walk(pending)
 
     assert [n.key for n in nodes] == [
@@ -159,9 +149,7 @@ def test_reinit_graph_derives_from_row_and_stored_template(
 
     vm_node = live_vm_node(db, config, registry, vm)
     agent_node = live_agent_node(row, vm_node)
-    tmpl_node = agent_template_node(
-        registry, resolve_template(registry, row.template)
-    )
+    tmpl_node = agent_template_node(registry, resolve_template(registry, row.template))
     nodes = walk(agent_node, tmpl_node)
 
     assert [n.key for n in nodes] == [
@@ -291,9 +279,7 @@ def test_create_mutation_failure_cleans_up_and_leaves_no_row(
     config = make_config()
     _seed_vm(db)
     _reachable(monkeypatch, True)
-    monkeypatch.setattr(
-        "agentworks.ssh_config.sync_ssh_config", lambda *a, **k: None
-    )
+    monkeypatch.setattr("agentworks.ssh_config.sync_ssh_config", lambda *a, **k: None)
 
     def _boom(*a: Any, **k: Any) -> None:
         raise RuntimeError("ssh exploded")
@@ -396,14 +382,10 @@ def test_create_grant_all_reconciles_between_insert_and_sync(
     monkeypatch.setattr(
         agent_grants,
         "add_to_workspace_group",
-        lambda vm, config_, db_, linux_user, ws, **k: group_adds.append(
-            (linux_user, ws)
-        ),
+        lambda vm, config_, db_, linux_user, ws, **k: group_adds.append((linux_user, ws)),
     )
 
-    agent_manager.create_agent(
-        db, config, name="dev", vm_name="box", grant_all_workspaces=True
-    )
+    agent_manager.create_agent(db, config, name="dev", vm_name="box", grant_all_workspaces=True)
 
     row = db.get_agent("dev")
     assert row is not None and row.grant_all

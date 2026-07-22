@@ -31,9 +31,7 @@ def normalized_rows(registry: Registry) -> dict[tuple[str, str], Any]:
     return rows
 
 
-def first_difference(
-    pre: dict[tuple[str, str], Any], post: dict[tuple[str, str], Any]
-) -> str | None:
+def first_difference(pre: dict[tuple[str, str], Any], post: dict[tuple[str, str], Any]) -> str | None:
     """Human-readable description of the first divergence, or None."""
     missing = sorted(set(pre) - set(post))
     if missing:

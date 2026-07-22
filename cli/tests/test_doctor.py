@@ -123,9 +123,7 @@ class TestCompletionChecks:
         assert doctor._shell_available("powershell") is True
         assert doctor._shell_available("zsh") is False
 
-        monkeypatch.setattr(
-            shutil, "which", lambda name: "/x/powershell" if name == "powershell" else None
-        )
+        monkeypatch.setattr(shutil, "which", lambda name: "/x/powershell" if name == "powershell" else None)
         assert doctor._shell_available("powershell") is True
 
 

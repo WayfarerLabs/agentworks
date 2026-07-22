@@ -53,9 +53,7 @@ def backend(monkeypatch: pytest.MonkeyPatch) -> _FakeBackend:
     from agentworks.secrets import resolve as secrets_resolve
 
     fake = _FakeBackend("fake", {"git-token-gh": "ghtok", "proxmox-token": "pve"})
-    monkeypatch.setattr(
-        secrets_resolve, "active_backends", lambda config, registry: [fake]
-    )
+    monkeypatch.setattr(secrets_resolve, "active_backends", lambda config, registry: [fake])
     return fake
 
 

@@ -29,10 +29,7 @@ ssh_private_key = "{priv}"
 
 def _config(tmp_path: Path, body: str = "") -> Any:
     cfg = tmp_path / "config.toml"
-    cfg.write_text(
-        _BASE_TOML.format(pub=tmp_path / "k.pub", priv=tmp_path / "k")
-        + dedent(body)
-    )
+    cfg.write_text(_BASE_TOML.format(pub=tmp_path / "k.pub", priv=tmp_path / "k") + dedent(body))
     (tmp_path / "k.pub").write_text("ssh-ed25519 AAAA test")
     (tmp_path / "k").write_text("key")
     return load_config(cfg, warn_issues=False)
@@ -250,23 +247,17 @@ def _strip(resource: Any) -> Any:
         ),
     ],
 )
-def test_round_trip_parity(
-    tmp_path: Path, kind: str, name: str, toml_body: str, manifest_doc: str
-) -> None:
+def test_round_trip_parity(tmp_path: Path, kind: str, name: str, toml_body: str, manifest_doc: str) -> None:
     toml_dir = tmp_path / "toml"
     toml_dir.mkdir()
     manifest_dir = tmp_path / "manifest"
     manifest_dir.mkdir()
 
-    toml_registry = build_registry(
-        _config(toml_dir, toml_body), ManifestSet.empty()
-    )
+    toml_registry = build_registry(_config(toml_dir, toml_body), ManifestSet.empty())
     _manifest(manifest_dir, manifest_doc)
     manifest_registry = build_registry(_config(manifest_dir))
 
-    assert _strip(toml_registry.lookup(kind, name)) == _strip(
-        manifest_registry.lookup(kind, name)
-    )
+    assert _strip(toml_registry.lookup(kind, name)) == _strip(manifest_registry.lookup(kind, name))
 
 
 def test_admin_template_flat_spec(tmp_path: Path) -> None:
@@ -360,9 +351,7 @@ def test_git_credential_provider_config_rejects_kind_owned_fields(
             provider: sneaky
         """,
     )
-    with pytest.raises(
-        ConfigError, match="may not contain kind-owned field"
-    ):
+    with pytest.raises(ConfigError, match="may not contain kind-owned field"):
         load_manifests(tmp_path / "resources")
 
 
@@ -400,9 +389,7 @@ def test_provider_config_must_be_a_mapping(tmp_path: Path) -> None:
           provider_config: nope
         """,
     )
-    with pytest.raises(
-        ConfigError, match="provider_config must be a mapping"
-    ):
+    with pytest.raises(ConfigError, match="provider_config must be a mapping"):
         load_manifests(tmp_path / "resources")
 
 
@@ -473,9 +460,7 @@ def test_description_stored_for_template_kind_without_warning(tmp_path: Path) ->
         ("named-console-template", "spec: {}"),
     ],
 )
-def test_description_never_warns_for_declarable_kind(
-    tmp_path: Path, kind: str, spec_body: str
-) -> None:
+def test_description_never_warns_for_declarable_kind(tmp_path: Path, kind: str, spec_body: str) -> None:
     """No declarable kind emits the retired "not yet stored" warning:
     description is framework-uniform, so every kind stores it."""
     _manifest(

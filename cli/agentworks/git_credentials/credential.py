@@ -5,8 +5,8 @@ Moved out of ``agentworks.config`` so the ``git_credentials`` domain owns
 its declared-resource type. The provider capability it references (and
 its kind, ``agentworks.capabilities.git_credential.kinds``) lives in the
 capabilities subtree; this consuming resource depends on it, not the
-reverse. ``config.py`` keeps only the legacy TOML loader that constructs
-it.
+reverse. The ``agentworks.config`` package keeps only the legacy TOML
+loader that constructs it.
 """
 
 from __future__ import annotations
@@ -96,9 +96,7 @@ class GitCredentialConfig(DeclaredResource):
 
         capability = GIT_CREDENTIAL_PROVIDER_REGISTRY.get(self.provider)
         if capability is not None:
-            for cref in capability.validate_config(
-                f"git-credential/{self.name}", self.provider_config
-            ):
+            for cref in capability.validate_config(f"git-credential/{self.name}", self.provider_config):
                 ref_cls = SecretReference if cref.kind == "secret" else _ResourceReq
                 refs.append(
                     ref_cls(

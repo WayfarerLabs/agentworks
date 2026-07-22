@@ -106,9 +106,7 @@ def test_single_underscore() -> None:
     ],
 )
 def test_double_hyphen_allowed_when_flag_set(name: str) -> None:
-    assert _is_valid(name, allow_double_hyphen=True), (
-        f"Expected '{name}' to validate with allow_double_hyphen=True"
-    )
+    assert _is_valid(name, allow_double_hyphen=True), f"Expected '{name}' to validate with allow_double_hyphen=True"
 
 
 @pytest.mark.parametrize(
@@ -127,9 +125,7 @@ def test_double_hyphen_allowed_when_flag_set(name: str) -> None:
         ("a" * 31, "too long"),
     ],
 )
-def test_double_hyphen_flag_does_not_relax_other_rules(
-    name: str, reason: str
-) -> None:
+def test_double_hyphen_flag_does_not_relax_other_rules(name: str, reason: str) -> None:
     assert not _is_valid(name, allow_double_hyphen=True), (
         f"Expected '{name}' to remain invalid with allow_double_hyphen=True ({reason})"
     )

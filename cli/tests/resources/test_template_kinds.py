@@ -98,9 +98,7 @@ def test_synthesize_empty_builds_default(spec: _KindSpec) -> None:
 @pytest.mark.parametrize("spec", SPECS, ids=lambda s: s.kind)
 def test_no_inherits_produces_no_template_requirements(spec: _KindSpec) -> None:
     tmpl = spec.expected_type(name="alone")
-    template_reqs = [
-        r for r in tmpl.referenced_resources() if isinstance(r, TemplateReference)
-    ]
+    template_reqs = [r for r in tmpl.referenced_resources() if isinstance(r, TemplateReference)]
     assert template_reqs == []
 
 
@@ -146,9 +144,7 @@ def test_template_required_resources_emits_template_requirement(
 
 
 @pytest.mark.parametrize("spec", SPECS, ids=lambda s: s.kind)
-def test_inherits_typo_fires_framework_miss_policy(
-    spec: _KindSpec, tmp_path: Path
-) -> None:
+def test_inherits_typo_fires_framework_miss_policy(spec: _KindSpec, tmp_path: Path) -> None:
     """A typo'd ``inherits`` reference (not ``"default"``, not declared)
     surfaces as a clean framework miss-policy error at build_registry
     time.
@@ -166,9 +162,7 @@ def test_inherits_typo_fires_framework_miss_policy(
 
 
 @pytest.mark.parametrize("spec", SPECS, ids=lambda s: s.kind)
-def test_inherits_default_works_without_operator_declaration(
-    spec: _KindSpec, tmp_path: Path
-) -> None:
+def test_inherits_default_works_without_operator_declaration(spec: _KindSpec, tmp_path: Path) -> None:
     """``inherits = ["default"]`` works even when the operator omits
     ``[<section>.default]``; the always-materialize step seeds the
     default row and the framework's miss policy resolves the

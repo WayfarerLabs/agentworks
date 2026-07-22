@@ -203,20 +203,16 @@ DYNAMIC_COMPLETIONS: dict[tuple[str, str], str] = {
     ("session.restart", "vm"): "vms",
     ("session.restart", "workspace"): "workspaces",
     ("session.restart", "agent"): "agents",
-
     ("session.attach", "name"): "sessions",
     ("session.delete", "name"): "sessions",
     ("session.logs", "name"): "sessions",
-
     # VM console
     ("vm.console", "name"): "vms",
-
     # Env inspection
     ("env.show", "vm"): "vms",
     ("env.show", "workspace"): "workspaces",
     ("env.show", "agent"): "agents",
     ("env.show", "session"): "sessions",
-
     # Named consoles
     ("console.create", "vm"): "vms",
     ("console.create", "sessions"): "sessions",
@@ -236,7 +232,6 @@ DYNAMIC_COMPLETIONS: dict[tuple[str, str], str] = {
     ("console.add-shell", "session"): "sessions",
     ("console.restore-session", "name"): "consoles",
     ("console.restore-session", "session"): "sessions",
-
     # Secret inspection
     ("secret.describe", "name"): "secrets",
     # Resource inspection (describe took the single KIND/NAME

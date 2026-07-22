@@ -27,6 +27,9 @@ jobs:
       - name: Ruff check
         run: uv run ruff check agentworks/ tests/
 
+      - name: Ruff format check
+        run: uv run ruff format --check agentworks/ tests/
+
       - name: Mypy
         run: uv run mypy agentworks/ tests/
 
@@ -34,12 +37,12 @@ jobs:
         run: |
           # Business logic must not import typer; use the output module instead.
           # Allowed: cli/ package (CLI layer), completions/ (CLI layer),
-          # sessions/manager.py (raw data pipe, see comment in file).
+          # sessions/manager/_logs.py (raw data pipe, see comment in file).
           violations=$(grep -rnP '^\s*(import typer|from typer)' agentworks/ --include='*.py' \
             | grep -v '__pycache__' \
             | grep -v 'agentworks/cli/' \
             | grep -v 'completions/' \
-            | grep -v 'sessions/manager\.py' \
+            | grep -v 'sessions/manager/_logs\.py' \
             || true)
           if [ -n "$violations" ]; then
             echo "ERROR: typer imported in business logic (use agentworks.output instead):"

@@ -75,25 +75,17 @@ def test_proxmox_returns_the_token_secret_reference() -> None:
     assert (ref.kind, ref.name) == ("secret", DEFAULT_TOKEN_SECRET)
     assert "token" in ref.usage
 
-    (ref,) = ProxmoxPlatform.validate_config(
-        "t", {**PROXMOX_CONFIG, "token_secret": "my-token"}
-    )
+    (ref,) = ProxmoxPlatform.validate_config("t", {**PROXMOX_CONFIG, "token_secret": "my-token"})
     assert ref.name == "my-token"
 
 
 def test_proxmox_validation_errors() -> None:
     with pytest.raises(ConfigError, match="node is required"):
-        ProxmoxPlatform.validate_config(
-            "t", {k: v for k, v in PROXMOX_CONFIG.items() if k != "node"}
-        )
+        ProxmoxPlatform.validate_config("t", {k: v for k, v in PROXMOX_CONFIG.items() if k != "node"})
     with pytest.raises(ConfigError, match="template_vmid must be an integer"):
-        ProxmoxPlatform.validate_config(
-            "t", {**PROXMOX_CONFIG, "template_vmid": "not-a-number"}
-        )
+        ProxmoxPlatform.validate_config("t", {**PROXMOX_CONFIG, "template_vmid": "not-a-number"})
     with pytest.raises(ConfigError, match="token_secret must be a bare secret"):
-        ProxmoxPlatform.validate_config(
-            "t", {**PROXMOX_CONFIG, "token_secret": ""}
-        )
+        ProxmoxPlatform.validate_config("t", {**PROXMOX_CONFIG, "token_secret": ""})
     with pytest.raises(ConfigError, match="unknown proxmox"):
         ProxmoxPlatform.validate_config("t", {**PROXMOX_CONFIG, "nodee": "x"})
 
@@ -107,25 +99,18 @@ def test_validate_config_is_pure() -> None:
 
 def test_legacy_platform_metadata_hooks() -> None:
     lima_row = {"name": "dev", "wsl_distro_name": None, "proxmox_vmid": None}
-    assert LimaPlatform.legacy_platform_metadata(lima_row, {}) == {
-        "instance_name": "dev"
-    }
+    assert LimaPlatform.legacy_platform_metadata(lima_row, {}) == {"instance_name": "dev"}
     wsl_row = {"name": "dev", "wsl_distro_name": "dev", "proxmox_vmid": None}
-    assert WSL2Platform.legacy_platform_metadata(wsl_row, {}) == {
-        "distro_name": "dev"
-    }
+    assert WSL2Platform.legacy_platform_metadata(wsl_row, {}) == {"distro_name": "dev"}
     wsl_row_null = {"name": "dev", "wsl_distro_name": None}
-    assert WSL2Platform.legacy_platform_metadata(wsl_row_null, {}) == {
-        "distro_name": "dev"
-    }
+    assert WSL2Platform.legacy_platform_metadata(wsl_row_null, {}) == {"distro_name": "dev"}
     az_row = {"name": "dev", "azure_resource_id": "/subscriptions/s/x"}
-    assert AzureVMPlatform.legacy_platform_metadata(az_row, {}) == {
-        "resource_id": "/subscriptions/s/x"
-    }
+    assert AzureVMPlatform.legacy_platform_metadata(az_row, {}) == {"resource_id": "/subscriptions/s/x"}
     az_row_null = {"name": "dev", "azure_resource_id": None}
     assert AzureVMPlatform.legacy_platform_metadata(az_row_null, {}) == {}
     px_row = {"name": "dev", "proxmox_vmid": "104"}
     assert ProxmoxPlatform.legacy_platform_metadata(px_row, {}) == {"vmid": "104"}
-    assert ProxmoxPlatform.legacy_platform_metadata(
-        px_row, {"proxmox": {"node": "pve1"}}
-    ) == {"vmid": "104", "node": "pve1"}
+    assert ProxmoxPlatform.legacy_platform_metadata(px_row, {"proxmox": {"node": "pve1"}}) == {
+        "vmid": "104",
+        "node": "pve1",
+    }

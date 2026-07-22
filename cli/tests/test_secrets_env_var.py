@@ -95,9 +95,7 @@ def test_resolve_omits_unset_env(monkeypatch: pytest.MonkeyPatch) -> None:
     """An unset env var is a soft miss: absent from the result."""
     monkeypatch.setenv("AW_SECRET_FOO", "foo-val")
     monkeypatch.delenv("AW_SECRET_BAR", raising=False)
-    out = _backend().resolve(
-        [SecretDecl(name="foo", description="F"), SecretDecl(name="bar", description="B")]
-    )
+    out = _backend().resolve([SecretDecl(name="foo", description="F"), SecretDecl(name="bar", description="B")])
     assert out == {"foo": "foo-val"}
 
 

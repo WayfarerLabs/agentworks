@@ -80,9 +80,7 @@ def test_tmux_env_flags_round_trip_through_shlex_for_single_quotes() -> None:
 
 
 def test_admin_socket_path_under_admin_socket_root() -> None:
-    assert admin_socket_path("agentworks", "s1") == (
-        "/run/agentworks/admin-tmux-sockets/agentworks/s1.sock"
-    )
+    assert admin_socket_path("agentworks", "s1") == ("/run/agentworks/admin-tmux-sockets/agentworks/s1.sock")
 
 
 # ---------------------------------------------------------------------------

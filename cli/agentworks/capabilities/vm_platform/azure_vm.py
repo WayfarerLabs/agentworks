@@ -147,9 +147,7 @@ _DEFAULT_VM_SIZES: tuple[_VMSize, ...] = (
 )
 
 
-def _parse_size_catalog(
-    config: Mapping[str, object], owner: str
-) -> tuple[_VMSize, ...]:
+def _parse_size_catalog(config: Mapping[str, object], owner: str) -> tuple[_VMSize, ...]:
     """The site's VM-size catalog: the operator override
     (``platform_config.vm_sizes``) when present, else the built-in
     B-series ladder. Raises ``ConfigError`` on a malformed override so
@@ -159,21 +157,14 @@ def _parse_size_catalog(
     if raw is None:
         return _DEFAULT_VM_SIZES
     if not isinstance(raw, (list, tuple)) or not raw:
-        raise ConfigError(
-            f"{owner}.vm_sizes must be a non-empty list of "
-            f"{{cpus, memory, size}} tables"
-        )
+        raise ConfigError(f"{owner}.vm_sizes must be a non-empty list of {{cpus, memory, size}} tables")
     catalog: list[_VMSize] = []
     for i, entry in enumerate(raw):
         if not isinstance(entry, dict):
-            raise ConfigError(
-                f"{owner}.vm_sizes[{i}] must be a {{cpus, memory, size}} table"
-            )
+            raise ConfigError(f"{owner}.vm_sizes[{i}] must be a {{cpus, memory, size}} table")
         unknown = sorted(set(entry) - {"cpus", "memory", "size"})
         if unknown:
-            raise ConfigError(
-                f"{owner}.vm_sizes[{i}]: unknown field(s): {', '.join(unknown)}"
-            )
+            raise ConfigError(f"{owner}.vm_sizes[{i}]: unknown field(s): {', '.join(unknown)}")
         cpus, memory, size = entry.get("cpus"), entry.get("memory"), entry.get("size")
         # bool is an int subclass; reject it explicitly so `cpus = true`
         # does not sneak through as 1.
@@ -187,9 +178,7 @@ def _parse_size_catalog(
     return tuple(catalog)
 
 
-def _select_vm_size(
-    catalog: tuple[_VMSize, ...], *, cpus: int, memory_gib: int
-) -> _VMSize:
+def _select_vm_size(catalog: tuple[_VMSize, ...], *, cpus: int, memory_gib: int) -> _VMSize:
     """The catalog entry that both satisfies the request and is smallest
     by (cpus, memory), chosen with ``min`` so the result is independent
     of catalog order. Raises ``ConfigError`` when the request exceeds
@@ -246,30 +235,21 @@ class AzureVMPlatform(VMPlatform):
     # without resolved credentials.
 
     @classmethod
-    def validate_config(
-        cls, owner: str, config: Mapping[str, object]
-    ) -> tuple[ConfigReference, ...]:
+    def validate_config(cls, owner: str, config: Mapping[str, object]) -> tuple[ConfigReference, ...]:
         for key in _AZURE_REQUIRED_KEYS:
             value = config.get(key)
             if not isinstance(value, str) or not value:
-                raise ConfigError(
-                    f"{owner}.{key} is required for the azure-vm platform and "
-                    f"must be a non-empty string"
-                )
+                raise ConfigError(f"{owner}.{key} is required for the azure-vm platform and must be a non-empty string")
         unknown = sorted(set(config) - set(_AZURE_REQUIRED_KEYS) - set(_AZURE_OPTIONAL_KEYS))
         if unknown:
-            raise ConfigError(
-                f"{owner}: unknown azure-vm platform field(s): {', '.join(unknown)}"
-            )
+            raise ConfigError(f"{owner}: unknown azure-vm platform field(s): {', '.join(unknown)}")
         # Validate the optional size-catalog override's shape here so a
         # malformed vm_sizes fails at config load, not first vm create.
         _parse_size_catalog(config, owner)
         return ()
 
     @classmethod
-    def legacy_platform_metadata(
-        cls, row: Mapping[str, Any], legacy: Mapping[str, Any]
-    ) -> dict[str, str]:
+    def legacy_platform_metadata(cls, row: Mapping[str, Any], legacy: Mapping[str, Any]) -> dict[str, str]:
         if row["azure_resource_id"]:
             return {"resource_id": str(row["azure_resource_id"])}
         return {}
@@ -370,9 +350,7 @@ class AzureVMPlatform(VMPlatform):
         )
         output.info(f"Performing runup test for vm-site/{self.site_name}...")
         try:
-            exists = self._resource_client(az).resource_groups.check_existence(
-                az.resource_group
-            )
+            exists = self._resource_client(az).resource_groups.check_existence(az.resource_group)
         except Exception as exc:
             raise _wrap_azure_error(exc) from exc
         if not exists:
@@ -411,9 +389,7 @@ class AzureVMPlatform(VMPlatform):
         # The provisioning line always names the selected SKU and its spec. A
         # round-up (an off-ratio request that no SKU matches exactly) also
         # warns, naming the requested shape as the reason.
-        size_summary = (
-            f"{selected.name} ({selected.cpus} vCPU / {selected.memory_gib} GiB)"
-        )
+        size_summary = f"{selected.name} ({selected.cpus} vCPU / {selected.memory_gib} GiB)"
         if selected.cpus > req_cpus or selected.memory_gib > req_memory:
             output.warn(
                 f"Rounded up to {selected.name} "
@@ -429,11 +405,7 @@ class AzureVMPlatform(VMPlatform):
         # Platform-owned naming with the slug as the
         # namespacing token; azure resource names are the primary
         # identifier, so a collision is an error.
-        vm_name = (
-            f"{request.system_slug}-{request.vm_name}"
-            if request.system_slug
-            else request.vm_name
-        )
+        vm_name = f"{request.system_slug}-{request.vm_name}" if request.system_slug else request.vm_name
 
         output.detail("Connecting to Azure...")
         compute = self._compute_client(az)
@@ -441,8 +413,7 @@ class AzureVMPlatform(VMPlatform):
 
         if self._vm_exists(compute, az.resource_group, vm_name):
             raise StateError(
-                f"an Azure VM named '{vm_name}' already exists in resource "
-                f"group '{az.resource_group}'",
+                f"an Azure VM named '{vm_name}' already exists in resource group '{az.resource_group}'",
                 entity_kind="vm",
                 entity_name=request.vm_name,
                 hint="delete it first or pick a different VM name",
@@ -636,9 +607,7 @@ class AzureVMPlatform(VMPlatform):
         )
 
     @staticmethod
-    def _vm_exists(
-        compute: ComputeManagementClient, resource_group: str, vm_name: str
-    ) -> bool:
+    def _vm_exists(compute: ComputeManagementClient, resource_group: str, vm_name: str) -> bool:
         """Pre-flight: does a VM with this name exist in the group?"""
         try:
             compute.virtual_machines.get(resource_group, vm_name)
@@ -789,7 +758,10 @@ class AzureVMPlatform(VMPlatform):
         return name
 
     def native_transport(
-        self, vm: VMRow, *, config: Config | None = None,
+        self,
+        vm: VMRow,
+        *,
+        config: Config | None = None,
     ) -> Transport | None:
         rg, name, az_cfg = _parse_resource_id(_resource_id(vm))
         try:
@@ -936,8 +908,7 @@ def _resource_id(vm: VMRow) -> str:
     resource_id = vm.platform_metadata.get("resource_id")
     if not resource_id:
         raise StateError(
-            f"VM '{vm.name}' has no azure resource_id in its platform "
-            f"metadata; the DB row is incomplete",
+            f"VM '{vm.name}' has no azure resource_id in its platform metadata; the DB row is incomplete",
             entity_kind="vm",
             entity_name=vm.name,
         )

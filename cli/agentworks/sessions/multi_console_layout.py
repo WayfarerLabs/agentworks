@@ -48,9 +48,7 @@ SHELL_INDEX_OPTION = "@agentworks-shell-index"
 # -- Layout application ----------------------------------------------------
 
 
-def _apply_layout(
-    target: Transport, q_con: str, q_win: str, layout: str
-) -> None:
+def _apply_layout(target: Transport, q_con: str, q_win: str, layout: str) -> None:
     """Apply *layout* to a single console window.
 
     Tmux preset names (`tiled`, `main-vertical`, etc.) go through
@@ -75,9 +73,7 @@ def _apply_layout(
         )
 
 
-def _apply_aw_session_vertical_layout(
-    target: Transport, q_con: str, q_win: str
-) -> None:
+def _apply_aw_session_vertical_layout(target: Transport, q_con: str, q_win: str) -> None:
     """Build and apply a hand-computed tmux layout string for
     ``aw-session-vertical``. Two transport round trips through the
     ``Transport`` abstraction (one ``target.run`` chains two tmux
@@ -237,17 +233,14 @@ def _focus_session_pane(target: Transport, q_con: str, q_win: str) -> None:
 # -- Pane / window reordering ----------------------------------------------
 
 
-def _list_shell_panes(
-    target: Transport, q_con: str, q_win: str
-) -> list[tuple[str, int, int | None]] | None:
+def _list_shell_panes(target: Transport, q_con: str, q_win: str) -> list[tuple[str, int, int | None]] | None:
     """Return live shell panes for a console window as (pane_id, pane_index,
     config_index_or_None). Excludes pane_index 0 (the session pane).
 
     Returns None if the tmux query failed.
     """
     res = target.run(
-        f"tmux list-panes -t {q_con}:{q_win} "
-        f"-F '#{{pane_id}}|#{{pane_index}}|#{{{SHELL_INDEX_OPTION}}}'",
+        f"tmux list-panes -t {q_con}:{q_win} -F '#{{pane_id}}|#{{pane_index}}|#{{{SHELL_INDEX_OPTION}}}'",
         check=False,
     )
     if not res.ok:
@@ -277,9 +270,7 @@ def _list_shell_panes(
     return panes
 
 
-def _reorder_shell_panes(
-    target: Transport, q_con: str, q_win: str, configured_count: int
-) -> None:
+def _reorder_shell_panes(target: Transport, q_con: str, q_win: str, configured_count: int) -> None:
     """Reorder shell panes so pane_index N+1 holds the pane with
     @agentworks-shell-index N. Shell panes live at pane_index >= 1 (the
     session pane occupies pane_index 0).
@@ -296,9 +287,7 @@ def _reorder_shell_panes(
     # pane_index by pane_id; mutated as we issue swaps so the next iteration
     # sees the current layout without another SSH round trip.
     pidx_by_pid: dict[str, int] = {pid: pidx for pid, pidx, _cidx in panes}
-    pid_by_cidx: dict[int, str] = {
-        cidx: pid for pid, _pidx, cidx in panes if cidx is not None
-    }
+    pid_by_cidx: dict[int, str] = {cidx: pid for pid, _pidx, cidx in panes if cidx is not None}
 
     for target_cidx in range(configured_count):
         target_pidx = target_cidx + 1
@@ -316,8 +305,7 @@ def _reorder_shell_panes(
             None,
         )
         res = target.run(
-            f"tmux swap-pane -s {shlex.quote(src_pid)} "
-            f"-t {q_con}:{q_win}.{target_pidx}",
+            f"tmux swap-pane -s {shlex.quote(src_pid)} -t {q_con}:{q_win}.{target_pidx}",
             check=False,
         )
         # Only mirror the swap into the local map on success; a failed swap-pane
@@ -386,9 +374,7 @@ def _reorder_session_windows(
     name_counts: dict[str, int] = {}
     for _idx, name in pairs:
         name_counts[name] = name_counts.get(name, 0) + 1
-    duplicated = sorted(
-        n for n, c in name_counts.items() if c > 1 and n in desired_set
-    )
+    duplicated = sorted(n for n, c in name_counts.items() if c > 1 and n in desired_set)
     if duplicated:
         q_console = shlex.quote(console_name)
         output.warn(

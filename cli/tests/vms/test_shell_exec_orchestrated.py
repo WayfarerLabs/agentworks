@@ -47,8 +47,7 @@ def _seed_vm(db: Database) -> None:
 
 def _seed_workspace(db: Database, *, vm_name: str = "box", name: str = "ws1") -> None:
     db._conn.execute(
-        "INSERT INTO workspaces (name, vm_name, workspace_path, linux_group) "
-        "VALUES (?, ?, ?, ?)",
+        "INSERT INTO workspaces (name, vm_name, workspace_path, linux_group) VALUES (?, ?, ?, ?)",
         (name, vm_name, f"/srv/{name}", f"ws-{name}"),
     )
     db._conn.commit()
@@ -65,12 +64,8 @@ def _stop_the_vm(monkeypatch: pytest.MonkeyPatch, events: list[str]) -> None:
         "status",
         lambda self, row, ctx: events.append("status") or VMStatus.STOPPED,
     )
-    monkeypatch.setattr(
-        ProxmoxPlatform, "start", lambda self, row, ctx: events.append("start")
-    )
-    monkeypatch.setattr(
-        vm_manager, "_ensure_tailscale", lambda *a, **k: events.append("tailscale")
-    )
+    monkeypatch.setattr(ProxmoxPlatform, "start", lambda self, row, ctx: events.append("start"))
+    monkeypatch.setattr(vm_manager, "_ensure_tailscale", lambda *a, **k: events.append("tailscale"))
 
 
 class _FakeTarget:
@@ -90,9 +85,7 @@ class _FakeTarget:
 @pytest.fixture
 def target(monkeypatch: pytest.MonkeyPatch) -> _FakeTarget:
     fake = _FakeTarget()
-    monkeypatch.setattr(
-        "agentworks.transports.transport", lambda vm, config, **kwargs: fake
-    )
+    monkeypatch.setattr("agentworks.transports.transport", lambda vm, config, **kwargs: fake)
     return fake
 
 
@@ -100,7 +93,8 @@ def target(monkeypatch: pytest.MonkeyPatch) -> _FakeTarget:
 
 
 def test_graph_derives_from_row_and_env_joins_via_targets(
-    db: Database, make_config  # noqa: ANN001
+    db: Database,
+    make_config,  # noqa: ANN001
 ) -> None:
     """The shell / exec graph is the live VM alone (vm-site + vm), so
     the walk union is the site's config secret ONLY. The env-chain
@@ -127,9 +121,7 @@ def test_graph_derives_from_row_and_env_joins_via_targets(
     for name in secret_union(nodes):
         resolver.register_name(name)
     scopes = vm_manager._resolve_vm_admin_env_scopes(registry, vm)
-    resolver.register_targets(
-        [vm_manager._vm_secret_target(scopes, label="vm-shell=box")]
-    )
+    resolver.register_targets([vm_manager._vm_secret_target(scopes, label="vm-shell=box")])
     resolver.resolve()
     assert set(resolver.values) == {"proxmox-token", "vm-env-secret"}
 
@@ -270,9 +262,7 @@ def test_cross_vm_workspace_mismatch_fails_with_zero_resolves_and_zero_gate(
     _no_gate(monkeypatch)
 
     with pytest.raises(ValidationError, match="belongs to VM 'other', not 'box'"):
-        vm_manager.exec_vm(
-            db, config, "box", ["echo", "hi"], workspace_name="ws-other"
-        )
+        vm_manager.exec_vm(db, config, "box", ["echo", "hi"], workspace_name="ws-other")
 
     assert resolve_counter == []
     assert target.streaming_calls == []

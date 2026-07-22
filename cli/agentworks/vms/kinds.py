@@ -79,9 +79,7 @@ class _VMTemplateKind:
         source = references[0].source if references else ALWAYS_MATERIALIZE_SOURCE
         return VMTemplate(name="default", origin=Origin.auto_declared(source=source))
 
-    def instances(
-        self, db: Database, registry: Registry, resource: Any
-    ) -> Iterable[InstanceRef]:
+    def instances(self, db: Database, registry: Registry, resource: Any) -> Iterable[InstanceRef]:
         """Every VM whose ``template`` column matches this VMTemplate's
         name -- or whose ``template`` is NULL when the resource is the
         reserved ``default`` (a NULL ``template`` column means "use the
@@ -122,9 +120,7 @@ class _AdminTemplateKind:
         source = references[0].source if references else ALWAYS_MATERIALIZE_SOURCE
         return AdminConfig(name="default", origin=Origin.auto_declared(source=source))
 
-    def instances(
-        self, db: Database, registry: Registry, resource: Any
-    ) -> Iterable[InstanceRef]:
+    def instances(self, db: Database, registry: Registry, resource: Any) -> Iterable[InstanceRef]:
         """The VMs provisioned from this admin-template. Each VM records
         its selected admin-template in the ``vms.admin_template`` column
         (NULL = the reserved ``default``); the admin template defines the
@@ -188,16 +184,11 @@ class _VMSiteKind:
         from agentworks.resources.kind import NoUnreferencedDefaultError
 
         raise NoUnreferencedDefaultError(
-            "the vm-site kind has no reserved default name; synthesize "
-            "is never invoked under the error miss policy"
+            "the vm-site kind has no reserved default name; synthesize is never invoked under the error miss policy"
         )
 
-    def instances(
-        self, db: Database, registry: Registry, resource: Any
-    ) -> Iterable[InstanceRef]:
-        """Every VM whose ``site`` column names this site.
-
-        """
+    def instances(self, db: Database, registry: Registry, resource: Any) -> Iterable[InstanceRef]:
+        """Every VM whose ``site`` column names this site."""
         name = resource.name
         for vm in db.list_vms():
             if vm.site == name:

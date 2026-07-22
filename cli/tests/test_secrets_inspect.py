@@ -203,9 +203,7 @@ def test_column_order_matches_backend_chain_precedence(tmp_path: Path) -> None:
     assert table.backends == ("prompt", "env-var")
 
 
-def test_names_only_lists_every_registry_secret(
-    tmp_path: Path, monkeypatch
-) -> None:
+def test_names_only_lists_every_registry_secret(tmp_path: Path, monkeypatch) -> None:
     """``agw secret list --names-only`` is the source for shell
     completion; it must include auto-declared names like
     ``tailscale-auth-key`` so completion matches what ``agw secret
@@ -303,7 +301,5 @@ def test_render_secret_table_caps_long_backend_identifier(
     # onepassword column width is bounded by ``_BACKEND_CELL_WIDTH``.
     assert truncated in joined
     assert long_ident not in joined
-    data_line = next(
-        line for line in captured_output.info if line.startswith("reg ")
-    )
+    data_line = next(line for line in captured_output.info if line.startswith("reg "))
     assert truncated in data_line

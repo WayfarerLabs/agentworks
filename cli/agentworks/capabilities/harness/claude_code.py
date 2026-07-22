@@ -55,9 +55,7 @@ class ClaudeCodeHarness(Harness):
     _resumed: bool | None = None
 
     @classmethod
-    def validate_config(
-        cls, owner: str, config: Mapping[str, object]
-    ) -> tuple[ConfigReference, ...]:
+    def validate_config(cls, owner: str, config: Mapping[str, object]) -> tuple[ConfigReference, ...]:
         """Shape-and-vocabulary only (FRD R4): unknown fields raise; each
         present field is type-checked. The ``--permission-mode`` / ``--model``
         CHOICE sets are Claude-owned and drift between releases, so the
@@ -67,22 +65,16 @@ class ClaudeCodeHarness(Harness):
         """
         unknown = sorted(set(config) - _CLAUDE_CODE_FIELDS)
         if unknown:
-            raise ConfigError(
-                f"{owner}: unknown claude-code harness field(s): "
-                f"{', '.join(unknown)}"
-            )
+            raise ConfigError(f"{owner}: unknown claude-code harness field(s): {', '.join(unknown)}")
         for field_name in ("permission_mode", "model"):
             value = config.get(field_name)
             if value is not None and not isinstance(value, str):
                 raise ConfigError(f"{owner}.{field_name} must be a string")
         extra_args = config.get("extra_args")
         if extra_args is not None and (
-            not isinstance(extra_args, list)
-            or not all(isinstance(item, str) for item in extra_args)
+            not isinstance(extra_args, list) or not all(isinstance(item, str) for item in extra_args)
         ):
-            raise ConfigError(
-                f"{owner}.extra_args must be a list of strings"
-            )
+            raise ConfigError(f"{owner}.extra_args must be a list of strings")
         return ()
 
     def start(self, ctx: RunContext) -> str:
@@ -117,16 +109,10 @@ class ClaudeCodeHarness(Harness):
 
         if resume:
             identity = ["--resume", sid]
-            msg = (
-                f"agentworks harness (claude-code): resuming session "
-                f"{self._session_name}"
-            )
+            msg = f"agentworks harness (claude-code): resuming session {self._session_name}"
         else:
             identity = ["--session-id", sid]
-            msg = (
-                f"agentworks harness (claude-code): starting new session "
-                f"{self._session_name}"
-            )
+            msg = f"agentworks harness (claude-code): starting new session {self._session_name}"
         tokens = [*identity, "--name", self._session_name, *self._config_flags()]
         argv = " ".join(shlex.quote(token) for token in tokens)
         # A single ``sh -c`` so the whole thing survives the ``exec``

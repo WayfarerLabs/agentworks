@@ -59,9 +59,7 @@ def secret_union(nodes: Iterable[Node]) -> tuple[str, ...]:
     return tuple(out)
 
 
-def secret_declarations(
-    names: Iterable[str], registry: Registry
-) -> tuple[SecretDecl, ...]:
+def secret_declarations(names: Iterable[str], registry: Registry) -> tuple[SecretDecl, ...]:
     """Declarations for ``names``, from the registry's ``secret`` rows.
 
     A name with no registry row falls back to a synthesized bare
@@ -83,9 +81,7 @@ def secret_declarations(
     return tuple(out)
 
 
-def predict_resolution(
-    decls: Iterable[SecretDecl], backends: list[ActiveBackend]
-) -> dict[str, str | None]:
+def predict_resolution(decls: Iterable[SecretDecl], backends: list[ActiveBackend]) -> dict[str, str | None]:
     """Central resolvability prediction over declared references: for
     each declaration, the name of the first active backend that would
     resolve it, or ``None`` when nothing would.
@@ -104,10 +100,7 @@ def predict_resolution(
 
     interactive_available = output.is_interactive()
     return {
-        decl.name: preview_resolution(
-            decl, backends, interactive_available=interactive_available
-        )
-        for decl in decls
+        decl.name: preview_resolution(decl, backends, interactive_available=interactive_available) for decl in decls
     }
 
 
@@ -145,8 +138,7 @@ def require_predicted_refs(
     for ref in refs:
         if predictions[ref.name] is None:
             raise ConfigError(
-                f"{owner}: secret '{ref.name}' ({ref.usage}) is not "
-                f"resolvable by any active backend",
+                f"{owner}: secret '{ref.name}' ({ref.usage}) is not resolvable by any active backend",
                 hint=(
                     f"`agw secret describe {ref.name}` shows how each "
                     "backend looks the secret up; add a backend mapping "

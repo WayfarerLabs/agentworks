@@ -41,10 +41,7 @@ def env_show(
         str | None,
         typer.Option(
             "--session",
-            help=(
-                "Anchor the chain at this session (its workspace, agent, "
-                "and VM are auto-resolved)."
-            ),
+            help=("Anchor the chain at this session (its workspace, agent, and VM are auto-resolved)."),
         ),
     ] = None,
     reveal_secrets: Annotated[

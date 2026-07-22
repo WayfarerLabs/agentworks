@@ -114,9 +114,7 @@ def _resolve_walk(
     """
     if name in _visiting:
         path = " -> ".join((*_visiting, name))
-        raise ConfigError(
-            f"session_templates inheritance cycle detected: {path}"
-        )
+        raise ConfigError(f"session_templates inheritance cycle detected: {path}")
 
     if name not in templates:
         return ResolvedSessionTemplate(name=name), None, {}
@@ -128,18 +126,12 @@ def _resolve_walk(
     next_visiting = (*_visiting, name)
 
     for parent_name in tmpl.inherits:
-        parent, parent_harness, parent_config = _resolve_walk(
-            templates, parent_name, next_visiting
-        )
+        parent, parent_harness, parent_config = _resolve_walk(templates, parent_name, next_visiting)
         _merge(result, parent)
-        harness, harness_config = _merge_pair(
-            harness, harness_config, parent_harness, parent_config
-        )
+        harness, harness_config = _merge_pair(harness, harness_config, parent_harness, parent_config)
 
     _merge_template(result, tmpl)
-    harness, harness_config = _merge_pair(
-        harness, harness_config, tmpl.harness, tmpl.harness_config
-    )
+    harness, harness_config = _merge_pair(harness, harness_config, tmpl.harness, tmpl.harness_config)
     result.name = name
     return result, harness, harness_config
 
@@ -180,9 +172,7 @@ def _validate_merged(resolved: ResolvedSessionTemplate) -> None:
     kind's miss policy at finalize)."""
     from agentworks.capabilities.harness import harness_for
 
-    harness_for(resolved.harness).validate_config(
-        f"session-template/{resolved.name}", resolved.harness_config
-    )
+    harness_for(resolved.harness).validate_config(f"session-template/{resolved.name}", resolved.harness_config)
 
 
 def _merge(target: ResolvedSessionTemplate, source: ResolvedSessionTemplate) -> None:

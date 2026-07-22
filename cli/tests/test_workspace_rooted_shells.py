@@ -80,17 +80,14 @@ def _patch_vm_common(monkeypatch: pytest.MonkeyPatch) -> None:
     from agentworks.vms import manager as vm_manager
 
     monkeypatch.setattr(
-        vm_manager, "_resolve_vm_admin_env_scopes",
-        lambda *a, **k: vm_manager._VmAdminEnvScopes(
-            vm={}, workspace=None, admin={}
-        ),
+        vm_manager,
+        "_resolve_vm_admin_env_scopes",
+        lambda *a, **k: vm_manager._VmAdminEnvScopes(vm={}, workspace=None, admin={}),
     )
     # A real, empty SecretTarget: the orchestrated roots register the
     # env target on the operation's REAL resolver, so a bare object()
     # sentinel no longer survives the seam.
-    monkeypatch.setattr(
-        vm_manager, "_vm_secret_target", lambda *a, **k: empty_secret_target()
-    )
+    monkeypatch.setattr(vm_manager, "_vm_secret_target", lambda *a, **k: empty_secret_target())
     monkeypatch.setattr("agentworks.secrets.resolve_for_command", lambda *a, **k: None)
     monkeypatch.setattr("agentworks.env.compose_env", lambda **k: {})
     stub_vm_gates(monkeypatch)
@@ -102,10 +99,9 @@ def _patch_agent_common(monkeypatch: pytest.MonkeyPatch) -> None:
     from agentworks.agents import manager as agent_manager
 
     monkeypatch.setattr(
-        agent_manager, "_resolve_agent_direct_env_scopes",
-        lambda *a, **k: agent_manager._AgentDirectEnvScopes(
-            vm={}, workspace=None, agent={}
-        ),
+        agent_manager,
+        "_resolve_agent_direct_env_scopes",
+        lambda *a, **k: agent_manager._AgentDirectEnvScopes(vm={}, workspace=None, agent={}),
     )
     # A real, empty SecretTarget: the orchestrated roots register the
     # env target on the operation's REAL resolver, so a bare object()
@@ -118,9 +114,7 @@ def _patch_agent_common(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("agentworks.secrets.resolve_for_command", lambda *a, **k: None)
     monkeypatch.setattr("agentworks.env.compose_env", lambda **k: {})
     stub_vm_gates(monkeypatch)
-    monkeypatch.setattr(
-        agent_manager, "_assert_agent_ssh_works", lambda *a, **k: None
-    )
+    monkeypatch.setattr(agent_manager, "_assert_agent_ssh_works", lambda *a, **k: None)
 
 
 # ---------------------------------------------------------------------------
@@ -129,7 +123,8 @@ def _patch_agent_common(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_shell_vm_workspace_unknown_raises_not_found(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """``vm shell vm1 --workspace nope`` must surface a NotFoundError
     before any SSH work."""
@@ -141,12 +136,16 @@ def test_shell_vm_workspace_unknown_raises_not_found(
 
     with pytest.raises(NotFoundError, match="nope"):
         vm_manager.shell_vm(  # type: ignore[arg-type]
-            db, config, "vm1", workspace_name="nope",
+            db,
+            config,
+            "vm1",
+            workspace_name="nope",
         )
 
 
 def test_shell_vm_workspace_cross_vm_raises_validation(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """``vm shell vm1 --workspace ws2`` (ws2 belongs to vm2) raises
     ``ValidationError`` upfront. This is the load-bearing acceptance
@@ -168,17 +167,20 @@ def test_shell_vm_workspace_cross_vm_raises_validation(
 
     with pytest.raises(ValidationError, match="belongs to VM 'vm2', not 'vm1'"):
         vm_manager.shell_vm(  # type: ignore[arg-type]
-            db, config, "vm1", workspace_name="ws2",
+            db,
+            config,
+            "vm1",
+            workspace_name="ws2",
         )
 
     assert interactive_calls == [], (
-        "the mismatch must be detected before any SSH work; "
-        "interactive() must not have been called"
+        "the mismatch must be detected before any SSH work; interactive() must not have been called"
     )
 
 
 def test_shell_vm_workspace_cds_into_workspace_path(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """When ``--workspace`` is set, the interactive shell command must
     start with ``cd <quoted-workspace-path> && exec $SHELL -l``."""
@@ -197,16 +199,23 @@ def test_shell_vm_workspace_cds_into_workspace_path(
 
     monkeypatch.setattr("agentworks.transports.transport", _factory)
 
-    assert vm_manager.shell_vm(  # type: ignore[arg-type]
-        db, config, "vm1", workspace_name="ws1",
-    ) == 0
+    assert (
+        vm_manager.shell_vm(  # type: ignore[arg-type]
+            db,
+            config,
+            "vm1",
+            workspace_name="ws1",
+        )
+        == 0
+    )
 
     assert len(captured_cmd) == 1
     assert captured_cmd[0] == "cd /opt/agentworks/workspaces/ws1 && exec $SHELL -l"
 
 
 def test_shell_vm_no_workspace_keeps_empty_command(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """``vm shell`` without ``--workspace`` retains the existing
     behavior: ``interactive("")`` (no remote command, default login
@@ -237,7 +246,8 @@ def test_shell_vm_no_workspace_keeps_empty_command(
 
 
 def test_exec_vm_workspace_cross_vm_raises_validation(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """``vm exec vm1 --workspace ws2 ...`` raises ValidationError upfront."""
     from agentworks.vms import manager as vm_manager
@@ -257,14 +267,19 @@ def test_exec_vm_workspace_cross_vm_raises_validation(
 
     with pytest.raises(ValidationError, match="belongs to VM 'vm2', not 'vm1'"):
         vm_manager.exec_vm(  # type: ignore[arg-type]
-            db, config, "vm1", ["echo", "hi"], workspace_name="ws2",
+            db,
+            config,
+            "vm1",
+            ["echo", "hi"],
+            workspace_name="ws2",
         )
 
     assert streaming_calls == []
 
 
 def test_exec_vm_workspace_prefixes_cd(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """``vm exec --workspace`` runs ``cd <path> && <joined-command>``."""
     from agentworks.vms import manager as vm_manager
@@ -283,7 +298,11 @@ def test_exec_vm_workspace_prefixes_cd(
     monkeypatch.setattr("agentworks.transports.transport", _factory)
 
     rc = vm_manager.exec_vm(  # type: ignore[arg-type]
-        db, config, "vm1", ["echo", "hi"], workspace_name="ws1",
+        db,
+        config,
+        "vm1",
+        ["echo", "hi"],
+        workspace_name="ws1",
     )
 
     assert rc == 0
@@ -291,7 +310,8 @@ def test_exec_vm_workspace_prefixes_cd(
 
 
 def test_exec_vm_no_workspace_unchanged(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """``vm exec`` without ``--workspace`` keeps the original behavior:
     just the joined command, no ``cd`` prefix."""
@@ -321,7 +341,8 @@ def test_exec_vm_no_workspace_unchanged(
 
 
 def test_exec_agent_workspace_cross_vm_raises_validation(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """``agent exec a1 --workspace ws2`` (a1 lives on vm1, ws2 on vm2)
     raises ValidationError upfront. The agent's authz status is
@@ -346,14 +367,19 @@ def test_exec_agent_workspace_cross_vm_raises_validation(
 
     with pytest.raises(ValidationError, match="belongs to VM 'vm2', not 'vm1'"):
         agent_manager.exec_agent(  # type: ignore[arg-type]
-            db, config, name="a1", command=["echo", "hi"], workspace_name="ws2",
+            db,
+            config,
+            name="a1",
+            command=["echo", "hi"],
+            workspace_name="ws2",
         )
 
     assert streaming_calls == []
 
 
 def test_exec_agent_workspace_missing_grant_raises_authz(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """``agent exec a1 --workspace ws1`` without an explicit grant
     raises ``AuthorizationError``. The agent and workspace are on the
@@ -377,14 +403,19 @@ def test_exec_agent_workspace_missing_grant_raises_authz(
 
     with pytest.raises(AuthorizationError, match="does not have access"):
         agent_manager.exec_agent(  # type: ignore[arg-type]
-            db, config, name="a1", command=["echo", "hi"], workspace_name="ws1",
+            db,
+            config,
+            name="a1",
+            command=["echo", "hi"],
+            workspace_name="ws1",
         )
 
     assert streaming_calls == []
 
 
 def test_exec_agent_workspace_prefixes_cd(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """``agent exec --workspace`` wraps the command with the workspace
     ``cd``, then wraps the whole thing in ``$SHELL -lc`` so the agent's
@@ -407,7 +438,11 @@ def test_exec_agent_workspace_prefixes_cd(
     monkeypatch.setattr("agentworks.transports.agent_transport", _factory)
 
     rc = agent_manager.exec_agent(  # type: ignore[arg-type]
-        db, config, name="a1", command=["echo", "hi"], workspace_name="ws1",
+        db,
+        config,
+        name="a1",
+        command=["echo", "hi"],
+        workspace_name="ws1",
     )
 
     assert rc == 0
@@ -440,7 +475,9 @@ def test_exec_agent_workspace_prefixes_cd(
     ],
 )
 def test_exec_vm_rejects_dash_prefixed_command(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, command: list[str],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    command: list[str],
 ) -> None:
     """Any ``vm exec`` whose remote-command argv starts with ``-`` is
     rejected before any SSH work. The hint is the same regardless of
@@ -459,7 +496,8 @@ def test_exec_vm_rejects_dash_prefixed_command(
 
 
 def test_exec_agent_rejects_dash_prefixed_command(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """``agent exec`` mirrors the same rejection and hint shape as
     ``vm exec``."""
@@ -471,7 +509,10 @@ def test_exec_agent_rejects_dash_prefixed_command(
 
     with pytest.raises(ValidationError, match="cannot start with '-'") as exc_info:
         agent_manager.exec_agent(  # type: ignore[arg-type]
-            db, config, name="a1", command=["--workspace", "ws1", "pwd"],
+            db,
+            config,
+            name="a1",
+            command=["--workspace", "ws1", "pwd"],
         )
     hint = exc_info.value.hint or ""
     assert "agentworks args must come before the first positional argument" in hint
@@ -515,9 +556,7 @@ def _shell_command_params(resource: str, argv: list[str]) -> dict[str, object]:
     )
     group = app_commands[resource]
     group_commands = getattr(group, "commands", None)
-    assert isinstance(group_commands, dict), (
-        f"expected {resource!r} to be a subgroup, got {type(group).__name__}"
-    )
+    assert isinstance(group_commands, dict), f"expected {resource!r} to be a subgroup, got {type(group).__name__}"
     shell_cmd = group_commands["shell"]
     ctx = shell_cmd.make_context(f"{resource} shell", list(argv))
     params: dict[str, object] = ctx.params
@@ -552,28 +591,30 @@ def test_agent_shell_accepts_workspace_flag_in_either_position() -> None:
 
 
 def test_shell_vm_passes_workspace_scope_to_secret_target(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """``vm shell --workspace`` must include workspace-template env in
     the ``SecretTarget`` so workspace-scope secrets get eager-resolved
     before SSH. Mirrors ``test_shell_agent_passes_workspace_scope_to_
-    secret_target`` (in test_secrets_eager_resolve.py) on the admin
-    side."""
+    secret_target`` (in test_secrets_eager_resolve_vm_agent.py) on the
+    admin side."""
     from agentworks.vms import manager as vm_manager
 
     db = _seed_db(tmp_path)
     captured_scopes: dict[str, object] = {}
 
     def _spy_scopes(
-        registry: object, vm: object, *, ws: object = None,
+        registry: object,
+        vm: object,
+        *,
+        ws: object = None,
     ) -> object:
         captured_scopes["ws"] = ws
         return vm_manager._VmAdminEnvScopes(vm={}, workspace=None, admin={})
 
     monkeypatch.setattr(vm_manager, "_resolve_vm_admin_env_scopes", _spy_scopes)
-    monkeypatch.setattr(
-        vm_manager, "_vm_secret_target", lambda *a, **k: empty_secret_target()
-    )
+    monkeypatch.setattr(vm_manager, "_vm_secret_target", lambda *a, **k: empty_secret_target())
     monkeypatch.setattr("agentworks.secrets.resolve_for_command", lambda *a, **k: None)
     monkeypatch.setattr("agentworks.env.compose_env", lambda **k: {})
     stub_vm_gates(monkeypatch)
@@ -585,9 +626,15 @@ def test_shell_vm_passes_workspace_scope_to_secret_target(
 
     config = SimpleNamespace()
 
-    assert vm_manager.shell_vm(  # type: ignore[arg-type]
-        db, config, "vm1", workspace_name="ws1",
-    ) == 0
+    assert (
+        vm_manager.shell_vm(  # type: ignore[arg-type]
+            db,
+            config,
+            "vm1",
+            workspace_name="ws1",
+        )
+        == 0
+    )
 
     ws_arg = captured_scopes.get("ws")
     assert ws_arg is not None, (

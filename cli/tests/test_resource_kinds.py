@@ -38,11 +38,7 @@ def test_every_kind_declares_category_and_description() -> None:
 
 
 def test_capability_kinds_are_exactly_the_code_backed_ones() -> None:
-    capability = {
-        name
-        for name, handler in KIND_REGISTRY.items()
-        if handler.category == "capability"
-    }
+    capability = {name for name, handler in KIND_REGISTRY.items() if handler.category == "capability"}
     assert capability == {
         "secret-backend",
         "git-credential-provider",
@@ -59,9 +55,7 @@ def test_names_only_needs_no_config(tmp_path: Path, monkeypatch) -> None:
 
     from agentworks.cli import app
 
-    monkeypatch.setattr(
-        "agentworks.config.CONFIG_PATH", tmp_path / "nope" / "config.toml"
-    )
+    monkeypatch.setattr("agentworks.config.CONFIG_PATH", tmp_path / "nope" / "config.toml")
     result = CliRunner().invoke(app, ["resource", "kinds", "--names-only"])
     assert result.exit_code == 0, result.output
     lines = [line for line in result.output.splitlines() if line]
@@ -83,15 +77,9 @@ def test_table_shows_categories_and_counts(tmp_path: Path, monkeypatch) -> None:
     assert "KIND" in out and "CATEGORY" in out and "RESOURCES" in out
     # The capability rows carry their classifier and real counts (all
     # built-in backends registered).
-    (backend_line,) = [
-        line for line in out.splitlines() if line.startswith("secret-backend ")
-    ]
+    (backend_line,) = [line for line in out.splitlines() if line.startswith("secret-backend ")]
     assert backend_line.split()[1] == "capability"
     # env-var, prompt, onepassword.
     assert backend_line.split()[2] == str(len(SECRET_BACKEND_REGISTRY))
-    (secret_line,) = [
-        line
-        for line in out.splitlines()
-        if line.startswith("secret ") or line.startswith("secret  ")
-    ]
+    (secret_line,) = [line for line in out.splitlines() if line.startswith("secret ") or line.startswith("secret  ")]
     assert "declarable" in secret_line

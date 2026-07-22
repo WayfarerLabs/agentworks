@@ -44,10 +44,7 @@ _MIGRATABLE_KINDS = {k for k in KIND_SECTIONS if k != "secret-backend"}
 
 # section -> kind, covering vm-site's two legacy sections.
 _SECTION_KINDS = {
-    section: kind
-    for kind, sections in KIND_SECTIONS.items()
-    if kind != "secret-backend"
-    for section in sections
+    section: kind for kind, sections in KIND_SECTIONS.items() if kind != "secret-backend" for section in sections
 }
 
 # Kinds whose whole top-level section is the unit (rather than a family
@@ -163,10 +160,7 @@ def plan_migration(
     targets = _targets(selected, layout)
     writes = _build_writes(doc, selected, layout, resources_dir)
 
-    drops = any(
-        key is not None and key_name(key) == _SECRET_BACKENDS_SECTION
-        for key, _item in doc.body
-    )
+    drops = any(key is not None and key_name(key) == _SECRET_BACKENDS_SECTION for key, _item in doc.body)
     markers = {(u.section, u.name): targets[(u.kind, u.name)] for u in selected}
     # vm-site sections rewrite whole (like singletons); the editor's
     # singleton path looks markers up under the "default" name.
@@ -177,9 +171,7 @@ def plan_migration(
         new_text = apply_toml_edits(
             old_text,
             units={(u.section, u.name) for u in selected},
-            singleton_sections={
-                u.section for u in selected if u.kind in _WHOLE_SECTION_KINDS
-            },
+            singleton_sections={u.section for u in selected if u.kind in _WHOLE_SECTION_KINDS},
             mode=toml_mode,
             markers=markers,
             drop_sections={_SECRET_BACKENDS_SECTION} if drops else set(),
@@ -256,9 +248,7 @@ def _mapping_child_names(item: toml_items.Item) -> list[str]:
     return []
 
 
-def _resolve_selectors(
-    selectors: list[str], available: list[MigrationUnit]
-) -> list[MigrationUnit]:
+def _resolve_selectors(selectors: list[str], available: list[MigrationUnit]) -> list[MigrationUnit]:
     if not selectors:
         return list(available)
 
@@ -275,10 +265,7 @@ def _resolve_selectors(
             raise ValidationError(
                 "secret-backend TOML sections are deprecated no-ops with no "
                 "manifest successor; there is nothing to migrate.",
-                hint=(
-                    "Run `agw resource migrate --all` to drop the "
-                    "[secret_backends.*] sections from config.toml."
-                ),
+                hint=("Run `agw resource migrate --all` to drop the [secret_backends.*] sections from config.toml."),
             )
         if kind not in _MIGRATABLE_KINDS:
             known = ", ".join(sorted(_MIGRATABLE_KINDS))
@@ -303,10 +290,7 @@ def _resolve_selectors(
             if not matches:
                 raise ValidationError(
                     f"no TOML-declared resources of kind {kind!r}",
-                    hint=(
-                        "They may already be YAML-declared or auto-declared; "
-                        "only TOML-declared resources migrate."
-                    ),
+                    hint=("They may already be YAML-declared or auto-declared; only TOML-declared resources migrate."),
                 )
             for unit in matches:
                 picked[(unit.kind, unit.name)] = unit
@@ -345,8 +329,7 @@ def _check_declaration_shapes(
         if section in singleton_sections and not isinstance(item, toml_items.Table):
             where = _section_location(old_text, config_path, section)
             raise ConfigError(
-                f"{where}: [{section}] is not declared as standard TOML "
-                "tables; the migrate tool cannot rewrite it",
+                f"{where}: [{section}] is not declared as standard TOML tables; the migrate tool cannot rewrite it",
                 hint="Migrate this section by hand (dotted-key/inline shapes).",
             )
         if section not in wanted:
@@ -354,8 +337,7 @@ def _check_declaration_shapes(
         if not isinstance(item, toml_items.Table):
             where = _section_location(old_text, config_path, section)
             raise ConfigError(
-                f"{where}: [{section}] is not declared as standard TOML "
-                "tables; the migrate tool cannot rewrite it",
+                f"{where}: [{section}] is not declared as standard TOML tables; the migrate tool cannot rewrite it",
                 hint="Migrate this section by hand (dotted-key/inline shapes).",
             )
         for inner_key, inner in item.value.body:
@@ -363,13 +345,8 @@ def _check_declaration_shapes(
                 continue
             if not isinstance(inner, toml_items.Table):
                 child = f"{section}.{key_name(inner_key)}"
-                unit = next(
-                    u for u in selected
-                    if u.section == section and u.name == key_name(inner_key)
-                )
-                where = _declared_at(registry, unit) or _section_location(
-                    old_text, config_path, section
-                )
+                unit = next(u for u in selected if u.section == section and u.name == key_name(inner_key))
+                where = _declared_at(registry, unit) or _section_location(old_text, config_path, section)
                 raise ConfigError(
                     f"{where}: [{child}] is declared as a dotted key or "
                     f"inline table; the migrate tool only rewrites standard "
@@ -399,21 +376,14 @@ def _section_location(old_text: str, config_path: Path, section: str) -> str:
     """
     for number, line in enumerate(old_text.splitlines(), start=1):
         stripped = line.lstrip()
-        if stripped.startswith((f"[{section}]", f"[{section}.")) or line.startswith(
-            (f"{section} =", f"{section}=")
-        ):
+        if stripped.startswith((f"[{section}]", f"[{section}.")) or line.startswith((f"{section} =", f"{section}=")):
             return f"{config_path}:{number}"
     return str(config_path)
 
 
-def _targets(
-    selected: list[MigrationUnit], layout: str
-) -> dict[tuple[str, str], str]:
+def _targets(selected: list[MigrationUnit], layout: str) -> dict[tuple[str, str], str]:
     """Per-unit target paths relative to the config dir."""
-    return {
-        (u.kind, u.name): f"{RESOURCES_DIRNAME}/{_relative_target(u, layout).as_posix()}"
-        for u in selected
-    }
+    return {(u.kind, u.name): f"{RESOURCES_DIRNAME}/{_relative_target(u, layout).as_posix()}" for u in selected}
 
 
 def _build_writes(
@@ -440,8 +410,7 @@ def _relative_target(unit: MigrationUnit, layout: str) -> Path:
         return Path(f"{unit.kind}s.yaml")
     if not _SAFE_FILENAME.fullmatch(unit.name):
         raise ConfigError(
-            f"{unit.kind}/{unit.name}: name is not filename-safe for the "
-            "per-resource layout",
+            f"{unit.kind}/{unit.name}: name is not filename-safe for the per-resource layout",
             hint="Use --layout per-kind for this resource.",
         )
     return Path(unit.kind) / f"{unit.name}.yaml"
@@ -486,9 +455,7 @@ def _emit_document(doc: tomlkit.TOMLDocument, unit: MigrationUnit) -> str:
         platform_cls = VM_PLATFORM_REGISTRY.get(platform)
         if platform_cls is not None and "platform_config" in rebuilt_site:
             try:
-                platform_cls.validate_config(
-                    f"[{unit.section}]", rebuilt_site["platform_config"]
-                )
+                platform_cls.validate_config(f"[{unit.section}]", rebuilt_site["platform_config"])
             except ConfigError as exc:
                 raise ConfigError(
                     f"cannot migrate vm-site/{unit.name}: {exc}",
@@ -532,9 +499,7 @@ def _emit_document(doc: tomlkit.TOMLDocument, unit: MigrationUnit) -> str:
         capability = GIT_CREDENTIAL_PROVIDER_REGISTRY.get(str(provider))
         if capability is not None and "provider_config" in rebuilt:
             try:
-                capability.validate_config(
-                    f"git-credential/{unit.name}", rebuilt["provider_config"]
-                )
+                capability.validate_config(f"git-credential/{unit.name}", rebuilt["provider_config"])
             except ConfigError as exc:
                 raise ConfigError(
                     f"cannot migrate git-credential/{unit.name}: {exc}",
@@ -551,17 +516,13 @@ def _emit_document(doc: tomlkit.TOMLDocument, unit: MigrationUnit) -> str:
         # the 'shell' harness (mirroring the git-credential
         # provider_config nesting); a declared harness / harness_config
         # passes through. env and inherits are kind-owned and stay at
-        # the spec top level. The TOML loader's hoist (config.py) and
-        # this emission land on the identical internal value, which the
+        # the spec top level. The TOML loader's hoist (``agentworks.config``)
+        # and this emission land on the identical internal value, which the
         # post-run registry-equivalence verification proves; validate
         # the rebuilt blob pre-write so a bad blob fails BEFORE anything
         # is written, in the operator's TOML vocabulary, rather than
         # failing verification after the write.
-        flat = {
-            key: spec.pop(key)
-            for key in ("command", "restart_command", "required_commands")
-            if key in spec
-        }
+        flat = {key: spec.pop(key) for key in ("command", "restart_command", "required_commands") if key in spec}
         harness = spec.pop("harness", None)
         harness_config = spec.pop("harness_config", None)
         if flat:
@@ -584,9 +545,7 @@ def _emit_document(doc: tomlkit.TOMLDocument, unit: MigrationUnit) -> str:
             harness_cap = HARNESS_REGISTRY.get(harness)
             if harness_cap is not None:
                 try:
-                    harness_cap.validate_config(
-                        f"session-template/{unit.name}", harness_config
-                    )
+                    harness_cap.validate_config(f"session-template/{unit.name}", harness_config)
                 except ConfigError as exc:
                     raise ConfigError(
                         f"cannot migrate session-template/{unit.name}: {exc}",
@@ -604,9 +563,7 @@ def _emit_document(doc: tomlkit.TOMLDocument, unit: MigrationUnit) -> str:
         "metadata": metadata,
         "spec": spec,
     }
-    return yaml.safe_dump(
-        envelope, sort_keys=False, default_flow_style=False, allow_unicode=True
-    )
+    return yaml.safe_dump(envelope, sort_keys=False, default_flow_style=False, allow_unicode=True)
 
 
 def _spec_data(doc: tomlkit.TOMLDocument, unit: MigrationUnit) -> dict[str, Any]:

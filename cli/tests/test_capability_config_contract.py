@@ -144,18 +144,14 @@ class _SigningCredentialProvider(GitCredentialProvider):
     provider_name = "test-signing"
 
     @classmethod
-    def validate_config(
-        cls, owner: str, config: Any
-    ) -> tuple[ConfigReference, ...]:
+    def validate_config(cls, owner: str, config: Any) -> tuple[ConfigReference, ...]:
         unknown = sorted(set(config) - {"signing_key"})
         if unknown:
             raise ConfigError(f"{owner}: unknown field(s): {', '.join(unknown)}")
         key = config.get("signing_key", "code-signing-key")
         if not isinstance(key, str) or not key:
             raise ConfigError(f"{owner}.signing_key must be a secret name")
-        return (
-            ConfigReference(kind="secret", name=key, usage="the signing key"),
-        )
+        return (ConfigReference(kind="secret", name=key, usage="the signing key"),)
 
     def credential_lines(self, token: str) -> list[str]:
         return [f"https://signer:{token}@example.test"]
@@ -168,14 +164,10 @@ class _SigningCredentialProvider(GitCredentialProvider):
 
 @pytest.fixture
 def signing_provider(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setitem(
-        GIT_CREDENTIAL_PROVIDER_REGISTRY, "test-signing", _SigningCredentialProvider
-    )
+    monkeypatch.setitem(GIT_CREDENTIAL_PROVIDER_REGISTRY, "test-signing", _SigningCredentialProvider)
 
 
-def test_capability_refs_attributed_to_consuming_resource(
-    tmp_path: Path, signing_provider: None
-) -> None:
+def test_capability_refs_attributed_to_consuming_resource(tmp_path: Path, signing_provider: None) -> None:
     """The full contract: the capability returns the reference its blob
     implies; the consuming resource emits it as source; the framework
     auto-declares the secret with a per-consumer description."""
@@ -195,9 +187,7 @@ def test_capability_refs_attributed_to_consuming_resource(
     assert ("git-credential", "signer") in sources
 
 
-def test_capability_ref_default_is_operator_overridable(
-    tmp_path: Path, signing_provider: None
-) -> None:
+def test_capability_ref_default_is_operator_overridable(tmp_path: Path, signing_provider: None) -> None:
     """The defaulted-and-overridable flavor: pointing the blob field at
     another secret moves the reference (TOML hosts blob fields flat)."""
     config = _config(

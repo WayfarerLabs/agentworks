@@ -13,15 +13,11 @@ def _secret_req(name: str, source: tuple[str, str], usage: str = "the X env var"
 
 
 def _admin_req() -> SecretReference:
-    return SecretReference(
-        name="default", kind="admin-template", usage="ignored", source=("test", "x")
-    )
+    return SecretReference(name="default", kind="admin-template", usage="ignored", source=("test", "x"))
 
 
 def _named_console_req() -> SecretReference:
-    return SecretReference(
-        name="default", kind="named-console-template", usage="ignored", source=("test", "x")
-    )
+    return SecretReference(name="default", kind="named-console-template", usage="ignored", source=("test", "x"))
 
 
 def test_phase_1a_kinds_registered() -> None:

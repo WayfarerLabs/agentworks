@@ -35,9 +35,7 @@ class EnvEntry:
                 f"EnvEntry for {self.key!r} cannot set both value and secret",
             )
 
-    def referenced_resources(
-        self, source: tuple[str, str]
-    ) -> list[SecretReference]:
+    def referenced_resources(self, source: tuple[str, str]) -> list[SecretReference]:
         """Emit a ``SecretReference`` for this entry's secret reference,
         or an empty list for plaintext entries.
 

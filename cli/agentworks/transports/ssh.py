@@ -187,8 +187,7 @@ class SSHTransport(Transport):
                 self.logger.log_command(command, ssh_result)
             if check and not ssh_result.ok:
                 raise SSHError(
-                    f"SSH command failed (exit {result.returncode}): {command}\n"
-                    f"stderr: {result.stderr.strip()}"
+                    f"SSH command failed (exit {result.returncode}): {command}\nstderr: {result.stderr.strip()}"
                 )
             return ssh_result
 

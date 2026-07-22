@@ -41,9 +41,7 @@ def _write_cfg(tmp_path: Path, body: str, ssh_keys: tuple[Path, Path]) -> Path:
     return p
 
 
-def test_default_token_secret_auto_declares(
-    tmp_path: Path, ssh_keys: tuple[Path, Path]
-) -> None:
+def test_default_token_secret_auto_declares(tmp_path: Path, ssh_keys: tuple[Path, Path]) -> None:
     """A bare ``[git_credentials.github]`` stanza (no ``token`` field)
     parses with the default ``token = "git-token-github"``; the
     framework's finalize pass auto-declares that secret via
@@ -68,9 +66,7 @@ def test_default_token_secret_auto_declares(
     assert decl.origin.source == ("git-credential", "github")
 
 
-def test_custom_token_secret_auto_declares(
-    tmp_path: Path, ssh_keys: tuple[Path, Path]
-) -> None:
+def test_custom_token_secret_auto_declares(tmp_path: Path, ssh_keys: tuple[Path, Path]) -> None:
     """An operator-typed ``token = "custom"`` overrides the default
     secret name; auto-declare uses the custom name.
     """
@@ -92,9 +88,7 @@ def test_custom_token_secret_auto_declares(
     assert decl.origin.variant == "auto-declared"
 
 
-def test_empty_token_string_rejected_at_load(
-    tmp_path: Path, ssh_keys: tuple[Path, Path]
-) -> None:
+def test_empty_token_string_rejected_at_load(tmp_path: Path, ssh_keys: tuple[Path, Path]) -> None:
     """An empty-string ``token = ""`` is a usability footgun (would
     derive ``AW_SECRET_`` env-var name and prompt for a secret called
     ``""``); the loader rejects it explicitly.
@@ -114,9 +108,7 @@ def test_empty_token_string_rejected_at_load(
         load_config(cfg, warn_issues=False)
 
 
-def test_non_string_token_rejected_at_load(
-    tmp_path: Path, ssh_keys: tuple[Path, Path]
-) -> None:
+def test_non_string_token_rejected_at_load(tmp_path: Path, ssh_keys: tuple[Path, Path]) -> None:
     """``token`` must be a bare string; the loader rejects inline
     tables (``{ secret = "..." }`` polymorphism not permitted).
     """

@@ -48,20 +48,22 @@ def _seed_vm(db: Database, site: str) -> VMRow:
 
 
 def test_no_site_secrets_skips_the_resolve_pass(
-    db: Database, make_config, resolve_counter: list[list[str]]  # noqa: ANN001
+    db: Database,
+    make_config,
+    resolve_counter: list[list[str]],  # noqa: ANN001
 ) -> None:
     """A secret-free site's boundary resolve is a no-op: the backend
     loop never runs, so nothing can prompt."""
     config = make_config()
-    vm_node, _ops_ctx = vm_manager._live_vm_boundary(
-        db, config, _seed_vm(db, "lima-local")
-    )
+    vm_node, _ops_ctx = vm_manager._live_vm_boundary(db, config, _seed_vm(db, "lima-local"))
     assert vm_node.site.platform.name == "lima"
     assert resolve_counter == []
 
 
 def test_secret_bearing_site_resolves_exactly_once(
-    db: Database, make_config, resolve_counter: list[list[str]]  # noqa: ANN001
+    db: Database,
+    make_config,
+    resolve_counter: list[list[str]],  # noqa: ANN001
 ) -> None:
     """The bound platform's declared config secret resolves in the ONE
     boundary pass and ops read it through the returned op-start
@@ -69,9 +71,7 @@ def test_secret_bearing_site_resolves_exactly_once(
     from agentworks.capabilities.vm_platform.proxmox import ProxmoxPlatform
 
     config = make_config(PROXMOX_SECTION)
-    vm_node, ops_ctx = vm_manager._live_vm_boundary(
-        db, config, _seed_vm(db, "proxmox")
-    )
+    vm_node, ops_ctx = vm_manager._live_vm_boundary(db, config, _seed_vm(db, "proxmox"))
     assert isinstance(vm_node.site.platform, ProxmoxPlatform)
     assert ops_ctx.secret("proxmox-token") == "pve-token"
     assert len(resolve_counter) == 1
@@ -113,17 +113,16 @@ def test_env_targets_join_the_site_secret_pass(
 
     monkeypatch.setenv("AW_SECRET_API_KEY", "k")
     monkeypatch.setattr(vm_manager, "_is_tailscale_reachable", lambda host: True)
-    config = make_config(
-        PROXMOX_SECTION + '\n[secrets.api-key]\ndescription = "workload key"\n'
-    )
+    config = make_config(PROXMOX_SECTION + '\n[secrets.api-key]\ndescription = "workload key"\n')
     registry = build_registry(config)
     target = SecretTarget(
         vm={"API_KEY": EnvEntry(key="API_KEY", secret="api-key")},
         label="test-shell",
     )
-    with vm_manager.gated_vm_boundary(
-        db, config, registry, _seed_vm(db, "proxmox"), targets=[target]
-    ) as (_vm_node, resolver):
+    with vm_manager.gated_vm_boundary(db, config, registry, _seed_vm(db, "proxmox"), targets=[target]) as (
+        _vm_node,
+        resolver,
+    ):
         pass
 
     assert len(resolve_counter) == 1

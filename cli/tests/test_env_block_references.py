@@ -217,9 +217,7 @@ def test_operator_declared_secret_referenced_from_env_gets_usage_populated(
     ]
 
 
-def test_multiple_env_refs_from_one_resource_each_contribute_usage(
-    tmp_path: Path, ssh_keys: tuple[Path, Path]
-) -> None:
+def test_multiple_env_refs_from_one_resource_each_contribute_usage(tmp_path: Path, ssh_keys: tuple[Path, Path]) -> None:
     cfg = _write_cfg(
         tmp_path,
         """\

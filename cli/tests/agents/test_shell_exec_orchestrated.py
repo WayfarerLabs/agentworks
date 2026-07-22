@@ -50,8 +50,7 @@ def _seed(db: Database) -> None:
 
 def _seed_workspace(db: Database, *, vm_name: str, name: str) -> None:
     db._conn.execute(
-        "INSERT INTO workspaces (name, vm_name, workspace_path, linux_group) "
-        "VALUES (?, ?, ?, ?)",
+        "INSERT INTO workspaces (name, vm_name, workspace_path, linux_group) VALUES (?, ?, ?, ?)",
         (name, vm_name, f"/srv/{name}", f"ws-{name}"),
     )
     db._conn.commit()
@@ -68,12 +67,8 @@ def _stop_the_vm(monkeypatch: pytest.MonkeyPatch, events: list[str]) -> None:
         "status",
         lambda self, row, ctx: events.append("status") or VMStatus.STOPPED,
     )
-    monkeypatch.setattr(
-        ProxmoxPlatform, "start", lambda self, row, ctx: events.append("start")
-    )
-    monkeypatch.setattr(
-        vm_manager, "_ensure_tailscale", lambda *a, **k: events.append("tailscale")
-    )
+    monkeypatch.setattr(ProxmoxPlatform, "start", lambda self, row, ctx: events.append("start"))
+    monkeypatch.setattr(vm_manager, "_ensure_tailscale", lambda *a, **k: events.append("tailscale"))
 
 
 class _FakeAgentTarget:
@@ -110,7 +105,8 @@ def target(monkeypatch: pytest.MonkeyPatch) -> _FakeAgentTarget:
 
 
 def test_graph_derives_from_row_and_env_joins_via_targets(
-    db: Database, make_config  # noqa: ANN001
+    db: Database,
+    make_config,  # noqa: ANN001
 ) -> None:
     """The agent shell / exec graph is the live VM alone (vm-site +
     vm): no agent node exists (nothing about the agent is provisioned
@@ -139,9 +135,7 @@ def test_graph_derives_from_row_and_env_joins_via_targets(
     for name in secret_union(nodes):
         resolver.register_name(name)
     scopes = agent_manager._resolve_agent_direct_env_scopes(registry, vm, agent)
-    resolver.register_targets(
-        [agent_manager._agent_direct_secret_target(scopes, label="agent-shell=a1")]
-    )
+    resolver.register_targets([agent_manager._agent_direct_secret_target(scopes, label="agent-shell=a1")])
     resolver.resolve()
     assert set(resolver.values) == {"proxmox-token", "agent-env-secret"}
 
@@ -237,9 +231,7 @@ def test_exec_dash_prefixed_command_fails_with_zero_resolves_and_zero_gate(
     _no_gate(monkeypatch)
 
     with pytest.raises(ValidationError, match="cannot start with '-'"):
-        agent_manager.exec_agent(
-            db, config, name="a1", command=["--workspace", "ws1", "pwd"]
-        )
+        agent_manager.exec_agent(db, config, name="a1", command=["--workspace", "ws1", "pwd"])
 
     assert resolve_counter == []
     assert target.streaming_calls == []
@@ -260,9 +252,7 @@ def test_missing_grant_fails_with_zero_resolves_and_zero_gate(
     _no_gate(monkeypatch)
 
     with pytest.raises(AuthorizationError, match="does not have access"):
-        agent_manager.exec_agent(
-            db, config, name="a1", command=["echo", "hi"], workspace_name="ws1"
-        )
+        agent_manager.exec_agent(db, config, name="a1", command=["echo", "hi"], workspace_name="ws1")
 
     assert resolve_counter == []
     assert target.streaming_calls == []

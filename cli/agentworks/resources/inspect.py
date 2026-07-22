@@ -159,8 +159,7 @@ def list_resources(
 
     if origin_filter is not None and origin_filter not in _ORIGIN_FILTER_MAP:
         raise ValidationError(
-            "origin_filter must be one of "
-            f"{sorted(_ORIGIN_FILTER_MAP)}; got {origin_filter!r}",
+            f"origin_filter must be one of {sorted(_ORIGIN_FILTER_MAP)}; got {origin_filter!r}",
             entity_kind="resource",
         )
     if kinds is not None and not kinds:
@@ -215,9 +214,7 @@ def list_resources(
     )
 
 
-def disabled_reason_for(
-    registry: Registry, kind: str, resource: object
-) -> str | None:
+def disabled_reason_for(registry: Registry, kind: str, resource: object) -> str | None:
     """Project the kind's generic disabled hook: why ``resource``
     cannot run on this host, or ``None`` when it can (or the kind has
     no disabled concept). Same structural-duck-typing gate as
@@ -235,15 +232,11 @@ def disabled_reason_for(
     if reason is not None and not isinstance(reason, str):
         from agentworks.errors import StateError
 
-        raise StateError(
-            f"{kind}.disabled_reason returned {type(reason).__name__}, expected str | None"
-        )
+        raise StateError(f"{kind}.disabled_reason returned {type(reason).__name__}, expected str | None")
     return reason
 
 
-def used_by_for(
-    db: Database | None, registry: Registry, kind: str, resource: object
-) -> tuple[InstanceRef, ...] | None:
+def used_by_for(db: Database | None, registry: Registry, kind: str, resource: object) -> tuple[InstanceRef, ...] | None:
     """Project ``(kind, resource) -> tuple[InstanceRef, ...] | None`` via
     the kind's ``instances`` hook. ``None`` for kinds that don't
     implement the hook (apt / install-commands, providers, backends) or
@@ -268,9 +261,7 @@ def used_by_for(
     return tuple(method(db, registry, resource))
 
 
-def _count_used_by(
-    db: Database | None, registry: Registry, kind: str, resource: object
-) -> int | None:
+def _count_used_by(db: Database | None, registry: Registry, kind: str, resource: object) -> int | None:
     """``len()`` variant of ``used_by_for`` used by the list-row builder.
     Returns ``None`` (renderer shows ``-``) when the kind has no
     instance concept; otherwise the count of live instances.
@@ -374,13 +365,9 @@ def render_kind_table(rows: list[KindRow]) -> None:
     kind_w = max(len("KIND"), *(len(r.kind) for r in rows))
     cat_w = max(len("CATEGORY"), *(len(r.category) for r in rows))
     res_w = len("RESOURCES")
-    output.info(
-        f"{'KIND':<{kind_w}}  {'CATEGORY':<{cat_w}}  {'RESOURCES':<{res_w}}  DESCRIPTION"
-    )
+    output.info(f"{'KIND':<{kind_w}}  {'CATEGORY':<{cat_w}}  {'RESOURCES':<{res_w}}  DESCRIPTION")
     for r in rows:
-        output.info(
-            f"{r.kind:<{kind_w}}  {r.category:<{cat_w}}  {r.resources:<{res_w}}  {r.description}"
-        )
+        output.info(f"{r.kind:<{kind_w}}  {r.category:<{cat_w}}  {r.resources:<{res_w}}  {r.description}")
 
 
 def edit_location(registry: Registry, kind: str, name: str) -> tuple[Path, int]:
@@ -416,8 +403,7 @@ def edit_location(registry: Registry, kind: str, name: str) -> tuple[Path, int]:
                 hint=(
                     f"Declare an operator resource instead: {sample_hint}"
                     if declarable
-                    else f"{kind} is a capability provided by the app; "
-                    f"there is nothing to declare or edit."
+                    else f"{kind} is a capability provided by the app; there is nothing to declare or edit."
                 ),
             )
         raise ValidationError(
@@ -427,8 +413,7 @@ def edit_location(registry: Registry, kind: str, name: str) -> tuple[Path, int]:
     assert origin.file is not None and origin.line is not None  # variant contract
     if origin.file.suffix == ".toml":
         raise ValidationError(
-            f"{kind}/{name} is declared in TOML "
-            f"({format_file_path(origin.file)}:{origin.line})",
+            f"{kind}/{name} is declared in TOML ({format_file_path(origin.file)}:{origin.line})",
             hint=(
                 f"Move it to a YAML manifest with `agw resource migrate "
                 f"{kind}/{name}`, or edit the config directly with "
@@ -482,11 +467,7 @@ def render_resource_table(listing: ResourceListing) -> None:
         # NAME cell: the rendered name must stay the exact selector an
         # operator copies into `agw resource describe KIND/NAME`.
         # `describe` carries the full reason.
-        description_cell = (
-            row.description
-            if row.disabled_reason is None
-            else f"(disabled) {row.description}".rstrip()
-        )
+        description_cell = row.description if row.disabled_reason is None else f"(disabled) {row.description}".rstrip()
         rendered.append(
             (
                 row.kind,
@@ -497,10 +478,7 @@ def render_resource_table(listing: ResourceListing) -> None:
                 description_cell,
             )
         )
-    widths = [
-        max(len(headers[i]), *(len(r[i]) for r in rendered))
-        for i in range(len(headers))
-    ]
+    widths = [max(len(headers[i]), *(len(r[i]) for r in rendered)) for i in range(len(headers))]
 
     def _fmt(cols: tuple[str, ...]) -> str:
         return "  ".join(c.ljust(widths[i]) for i, c in enumerate(cols))

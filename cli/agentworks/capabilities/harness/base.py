@@ -180,9 +180,7 @@ class Harness(Capability):
         return tuple(ref.name for ref in self._secret_refs)
 
     @classmethod
-    def merge_config(
-        cls, base: Mapping[str, object], child: Mapping[str, object]
-    ) -> dict[str, object]:
+    def merge_config(cls, base: Mapping[str, object], child: Mapping[str, object]) -> dict[str, object]:
         """Inheritance-time blob merge for a same-harness parent/child
         pair (FRD R5). Default: shallow child-wins. Overridden per
         capability where a key needs richer combination (``shell`` unions
@@ -236,9 +234,7 @@ class Harness(Capability):
             return f"VM '{self._vm_name}'"
         return f"agent '{self._target.name}'"
 
-    def _run_readiness(
-        self, ctx: RunContext, *, stage: Literal["preflight", "runup"]
-    ) -> None:
+    def _run_readiness(self, ctx: RunContext, *, stage: Literal["preflight", "runup"]) -> None:
         """The skip/defer/probe/error readiness fork (including the fifth
         ``scope is None`` loud branch), with the SESSION-level identity
         guard added ahead of the single-fire short-circuit."""
@@ -305,32 +301,21 @@ class Harness(Capability):
         """
         mismatches: list[str] = []
         if scope.vm != self._vm_name:
-            mismatches.append(
-                f"names VM {scope.vm!r} but this harness is wired for VM "
-                f"{self._vm_name!r}"
-            )
+            mismatches.append(f"names VM {scope.vm!r} but this harness is wired for VM {self._vm_name!r}")
         if scope.workspace != self._workspace_name:
             mismatches.append(
-                f"names workspace {scope.workspace!r} but this harness is "
-                f"wired for workspace {self._workspace_name!r}"
+                f"names workspace {scope.workspace!r} but this harness is wired for workspace {self._workspace_name!r}"
             )
         if scope.session != self._session_name:
             mismatches.append(
-                f"names session {scope.session!r} but this harness is wired "
-                f"for session {self._session_name!r}"
+                f"names session {scope.session!r} but this harness is wired for session {self._session_name!r}"
             )
         if scope.admin != self._admin:
-            mismatches.append(
-                f"is admin={scope.admin} but this harness is wired for "
-                f"admin={self._admin}"
-            )
+            mismatches.append(f"is admin={scope.admin} but this harness is wired for admin={self._admin}")
         elif not self._admin:
             target_name = self._target.name if self._target is not None else None
             if scope.agent != target_name:
-                mismatches.append(
-                    f"names agent {scope.agent!r} but this harness runs as "
-                    f"agent {target_name!r}"
-                )
+                mismatches.append(f"names agent {scope.agent!r} but this harness runs as agent {target_name!r}")
         if mismatches:
             raise StateError(
                 f"session '{self._session_name}': the operation scope "

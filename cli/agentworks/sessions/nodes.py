@@ -163,8 +163,7 @@ class PendingSessionNode:
     def mark_realized(self) -> None:
         if self._realized:
             raise StateError(
-                f"{self.key} was already marked realized; the "
-                f"pending-to-realized flip is one-way and once."
+                f"{self.key} was already marked realized; the pending-to-realized flip is one-way and once."
             )
         self._realized = True
 
@@ -195,9 +194,7 @@ class PendingSessionNode:
         agent_name = self._agent.name
         workspace_name = self._workspace.name
         try:
-            self._db.delete_agent_grant(
-                agent_name, workspace_name, "implicit", session_name=self._name
-            )
+            self._db.delete_agent_grant(agent_name, workspace_name, "implicit", session_name=self._name)
             remaining = self._db.has_any_grant(agent_name, workspace_name)
         except Exception as e:
             output.warn(
@@ -222,8 +219,7 @@ class PendingSessionNode:
                 )
             except Exception as e:
                 output.warn(
-                    f"rollback: failed to remove agent '{agent_name}' from "
-                    f"workspace '{workspace_name}' group: {e}"
+                    f"rollback: failed to remove agent '{agent_name}' from workspace '{workspace_name}' group: {e}"
                 )
 
 
@@ -336,8 +332,7 @@ def live_session_node(
             )
     elif agent is not None:
         raise StateError(
-            f"session '{row.name}' is an admin session but an agent "
-            f"node ('{agent.name}') was handed to the factory."
+            f"session '{row.name}' is an admin session but an agent node ('{agent.name}') was handed to the factory."
         )
     harness = _harness_for_template(
         template,

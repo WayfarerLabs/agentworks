@@ -148,7 +148,8 @@ class _RefEmitter:
 
 
 def test_error_miss_policy_includes_reference_usage(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
 ) -> None:
     """The error-miss ConfigError carries the reference's usage in the
     message so the operator sees what needed the missing resource."""
@@ -227,8 +228,7 @@ def test_iter_kind_returns_published_resources(tmp_path: Path) -> None:
         )
     r.finalize()
     operator_names = sorted(
-        s.name for s in r.iter_kind("secret")
-        if s.origin is not None and s.origin.variant == "operator-declared"
+        s.name for s in r.iter_kind("secret") if s.origin is not None and s.origin.variant == "operator-declared"
     )
     assert operator_names == ["a", "b", "c"]
 
@@ -239,9 +239,7 @@ def test_iter_kind_empty_when_kind_absent() -> None:
     assert list(r.iter_kind("nonexistent")) == []
 
 
-def test_build_registry_equivalent_to_manual_steps(
-    example_config: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_build_registry_equivalent_to_manual_steps(example_config: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """``build_registry(config)`` matches the manual publisher sequence.
 
     The manual side needs the bundled built-in manifests (backend rows)

@@ -31,9 +31,7 @@ def test_ssh_error_is_agentworks_error() -> None:
     assert isinstance(SSHError("boom"), AgentworksError)
 
 
-def test_record_unhandled_error_writes_traceback_with_context(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_record_unhandled_error_writes_traceback_with_context(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """The error log records timestamp, argv, and the full traceback so a
     user-visible one-liner can be backed by a debuggable artifact."""
     monkeypatch.setattr("agentworks.config.CONFIG_DIR", tmp_path)
@@ -55,9 +53,7 @@ def test_record_unhandled_error_writes_traceback_with_context(
     assert "Traceback" in text
 
 
-def test_record_unhandled_error_handles_unusable_log_dir(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_record_unhandled_error_handles_unusable_log_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """If the log path can't be created, the helper must return None (signal
     to the caller) without raising. The user's one-line error is more
     important than the persisted log."""
@@ -74,9 +70,7 @@ def test_record_unhandled_error_handles_unusable_log_dir(
     assert result is None
 
 
-def test_main_wrapper_catches_unhandled_exception(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_main_wrapper_catches_unhandled_exception(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Register a throwaway command that raises an arbitrary Exception and
     confirm main()'s top-level wrapper prints a clean one-liner + log path
     instead of leaking a traceback."""
@@ -113,9 +107,7 @@ def test_main_wrapper_catches_unhandled_exception(
     assert "RuntimeError: synthetic blowup" in log_path.read_text()
 
 
-def test_main_wrapper_lets_click_exceptions_through(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_main_wrapper_lets_click_exceptions_through(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """typer.Exit / Click ClickException must NOT be caught by our broad
     handler -- they own their own rendering and exit codes."""
     from agentworks import cli as cli_mod
@@ -144,9 +136,7 @@ def test_main_wrapper_lets_click_exceptions_through(
     assert not log_path.exists()
 
 
-def test_main_wrapper_handles_keyboard_interrupt(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_main_wrapper_handles_keyboard_interrupt(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """KeyboardInterrupt from inside a command exits cleanly with code 130.
 
     The Ctrl-C contract: no traceback, no error.log entry (KI isn't a bug to
@@ -240,9 +230,7 @@ def test_domain_error_renders_plain_off_tty(
     assert "\x1b" not in err
 
 
-def test_create_session_rolls_back_on_keyboard_interrupt(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_create_session_rolls_back_on_keyboard_interrupt(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Spot-check the per-op rollback pattern: a KeyboardInterrupt raised from
     inside the long-running SSH-driven part of ``create_session`` must trigger
     the DB rollback (delete_session) and re-raise the KI unchanged.

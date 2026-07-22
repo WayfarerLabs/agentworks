@@ -70,7 +70,8 @@ def test_returns_empty_for_no_targets(tmp_path: Path) -> None:
 
 
 def test_unions_single_target_env_chain(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setenv("AW_SECRET_API_KEY", "x")  # silence prompt fallback
     cfg = _write_config(
@@ -176,7 +177,10 @@ backends = ["env-var", "prompt"]
     )
     decls = compute_needed_secrets([target], build_registry(config))
     assert sorted(d.name for d in decls) == [
-        "admin-secret", "session-secret", "vm-secret", "ws-secret",
+        "admin-secret",
+        "session-secret",
+        "vm-secret",
+        "ws-secret",
     ]
 
 
@@ -199,9 +203,7 @@ backends = ["env-var", "prompt"]
 
     target = SecretTarget(vm={"K": EnvEntry(key="K", secret="from-env")})
     external_decl = config.secrets["external"]
-    decls = compute_needed_secrets(
-        [target], build_registry(config), extra_decls=[external_decl]
-    )
+    decls = compute_needed_secrets([target], build_registry(config), extra_decls=[external_decl])
     assert sorted(d.name for d in decls) == ["external", "from-env"]
 
 
@@ -302,9 +304,7 @@ backends = ["env-var", "prompt"]
 
     target = SecretTarget(vm={"K": EnvEntry(key="K", secret="shared")})
     shared = config.secrets["shared"]
-    decls = compute_needed_secrets(
-        [target], build_registry(config), extra_decls=[shared]
-    )
+    decls = compute_needed_secrets([target], build_registry(config), extra_decls=[shared])
     assert [d.name for d in decls] == ["shared"]
 
 
@@ -314,7 +314,8 @@ backends = ["env-var", "prompt"]
 
 
 def test_resolve_for_command_returns_resolved_values(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """The returned values dict IS the channel: the command threads it
     down to its compose_env sites (there is no cache)."""
@@ -336,7 +337,8 @@ backends = ["env-var"]
 
 
 def test_resolved_values_are_plain_data(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """The one resolve call captures values at that moment; later
     environment mutation cannot change what the command threads down.
@@ -364,16 +366,15 @@ backends = ["env-var"]
 
     env = compose_env(
         values=values,
-        ctx=ResourceContext(
-            vm_name="v", platform="lima", site="lima", user="u"
-        ),
+        ctx=ResourceContext(vm_name="v", platform="lima", site="lima", user="u"),
         vm={"K": EnvEntry(key="K", secret="api-key")},
     )
     assert env["K"] == "first"
 
 
 def test_resolve_for_command_skips_loop_when_no_secrets(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """An empty target list (or targets whose envs reference no secrets)
     must not run the resolve loop -- avoids spinning up prompt machinery
@@ -399,7 +400,8 @@ def test_resolve_for_command_skips_loop_when_no_secrets(
 
 
 def test_resolve_for_command_passes_extra_decls_through(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """extra_decls reach the resolve loop even when no target references
     any secret -- pinning the legacy-migration hook."""
@@ -427,9 +429,7 @@ backends = ["env-var"]
 
     monkeypatch.setattr("agentworks.secrets.resolve.resolve_secrets", _spy)
 
-    resolve_for_command(
-        [], config, registry, extra_decls=[config.secrets["external"]]
-    )
+    resolve_for_command([], config, registry, extra_decls=[config.secrets["external"]])
     assert calls == [["external"]]
 
 

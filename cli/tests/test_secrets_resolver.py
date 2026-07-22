@@ -26,8 +26,7 @@ def env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
         path = tmp_path / "config.toml"
         path.write_text(
             f'[operator]\nssh_public_key = "{key}.pub"\nssh_private_key = "{key}"\n'
-            '[secret_config]\nbackends = ["env-var"]\n'
-            + extra
+            '[secret_config]\nbackends = ["env-var"]\n' + extra
         )
         config = load_config(path, warn_issues=False, warn_deprecations=False)
         return config, build_registry(config)

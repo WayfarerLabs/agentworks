@@ -12,11 +12,7 @@ import pytest
 from agentworks.bootstrap import build_registry
 from agentworks.config import load_config
 
-SAMPLE_CONFIG_PATH = (
-    Path(__file__).resolve().parent.parent
-    / "agentworks"
-    / "sample-config.toml"
-)
+SAMPLE_CONFIG_PATH = Path(__file__).resolve().parent.parent / "agentworks" / "sample-config.toml"
 
 
 @pytest.fixture()
@@ -33,9 +29,7 @@ def sample_config(tmp_path: Path) -> Path:
 
     src = SAMPLE_CONFIG_PATH.read_text()
     # Replace the operator section's SSH key paths with tmp_path versions.
-    src = src.replace(
-        "~/.ssh/id_ed25519.pub", str(pub)
-    ).replace("~/.ssh/id_ed25519", str(priv))
+    src = src.replace("~/.ssh/id_ed25519.pub", str(pub)).replace("~/.ssh/id_ed25519", str(priv))
 
     cfg = tmp_path / "config.toml"
     cfg.write_text(src)

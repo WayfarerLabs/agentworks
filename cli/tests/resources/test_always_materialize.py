@@ -196,8 +196,7 @@ def test_secret_kind_not_materialized_by_pre_step(tmp_path: Path) -> None:
     # required_resources doesn't run).
     secret_names = {s.name for s in secrets}
     assert "tailscale-auth-key" in secret_names, (
-        "expected vm-template:default's tailscale requirement to "
-        "auto-declare 'tailscale-auth-key' via the cascade"
+        "expected vm-template:default's tailscale requirement to auto-declare 'tailscale-auth-key' via the cascade"
     )
     for secret in secrets:
         assert secret.references, (

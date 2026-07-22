@@ -96,12 +96,7 @@ def test_kind_filter_narrows_rows_and_summary(tmp_path: Path) -> None:
     assert {r.kind for r in listing.rows} == {"secret"}
     # Summary counts are post-filter -- they reflect only the visible
     # rows so the header doesn't mislead the operator.
-    assert (
-        listing.operator_count
-        + listing.auto_count
-        + listing.code_count
-        == len(listing.rows)
-    )
+    assert listing.operator_count + listing.auto_count + listing.code_count == len(listing.rows)
 
 
 def test_kind_filter_accepts_multiple_kinds(tmp_path: Path) -> None:
@@ -159,10 +154,7 @@ def test_origin_filter_operator_only_shows_operator_declared(tmp_path: Path) -> 
     registry = _load(cfg_file)
     listing = list_resources(registry, origin_filter="operator")
 
-    assert all(
-        row.origin is not None and row.origin.variant == "operator-declared"
-        for row in listing.rows
-    )
+    assert all(row.origin is not None and row.origin.variant == "operator-declared" for row in listing.rows)
     assert listing.operator_count == len(listing.rows)
     assert listing.auto_count == 0
     assert listing.code_count == 0
@@ -183,10 +175,7 @@ def test_origin_filter_auto_only_shows_auto_declared(tmp_path: Path) -> None:
     registry = _load(cfg_file)
     listing = list_resources(registry, origin_filter="auto")
 
-    assert all(
-        row.origin is not None and row.origin.variant == "auto-declared"
-        for row in listing.rows
-    )
+    assert all(row.origin is not None and row.origin.variant == "auto-declared" for row in listing.rows)
     assert listing.auto_count == len(listing.rows)
 
 
@@ -199,10 +188,7 @@ def test_origin_filter_code_only_shows_built_in(tmp_path: Path) -> None:
     registry = _load(cfg_file)
     listing = list_resources(registry, origin_filter="builtin")
 
-    assert all(
-        row.origin is not None and row.origin.variant == "built-in"
-        for row in listing.rows
-    )
+    assert all(row.origin is not None and row.origin.variant == "built-in" for row in listing.rows)
     assert listing.code_count == len(listing.rows)
 
 
@@ -273,9 +259,7 @@ def test_description_populated_for_operator_and_auto_resources(tmp_path: Path) -
 # -- CLI surface -----------------------------------------------------------
 
 
-def test_cli_names_only_emits_kind_slash_name_per_line(
-    tmp_path: Path, monkeypatch
-) -> None:
+def test_cli_names_only_emits_kind_slash_name_per_line(tmp_path: Path, monkeypatch) -> None:
     """``agw resource list --names-only`` is the source for shell
     completion; the line format is ``<kind>:<name>``. Completion
     snippets (bash/zsh/powershell) parse this with ``awk -F:``.
@@ -331,9 +315,7 @@ def test_cli_kind_csv_filter(tmp_path: Path, monkeypatch) -> None:
     assert seen_kinds == {"vm-template", "secret"}
 
 
-def test_cli_kind_csv_filter_tolerates_whitespace(
-    tmp_path: Path, monkeypatch
-) -> None:
+def test_cli_kind_csv_filter_tolerates_whitespace(tmp_path: Path, monkeypatch) -> None:
     """``--kind vm-template, secret`` (with a space) parses the same as
     ``--kind vm-template,secret``. Commas can't appear in kind
     identifiers, so a forgiving parse is safe.
@@ -362,9 +344,7 @@ def test_cli_kind_csv_filter_tolerates_whitespace(
     assert seen_kinds == {"vm-template", "secret"}
 
 
-def test_cli_names_only_with_unknown_kind_emits_nothing(
-    tmp_path: Path, monkeypatch
-) -> None:
+def test_cli_names_only_with_unknown_kind_emits_nothing(tmp_path: Path, monkeypatch) -> None:
     """``--names-only`` against a filter that resolves to zero rows
     emits no output -- no header, no "No resources match." message.
     Required by the ``--names-only`` cli convention so completion
@@ -405,9 +385,7 @@ def test_cli_empty_kind_csv_is_rejected(tmp_path: Path, monkeypatch) -> None:
     assert isinstance(result.exception, ValidationError)
 
 
-def test_cli_invalid_origin_filter_is_rejected(
-    tmp_path: Path, monkeypatch
-) -> None:
+def test_cli_invalid_origin_filter_is_rejected(tmp_path: Path, monkeypatch) -> None:
     from typer.testing import CliRunner
 
     from agentworks.cli import app
@@ -418,9 +396,7 @@ def test_cli_invalid_origin_filter_is_rejected(
 
     from agentworks.errors import ValidationError
 
-    result = CliRunner().invoke(
-        app, ["resource", "list", "--origin", "bogus"]
-    )
+    result = CliRunner().invoke(app, ["resource", "list", "--origin", "bogus"])
     assert result.exit_code != 0
     # The typed ValidationError surfaces with the allowed list so the
     # operator can self-correct without reading the help text.

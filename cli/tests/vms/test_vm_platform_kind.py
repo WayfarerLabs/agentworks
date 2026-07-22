@@ -60,11 +60,7 @@ def test_publisher_skips_unsupported_platforms(
 
 def test_vm_platform_is_not_manifest_declarable(tmp_path: Path) -> None:
     (tmp_path / "cap.yaml").write_text(
-        "apiVersion: agentworks/v1\n"
-        "kind: vm-platform\n"
-        "metadata:\n"
-        "  name: my-cloud\n"
-        "spec: {}\n"
+        "apiVersion: agentworks/v1\nkind: vm-platform\nmetadata:\n  name: my-cloud\nspec: {}\n"
     )
     with pytest.raises(ConfigError, match="provided by the app"):
         load_manifests(tmp_path)

@@ -5,8 +5,9 @@ Moved out of ``agentworks.config`` so the ``sessions`` domain owns its
 declared-resource types next to the resolver
 (``agentworks.sessions.templates``) and the kinds
 (``agentworks.sessions.kinds``). ``NamedConsoleConfig`` imports its
-layout default from ``agentworks.sessions.layouts``. ``config.py`` keeps
-only the legacy TOML loaders that construct these.
+layout default from ``agentworks.sessions.layouts``. The
+``agentworks.config`` package keeps only the legacy TOML loaders that
+construct these.
 """
 
 from __future__ import annotations
@@ -103,12 +104,8 @@ class SessionTemplate(DeclaredResource):
 
             capability = HARNESS_REGISTRY.get(self.harness)
             if capability is not None:
-                for cref in capability.validate_config(
-                    f"session-template/{self.name}", self.harness_config or {}
-                ):
-                    ref_cls = (
-                        SecretReference if cref.kind == "secret" else _ResourceRef
-                    )
+                for cref in capability.validate_config(f"session-template/{self.name}", self.harness_config or {}):
+                    ref_cls = SecretReference if cref.kind == "secret" else _ResourceRef
                     refs.append(
                         ref_cls(
                             name=cref.name,

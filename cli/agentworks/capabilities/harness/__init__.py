@@ -60,9 +60,7 @@ def harness_for(name: str) -> type[Harness]:
         return HARNESS_REGISTRY[name]
     except KeyError:
         known = ", ".join(sorted(HARNESS_REGISTRY)) or "(none)"
-        raise ConfigError(
-            f"unknown harness {name!r}; known harnesses: {known}"
-        ) from None
+        raise ConfigError(f"unknown harness {name!r}; known harnesses: {known}") from None
 
 
 def publish_to(registry: Registry) -> None:

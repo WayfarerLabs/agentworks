@@ -38,7 +38,9 @@ def test_would_attempt_false_when_opted_out() -> None:
     path in an interactive shell. The opt-out is generic loop-side
     behavior; the provider never sees it."""
     decl = SecretDecl(
-        name="x", description="X", backend_mappings={"prompt": False},
+        name="x",
+        description="X",
+        backend_mappings={"prompt": False},
     )
     assert _backend().would_attempt(decl) is False
 

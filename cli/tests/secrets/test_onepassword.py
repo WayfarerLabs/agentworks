@@ -34,9 +34,7 @@ def _decl(name: str, **kw: Any) -> SecretDecl:
     return SecretDecl(name=name, description=f"{name} description", **kw)
 
 
-def _install_runner(
-    monkeypatch: pytest.MonkeyPatch, runner: Any
-) -> None:
+def _install_runner(monkeypatch: pytest.MonkeyPatch, runner: Any) -> None:
     monkeypatch.setattr(op_mod, "_run_op", runner)
 
 
@@ -96,10 +94,7 @@ def test_bare_string_resolves_without_account_flag(
 
     uri = "op://Work/npm/token"
     secret = _decl("s-str", backend_mappings={"onepassword": uri})
-    assert (
-        backend.describe_lookup(secret, secret.backend_mappings["onepassword"])
-        == uri
-    )
+    assert backend.describe_lookup(secret, secret.backend_mappings["onepassword"]) == uri
     got = backend.batch_get([(secret, secret.backend_mappings["onepassword"])])
     assert got == {"s-str": "secret-value"}
     # The bare string uses op's default account: no --account flag anywhere.
@@ -123,9 +118,7 @@ def test_table_form_resolves_with_account_flag(
     got = backend.batch_get([(secret, secret.backend_mappings["onepassword"])])
     assert got == {"s-tbl": "secret-value"}
     read_calls = [c for c in runner.calls if c[0] == "read"]
-    assert read_calls == [
-        ["read", "--no-newline", "--account", "my.1password.com", uri]
-    ]
+    assert read_calls == [["read", "--no-newline", "--account", "my.1password.com", uri]]
 
 
 def test_section_bearing_reference_validates_and_resolves(
@@ -149,22 +142,15 @@ def test_describe_lookup_includes_account_when_set() -> None:
     uri = "op://Work/npm/token"
     with_account = _decl(
         "s-acct",
-        backend_mappings={
-            "onepassword": {"account": "my.1password.com", "reference": uri}
-        },
+        backend_mappings={"onepassword": {"account": "my.1password.com", "reference": uri}},
     )
     bare = _decl("s-bare", backend_mappings={"onepassword": uri})
     # Account-first: "<account>: <reference>" (position conveys "account").
     assert (
-        backend.describe_lookup(
-            with_account, with_account.backend_mappings["onepassword"]
-        )
+        backend.describe_lookup(with_account, with_account.backend_mappings["onepassword"])
         == f"my.1password.com: {uri}"
     )
-    assert (
-        backend.describe_lookup(bare, bare.backend_mappings["onepassword"])
-        == uri
-    )
+    assert backend.describe_lookup(bare, bare.backend_mappings["onepassword"]) == uri
 
 
 def test_describe_lookup_none_when_unmapped() -> None:
@@ -198,17 +184,13 @@ def test_validate_mapping_accepts_valid_forms() -> None:
         pytest.param("Work/npm/token", id="missing-scheme"),
         pytest.param("op://Work/token", id="too-few-segments"),
         pytest.param("op://Work//token", id="blank-segment"),
-        pytest.param(
-            {"reference": "op://Work/npm/token"}, id="table-missing-account"
-        ),
+        pytest.param({"reference": "op://Work/npm/token"}, id="table-missing-account"),
         pytest.param(
             {"account": "", "reference": "op://Work/npm/token"},
             id="table-blank-account",
         ),
         pytest.param({"account": "acct"}, id="table-missing-reference"),
-        pytest.param(
-            {"account": "acct", "reference": ""}, id="table-blank-reference"
-        ),
+        pytest.param({"account": "acct", "reference": ""}, id="table-blank-reference"),
         pytest.param(
             {"account": "acct", "reference": "not-a-ref"},
             id="table-bad-reference",
@@ -299,9 +281,7 @@ def test_valid_mapping_passes_build_registry(tmp_path: Path) -> None:
 
 
 def test_batch_get_returns_found_value(monkeypatch: pytest.MonkeyPatch) -> None:
-    _install_runner(
-        monkeypatch, _fake_op(values={"op://Work/npm/token": "the-token"})
-    )
+    _install_runner(monkeypatch, _fake_op(values={"op://Work/npm/token": "the-token"}))
     backend = OnePasswordBackend()
     secret = _decl("npm", backend_mappings={"onepassword": "op://Work/npm/token"})
     got = backend.batch_get([(secret, secret.backend_mappings["onepassword"])])
@@ -350,9 +330,7 @@ def _signed_out_read(uri: str) -> Any:
     """A ``_run_op`` double whose `op read` for ``uri`` fails with a
     signed-out marker (the real-world app-integration failure mode: no
     whoami gate, the read itself reports it)."""
-    return _fake_op(
-        read_errors={uri: (1, "[ERROR] account is not signed in.")}
-    )
+    return _fake_op(read_errors={uri: (1, "[ERROR] account is not signed in.")})
 
 
 def test_signed_out_read_default_account_raises_connectivity_error(
@@ -383,9 +361,7 @@ def test_signed_out_read_pinned_account_names_it(
     backend = OnePasswordBackend()
     secret = _decl(
         "npm",
-        backend_mappings={
-            "onepassword": {"account": "my.1password.com", "reference": uri}
-        },
+        backend_mappings={"onepassword": {"account": "my.1password.com", "reference": uri}},
     )
     with pytest.raises(ConnectivityError, match="my.1password.com"):
         backend.batch_get([(secret, secret.backend_mappings["onepassword"])])
@@ -447,9 +423,7 @@ def test_batch_get_unexpected_failure_raises_external_error(
 ) -> None:
     _install_runner(
         monkeypatch,
-        _fake_op(
-            read_errors={"op://Work/npm/token": (1, "unexpected server error 503")}
-        ),
+        _fake_op(read_errors={"op://Work/npm/token": (1, "unexpected server error 503")}),
     )
     backend = OnePasswordBackend()
     secret = _decl("npm", backend_mappings={"onepassword": "op://Work/npm/token"})
@@ -471,10 +445,7 @@ def test_preview_reports_onepassword_without_probing(
 
     _install_runner(monkeypatch, exploding)
     secret = _decl("npm", backend_mappings={"onepassword": "op://Work/npm/token"})
-    assert (
-        preview_resolution(secret, _backend_chain(), interactive_available=True)
-        == "onepassword"
-    )
+    assert preview_resolution(secret, _backend_chain(), interactive_available=True) == "onepassword"
 
 
 def test_preview_returns_none_for_unmapped_secret(
@@ -485,12 +456,7 @@ def test_preview_returns_none_for_unmapped_secret(
 
     _install_runner(monkeypatch, exploding)
     # Unmapped: would_attempt is False, so onepassword is skipped entirely.
-    assert (
-        preview_resolution(
-            _decl("npm"), _backend_chain(), interactive_available=True
-        )
-        is None
-    )
+    assert preview_resolution(_decl("npm"), _backend_chain(), interactive_available=True) is None
 
 
 # -- registry ----------------------------------------------------------------

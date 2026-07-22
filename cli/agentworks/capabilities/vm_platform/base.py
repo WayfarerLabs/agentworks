@@ -123,13 +123,12 @@ class VMPlatform(Capability):
         ``limactl`` disables itself). Default: supported everywhere.
         """
         return None
+
     # Operator guidance shown when native_transport returns None (the
     # transports factory embeds it in the StateError hint). Platforms
     # that opt out of a native transport override with prose naming
     # their actual escape hatch.
-    no_native_transport_hint: ClassVar[str] = (
-        "This platform has no interactive native transport."
-    )
+    no_native_transport_hint: ClassVar[str] = "This platform has no interactive native transport."
 
     @property
     def site_name(self) -> str:
@@ -144,9 +143,7 @@ class VMPlatform(Capability):
         return self.config
 
     @classmethod
-    def legacy_platform_metadata(
-        cls, row: Mapping[str, Any], legacy: Mapping[str, Any]
-    ) -> dict[str, str]:
+    def legacy_platform_metadata(cls, row: Mapping[str, Any], legacy: Mapping[str, Any]) -> dict[str, str]:
         """Map a pre-v27 ``vms`` row's legacy column values to this
         platform's ``platform_metadata`` conventions.
 
@@ -229,9 +226,7 @@ class VMPlatform(Capability):
         proxmox ``vmid@node``). Reads ``vm.platform_metadata``.
         """
 
-    def native_transport(
-        self, vm: VMRow, *, config: Config | None = None
-    ) -> Transport | None:
+    def native_transport(self, vm: VMRow, *, config: Config | None = None) -> Transport | None:
         """Platform-native :class:`Transport` for bootstrap and
         ``vm shell --platform``, or ``None`` when the platform has no
         interactive native transport (proxmox: one-shot QEMU guest-agent
@@ -274,9 +269,7 @@ class VMPlatform(Capability):
         """
         return nullcontext()
 
-    def vm_active(
-        self, vm: VMRow, *, config: Config | None = None
-    ) -> AbstractContextManager[None]:
+    def vm_active(self, vm: VMRow, *, config: Config | None = None) -> AbstractContextManager[None]:
         """Hold the VM against the backend's own idle-shutdown mechanism
         for the duration of the context.
 

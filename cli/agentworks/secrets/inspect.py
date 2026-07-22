@@ -187,18 +187,13 @@ def render_secret_table(table: SecretTable) -> None:
                 # Cap the identifier column so a long op:// ref (or
                 # account-prefixed one) does not blow the table out. The
                 # DETAIL view keeps the full identifier.
-                cells.append(
-                    output.truncate(cell.identifier, _BACKEND_CELL_WIDTH)
-                )
+                cells.append(output.truncate(cell.identifier, _BACKEND_CELL_WIDTH))
             else:
                 cells.append("enabled")
         rendered.append(tuple(cells))
 
     headers = ("NAME", "DESCRIPTION", *table.backends)
-    widths = [
-        max(len(headers[i]), *(len(r[i]) for r in rendered))
-        for i in range(len(headers))
-    ]
+    widths = [max(len(headers[i]), *(len(r[i]) for r in rendered)) for i in range(len(headers))]
 
     def _fmt(cols: tuple[str, ...]) -> str:
         return "  ".join(c.ljust(widths[i]) for i, c in enumerate(cols))

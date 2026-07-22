@@ -24,7 +24,10 @@ from agentworks.errors import ValidationError
 
 
 def reject_dash_prefixed_command(
-    command: list[str], *, kind: str, name: str,
+    command: list[str],
+    *,
+    kind: str,
+    name: str,
 ) -> None:
     """Reject ``exec`` commands whose first token starts with ``-``.
 
@@ -43,8 +46,5 @@ def reject_dash_prefixed_command(
         f"remote command cannot start with '-' (got: {command[0]!r})",
         entity_kind=kind,
         entity_name=name,
-        hint=(
-            "agentworks args must come before the first positional "
-            "argument for this command."
-        ),
+        hint=("agentworks args must come before the first positional argument for this command."),
     )
