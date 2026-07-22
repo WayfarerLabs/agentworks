@@ -23,7 +23,9 @@ makes explicit (``capabilities/harness/base.py``):
 The node is the rich consuming resource of ``capabilities/README.md``:
 its ``preflight`` / ``runup`` fan into the held harness's, and the
 harness's declared secrets fold into the node's ``secret_refs`` (empty
-for the built-ins, plumbing present).
+for ``shell`` and for ``claude-code`` in its default shape;
+``claude-code`` declares an OAuth token secret when ``pass_oauth_token``
+is enabled, issue #220).
 """
 
 from __future__ import annotations

@@ -173,9 +173,10 @@ class Harness(Capability):
         Mirrors how :class:`GitCredentialProvider` exposes ``secret_name``
         to its holder, so the node consumes a public accessor rather than
         reaching into the base ``Capability._secret_refs`` private field.
-        Empty for both built-ins (``shell`` / ``claude-code`` declare no
-        secrets); the plumbing is here for a future secret-declaring
-        harness.
+        Empty for ``shell`` and for ``claude-code`` in its default shape;
+        ``claude-code`` declares the OAuth token secret when
+        ``pass_oauth_token`` is enabled (issue #220), the first
+        secret-declaring harness.
         """
         return tuple(ref.name for ref in self._secret_refs)
 
@@ -200,6 +201,27 @@ class Harness(Capability):
         resumed an existing session or started a new one.
         """
         return None
+
+    def env_contributions(self, ctx: RunContext) -> dict[str, str]:
+        """Environment variables this harness injects into the session's
+        shell-open env. The session manager merges the result over the
+        composed env at BOTH launch sites (create / restart), with harness
+        contributions winning a key collision (the workload-owned setting
+        is the more specific one; issue #220).
+
+        Value-level by design, NOT ``EnvEntry``-level: the values are
+        already resolved (a secret value comes from ``ctx.secret``, filled
+        by the graph's boundary resolve), so this never touches a resolver
+        and never entangles the env-chain resolve or ``compose_env``'s
+        drift guard. A secret value delivered here rides the env channel,
+        never the pane command string, so it cannot leak through
+        ``/proc/*/cmdline``, ``ps``, or tmux's ``pane_start_command``.
+
+        Default: no contributions. ``shell`` does not override it;
+        ``claude-code`` overrides it to pass an OAuth token when
+        configured.
+        """
+        return {}
 
     @abstractmethod
     def start(self, ctx: RunContext) -> str:

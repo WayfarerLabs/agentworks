@@ -27,15 +27,44 @@ from typing import TYPE_CHECKING, ClassVar
 
 from agentworks.capabilities.harness.base import Harness, require_commands
 from agentworks.errors import ConfigError, StateError
+from agentworks.resources.reference import ConfigReference
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
 
     from agentworks.capabilities.base import RunContext
-    from agentworks.resources.reference import ConfigReference
     from agentworks.transports import Transport
 
-_CLAUDE_CODE_FIELDS = {"permission_mode", "model", "extra_args"}
+_CLAUDE_CODE_FIELDS = {
+    "permission_mode",
+    "model",
+    "extra_args",
+    "pass_oauth_token",
+    "oauth_token_secret",
+}
+
+# The env var Claude Code reads a long-lived OAuth token from
+# (``claude setup-token``, one-year lifetime). Exact spelling, per
+# code.claude.com/docs/en/authentication.
+_OAUTH_TOKEN_ENV_VAR = "CLAUDE_CODE_OAUTH_TOKEN"
+
+# The declared secret the token maps to when ``oauth_token_secret`` is
+# not set explicitly.
+_DEFAULT_OAUTH_TOKEN_SECRET = "claude-code-oauth-token"
+
+
+def _oauth_secret_name(config: Mapping[str, object]) -> str:
+    """The secret name the OAuth token is mapped to: the explicit
+    ``oauth_token_secret`` when set to a non-empty string, else the
+    default. Shared by :meth:`ClaudeCodeHarness.validate_config` (which
+    DECLARES the reference) and the instance's
+    :meth:`ClaudeCodeHarness.env_contributions` (which READS the value),
+    so both name the same secret.
+    """
+    name = config.get("oauth_token_secret")
+    if isinstance(name, str) and name:
+        return name
+    return _DEFAULT_OAUTH_TOKEN_SECRET
 
 # The transcript's config root. ``CLAUDE_CONFIG_DIR`` is the CLI's own
 # override env var (confirmed present in the v2.1.205 binary); the default
@@ -62,8 +91,13 @@ class ClaudeCodeHarness(Harness):
         present field is type-checked. The ``--permission-mode`` / ``--model``
         CHOICE sets are Claude-owned and drift between releases, so the
         VALUE is forwarded unvalidated (an invalid one surfaces as Claude's
-        own startup error in the pane). Implies no resource reference, so
-        it returns ``()``.
+        own startup error in the pane).
+
+        Returns the config-implied resource references: when
+        ``pass_oauth_token`` is enabled, a single secret reference for the
+        (defaulted) token secret; otherwise ``()``. The conditionality is
+        automatic, because the declaration derives from config, so an
+        unmapped token secret fails at preflight for free (issue #220).
         """
         unknown = sorted(set(config) - _CLAUDE_CODE_FIELDS)
         if unknown:
@@ -82,6 +116,33 @@ class ClaudeCodeHarness(Harness):
         ):
             raise ConfigError(
                 f"{owner}.extra_args must be a list of strings"
+            )
+        pass_oauth_token = config.get("pass_oauth_token")
+        if pass_oauth_token is not None and not isinstance(pass_oauth_token, bool):
+            raise ConfigError(f"{owner}.pass_oauth_token must be a boolean")
+        oauth_token_secret = config.get("oauth_token_secret")
+        if oauth_token_secret is not None and not isinstance(oauth_token_secret, str):
+            raise ConfigError(f"{owner}.oauth_token_secret must be a string")
+        # An orphan secret name (a name with nothing consuming it) is a
+        # misconfiguration, surfaced loudly. This also catches the
+        # child-wins inheritance wrinkle: a child setting
+        # ``pass_oauth_token = false`` over a parent that set
+        # ``oauth_token_secret`` yields exactly this error on the merged
+        # blob (issue #220), which is honest, intended behavior.
+        if "oauth_token_secret" in config and pass_oauth_token is not True:
+            raise ConfigError(
+                f"{owner}.oauth_token_secret is set but pass_oauth_token is "
+                f"not true; a token secret name with nothing consuming it is "
+                f"a misconfiguration. Enable pass_oauth_token, or drop "
+                f"oauth_token_secret."
+            )
+        if pass_oauth_token is True:
+            return (
+                ConfigReference(
+                    kind="secret",
+                    name=_oauth_secret_name(config),
+                    usage=f"the {_OAUTH_TOKEN_ENV_VAR} env var",
+                ),
             )
         return ()
 
@@ -105,6 +166,22 @@ class ClaudeCodeHarness(Harness):
             if self._resumed
             else "No existing Claude Code session. Starting a new one..."
         )
+
+    def env_contributions(self, ctx: RunContext) -> dict[str, str]:
+        """When ``pass_oauth_token`` is enabled, deliver the mapped
+        secret's value as ``CLAUDE_CODE_OAUTH_TOKEN`` so a harness-launched
+        Claude skips the interactive login step. Empty otherwise.
+
+        The value was already resolved by the graph's boundary pass;
+        ``ctx.secret`` reads it from the scoped view (the name was declared
+        by :meth:`validate_config`, so the session node's ``secret_refs()``
+        covers it, and the hook never touches a resolver). Riding the env
+        channel (not the pane command string) keeps the token out of
+        ``/proc/*/cmdline``, ``ps``, and tmux's ``pane_start_command``.
+        """
+        if self.config.get("pass_oauth_token") is not True:
+            return {}
+        return {_OAUTH_TOKEN_ENV_VAR: ctx.secret(_oauth_secret_name(self.config))}
 
     def _resume_or_launch(self, ctx: RunContext) -> str:
         """Read (or mint) the stored session id, probe the launch target

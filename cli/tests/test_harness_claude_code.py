@@ -103,6 +103,126 @@ def test_construct_revalidates_config() -> None:
         _harness({"nope": 1})
 
 
+# -- the OAuth token config surface ------------------------------------------
+
+
+def test_validate_rejects_non_bool_pass_oauth_token() -> None:
+    with pytest.raises(ConfigError, match="pass_oauth_token must be a boolean"):
+        ClaudeCodeHarness.validate_config(
+            "session-template/claude", {"pass_oauth_token": "yes"}
+        )
+
+
+def test_validate_rejects_non_string_oauth_token_secret() -> None:
+    with pytest.raises(ConfigError, match="oauth_token_secret must be a string"):
+        ClaudeCodeHarness.validate_config(
+            "session-template/claude",
+            {"pass_oauth_token": True, "oauth_token_secret": 3},
+        )
+
+
+def test_validate_rejects_orphan_oauth_token_secret() -> None:
+    """A secret name with nothing consuming it (``pass_oauth_token`` not
+    true) is a misconfiguration, surfaced loudly."""
+    with pytest.raises(ConfigError, match="nothing consuming it"):
+        ClaudeCodeHarness.validate_config(
+            "session-template/claude", {"oauth_token_secret": "my-token"}
+        )
+
+
+def test_validate_orphan_error_also_fires_when_pass_is_explicitly_false() -> None:
+    """The inheritance-wrinkle shape at the blob level: a merged blob with
+    ``oauth_token_secret`` set and ``pass_oauth_token = false`` is the
+    same orphan error (asserted end to end through the template merge in
+    test_session_template_surface)."""
+    with pytest.raises(ConfigError, match="nothing consuming it"):
+        ClaudeCodeHarness.validate_config(
+            "session-template/claude",
+            {"oauth_token_secret": "my-token", "pass_oauth_token": False},
+        )
+
+
+def test_validate_declares_default_secret_when_passing_enabled() -> None:
+    (ref,) = ClaudeCodeHarness.validate_config(
+        "session-template/claude", {"pass_oauth_token": True}
+    )
+    assert ref.kind == "secret"
+    assert ref.name == "claude-code-oauth-token"
+    assert ref.usage == "the CLAUDE_CODE_OAUTH_TOKEN env var"
+
+
+def test_validate_declares_explicit_secret_name_when_passing_enabled() -> None:
+    (ref,) = ClaudeCodeHarness.validate_config(
+        "session-template/claude",
+        {"pass_oauth_token": True, "oauth_token_secret": "prod-token"},
+    )
+    assert ref.name == "prod-token"
+
+
+def test_validate_declares_nothing_when_passing_disabled() -> None:
+    assert (
+        ClaudeCodeHarness.validate_config(
+            "session-template/claude", {"pass_oauth_token": False}
+        )
+        == ()
+    )
+
+
+# -- conditional secret_refs on the constructed instance ---------------------
+
+
+def test_secret_refs_empty_when_passing_off() -> None:
+    assert _harness().secret_refs() == ()
+    assert _harness({"pass_oauth_token": False}).secret_refs() == ()
+
+
+def test_secret_refs_names_default_secret_when_passing_on() -> None:
+    assert _harness({"pass_oauth_token": True}).secret_refs() == (
+        "claude-code-oauth-token",
+    )
+
+
+def test_secret_refs_names_explicit_secret_when_passing_on() -> None:
+    harness = _harness(
+        {"pass_oauth_token": True, "oauth_token_secret": "prod-token"}
+    )
+    assert harness.secret_refs() == ("prod-token",)
+
+
+# -- env contributions -------------------------------------------------------
+
+
+def _secret_ctx(name: str, value: str) -> RunContext:
+    """A context whose scoped secrets carry exactly ``{name: value}``,
+    mirroring what the manager assembles from the graph resolve."""
+    from agentworks.orchestration.secrets import ScopedSecrets
+
+    return RunContext(secrets=ScopedSecrets({name: value}, [name]))
+
+
+def test_env_contributions_empty_when_passing_off() -> None:
+    assert _harness().env_contributions(RunContext()) == {}
+    assert _harness({"pass_oauth_token": False}).env_contributions(RunContext()) == {}
+
+
+def test_env_contributions_pairs_the_token_when_passing_on() -> None:
+    ctx = _secret_ctx("claude-code-oauth-token", "sk-oauth-xyz")
+    harness = _harness({"pass_oauth_token": True})
+    assert harness.env_contributions(ctx) == {
+        "CLAUDE_CODE_OAUTH_TOKEN": "sk-oauth-xyz"
+    }
+
+
+def test_env_contributions_reads_the_explicit_secret_name() -> None:
+    ctx = _secret_ctx("prod-token", "sk-oauth-prod")
+    harness = _harness(
+        {"pass_oauth_token": True, "oauth_token_secret": "prod-token"}
+    )
+    assert harness.env_contributions(ctx) == {
+        "CLAUDE_CODE_OAUTH_TOKEN": "sk-oauth-prod"
+    }
+
+
 # -- detection: present -> resume, absent -> launch fresh --------------------
 
 

@@ -317,6 +317,53 @@ def test_multi_parent_silent_parent_does_not_wipe(tmp_path: Path) -> None:
     assert resolved.env["FOO"].value == "bar"
 
 
+def test_child_false_over_parent_oauth_secret_is_a_merged_blob_error() -> None:
+    """The inheritance wrinkle (issue #220): under the default child-wins
+    shallow merge, a child setting ``pass_oauth_token = false`` over a
+    parent that set ``oauth_token_secret`` yields exactly the orphan
+    config error on the merged blob. Honest, intended behavior: a token
+    secret name with nothing consuming it is a misconfiguration."""
+    templates = {
+        "base": SessionTemplate(
+            name="base",
+            harness="claude-code",
+            harness_config={
+                "pass_oauth_token": True,
+                "oauth_token_secret": "prod-token",
+            },
+        ),
+        "child": SessionTemplate(
+            name="child",
+            inherits=["base"],
+            harness="claude-code",
+            harness_config={"pass_oauth_token": False},
+        ),
+    }
+    with pytest.raises(ConfigError, match="nothing consuming it"):
+        resolve_from_dict(templates, "child")
+
+
+def test_child_inheriting_oauth_pass_and_secret_resolves_cleanly() -> None:
+    """The benign counterpart: a child that leaves ``pass_oauth_token``
+    enabled (silent) inherits the parent's token secret, and the merged
+    blob validates and declares the reference."""
+    templates = {
+        "base": SessionTemplate(
+            name="base",
+            harness="claude-code",
+            harness_config={
+                "pass_oauth_token": True,
+                "oauth_token_secret": "prod-token",
+            },
+        ),
+        "child": SessionTemplate(name="child", inherits=["base"]),
+    }
+    resolved = resolve_from_dict(templates, "child")
+    assert resolved.harness == "claude-code"
+    assert resolved.harness_config["pass_oauth_token"] is True
+    assert resolved.harness_config["oauth_token_secret"] == "prod-token"
+
+
 def test_undeclared_default_resolves_to_shell_empty() -> None:
     resolved = resolve_from_dict({}, None)
     assert resolved.name == "default"
