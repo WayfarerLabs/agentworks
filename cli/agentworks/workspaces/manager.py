@@ -443,9 +443,9 @@ def reinit_workspace(
             output.warn(f"agent membership check failed: {e}")
 
         if fixes > 0:
-            output.info(f"\nApplied {fixes} fix(es)")
+            output.result(f"\nApplied {fixes} fix(es)")
         else:
-            output.info("\nAlready up to date")
+            output.result("\nAlready up to date")
 
 
 def _reinit_git_identity(
@@ -812,20 +812,20 @@ def _rehome_vm(
 
                 # Update database
                 db.update_workspace_path(ws_name, new_path)
-                output.info(f"Database updated: workspace_path = {new_path}")
+                output.detail(f"Database updated: workspace_path = {new_path}")
 
                 # Regenerate VS Code workspace file
                 vscode_path = generate_vscode_workspace(vm, config, ws_name, new_path)
-                output.info(f"VS Code workspace updated: {vscode_path}")
+                output.detail(f"VS Code workspace updated: {vscode_path}")
 
                 # Handle old directory
                 if remove_old:
                     output.info(f"Removing old directory {old_path}...")
                     target.run(f"rm -rf {op}", sudo=True, timeout=60)
-                    output.info("Old directory removed")
+                    output.detail("Old directory removed")
                 else:
-                    output.info(f"\nOld directory left in place at {old_path}")
-                    output.info("Remove it manually when ready, or re-run with --remove-old")
+                    output.info(f"Old directory left in place at {old_path}")
+                    output.detail("Remove it manually when ready, or re-run with --remove-old")
 
             except KeyboardInterrupt:
                 output.warn(
@@ -849,7 +849,7 @@ def _rehome_vm(
         finally:
             ssh_logger.close()
 
-        output.info(f"\nWorkspace '{ws_name}' rehomed to {new_path}")
+        output.result(f"Workspace '{ws_name}' rehomed to {new_path}")
 
 
 def delete_workspace(
@@ -1222,7 +1222,7 @@ def copy_workspace(
     finally:
         tmp_path.unlink(missing_ok=True)
 
-    output.info(f"Workspace '{source_name}' copied to '{dest_name}'")
+    output.result(f"Workspace '{source_name}' copied to '{dest_name}'")
 
 
 def _workspace_scope(db: Database, vm: VMRow, ws_name: str) -> OperationScope:

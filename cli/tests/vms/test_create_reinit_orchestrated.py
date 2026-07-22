@@ -18,6 +18,7 @@ from agentworks.capabilities.vm_platform import ProvisionResult
 from agentworks.config import load_config
 from agentworks.db import VMStatus
 from agentworks.errors import StateError
+from agentworks.output import Role
 from agentworks.vms import manager as vm_manager
 
 if TYPE_CHECKING:
@@ -292,6 +293,14 @@ def test_reinit_runs_initialization_through_the_gate(
     assert captured["held"] == ["open"]  # init ran inside the span
     assert holds == ["open", "close"]  # span closed at the end
     assert any("reinitialized successfully" in m for m in captured_output.info)
+    # Preflight is a real section (header at level 0), and the terminal
+    # outcome routes through result() (RESULT role at level 0).
+    assert (Role.HEADER, 0, "Preflight") in captured_output.lines
+    assert (
+        Role.RESULT,
+        0,
+        "VM 'rvm' reinitialized successfully!",
+    ) in captured_output.lines
 
 
 def test_reinit_resolves_the_stored_admin_template(

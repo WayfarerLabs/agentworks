@@ -11,6 +11,7 @@ from pathlib import Path
 import pytest
 
 from agentworks.db import Database
+from agentworks.output import Role, StatusStyle, _render_header
 
 # The orchestrated-command suites' shared fixture trio (proxmox
 # section, make_config, resolve_counter) lives in its own module so it
@@ -50,6 +51,10 @@ class _CapturedProgress:
 class CapturedOutput:
     """All output captured during a test."""
 
+    # Structural capture: every emitted line as (role, level, message).
+    # New tests assert on role + level here; the message-list fields
+    # below stay for existing substring assertions.
+    lines: list[tuple[Role, int, str]] = field(default_factory=list)
     info: list[str] = field(default_factory=list)
     detail: list[str] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
@@ -64,31 +69,43 @@ class _TestHandler:
     def __init__(self, captured: CapturedOutput) -> None:
         self._captured = captured
 
-    def info(self, message: str) -> None:
-        self._captured.info.append(message)
+    def emit(self, role: Role, message: str, level: int) -> None:
+        self._captured.lines.append((role, level, message))
+        # Mirror into the legacy message lists so existing substring
+        # assertions keep working. RESULT joins info so "final line"
+        # checks still find the closing message. HEADER mirrors its
+        # rendered form (e.g. "=== Preflight ===") into info so existing
+        # phase()-header assertions keep passing until those call sites
+        # move to section() (Phases 3-4); new tests read .lines instead.
+        if role in (Role.BODY, Role.RESULT):
+            self._captured.info.append(message)
+        elif role is Role.HEADER:
+            self._captured.info.append(_render_header(message, level))
+        elif role is Role.DETAIL:
+            self._captured.detail.append(message)
+        elif role is Role.WARNING:
+            self._captured.warnings.append(message)
 
-    def detail(self, message: str, indent: int = 1) -> None:
-        self._captured.detail.append(message)
+    def style_status(self, text: str, style: StatusStyle) -> str:
+        # The test handler never colorizes: tests assert on plain text.
+        return text
 
-    def warn(self, message: str) -> None:
-        self._captured.warnings.append(message)
-
-    def confirm(self, message: str, default: bool = False) -> bool:
+    def confirm(self, message: str, level: int, default: bool = False) -> bool:
         return self._captured.confirm_response
 
-    def choose(self, message: str, options: list[str]) -> int:
+    def choose(self, message: str, options: list[str], level: int) -> int:
         return self._captured.choose_response
 
-    def pause(self, message: str) -> None:
+    def pause(self, message: str, level: int) -> None:
         pass  # no-op in tests
 
-    def prompt(self, label: str, default: str | None = None) -> str:
+    def prompt(self, label: str, level: int, default: str | None = None) -> str:
         return self._captured.prompt_response
 
-    def prompt_secret(self, label: str, hint: str | None = None) -> str:
+    def prompt_secret(self, label: str, level: int, hint: str | None = None) -> str:
         return self._captured.secret_response
 
-    def progress(self, label: str, total: int | None = None) -> _CapturedProgress:
+    def progress(self, label: str, level: int, total: int | None = None) -> _CapturedProgress:
         p = _CapturedProgress(label=label)
         self._captured.progress_items.append(p)
         return p
@@ -105,6 +122,7 @@ def captured_output() -> Generator[CapturedOutput, None, None]:
             assert any("expected" in m for m in captured_output.info)
             assert len(captured_output.warnings) == 0
     """
+    from agentworks import output
     from agentworks.output import get_handler, set_handler
 
     previous = get_handler()
@@ -112,6 +130,9 @@ def captured_output() -> Generator[CapturedOutput, None, None]:
     set_handler(_TestHandler(captured))
     yield captured
     set_handler(previous)
+    # Defense in depth: a test cannot leak a section level into the next,
+    # even though section()'s reset-token discipline already prevents it.
+    output._level.set(0)
 
 
 @pytest.fixture
@@ -252,9 +273,7 @@ def stub_vm_gates(monkeypatch: pytest.MonkeyPatch) -> _StubPlatform:
         return platform
 
     monkeypatch.setattr("agentworks.vms.sites.resolve_site", _fake_resolve_site)
-    monkeypatch.setattr(
-        "agentworks.vms.manager._is_tailscale_reachable", lambda host: True
-    )
+    monkeypatch.setattr("agentworks.vms.manager._is_tailscale_reachable", lambda host: True)
     return platform
 
 
@@ -270,18 +289,10 @@ def fake_target(monkeypatch: pytest.MonkeyPatch) -> _FakeTarget:
     # ``sessions.manager`` and the agents modules import ``transport`` at
     # module load (eager), so the agentworks.transports-side patch alone
     # wouldn't take effect for callers that already captured the binding.
-    monkeypatch.setattr(
-        "agentworks.sessions.manager.transport", fake_factory
-    )
-    monkeypatch.setattr(
-        "agentworks.agents.manager.transport", fake_factory
-    )
-    monkeypatch.setattr(
-        "agentworks.agents.grants.transport", fake_factory
-    )
-    monkeypatch.setattr(
-        "agentworks.agents.initializer.transport", fake_factory
-    )
+    monkeypatch.setattr("agentworks.sessions.manager.transport", fake_factory)
+    monkeypatch.setattr("agentworks.agents.manager.transport", fake_factory)
+    monkeypatch.setattr("agentworks.agents.grants.transport", fake_factory)
+    monkeypatch.setattr("agentworks.agents.initializer.transport", fake_factory)
     stub_vm_gates(monkeypatch)
     # The interactive code path now lives on the transport itself; the
     # fake target exposes it as a no-op so attach flows return cleanly.
@@ -333,15 +344,9 @@ def stub_session_resolvers(monkeypatch: pytest.MonkeyPatch) -> None:
     """
     from agentworks.sessions import manager as session_manager
 
-    monkeypatch.setattr(
-        session_manager, "_resolve_template", lambda *a, **k: _StubSessionTemplate()
-    )
-    monkeypatch.setattr(
-        session_manager, "_resolve_session_env", lambda *a, **k: {}
-    )
-    monkeypatch.setattr(
-        session_manager, "_session_secret_target", lambda *a, **k: empty_secret_target()
-    )
+    monkeypatch.setattr(session_manager, "_resolve_template", lambda *a, **k: _StubSessionTemplate())
+    monkeypatch.setattr(session_manager, "_resolve_session_env", lambda *a, **k: {})
+    monkeypatch.setattr(session_manager, "_session_secret_target", lambda *a, **k: empty_secret_target())
     monkeypatch.setattr(
         session_manager,
         "_session_secret_target_pre_create",
@@ -350,9 +355,7 @@ def stub_session_resolvers(monkeypatch: pytest.MonkeyPatch) -> None:
     # ``resolve_for_command`` is imported locally inside create_session /
     # restart_session, so patch its module-level home; the import inside
     # the function picks up the patched version.
-    monkeypatch.setattr(
-        "agentworks.secrets.resolve_for_command", lambda *a, **k: {}
-    )
+    monkeypatch.setattr("agentworks.secrets.resolve_for_command", lambda *a, **k: {})
 
 
 class _StubRegistry:
@@ -450,9 +453,7 @@ def stub_build_registry(monkeypatch: pytest.MonkeyPatch) -> None:
         def _stub_build_registry(monkeypatch: pytest.MonkeyPatch) -> None:
             stub_build_registry(monkeypatch)
     """
-    monkeypatch.setattr(
-        "agentworks.bootstrap.build_registry", _StubRegistry
-    )
+    monkeypatch.setattr("agentworks.bootstrap.build_registry", _StubRegistry)
 
     # Namespace configs lack secret_config_data (and the stub registry
     # carries no backend rows), so stub the orchestration seam: eager
@@ -485,15 +486,11 @@ def _no_network_token_verification(monkeypatch: pytest.MonkeyPatch) -> None:
     def _refuse(*_a: object, **_k: object) -> object:
         raise OSError("network disabled in tests")
 
-    monkeypatch.setattr(
-        "agentworks.capabilities.git_credential.base._http_probe", _refuse
-    )
+    monkeypatch.setattr("agentworks.capabilities.git_credential.base._http_probe", _refuse)
 
 
 @pytest.fixture(autouse=True)
-def _isolated_database(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
+def _isolated_database(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """The suite must never touch the operator's real database. Several
     CLI tests isolate CONFIG_PATH but the module-level DB_PATH default
     still pointed at the live DB; used-by counts in `resource list`
@@ -502,6 +499,4 @@ def _isolated_database(
     fresh empty DB path; fixtures that build explicit DB state pass
     their own path and are unaffected.
     """
-    monkeypatch.setattr(
-        "agentworks.db.DB_PATH", tmp_path / "isolated-test.db"
-    )
+    monkeypatch.setattr("agentworks.db.DB_PATH", tmp_path / "isolated-test.db")

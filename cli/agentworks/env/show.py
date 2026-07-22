@@ -470,8 +470,8 @@ def _print_table(
 
     key_w = max((len(r.key) for r in sorted_rows), default=3)
     scope_w = max((len(r.scope) for r in sorted_rows), default=5)
-    header = f"  {'KEY':<{key_w}}  {'SCOPE':<{scope_w}}  VALUE"
+    header = f"{'KEY':<{key_w}}  {'SCOPE':<{scope_w}}  VALUE"
     output.info(header)
-    output.info(f"  {'-' * key_w}  {'-' * scope_w}  {'-' * 5}")
+    output.info(f"{'-' * key_w}  {'-' * scope_w}  {'-' * 5}")
     for r in sorted_rows:
-        output.info(f"  {r.key:<{key_w}}  {r.scope:<{scope_w}}  {r.rendered_value}")
+        output.info(f"{r.key:<{key_w}}  {r.scope:<{scope_w}}  {r.rendered_value}")

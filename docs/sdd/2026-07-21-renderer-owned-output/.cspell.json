@@ -1,0 +1,24 @@
+{
+  "version": "0.2",
+  "import": ["../../../.cspell.json"],
+  "words": [
+    "asyncio",
+    "callees",
+    "contextlib",
+    "contextmanager",
+    "contextvars",
+    "isatty",
+    "ctlseqs",
+    "dedents",
+    "DECRST",
+    "DECSET",
+    "dedented",
+    "greenlets",
+    "headerless",
+    "parameterizing",
+    "scannability",
+    "structlog",
+    "urxvt",
+    "Werkzeug"
+  ]
+}

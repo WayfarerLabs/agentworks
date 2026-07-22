@@ -1041,6 +1041,55 @@ def test_fstab_hidepid_preserves_admin_set_hidepid_2() -> None:
     assert any(cmd == "mount -o remount,hidepid=2 /proc" for cmd in target.run_log)
 
 
+# -- Section role/level shape (regression guard) -------------------------------
+
+
+def test_vm_initialization_step_and_subresult_roles(captured_output) -> None:  # noqa: ANN001
+    """Pin the fixed indentation shape for a VM Initialization section.
+
+    Regression guard for the over-indent bug: inside a ``section("VM
+    Initialization")`` (body at level 1), a primary step must carry the
+    BODY role so the handler renders it at the section level (2 spaces),
+    while a genuine sub-result subordinate to that step stays DETAIL so it
+    nests one notch deeper (4 spaces). ``apply_vm_hardening`` exercises
+    both in one section: "Applying sysctl baseline..." and "Ensuring
+    hidepid=1 on /proc..." are steps, and "Added /proc entry to
+    /etc/fstab" is the fstab step's sub-result.
+
+    The captured level is the ambient section level (1) for both roles;
+    the step-vs-subresult distinction rides the ROLE (the handler maps
+    DETAIL to level + 1 at render time), which is exactly what the fix
+    restored.
+    """
+    from agentworks import output
+    from agentworks.output import Role
+    from agentworks.vms.hardening import apply_vm_hardening
+
+    # sysctl file missing -> "Applying sysctl baseline..."; fstab has no
+    # /proc line -> "Ensuring hidepid=1 on /proc..." + "Added /proc entry
+    # to /etc/fstab" sub-result.
+    target = _make_hardening_target(
+        sysctl_content=None,
+        fstab_content="# fstab\nUUID=root  /  ext4  defaults  0  1\n",
+    )
+    logger = MagicMock()
+
+    with output.section("VM Initialization"):
+        apply_vm_hardening(target, logger)
+
+    # Primary steps: BODY at the section level (renders at 2 spaces).
+    assert (Role.BODY, 1, "Applying sysctl baseline...") in captured_output.lines
+    assert (Role.BODY, 1, "Ensuring hidepid=1 on /proc...") in captured_output.lines
+    # Genuine sub-result: DETAIL, so the handler nests it one notch deeper
+    # (4 spaces) under the step above.
+    assert (Role.DETAIL, 1, "Added /proc entry to /etc/fstab") in captured_output.lines
+    # The step lines are NOT dimmed to DETAIL (the bug this guards against).
+    assert not any(
+        role is Role.DETAIL and msg == "Ensuring hidepid=1 on /proc..."
+        for role, _level, msg in captured_output.lines
+    )
+
+
 # -- Pure function tests for the fstab editor ----------------------------------
 
 

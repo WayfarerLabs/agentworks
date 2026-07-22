@@ -146,7 +146,7 @@ def _write_agentworks_profile(
             unique_paths.append(p)
 
     logger.step("Shell profile")
-    output.detail(
+    output.info(
         f"Writing agentworks profile ({output.count(len(unique_paths), 'PATH entry', 'PATH entries')})..."
     )
 
@@ -249,7 +249,7 @@ def _write_skel_seeds(
     ``.agentworks-rc.sh`` substring the grep matches against.
     """
     logger.step("Shell rc skel")
-    output.detail(f"Writing {SKEL_BASHRC_PATH} and {SKEL_ZSHRC_PATH}...")
+    output.info(f"Writing {SKEL_BASHRC_PATH} and {SKEL_ZSHRC_PATH}...")
 
     try:
         for path, content in (
@@ -289,7 +289,7 @@ def _write_agentworks_identity_profile(
     markers is opting in to having that content overwritten.
     """
     logger.step("Identity profile")
-    output.detail(
+    output.info(
         f"Writing {AGENTWORKS_IDENTITY_PROFILE_PATH} ({output.count(len(identity_env), 'var')})..."
     )
 
@@ -397,7 +397,7 @@ def _write_sshd_accept_env(
     Idempotent on reinit.
     """
     logger.step("sshd AcceptEnv")
-    output.detail(f"Writing {AGENTWORKS_SSHD_ACCEPT_ENV_PATH}...")
+    output.info(f"Writing {AGENTWORKS_SSHD_ACCEPT_ENV_PATH}...")
 
     body = (
         "# Managed by agentworks -- do not edit.\n"
@@ -501,7 +501,7 @@ def _write_sudoers_env_keep(
     docs/adrs/0017-console-pane-preserve-env.md.
     """
     logger.step("sudoers env_keep")
-    output.detail(f"Writing {AGENTWORKS_SUDOERS_ENV_KEEP_PATH}...")
+    output.info(f"Writing {AGENTWORKS_SUDOERS_ENV_KEEP_PATH}...")
 
     body = (
         "# Managed by agentworks -- do not edit.\n"
@@ -546,7 +546,7 @@ def _write_sudoers_console_setenv(
     achieve. See docs/adrs/0017-console-pane-preserve-env.md.
     """
     logger.step("sudoers console setenv")
-    output.detail(f"Writing {AGENTWORKS_SUDOERS_CONSOLE_SETENV_PATH}...")
+    output.info(f"Writing {AGENTWORKS_SUDOERS_CONSOLE_SETENV_PATH}...")
 
     body = (
         "# Managed by agentworks -- do not edit.\n"
@@ -584,7 +584,7 @@ def _write_agentworks_rc(
     Always written (even if empty) so that reinit can clear previously set hooks.
     """
     logger.step("Shell rc")
-    output.detail("Writing agentworks rc...")
+    output.info("Writing agentworks rc...")
 
     try:
         lines = ["# Managed by agentworks -- do not edit"]
@@ -643,7 +643,7 @@ def _write_mise_config(
         return
 
     logger.step("Mise config")
-    output.detail(f"Writing mise config with {output.count(len(packages), 'package')}...")
+    output.info(f"Writing mise config with {output.count(len(packages), 'package')}...")
 
     settings_lines = ["[settings]", f'install_before = "{install_before}"', ""]
     tools_lines = ["[tools]"]
@@ -677,7 +677,7 @@ def _fetch_mise_lockfile(
     from agentworks.sources import SourceRefError, fetch_file, parse_source_ref
 
     logger.step("Mise lockfile")
-    output.detail(f"Fetching mise lockfile from {lockfile_source}...")
+    output.info(f"Fetching mise lockfile from {lockfile_source}...")
 
     try:
         ref = parse_source_ref(lockfile_source, default_filename="mise.lock")
@@ -742,7 +742,7 @@ def _run_mise_install(
     installed = False
 
     if has_lockfile:
-        output.detail("Running mise install (locked)...")
+        output.info("Running mise install (locked)...")
         try:
             target.run(
                 f"{shell} -lc 'mise install -y --locked'",
@@ -763,7 +763,7 @@ def _run_mise_install(
             output.warn("Retrying unlocked...")
 
     if not installed:
-        output.detail("Running mise install...")
+        output.info("Running mise install...")
         try:
             target.run(
                 f"{shell} -lc 'mise install -y'",
@@ -833,7 +833,7 @@ def _reconcile_authorized_keys(
     label = f"1 primary + {extra_count} extra" if extra_count else "1 primary"
     if owner is not None:
         label = f"{label} for {owner}"
-    output.detail(f"Reconciling authorized_keys ({label})...")
+    output.info(f"Reconciling authorized_keys ({label})...")
 
     content = AUTHORIZED_KEYS_HEADER + "\n".join(keys) + "\n"
 
@@ -895,7 +895,7 @@ def _preserve_ssh_host_keys(
     from agentworks.capabilities.vm_platform.bootstrap_script import SSH_PRESERVE_KEYS_LINES, SSH_PRESERVE_KEYS_PATH
 
     logger.step("Preserve SSH host keys")
-    output.detail("Ensuring SSH host key preservation...")
+    output.info("Ensuring SSH host key preservation...")
 
     parent = str(PurePosixPath(SSH_PRESERVE_KEYS_PATH).parent)
     printf_args = " ".join(shlex.quote(line) for line in SSH_PRESERVE_KEYS_LINES)
@@ -951,7 +951,7 @@ def _apply_sve_mask(target: Transport, logger: SSHLogger) -> None:
     if not gate.ok:
         return
 
-    output.detail("Masking unusable SVE (arm64.nosve)...")
+    output.info("Masking unusable SVE (arm64.nosve)...")
     parent = str(PurePosixPath(SVE_NOSVE_GRUB_PATH).parent)
     printf_args = " ".join(shlex.quote(line) for line in SVE_NOSVE_GRUB_LINES)
     try:
@@ -1019,7 +1019,7 @@ def _configure_apt_sources(
         key_exists = target.run(f"test -f {shlex.quote(src.key_path)}", check=False).returncode == 0
 
         if not key_exists:
-            output.detail(f"Configuring apt source '{name}'...")
+            output.info(f"Configuring apt source '{name}'...")
             try:
                 # Ensure parent directory for key_path exists
                 from pathlib import PurePosixPath
@@ -1058,12 +1058,12 @@ def _configure_apt_sources(
         current = target.run(f"cat {shlex.quote(source_path)}", check=False)
         if current.returncode == 0 and current.stdout == expected:
             if key_exists:
-                output.detail(f"Apt source '{name}': already configured, skipping")
+                output.info(f"Apt source '{name}': already configured, skipping")
                 logger.output(f"apt source {name}: key and source list up to date, skipping")
             continue
 
         if key_exists:
-            output.detail(f"Apt source '{name}': updating source list...")
+            output.info(f"Apt source '{name}': updating source list...")
             logger.output(f"apt source {name}: key exists but source list needs update")
 
         try:
@@ -1078,7 +1078,7 @@ def _configure_apt_sources(
             output.warn(msg)
 
     if newly_configured:
-        output.detail("Running apt-get update...")
+        output.info("Running apt-get update...")
         try:
             target.run("apt-get update -qq", sudo=True, timeout=120)
         except SSHError as e:
@@ -1108,7 +1108,7 @@ def _install_system_packages(
         logger.warning(msg)
         output.warn(msg)
 
-    output.detail("Running apt-get update...")
+    output.info("Running apt-get update...")
     try:
         target.run("apt-get update -qq", sudo=True, timeout=120)
     except SSHError as e:
@@ -1116,7 +1116,7 @@ def _install_system_packages(
         logger.warning(msg)
         output.warn(msg)
 
-    output.detail(f"Installing {output.count(len(INIT_SYSTEM_PACKAGES), 'system package')}...")
+    output.info(f"Installing {output.count(len(INIT_SYSTEM_PACKAGES), 'system package')}...")
     apt_str = " ".join(shlex.quote(p) for p in INIT_SYSTEM_PACKAGES)
     try:
         target.run(
@@ -1148,7 +1148,7 @@ def _install_apt_packages(
         return
 
     logger.step("Apt packages")
-    output.detail(f"Installing {output.count(len(all_apt), 'apt package')}...")
+    output.info(f"Installing {output.count(len(all_apt), 'apt package')}...")
     apt_str = " ".join(shlex.quote(p) for p in all_apt)
     try:
         target.run(
@@ -1221,7 +1221,7 @@ def _run_install_commands(
             try:
                 check = target.run(test_cmd, check=False, timeout=10)
                 if check.returncode == 0:
-                    output.detail(f"{label} {i}/{total} ({name}): already installed, skipping")
+                    output.info(f"{label} {i}/{total} ({name}): already installed, skipping")
                     logger.output(f"{name}: already installed ({test_cmd}), skipping")
                     path_additions.extend(entry.path)
                     continue
@@ -1230,7 +1230,7 @@ def _run_install_commands(
                 logger.output(f"{name}: install check failed ({e}), assuming not installed")
 
         truncated = entry.command[:60]
-        output.detail(f"{label} {i}/{total} ({name}): {truncated}...")
+        output.info(f"{label} {i}/{total} ({name}): {truncated}...")
         try:
             target.run(
                 f"{shlex.quote(shell)} -lc {shlex.quote(entry.command)}",
@@ -1331,7 +1331,7 @@ def announce_git_credentials(providers: dict[str, GitCredentialProvider]) -> Non
     ``SecretUnavailableError`` at collect time.)
     """
     for name in providers:
-        output.detail(f"Checking git-credential/{name}...")
+        output.info(f"Checking git-credential/{name}...")
 
 
 def rejoin_tailscale(
@@ -1550,7 +1550,6 @@ def run_initialization(
     """
     db.insert_vm_event(vm_name, "init_started")
 
-    output.phase("VM Initialization")
     try:
         _phase_b_setup(
             db,
@@ -1810,333 +1809,333 @@ def _phase_b_setup(
     ``git_tokens`` is required: every provider listed in
     ``providers`` must have a pre-resolved token value in the dict.
     """
-    from agentworks.resources.access import kind_dict
+    with output.section("VM Initialization"):
+        from agentworks.resources.access import kind_dict
 
-    output.detail(f"vm: {vm_name}")
-    db.update_vm_init_status(vm_name, InitStatus.IN_PROGRESS)
-    # Reference validation lives in the framework (the apt / install-command
-    # kinds' error miss policy fires at build_registry time, which the
-    # manager-entry hoist runs before reaching this point). Read the kinds
-    # this phase drives directly from the finalized registry.
-    apt_sources = kind_dict(registry, "apt-source")
-    apt_packages = kind_dict(registry, "apt-package")
-    system_install_commands = kind_dict(registry, "system-install-command")
-    user_install_commands = kind_dict(registry, "user-install-command")
+        output.info(f"vm: {vm_name}")
+        db.update_vm_init_status(vm_name, InitStatus.IN_PROGRESS)
+        # Reference validation lives in the framework (the apt / install-command
+        # kinds' error miss policy fires at build_registry time, which the
+        # manager-entry hoist runs before reaching this point). Read the kinds
+        # this phase drives directly from the finalized registry.
+        apt_sources = kind_dict(registry, "apt-source")
+        apt_packages = kind_dict(registry, "apt-package")
+        system_install_commands = kind_dict(registry, "system-install-command")
+        user_install_commands = kind_dict(registry, "user-install-command")
 
-    # Non-fatal: ensure cloud-init won't regenerate SSH host keys on reboot.
-    # Runs first so VMs predating the Phase A step are repaired on reinit
-    # even if a later step warns. Idempotent overwrite with identical
-    # content.
-    _preserve_ssh_host_keys(ts_target, logger)
+        # Non-fatal: ensure cloud-init won't regenerate SSH host keys on reboot.
+        # Runs first so VMs predating the Phase A step are repaired on reinit
+        # even if a later step warns. Idempotent overwrite with identical
+        # content.
+        _preserve_ssh_host_keys(ts_target, logger)
 
-    # Non-fatal: repair the Apple-vz SVE trap (arm64.nosve grub drop-in) on
-    # VMs provisioned before the Phase A mask existed. Runs early, before the
-    # crypto-dependent apt/source steps, so a broken VM at least gets the fix
-    # installed this pass; it needs a restart plus one more reinit to converge.
-    # A silent no-op on every non-Apple host and on already-masked VMs.
-    _apply_sve_mask(ts_target, logger)
+        # Non-fatal: repair the Apple-vz SVE trap (arm64.nosve grub drop-in) on
+        # VMs provisioned before the Phase A mask existed. Runs early, before the
+        # crypto-dependent apt/source steps, so a broken VM at least gets the fix
+        # installed this pass; it needs a restart plus one more reinit to converge.
+        # A silent no-op on every non-Apple host and on already-masked VMs.
+        _apply_sve_mask(ts_target, logger)
 
-    # Non-fatal: VM hardening (sysctl baseline + /proc hidepid>=1).
-    # Runs before the rest of init so subsequent steps execute under the
-    # hardened baseline. Depends only on coreutils + procps (always
-    # present); nothing here needs apt-installed packages. Idempotent on
-    # reinit.
-    from agentworks.vms.hardening import apply_vm_hardening
+        # Non-fatal: VM hardening (sysctl baseline + /proc hidepid>=1).
+        # Runs before the rest of init so subsequent steps execute under the
+        # hardened baseline. Depends only on coreutils + procps (always
+        # present); nothing here needs apt-installed packages. Idempotent on
+        # reinit.
+        from agentworks.vms.hardening import apply_vm_hardening
 
-    apply_vm_hardening(ts_target, logger)
+        apply_vm_hardening(ts_target, logger)
 
-    # Check VM DNS works before subsequent steps that need external
-    # resolution (apt-get update, source fetches, etc.) fail cryptically.
-    # When DNS is broken AND the failure matches the known issue #117
-    # latched shape AND the heal applies to this resolver setup, raises
-    # StateError with the manual heal block as a hint. When DNS is broken
-    # for any other reason, surfaces a non-fatal warning so the operator
-    # has a visible link to the apt failure that will follow.
-    from agentworks.vms.tailscale_dns import (
-        apply_tailscaled_dns_fix,
-        check_vm_dns,
-    )
+        # Check VM DNS works before subsequent steps that need external
+        # resolution (apt-get update, source fetches, etc.) fail cryptically.
+        # When DNS is broken AND the failure matches the known issue #117
+        # latched shape AND the heal applies to this resolver setup, raises
+        # StateError with the manual heal block as a hint. When DNS is broken
+        # for any other reason, surfaces a non-fatal warning so the operator
+        # has a visible link to the apt failure that will follow.
+        from agentworks.vms.tailscale_dns import (
+            apply_tailscaled_dns_fix,
+            check_vm_dns,
+        )
 
-    check_vm_dns(ts_target, logger)
+        check_vm_dns(ts_target, logger)
 
-    # Non-fatal: tailscaled cold-boot DNS race fix (GitHub issue #117).
-    # Drops in a systemd override that orders tailscaled after the DNS
-    # layer is up so its DNS-manager probe finds a resolver instead of
-    # falling back to direct mode. Applied early in Phase B so existing
-    # VMs pick up the fix on the first reinit. Does not restart
-    # tailscaled (would disconnect us); takes effect on next cold boot.
-    apply_tailscaled_dns_fix(ts_target, logger)
+        # Non-fatal: tailscaled cold-boot DNS race fix (GitHub issue #117).
+        # Drops in a systemd override that orders tailscaled after the DNS
+        # layer is up so its DNS-manager probe finds a resolver instead of
+        # falling back to direct mode. Applied early in Phase B so existing
+        # VMs pick up the fix on the first reinit. Does not restart
+        # tailscaled (would disconnect us); takes effect on next cold boot.
+        apply_tailscaled_dns_fix(ts_target, logger)
 
-    # Non-fatal: VM-wide SetEnv plumbing.
-    # Runs before apt install so subsequent SSH commands within init can
-    # rely on the SetEnv path. These targets don't touch zsh-shipped files,
-    # so dpkg conffile handling doesn't apply.
-    _write_sshd_accept_env(ts_target, logger)
-    _write_sudoers_env_keep(ts_target, logger)
-    # Pairs with the --preserve-env in _split_shell_pane's agent-pane branch.
-    _write_sudoers_console_setenv(ts_target, logger, admin_username)
-    vm_row = db.get_vm(vm_name)
-    # Init runs against a VM that exists in the DB (initialize_vm fetches the
-    # row up front). A None here is an internal invariant violation, not a
-    # recoverable state, so surface it loudly.
-    assert vm_row is not None, f"VM '{vm_name}' missing from DB mid-init"
-    # The platform name resolves through the site declaration at this
-    # composition root (a stranded remote-Lima VM already failed reinit
-    # at the earlier bind, before any env baking).
-    from agentworks.vms.sites import site_platform_name
+        # Non-fatal: VM-wide SetEnv plumbing.
+        # Runs before apt install so subsequent SSH commands within init can
+        # rely on the SetEnv path. These targets don't touch zsh-shipped files,
+        # so dpkg conffile handling doesn't apply.
+        _write_sshd_accept_env(ts_target, logger)
+        _write_sudoers_env_keep(ts_target, logger)
+        # Pairs with the --preserve-env in _split_shell_pane's agent-pane branch.
+        _write_sudoers_console_setenv(ts_target, logger, admin_username)
+        vm_row = db.get_vm(vm_name)
+        # Init runs against a VM that exists in the DB (initialize_vm fetches the
+        # row up front). A None here is an internal invariant violation, not a
+        # recoverable state, so surface it loudly.
+        assert vm_row is not None, f"VM '{vm_name}' missing from DB mid-init"
+        # The platform name resolves through the site declaration at this
+        # composition root (a stranded remote-Lima VM already failed reinit
+        # at the earlier bind, before any env baking).
+        from agentworks.vms.sites import site_platform_name
 
-    identity_ctx = ResourceContext(
-        vm_name=vm_row.name,
-        platform=site_platform_name(vm_row.site, registry),
-        site=vm_row.site,
-        user=admin_username,
-    )
+        identity_ctx = ResourceContext(
+            vm_name=vm_row.name,
+            platform=site_platform_name(vm_row.site, registry),
+            site=vm_row.site,
+            user=admin_username,
+        )
 
-    # Provisioning is hermetic: no operator env, no per-context identity,
-    # no secrets from env tables are injected into install commands. Static
-    # identity (AGENTWORKS_VM / SITE / PLATFORM) reaches install commands
-    # via /etc/profile.d/agentworks-identity.sh sourcing. Tailscale auth key
-    # and git credentials -- the only provisioning-time secrets -- have
-    # their own dedicated config paths outside [admin.env]. Operator env
-    # only reaches RUNTIME shells (vm shell, agent shell, sessions,
-    # consoles), never build-time install machinery.
+        # Provisioning is hermetic: no operator env, no per-context identity,
+        # no secrets from env tables are injected into install commands. Static
+        # identity (AGENTWORKS_VM / SITE / PLATFORM) reaches install commands
+        # via /etc/profile.d/agentworks-identity.sh sourcing. Tailscale auth key
+        # and git credentials -- the only provisioning-time secrets -- have
+        # their own dedicated config paths outside [admin.env]. Operator env
+        # only reaches RUNTIME shells (vm shell, agent shell, sessions,
+        # consoles), never build-time install machinery.
 
-    # Non-fatal: system repos + packages (mise repo added, then all packages)
-    _install_system_packages(ts_target, logger)
+        # Non-fatal: system repos + packages (mise repo added, then all packages)
+        _install_system_packages(ts_target, logger)
 
-    # Non-fatal: apt sources required by selected apt_packages
-    _configure_apt_sources(ts_target, vm_template, apt_packages, apt_sources, logger)
+        # Non-fatal: apt sources required by selected apt_packages
+        _configure_apt_sources(ts_target, vm_template, apt_packages, apt_sources, logger)
 
-    # Non-fatal: apt packages (direct list + apt-package entries)
-    _install_apt_packages(ts_target, vm_template, apt_packages, logger)
+        # Non-fatal: apt packages (direct list + apt-package entries)
+        _install_apt_packages(ts_target, vm_template, apt_packages, logger)
 
-    # Identity profile fragments. Runs AFTER apt install because apt uses
-    # `--force-confnew`, which would replace the agentworks block in
-    # `/etc/zsh/zprofile` with zsh-common's package default if zsh got
-    # installed after we wrote our fragment. Post-install, we append cleanly
-    # on top of whatever the package shipped. The mirror is idempotent on
-    # reinit (strip-and-rewrite via begin/end markers).
-    _write_agentworks_identity_profile(
-        ts_target, vm_stable_identity_env(identity_ctx), logger,
-    )
+        # Identity profile fragments. Runs AFTER apt install because apt uses
+        # `--force-confnew`, which would replace the agentworks block in
+        # `/etc/zsh/zprofile` with zsh-common's package default if zsh got
+        # installed after we wrote our fragment. Post-install, we append cleanly
+        # on top of whatever the package shipped. The mirror is idempotent on
+        # reinit (strip-and-rewrite via begin/end markers).
+        _write_agentworks_identity_profile(
+            ts_target, vm_stable_identity_env(identity_ctx), logger,
+        )
 
-    # /etc/skel seeds. MUST run AFTER apt for the same reason as the
-    # identity profile above: `/etc/skel/.bashrc` is a Debian conffile
-    # shipped by the `bash` package. Running before apt's
-    # `--force-confnew` would let a bash upgrade silently replace the
-    # seed with Debian's stock skel (saving ours as .dpkg-old). Future
-    # `useradd -m` would then inherit Debian's skel instead.
-    _write_skel_seeds(ts_target, logger)
+        # /etc/skel seeds. MUST run AFTER apt for the same reason as the
+        # identity profile above: `/etc/skel/.bashrc` is a Debian conffile
+        # shipped by the `bash` package. Running before apt's
+        # `--force-confnew` would let a bash upgrade silently replace the
+        # seed with Debian's stock skel (saving ours as .dpkg-old). Future
+        # `useradd -m` would then inherit Debian's skel instead.
+        _write_skel_seeds(ts_target, logger)
 
-    # Non-fatal: snap packages
-    if vm_template.snap:
-        logger.step("Snap packages")
-        output.detail(f"Installing {output.count(len(vm_template.snap), 'snap package')}...")
-        for pkg in vm_template.snap:
+        # Non-fatal: snap packages
+        if vm_template.snap:
+            logger.step("Snap packages")
+            output.info(f"Installing {output.count(len(vm_template.snap), 'snap package')}...")
+            for pkg in vm_template.snap:
+                try:
+                    ts_target.run(f"snap install {shlex.quote(pkg)}", sudo=True, timeout=120)
+                except SSHError as e:
+                    msg = f"snap install '{pkg}' failed: {e}"
+                    logger.warning(msg)
+                    output.warn(msg)
+
+        # admin_shell is a pure config read, hoisted above the system install
+        # commands below (which run in it) so they stay in the VM section; the
+        # login-shell usermod is a separate admin step further down.
+        admin_shell = admin.shell
+
+        # Non-fatal: system install commands (VM-level, system-wide). Kept in
+        # the VM section: they run via ``{admin_shell} -lc`` explicitly, so
+        # they do not depend on the login-shell usermod, and they install
+        # system-wide tools rather than touching the admin's rc.
+        system_path = _run_install_commands(
+            ts_target,
+            vm_template.system_install_commands,
+            system_install_commands,
+            admin_shell,
+            home,
+            logger,
+            label="System install command",
+        )
+
+        # Non-fatal: agent tmux socket directory infrastructure (VM-level:
+        # shared group, root directory, per-agent subdirectories, all
+        # root-owned system state). No dependency on the admin steps below, so
+        # it closes out the VM phase.
+        try:
+            from agentworks.sessions.tmux import (
+                cleanup_stale_sockets,
+                ensure_agent_socket_dir,
+                ensure_agent_socket_root,
+            )
+
+            logger.step("Agent tmux socket directories")
+            output.info("Setting up agent tmux socket infrastructure...")
+
+            ensure_agent_socket_root(ts_target, admin_username, warn_if_missing=not is_first_init)
+            for agent in db.list_agents(vm_name=vm_name):
+                ensure_agent_socket_dir(ts_target, agent.linux_user)
+                removed = cleanup_stale_sockets(ts_target, agent.linux_user)
+                if removed:
+                    output.detail(
+                        f"Cleaned up {output.count(removed, 'stale socket')} for {agent.linux_user}"
+                    )
+        except SSHError as e:
+            msg = f"agent tmux socket setup failed: {e}"
+            logger.warning(msg)
+            output.warn(msg)
+
+    with output.section("Admin Initialization"):
+        # Non-fatal: set default shell (before the USER install commands so
+        # those installers write to the correct rc file). The zsh
+        # ``zsh-newuser-install`` first-run wizard is pre-empted by the skel seed.
+        logger.step("Shell configuration")
+        output.info(f"Setting shell to {admin_shell}...")
+        try:
+            ts_target.run(
+                f"usermod -s $(which {shlex.quote(admin_shell)}) {shlex.quote(admin_username)}",
+                sudo=True,
+            )
+        except SSHError as e:
+            msg = f"shell configuration failed: {e}"
+            logger.warning(msg)
+            output.warn(msg)
+
+        # Non-fatal: reconcile authorized_keys
+        _reconcile_authorized_keys(ts_target, config, home, logger)
+
+        # Non-fatal: workspaces directory with ACLs for group-writable files.
+        # Default ACLs ensure new files/dirs inherit group rwx regardless of umask.
+        # Access ACLs fix existing files. Applied recursively to cover all workspaces.
+        workspaces_dir = config.paths.vm_workspaces
+        if workspaces_dir.startswith("/home/"):
+            output.warn(
+                f"vm_workspaces is under /home ({workspaces_dir}). "
+                "This may require the home directory to be world-traversable."
+            )
+        try:
+            # acl is now installed as a system package in _install_system_packages
+            ts_target.run(f"mkdir -p {workspaces_dir}", sudo=True)
+            # Ensure all parent directories are traversable by agents
+            ts_target.run(
+                f'sh -c \'p={workspaces_dir}; while [ "$p" != "/" ]; do chmod a+x "$p"; p=$(dirname "$p"); done\'',
+                sudo=True,
+            )
+            # Default ACLs on directories only (setfacl -R -d warns on files)
+            ts_target.run(
+                f"find {workspaces_dir} -type d -exec setfacl -d -m g::rwx -m m::rwx {{}} +",
+                sudo=True,
+                timeout=120,
+            )
+            # Access ACLs on all existing files and dirs
+            ts_target.run(
+                f"setfacl -R -m g::rwx -m m::rwx {workspaces_dir}",
+                sudo=True,
+                timeout=120,
+            )
+        except SSHError as e:
+            msg = f"workspaces directory setup failed: {e}"
+            logger.warning(msg)
+            output.warn(msg)
+
+        # Non-fatal: mise config (written before dotfiles so dotfiles can override)
+        mise_path: list[str] = _mise_shims_path(home)
+        if admin.mise_packages:
+            _write_mise_config(ts_target, admin.mise_packages, admin.mise_install_before, home, logger)
+
+        # Non-fatal: git safe.directory wildcard (disables ownership checks for the
+        # multi-user workspace model where agents access repos owned by admin)
+        if admin.git_force_safe_directory:
             try:
-                ts_target.run(f"snap install {shlex.quote(pkg)}", sudo=True, timeout=120)
+                ts_target.run("git config --global --add safe.directory '*'")
+                output.info("Git safe.directory wildcard configured")
             except SSHError as e:
-                msg = f"snap install '{pkg}' failed: {e}"
+                msg = f"git safe.directory setup failed: {e}"
                 logger.warning(msg)
                 output.warn(msg)
 
-    # admin_shell is a pure config read, hoisted above the system install
-    # commands below (which run in it) so they stay in the VM section; the
-    # login-shell usermod is a separate admin step further down.
-    admin_shell = admin.shell
-
-    # Non-fatal: system install commands (VM-level, system-wide). Kept in
-    # the VM section: they run via ``{admin_shell} -lc`` explicitly, so
-    # they do not depend on the login-shell usermod, and they install
-    # system-wide tools rather than touching the admin's rc.
-    system_path = _run_install_commands(
-        ts_target,
-        vm_template.system_install_commands,
-        system_install_commands,
-        admin_shell,
-        home,
-        logger,
-        label="System install command",
-    )
-
-    # Non-fatal: agent tmux socket directory infrastructure (VM-level:
-    # shared group, root directory, per-agent subdirectories, all
-    # root-owned system state). No dependency on the admin steps below, so
-    # it closes out the VM phase.
-    try:
-        from agentworks.sessions.tmux import (
-            cleanup_stale_sockets,
-            ensure_agent_socket_dir,
-            ensure_agent_socket_root,
-        )
-
-        logger.step("Agent tmux socket directories")
-        output.detail("Setting up agent tmux socket infrastructure...")
-
-        ensure_agent_socket_root(ts_target, admin_username, warn_if_missing=not is_first_init)
-        for agent in db.list_agents(vm_name=vm_name):
-            ensure_agent_socket_dir(ts_target, agent.linux_user)
-            removed = cleanup_stale_sockets(ts_target, agent.linux_user)
-            if removed:
-                output.detail(
-                    f"Cleaned up {output.count(removed, 'stale socket')} for {agent.linux_user}"
-                )
-    except SSHError as e:
-        msg = f"agent tmux socket setup failed: {e}"
-        logger.warning(msg)
-        output.warn(msg)
-
-    output.phase("Admin Initialization")
-
-    # Non-fatal: set default shell (before the USER install commands so
-    # those installers write to the correct rc file). The zsh
-    # ``zsh-newuser-install`` first-run wizard is pre-empted by the skel seed.
-    logger.step("Shell configuration")
-    output.detail(f"Setting shell to {admin_shell}...")
-    try:
-        ts_target.run(
-            f"usermod -s $(which {shlex.quote(admin_shell)}) {shlex.quote(admin_username)}",
-            sudo=True,
-        )
-    except SSHError as e:
-        msg = f"shell configuration failed: {e}"
-        logger.warning(msg)
-        output.warn(msg)
-
-    # Non-fatal: reconcile authorized_keys
-    _reconcile_authorized_keys(ts_target, config, home, logger)
-
-    # Non-fatal: workspaces directory with ACLs for group-writable files.
-    # Default ACLs ensure new files/dirs inherit group rwx regardless of umask.
-    # Access ACLs fix existing files. Applied recursively to cover all workspaces.
-    workspaces_dir = config.paths.vm_workspaces
-    if workspaces_dir.startswith("/home/"):
-        output.warn(
-            f"vm_workspaces is under /home ({workspaces_dir}). "
-            "This may require the home directory to be world-traversable."
-        )
-    try:
-        # acl is now installed as a system package in _install_system_packages
-        ts_target.run(f"mkdir -p {workspaces_dir}", sudo=True)
-        # Ensure all parent directories are traversable by agents
-        ts_target.run(
-            f'sh -c \'p={workspaces_dir}; while [ "$p" != "/" ]; do chmod a+x "$p"; p=$(dirname "$p"); done\'',
-            sudo=True,
-        )
-        # Default ACLs on directories only (setfacl -R -d warns on files)
-        ts_target.run(
-            f"find {workspaces_dir} -type d -exec setfacl -d -m g::rwx -m m::rwx {{}} +",
-            sudo=True,
-            timeout=120,
-        )
-        # Access ACLs on all existing files and dirs
-        ts_target.run(
-            f"setfacl -R -m g::rwx -m m::rwx {workspaces_dir}",
-            sudo=True,
-            timeout=120,
-        )
-    except SSHError as e:
-        msg = f"workspaces directory setup failed: {e}"
-        logger.warning(msg)
-        output.warn(msg)
-
-    # Non-fatal: mise config (written before dotfiles so dotfiles can override)
-    mise_path: list[str] = _mise_shims_path(home)
-    if admin.mise_packages:
-        _write_mise_config(ts_target, admin.mise_packages, admin.mise_install_before, home, logger)
-
-    # Non-fatal: git safe.directory wildcard (disables ownership checks for the
-    # multi-user workspace model where agents access repos owned by admin)
-    if admin.git_force_safe_directory:
-        try:
-            ts_target.run("git config --global --add safe.directory '*'")
-            output.detail("Git safe.directory wildcard configured")
-        except SSHError as e:
-            msg = f"git safe.directory setup failed: {e}"
-            logger.warning(msg)
-            output.warn(msg)
-
-    # Non-fatal: git credentials (before dotfiles and mise lockfile for private repos)
-    if providers:
-        _configure_git_credentials(
-            vm_name, ts_target, providers, logger, git_tokens=git_tokens, config=config
-        )
-
-    # Non-fatal: dotfiles (can override mise config, can provide lockfile)
-    if admin.dotfiles_source:
-        logger.step("Dotfiles")
-        dest = admin.dotfiles_destination.replace("~", home)
-        try:
-            from agentworks.sources import SourceRefError, fetch_dir, parse_source_ref
-
-            ref = parse_source_ref(admin.dotfiles_source)
-            output.detail(f"Syncing dotfiles from {admin.dotfiles_source}...")
-            fetch_dir(ref, ts_target, dest, logger=logger)
-
-            output.detail(f"Running dotfiles install: {admin.dotfiles_install_cmd}")
-            ts_target.run(
-                f"cd {dest} && {admin.dotfiles_install_cmd}",
-                timeout=120,
+        # Non-fatal: git credentials (before dotfiles and mise lockfile for private repos)
+        if providers:
+            _configure_git_credentials(
+                vm_name, ts_target, providers, logger, git_tokens=git_tokens, config=config
             )
-        except (SourceRefError, Exception) as e:
-            msg = f"dotfiles install failed: {e}"
-            logger.warning(msg)
-            output.warn(msg)
 
-    # Non-fatal: mise lockfile (after git creds and dotfiles; overrides dotfiles lockfile)
-    if admin.mise_lockfile:
-        _fetch_mise_lockfile(ts_target, admin.mise_lockfile, home, logger)
+        # Non-fatal: dotfiles (can override mise config, can provide lockfile)
+        if admin.dotfiles_source:
+            logger.step("Dotfiles")
+            dest = admin.dotfiles_destination.replace("~", home)
+            try:
+                from agentworks.sources import SourceRefError, fetch_dir, parse_source_ref
 
-    # Non-fatal: mise install (after config + dotfiles + lockfile are all settled)
-    prune = admin.mise_prune_on_reinit
-    if admin.mise_packages or admin.mise_lockfile:
-        _run_mise_install(
-            ts_target, admin_shell, home, admin.mise_allow_unlocked, logger,
-            prune=prune,
-        )
-    else:
-        try:
-            check = ts_target.run(f"test -f {home}/.config/mise/config.toml", check=False)
-            if check.ok:
-                _run_mise_install(
-                    ts_target, admin_shell, home, admin.mise_allow_unlocked, logger,
-                    prune=prune,
+                ref = parse_source_ref(admin.dotfiles_source)
+                output.info(f"Syncing dotfiles from {admin.dotfiles_source}...")
+                fetch_dir(ref, ts_target, dest, logger=logger)
+
+                output.info(f"Running dotfiles install: {admin.dotfiles_install_cmd}")
+                ts_target.run(
+                    f"cd {dest} && {admin.dotfiles_install_cmd}",
+                    timeout=120,
                 )
-        except SSHError:
-            pass
+            except (SourceRefError, Exception) as e:
+                msg = f"dotfiles install failed: {e}"
+                logger.warning(msg)
+                output.warn(msg)
 
-    # Non-fatal: user install commands for admin user (may depend on mise tools)
-    user_path = _run_install_commands(
-        ts_target,
-        admin.user_install_commands,
-        user_install_commands,
-        admin_shell,
-        home,
-        logger,
-        label="User install command",
-    )
+        # Non-fatal: mise lockfile (after git creds and dotfiles; overrides dotfiles lockfile)
+        if admin.mise_lockfile:
+            _fetch_mise_lockfile(ts_target, admin.mise_lockfile, home, logger)
 
-    # Non-fatal: shell profile (PATH exports sourced at login)
-    all_paths = system_path + mise_path + user_path
-    _write_agentworks_profile(ts_target, all_paths, logger)
+        # Non-fatal: mise install (after config + dotfiles + lockfile are all settled)
+        prune = admin.mise_prune_on_reinit
+        if admin.mise_packages or admin.mise_lockfile:
+            _run_mise_install(
+                ts_target, admin_shell, home, admin.mise_allow_unlocked, logger,
+                prune=prune,
+            )
+        else:
+            try:
+                check = ts_target.run(f"test -f {home}/.config/mise/config.toml", check=False)
+                if check.ok:
+                    _run_mise_install(
+                        ts_target, admin_shell, home, admin.mise_allow_unlocked, logger,
+                        prune=prune,
+                    )
+            except SSHError:
+                pass
 
-    # Non-fatal: shell rc (interactive shell hooks like mise activate)
-    rc_snippets = [MISE_ACTIVATE_LINES] if admin.mise_activate else ["# mise activation disabled"]
-    _write_agentworks_rc(ts_target, rc_snippets, logger)
+        # Non-fatal: user install commands for admin user (may depend on mise tools)
+        user_path = _run_install_commands(
+            ts_target,
+            admin.user_install_commands,
+            user_install_commands,
+            admin_shell,
+            home,
+            logger,
+            label="User install command",
+        )
 
-    # Non-fatal: Claude Code marketplaces and plugins for admin user
-    def _admin_run_cmd(cmd: str, timeout: int) -> object:
-        inner = shlex.quote(cmd)
-        return ts_target.run(f"{admin_shell} -lc {inner}", timeout=timeout)
+        # Non-fatal: shell profile (PATH exports sourced at login)
+        all_paths = system_path + mise_path + user_path
+        _write_agentworks_profile(ts_target, all_paths, logger)
 
-    install_claude_plugins(_admin_run_cmd, admin.claude_marketplaces, admin.claude_plugins, logger)
+        # Non-fatal: shell rc (interactive shell hooks like mise activate)
+        rc_snippets = [MISE_ACTIVATE_LINES] if admin.mise_activate else ["# mise activation disabled"]
+        _write_agentworks_rc(ts_target, rc_snippets, logger)
 
-    # Defensive final step: re-ensure source lines in case any earlier
-    # step (dotfiles install in particular) overwrote a shell rc file
-    # in place. Idempotent grep-or-append.
-    _ensure_agentworks_files_sourced(
-        ts_target, home=home, shell=admin_shell, logger=logger,
-    )
+        # Non-fatal: Claude Code marketplaces and plugins for admin user
+        def _admin_run_cmd(cmd: str, timeout: int) -> object:
+            inner = shlex.quote(cmd)
+            return ts_target.run(f"{admin_shell} -lc {inner}", timeout=timeout)
+
+        install_claude_plugins(_admin_run_cmd, admin.claude_marketplaces, admin.claude_plugins, logger)
+
+        # Defensive final step: re-ensure source lines in case any earlier
+        # step (dotfiles install in particular) overwrote a shell rc file
+        # in place. Idempotent grep-or-append.
+        _ensure_agentworks_files_sourced(
+            ts_target, home=home, shell=admin_shell, logger=logger,
+        )
 
 
 RunCmd = Callable[[str, int], object]
@@ -2182,11 +2181,11 @@ def install_claude_plugins(
 
     try:
         for source in marketplaces:
-            output.detail(f"Registering Claude marketplace: {source}")
+            output.info(f"Registering Claude marketplace: {source}")
             run_cmd(f"claude plugin marketplace add {shlex.quote(source)}", 60)
 
         for plugin in plugins:
-            output.detail(f"Installing Claude plugin: {plugin}")
+            output.info(f"Installing Claude plugin: {plugin}")
             run_cmd(f"claude plugin install {shlex.quote(plugin)} --scope user", 60)
     except SSHError as e:
         msg = f"Claude plugin install failed: {e}"
@@ -2226,7 +2225,7 @@ def _configure_git_credentials(
     credential config as a whole rather than shipping a partial store.
     """
     logger.step("Git credentials")
-    output.detail("Configuring git credentials...")
+    output.info("Configuring git credentials...")
 
     missing = [name for name in providers if name not in git_tokens]
     if missing:

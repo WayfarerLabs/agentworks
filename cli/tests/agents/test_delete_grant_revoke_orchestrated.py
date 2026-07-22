@@ -206,7 +206,13 @@ def test_grant_reachable_vm_is_one_boundary_burst(
 
     assert resolve_counter == [["proxmox-token"]]
     assert db.has_any_grant("a1", "ws1")
-    assert "Granted: ws1" in captured_output.detail
+    assert "Granted: ws1" in captured_output.info
+    # The per-workspace lines stay info; the command's summary is a result().
+    from agentworks.output import Role
+
+    assert (Role.RESULT, 0, "Agent 'a1' granted access to 1 workspace") in (
+        captured_output.lines
+    )
 
 
 def test_grant_stopped_vm_gate_burst_seeds_the_whole_union(
@@ -254,7 +260,12 @@ def test_revoke_reachable_vm_is_one_boundary_burst(
 
     assert resolve_counter == [["proxmox-token"]]
     assert not db.has_any_grant("a1", "ws1")
-    assert "Revoked: ws1" in captured_output.detail
+    assert "Revoked: ws1" in captured_output.info
+    from agentworks.output import Role
+
+    assert (Role.RESULT, 0, "Revoked 1 workspace grant from agent 'a1'") in (
+        captured_output.lines
+    )
 
 
 def test_revoke_stopped_vm_gate_burst_seeds_the_whole_union(
@@ -619,7 +630,7 @@ def test_grant_missing_workspace_warns_and_skips(
     assert db.has_any_grant("a1", "ws1")
     assert not db.has_any_grant("a1", "nope")
     assert "workspace 'nope' not found, skipping" in captured_output.warnings
-    assert "Granted: ws1" in captured_output.detail
+    assert "Granted: ws1" in captured_output.info
 
 
 def test_revoke_named_workspace_with_implicit_access_keeps_membership(
@@ -647,7 +658,7 @@ def test_revoke_named_workspace_with_implicit_access_keeps_membership(
     assert not any("gpasswd" in c for c in target.commands)
     assert (
         "Revoked: ws1 (still has implicit access via sessions)"
-        in captured_output.detail
+        in captured_output.info
     )
 
 

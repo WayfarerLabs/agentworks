@@ -319,7 +319,7 @@ def resolve_secrets(
         for name in sorted(got):
             ident = backend.describe_lookup(decl_by_name[name])
             suffix = f" ({ident})" if ident else ""
-            output.detail(f"Resolved {name} via {backend.name}{suffix}")
+            output.info(f"Resolved {name} via {backend.name}{suffix}")
         for name, value in got.items():
             # ADR 0014: embedded newlines would corrupt SSH
             # `-o SetEnv=KEY=VALUE` arguments. The env-var backend

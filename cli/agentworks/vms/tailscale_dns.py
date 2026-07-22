@@ -107,10 +107,10 @@ def _ensure_tailscaled_dropin(target: Transport, logger: SSHLogger) -> None:
         getattr(existing, "ok", False)
         and getattr(existing, "stdout", "") == TAILSCALED_DROPIN_CONTENT
     ):
-        output.detail("tailscaled drop-in already installed; no change.")
+        output.info("tailscaled drop-in already installed; no change.")
         return
 
-    output.detail("Installing tailscaled startup-ordering drop-in...")
+    output.info("Installing tailscaled startup-ordering drop-in...")
     target.run(
         f"install -d -m 0755 -o root -g root {TAILSCALED_DROPIN_DIR}",
         sudo=True,
@@ -203,7 +203,7 @@ def check_vm_dns(target: Transport, logger: SSHLogger) -> None:
     # block on the lookup; getent over libc -> tailscaled -> upstream
     # can take a few seconds and the operator should know what we're
     # waiting on.
-    output.detail(f"Checking DNS resolution ({_DNS_PROBE_NAME})...")
+    output.info(f"Checking DNS resolution ({_DNS_PROBE_NAME})...")
     probe = target.run(f"getent hosts {shlex.quote(_DNS_PROBE_NAME)}", check=False)
     if getattr(probe, "ok", False):
         # No "VM DNS is healthy." line on the happy path: phase B's

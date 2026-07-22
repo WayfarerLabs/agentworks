@@ -20,6 +20,7 @@ from agentworks.agents import manager as agent_manager
 from agentworks.capabilities.base import RunContext
 from agentworks.capabilities.vm_platform.proxmox import ProxmoxPlatform
 from agentworks.errors import ExternalError
+from agentworks.output import Role
 from agentworks.vms import manager as vm_manager
 from tests.orchestrated_fixtures import PROXMOX_SECTION, write_operator_config
 
@@ -207,8 +208,14 @@ def test_create_stopped_vm_gate_resolves_once_and_seeds_the_boundary(
     assert "=== Preflight ===" in captured_output.info
     assert "=== Resolving Secrets ===" in captured_output.info
     assert "=== Agent Initialization ===" in captured_output.info
-    assert "Checking agent-template/default..." in captured_output.detail
-    assert "Checking git-credential/gh..." in captured_output.detail
+    assert "Checking agent-template/default..." in captured_output.info
+    assert "Checking git-credential/gh..." in captured_output.info
+    # The phases are real sections now: headers at level 0, their body
+    # step lines at level 1. Preflight's "Checking ..." lines are primary
+    # steps, so they render as Role.BODY at the section level (2 spaces),
+    # not de-emphasized detail one notch deeper.
+    assert (Role.HEADER, 0, "Preflight") in captured_output.lines
+    assert (Role.BODY, 1, "Checking agent-template/default...") in captured_output.lines
 
 
 def test_reinit_stopped_vm_gate_resolves_once_and_seeds_the_boundary(
@@ -235,12 +242,14 @@ def test_reinit_stopped_vm_gate_resolves_once_and_seeds_the_boundary(
     assert mutation["git_tokens"] == {"gh": "ghtok"}
     assert mutation["agent_name"] == "dev"
     assert any("reinitialized" in m for m in captured_output.info)
+    # The terminal outcome routes through result(): RESULT role at level 0.
+    assert (Role.RESULT, 0, "Agent 'dev' reinitialized") in captured_output.lines
     # Banner parity: reinit frames the same phases the imperative root
     # did, so a framing regression cannot pass.
     assert "=== Preflight ===" in captured_output.info
     assert "=== Resolving Secrets ===" in captured_output.info
     assert "=== Agent Initialization ===" in captured_output.info
-    assert "Checking agent-template/default..." in captured_output.detail
+    assert "Checking agent-template/default..." in captured_output.info
 
 
 def test_create_reachable_vm_fast_path_costs_no_gate_resolve(

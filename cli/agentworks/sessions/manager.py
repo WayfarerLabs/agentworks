@@ -1725,57 +1725,57 @@ def create_session(
         # <kind>/<name> form vm/agent create use, then run the readiness
         # sweep. Framed as a phase so session create reads like a plan
         # executing, matching vm create.
-        output.phase("Preflight")
-        output.detail(f"Checking session-template/{template.name}...")
-        if new_workspace:
-            assert workspace_tmpl is not None  # resolved at build above
-            output.detail(f"Checking workspace-template/{workspace_tmpl.name}...")
-        if new_agent:
-            assert agent_tmpl is not None  # resolved at build above
-            output.detail(f"Checking agent-template/{agent_tmpl.name}...")
-        if agent_tmpl_node is not None:
-            from agentworks.vms.initializer import announce_git_credentials
+        with output.section("Preflight"):
+            output.info(f"Checking session-template/{template.name}...")
+            if new_workspace:
+                assert workspace_tmpl is not None  # resolved at build above
+                output.info(f"Checking workspace-template/{workspace_tmpl.name}...")
+            if new_agent:
+                assert agent_tmpl is not None  # resolved at build above
+                output.info(f"Checking agent-template/{agent_tmpl.name}...")
+            if agent_tmpl_node is not None:
+                from agentworks.vms.initializer import announce_git_credentials
 
-            announce_git_credentials(
-                {
-                    cred.provider.owner_name: cred.provider
-                    for cred in agent_tmpl_node.credentials
-                }
+                announce_git_credentials(
+                    {
+                        cred.provider.owner_name: cred.provider
+                        for cred in agent_tmpl_node.credentials
+                    }
+                )
+
+            # Probe direct agent SSH for an EXISTING agent before any
+            # prompt or mutation: a pre-rollout agent surfaces as an
+            # actionable StateError with nothing to roll back (the
+            # orchestrated flow moves this probe, and the required-commands
+            # probe below, ahead of the resolve boundary: the
+            # earlier-failure win). An ephemeral agent's probe runs right
+            # after its realization below.
+            agent_target: Transport | None = None
+            if agent_node is not None and not new_agent:
+                from agentworks.agents.manager import _assert_agent_ssh_works
+                from agentworks.transports import agent_transport
+
+                assert existing_agent is not None
+                agent_target = agent_transport(vm, config, existing_agent)
+                _assert_agent_ssh_works(agent_target, existing_agent)
+
+            # PREFLIGHT-ALL against the one command-start context: the
+            # required-commands check probes a realized (existing) agent or
+            # the admin target NOW and defers on a pending one; each
+            # git-credential provider predicts its token's resolvability.
+            # Then the boundary resolve: the walk-away point.
+            preflight_all(
+                nodes,
+                RunContext(
+                    config=config,
+                    operation_scope=scope,
+                    admin_target=target,
+                    agent_target=agent_target,
+                ),
             )
 
-        # Probe direct agent SSH for an EXISTING agent before any
-        # prompt or mutation: a pre-rollout agent surfaces as an
-        # actionable StateError with nothing to roll back (the
-        # orchestrated flow moves this probe, and the required-commands
-        # probe below, ahead of the resolve boundary: the
-        # earlier-failure win). An ephemeral agent's probe runs right
-        # after its realization below.
-        agent_target: Transport | None = None
-        if agent_node is not None and not new_agent:
-            from agentworks.agents.manager import _assert_agent_ssh_works
-            from agentworks.transports import agent_transport
-
-            assert existing_agent is not None
-            agent_target = agent_transport(vm, config, existing_agent)
-            _assert_agent_ssh_works(agent_target, existing_agent)
-
-        # PREFLIGHT-ALL against the one command-start context: the
-        # required-commands check probes a realized (existing) agent or
-        # the admin target NOW and defers on a pending one; each
-        # git-credential provider predicts its token's resolvability.
-        # Then the boundary resolve: the walk-away point.
-        preflight_all(
-            nodes,
-            RunContext(
-                config=config,
-                operation_scope=scope,
-                admin_target=target,
-                agent_target=agent_target,
-            ),
-        )
-
-        output.phase("Resolving Secrets")
-        resolver.resolve()
+        with output.section("Resolving Secrets"):
+            resolver.resolve()
         secret_values = resolver.values
 
         def scoped_ctx(secret_names: tuple[str, ...]) -> RunContext:
@@ -1803,41 +1803,41 @@ def create_session(
                 # The realizer emits its own "Creating workspace ..." line
                 # (used by the standalone `workspace create` path too), so the
                 # session flow must not echo it a second time here.
-                output.phase("Creating Workspace")
-                realize_workspace(
-                    db,
-                    config,
-                    registry,
-                    name=workspace_name,
-                    vm=vm,
-                    template=workspace_tmpl,
-                )
-                log.mark_realized(pending_workspace)
+                with output.section("Creating Workspace"):
+                    realize_workspace(
+                        db,
+                        config,
+                        registry,
+                        name=workspace_name,
+                        vm=vm,
+                        template=workspace_tmpl,
+                    )
+                    log.mark_realized(pending_workspace)
             if pending_agent is not None:
                 from agentworks.agents.realize import realize_agent
 
                 assert agent_name is not None  # defaulted to ``name`` above
                 assert agent_tmpl is not None and agent_tmpl_node is not None
-                output.phase("Creating Agent")
-                output.detail(
-                    f"Creating agent '{agent_name}' on VM '{vm.name}' "
-                    f"(template: {agent_tmpl.name})..."
-                )
-                # Each credential's token, read through its node's
-                # SCOPED delivery (the boundary pass above covered
-                # them; the graph-derived fold replaces the nested
-                # create_agent's git_tokens hand-off).
-                git_tokens = credential_tokens(agent_tmpl_node, scoped_ctx)
-                realize_agent(
-                    db,
-                    config,
-                    registry,
-                    name=agent_name,
-                    vm=vm,
-                    template=agent_tmpl,
-                    git_tokens=git_tokens,
-                )
-                log.mark_realized(pending_agent)
+                with output.section("Creating Agent"):
+                    output.info(
+                        f"Creating agent '{agent_name}' on VM '{vm.name}' "
+                        f"(template: {agent_tmpl.name})..."
+                    )
+                    # Each credential's token, read through its node's
+                    # SCOPED delivery (the boundary pass above covered
+                    # them; the graph-derived fold replaces the nested
+                    # create_agent's git_tokens hand-off).
+                    git_tokens = credential_tokens(agent_tmpl_node, scoped_ctx)
+                    realize_agent(
+                        db,
+                        config,
+                        registry,
+                        name=agent_name,
+                        vm=vm,
+                        template=agent_tmpl,
+                        git_tokens=git_tokens,
+                    )
+                    log.mark_realized(pending_agent)
 
             # ---- The session's own realizing slice -------------------------
             ws = _require_workspace(db, workspace_name)
@@ -1905,141 +1905,146 @@ def create_session(
                 expected_socket = agent_socket_path(linux_user, name)
 
             mode_label = f"agent: {resolved_agent_name}" if resolved_agent_name else "admin"
-            output.phase("Starting Session")
-            output.detail(
-                f"Starting session '{name}' on workspace '{workspace_name}' "
-                f"({mode_label}, template: {template.name})..."
-            )
+            with output.section("Starting Session"):
+                output.info(
+                    f"Starting session '{name}' on workspace '{workspace_name}' "
+                    f"({mode_label}, template: {template.name})..."
+                )
 
-            try:
-                # Everything that creates partial session state (on-VM group
-                # membership, implicit-grant row, session row, restricted-config
-                # write, tmux session) runs inside this block so a KI /
-                # exception anywhere here triggers the session node's
-                # partial-state teardown.
-                if resolved_agent_name is not None:
-                    # Auto-grant implicit workspace access if the agent has no
-                    # existing grant on this workspace.
-                    if not db.has_any_grant(resolved_agent_name, workspace_name):
-                        from agentworks.agents.grants import add_to_workspace_group
+                try:
+                    # Everything that creates partial session state (on-VM group
+                    # membership, implicit-grant row, session row, restricted-config
+                    # write, tmux session) runs inside this block so a KI /
+                    # exception anywhere here triggers the session node's
+                    # partial-state teardown.
+                    if resolved_agent_name is not None:
+                        # Auto-grant implicit workspace access if the agent has no
+                        # existing grant on this workspace.
+                        if not db.has_any_grant(resolved_agent_name, workspace_name):
+                            from agentworks.agents.grants import add_to_workspace_group
 
-                        add_to_workspace_group(
-                            vm, config, db, linux_user, workspace_name
+                            add_to_workspace_group(
+                                vm, config, db, linux_user, workspace_name
+                            )
+                        db.insert_agent_grant(
+                            resolved_agent_name, workspace_name, "implicit", session_name=name
                         )
-                    db.insert_agent_grant(
-                        resolved_agent_name, workspace_name, "implicit", session_name=name
+
+                    # Op-start RunContext for the harness's start op: mirrors
+                    # the runup readiness ctx above (targets), plus the scoped
+                    # secrets (the session node's declared union, empty for the
+                    # built-in shell harness; ScopedSecrets never delivers).
+                    # Template-var substitution lifts OUT of the harness and
+                    # wraps its returned string. The op runs BEFORE the insert
+                    # so a freshly minted harness_state (claude-code's session
+                    # id) lands with the new row; it does only read-only work
+                    # (a login-shell string for shell, a find probe for
+                    # claude-code), so it stays ahead of any tmux mutation.
+                    start_ctx = RunContext(
+                        config=config,
+                        operation_scope=scope,
+                        admin_target=target,
+                        agent_target=agent_target,
+                        secrets=ScopedSecrets(secret_values, session_node.secret_refs()),
+                    )
+                    command = _substitute_template_vars(
+                        session_node.harness.start(start_ctx),
+                        {"session_name": name, "workspace_name": workspace_name},
+                    )
+                    if (note := session_node.harness.launch_note()) is not None:
+                        output.detail(note)
+
+                    # Insert DB record before any tmux work so a crash mid-create
+                    # leaves a recoverable row (and the teardown can find it to
+                    # delete). The harness's start op ran just above, so its
+                    # state blob lands with the new row.
+                    db.insert_session(
+                        name,
+                        workspace_name,
+                        template.name,
+                        mode,
+                        agent_name=resolved_agent_name,
+                        created_workspace=pending_workspace is not None,
+                        created_agent=pending_agent is not None,
+                        socket_path=expected_socket,
+                        harness_state=session_node.harness.state,
                     )
 
-                # Op-start RunContext for the harness's start op: mirrors
-                # the runup readiness ctx above (targets), plus the scoped
-                # secrets (the session node's declared union, empty for the
-                # built-in shell harness; ScopedSecrets never delivers).
-                # Template-var substitution lifts OUT of the harness and
-                # wraps its returned string. The op runs BEFORE the insert
-                # so a freshly minted harness_state (claude-code's session
-                # id) lands with the new row; it does only read-only work
-                # (a login-shell string for shell, a find probe for
-                # claude-code), so it stays ahead of any tmux mutation.
-                start_ctx = RunContext(
-                    config=config,
-                    operation_scope=scope,
-                    admin_target=target,
-                    agent_target=agent_target,
-                    secrets=ScopedSecrets(secret_values, session_node.secret_refs()),
-                )
-                command = _substitute_template_vars(
-                    session_node.harness.start(start_ctx),
-                    {"session_name": name, "workspace_name": workspace_name},
-                )
-                if (note := session_node.harness.launch_note()) is not None:
-                    output.detail(note)
+                    deploy_restricted_config(run_command, history_limit=config.session.history_limit)
+                    session_env = _resolve_session_env(
+                        registry,
+                        values=secret_values,
+                        db=db,
+                        vm=vm,
+                        ws=ws,
+                        session_name=name,
+                        session_template=template,
+                        mode=mode,
+                        agent_name=resolved_agent_name,
+                        linux_user=linux_user,
+                    )
+                    # Pick the SSH transport for tmux operations:
+                    # - admin sessions: admin's run_command (unchanged)
+                    # - agent sessions: agent's run_command (direct
+                    #   target-user SSH). agent_target was built and probed above
+                    #   so a pre-rollout agent never reaches this point. admin's
+                    #   ``target`` is still passed for socket-root setup which
+                    #   requires root.
+                    session_run_command: RunCommand
+                    if mode == SessionMode.AGENT:
+                        assert agent_target is not None  # built in the agent branches above
+                        session_run_command = agent_target.run
+                    else:
+                        session_run_command = run_command
+                    sock, pid = create_tmux_session(
+                        name,
+                        ws.workspace_path,
+                        command,
+                        linux_user,
+                        run_command=session_run_command,
+                        target=target,
+                        admin_username=vm.admin_username,
+                        is_admin=(mode == SessionMode.ADMIN),
+                        env=session_env,
+                    )
+                except (KeyboardInterrupt, Exception):
+                    # Session-internal cleanup only (DB row, grant, group
+                    # membership: the node's partial-state teardown). The
+                    # realized ephemerals are unwound by the outer handlers,
+                    # whose warn prints one clean reason line before the
+                    # rollback's delete messages start landing.
+                    session_node.teardown()
+                    raise
 
-                # Insert DB record before any tmux work so a crash mid-create
-                # leaves a recoverable row (and the teardown can find it to
-                # delete). The harness's start op ran just above, so its
-                # state blob lands with the new row.
-                db.insert_session(
-                    name,
-                    workspace_name,
-                    template.name,
-                    mode,
-                    agent_name=resolved_agent_name,
-                    created_workspace=pending_workspace is not None,
-                    created_agent=pending_agent is not None,
-                    socket_path=expected_socket,
-                    harness_state=session_node.harness.state,
-                )
+                # The session's realizing slice is complete: flip the node.
+                # Deliberately NOT via the realization log: a completed
+                # session (tmux up, row written) is never rolled back, so
+                # failures past this point unwind only the ephemerals, and
+                # the session survives them. That pins the completed-session
+                # window as non-rollbackable.
+                session_node.mark_realized()
 
-                deploy_restricted_config(run_command, history_limit=config.session.history_limit)
-                session_env = _resolve_session_env(
-                    registry,
-                    values=secret_values,
-                    db=db,
-                    vm=vm,
-                    ws=ws,
-                    session_name=name,
-                    session_template=template,
-                    mode=mode,
-                    agent_name=resolved_agent_name,
-                    linux_user=linux_user,
-                )
-                # Pick the SSH transport for tmux operations:
-                # - admin sessions: admin's run_command (unchanged)
-                # - agent sessions: agent's run_command (direct
-                #   target-user SSH). agent_target was built and probed above
-                #   so a pre-rollout agent never reaches this point. admin's
-                #   ``target`` is still passed for socket-root setup which
-                #   requires root.
-                session_run_command: RunCommand
-                if mode == SessionMode.AGENT:
-                    assert agent_target is not None  # built in the agent branches above
-                    session_run_command = agent_target.run
+                # Persist socket path, PID, and boot ID
+                if sock:
+                    db.update_session_socket_path(name, sock)
+                if pid is not None:
+                    boot_id = _get_boot_id(target)
+                    if boot_id is not None:
+                        db.update_session_pid(name, pid, boot_id=boot_id)
+                    else:
+                        output.warn(f"Could not read boot ID for session '{name}', PID not stored")
                 else:
-                    session_run_command = run_command
-                sock, pid = create_tmux_session(
-                    name,
-                    ws.workspace_path,
-                    command,
-                    linux_user,
-                    run_command=session_run_command,
-                    target=target,
-                    admin_username=vm.admin_username,
-                    is_admin=(mode == SessionMode.ADMIN),
-                    env=session_env,
-                )
-            except (KeyboardInterrupt, Exception):
-                # Session-internal cleanup only (DB row, grant, group
-                # membership: the node's partial-state teardown). The
-                # realized ephemerals are unwound by the outer handlers,
-                # whose warn prints one clean reason line before the
-                # rollback's delete messages start landing.
-                session_node.teardown()
-                raise
+                    output.warn(
+                        f"Could not capture PID for session '{name}', will auto-repair on next access"
+                    )
 
-            # The session's realizing slice is complete: flip the node.
-            # Deliberately NOT via the realization log: a completed
-            # session (tmux up, row written) is never rolled back, so
-            # failures past this point unwind only the ephemerals, and
-            # the session survives them. That pins the completed-session
-            # window as non-rollbackable.
-            session_node.mark_realized()
-
-            # Persist socket path, PID, and boot ID
-            if sock:
-                db.update_session_socket_path(name, sock)
-            if pid is not None:
-                boot_id = _get_boot_id(target)
-                if boot_id is not None:
-                    db.update_session_pid(name, pid, boot_id=boot_id)
-                else:
-                    output.warn(f"Could not read boot ID for session '{name}', PID not stored")
-            else:
-                output.warn(
-                    f"Could not capture PID for session '{name}', will auto-repair on next access"
-                )
-
+            # The section is closed: the terminal result line and the
+            # post-start bookkeeping (tmuxinator regen, console add) render
+            # at column 0, mirroring restart_session. They stay inside the
+            # outer try so a failure here still triggers the ephemeral
+            # rollback (a completed session itself is never rolled back).
             mode_label = f"agent: {resolved_agent_name}" if resolved_agent_name else "admin"
-            output.info(f"Session '{name}' started ({mode_label}, template: {template.name})")
+            output.result(f"Session '{name}' started ({mode_label}, template: {template.name})")
 
             # Update tmuxinator config and add to console if it exists
             _regenerate_tmuxinator(db, config, vm, ws)
@@ -2067,6 +2072,7 @@ def _execute_stop(
     *,
     db: Database,
     force: bool = False,
+    announce_stopped: bool = True,
 ) -> list[tuple[str, str]]:
     """Core stop logic: C-c all, single grace period, kill survivors.
 
@@ -2077,6 +2083,12 @@ def _execute_stop(
     (admin SSH for an agent session in batch ops), sudo is needed.
 
     Handles both single and batch stops. Returns list of (name, error) failures.
+
+    ``announce_stopped`` gates the per-session "Session 'x' stopped" body
+    line. Batch stops keep it (the per-item outcome of a loop that has no
+    single terminal); the single-session caller sets it False because it
+    owns a column-0 ``result()`` terminal of its own, and the per-session
+    body line would just duplicate it.
     """
     import time
 
@@ -2168,7 +2180,8 @@ def _execute_stop(
             target.run(f"rm -f {shlex.quote(session.socket_path)}", sudo=kill_sudo, check=False)
 
         db.update_session_pid(session.name, PID_STOPPED)
-        output.info(f"Session '{session.name}' stopped")
+        if announce_stopped:
+            output.info(f"Session '{session.name}' stopped")
 
     return failed
 
@@ -2234,18 +2247,27 @@ def stop_session(
                     entity_name=name,
                 )
             db.update_session_pid(name, PID_STOPPED)
-            output.info(f"Session '{name}' force-stopped")
+            output.result(f"Session '{name}' force-stopped")
             return
 
         # OK: delegate to shared stop logic. target_owns_session=True
-        # because _build_session_target returned a same-uid target.
-        failed = _execute_stop([(session, target, True)], db=db, force=force)
+        # because _build_session_target returned a same-uid target. The
+        # anchor gives _execute_stop's internal detail lines a parent (the
+        # batch caller emits its own "Stopping N session(s)..." anchor).
+        # announce_stopped=False: this single-stop path owns the terminal
+        # (the column-0 result() below), so the shared helper must not also
+        # emit its per-session "stopped" body line and double it up.
+        output.info(f"Stopping session '{name}'...")
+        failed = _execute_stop(
+            [(session, target, True)], db=db, force=force, announce_stopped=False
+        )
         if failed:
             raise ExternalError(
                 f"failed to stop session '{name}': {failed[0][1]}",
                 entity_kind="session",
                 entity_name=name,
             )
+        output.result(f"Session '{name}' stopped")
 
 
 def restart_session(
@@ -2366,253 +2388,256 @@ def restart_session(
         admin_target = transport(vm, config, logger=logger)
         run_command: RunCommand = admin_target.run
 
-        session = _ensure_pid(session, target=admin_target, db=db)
+        with output.section("Preflight"):
+            session = _ensure_pid(session, target=admin_target, db=db)
 
-        # Legacy migration: sessions predating the per-session-socket model
-        # have ``socket_path=None`` (they lived on the admin's default tmux
-        # server, where session.pid identifies the server, not this
-        # session). ``check_session_status`` would raise a typed StateError
-        # for these; instead we recognize the shape, run a surgical
-        # ``tmux kill-session -t <name>`` on the default server (no socket
-        # path), and fall through to the create step. The downstream
-        # ``create_tmux_session`` produces a per-session socket and the
-        # subsequent ``db.update_session_socket_path`` lands the migration.
-        is_legacy = session.socket_path is None and session.pid is not None and session.pid > 0
-        if is_legacy:
-            output.info(
-                f"Session '{name}' uses the legacy default-tmux-server model; "
-                "migrating to per-session socket."
+            # Legacy migration: sessions predating the per-session-socket model
+            # have ``socket_path=None`` (they lived on the admin's default tmux
+            # server, where session.pid identifies the server, not this
+            # session). ``check_session_status`` would raise a typed StateError
+            # for these; instead we recognize the shape, run a surgical
+            # ``tmux kill-session -t <name>`` on the default server (no socket
+            # path), and fall through to the create step. The downstream
+            # ``create_tmux_session`` produces a per-session socket and the
+            # subsequent ``db.update_session_socket_path`` lands the migration.
+            is_legacy = session.socket_path is None and session.pid is not None and session.pid > 0
+            if is_legacy:
+                output.info(
+                    f"Session '{name}' uses the legacy default-tmux-server model; "
+                    "migrating to per-session socket."
+                )
+                status = SessionStatus.STOPPED  # placeholder; legacy branch owns the kill below
+            else:
+                status = check_session_status(session, target=admin_target)
+
+            # Pick the destructive-op transport BEFORE any destructive action.
+            # For agent sessions this builds an agent Transport and probes it
+            # so a pre-rollout agent surfaces as an actionable StateError up
+            # front rather than leaving us with a stopped session we can't
+            # restart. Same transport is used for kill (above) and create
+            # (below): every destructive step on an agent session goes via
+            # direct agent SSH. _build_session_target always returns a
+            # same-uid target, so no sudo is needed for kill.
+            is_admin = session.mode == SessionMode.ADMIN.value
+            session_target = _build_session_target(
+                session, vm=vm, config=config, db=db, admin_target=admin_target
             )
-            status = SessionStatus.STOPPED  # placeholder; legacy branch owns the kill below
-        else:
-            status = check_session_status(session, target=admin_target)
+            session_run_command: RunCommand = session_target.run
+            kill_sudo = False
 
-        # Pick the destructive-op transport BEFORE any destructive action.
-        # For agent sessions this builds an agent Transport and probes it
-        # so a pre-rollout agent surfaces as an actionable StateError up
-        # front rather than leaving us with a stopped session we can't
-        # restart. Same transport is used for kill (above) and create
-        # (below): every destructive step on an agent session goes via
-        # direct agent SSH. _build_session_target always returns a
-        # same-uid target, so no sudo is needed for kill.
-        is_admin = session.mode == SessionMode.ADMIN.value
-        session_target = _build_session_target(
-            session, vm=vm, config=config, db=db, admin_target=admin_target
-        )
-        session_run_command: RunCommand = session_target.run
-        kill_sudo = False
+            # PREFLIGHT-ALL over the walk rooted at the live session node,
+            # against the one command-start context: the required-commands
+            # check's target (an existing agent, or the admin) is realized,
+            # so it probes NOW, pre-resolve and PRE-KILL, and a missing
+            # binary aborts the restart with the old session still running.
+            # Preflight is read-only (no prompt), so it stays ahead of the
+            # gates below; both secret-resolving passes run AFTER them.
+            preflight_all(
+                nodes,
+                RunContext(
+                    config=config,
+                    operation_scope=scope,
+                    admin_target=admin_target,
+                    agent_target=None if is_admin else session_target,
+                ),
+            )
 
-        # PREFLIGHT-ALL over the walk rooted at the live session node,
-        # against the one command-start context: the required-commands
-        # check's target (an existing agent, or the admin) is realized,
-        # so it probes NOW, pre-resolve and PRE-KILL, and a missing
-        # binary aborts the restart with the old session still running.
-        # Preflight is read-only (no prompt), so it stays ahead of the
-        # gates below; both secret-resolving passes run AFTER them.
-        preflight_all(
-            nodes,
-            RunContext(
+            # Bail-before-prompt: refuse the operation up front in the cases
+            # where the operator either lacks the right flag (BROKEN + no
+            # --force) or declines the confirm (OK + interactive 'no'). BOTH
+            # secret-resolving passes (the graph-union boundary resolve and
+            # the env-chain resolve below) run AFTER these checks so a
+            # refused or declined restart never prompts for secrets it was
+            # about to discard.
+            # UNKNOWN is impossible here (_ensure_pid raises on unresolvable
+            # sessions). Legacy sessions short-circuit at ``status =
+            # SessionStatus.STOPPED`` above, so neither gate fires for them;
+            # migration is implicit in the operator's restart opt-in.
+            if status == SessionStatus.BROKEN and not force:
+                raise BrokenStateError(
+                    f"session '{name}' is broken (PID alive but tmux unreachable).",
+                    entity_kind="session",
+                    entity_name=name,
+                    hint="Use --force to restart.",
+                )
+            if status == SessionStatus.OK and not yes and not output.confirm(
+                f"Session '{name}' is running. Restart?"
+            ):
+                raise UserAbort("restart cancelled")
+
+        with output.section("Resolving Secrets"):
+            # The graph-union boundary resolve (pass 1). Placed AFTER the
+            # gates above, symmetric with the env-chain pass below, so a
+            # refused or declined restart never prompts. Gate-resolved values
+            # are already seeded, so nothing resolves twice.
+            resolver.resolve()
+            # Capture the graph boundary union for the harness's op-start
+            # context (matching the create path, which captures
+            # ``resolver.values`` at its boundary). Inert for the built-in
+            # shell harness (empty ``secret_refs()``), but keeps the restart
+            # op ctx shape-correct for a future secret-declaring harness; the
+            # env-chain resolve (``resolve_for_command`` below) is a SEPARATE
+            # pass, not this graph union.
+            graph_secret_values = resolver.values
+
+            # Eager-prompting orchestration (pass 2): resolve every secret
+            # referenced by this session's env chain BEFORE any kill /
+            # destructive step. Non-interactive failures surface as
+            # SecretUnavailableError with no partial state to clean up. This
+            # is the recorded bail-before-prompt exception to the
+            # one-boundary-resolve contract: the graph's union (the site's
+            # config secrets) and this env chain BOTH resolve here, after the
+            # BROKEN/--force refusal and the "Restart?" confirm, so a declined
+            # restart never prompts for secrets it was about to discard.
+            # Folding the env chain into the boundary would trade that
+            # operator protection for one fewer prompt session on proxmox
+            # only.
+
+            from agentworks.secrets import resolve_for_command
+
+            secret_values = resolve_for_command(
+                [
+                    _session_secret_target(
+                        registry,
+                        db=db,
+                        vm=vm,
+                        ws=ws,
+                        session_name=name,
+                        session_template=template,
+                        mode=SessionMode(session.mode),
+                        agent_name=session.agent_name,
+                    ),
+                ],
+                config,
+                registry,
+            )
+
+        with output.section("Starting Session"):
+            output.info(f"Restarting session '{name}'...")
+
+            if is_legacy:
+                # Surgical kill of the named session on the default tmux
+                # server (no socket path). ``session.pid`` identifies the
+                # SERVER for legacy admin rows, not this session, so the
+                # BROKEN path's ``force_kill_tmux_server(pid)`` would nuke
+                # every other tmux session sharing the server -- including
+                # ad-hoc tmux work and other legacy Agentworks rows. The
+                # ``kill-session -t <name>`` primitive is surgical. Failure
+                # is best-effort: if the session is already gone (only the
+                # DB row survived), kill returns False and we proceed to
+                # create the new shape.
+                _kill_session(name, run_command=session_run_command, socket_path=None)
+            elif status == SessionStatus.BROKEN:
+                from agentworks.sessions.tmux import force_kill_tmux_server
+
+                output.warn(f"Session '{name}' is broken (tmux unreachable), force-killing via PID")
+                assert session.pid is not None
+                killed = force_kill_tmux_server(
+                    session.pid,
+                    target=session_target,
+                    socket_path=session.socket_path,
+                    log=output.detail,
+                    use_sudo=kill_sudo,
+                )
+                if not killed:
+                    raise ExternalError(
+                        f"failed to kill PID {session.pid} for session '{name}'",
+                        entity_kind="session",
+                        entity_name=name,
+                    )
+            elif status == SessionStatus.OK:
+                # Confirm already happened above (before eager-resolve), so we
+                # know the operator opted in.
+                sock = session.socket_path
+                if not _kill_session(name, run_command=session_run_command, socket_path=sock):
+                    raise ExternalError(
+                        f"failed to stop session '{name}' for restart",
+                        entity_kind="session",
+                        entity_name=name,
+                    )
+
+            deploy_restricted_config(run_command, history_limit=config.session.history_limit)
+
+            # Op-start RunContext for the harness's restart op, assembled
+            # AFTER the kill (a state-aware harness decides resume-vs-launch
+            # with the old process already dead). Mirrors the preflight
+            # readiness ctx above (the restart path builds no runup ctx), plus
+            # the scoped graph secrets (empty for the built-in shell harness).
+            # Template-var substitution wraps the returned string; restart
+            # sources ``workspace_name`` from the session row, as the interim
+            # path did.
+            restart_ctx = RunContext(
                 config=config,
                 operation_scope=scope,
                 admin_target=admin_target,
                 agent_target=None if is_admin else session_target,
-            ),
-        )
-
-        # Bail-before-prompt: refuse the operation up front in the cases
-        # where the operator either lacks the right flag (BROKEN + no
-        # --force) or declines the confirm (OK + interactive 'no'). BOTH
-        # secret-resolving passes (the graph-union boundary resolve and
-        # the env-chain resolve below) run AFTER these checks so a
-        # refused or declined restart never prompts for secrets it was
-        # about to discard.
-        # UNKNOWN is impossible here (_ensure_pid raises on unresolvable
-        # sessions). Legacy sessions short-circuit at ``status =
-        # SessionStatus.STOPPED`` above, so neither gate fires for them;
-        # migration is implicit in the operator's restart opt-in.
-        if status == SessionStatus.BROKEN and not force:
-            raise BrokenStateError(
-                f"session '{name}' is broken (PID alive but tmux unreachable).",
-                entity_kind="session",
-                entity_name=name,
-                hint="Use --force to restart.",
+                secrets=ScopedSecrets(graph_secret_values, session_node.secret_refs()),
             )
-        if status == SessionStatus.OK and not yes and not output.confirm(
-            f"Session '{name}' is running. Restart?"
-        ):
-            raise UserAbort("restart cancelled")
-
-        # The graph-union boundary resolve (pass 1). Placed AFTER the
-        # gates above, symmetric with the env-chain pass below, so a
-        # refused or declined restart never prompts. Gate-resolved values
-        # are already seeded, so nothing resolves twice.
-        resolver.resolve()
-        # Capture the graph boundary union for the harness's op-start
-        # context (matching the create path, which captures
-        # ``resolver.values`` at its boundary). Inert for the built-in
-        # shell harness (empty ``secret_refs()``), but keeps the restart
-        # op ctx shape-correct for a future secret-declaring harness; the
-        # env-chain resolve (``resolve_for_command`` below) is a SEPARATE
-        # pass, not this graph union.
-        graph_secret_values = resolver.values
-
-        # Eager-prompting orchestration (pass 2): resolve every secret
-        # referenced by this session's env chain BEFORE any kill /
-        # destructive step. Non-interactive failures surface as
-        # SecretUnavailableError with no partial state to clean up. This
-        # is the recorded bail-before-prompt exception to the
-        # one-boundary-resolve contract: the graph's union (the site's
-        # config secrets) and this env chain BOTH resolve here, after the
-        # BROKEN/--force refusal and the "Restart?" confirm, so a declined
-        # restart never prompts for secrets it was about to discard.
-        # Folding the env chain into the boundary would trade that
-        # operator protection for one fewer prompt session on proxmox
-        # only.
-
-        from agentworks.secrets import resolve_for_command
-
-        secret_values = resolve_for_command(
-            [
-                _session_secret_target(
-                    registry,
-                    db=db,
-                    vm=vm,
-                    ws=ws,
-                    session_name=name,
-                    session_template=template,
-                    mode=SessionMode(session.mode),
-                    agent_name=session.agent_name,
-                ),
-            ],
-            config,
-            registry,
-        )
-
-        output.info(f"Restarting session '{name}'...")
-
-        if is_legacy:
-            # Surgical kill of the named session on the default tmux
-            # server (no socket path). ``session.pid`` identifies the
-            # SERVER for legacy admin rows, not this session, so the
-            # BROKEN path's ``force_kill_tmux_server(pid)`` would nuke
-            # every other tmux session sharing the server -- including
-            # ad-hoc tmux work and other legacy Agentworks rows. The
-            # ``kill-session -t <name>`` primitive is surgical. Failure
-            # is best-effort: if the session is already gone (only the
-            # DB row survived), kill returns False and we proceed to
-            # create the new shape.
-            _kill_session(name, run_command=session_run_command, socket_path=None)
-        elif status == SessionStatus.BROKEN:
-            from agentworks.sessions.tmux import force_kill_tmux_server
-
-            output.warn(f"Session '{name}' is broken (tmux unreachable), force-killing via PID")
-            assert session.pid is not None
-            killed = force_kill_tmux_server(
-                session.pid,
-                target=session_target,
-                socket_path=session.socket_path,
-                log=output.detail,
-                use_sudo=kill_sudo,
+            command = _substitute_template_vars(
+                session_node.harness.restart(restart_ctx),
+                {"session_name": name, "workspace_name": session.workspace_name},
             )
-            if not killed:
-                raise ExternalError(
-                    f"failed to kill PID {session.pid} for session '{name}'",
-                    entity_kind="session",
-                    entity_name=name,
+            if (note := session_node.harness.launch_note()) is not None:
+                output.detail(note)
+            # Persist the harness's state blob after the op (mirrors the
+            # create-path insert). Usually a no-op (the value was stored on
+            # create), but a session predating the harness_state column
+            # (backfilled to {}) mints its id on this first restart. Persisting
+            # BEFORE create_tmux_session is intentional: a stable id that
+            # survives a tmux-recreate retry beats re-minting a new one each
+            # attempt (the id is the session's, whether or not the pane came up).
+            db.update_session_harness_state(name, session_node.harness.state)
+            linux_user = _resolve_session_linux_user(db, session, vm)
+            session_env = _resolve_session_env(
+                registry,
+                values=secret_values,
+                db=db,
+                vm=vm,
+                ws=ws,
+                session_name=name,
+                session_template=template,
+                mode=SessionMode(session.mode),
+                agent_name=session.agent_name,
+                linux_user=linux_user,
+            )
+
+            try:
+                new_sock, pid = create_tmux_session(
+                    name,
+                    ws.workspace_path,
+                    command,
+                    linux_user,
+                    run_command=session_run_command,
+                    target=admin_target,
+                    admin_username=vm.admin_username,
+                    is_admin=is_admin,
+                    env=session_env,
                 )
-        elif status == SessionStatus.OK:
-            # Confirm already happened above (before eager-resolve), so we
-            # know the operator opted in.
-            sock = session.socket_path
-            if not _kill_session(name, run_command=session_run_command, socket_path=sock):
-                raise ExternalError(
-                    f"failed to stop session '{name}' for restart",
-                    entity_kind="session",
-                    entity_name=name,
-                )
+            except RuntimeError as exc:
+                if "already has an active tmux server" in str(exc):
+                    raise StateError(
+                        f"session '{name}' has an active tmux server that was not detected by the status check.",
+                        entity_kind="session",
+                        entity_name=name,
+                        hint="Use 'session stop --force' to kill it, then retry.",
+                    ) from exc
+                raise
 
-        deploy_restricted_config(run_command, history_limit=config.session.history_limit)
-
-        # Op-start RunContext for the harness's restart op, assembled
-        # AFTER the kill (a state-aware harness decides resume-vs-launch
-        # with the old process already dead). Mirrors the preflight
-        # readiness ctx above (the restart path builds no runup ctx), plus
-        # the scoped graph secrets (empty for the built-in shell harness).
-        # Template-var substitution wraps the returned string; restart
-        # sources ``workspace_name`` from the session row, as the interim
-        # path did.
-        restart_ctx = RunContext(
-            config=config,
-            operation_scope=scope,
-            admin_target=admin_target,
-            agent_target=None if is_admin else session_target,
-            secrets=ScopedSecrets(graph_secret_values, session_node.secret_refs()),
-        )
-        command = _substitute_template_vars(
-            session_node.harness.restart(restart_ctx),
-            {"session_name": name, "workspace_name": session.workspace_name},
-        )
-        if (note := session_node.harness.launch_note()) is not None:
-            output.detail(note)
-        # Persist the harness's state blob after the op (mirrors the
-        # create-path insert). Usually a no-op (the value was stored on
-        # create), but a session predating the harness_state column
-        # (backfilled to {}) mints its id on this first restart. Persisting
-        # BEFORE create_tmux_session is intentional: a stable id that
-        # survives a tmux-recreate retry beats re-minting a new one each
-        # attempt (the id is the session's, whether or not the pane came up).
-        db.update_session_harness_state(name, session_node.harness.state)
-        linux_user = _resolve_session_linux_user(db, session, vm)
-        session_env = _resolve_session_env(
-            registry,
-            values=secret_values,
-            db=db,
-            vm=vm,
-            ws=ws,
-            session_name=name,
-            session_template=template,
-            mode=SessionMode(session.mode),
-            agent_name=session.agent_name,
-            linux_user=linux_user,
-        )
-
-        try:
-            new_sock, pid = create_tmux_session(
-                name,
-                ws.workspace_path,
-                command,
-                linux_user,
-                run_command=session_run_command,
-                target=admin_target,
-                admin_username=vm.admin_username,
-                is_admin=is_admin,
-                env=session_env,
-            )
-        except RuntimeError as exc:
-            if "already has an active tmux server" in str(exc):
-                raise StateError(
-                    f"session '{name}' has an active tmux server that was not detected by the status check.",
-                    entity_kind="session",
-                    entity_name=name,
-                    hint="Use 'session stop --force' to kill it, then retry.",
-                ) from exc
-            raise
-
-        # Persist socket path if it differs from what's stored.
-        if new_sock != session.socket_path:
-            db.update_session_socket_path(name, new_sock)
-        if pid is not None:
-            # boot_id is /proc/sys/kernel/random/boot_id (world-readable);
-            # admin's target is fine and convenient.
-            boot_id = _get_boot_id(admin_target)
-            if boot_id is not None:
-                db.update_session_pid(name, pid, boot_id=boot_id)
+            # Persist socket path if it differs from what's stored.
+            if new_sock != session.socket_path:
+                db.update_session_socket_path(name, new_sock)
+            if pid is not None:
+                # boot_id is /proc/sys/kernel/random/boot_id (world-readable);
+                # admin's target is fine and convenient.
+                boot_id = _get_boot_id(admin_target)
+                if boot_id is not None:
+                    db.update_session_pid(name, pid, boot_id=boot_id)
+                else:
+                    output.warn(f"Could not read boot ID for session '{name}', PID not stored")
             else:
-                output.warn(f"Could not read boot ID for session '{name}', PID not stored")
-        else:
-            output.warn(f"Could not capture PID for session '{name}', will auto-repair on next access")
+                output.warn(f"Could not capture PID for session '{name}', will auto-repair on next access")
 
-        output.info(f"Session '{name}' restarted")
+        output.result(f"Session '{name}' restarted")
 
         _regenerate_tmuxinator(db, config, vm, ws)
         # Don't re-add the session to the legacy vm-console here. The existing

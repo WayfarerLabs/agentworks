@@ -179,7 +179,9 @@ def test_stop_sets_flag_before_already_stopped_shortcut(
     assert row is not None and row.operator_stopped is True
     assert events == ["status"]  # short-circuited, no stop op
     assert resolve_counter == [["proxmox-token"]]
-    (message,) = captured_output.info
+    # The boundary resolve emits a "Resolved ..." info line of its own; the
+    # stop message is the remaining info line.
+    (message,) = [m for m in captured_output.info if not m.startswith("Resolved ")]
     assert "stopped on its own" in message
     assert "will not be auto-started" in message
 
@@ -199,7 +201,7 @@ def test_stop_of_a_manually_stopped_vm_is_a_true_noop(
 
     vm_manager.stop_vm(db, config, "box")
 
-    (message,) = captured_output.info
+    (message,) = [m for m in captured_output.info if not m.startswith("Resolved ")]
     assert message == "VM 'box' is already manually stopped"
 
 

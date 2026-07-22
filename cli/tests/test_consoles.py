@@ -948,8 +948,8 @@ def test_describe_console_uses_iteration_index(
     describe_console(db, name="con")
     member_lines = [m for m in captured_output.info if m.lstrip().startswith("[")]
     assert member_lines == [
-        "  [0] b  (no extra shells)",
-        "  [1] c  (no extra shells)",
+        "[0] b  (no extra shells)",
+        "[1] c  (no extra shells)",
     ]
 
 

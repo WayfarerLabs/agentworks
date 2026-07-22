@@ -553,7 +553,7 @@ class WSL2Platform(VMPlatform):
             output.detail("Using cached Debian rootfs.")
 
         # Import and configure the distro
-        output.detail("Importing rootfs into WSL2...")
+        output.info("Importing rootfs into WSL2...")
         _wsl(["--import", vm_name, str(install_path), str(tarball)])
 
         # Strip Docker-image minimization hooks before we run any apt-get.
@@ -561,7 +561,7 @@ class WSL2Platform(VMPlatform):
         # that returns 101 to refuse all service starts during image build;
         # without removing it, apt-installed daemons (e.g. tailscaled) never
         # start, leaving us with an "installed but inert" service.
-        output.detail("Removing Docker minimization hooks...")
+        output.info("Removing Docker minimization hooks...")
         _wsl(
             [
                 "--distribution",
@@ -577,7 +577,7 @@ class WSL2Platform(VMPlatform):
 
         # The Docker rootfs is minimal. Install packages to bring it up to
         # parity with the Lima/Azure cloud images.
-        output.detail("Installing base packages...")
+        output.info("Installing base packages...")
         _wsl(
             [
                 "--distribution",
@@ -601,7 +601,7 @@ class WSL2Platform(VMPlatform):
         # Configure swap file
         if swap > 0:
             swap_mb = swap * 1024
-            output.detail(f"Setting up {swap} GiB swap file...")
+            output.info(f"Setting up {swap} GiB swap file...")
             _wsl(
                 [
                     "--distribution",
@@ -620,7 +620,7 @@ class WSL2Platform(VMPlatform):
             )
 
         # Create user account
-        output.detail(f"Creating user '{admin_username}'...")
+        output.info(f"Creating user '{admin_username}'...")
         _wsl(["--distribution", vm_name, "--user", "root", "--", "useradd", "-m", "-s", "/bin/bash", admin_username])
         _wsl(["--distribution", vm_name, "--user", "root", "--", "usermod", "-aG", "sudo", admin_username])
         import shlex
@@ -640,7 +640,7 @@ class WSL2Platform(VMPlatform):
         )
 
         # Configure wsl.conf: default user + systemd
-        output.detail("Enabling systemd...")
+        output.info("Enabling systemd...")
         _wsl(
             [
                 "--distribution",
@@ -656,7 +656,7 @@ class WSL2Platform(VMPlatform):
         )
 
         # Restart the distro so systemd takes effect
-        output.detail("Restarting distro...")
+        output.info("Restarting distro...")
         _wsl(["--terminate", vm_name])
         # Run a command to trigger the distro to start with systemd
         _wsl(["--distribution", vm_name, "--user", "root", "--", "bash", "-c", "echo ok"])

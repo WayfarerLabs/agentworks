@@ -336,13 +336,13 @@ def create_agent(
         # The preflight boundary: an unresolvable token fails before
         # any prompt, then git tokens and any site config secret
         # (proxmox's API token) resolve in one prompt session.
-        output.phase("Preflight")
-        output.detail(f"Checking agent-template/{agent_tmpl.name}...")
-        announce_git_credentials(providers)
-        preflight_all(nodes, RunContext(config=config, operation_scope=scope))
+        with output.section("Preflight"):
+            output.info(f"Checking agent-template/{agent_tmpl.name}...")
+            announce_git_credentials(providers)
+            preflight_all(nodes, RunContext(config=config, operation_scope=scope))
 
-        output.phase("Resolving Secrets")
-        resolver.resolve()
+        with output.section("Resolving Secrets"):
+            resolver.resolve()
 
         def scoped_ctx(secret_names: tuple[str, ...]) -> RunContext:
             return RunContext(
@@ -356,25 +356,30 @@ def create_agent(
         # skip-and-degrade policy as before.
         git_tokens = credential_tokens(tmpl_node, scoped_ctx)
 
-        output.phase("Agent Initialization")
-        from agentworks.agents.realize import realize_agent
+        with output.section("Agent Initialization"):
+            from agentworks.agents.realize import realize_agent
 
-        realize_agent(
-            db,
-            config,
-            registry,
-            name=name,
-            vm=vm,
-            template=agent_tmpl,
-            git_tokens=git_tokens,
-            grant_all_workspaces=grant_all_workspaces,
-        )
-        # Bookkeeping only, deliberately not via a realization log:
-        # this command never unwinds a realized agent (a failure after
-        # the row exists keeps the agent, as the imperative command
-        # did), and the body already cleaned up its own partial state
-        # before re-raising.
-        pending_agent.mark_realized()
+            # realize_agent emits its own "Agent '<name>' created ..."
+            # line (shared with the session-create ephemeral path), so it
+            # stays the command's closing line inside this section rather
+            # than being echoed again through result(); mirrors the
+            # standalone workspace-create path (see realize_workspace).
+            realize_agent(
+                db,
+                config,
+                registry,
+                name=name,
+                vm=vm,
+                template=agent_tmpl,
+                git_tokens=git_tokens,
+                grant_all_workspaces=grant_all_workspaces,
+            )
+            # Bookkeeping only, deliberately not via a realization log:
+            # this command never unwinds a realized agent (a failure after
+            # the row exists keeps the agent, as the imperative command
+            # did), and the body already cleaned up its own partial state
+            # before re-raising.
+            pending_agent.mark_realized()
 
 
 def delete_agent(
@@ -421,6 +426,7 @@ def delete_agent(
     all_sessions = db.list_sessions()
     agent_sessions = [s for s in all_sessions if s.agent_name == name]
     if agent_sessions and not force:
+        output.info(f"Agent '{name}' has {output.count(len(agent_sessions), 'session')}:")
         for s in agent_sessions:
             output.detail(f"{s.name}")
         raise StateError(
@@ -638,13 +644,13 @@ def reinit_agent(
         # The preflight boundary: git tokens and any site config secret
         # resolve in one prompt session. Provisioning is hermetic: no
         # operator-env secrets are prompted at reinit.
-        output.phase("Preflight")
-        output.detail(f"Checking agent-template/{agent_tmpl.name}...")
-        announce_git_credentials(providers)
-        preflight_all(nodes, RunContext(config=config, operation_scope=scope))
+        with output.section("Preflight"):
+            output.info(f"Checking agent-template/{agent_tmpl.name}...")
+            announce_git_credentials(providers)
+            preflight_all(nodes, RunContext(config=config, operation_scope=scope))
 
-        output.phase("Resolving Secrets")
-        resolver.resolve()
+        with output.section("Resolving Secrets"):
+            resolver.resolve()
 
         def scoped_ctx(secret_names: tuple[str, ...]) -> RunContext:
             return RunContext(
@@ -655,41 +661,44 @@ def reinit_agent(
 
         git_tokens = credential_tokens(tmpl_node, scoped_ctx)
 
-        output.phase("Agent Initialization")
-        from agentworks.agents.initializer import create_agent_on_vm
-        from agentworks.ssh import SSHLogger
-        ssh_logger = SSHLogger(vm.name, "agent-reinit")
-        try:
+        with output.section("Agent Initialization"):
+            from agentworks.agents.initializer import create_agent_on_vm
+            from agentworks.ssh import SSHLogger
+            ssh_logger = SSHLogger(vm.name, "agent-reinit")
             try:
-                create_agent_on_vm(
-                    vm, config, registry, agent_tmpl, agent.linux_user,
-                    agent_name=agent.name,
-                    git_tokens=git_tokens,
-                    logger=ssh_logger,
-                )
-            except KeyboardInterrupt:
-                output.warn(
-                    f"Cancelling agent reinit '{name}'. The agent may be in a partial state. "
-                    f"Re-run 'agent reinit {name}' to retry. SSH log: {ssh_logger.path}"
-                )
-                raise
-            except Exception as e:
-                raise ExternalError(
-                    f"reinitializing agent: {e}",
-                    entity_kind="agent",
-                    entity_name=name,
-                    hint=f"SSH log: {ssh_logger.path}",
-                ) from e
-        finally:
-            ssh_logger.close()
+                try:
+                    create_agent_on_vm(
+                        vm, config, registry, agent_tmpl, agent.linux_user,
+                        agent_name=agent.name,
+                        git_tokens=git_tokens,
+                        logger=ssh_logger,
+                    )
+                except KeyboardInterrupt:
+                    output.warn(
+                        f"Cancelling agent reinit '{name}'. The agent may be in a partial state. "
+                        f"Re-run 'agent reinit {name}' to retry. SSH log: {ssh_logger.path}"
+                    )
+                    raise
+                except Exception as e:
+                    raise ExternalError(
+                        f"reinitializing agent: {e}",
+                        entity_kind="agent",
+                        entity_name=name,
+                        hint=f"SSH log: {ssh_logger.path}",
+                    ) from e
+            finally:
+                ssh_logger.close()
 
-        # Refresh operator SSH config (declarative rebuild; picks up any
-        # config changes that affect the per-agent block).
-        from agentworks.ssh_config import sync_ssh_config
+            # Refresh operator SSH config (declarative rebuild; picks up any
+            # config changes that affect the per-agent block).
+            from agentworks.ssh_config import sync_ssh_config
 
-        sync_ssh_config(config, db)
+            sync_ssh_config(config, db)
 
-        output.info(f"Agent '{name}' reinitialized")
+        # The section is closed: the terminal outcome line renders at
+        # column 0 via result(), matching the reference create/restart
+        # flows.
+        output.result(f"Agent '{name}' reinitialized")
 
 
 MAX_GRANTS_DISPLAY = 60
