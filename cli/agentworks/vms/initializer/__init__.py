@@ -15,11 +15,15 @@ surface that predates the split into submodules (``shell_env``, ``mise``,
 is re-exported here so ``from agentworks.vms.initializer import
 initialize_vm`` (and the many ``agentworks.vms.initializer.<name>``
 attribute references across the codebase and test suite) keep working
-unchanged. Unlike the sibling ``vms.manager`` package, no submodule here
-calls another submodule's re-exported name in a way current tests
-monkeypatch, so plain cross-submodule imports (``from .shell_env import
-...`` etc, inside ``driver.py``) are sufficient; there is no
-package-object-indirection requirement to preserve.
+unchanged. Unlike the sibling ``vms.manager`` package, no cross-submodule
+call here needs package-object indirection: the internal names that ARE
+monkeypatched (e.g. ``initialize_vm``, ``run_initialization``) are only
+ever patched on the ``vms.manager`` namespace (its reinit path reads them
+via that package object), never on ``vms.initializer`` itself, so plain
+cross-submodule imports (``from .shell_env import ...`` etc, inside
+``driver.py``) are sufficient. If a future test needs to patch a name on
+``agentworks.vms.initializer`` and have an internal caller observe it,
+that caller must switch to package-object indirection.
 """
 
 from __future__ import annotations

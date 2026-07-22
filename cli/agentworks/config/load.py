@@ -105,9 +105,9 @@ def load_config(
         SystemExit: If the config file does not exist.
     """
     # Re-imported here (rather than bound at module load) so that tests'
-    # ``monkeypatch.setattr("agentworks.config.CONFIG_PATH", ...)`` -- which
-    # patches the attribute on the public ``agentworks.config`` package --
-    # is observed: a module-top `from ... import CONFIG_PATH` would instead
+    # ``monkeypatch.setattr("agentworks.config.CONFIG_PATH", ...)``, which
+    # patches the attribute on the public ``agentworks.config`` package, is
+    # observed. A module-top `from ... import CONFIG_PATH` would instead
     # bind this module's own copy of the name at import time, permanently
     # deaf to a later monkeypatch.
     from agentworks.config import CONFIG_PATH

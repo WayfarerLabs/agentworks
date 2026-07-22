@@ -24,7 +24,7 @@ outgrew a single 500-line file. The submodules are organized by concern:
 
 Every name below is re-exported here so ``agentworks.sessions.multi_console``
 keeps working as the single public import path this package replaces
-(including the private names tests monkeypatch directly on this module --
+(including the private names tests monkeypatch directly on this module;
 see each submodule's docstring for why calls route back through this
 package object rather than a direct cross-submodule import).
 """
