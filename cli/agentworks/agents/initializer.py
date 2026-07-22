@@ -1,9 +1,9 @@
 """On-VM agent provisioning: the SSH bodies that create, configure,
 and remove an agent's Linux user.
 
-The agent counterpart of ``vms/initializer.py``. Command orchestration
+The agent counterpart of ``agentworks.vms.initializer``. Command orchestration
 (validation, gating, DB rows, rollback choreography) lives in
-``agents/manager.py`` and ``agents/realize.py``; this module owns the
+``agentworks.agents.manager`` and ``agents/realize.py``; this module owns the
 remote mutations they drive over SSH: the user bootstrap and
 self-configure sequence, its install-command / profile / rc / mise
 sub-steps, and the user removal.
@@ -149,7 +149,7 @@ def create_agent_on_vm(
     # step at the end of setup adds a ``. ~/.agentworks-rc.sh`` line to
     # the agent's .bashrc/.zshrc unconditionally; if the file doesn't
     # exist, every interactive login hits "No such file or directory".
-    # Matches the admin pattern in vms/initializer.py:_write_agentworks_rc.
+    # Matches the admin pattern in vms/initializer/shell_env.py:_write_agentworks_rc.
     _write_agent_shell_rc(agent_target, home=home, agent_cfg=agent_cfg)
 
     # No PS1 setup: operators who want an agent indicator can read
@@ -324,7 +324,7 @@ def create_agent_on_vm(
     # agent's PATH (mise shims, ~/.local/bin, etc.); a plain SSH command
     # gets a non-interactive non-login shell that sources none of the
     # rc / profile files. Wrap in `<shell> -lc` for parity with the
-    # admin caller in vms/initializer.py.
+    # admin caller in agentworks.vms.initializer.
     import shlex as _shlex
 
     from agentworks.vms.initializer import install_claude_plugins

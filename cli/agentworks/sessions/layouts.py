@@ -2,7 +2,7 @@
 
 Moved out of ``agentworks.config`` so the ``sessions`` domain owns these
 next to their runtime home (``agentworks.sessions.multi_console_layout``,
-which builds the custom tmux layout string). ``config.py``'s
+which builds the custom tmux layout string). ``agentworks.config``'s
 ``[named_console]`` loader imports them from here for validation.
 """
 

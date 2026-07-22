@@ -37,7 +37,7 @@ private ``_load_*`` helpers that the manifest decoder and tests reach into
 directly) so every existing ``from agentworks.config import ...`` call site
 keeps working unchanged.
 
-CRITICAL cycle note: ``agentworks/db.py`` imports ``agentworks.config.CONFIG_DIR``
+CRITICAL cycle note: the ``agentworks.db`` package imports ``agentworks.config.CONFIG_DIR``
 at module load time, while the domain packages this package imports
 (agents.template, sessions.template, vms.admin, etc.) only import
 ``agentworks.db`` under ``TYPE_CHECKING``. Nothing in this package may import

@@ -516,8 +516,8 @@ def _emit_document(doc: tomlkit.TOMLDocument, unit: MigrationUnit) -> str:
         # the 'shell' harness (mirroring the git-credential
         # provider_config nesting); a declared harness / harness_config
         # passes through. env and inherits are kind-owned and stay at
-        # the spec top level. The TOML loader's hoist (config.py) and
-        # this emission land on the identical internal value, which the
+        # the spec top level. The TOML loader's hoist (``agentworks.config``)
+        # and this emission land on the identical internal value, which the
         # post-run registry-equivalence verification proves; validate
         # the rebuilt blob pre-write so a bad blob fails BEFORE anything
         # is written, in the operator's TOML vocabulary, rather than

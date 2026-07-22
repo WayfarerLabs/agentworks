@@ -5,8 +5,8 @@ declared-resource type next to the resolver
 (``agentworks.agents.templates``) and the kinds
 (``agentworks.agents.kinds``). The agent-shaped ``AdminConfig`` is homed
 in ``agentworks.vms.admin`` instead (by lifecycle: the admin user is a
-per-VM concept). ``config.py`` keeps only the legacy TOML loader that
-constructs this.
+per-VM concept). The ``agentworks.config`` package keeps only the legacy
+TOML loader that constructs this.
 """
 
 from __future__ import annotations

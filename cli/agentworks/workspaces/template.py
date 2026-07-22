@@ -3,8 +3,8 @@
 Moved out of ``agentworks.config`` so the ``workspaces`` domain owns its
 declared-resource type next to the resolver
 (``agentworks.workspaces.templates``) and the kind
-(``agentworks.workspaces.kinds``). ``config.py`` keeps only the legacy
-TOML loader that constructs it.
+(``agentworks.workspaces.kinds``). The ``agentworks.config`` package
+keeps only the legacy TOML loader that constructs it.
 """
 
 from __future__ import annotations

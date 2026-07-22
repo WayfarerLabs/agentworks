@@ -24,7 +24,7 @@ as _mgr`` at module scope, then ``_mgr.transport(...)`` at call time)
 rather than importing ``transport`` by value, so the monkeypatch on this
 module's attribute still reaches that call. Likewise ``delete_agent``
 itself is patched by the session-create ephemeral-rollback tests;
-external callers (``sessions/manager.py``, ``agents/nodes.py``) import
+external callers (``agentworks.sessions.manager``, ``agents/nodes.py``) import
 it lazily from this package (``from agentworks.agents.manager import
 delete_agent``) so the patch reaches them too.
 """

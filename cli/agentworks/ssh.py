@@ -176,7 +176,7 @@ class SSHLogger:
 
         If an exception is in flight (``close()`` called from inside an
         ``except`` block, which the operation-level handlers in
-        ``vms/initializer.py`` and elsewhere do), append the full
+        ``agentworks.vms.initializer`` and elsewhere do), append the full
         traceback before the footer. This lands the traceback in the
         per-operation log instead of relying on the top-level
         ``record_unhandled_error`` fallback, which writes to a shared

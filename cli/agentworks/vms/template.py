@@ -4,7 +4,8 @@ Tailscale secret-reference helper.
 The ``vms`` domain owns this dataclass (moved out of ``agentworks.config``)
 so the declared-resource type lives next to the resolver
 (``agentworks.vms.templates``) and the kind (``agentworks.vms.kinds``).
-``config.py`` keeps only the legacy TOML loader that constructs it.
+The ``agentworks.config`` package keeps only the legacy TOML loader that
+constructs it.
 """
 
 from __future__ import annotations

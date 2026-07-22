@@ -5,8 +5,9 @@ Moved out of ``agentworks.config`` so the ``sessions`` domain owns its
 declared-resource types next to the resolver
 (``agentworks.sessions.templates``) and the kinds
 (``agentworks.sessions.kinds``). ``NamedConsoleConfig`` imports its
-layout default from ``agentworks.sessions.layouts``. ``config.py`` keeps
-only the legacy TOML loaders that construct these.
+layout default from ``agentworks.sessions.layouts``. The
+``agentworks.config`` package keeps only the legacy TOML loaders that
+construct these.
 """
 
 from __future__ import annotations
