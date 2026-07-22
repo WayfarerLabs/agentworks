@@ -271,7 +271,7 @@ def render_table(
     widths = [min(max_col_width, max(len(cell) for cell in column)) for column in columns]
 
     def _line(cells: Sequence[str]) -> str:
-        rendered = (_truncate_cell(cell, width).ljust(width) for cell, width in zip(cells, widths, strict=True))
+        rendered = (truncate(cell, width).ljust(width) for cell, width in zip(cells, widths, strict=True))
         return "  ".join(rendered).rstrip()
 
     header_line = _line(headers)
@@ -280,16 +280,20 @@ def render_table(
     return lines
 
 
-def _truncate_cell(cell: str, width: int) -> str:
-    """Truncate ``cell`` to ``width`` with a trailing ``...`` when it
-    overflows; leave a cell that already fits untouched. When ``width``
-    is too small to fit the ellipsis (<= 3), hard-truncate to ``width``
-    so the result never exceeds it."""
-    if len(cell) <= width:
-        return cell
+def truncate(text: str, width: int) -> str:
+    """Truncate ``text`` to ``width`` with a trailing ``...`` when it
+    overflows; leave text that already fits untouched. When ``width`` is
+    too small to fit the ellipsis (<= 3), hard-truncate to ``width`` so the
+    result never exceeds it.
+
+    The shared cell-truncation helper: used by :func:`render_table` and by
+    bespoke table renderers (e.g. the secret list view) that cap their own
+    columns."""
+    if len(text) <= width:
+        return text
     if width <= 3:
-        return cell[:width]
-    return cell[: width - 3] + "..."
+        return text[:width]
+    return text[: width - 3] + "..."
 
 
 def info(message: str) -> None:

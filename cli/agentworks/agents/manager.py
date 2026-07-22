@@ -710,10 +710,7 @@ def _format_grants(db: Database, agent_name: str, grant_all: bool) -> str:
         suffix = "*" if has_implicit and not has_explicit else ""
         parts.append(f"{ws_name}{suffix}")
 
-    result = ", ".join(parts)
-    if len(result) > MAX_GRANTS_DISPLAY:
-        result = result[: MAX_GRANTS_DISPLAY - 3] + "..."
-    return result
+    return output.truncate(", ".join(parts), MAX_GRANTS_DISPLAY)
 
 
 def list_agents(
