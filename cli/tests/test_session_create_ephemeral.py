@@ -642,6 +642,23 @@ def test_session_create_frames_phases_like_a_plan(
     assert any(m.startswith("Checking session-template/") for m in captured_output.detail)
     assert any(m.startswith("Checking workspace-template/") for m in captured_output.detail)
     assert any(m.startswith("Checking agent-template/") for m in captured_output.detail)
+
+    # Nesting (not just substrings): each phase header sits at level 0 and
+    # its body renders one level deeper. The Preflight "Checking ..." lines
+    # nest under the header at level 1, and the ephemeral "Creating agent"
+    # announce, promoted to the BODY role so it matches its workspace
+    # sibling, renders at level 1 under its own header.
+    assert (output.Role.HEADER, 0, "Preflight") in captured_output.lines
+    assert (output.Role.HEADER, 0, "Creating Workspace") in captured_output.lines
+    assert (output.Role.HEADER, 0, "Creating Agent") in captured_output.lines
+    assert any(
+        role is output.Role.DETAIL and level == 1 and msg.startswith("Checking session-template/")
+        for role, level, msg in captured_output.lines
+    )
+    assert any(
+        role is output.Role.BODY and level == 1 and msg.startswith("Creating agent 's1'")
+        for role, level, msg in captured_output.lines
+    )
     db.close()
 
 

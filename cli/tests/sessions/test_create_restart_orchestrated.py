@@ -28,6 +28,7 @@ import pytest
 from agentworks.bootstrap import build_registry as _real_build_registry
 from agentworks.db import Database, SessionMode, SessionStatus
 from agentworks.errors import StateError
+from agentworks.output import Role
 from agentworks.secrets.orchestration import (
     resolve_for_command as _real_resolve_for_command,
 )
@@ -749,6 +750,21 @@ def test_create_stopped_vm_gate_resolves_once_and_seeds_the_boundary(
         m.startswith("Checking session-template/") for m in captured_output.detail
     )
 
+    # Nesting, not just substrings: each phase header sits at level 0, the
+    # Preflight "Checking ..." lines nest one deeper (level 1), and the
+    # terminal result line dedents to column 0 (Role.RESULT, level 0) even
+    # though it is emitted from inside the Starting Session section.
+    assert (Role.HEADER, 0, "Preflight") in captured_output.lines
+    assert (Role.HEADER, 0, "Starting Session") in captured_output.lines
+    assert any(
+        role is Role.DETAIL and level == 1 and msg.startswith("Checking session-template/")
+        for role, level, msg in captured_output.lines
+    )
+    assert any(
+        role is Role.RESULT and level == 0 and msg.startswith("Session 's1' started")
+        for role, level, msg in captured_output.lines
+    )
+
 
 def test_restart_stopped_vm_gate_seeds_and_env_pass_is_the_only_other(
     db: Database,
@@ -789,3 +805,52 @@ def test_restart_stopped_vm_gate_seeds_and_env_pass_is_the_only_other(
     assert events[:3] == ["status", "start", "tailscale"]  # the gate ran
     assert captured_env["API_KEY"] == "shhh"
     assert "tmux_create" in events  # the command completed
+
+    # Restart now reads as a structured plan mirroring create: the
+    # Preflight / Resolving Secrets / Starting Session headers sit at level
+    # 0, the "Restarting..." announce nests at level 1, and the terminal
+    # result line dedents to column 0.
+    assert (Role.HEADER, 0, "Preflight") in captured_output.lines
+    assert (Role.HEADER, 0, "Resolving Secrets") in captured_output.lines
+    assert (Role.HEADER, 0, "Starting Session") in captured_output.lines
+    assert any(
+        role is Role.BODY and level == 1 and msg.startswith("Restarting session 's1'")
+        for role, level, msg in captured_output.lines
+    )
+    assert any(
+        role is Role.RESULT and level == 0 and msg == "Session 's1' restarted"
+        for role, level, msg in captured_output.lines
+    )
+
+
+def test_restart_broken_force_kill_warning_nests_under_starting_session(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, captured_output: Any
+) -> None:
+    """A BROKEN session restarted with --force force-kills via PID; that
+    'force-killing' warning is emitted from inside the Starting Session
+    section, so it renders at level 1 under the header, and the terminal
+    result line still dedents to column 0."""
+    from agentworks.sessions import manager as session_manager
+    from agentworks.sessions import tmux as tmux_mod
+    from agentworks.sessions.manager import restart_session
+
+    db, events = _restart_fixture(tmp_path, monkeypatch)
+    monkeypatch.setattr(
+        session_manager, "check_session_status", lambda *a, **k: SessionStatus.BROKEN
+    )
+    monkeypatch.setattr(tmux_mod, "force_kill_tmux_server", lambda *a, **k: True)
+
+    restart_session(
+        db,
+        SimpleNamespace(session=SimpleNamespace(history_limit=1)),  # type: ignore[arg-type]
+        name="s1",
+        force=True,
+    )
+
+    assert (Role.HEADER, 0, "Starting Session") in captured_output.lines
+    assert any(
+        role is Role.WARNING and level == 1 and "force-killing via PID" in msg
+        for role, level, msg in captured_output.lines
+    )
+    assert (Role.RESULT, 0, "Session 's1' restarted") in captured_output.lines
+    db.close()

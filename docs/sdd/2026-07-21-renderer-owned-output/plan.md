@@ -105,14 +105,22 @@ against a reproduction.
 Definition of done: `session create` and `session restart` render fully nested with prompts and
 warnings inside their sections and the result line at column 0; sibling realizers agree.
 
-- [ ] Convert `create_session`'s five `phase()` calls to `with section(...)` blocks (reference
+- [x] Convert `create_session`'s five `phase()` calls to `with section(...)` blocks (reference
       shape); emit its closing line via `result()`.
-- [ ] Give `restart_session` matching sections (R10) so it is no longer a flat list.
-- [ ] Reconcile the workspace realizer (`info` "Creating workspace") and agent realizer (`detail`
-      "Creating agent") so both render identically under their section.
-- [ ] `secrets/prompt.py`: prompt renders at ambient level (no more flush-left escape).
-- [ ] Update/extend session tests to assert nesting level, not only substrings.
-- [ ] `agentworks-reviewer` + fresh-eyes pass; manual `session create` smoke check.
+- [x] Give `restart_session` matching sections (R10) so it is no longer a flat list.
+- [x] Reconcile the workspace realizer (`info` "Creating workspace") and agent realizer (`detail`
+      "Creating agent") so both render identically under their section. (The "Creating agent" line
+      lives inline in `create_session`, not in `realize_agent`; promoting it to `info` therefore
+      affects only the session-create path, its sole call site.)
+- [x] `secrets/prompt.py`: prompt renders at ambient level (no more flush-left escape). (Already
+      routes through the level-aware `output.prompt_secret`; it now fires inside the
+      `Resolving     Secrets` section, so it indents to level 1 with no code change needed.)
+- [x] Update/extend session tests to assert nesting level, not only substrings.
+- [x] `agentworks-reviewer` + fresh-eyes (Sonnet) pass; both approved. One should-fix folded: the
+      `create_session` tail (`result()`, tmuxinator regen, console-add) was dedented out of the
+      "Starting Session" section (it stays inside the rollback `try`) so `add_session_to_console`'s
+      `info`/`warn` no longer render indented after the flush-left result line, matching
+      `restart_session`.
 
 ## Phase 4: Full sweep of remaining commands
 
