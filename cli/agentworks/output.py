@@ -16,6 +16,12 @@ color into a message string, and it must not import typer or call sys.exit.
 Errors are signalled by raising from the exception hierarchy below; the CLI
 entry point catches them and renders them through the ERROR role.
 
+A caller that has already composed a formatted line and just needs one
+*token* inside it colored (a status label like `agw doctor`'s ``[ok]``/
+``[warn]``, not a whole line) calls :func:`style_status` with a
+:class:`StatusStyle` instead of going through a :class:`Role`; it is a
+narrower, string-in-string-out sibling of :func:`emit`.
+
 **Section level is ambient.** ``section()`` opens a section whose header
 renders at the current depth and whose body renders one level deeper; the
 depth is carried in a ``contextvars`` variable, so a callee emitting output
@@ -95,9 +101,12 @@ class Role(Enum):
 
     The handler maps role + section level to concrete indentation and
     decoration (the free functions never pre-render either). ERROR is
-    emitted by :func:`error` (only from the CLI entry-point catch);
-    STATUS is reserved for the deferred status-column follow-up and has
-    no public free function yet.
+    emitted by :func:`error` (only from the CLI entry-point catch).
+    STATUS is realized for inline status-token styling via
+    :func:`style_status` (e.g. the ``[ok]``/``[warn]`` labels in `agw
+    doctor`); it has no public whole-line ``emit`` free function of its
+    own; a caller that ever needs to emit a whole line under this role
+    can add one without disturbing the token styler.
     """
 
     BODY = auto()  # info(): a normal body line / step
@@ -106,7 +115,7 @@ class Role(Enum):
     ERROR = auto()  # error(): failed terminal outcome, stderr (entry catch)
     HEADER = auto()  # section() header
     RESULT = auto()  # result(): terminal outcome line, always level 0
-    STATUS = auto()  # reserved: list/describe status values (deferred)
+    STATUS = auto()  # realized via style_status(); no whole-line emit yet
 
 
 _INDENT_UNIT = "  "
@@ -130,6 +139,35 @@ def _render_header(title: str, level: int) -> str:
     if level == 1:
         return f"--- {title} ---"
     return title
+
+
+class StatusStyle(Enum):
+    """The semantic color of a status token: the realized form of the
+    STATUS role, which has no whole-line ``emit`` rendering of its own.
+
+    A *token* styler: it colors a short label (e.g. the ``[ok]`` in
+    ``agw doctor``'s ``  [ok]   name: message``) that the caller has
+    already composed into a formatted line, as opposed to :func:`Role`
+    values, which each map to a whole rendered line. Kept business-logic
+    neutral (GOOD/NEUTRAL/WARN/BAD rather than OK/INFO/WARN/FAIL) so it
+    can style any status vocabulary, not just doctor's.
+    """
+
+    GOOD = auto()
+    NEUTRAL = auto()
+    WARN = auto()
+    BAD = auto()
+
+
+def style_status(text: str, style: StatusStyle) -> str:
+    """Style a status token per ``style``, via the current handler.
+
+    Returns ``text`` unchanged when color is disabled (or the handler
+    doesn't colorize, e.g. in tests). Distinct from :func:`emit`: this
+    colors a token composed into a caller-formatted line rather than
+    rendering a whole line itself.
+    """
+    return _handler.style_status(text, style)
 
 
 # ---------------------------------------------------------------------------
@@ -166,6 +204,11 @@ class OutputHandler(Protocol):
 
     def emit(self, role: Role, message: str, level: int) -> None:
         """Render a one-shot line for ``role`` at section ``level``."""
+        ...
+
+    def style_status(self, text: str, style: StatusStyle) -> str:
+        """Style a status token per ``style``. Returns ``text`` unchanged
+        when the handler doesn't colorize (or color is disabled)."""
         ...
 
     def confirm(self, message: str, level: int, default: bool = False) -> bool:
@@ -247,6 +290,9 @@ class _DefaultHandler:
             # fast-follow) or ERROR (Phase 5) must add its own explicit
             # branch above, not lean on this BODY fall-through.
             print(f"{_pad(level)}{message}")
+
+    def style_status(self, text: str, style: StatusStyle) -> str:
+        return text
 
     def confirm(self, message: str, level: int, default: bool = False) -> bool:
         try:

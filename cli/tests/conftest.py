@@ -11,7 +11,7 @@ from pathlib import Path
 import pytest
 
 from agentworks.db import Database
-from agentworks.output import Role, _render_header
+from agentworks.output import Role, StatusStyle, _render_header
 
 # The orchestrated-command suites' shared fixture trio (proxmox
 # section, make_config, resolve_counter) lives in its own module so it
@@ -85,6 +85,10 @@ class _TestHandler:
             self._captured.detail.append(message)
         elif role is Role.WARNING:
             self._captured.warnings.append(message)
+
+    def style_status(self, text: str, style: StatusStyle) -> str:
+        # The test handler never colorizes: tests assert on plain text.
+        return text
 
     def confirm(self, message: str, level: int, default: bool = False) -> bool:
         return self._captured.confirm_response

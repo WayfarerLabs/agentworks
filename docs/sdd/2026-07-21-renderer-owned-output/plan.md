@@ -230,11 +230,49 @@ live in a permanent home; gates green; SDD locked.
 - [x] Write `locked.md` summarizing the as-built state, the permanent homes, and the deferred status
       fast-follow.
 
+## Phase 7: `agw doctor` status colorization (STATUS role, fast-follow)
+
+Definition of done: `agw doctor`'s per-check `[ok]`/`[info]`/`[warn]`/`[FAIL]` labels and its
+Results summary counts are colorized on a TTY, byte-plain under `NO_COLOR` / non-TTY /
+`--non-interactive`; `agentworks/doctor.py` (the service layer) is untouched, so doctor stays
+cleanly split between health-check logic and CLI rendering.
+
+- [x] Add `StatusStyle` (`GOOD`/`NEUTRAL`/`WARN`/`BAD`) and the free function
+      `style_status(text, style)` to `output.py`: a token styler (colors a status label already
+      composed into a formatted line) distinct from `emit()` (which renders a whole line). Added
+      `style_status` to the `OutputHandler` Protocol; `_DefaultHandler` and the test handler
+      (`tests/conftest.py`) return the text unchanged; `TyperHandler` applies `click.style` gated by
+      its existing `_color_enabled(sys.stdout)` (green/yellow/red/unstyled). Updated the
+      `Role.STATUS` comment: realized for inline status-token styling via `style_status`; no
+      whole-line `emit` case yet.
+- [x] `cli/commands/doctor.py`: map `Status.OK/INFO/WARN/FAIL` to
+      `StatusStyle.GOOD/NEUTRAL/WARN/BAD` and wrap each `[ok]`/`[info]`/`[warn]`/`[FAIL]` label
+      through `style_status`, applied AFTER `.ljust(6)` so column alignment is unaffected when color
+      is off. Colorized the Results summary's `ok`/`warn`/`fail` counts (`warn`/`fail` only when
+      nonzero). Left the group-name header (`{group.name}:`) plain: bolding it would need a
+      general-purpose "style bold" handler hook that doesn't exist yet (`style_status` is scoped to
+      status tokens, and routing doctor through `section()` would change its rendering shape beyond
+      this fast-follow's scope).
+- [x] Tests: `tests/test_typer_output.py` (per-`StatusStyle` TTY + plain-fallback unit tests on
+      `TyperHandler.style_status`), `tests/test_output.py` (`_DefaultHandler.style_status` never
+      colorizes; the free function delegates to the installed handler), `tests/test_doctor_cli.py`
+      (new: end-to-end `agw doctor` render, per-status color, column-width-unaffected-by-ANSI,
+      colored summary counts, and byte-plain output under non-TTY / `NO_COLOR` /
+      `--non-interactive`). `agentworks/doctor.py` unchanged; full suite green.
+- [x] `README.md` updated: the color-convention paragraph now names doctor's status-label and
+      summary-count coloring.
+- [x] `agentworks-reviewer` + fresh-eyes (Sonnet) pass; both approved. Color-leak safety verified
+      (piped/`NO_COLOR`/`--non-interactive` doctor output stays byte-plain), `.ljust(6)`/ANSI column
+      math correct, CLI/service split preserved. Two fixes folded: test hermeticity (the on-TTY
+      doctor tests now `delenv("NO_COLOR")` via a `_tty` helper, so they pass with `NO_COLOR` set),
+      and summary-count consistency (each count colored only when `> 0`).
+
 ## Deliberately out of scope (recorded)
 
-- **Status-column colorization (#145).** Deferred to a small fast-follow: the status role exists in
-  the vocabulary, but rendering colored `OK`/`BROKEN`/... in `list`/`describe` needs the role to
-  survive into the table-cell renderers. Tracked for follow-up after this PR.
+- **List/describe status-column colorization.** `style_status` and the realized `STATUS` role now
+  cover `agw doctor`; extending colored status cells into `list`/`describe` tables is a separate
+  fast-follow (those renderers build cells as plain strings today and would need to route the
+  relevant cell through `style_status` the same way).
 - **The concurrent multiplexing renderer.** This effort ships the per-flow-isolated state model that
   enables it without further call-site churn.
 - **A web / non-terminal color handler** and themeable/configurable palettes. (A de-emphasis body

@@ -25,7 +25,7 @@ import typer
 
 from agentworks import output
 from agentworks.cli._typer_output import TyperHandler
-from agentworks.output import Role
+from agentworks.output import Role, StatusStyle
 
 # Strip SGR color escapes so a rendered line can be compared against its
 # byte-plain form (mirrors tests/test_session_agent_filter.py:_plain).
@@ -103,6 +103,52 @@ def test_body_role_is_never_colored_on_a_tty(
     out = capsys.readouterr().out
     assert out == "Creating workspace\n"
     assert _ANSI_RE.search(out) is None
+
+
+# --- style_status: token styling (the STATUS role's realized form) -------
+
+
+def test_style_status_good_is_green_on_a_tty(monkeypatch: pytest.MonkeyPatch) -> None:
+    _tty(monkeypatch)
+    assert TyperHandler().style_status("[ok]", StatusStyle.GOOD) == click.style("[ok]", fg="green")
+
+
+def test_style_status_warn_is_yellow_on_a_tty(monkeypatch: pytest.MonkeyPatch) -> None:
+    _tty(monkeypatch)
+    assert TyperHandler().style_status("[warn]", StatusStyle.WARN) == click.style("[warn]", fg="yellow")
+
+
+def test_style_status_bad_is_red_on_a_tty(monkeypatch: pytest.MonkeyPatch) -> None:
+    _tty(monkeypatch)
+    assert TyperHandler().style_status("[FAIL]", StatusStyle.BAD) == click.style("[FAIL]", fg="red")
+
+
+def test_style_status_neutral_is_unstyled_on_a_tty(monkeypatch: pytest.MonkeyPatch) -> None:
+    _tty(monkeypatch)
+    text = TyperHandler().style_status("[info]", StatusStyle.NEUTRAL)
+    assert text == "[info]"
+    assert _ANSI_RE.search(text) is None
+
+
+def test_style_status_returns_plain_text_off_tty(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(sys.stdout, "isatty", lambda: False)
+    assert TyperHandler().style_status("[ok]", StatusStyle.GOOD) == "[ok]"
+
+
+def test_style_status_returns_plain_text_under_no_color(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(sys.stdout, "isatty", lambda: True)
+    monkeypatch.setenv("NO_COLOR", "")
+    assert TyperHandler().style_status("[ok]", StatusStyle.GOOD) == "[ok]"
+
+
+def test_style_status_returns_plain_text_under_non_interactive(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(sys.stdout, "isatty", lambda: True)
+    monkeypatch.delenv("NO_COLOR", raising=False)
+    output.set_non_interactive(True)
+    try:
+        assert TyperHandler().style_status("[ok]", StatusStyle.GOOD) == "[ok]"
+    finally:
+        output.set_non_interactive(False)
 
 
 # --- Plain fallbacks: NO_COLOR, non-TTY, and --non-interactive ------------

@@ -11,7 +11,7 @@ import click
 import typer
 
 from agentworks.errors import UserAbort
-from agentworks.output import Role, _pad, _render_header, non_interactive
+from agentworks.output import Role, StatusStyle, _pad, _render_header, non_interactive
 
 if TYPE_CHECKING:
     from agentworks.output import Progress
@@ -29,6 +29,14 @@ if TYPE_CHECKING:
 # before the prompt is issued, and only when that stream is a real
 # terminal; see LLD sec 10.
 _MOUSE_TRACKING_DISABLE = "\x1b[?1000;1002;1003;1006;1015l"
+
+# StatusStyle -> click.style fg color. NEUTRAL has no entry: it renders
+# unstyled, matching Role.BODY's "no color" treatment.
+_STATUS_COLORS: dict[StatusStyle, str] = {
+    StatusStyle.GOOD: "green",
+    StatusStyle.WARN: "yellow",
+    StatusStyle.BAD: "red",
+}
 
 
 class _TyperProgress:
@@ -103,6 +111,15 @@ class TyperHandler:
             # fast-follow) must add its own explicit branch above, not
             # lean on this BODY fall-through.
             typer.echo(f"{_pad(level)}{message}")
+
+    def style_status(self, text: str, style: StatusStyle) -> str:
+        # Gated on stdout, matching every other body-stream role above
+        # (doctor, the STATUS role's one caller so far, echoes to
+        # stdout); when color is disabled this returns text untouched.
+        color = _STATUS_COLORS.get(style)
+        if color is None or not self._color_enabled(sys.stdout):
+            return text
+        return click.style(text, fg=color)
 
     def confirm(self, message: str, level: int, default: bool = False) -> bool:
         # stdout is the stream typer.confirm() prompts and reads on (its

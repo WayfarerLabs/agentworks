@@ -85,11 +85,13 @@ the traceback to stderr instead.
 
 On an interactive terminal, output is tastefully colorized by role so it is easy to scan at a
 glance: a yellow `Warning:` prefix, a red `Error:` prefix, bold section headers, a dim-green result
-line (the closing "VM deleted", "rekeyed", etc.), and dimmed secondary detail. Color is a
-presentation aid only, never carried in the message text. It is suppressed automatically when the
-target stream is not a terminal (pipes, redirects, CI capture) and under `--non-interactive`, so
-scripted and captured output stays byte-plain. Set the `NO_COLOR` environment variable (any value,
-honored by its presence) to opt out of color even on a terminal.
+line (the closing "VM deleted", "rekeyed", etc.), and dimmed secondary detail. `agw doctor` colors
+its per-check status labels the same way (green `[ok]`, yellow `[warn]`, red `[FAIL]`, unstyled
+`[info]`), plus its summary line's `fail`/`warn`/`ok` counts. Color is a presentation aid only,
+never carried in the message text. It is suppressed automatically when the target stream is not a
+terminal (pipes, redirects, CI capture) and under `--non-interactive`, so scripted and captured
+output stays byte-plain. Set the `NO_COLOR` environment variable (any value, honored by its
+presence) to opt out of color even on a terminal.
 
 Pressing Ctrl-C during a long-running operation triggers best-effort cleanup. Where the operation
 can roll back (e.g. `vm create` during the provisioning phase, `workspace create`, `agent create`,

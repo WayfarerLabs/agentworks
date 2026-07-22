@@ -2,11 +2,13 @@
 
 ## 2026-07-22
 
-The SDD is complete and locked as of this date. All plan phases (0-6) are done; every checkbox in
-`plan.md` is checked. CLI output is now **semantic and renderer-owned**: business logic emits a
-semantic role plus an ambient section level, and the handler owns all presentation (indentation,
-header decoration, dimming, and color). This effort folded in issue #211 (section-aware indentation)
-and the bulk of issue #145 (tasteful colorization) under one seam.
+The SDD is complete and locked as of this date. All plan phases (0-7) are done; every checkbox in
+`plan.md` is checked. (Phase 7, `agw doctor` status coloring, was added pre-merge in response to an
+operator request, an in-flight addition while the branch was unmerged, not a post-lock change.) CLI
+output is now **semantic and renderer-owned**: business logic emits a semantic role plus an ambient
+section level, and the handler owns all presentation (indentation, header decoration, dimming, and
+color). This effort folded in issue #211 (section-aware indentation) and the bulk of issue #145
+(tasteful colorization) under one seam.
 
 ### What shipped
 
@@ -36,6 +38,12 @@ and the bulk of issue #145 (tasteful colorization) under one seam.
   gates a fixed palette (yellow `Warning:`, red `Error:`, bold headers, dim-green result, dim
   detail) on `NO_COLOR` unset + target-stream `isatty()` + not `--non-interactive`. Color never
   lives in a message string and is emitted only by the terminal handler.
+- **`agw doctor` status coloring** (Phase 7, added pre-merge). The reserved `STATUS` role is
+  realized as a handler-owned token styler, `style_status(text, StatusStyle)`
+  (GOOD/NEUTRAL/WARN/BAD, gated by the same color policy), used by the doctor CLI renderer to color
+  the `[ok]`/`[info]`/`[warn]`/ `[FAIL]` labels and summary counts. The doctor service layer
+  (`agentworks/doctor.py`) is unchanged; only the CLI renderer maps its `Status` to a style. This is
+  the first consumer of the STATUS role.
 
 ### Permanent homes (SDD-not-permanent)
 
@@ -52,10 +60,11 @@ Nothing under this directory is load-bearing after merge; the directory is delet
 
 ### Deliberately out of scope / deferred (recorded)
 
-- **Status-column colorization (#145 fast-follow).** The `STATUS` role is reserved in the
-  vocabulary, but rendering colored `OK`/`STOPPED`/`BROKEN`/... in `list`/`describe` is deferred,
-  those values are composed into table rows by the renderers and need the role to survive to render
-  time. #145 is otherwise satisfied.
+- **`list`/`describe` status-column colorization (#145 fast-follow).** The `STATUS` role now exists
+  and is realized via `style_status` (doctor is the first consumer, above), so this narrows to the
+  table-cell case: coloring `OK`/`STOPPED`/`BROKEN`/`RUNNING` in the `list`/`describe` table
+  renderers, where the value is composed into a row and the style must survive to render time. #145
+  is otherwise satisfied.
 - **The concurrent multiplexing renderer.** This effort ships the per-flow-isolated section level; a
   per-flow _handler_ (independent sinks per concurrent op) is the concurrent-renderer effort's job.
   When it lands, move `_handler` into the ContextVar-backed state and add an `output`-owned
@@ -67,16 +76,16 @@ Nothing under this directory is load-bearing after merge; the directory is delet
 
 ### Review history
 
-Every phase was reviewed by `agentworks-reviewer`, and each code-heavy phase (1, 3, 4, 5)
-additionally got a fresh-eyes senior-dev pass from a Sonnet `general-purpose` reviewer, since
-Copilot was quota-limited. The pre-implementation LLD review caught the
+Every phase was reviewed by `agentworks-reviewer`, and each code-heavy phase (1, 3, 4, 5, and the
+doctor Phase 7) additionally got a fresh-eyes senior-dev pass from a Sonnet `general-purpose`
+reviewer, since Copilot was quota-limited. The pre-implementation LLD review caught the
 level-only-vs-per-flow-handler blocker (worker threads that emit output would lose the handler if it
 moved into the ContextVar), which reshaped the state model. Phase reviews confirmed each caller
 conversion is behavior-preserving (verified by whitespace-ignoring diffs), the byte-identical
 invariant holds at level 0, and color never leaks into non-TTY / `NO_COLOR` / `--non-interactive`
 output. The FRD, HLA, prior-art, plan, and LLD are accurate as-built and are now locked.
 
-Final gate at closeout: `ruff check` clean, `mypy` clean (348 files), full suite green (2288 tests).
+Final gate at closeout: `ruff check` clean, `mypy` clean (349 files), full suite green (2306 tests).
 
 ### Issues
 

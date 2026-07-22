@@ -182,6 +182,13 @@ def test_detail_nests_via_headerless_section(
     assert (Role.DETAIL, 1, "deep") in captured_output.lines
 
 
+def test_style_status_delegates_to_current_handler(captured_output: CapturedOutput) -> None:
+    # captured_output installs the test handler, which never colorizes;
+    # this pins that the free function reaches whatever handler is
+    # installed rather than hardcoding a rendering of its own.
+    assert output.style_status("[ok]", output.StatusStyle.GOOD) == "[ok]"
+
+
 def test_result_always_reports_level_zero(captured_output: CapturedOutput) -> None:
     with output.section("Provisioning"), output.section(None):
         assert output._current_level() == 2
@@ -286,3 +293,11 @@ def test_default_handler_prompt_indents_label_with_level(
     monkeypatch.setattr("builtins.input", lambda text="": prompts.append(text) or "")
     output._DefaultHandler().prompt("Name", 2)
     assert prompts == ["    Name: "]
+
+
+def test_default_handler_style_status_never_colorizes() -> None:
+    # _DefaultHandler has no terminal to colorize against; every style
+    # returns the text unchanged, same as StatusStyle.NEUTRAL everywhere.
+    handler = output._DefaultHandler()
+    assert handler.style_status("[ok]", output.StatusStyle.GOOD) == "[ok]"
+    assert handler.style_status("[FAIL]", output.StatusStyle.BAD) == "[FAIL]"
