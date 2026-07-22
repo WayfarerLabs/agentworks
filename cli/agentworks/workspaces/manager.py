@@ -812,20 +812,20 @@ def _rehome_vm(
 
                 # Update database
                 db.update_workspace_path(ws_name, new_path)
-                output.info(f"Database updated: workspace_path = {new_path}")
+                output.detail(f"Database updated: workspace_path = {new_path}")
 
                 # Regenerate VS Code workspace file
                 vscode_path = generate_vscode_workspace(vm, config, ws_name, new_path)
-                output.info(f"VS Code workspace updated: {vscode_path}")
+                output.detail(f"VS Code workspace updated: {vscode_path}")
 
                 # Handle old directory
                 if remove_old:
                     output.info(f"Removing old directory {old_path}...")
                     target.run(f"rm -rf {op}", sudo=True, timeout=60)
-                    output.info("Old directory removed")
+                    output.detail("Old directory removed")
                 else:
-                    output.info(f"\nOld directory left in place at {old_path}")
-                    output.info("Remove it manually when ready, or re-run with --remove-old")
+                    output.info(f"Old directory left in place at {old_path}")
+                    output.detail("Remove it manually when ready, or re-run with --remove-old")
 
             except KeyboardInterrupt:
                 output.warn(
@@ -849,7 +849,7 @@ def _rehome_vm(
         finally:
             ssh_logger.close()
 
-        output.result(f"\nWorkspace '{ws_name}' rehomed to {new_path}")
+        output.result(f"Workspace '{ws_name}' rehomed to {new_path}")
 
 
 def delete_workspace(

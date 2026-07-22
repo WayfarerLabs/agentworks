@@ -511,6 +511,56 @@ def test_stop_session_stopped_vm_gate_burst_seeds_the_boundary(
     assert resolve_counter == [["proxmox-token"]]
 
 
+def test_single_stop_ends_on_a_result_terminal_without_duplication(
+    db: Database,
+    make_config,  # noqa: ANN001
+    resolve_counter: list[list[str]],
+    target: _FakeTarget,
+    monkeypatch: pytest.MonkeyPatch,
+    captured_output,  # noqa: ANN001
+) -> None:
+    """A single OK-status stop ends on a column-0 result() (parity with the
+    force-stop sibling), and the shared _execute_stop helper's per-session
+    'stopped' body line is suppressed so the terminal is not doubled."""
+    from agentworks.db import SessionStatus
+    from agentworks.output import Role
+
+    config = make_config()
+    _seed_singular(db)
+    _reachable(monkeypatch, True)
+    monkeypatch.setattr("time.sleep", lambda _s: None)
+    monkeypatch.setattr(
+        session_manager, "_ensure_pid", lambda session, *, target, db: session
+    )
+    monkeypatch.setattr(
+        session_manager,
+        "check_session_status",
+        lambda session, *, target: SessionStatus.OK,
+    )
+    monkeypatch.setattr(
+        session_manager,
+        "_build_session_target",
+        lambda session, *, vm, config, db, admin_target: admin_target,
+    )
+    monkeypatch.setattr(
+        session_manager,
+        "batch_check_status",
+        lambda sessions, *, target: {s.name: SessionStatus.OK for s in sessions},
+    )
+    monkeypatch.setattr(session_manager, "_kill_session", lambda *a, **k: True)
+
+    session_manager.stop_session(db, config, name="s1")
+
+    # The terminal is exactly one RESULT line, not doubled by the helper's
+    # per-session body line (announce_stopped=False suppresses it).
+    stopped = [
+        (role, msg)
+        for role, _lvl, msg in captured_output.lines
+        if msg == "Session 's1' stopped"
+    ]
+    assert stopped == [(Role.RESULT, "Session 's1' stopped")]
+
+
 def test_delete_session_reachable_vm_is_one_boundary_burst(
     db: Database,
     make_config,  # noqa: ANN001

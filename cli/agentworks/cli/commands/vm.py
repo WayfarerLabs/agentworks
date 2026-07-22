@@ -272,10 +272,11 @@ def vm_logs(
     show_all: Annotated[bool, typer.Option("--all", help="Show all logs instead of only the latest")] = False,
 ) -> None:
     """Show SSH logs for a VM."""
+    from agentworks import output
     from agentworks.ssh import LOG_DIR
 
     if not LOG_DIR.exists():
-        typer.echo("No logs found.")
+        output.info("No logs found.")
         return
 
     # Collect all logs for this VM -- filename is <vm>-<timestamp>-<cmd>.log
@@ -283,14 +284,16 @@ def vm_logs(
     logs = [(str(p), p.name) for p in all_logs]
 
     if not logs:
-        typer.echo(f"No SSH logs found for VM '{name}'.")
+        output.info(f"No SSH logs found for VM '{name}'.")
         return
 
+    # Header names the log file (the handler owns any decoration); the raw
+    # log body is emitted flush-left so it stays copy-paste faithful.
     display = logs if show_all else logs[:1]
     for log_path, log_name in display:
-        typer.echo(f"--- {log_name} ---")
-        typer.echo(Path(log_path).read_text(), nl=False)
-        typer.echo("")
+        output.info(log_name)
+        output.info(Path(log_path).read_text().rstrip("\n"))
+        output.info("")
 
 
 @vm_app.command("console")

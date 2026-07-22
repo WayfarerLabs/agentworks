@@ -408,15 +408,16 @@ def resource_migrate(
     if not yes and not output.confirm("Proceed?", default=False):
         raise UserAbort("migration cancelled")
 
+    output.info("Applying migration...")
     result = execute_plan(plan, config)
     for path in result.created:
-        output.info(f"Created {path}")
+        output.detail(f"Created {path}")
     for path in result.appended:
-        output.info(f"Appended to {path}")
-    output.info(f"Rewrote {plan.config_path} (backup: {result.backup_path})")
+        output.detail(f"Appended to {path}")
+    output.detail(f"Rewrote {plan.config_path} (backup: {result.backup_path})")
     if result.dropped_secret_backends:
-        output.info("Dropped deprecated [secret_backends.*] sections.")
-    output.info(f"verified: registry unchanged ({result.verified_rows} resources)")
+        output.detail("Dropped deprecated [secret_backends.*] sections.")
+    output.result(f"verified: registry unchanged ({result.verified_rows} resources)")
 
 
 @resource_app.command("sample")

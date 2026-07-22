@@ -395,6 +395,46 @@ def test_rekey_scope_reaches_node_readiness(
     assert scope.vm == "box"
 
 
+def test_rekey_wraps_steps_in_a_section(
+    db: Database,
+    make_config,  # noqa: ANN001
+    _ts_key: None,
+    monkeypatch: pytest.MonkeyPatch,
+    captured_output,  # noqa: ANN001
+) -> None:
+    """The rekey step sequence renders inside a 'Rekeying' section: the
+    tailnet steps are primary (BODY) lines one level deep, the read-back
+    IP is a subordinate DETAIL, and the terminal is a column-0 RESULT."""
+    from agentworks.output import Role
+
+    config = make_config()
+    _seed_vm(db)
+    _reachable(monkeypatch, True)
+    _fake_status(monkeypatch, VMStatus.RUNNING)
+    _fake_rekey_transports(monkeypatch)
+
+    vm_manager.rekey_vm(db, config, "box")
+
+    assert any(
+        role is Role.HEADER and lvl == 0 and msg == "Rekeying 'box'"
+        for role, lvl, msg in captured_output.lines
+    )
+    body_l1 = [
+        msg for role, lvl, msg in captured_output.lines if role is Role.BODY and lvl == 1
+    ]
+    assert "Joining new tailnet..." in body_l1
+    assert "Reading new Tailscale IP..." in body_l1
+    # The read-back IP is a subordinate detail of the read step, not a step.
+    assert any(
+        role is Role.DETAIL and msg.startswith("Tailscale IP:")
+        for role, lvl, msg in captured_output.lines
+    )
+    assert any(
+        role is Role.RESULT and lvl == 0 and "rekeyed successfully" in msg
+        for role, lvl, msg in captured_output.lines
+    )
+
+
 # == port_forward_vm: a gated command =========================================
 
 
@@ -646,3 +686,35 @@ def test_backup_scope_reaches_node_readiness(
     assert scope is not None
     assert scope.level is ScopeLevel.VM
     assert scope.vm == "box"
+
+
+def test_backup_wraps_phases_in_a_section(
+    db: Database,
+    backup_env,  # noqa: ANN001
+    monkeypatch: pytest.MonkeyPatch,
+    captured_output,  # noqa: ANN001
+) -> None:
+    """The backup phases render inside a section: a level-0 header, the
+    export phases as primary (BODY) steps one level deeper (not orphaned
+    detail), and the terminal 'Backup complete' as a column-0 RESULT."""
+    from agentworks.output import Role
+    from agentworks.vms import backup as vm_backup
+
+    _seed_vm(db)
+    _reachable(monkeypatch, True)
+
+    vm_backup.backup_vm(db, backup_env, "box")
+
+    assert any(
+        role is Role.HEADER and lvl == 0 and msg.startswith("Backing up VM 'box'")
+        for role, lvl, msg in captured_output.lines
+    )
+    body_l1 = [
+        msg for role, lvl, msg in captured_output.lines if role is Role.BODY and lvl == 1
+    ]
+    assert "Reading database (consistent snapshot)..." in body_l1
+    assert "Exporting VM metadata..." in body_l1
+    assert any(
+        role is Role.RESULT and lvl == 0 and msg.startswith("Backup complete:")
+        for role, lvl, msg in captured_output.lines
+    )

@@ -339,7 +339,7 @@ def create_console(
             db.add_console_session(name, spec.name, default_shells(spec.shells))
 
     extras_note = " + admin shell" if add_admin_shell else ""
-    output.info(f"Console '{name}' created with {len(specs)} session(s){extras_note}.")
+    output.result(f"Console '{name}' created with {len(specs)} session(s){extras_note}.")
 
 
 def add_sessions(
@@ -421,7 +421,7 @@ def add_sessions(
         for spec in specs:
             db.add_console_session(console_name, spec.name, default_shells(spec.shells))
 
-    output.info(f"Added {len(specs)} session(s) to console '{console_name}'.")
+    output.result(f"Added {len(specs)} session(s) to console '{console_name}'.")
 
     with _live_best_effort(f"add-sessions to '{console_name}'", console_name=console_name):
         live = _live_target(db, config, console.vm_name)
@@ -468,7 +468,7 @@ def remove_sessions(
     with db.transaction():
         for n in session_names:
             db.remove_console_session(console_name, n)
-    output.info(
+    output.result(
         f"Removed {len(session_names)} session(s) from console '{console_name}'."
     )
 
@@ -553,7 +553,7 @@ def reorder_sessions(
         return
 
     db.reorder_console_sessions(console_name, desired_order)
-    output.info(
+    output.result(
         f"Reordered {len(front)} session(s) to the front of console "
         f"'{console_name}'."
     )
@@ -662,7 +662,7 @@ def add_shell(
     new_shells = [*cs.shells, new_shell]
     db.update_console_shells(console_name, session_name, new_shells)
     user_tag = "admin" if admin else "agent"
-    output.info(
+    output.result(
         f"Added {user_tag} shell at {cwd or '<workspace>'} to '{session_name}' "
         f"in console '{console_name}'."
     )
@@ -813,6 +813,9 @@ def restore_session(
                 vm=vm,
                 layout=layout,
                 preserve_memo={},
+            )
+            output.result(
+                f"Rebuilt window '{session_name}' in console '{console_name}'."
             )
             return
 
@@ -992,6 +995,9 @@ def restore_session(
         # we still want consistent landing focus).
         _apply_layout(target, q_con, q_win, layout)
         _focus_session_pane(target, q_con, q_win)
+        output.result(
+            f"Restored {output.count(len(missing), 'shell pane')} in '{session_name}'."
+        )
 
 
 # -- Read-side helpers ----------------------------------------------------
@@ -1067,7 +1073,7 @@ def describe_console(db: Database, *, name: str) -> None:
 
     output.info("")
     for i, m in enumerate(members):
-        output.info(f"  [{i}] {m.session_name}  ({_shell_summary(m.shells)})")
+        output.info(f"[{i}] {m.session_name}  ({_shell_summary(m.shells)})")
 
 
 # -- Tmux orchestration ----------------------------------------------------
@@ -1860,7 +1866,8 @@ def _build_console_tmux(
         placeholder_used = True
 
     if members:
-        output.info(
+        # A sub-step of attach_console's "Building/Rebuilding console..." line.
+        output.detail(
             f"Adding {len(members)} session window(s) to console '{console.name}'..."
         )
     # One memo for the whole build: every window's agent panes ask the same VM

@@ -2072,6 +2072,7 @@ def _execute_stop(
     *,
     db: Database,
     force: bool = False,
+    announce_stopped: bool = True,
 ) -> list[tuple[str, str]]:
     """Core stop logic: C-c all, single grace period, kill survivors.
 
@@ -2082,6 +2083,12 @@ def _execute_stop(
     (admin SSH for an agent session in batch ops), sudo is needed.
 
     Handles both single and batch stops. Returns list of (name, error) failures.
+
+    ``announce_stopped`` gates the per-session "Session 'x' stopped" body
+    line. Batch stops keep it (the per-item outcome of a loop that has no
+    single terminal); the single-session caller sets it False because it
+    owns a column-0 ``result()`` terminal of its own, and the per-session
+    body line would just duplicate it.
     """
     import time
 
@@ -2173,7 +2180,8 @@ def _execute_stop(
             target.run(f"rm -f {shlex.quote(session.socket_path)}", sudo=kill_sudo, check=False)
 
         db.update_session_pid(session.name, PID_STOPPED)
-        output.info(f"Session '{session.name}' stopped")
+        if announce_stopped:
+            output.info(f"Session '{session.name}' stopped")
 
     return failed
 
@@ -2239,18 +2247,27 @@ def stop_session(
                     entity_name=name,
                 )
             db.update_session_pid(name, PID_STOPPED)
-            output.info(f"Session '{name}' force-stopped")
+            output.result(f"Session '{name}' force-stopped")
             return
 
         # OK: delegate to shared stop logic. target_owns_session=True
-        # because _build_session_target returned a same-uid target.
-        failed = _execute_stop([(session, target, True)], db=db, force=force)
+        # because _build_session_target returned a same-uid target. The
+        # anchor gives _execute_stop's internal detail lines a parent (the
+        # batch caller emits its own "Stopping N session(s)..." anchor).
+        # announce_stopped=False: this single-stop path owns the terminal
+        # (the column-0 result() below), so the shared helper must not also
+        # emit its per-session "stopped" body line and double it up.
+        output.info(f"Stopping session '{name}'...")
+        failed = _execute_stop(
+            [(session, target, True)], db=db, force=force, announce_stopped=False
+        )
         if failed:
             raise ExternalError(
                 f"failed to stop session '{name}': {failed[0][1]}",
                 entity_kind="session",
                 entity_name=name,
             )
+        output.result(f"Session '{name}' stopped")
 
 
 def restart_session(

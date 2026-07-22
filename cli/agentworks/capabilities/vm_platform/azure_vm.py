@@ -368,7 +368,7 @@ class AzureVMPlatform(VMPlatform):
             resource_group=str(self.platform_config["resource_group"]),
             region=str(self.platform_config["region"]),
         )
-        output.detail(f"Performing runup test for vm-site/{self.site_name}...")
+        output.info(f"Performing runup test for vm-site/{self.site_name}...")
         try:
             exists = self._resource_client(az).resource_groups.check_existence(
                 az.resource_group
@@ -731,7 +731,7 @@ class AzureVMPlatform(VMPlatform):
 
         try:
             # Create (or re-create) the public IP
-            output.detail("Attaching temporary public IP...")
+            output.info("Attaching temporary public IP...")
             ip_poller = network.public_ip_addresses.begin_create_or_update(  # type: ignore[call-overload]
                 rg,
                 f"{name}-ip",
@@ -765,7 +765,7 @@ class AzureVMPlatform(VMPlatform):
         rg, name, az_cfg = _parse_resource_id(_resource_id(vm))
         network = self._network_client(az_cfg)
 
-        output.detail("Removing public IP...")
+        output.info("Removing public IP...")
         # Detach from NIC
         with contextlib.suppress(Exception):
             nic = network.network_interfaces.get(rg, f"{name}-nic")

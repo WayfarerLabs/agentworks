@@ -426,6 +426,7 @@ def delete_agent(
     all_sessions = db.list_sessions()
     agent_sessions = [s for s in all_sessions if s.agent_name == name]
     if agent_sessions and not force:
+        output.info(f"Agent '{name}' has {output.count(len(agent_sessions), 'session')}:")
         for s in agent_sessions:
             output.detail(f"{s.name}")
         raise StateError(

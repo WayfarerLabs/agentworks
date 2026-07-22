@@ -543,7 +543,7 @@ def create_vm(
         sync_ssh_config(config, db)
     except Exception as e:
         output.warn(f"SSH config sync failed: {e}")
-        output.detail("VM is likely still usable.")
+        output.info("VM is likely still usable.")
 
     # Final status is set by initialize_vm (COMPLETE or PARTIAL). The
     # terminal outcome line renders at column 0 via result().
@@ -1076,7 +1076,7 @@ def add_git_credential(db: Database, config: Config, name: str, credential_name:
         # skips and continues to partial): the operator asked to add
         # exactly this one credential.
         if config.defaults.runup_git_credentials:
-            output.detail(
+            output.info(
                 f"Performing runup test for git-credential/{credential_name}..."
             )
             cred_node.runup(scoped_ctx(cred_node.secret_refs()))
@@ -1124,7 +1124,7 @@ def add_git_credential(db: Database, config: Config, name: str, credential_name:
             f"else git config --global credential.helper store; fi"
         )
 
-    output.info(f"Git credential '{credential_name}' configured on VM '{name}'")
+    output.result(f"Git credential '{credential_name}' configured on VM '{name}'")
 
 
 def _credential_line_key(line: str) -> tuple[str, str] | None:
@@ -1452,9 +1452,7 @@ def rekey_vm(
             entity_name=name,
         )
 
-    output.info(f"Rekeying '{name}'...")
-
-    with contextlib.ExitStack() as _stack:
+    with output.section(f"Rekeying '{name}'"), contextlib.ExitStack() as _stack:
         # The activation gate, opened AFTER the boundary at exactly the
         # point HEAD held ``keep_active``: converge power state (a race
         # from the running check above, as at HEAD), then hold for the
@@ -1488,24 +1486,24 @@ def rekey_vm(
         restart_cmd = "systemctl restart tailscaled"
         stabilize_secs = 15  # pause between steps for daemon/network stability
 
-        output.detail("Restarting Tailscale daemon...")
+        output.info("Restarting Tailscale daemon...")
         exec_target.run(restart_cmd, sudo=True, timeout=15)
         time.sleep(stabilize_secs)
 
-        output.detail("Logging out of current tailnet...")
+        output.info("Logging out of current tailnet...")
         exec_target.run("tailscale logout", sudo=True, timeout=30)
         time.sleep(stabilize_secs)
 
-        output.detail("Joining new tailnet...")
+        output.info("Joining new tailnet...")
         quoted_key = shlex.quote(ts_auth_key)
         exec_target.run(f"tailscale up --auth-key {quoted_key}", sudo=True, timeout=30)
         time.sleep(stabilize_secs)
 
-        output.detail("Restarting Tailscale daemon...")
+        output.info("Restarting Tailscale daemon...")
         exec_target.run(restart_cmd, sudo=True, timeout=15)
         time.sleep(stabilize_secs)
 
-        output.detail("Reading new Tailscale IP...")
+        output.info("Reading new Tailscale IP...")
         result = exec_target.run("tailscale ip -4", sudo=True, timeout=15)
         raw_ip = result.stdout.strip()
         new_ip = raw_ip.splitlines()[0].strip() if raw_ip else ""
@@ -1530,7 +1528,7 @@ def rekey_vm(
             )
 
         # Always verify Tailscale SSH connectivity to the new IP
-        output.detail(f"Verifying SSH to {new_ip}...")
+        output.info(f"Verifying SSH to {new_ip}...")
         from agentworks.transports import SSHTransport
 
         ts_target = transport(vm, config)
@@ -1862,7 +1860,7 @@ def reinit_vm(
     # Terminal outcome line at column 0 via result().
     if refreshed_vm.init_status == InitStatus.PARTIAL.value:
         output.result(f"VM '{name}' reinitialized (with warnings, see above)")
-        output.detail(f"Log: {logger.path}")
+        output.info(f"Log: {logger.path}")
     else:
         output.result(f"VM '{name}' reinitialized successfully!")
 

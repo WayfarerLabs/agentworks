@@ -90,9 +90,10 @@ def grant_workspaces(
             for ws in db.list_workspaces(vm_name=vm.name):
                 add_to_workspace_group(vm, config, db, agent.linux_user, ws.name, logger=None)
                 db.insert_agent_grant(agent_name, ws.name, "explicit")
-            output.info(f"Agent '{agent_name}' granted access to all workspaces")
+            output.result(f"Agent '{agent_name}' granted access to all workspaces")
             return
 
+        granted = 0
         for ws_name in workspace_names:
             found_ws = db.get_workspace(ws_name)
             if found_ws is None:
@@ -100,7 +101,11 @@ def grant_workspaces(
                 continue
             add_to_workspace_group(vm, config, db, agent.linux_user, ws_name, logger=None)
             db.insert_agent_grant(agent_name, ws_name, "explicit")
-            output.detail(f"Granted: {ws_name}")
+            output.info(f"Granted: {ws_name}")
+            granted += 1
+        output.result(
+            f"Agent '{agent_name}' granted access to {output.count(granted, 'workspace')}"
+        )
 
 
 def revoke_workspaces(
@@ -160,7 +165,7 @@ def revoke_workspaces(
                     remaining_implicit.append(ws_name)
                 else:
                     remove_from_workspace_group(vm, config, db, agent.linux_user, ws_name, logger=None)
-            output.info(f"All explicit grants revoked for agent '{agent_name}'")
+            output.result(f"All explicit grants revoked for agent '{agent_name}'")
             if remaining_implicit:
                 output.warn(
                     f"agent still has implicit access via sessions to: {', '.join(remaining_implicit)}"
@@ -171,9 +176,13 @@ def revoke_workspaces(
             db.delete_agent_grant(agent_name, ws_name, "explicit")
             if not db.has_any_grant(agent_name, ws_name):
                 remove_from_workspace_group(vm, config, db, agent.linux_user, ws_name, logger=None)
-                output.detail(f"Revoked: {ws_name}")
+                output.info(f"Revoked: {ws_name}")
             else:
-                output.detail(f"Revoked: {ws_name} (still has implicit access via sessions)")
+                output.info(f"Revoked: {ws_name} (still has implicit access via sessions)")
+        output.result(
+            f"Revoked {output.count(len(workspace_names), 'workspace grant')} "
+            f"from agent '{agent_name}'"
+        )
 
 
 def revoke_workspace_grants(

@@ -47,7 +47,7 @@ def render_dry_run(plan: MigrationPlan, *, full: bool = False) -> list[str]:
     for write in plan.writes:
         header = "appended to" if write.exists else "written to"
         lines.append("")
-        lines.append(f"--- documents {header} {write.path} ---")
+        lines.append(f"Documents {header} {write.path}:")
         for index, document in enumerate(write.documents):
             if index or write.exists:
                 lines.append("---")
@@ -63,6 +63,6 @@ def render_dry_run(plan: MigrationPlan, *, full: bool = False) -> list[str]:
     )
     if diff:
         lines.append("")
-        lines.append("--- config.toml changes ---")
+        lines.append("Config.toml changes:")
         lines.extend(diff)
     return lines

@@ -772,11 +772,11 @@ def test_dry_run_is_plan_only_and_summary_by_default(tmp_path: Path) -> None:
     original = cfg.read_text()
     _config, plan = _plan(cfg, [], all_resources=True)
     summary = render_dry_run(plan)
-    assert not any("config.toml changes" in line for line in summary)
+    assert not any("Config.toml changes" in line for line in summary)
     assert any("Pass --full" in line for line in summary)
     assert any("secret/npm-token -> " in line for line in summary)
     detailed = render_dry_run(plan, full=True)
-    assert any("config.toml changes" in line for line in detailed)
+    assert any("Config.toml changes" in line for line in detailed)
     assert any("apiVersion: agentworks/v1" in line for line in detailed)
     assert cfg.read_text() == original
     assert not (tmp_path / "resources").exists()
@@ -853,7 +853,7 @@ def test_cli_migrate_dry_run_full_includes_content(
     )
     assert result.exit_code == 0, result.stdout
     assert "apiVersion: agentworks/v1" in result.stdout
-    assert "config.toml changes" in result.stdout
+    assert "Config.toml changes" in result.stdout
 
 
 def test_cli_migrate_full_requires_dry_run(

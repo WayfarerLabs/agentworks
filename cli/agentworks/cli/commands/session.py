@@ -245,10 +245,11 @@ def session_restart(
                 names = ", ".join(s.name for s in running[:5])
                 suffix = f" (and {len(running) - 5} more)" if len(running) > 5 else ""
                 output.warn(
-                    f"{len(running)} session(s) are running and will be restarted ({names}{suffix}).\n"
-                    "Hint: use --all-stopped to restart only stopped sessions."
+                    f"{len(running)} session(s) are running and will be restarted ({names}{suffix})."
                 )
-                if not output.confirm("Continue?"):
+                if not output.confirm(
+                    "Continue? (--all-stopped restarts only the stopped sessions)"
+                ):
                     from agentworks.errors import UserAbort
 
                     raise UserAbort("restart cancelled")
