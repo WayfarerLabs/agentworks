@@ -51,9 +51,7 @@ class _GatePlatform:
         self.events.append("start")
 
     @contextlib.contextmanager
-    def vm_active(
-        self, vm: VMRow, *, config: object | None = None
-    ) -> Iterator[None]:
+    def vm_active(self, vm: VMRow, *, config: object | None = None) -> Iterator[None]:
         self.holds += 1
         self.events.append("hold-open")
         try:
@@ -62,15 +60,9 @@ class _GatePlatform:
             self.events.append("hold-close")
 
 
-def _node(
-    db: Database, platform: _GatePlatform, vm: VMRow
-) -> tuple[LiveVMNode, VMSiteNode]:
-    site = VMSiteNode(
-        "stub", cast("VMPlatform", platform), (), cast("Registry", object())
-    )
-    node = LiveVMNode(
-        db, cast("Config", object()), cast("Registry", object()), vm, site
-    )
+def _node(db: Database, platform: _GatePlatform, vm: VMRow) -> tuple[LiveVMNode, VMSiteNode]:
+    site = VMSiteNode("stub", cast("VMPlatform", platform), (), cast("Registry", object()))
+    node = LiveVMNode(db, cast("Config", object()), cast("Registry", object()), vm, site)
     return node, site
 
 
@@ -87,9 +79,7 @@ def _no_resolve(name: str) -> str:
     raise AssertionError(f"gate resolved '{name}' unexpectedly")
 
 
-def test_fast_path_skips_status_and_secrets(
-    db: Database, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_fast_path_skips_status_and_secrets(db: Database, monkeypatch: pytest.MonkeyPatch) -> None:
     """Oracle: a reachable Tailscale host short-circuits before any
     backend round trip; gate addition: before any secret, too."""
     vm = _seed(db)
@@ -127,9 +117,7 @@ def test_auto_resume_starts_and_holds_through_tailscale(
     ]
 
 
-def test_manually_stopped_raises_and_skips_the_ping(
-    db: Database, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_manually_stopped_raises_and_skips_the_ping(db: Database, monkeypatch: pytest.MonkeyPatch) -> None:
     """Oracle: the refusal names the operator's own action, carries the
     explicit-start hint, and the row's flag skips the reachability
     probe (pinging a stopped VM would burn the timeout to reach the
@@ -153,9 +141,7 @@ def test_manually_stopped_raises_and_skips_the_ping(
     assert platform.start_calls == 0
 
 
-def test_manually_stopped_but_running_out_of_band_proceeds(
-    db: Database, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_manually_stopped_but_running_out_of_band_proceeds(db: Database, monkeypatch: pytest.MonkeyPatch) -> None:
     """Oracle: the flag is intent, not observed state; RUNNING proceeds
     without a start and without raising."""
     _seed(db)
@@ -170,9 +156,7 @@ def test_manually_stopped_but_running_out_of_band_proceeds(
     assert platform.start_calls == 0
 
 
-def test_flag_is_reread_before_auto_start(
-    db: Database, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_flag_is_reread_before_auto_start(db: Database, monkeypatch: pytest.MonkeyPatch) -> None:
     """Oracle: a concurrent `vm stop` between the row load and the gate
     must not be auto-undone (the re-read race guard)."""
     vm = _seed(db)  # loaded with operator_stopped=False
@@ -218,9 +202,7 @@ def test_deallocated_auto_resumes_like_stopped(
     assert platform.start_calls == 1
 
 
-def test_unknown_status_proceeds_without_start(
-    db: Database, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_unknown_status_proceeds_without_start(db: Database, monkeypatch: pytest.MonkeyPatch) -> None:
     """Oracle: a transient status failure must not trigger a spurious
     start; the real op surfaces the real error."""
     vm = _seed(db)
@@ -232,9 +214,7 @@ def test_unknown_status_proceeds_without_start(
     assert platform.start_calls == 0
 
 
-def test_gate_span_holds_through_the_command_body(
-    db: Database, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_gate_span_holds_through_the_command_body(db: Database, monkeypatch: pytest.MonkeyPatch) -> None:
     """``activation_gate`` over the node is ``keep_active``'s shape:
     converge, then hold for the body's duration."""
     vm = _seed(db)
@@ -258,9 +238,7 @@ def test_rejoin_auth_key_reads_lazily_through_the_gate_reader(
     monkeypatch.setattr(vm_manager, "_is_tailscale_reachable", lambda host: False)
     platform = _GatePlatform(status=VMStatus.STOPPED)
     node, _ = _node(db, platform, vm)
-    monkeypatch.setattr(
-        node, "repair_secret_refs", lambda: ("tailscale-auth-key",)
-    )
+    monkeypatch.setattr(node, "repair_secret_refs", lambda: ("tailscale-auth-key",))
     captured: dict[str, Callable[[], str] | None] = {}
 
     def _capture(*a: object, **k: object) -> None:
@@ -304,9 +282,7 @@ def test_template_node_declares_only_the_tailscale_key() -> None:
     assert node.deps() == ()
 
 
-def test_template_node_preflight_predicts_the_key(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_template_node_preflight_predicts_the_key(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """The relocated readiness check predicts CENTRALLY over the key's
     declaration (the held-resolver prediction seam is closed): with the
     env-var backend alone, a set variable predicts resolvable and an
@@ -318,9 +294,7 @@ def test_template_node_preflight_predicts_the_key(
     from agentworks.vms.templates import ResolvedVMTemplate
     from tests.orchestrated_fixtures import write_operator_config
 
-    config = write_operator_config(
-        tmp_path, '[secret_config]\nbackends = ["env-var"]\n'
-    )
+    config = write_operator_config(tmp_path, '[secret_config]\nbackends = ["env-var"]\n')
     registry = build_registry(config)
     node = vm_template_node(ResolvedVMTemplate(name="default"), registry)
 
@@ -339,12 +313,8 @@ def _pending(db: Database):
     from agentworks.vms.nodes import pending_vm_node, vm_template_node
     from agentworks.vms.templates import ResolvedVMTemplate
 
-    template = vm_template_node(
-        ResolvedVMTemplate(name="default"), cast("Registry", object())
-    )
-    site = VMSiteNode(
-        "stub", cast("VMPlatform", _GatePlatform()), (), cast("Registry", object())
-    )
+    template = vm_template_node(ResolvedVMTemplate(name="default"), cast("Registry", object()))
+    site = VMSiteNode("stub", cast("VMPlatform", _GatePlatform()), (), cast("Registry", object()))
     return pending_vm_node(db, "nvm", template, site, ()), template, site
 
 

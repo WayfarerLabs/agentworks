@@ -103,13 +103,9 @@ def parse_session_spec(spec: str) -> SessionSpec:
                 f"invalid session spec '{spec}': shell count must be a non-negative integer"
             ) from None
         if shells < 0:
-            raise ValidationError(
-                f"invalid session spec '{spec}': shell count must be >= 0"
-            )
+            raise ValidationError(f"invalid session spec '{spec}': shell count must be >= 0")
     else:
-        raise ValidationError(
-            f"invalid session spec '{spec}': use 'name' or 'name+N'"
-        )
+        raise ValidationError(f"invalid session spec '{spec}': use 'name' or 'name+N'")
     try:
         validate_name(name, allow_double_hyphen=True)
     except ValidationError as exc:
@@ -144,9 +140,7 @@ def _vm_sessions(db: Database, vm_name: str) -> list[SessionRow]:
     return sessions
 
 
-def running_session_names(
-    db: Database, config: Config, vm_name: str
-) -> list[str]:
+def running_session_names(db: Database, config: Config, vm_name: str) -> list[str]:
     """SSH-probe the VM and return names of sessions whose live tmux state is OK.
 
     Uses the same one-round-trip-per-VM check that powers ``aw session list``.
@@ -167,27 +161,19 @@ def running_session_names(
     # with a status, the probe almost certainly failed (e.g. SSH unreachable).
     # batch_check_all_sessions warns on exceptions but returns silently on
     # `check=False` non-zero exits, so we cannot rely on the warning alone.
-    checkable = [
-        s for s in sessions
-        if s.pid is not None and s.pid != PID_STOPPED and s.pid > 0 and s.boot_id
-    ]
+    checkable = [s for s in sessions if s.pid is not None and s.pid != PID_STOPPED and s.pid > 0 and s.boot_id]
     if checkable and not status_map:
         raise ConnectivityError(
-            f"could not determine running sessions on VM '{vm_name}' "
-            f"(status probe returned no results)",
+            f"could not determine running sessions on VM '{vm_name}' (status probe returned no results)",
             entity_kind="vm",
             entity_name=vm_name,
             hint="Check VM reachability.",
         )
 
-    return sorted(
-        s.name for s in sessions if status_map.get(s.name) == SessionStatus.OK
-    )
+    return sorted(s.name for s in sessions if status_map.get(s.name) == SessionStatus.OK)
 
 
-def infer_vm_from_session_specs(
-    db: Database, session_specs: list[str]
-) -> str | None:
+def infer_vm_from_session_specs(db: Database, session_specs: list[str]) -> str | None:
     """Return the single VM hosting all listed sessions.
 
     - Returns None if *session_specs* is empty or none of the names resolve to
@@ -310,9 +296,7 @@ def create_console(
 
     if fill_all:
         explicit_names = {s.name for s in specs}
-        extras = sorted(
-            s.name for s in _vm_sessions(db, vm_name) if s.name not in explicit_names
-        )
+        extras = sorted(s.name for s in _vm_sessions(db, vm_name) if s.name not in explicit_names)
         specs.extend(SessionSpec(name=n, shells=0) for n in extras)
 
     if not specs and not add_admin_shell:
@@ -403,8 +387,11 @@ def add_sessions(
                 # use_admin promotion only fires for admin-mode sessions.
                 use_admin = session_user == vm_row.admin_username
                 pane = _pane_secret_target(
-                    db, registry,
-                    vm=vm_row, session=session, is_admin_pane=use_admin,
+                    db,
+                    registry,
+                    vm=vm_row,
+                    session=session,
+                    is_admin_pane=use_admin,
                 )
                 if pane is None:
                     continue
@@ -413,9 +400,7 @@ def add_sessions(
                 # unions per secret name).
                 new_shell_targets.append(pane)
         if new_shell_targets:
-            secret_values = resolve_for_command(
-                new_shell_targets, config, registry
-            )
+            secret_values = resolve_for_command(new_shell_targets, config, registry)
 
     with db.transaction():
         for spec in specs:
@@ -468,20 +453,14 @@ def remove_sessions(
     with db.transaction():
         for n in session_names:
             db.remove_console_session(console_name, n)
-    output.result(
-        f"Removed {len(session_names)} session(s) from console '{console_name}'."
-    )
+    output.result(f"Removed {len(session_names)} session(s) from console '{console_name}'.")
 
-    with _live_best_effort(
-        f"remove-sessions from '{console_name}'", console_name=console_name
-    ):
+    with _live_best_effort(f"remove-sessions from '{console_name}'", console_name=console_name):
         live = _live_target(db, config, console.vm_name)
         if live is None:
             return
         _vm, target = live
-        kill_session_windows(
-            target, pairs=[(console_name, n) for n in session_names]
-        )
+        kill_session_windows(target, pairs=[(console_name, n) for n in session_names])
 
 
 def reorder_sessions(
@@ -546,21 +525,13 @@ def reorder_sessions(
     desired_order = front + remaining
 
     if desired_order == current_order:
-        output.info(
-            f"Console '{console_name}' is already in the requested order; "
-            f"nothing to do."
-        )
+        output.info(f"Console '{console_name}' is already in the requested order; nothing to do.")
         return
 
     db.reorder_console_sessions(console_name, desired_order)
-    output.result(
-        f"Reordered {len(front)} session(s) to the front of console "
-        f"'{console_name}'."
-    )
+    output.result(f"Reordered {len(front)} session(s) to the front of console '{console_name}'.")
 
-    with _live_best_effort(
-        f"reorder-sessions in '{console_name}'", console_name=console_name
-    ):
+    with _live_best_effort(f"reorder-sessions in '{console_name}'", console_name=console_name):
         live = _live_target(db, config, console.vm_name)
         if live is None:
             return
@@ -591,13 +562,9 @@ def _validate_cwd(cwd: str | None) -> None:
     if not cwd:
         raise ValidationError("cwd may not be empty (omit it for workspace root)")
     if cwd.startswith("/"):
-        raise ValidationError(
-            f"cwd '{cwd}' must be relative to the workspace root, not absolute"
-        )
+        raise ValidationError(f"cwd '{cwd}' must be relative to the workspace root, not absolute")
     if ".." in cwd.split("/"):
-        raise ValidationError(
-            f"cwd '{cwd}' may not contain '..' segments"
-        )
+        raise ValidationError(f"cwd '{cwd}' may not contain '..' segments")
 
 
 def add_shell(
@@ -654,22 +621,15 @@ def add_shell(
         if pane_target is not None:
             from agentworks.secrets import resolve_for_command
 
-            secret_values = resolve_for_command(
-                [pane_target], config, registry
-            )
+            secret_values = resolve_for_command([pane_target], config, registry)
 
     new_shell: ShellEntry = {"cwd": cwd, "admin": admin}
     new_shells = [*cs.shells, new_shell]
     db.update_console_shells(console_name, session_name, new_shells)
     user_tag = "admin" if admin else "agent"
-    output.result(
-        f"Added {user_tag} shell at {cwd or '<workspace>'} to '{session_name}' "
-        f"in console '{console_name}'."
-    )
+    output.result(f"Added {user_tag} shell at {cwd or '<workspace>'} to '{session_name}' in console '{console_name}'.")
 
-    with _live_best_effort(
-        f"add-shell to '{console_name}:{session_name}'", console_name=console_name
-    ):
+    with _live_best_effort(f"add-shell to '{console_name}:{session_name}'", console_name=console_name):
         live = _live_target(db, config, console.vm_name)
         if live is None:
             return
@@ -744,13 +704,10 @@ def restore_session(
     # base.VMPlatform.vm_active's docstring). The gate's held-active span
     # wraps the SSH-heavy body so a freshly booted WSL2 distro doesn't
     # idle out between the window probe and the pane reconciliation.
-    with _prepare_vm_target_for_attach(
-        db, config, console.vm_name, registry=registry
-    ) as (vm, target):
+    with _prepare_vm_target_for_attach(db, config, console.vm_name, registry=registry) as (vm, target):
         if not _console_tmux_exists(target, console_name):
             raise StateError(
-                f"console '{console_name}' has no live tmux session on VM "
-                f"'{console.vm_name}'.",
+                f"console '{console_name}' has no live tmux session on VM '{console.vm_name}'.",
                 entity_kind="console",
                 entity_name=console_name,
                 hint=(
@@ -771,16 +728,13 @@ def restore_session(
         )
         if not res.ok:
             raise ExternalError(
-                f"failed to list windows for console '{console_name}': "
-                f"{res.stderr.strip()}",
+                f"failed to list windows for console '{console_name}': {res.stderr.strip()}",
                 entity_kind="console",
                 entity_name=console_name,
             )
         windows = res.stdout.strip().splitlines()
         if session_name not in windows:
-            output.info(
-                f"window '{session_name}' is missing; rebuilding from config..."
-            )
+            output.info(f"window '{session_name}' is missing; rebuilding from config...")
             # Eager-prompting orchestration:
             # the window-rebuild path also opens new shells (one per
             # configured shell entry, via _add_session_window ->
@@ -798,7 +752,11 @@ def restore_session(
             if all_indices:
                 secret_values = resolve_for_command(
                     _restore_session_secret_targets(
-                        db, registry, vm=vm, member=member, indices=all_indices,
+                        db,
+                        registry,
+                        vm=vm,
+                        member=member,
+                        indices=all_indices,
                     ),
                     config,
                     registry,
@@ -814,9 +772,7 @@ def restore_session(
                 layout=layout,
                 preserve_memo={},
             )
-            output.result(
-                f"Rebuilt window '{session_name}' in console '{console_name}'."
-            )
+            output.result(f"Rebuilt window '{session_name}' in console '{console_name}'.")
             return
 
         # Window exists. Enumerate shell panes (skipping pane_index 0, the session
@@ -839,14 +795,10 @@ def restore_session(
             # restore-session can't map the live pane back to a configured shell
             # index, so we refuse and direct the operator to rebuild.
             raise StateError(
-                f"window '{session_name}' has {len(untagged)} shell pane(s) with "
-                f"no agentworks tag.",
+                f"window '{session_name}' has {len(untagged)} shell pane(s) with no agentworks tag.",
                 entity_kind="console",
                 entity_name=console_name,
-                hint=(
-                    f"Run `agw console attach {console_name} --recreate` "
-                    f"to rebuild and retag from scratch."
-                ),
+                hint=(f"Run `agw console attach {console_name} --recreate` to rebuild and retag from scratch."),
             )
 
         # Validate that the tag values form a subset of 0..configured_count-1 with
@@ -871,32 +823,21 @@ def restore_session(
                 parts.append(f"duplicate tags {duplicates}")
             if out_of_range:
                 if configured_count == 0:
-                    parts.append(
-                        f"{len(out_of_range)} tagged shell pane(s) but session has "
-                        f"no configured shells"
-                    )
+                    parts.append(f"{len(out_of_range)} tagged shell pane(s) but session has no configured shells")
                 else:
-                    parts.append(
-                        f"tags {out_of_range} point past the configured range "
-                        f"(0..{configured_count - 1})"
-                    )
+                    parts.append(f"tags {out_of_range} point past the configured range (0..{configured_count - 1})")
             raise StateError(
-                f"window '{session_name}' has shell panes with inconsistent tags "
-                f"({'; '.join(parts)}).",
+                f"window '{session_name}' has shell panes with inconsistent tags ({'; '.join(parts)}).",
                 entity_kind="console",
                 entity_name=console_name,
-                hint=(
-                    f"Run `agw console attach {console_name} --recreate` "
-                    f"to rebuild and retag from scratch."
-                ),
+                hint=(f"Run `agw console attach {console_name} --recreate` to rebuild and retag from scratch."),
             )
 
         # tag_values is now a subset of 0..configured_count-1 with no duplicates,
         # so len(tag_values) <= configured_count.
         if len(tag_values) == configured_count:
             output.info(
-                f"session '{session_name}' already matches config "
-                f"({len(tag_values)} shell pane(s)); nothing to do."
+                f"session '{session_name}' already matches config ({len(tag_values)} shell pane(s)); nothing to do."
             )
             # Still focus the session pane on this no-op path so post-restore
             # landing focus is consistent whether or not repairs were needed.
@@ -940,16 +881,17 @@ def restore_session(
 
         secret_values = resolve_for_command(
             _restore_session_secret_targets(
-                db, registry, vm=vm, member=member, indices=missing,
+                db,
+                registry,
+                vm=vm,
+                member=member,
+                indices=missing,
             ),
             config,
             registry,
         )
 
-        output.info(
-            f"Restoring {len(missing)} shell pane(s) in '{session_name}': "
-            f"config indices {missing}."
-        )
+        output.info(f"Restoring {len(missing)} shell pane(s) in '{session_name}': config indices {missing}.")
         # Collect each split's outcome so a partial failure becomes a loud error
         # rather than a silent exit-0 leaving panes missing or untagged.
         failed: list[int] = []
@@ -979,10 +921,7 @@ def restore_session(
                 f"create/tag config indices {failed} (see warnings above).",
                 entity_kind="console",
                 entity_name=console_name,
-                hint=(
-                    f"Run `agw console attach {console_name} --recreate` "
-                    f"to rebuild from scratch."
-                ),
+                hint=(f"Run `agw console attach {console_name} --recreate` to rebuild from scratch."),
             )
 
         # New panes land at the tail; reorder so visual pane_index matches
@@ -995,9 +934,7 @@ def restore_session(
         # we still want consistent landing focus).
         _apply_layout(target, q_con, q_win, layout)
         _focus_session_pane(target, q_con, q_win)
-        output.result(
-            f"Restored {output.count(len(missing), 'shell pane')} in '{session_name}'."
-        )
+        output.result(f"Restored {output.count(len(missing), 'shell pane')} in '{session_name}'.")
 
 
 # -- Read-side helpers ----------------------------------------------------
@@ -1085,8 +1022,7 @@ def _session_linux_user(db: Database, session: SessionRow, vm: VMRow) -> str:
         agent = db.get_agent(session.agent_name)
         if agent is None:
             raise NotFoundError(
-                f"agent '{session.agent_name}' not found "
-                f"(referenced by session '{session.name}')",
+                f"agent '{session.agent_name}' not found (referenced by session '{session.name}')",
                 entity_kind="agent",
                 entity_name=session.agent_name,
             )
@@ -1190,13 +1126,8 @@ def kill_session_windows(
         raise
     except Exception as exc:
         affected = sorted({c for c, _ in pairs})
-        recovery = "; ".join(
-            f"agw console attach {shlex.quote(c)} --recreate" for c in affected
-        )
-        output.warn(
-            f"live console window cleanup failed: {exc}. "
-            f"Stale windows may persist; rebuild with: {recovery}"
-        )
+        recovery = "; ".join(f"agw console attach {shlex.quote(c)} --recreate" for c in affected)
+        output.warn(f"live console window cleanup failed: {exc}. Stale windows may persist; rebuild with: {recovery}")
 
 
 def _pane_secret_target(
@@ -1264,7 +1195,10 @@ def _pane_secret_target(
 
 
 def _admin_only_secret_target(
-    registry: Registry, vm: VMRow, *, label: str,
+    registry: Registry,
+    vm: VMRow,
+    *,
+    label: str,
 ) -> SecretTarget:
     """SecretTarget for an admin-only console pane (no workspace context).
 
@@ -1321,7 +1255,8 @@ def _console_build_secret_targets(
     if console.admin_shell:
         targets.append(
             _admin_only_secret_target(
-                registry, vm,
+                registry,
+                vm,
                 label=f"console={console.name}/admin-shell",
             ),
         )
@@ -1336,7 +1271,11 @@ def _console_build_secret_targets(
         for shell in member.shells:
             use_admin = shell["admin"] or session_user == vm.admin_username
             pane = _pane_secret_target(
-                db, registry, vm=vm, session=session, is_admin_pane=use_admin,
+                db,
+                registry,
+                vm=vm,
+                session=session,
+                is_admin_pane=use_admin,
             )
             if pane is not None:
                 targets.append(pane)
@@ -1374,7 +1313,11 @@ def _restore_session_secret_targets(
         shell = member.shells[idx]
         use_admin = shell["admin"] or session_user == vm.admin_username
         pane = _pane_secret_target(
-            db, registry, vm=vm, session=session, is_admin_pane=use_admin,
+            db,
+            registry,
+            vm=vm,
+            session=session,
+            is_admin_pane=use_admin,
         )
         if pane is not None:
             targets.append(pane)
@@ -1642,20 +1585,13 @@ def _split_shell_pane(
     # to stdout so we can target set-option at that exact pane immediately after.
     q_diag = shlex.quote(f"cwd missing: {full_path}")
     if use_admin:
-        bootstrap = (
-            f'cd {q_full} || echo {q_diag}; '
-            f'exec "$SHELL" -l'
-        )
+        bootstrap = f'cd {q_full} || echo {q_diag}; exec "$SHELL" -l'
         cmd = (
-            f"tmux split-window -t {q_con}:{q_win} -P -F '#{{pane_id}}'{env_flags} "
-            f"-c {q_full} {shlex.quote(bootstrap)}"
+            f"tmux split-window -t {q_con}:{q_win} -P -F '#{{pane_id}}'{env_flags} -c {q_full} {shlex.quote(bootstrap)}"
         )
     else:
         q_user = shlex.quote(session_user)
-        bootstrap = (
-            f'cd {q_full} || echo {q_diag}; '
-            f'exec "$SHELL" -l'
-        )
+        bootstrap = f'cd {q_full} || echo {q_diag}; exec "$SHELL" -l'
         # Carry the composed operator/secret env across the sudo boundary.
         # tmux set these vars on the pane process (env_flags, above), but
         # `sudo --login` resets the environment and would drop every var
@@ -1684,19 +1620,14 @@ def _split_shell_pane(
             memo=preserve_memo,
         ):
             preserve = f" --preserve-env={shlex.quote(','.join(pane_env))}"
-        pane_cmd = (
-            f"exec sudo --login{preserve} -u {q_user} bash -c {shlex.quote(bootstrap)}"
-        )
+        pane_cmd = f"exec sudo --login{preserve} -u {q_user} bash -c {shlex.quote(bootstrap)}"
         cmd = (
-            f"tmux split-window -t {q_con}:{q_win} -P -F '#{{pane_id}}'{env_flags} "
-            f"-c {q_full} {shlex.quote(pane_cmd)}"
+            f"tmux split-window -t {q_con}:{q_win} -P -F '#{{pane_id}}'{env_flags} -c {q_full} {shlex.quote(pane_cmd)}"
         )
 
     res = target.run(cmd, check=False, env=pane_env)
     if not res.ok:
-        output.warn(
-            f"failed to add shell pane in '{window_name}': {res.stderr.strip()}"
-        )
+        output.warn(f"failed to add shell pane in '{window_name}': {res.stderr.strip()}")
         return None
 
     q_console = shlex.quote(console_name)
@@ -1754,16 +1685,12 @@ def _add_session_window(
     session = db.get_session(member.session_name)
     if session is None:
         output.warn(
-            f"session '{member.session_name}' is in console '{console_name}' "
-            f"but no longer exists; skipping window"
+            f"session '{member.session_name}' is in console '{console_name}' but no longer exists; skipping window"
         )
         return
     workspace_path = _resolve_workspace_path(db, session)
     if workspace_path is None:
-        output.warn(
-            f"workspace for session '{member.session_name}' is missing; "
-            f"skipping window"
-        )
+        output.warn(f"workspace for session '{member.session_name}' is missing; skipping window")
         return
 
     q_con = shlex.quote(tmux_session_name(console_name))
@@ -1775,9 +1702,7 @@ def _add_session_window(
         check=False,
     )
     if not res.ok:
-        output.warn(
-            f"failed to add window for '{session.name}': {res.stderr.strip()}"
-        )
+        output.warn(f"failed to add window for '{session.name}': {res.stderr.strip()}")
         return
 
     if member.shells:
@@ -1789,10 +1714,7 @@ def _add_session_window(
         try:
             session_user = _session_linux_user(db, session, vm)
         except NotFoundError as exc:
-            output.warn(
-                f"agent for session '{session.name}' is missing ({exc}); "
-                f"skipping shell panes for this window"
-            )
+            output.warn(f"agent for session '{session.name}' is missing ({exc}); skipping shell panes for this window")
             return
         for config_index, shell in enumerate(member.shells):
             _split_shell_pane(
@@ -1848,8 +1770,7 @@ def _build_console_tmux(
         # No sudo wrapper: the SSH user IS the admin user (direct
         # target-user SSH), so a login shell at the pane is the goal directly.
         target.run(
-            f"tmux new-session -d -s {q_con} -n {shlex.quote(ADMIN_SHELL_WINDOW)} "
-            f"{shlex.quote('exec $SHELL -l')}"
+            f"tmux new-session -d -s {q_con} -n {shlex.quote(ADMIN_SHELL_WINDOW)} {shlex.quote('exec $SHELL -l')}"
         )
         placeholder_used = False
         placeholder = ""
@@ -1867,9 +1788,7 @@ def _build_console_tmux(
 
     if members:
         # A sub-step of attach_console's "Building/Rebuilding console..." line.
-        output.detail(
-            f"Adding {len(members)} session window(s) to console '{console.name}'..."
-        )
+        output.detail(f"Adding {len(members)} session window(s) to console '{console.name}'...")
     # One memo for the whole build: every window's agent panes ask the same VM
     # the same question, so probe (and warn) once per agent user, not per pane.
     preserve_memo: PreserveEnvMemo = {}
@@ -1909,8 +1828,7 @@ def _build_console_tmux(
         )
     else:
         output.warn(
-            f"console '{console.name}' has no usable session windows; "
-            f"placeholder kept so the tmux session survives"
+            f"console '{console.name}' has no usable session windows; placeholder kept so the tmux session survives"
         )
 
 
@@ -1961,9 +1879,7 @@ def _prepare_vm_target_for_attach(
         yield vm, transport(vm, config)
 
 
-def _live_target(
-    db: Database, config: Config, vm_name: str
-) -> tuple[VMRow, Transport] | None:
+def _live_target(db: Database, config: Config, vm_name: str) -> tuple[VMRow, Transport] | None:
     """Return (vm, target) for best-effort live sync without auto-starting the VM.
 
     Returns None if the VM record is missing or has no Tailscale address.
@@ -2030,9 +1946,7 @@ def attach_console(
     registry = build_registry(config)
     # The gate's held-active span covers the build and the interactive
     # attach (the hold this caller used to open itself).
-    with _prepare_vm_target_for_attach(
-        db, config, console.vm_name, registry=registry
-    ) as (vm, target):
+    with _prepare_vm_target_for_attach(db, config, console.vm_name, registry=registry) as (vm, target):
         exists = _console_tmux_exists(target, name)
         layout = named_console_template(registry).tmux_layout
 
@@ -2063,14 +1977,24 @@ def attach_console(
         if recreate and exists:
             output.info(f"Rebuilding console '{name}' (--recreate)...")
             _build_console_tmux(
-                target, db, registry, console, vm,
-                values=secret_values, layout=layout,
+                target,
+                db,
+                registry,
+                console,
+                vm,
+                values=secret_values,
+                layout=layout,
             )
         elif not exists:
             output.info(f"Building console '{name}' on first attach...")
             _build_console_tmux(
-                target, db, registry, console, vm,
-                values=secret_values, layout=layout,
+                target,
+                db,
+                registry,
+                console,
+                vm,
+                values=secret_values,
+                layout=layout,
             )
         else:
             output.info(f"Attaching to running console '{name}'.")

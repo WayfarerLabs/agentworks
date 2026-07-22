@@ -54,14 +54,10 @@ def make_config(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):  # noqa: ANN20
     from tests.orchestrated_fixtures import PROXMOX_SECTION, write_operator_config
 
     monkeypatch.setenv("AW_SECRET_PROXMOX_TOKEN", "pve-token")
-    paths_section = (
-        f'[paths]\nvscode_workspaces = "{tmp_path / "vscode"}"\n'
-    )
+    paths_section = f'[paths]\nvscode_workspaces = "{tmp_path / "vscode"}"\n'
 
     def _make(extra: str = ""):  # noqa: ANN202
-        return write_operator_config(
-            tmp_path, PROXMOX_SECTION + paths_section + extra
-        )
+        return write_operator_config(tmp_path, PROXMOX_SECTION + paths_section + extra)
 
     return _make
 
@@ -108,12 +104,8 @@ def _stop_the_vm(monkeypatch: pytest.MonkeyPatch, events: list[str]) -> None:
         "status",
         lambda self, row, ctx: events.append("status") or VMStatus.STOPPED,
     )
-    monkeypatch.setattr(
-        ProxmoxPlatform, "start", lambda self, row, ctx: events.append("start")
-    )
-    monkeypatch.setattr(
-        vm_manager, "_ensure_tailscale", lambda *a, **k: events.append("tailscale")
-    )
+    monkeypatch.setattr(ProxmoxPlatform, "start", lambda self, row, ctx: events.append("start"))
+    monkeypatch.setattr(vm_manager, "_ensure_tailscale", lambda *a, **k: events.append("tailscale"))
 
 
 def _no_gate(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -124,9 +116,7 @@ def _no_gate(monkeypatch: pytest.MonkeyPatch) -> None:
     _reachable(monkeypatch, False)
 
 
-def _node_holding(
-    db: Database, config: object, platform: object, *, vm_name: str = "box"
-):  # noqa: ANN202
+def _node_holding(db: Database, config: object, platform: object, *, vm_name: str = "box"):  # noqa: ANN202
     """A live VM node for ``vm_name`` (default 'box') whose site holds
     the given platform: the shape a nested teardown hands
     ``delete_workspace`` (it re-enters the hold through
@@ -160,9 +150,7 @@ class _FakeAdminTarget:
         if self._events is not None:
             self._events.append(f"run:{cmd}")
         ok = not any(needle in cmd for needle in self._failing)
-        return SimpleNamespace(
-            ok=ok, returncode=0 if ok else 1, stdout="", stderr=""
-        )
+        return SimpleNamespace(ok=ok, returncode=0 if ok else 1, stdout="", stderr="")
 
     def write_file(self, remote_path: str, content: str, **kwargs: object) -> None:
         self.written.append((remote_path, content))
@@ -191,7 +179,8 @@ def target(monkeypatch: pytest.MonkeyPatch) -> _FakeAdminTarget:
 
 
 def test_graph_is_the_live_vm_alone_no_workspace_node(
-    db: Database, make_config  # noqa: ANN001
+    db: Database,
+    make_config,  # noqa: ANN001
 ) -> None:
     """reinit / rehome / delete / copy share one graph per VM: the live
     VM from its row (vm-site + vm), union = the site's config secret
@@ -279,23 +268,15 @@ def test_reinit_converges_git_identity_on_the_checkout(
     checkout's repo-local config on reinit (the fake answers the rev-parse
     repo probe ok, and the config --get probe empty, so both fields apply)."""
     config = make_config(
-        '[workspace_templates.default]\n'
-        'git_user_name = "Ada Lovelace"\n'
-        'git_user_email = "ada@example.com"\n'
+        '[workspace_templates.default]\ngit_user_name = "Ada Lovelace"\ngit_user_email = "ada@example.com"\n'
     )
     _seed(db)
     _reachable(monkeypatch, True)
 
     workspace_manager.reinit_workspace(db, config, "ws1")
 
-    assert any(
-        "git -C /srv/ws1 config --local user.name 'Ada Lovelace'" in c
-        for c in target.commands
-    )
-    assert any(
-        "git -C /srv/ws1 config --local user.email ada@example.com" in c
-        for c in target.commands
-    )
+    assert any("git -C /srv/ws1 config --local user.name 'Ada Lovelace'" in c for c in target.commands)
+    assert any("git -C /srv/ws1 config --local user.email ada@example.com" in c for c in target.commands)
 
 
 class _RevParseFailingTarget(_FakeAdminTarget):
@@ -309,9 +290,7 @@ class _RevParseFailingTarget(_FakeAdminTarget):
     def run(self, cmd: str, **kwargs: object) -> SimpleNamespace:
         self.commands.append(cmd)
         if "rev-parse" in cmd:
-            return SimpleNamespace(
-                ok=False, returncode=128, stdout="", stderr=self._rev_parse_stderr
-            )
+            return SimpleNamespace(ok=False, returncode=128, stdout="", stderr=self._rev_parse_stderr)
         return SimpleNamespace(ok=True, returncode=0, stdout="", stderr="")
 
 
@@ -337,9 +316,7 @@ def test_reinit_skips_git_identity_when_not_a_repo(
     )
     _wire_target(monkeypatch, fake)
 
-    config = make_config(
-        '[workspace_templates.default]\ngit_user_name = "Ada Lovelace"\n'
-    )
+    config = make_config('[workspace_templates.default]\ngit_user_name = "Ada Lovelace"\n')
     _seed(db)
     _reachable(monkeypatch, True)
 
@@ -361,9 +338,7 @@ def test_reinit_git_identity_warns_on_unexpected_probe_failure(
     fake = _RevParseFailingTarget(rev_parse_stderr="git: command not found")
     _wire_target(monkeypatch, fake)
 
-    config = make_config(
-        '[workspace_templates.default]\ngit_user_name = "Ada Lovelace"\n'
-    )
+    config = make_config('[workspace_templates.default]\ngit_user_name = "Ada Lovelace"\n')
     _seed(db)
     _reachable(monkeypatch, True)
 
@@ -522,9 +497,7 @@ def test_rehome_overlapping_paths_fail_with_zero_resolves_and_zero_gate(
     _no_gate(monkeypatch)
 
     with pytest.raises(ValidationError, match="paths overlap"):
-        workspace_manager.rehome_workspace(
-            db, config, "ws1", target_path="/srv/ws1/nested"
-        )
+        workspace_manager.rehome_workspace(db, config, "ws1", target_path="/srv/ws1/nested")
 
     assert resolve_counter == []
     assert target.commands == []
@@ -571,9 +544,7 @@ def test_delete_nested_platform_path_reuses_the_callers_composition(
         def __init__(self) -> None:
             self.holds = 0
 
-        def vm_active(
-            self, row: object, *, config: object | None = None
-        ) -> contextlib.AbstractContextManager[None]:
+        def vm_active(self, row: object, *, config: object | None = None) -> contextlib.AbstractContextManager[None]:
             self.holds += 1
             return contextlib.nullcontext()
 
@@ -688,9 +659,7 @@ def test_rehome_confirm_sits_inside_the_span_after_the_dir_checks(
     events: list[str] = []
     _stop_the_vm(monkeypatch, events)
     fake = _FakeAdminTarget(events=events, failing=("test -d /dst/ws1",))
-    monkeypatch.setattr(
-        "agentworks.transports.transport", lambda vm, config_, **kwargs: fake
-    )
+    monkeypatch.setattr("agentworks.transports.transport", lambda vm, config_, **kwargs: fake)
 
     def _decline(message: str, default: bool = False) -> bool:
         events.append("confirm")
@@ -699,9 +668,7 @@ def test_rehome_confirm_sits_inside_the_span_after_the_dir_checks(
     monkeypatch.setattr(output_mod, "confirm", _decline)
 
     with pytest.raises(UserAbort, match="rehome cancelled"):
-        workspace_manager.rehome_workspace(
-            db, config, "ws1", target_path="/dst/ws1"
-        )
+        workspace_manager.rehome_workspace(db, config, "ws1", target_path="/dst/ws1")
 
     assert events == [
         "status",
@@ -719,9 +686,7 @@ def test_rehome_confirm_sits_inside_the_span_after_the_dir_checks(
 # -- copy: the sequential two-boundary composition ----------------------------
 
 
-def _wire_copy_fakes(
-    monkeypatch: pytest.MonkeyPatch, events: list[str]
-) -> _FakeAdminTarget:
+def _wire_copy_fakes(monkeypatch: pytest.MonkeyPatch, events: list[str]) -> _FakeAdminTarget:
     """The copy command's fakes: a transport double that IS an
     SSHTransport (the pack step asserts the concrete type to read the
     raw ssh argv off it), a recording ``subprocess.run`` for the tar
@@ -739,9 +704,7 @@ def _wire_copy_fakes(
             _FakeAdminTarget.__init__(self, events=events)
 
     fake = _FakeSSHTarget()
-    monkeypatch.setattr(
-        "agentworks.transports.transport", lambda vm, config, **kwargs: fake
-    )
+    monkeypatch.setattr("agentworks.transports.transport", lambda vm, config, **kwargs: fake)
 
     def _fake_pack(args: object, **kwargs: object) -> SimpleNamespace:
         events.append("pack")
@@ -783,9 +746,7 @@ def test_copy_cross_vm_runs_two_sequential_boundaries_with_nested_holds(
     events: list[str] = []
     _wire_copy_fakes(monkeypatch, events)
 
-    workspace_manager.copy_workspace(
-        db, config, "ws1", dest_name="ws2", vm_name="box2"
-    )
+    workspace_manager.copy_workspace(db, config, "ws1", dest_name="ws2", vm_name="box2")
 
     # Two sequential compositions, one boundary resolve each.
     assert resolve_counter == [["proxmox-token"], ["proxmox-token"]]
@@ -817,9 +778,7 @@ def test_copy_same_vm_reuses_the_source_composition(
     events: list[str] = []
     _wire_copy_fakes(monkeypatch, events)
 
-    workspace_manager.copy_workspace(
-        db, config, "ws1", dest_name="ws2", vm_name="box"
-    )
+    workspace_manager.copy_workspace(db, config, "ws1", dest_name="ws2", vm_name="box")
 
     assert resolve_counter == [["proxmox-token"]]
     assert events.count("hold-enter:box") == 1
@@ -844,14 +803,10 @@ def test_copy_refusals_fail_with_zero_resolves_and_zero_gate(
     _no_gate(monkeypatch)
 
     with pytest.raises(NotFoundError, match="workspace 'nope' not found"):
-        workspace_manager.copy_workspace(
-            db, config, "nope", dest_name="ws2", vm_name="box"
-        )
+        workspace_manager.copy_workspace(db, config, "nope", dest_name="ws2", vm_name="box")
 
     _seed_workspace(db, vm_name="box", name="ws2")
     with pytest.raises(AlreadyExistsError, match="workspace 'ws2' already exists"):
-        workspace_manager.copy_workspace(
-            db, config, "ws1", dest_name="ws2", vm_name="box"
-        )
+        workspace_manager.copy_workspace(db, config, "ws1", dest_name="ws2", vm_name="box")
 
     assert resolve_counter == []

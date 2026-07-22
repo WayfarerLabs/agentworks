@@ -112,9 +112,7 @@ def test_ops_read_the_token_through_the_context() -> None:
     platform = resolve_site("px", registry)
     assert isinstance(platform, ProxmoxPlatform)
 
-    served = RunContext(
-        secrets=ScopedSecrets({"proxmox-token": "s3cret"}, ("proxmox-token",))
-    )
+    served = RunContext(secrets=ScopedSecrets({"proxmox-token": "s3cret"}, ("proxmox-token",)))
     assert platform._api(served) is not None
 
     bare = resolve_site("px", registry)
@@ -236,9 +234,7 @@ def test_resolving_a_disabled_site_names_the_requirement(
     stranded paste-a-manifest error is only for undeclared names)."""
     from agentworks.vms.sites import lookup_site
 
-    monkeypatch.setattr(
-        LimaPlatform, "disabled_reason", lambda self: "limactl not installed"
-    )
+    monkeypatch.setattr(LimaPlatform, "disabled_reason", lambda self: "limactl not installed")
     registry = _registry()
 
     assert lookup_site("lima-local", registry).platform == "lima"

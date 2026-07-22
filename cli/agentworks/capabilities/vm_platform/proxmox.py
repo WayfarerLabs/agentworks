@@ -54,21 +54,14 @@ class ProxmoxPlatform(VMPlatform):
         self._api_cached: ProxmoxAPI | None = None
 
     @classmethod
-    def validate_config(
-        cls, owner: str, config: Mapping[str, object]
-    ) -> tuple[ConfigReference, ...]:
+    def validate_config(cls, owner: str, config: Mapping[str, object]) -> tuple[ConfigReference, ...]:
         for key in _REQUIRED_KEYS:
             if key not in config:
-                raise ConfigError(
-                    f"{owner}.{key} is required for the proxmox platform"
-                )
+                raise ConfigError(f"{owner}.{key} is required for the proxmox platform")
         try:
             int(str(config["template_vmid"]))
         except ValueError:
-            raise ConfigError(
-                f"{owner}.template_vmid must be an integer, "
-                f"got {config['template_vmid']!r}"
-            ) from None
+            raise ConfigError(f"{owner}.template_vmid must be an integer, got {config['template_vmid']!r}") from None
         token_secret = config.get("token_secret", DEFAULT_TOKEN_SECRET)
         if not isinstance(token_secret, str) or not token_secret:
             raise ConfigError(
@@ -77,9 +70,7 @@ class ProxmoxPlatform(VMPlatform):
             )
         unknown = sorted(set(config) - set(_REQUIRED_KEYS) - set(_OPTIONAL_KEYS))
         if unknown:
-            raise ConfigError(
-                f"{owner}: unknown proxmox platform field(s): {', '.join(unknown)}"
-            )
+            raise ConfigError(f"{owner}: unknown proxmox platform field(s): {', '.join(unknown)}")
         # Capability-implied reference: the API token is an ordinary
         # secret reference; the owning site attaches itself as source
         # (whoever hosts the config that names the secret emits the
@@ -95,9 +86,7 @@ class ProxmoxPlatform(VMPlatform):
         )
 
     @classmethod
-    def legacy_platform_metadata(
-        cls, row: Mapping[str, Any], legacy: Mapping[str, Any]
-    ) -> dict[str, str]:
+    def legacy_platform_metadata(cls, row: Mapping[str, Any], legacy: Mapping[str, Any]) -> dict[str, str]:
         metadata: dict[str, str] = {}
         if row["proxmox_vmid"]:
             metadata["vmid"] = str(row["proxmox_vmid"])
@@ -170,24 +159,14 @@ class ProxmoxPlatform(VMPlatform):
         except ProxmoxAPIError as e:
             if e.code in (401, 403):
                 raise TokenRejectedError(
-                    f"Proxmox rejected the API token for vm-site "
-                    f"'{self.site_name}' (secret '{token_secret}')",
+                    f"Proxmox rejected the API token for vm-site '{self.site_name}' (secret '{token_secret}')",
                     entity_kind="vm-site",
                     entity_name=self.site_name,
-                    hint=(
-                        "Check token_id and the token secret's value and "
-                        "permissions on the Proxmox host."
-                    ),
+                    hint=("Check token_id and the token secret's value and permissions on the Proxmox host."),
                 ) from e
-            output.warn(
-                f"could not verify the Proxmox API token for "
-                f"'{self.site_name}' ({e}); continuing unverified"
-            )
+            output.warn(f"could not verify the Proxmox API token for '{self.site_name}' ({e}); continuing unverified")
         except OSError as e:
-            output.warn(
-                f"could not reach Proxmox for '{self.site_name}' "
-                f"(network: {e}); continuing unverified"
-            )
+            output.warn(f"could not reach Proxmox for '{self.site_name}' (network: {e}); continuing unverified")
 
     def _vm_node(self, vm: VMRow) -> str:
         # Prefer the recorded node (decouples existing VMs from config
@@ -196,8 +175,7 @@ class ProxmoxPlatform(VMPlatform):
         node = vm.platform_metadata.get("node") or self._cfg("node")
         if not node:
             raise StateError(
-                f"VM '{vm.name}' has no proxmox node in its platform "
-                f"metadata or site configuration",
+                f"VM '{vm.name}' has no proxmox node in its platform metadata or site configuration",
                 entity_kind="vm",
                 entity_name=vm.name,
             )
@@ -207,8 +185,7 @@ class ProxmoxPlatform(VMPlatform):
         vmid = vm.platform_metadata.get("vmid")
         if not vmid:
             raise StateError(
-                f"VM '{vm.name}' has no proxmox vmid in its platform "
-                f"metadata; the DB row is incomplete",
+                f"VM '{vm.name}' has no proxmox vmid in its platform metadata; the DB row is incomplete",
                 entity_kind="vm",
                 entity_name=vm.name,
             )
@@ -223,15 +200,10 @@ class ProxmoxPlatform(VMPlatform):
         # The platform owns the backend-side name. PVE names are
         # soft (the vmid identifies), but a duplicate name is operator
         # confusion worth surfacing.
-        backend_name = (
-            f"{request.system_slug}-{request.vm_name}"
-            if request.system_slug
-            else request.vm_name
-        )
+        backend_name = f"{request.system_slug}-{request.vm_name}" if request.system_slug else request.vm_name
         if self._name_exists(node, backend_name, ctx):
             raise StateError(
-                f"a Proxmox VM named '{backend_name}' already exists on "
-                f"node {node}",
+                f"a Proxmox VM named '{backend_name}' already exists on node {node}",
                 entity_kind="vm",
                 entity_name=request.vm_name,
                 hint="delete it first or pick a different VM name",
@@ -246,7 +218,10 @@ class ProxmoxPlatform(VMPlatform):
         # 2. Clone template into the agentworks pool
         output.detail(f"Cloning template {template_vmid}...")
         upid = self._api(ctx).clone_vm(
-            node, template_vmid, newid, backend_name,
+            node,
+            template_vmid,
+            newid,
+            backend_name,
             storage=storage,
             pool=pool,
         )
@@ -396,15 +371,16 @@ class ProxmoxPlatform(VMPlatform):
 
     # -- Helpers ---------------------------------------------------------------
 
-    def _wait_for_cloud_init(
-        self, node: str, vmid: int, ctx: RunContext, *, timeout: int = 300
-    ) -> None:
+    def _wait_for_cloud_init(self, node: str, vmid: int, ctx: RunContext, *, timeout: int = 300) -> None:
         """Wait for cloud-init to finish inside the VM."""
         deadline = time.monotonic() + timeout
         while time.monotonic() < deadline:
             try:
                 result = self._api(ctx).guest_agent_exec_wait(
-                    node, vmid, "/usr/bin/cloud-init", ["status", "--wait"],
+                    node,
+                    vmid,
+                    "/usr/bin/cloud-init",
+                    ["status", "--wait"],
                     timeout=60,
                 )
                 if result is not None and result.get("exitcode", -1) == 0:
@@ -414,9 +390,7 @@ class ProxmoxPlatform(VMPlatform):
             time.sleep(5)
         # Don't fail: cloud-init may not be installed or may have already finished
 
-    def _wait_for_guest_ip(
-        self, node: str, vmid: int, ctx: RunContext, *, timeout: int = 120
-    ) -> str:
+    def _wait_for_guest_ip(self, node: str, vmid: int, ctx: RunContext, *, timeout: int = 120) -> str:
         """Poll the guest agent until it reports a non-loopback IPv4 address."""
         deadline = time.monotonic() + timeout
         while time.monotonic() < deadline:
@@ -433,13 +407,9 @@ class ProxmoxPlatform(VMPlatform):
             except ProxmoxAPIError:
                 pass  # guest agent not ready yet
             time.sleep(3)
-        raise RuntimeError(
-            f"Timed out waiting for guest agent IP on VMID {vmid}"
-        )
+        raise RuntimeError(f"Timed out waiting for guest agent IP on VMID {vmid}")
 
-    def _run_bootstrap_via_agent(
-        self, node: str, vmid: int, script: str, ctx: RunContext
-    ) -> str | None:
+    def _run_bootstrap_via_agent(self, node: str, vmid: int, script: str, ctx: RunContext) -> str | None:
         """Write and run the bootstrap script via the guest agent.
 
         Returns the Tailscale IP if bootstrap succeeds, None otherwise.
@@ -447,14 +417,15 @@ class ProxmoxPlatform(VMPlatform):
         from agentworks.capabilities.vm_platform.bootstrap_script import parse_bootstrap_output
 
         # Write script to VM via guest agent file-write
-        self._api(ctx).guest_agent_file_write(
-            node, vmid, "/tmp/agentworks-bootstrap.sh", script
-        )
+        self._api(ctx).guest_agent_file_write(node, vmid, "/tmp/agentworks-bootstrap.sh", script)
 
         # Run bootstrap (long-running: installs packages, joins tailscale)
         # bash is invoked explicitly so the script doesn't need +x
         result = self._api(ctx).guest_agent_exec_wait(
-            node, vmid, "/bin/bash", ["/tmp/agentworks-bootstrap.sh"],
+            node,
+            vmid,
+            "/bin/bash",
+            ["/tmp/agentworks-bootstrap.sh"],
             timeout=600,
         )
 

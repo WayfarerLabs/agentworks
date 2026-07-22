@@ -115,7 +115,6 @@ ssh_private_key = "{priv.as_posix()}"
     build_registry(config)
 
 
-
 def test_commented_samples_are_inert_through_the_loader(tmp_path: Path) -> None:
     """As shipped (commented), a written sample declares nothing."""
     resources = tmp_path / "resources"

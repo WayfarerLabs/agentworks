@@ -213,10 +213,7 @@ def test_manifest_unknown_harness_name_errors_at_finalize(tmp_path: Path) -> Non
     priv = tmp_path / "id"
     pub.write_text("ssh-ed25519 AAAA...")
     priv.write_text("-----BEGIN OPENSSH PRIVATE KEY-----")
-    cfg.write_text(
-        f'[operator]\nssh_public_key = "{pub.as_posix()}"\n'
-        f'ssh_private_key = "{priv.as_posix()}"\n'
-    )
+    cfg.write_text(f'[operator]\nssh_public_key = "{pub.as_posix()}"\nssh_private_key = "{priv.as_posix()}"\n')
     _manifest(
         tmp_path,
         """
@@ -229,9 +226,7 @@ def test_manifest_unknown_harness_name_errors_at_finalize(tmp_path: Path) -> Non
         """,
     )
     config = load_config(cfg, warn_issues=False)
-    with pytest.raises(
-        ConfigError, match="'typo' references unknown harness 'shel'"
-    ):
+    with pytest.raises(ConfigError, match="'typo' references unknown harness 'shel'"):
         build_registry(config)
 
 
@@ -263,9 +258,7 @@ def test_child_same_harness_merges_child_wins_and_unions_required() -> None:
 
 def test_child_silent_inherits_the_pair_unchanged() -> None:
     templates = {
-        "base": SessionTemplate(
-            name="base", harness="shell", harness_config={"command": "claude"}
-        ),
+        "base": SessionTemplate(name="base", harness="shell", harness_config={"command": "claude"}),
         "child": SessionTemplate(name="child", inherits=["base"]),
     }
     resolved = resolve_from_dict(templates, "child")
@@ -277,11 +270,11 @@ def test_child_different_harness_starts_fresh(fake_harness: None) -> None:
     """A child naming a DIFFERENT harness starts from an empty blob; the
     parent's blob was addressed to the wrong capability and never leaks."""
     templates = {
-        "base": SessionTemplate(
-            name="base", harness="shell", harness_config={"command": "sh-cmd"}
-        ),
+        "base": SessionTemplate(name="base", harness="shell", harness_config={"command": "sh-cmd"}),
         "child": SessionTemplate(
-            name="child", inherits=["base"], harness="fake",
+            name="child",
+            inherits=["base"],
+            harness="fake",
             harness_config={"k": "v"},
         ),
     }
@@ -328,9 +321,7 @@ def test_undeclared_default_resolves_to_shell_empty() -> None:
 
 
 def test_declared_harness_emits_a_reference() -> None:
-    tmpl = SessionTemplate(
-        name="claude", harness="shell", harness_config={"command": "claude"}
-    )
+    tmpl = SessionTemplate(name="claude", harness="shell", harness_config={"command": "claude"})
     refs = tmpl.referenced_resources()
     harness_refs = [r for r in refs if r.kind == "harness"]
     assert len(harness_refs) == 1

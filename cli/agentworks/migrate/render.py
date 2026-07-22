@@ -19,9 +19,7 @@ def render_preview(plan: MigrationPlan) -> list[str]:
             lines.append(f"  {unit.kind}/{unit.name} -> {target}")
         for write in plan.writes:
             action = "append to" if write.exists else "create"
-            lines.append(
-                f"  {action} {write.path} ({len(write.documents)} document(s))"
-            )
+            lines.append(f"  {action} {write.path} ({len(write.documents)} document(s))")
         verb = "commented out in" if plan.toml_mode == "comment" else "deleted from"
         lines.append(f"  migrated sections will be {verb} {plan.config_path}")
     if plan.drops_secret_backends:
@@ -40,9 +38,7 @@ def render_dry_run(plan: MigrationPlan, *, full: bool = False) -> list[str]:
     lines = render_preview(plan)
     if not full:
         lines.append("")
-        lines.append(
-            "(Pass --full to include the YAML documents and the config.toml diff.)"
-        )
+        lines.append("(Pass --full to include the YAML documents and the config.toml diff.)")
         return lines
     for write in plan.writes:
         header = "appended to" if write.exists else "written to"

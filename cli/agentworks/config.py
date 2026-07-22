@@ -42,7 +42,6 @@ from agentworks.vms.template import VMTemplate
 from agentworks.workspaces.template import WorkspaceTemplate
 
 if TYPE_CHECKING:
-
     from agentworks.resources.origin import Origin
     from agentworks.resources.registry import Registry
     from agentworks.vms.sites import VMSiteDecl
@@ -78,15 +77,9 @@ def validate_name(name: str, *, allow_double_hyphen: bool = False) -> None:
     from agentworks.output import ValidationError
 
     if len(name) > MAX_NAME_LENGTH:
-        raise ValidationError(
-            f"name '{name}' is too long ({len(name)} chars, max {MAX_NAME_LENGTH})"
-        )
+        raise ValidationError(f"name '{name}' is too long ({len(name)} chars, max {MAX_NAME_LENGTH})")
     if not NAME_RE.match(name) or (not allow_double_hyphen and "--" in name):
-        suffix = (
-            ""
-            if allow_double_hyphen
-            else ", and cannot contain consecutive hyphens (--)"
-        )
+        suffix = "" if allow_double_hyphen else ", and cannot contain consecutive hyphens (--)"
         raise ValidationError(
             f"invalid name '{name}'. Names must be lowercase alphanumeric "
             "with hyphens or underscores, must start and end with a letter or "
@@ -234,9 +227,7 @@ class Config:
         from agentworks.resources import Origin
 
         def op_origin(declared_at: SourceLocation) -> Origin:
-            return Origin.operator_declared(
-                file=declared_at.file, line=declared_at.line
-            )
+            return Origin.operator_declared(file=declared_at.file, line=declared_at.line)
 
         # Multi-named kinds: one Resource per (container, name) pair.
         # secret_backends is deliberately absent: the TOML sections are
@@ -296,11 +287,7 @@ class _SectionLineMap:
         operator), returns ``SourceLocation(config_path, line=0)``.
         """
         n = len(path)
-        candidates = [
-            line
-            for p, line in self.section_lines.items()
-            if len(p) >= n and p[:n] == path
-        ]
+        candidates = [line for p, line in self.section_lines.items() if len(p) >= n and p[:n] == path]
         if not candidates:
             return SourceLocation(file=self.config_path, line=0)
         return SourceLocation(file=self.config_path, line=min(candidates))
@@ -375,8 +362,7 @@ def _parse_env_table(
         key_str = str(key)
         if not _ENV_KEY_RE.match(key_str):
             raise ConfigError(
-                f"{context}.env: invalid env var name {key_str!r} "
-                "(must match /^[A-Za-z_][A-Za-z0-9_]*$/)"
+                f"{context}.env: invalid env var name {key_str!r} (must match /^[A-Za-z_][A-Za-z0-9_]*$/)"
             )
         if key_str.startswith(_AGENTWORKS_ENV_PREFIX):
             issues.append(
@@ -414,7 +400,7 @@ def _parse_env_table(
         else:
             raise ConfigError(
                 f"{context}.env.{key_str}: must be a string (plaintext) or "
-                "inline table of the form { secret = \"<name>\" }"
+                'inline table of the form { secret = "<name>" }'
             )
     return result
 
@@ -521,8 +507,7 @@ def _load_defaults(
 
     if "git_credentials" in raw:
         raise ConfigError(
-            "defaults.git_credentials has been removed. Move git_credentials into "
-            "[admin.config] and/or [agent.config]."
+            "defaults.git_credentials has been removed. Move git_credentials into [admin.config] and/or [agent.config]."
         )
 
     if "vm_host" in raw:
@@ -535,11 +520,9 @@ def _load_defaults(
 
         old_name = str(raw["vm_host"])
         raise ConfigError(
-            "defaults.vm_host has been removed; remote Lima hosts are "
-            "vm-site resources now",
+            "defaults.vm_host has been removed; remote Lima hosts are vm-site resources now",
             hint=(
-                site_manifest_hint(old_name, vm_host="<user@host>")
-                + "\n\nthen set defaults.site to the site's name"
+                site_manifest_hint(old_name, vm_host="<user@host>") + "\n\nthen set defaults.site to the site's name"
             ),
         )
 
@@ -604,10 +587,7 @@ def _load_named_console(
 
     layout = raw.get("tmux_layout", AW_SESSION_VERTICAL_LAYOUT)
     if layout not in VALID_TMUX_LAYOUTS:
-        raise ConfigError(
-            f"named_console.tmux_layout must be one of {VALID_TMUX_LAYOUTS}, "
-            f"got: {layout}"
-        )
+        raise ConfigError(f"named_console.tmux_layout must be one of {VALID_TMUX_LAYOUTS}, got: {layout}")
 
     return NamedConsoleConfig(
         name="default",
@@ -643,9 +623,7 @@ def _load_vm_templates(
         raise ConfigError("[vm_templates] must be a table")
 
     if "vm" in data and isinstance(data["vm"], dict) and "config" in data["vm"]:
-        raise ConfigError(
-            "[vm.config] has been replaced by [vm_templates.default]."
-        )
+        raise ConfigError("[vm.config] has been replaced by [vm_templates.default].")
 
     # TOML's implicit-parent semantics already populate this dict: writing
     # `[vm_templates.x.env]` alone produces `raw == {"x": {"env": {...}}}` even
@@ -680,7 +658,7 @@ def _load_vm_templates(
                 raise ConfigError(
                     f"vm_templates.{name}.tailscale_auth_key must not be empty; "
                     f"omit the key to inherit the default secret name "
-                    f"\"tailscale-auth-key\""
+                    f'"tailscale-auth-key"'
                 )
             ts_key_raw = tdata["tailscale_auth_key"]
 
@@ -800,9 +778,7 @@ def _load_agent_templates(
         raise ConfigError("[agent_templates] must be a table")
 
     if "agent" in data and isinstance(data["agent"], dict) and "config" in data["agent"]:
-        raise ConfigError(
-            "[agent.config] has been replaced by [agent_templates.default]."
-        )
+        raise ConfigError("[agent.config] has been replaced by [agent_templates.default].")
 
     templates: dict[str, AgentTemplate] = {}
     for name, tdata in raw.items():
@@ -828,11 +804,13 @@ def _load_agent_templates(
             mise_prune_on_reinit=(bool(tdata["mise_prune_on_reinit"]) if "mise_prune_on_reinit" in tdata else None),
             claude_marketplaces=(
                 _require_string_list(tdata, "claude_marketplaces", f"agent_templates.{name}")
-                if "claude_marketplaces" in tdata else None
+                if "claude_marketplaces" in tdata
+                else None
             ),
             claude_plugins=(
                 _require_string_list(tdata, "claude_plugins", f"agent_templates.{name}")
-                if "claude_plugins" in tdata else None
+                if "claude_plugins" in tdata
+                else None
             ),
             env=_parse_env_table(tdata.get("env"), context=f"agent_templates.{name}", issues=issues),
             declared_at=decls.lookup("agent_templates", name),
@@ -901,9 +879,7 @@ def _load_workspace_templates(
     for name, tdata in raw.items():
         if not isinstance(tdata, dict):
             raise ConfigError(f"workspace_templates.{name} must be a table")
-        _warn_unexpected_keys(
-            tdata, _WORKSPACE_TEMPLATE_KEYS, f"workspace_templates.{name}", issues
-        )
+        _warn_unexpected_keys(tdata, _WORKSPACE_TEMPLATE_KEYS, f"workspace_templates.{name}", issues)
         repo = str(tdata["repo"]) if "repo" in tdata else None
         # Embedded-username advice moved to a provider-owned preflight
         # (git_credentials.remote_advisories, run when a template is
@@ -915,12 +891,8 @@ def _load_workspace_templates(
             description=str(tdata["description"]) if "description" in tdata else None,
             repo=repo,
             tmuxinator=bool(tdata["tmuxinator"]) if "tmuxinator" in tdata else None,
-            git_user_name=(
-                str(tdata["git_user_name"]) if "git_user_name" in tdata else None
-            ),
-            git_user_email=(
-                str(tdata["git_user_email"]) if "git_user_email" in tdata else None
-            ),
+            git_user_name=(str(tdata["git_user_name"]) if "git_user_name" in tdata else None),
+            git_user_email=(str(tdata["git_user_email"]) if "git_user_email" in tdata else None),
             env=_parse_env_table(
                 tdata.get("env"),
                 context=f"workspace_templates.{name}",
@@ -997,7 +969,7 @@ def _load_git_credentials(
                 raise ConfigError(
                     f"git_credentials.{name}.token must not be empty; "
                     f"omit the key to inherit the default secret name "
-                    f"\"git-token-{name}\""
+                    f'"git-token-{name}"'
                 )
             provider_config["token"] = cdata["token"]
         # The flat TOML shape only ever read ``org``, and only for azdo;
@@ -1114,9 +1086,7 @@ def _load_session_templates(
     return templates
 
 
-def _session_harness_pair(
-    name: str, tdata: dict[str, object]
-) -> tuple[str | None, dict[str, object] | None]:
+def _session_harness_pair(name: str, tdata: dict[str, object]) -> tuple[str | None, dict[str, object] | None]:
     """Resolve a TOML session-template's ``(harness, harness_config)``
     pair, hoisting the legacy flat fields onto the ``shell`` harness
     (FRD R6). ``None`` on either means "not declared here".
@@ -1155,9 +1125,7 @@ def _session_harness_pair(
         if "restart_command" in tdata:
             blob["restart_command"] = str(tdata["restart_command"])
         if "required_commands" in tdata:
-            blob["required_commands"] = _require_string_list(
-                tdata, "required_commands", f"session_templates.{name}"
-            )
+            blob["required_commands"] = _require_string_list(tdata, "required_commands", f"session_templates.{name}")
         harness: str | None = "shell"
         harness_config: dict[str, object] | None = blob
     else:
@@ -1166,14 +1134,11 @@ def _session_harness_pair(
         if "harness_config" in tdata:
             raw_config = tdata["harness_config"]
             if not isinstance(raw_config, dict):
-                raise ConfigError(
-                    f"session_templates.{name}.harness_config must be a table"
-                )
+                raise ConfigError(f"session_templates.{name}.harness_config must be a table")
             harness_config = dict(raw_config)
         if harness is None and harness_config is not None:
             raise ConfigError(
-                f"session_templates.{name}: harness_config needs a harness "
-                f'(a blob with no owner); add harness = "..."'
+                f'session_templates.{name}: harness_config needs a harness (a blob with no owner); add harness = "..."'
             )
 
     # Shape-and-vocabulary validation on the declared/hoisted blob, in
@@ -1184,9 +1149,7 @@ def _session_harness_pair(
 
         capability = HARNESS_REGISTRY.get(harness)
         if capability is not None:
-            capability.validate_config(
-                f"session-template/{name}", harness_config
-            )
+            capability.validate_config(f"session-template/{name}", harness_config)
     return harness, harness_config
 
 
@@ -1243,9 +1206,7 @@ def _load_vm_sites_legacy(
             continue
         if not isinstance(raw, dict):
             raise ConfigError(f"[{section}] must be a table")
-        platform_config: dict[str, object] = {
-            key: raw[key] for key in known_keys if key in raw
-        }
+        platform_config: dict[str, object] = {key: raw[key] for key in known_keys if key in raw}
         capability = VM_PLATFORM_REGISTRY[platform_name]
         capability.validate_config(f"[{section}]", platform_config)
         sites[section] = VMSiteDecl(
@@ -1278,18 +1239,14 @@ def _load_secrets(
 
         description = sdata.get("description")
         if not isinstance(description, str) or not description:
-            raise ConfigError(
-                f"secrets.{name_str}.description is required and must be a non-empty string"
-            )
+            raise ConfigError(f"secrets.{name_str}.description is required and must be a non-empty string")
         hint = sdata.get("hint")
         if hint is not None and not isinstance(hint, str):
             raise ConfigError(f"secrets.{name_str}.hint must be a string")
 
         raw_mappings = sdata.get("backend_mappings", {})
         if not isinstance(raw_mappings, dict):
-            raise ConfigError(
-                f"secrets.{name_str}.backend_mappings must be a table"
-            )
+            raise ConfigError(f"secrets.{name_str}.backend_mappings must be a table")
         backend_mappings: dict[str, str | dict[str, object] | Literal[False]] = {}
         for kind, mapping in raw_mappings.items():
             kind_str = str(kind)
@@ -1306,8 +1263,7 @@ def _load_secrets(
                 backend_mappings[kind_str] = dict(mapping)
             else:
                 raise ConfigError(
-                    f"secrets.{name_str}.backend_mappings.{kind_str}: "
-                    "must be a string, inline table, or false"
+                    f"secrets.{name_str}.backend_mappings.{kind_str}: must be a string, inline table, or false"
                 )
 
         secret_decls[name_str] = SecretDecl(
@@ -1351,8 +1307,7 @@ def _load_secret_backends(
             raise ConfigError(f"secret_backends.{backend_str} must be a table")
         if backend_str not in known_backends:
             raise ConfigError(
-                f"[secret_backends.{backend_str}] names an unknown secret "
-                f"backend; supported: {sorted(known_backends)}"
+                f"[secret_backends.{backend_str}] names an unknown secret backend; supported: {sorted(known_backends)}"
             )
         found.append(f"[secret_backends.{backend_str}]")
         deprecations.append(
@@ -1442,9 +1397,7 @@ def _load_secret_config(
     if "backends" not in raw:
         return SecretConfig(declared_at=declared_at)
     backends_raw = raw["backends"]
-    if not isinstance(backends_raw, list) or not all(
-        isinstance(b, str) for b in backends_raw
-    ):
+    if not isinstance(backends_raw, list) or not all(isinstance(b, str) for b in backends_raw):
         raise ConfigError("[secret_config].backends must be a list of strings")
     return SecretConfig(backends=tuple(backends_raw), declared_at=declared_at)
 
@@ -1571,16 +1524,13 @@ def load_config(
     loaded_vm_templates = _load_vm_templates(resource_data, issues, decls)
     loaded_agent_templates = _load_agent_templates(resource_data, issues, decls)
 
-
     admin = _load_admin_config(resource_data, issues, decls)
     workspace_templates = _load_workspace_templates(resource_data, issues, decls)
 
     secrets = _load_secrets(resource_data, issues, decls)
     deprecations: list[str] = []
     noop_backend_sections = _load_secret_backends(resource_data, deprecations)
-    deprecated_sections = _warn_deprecated_resource_sections(
-        resource_data, deprecations
-    )
+    deprecated_sections = _warn_deprecated_resource_sections(resource_data, deprecations)
     secret_config_data = _load_secret_config(data, issues, decls)
     # Env-block secret references no longer error at config load
     # when they don't match a [secrets.<name>] block; the framework

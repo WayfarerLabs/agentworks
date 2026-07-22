@@ -184,10 +184,7 @@ def create_agent_on_vm(
 
         output.info("Configuring git credentials...")
         providers = resolve_git_credential_providers(registry, agent_cfg.git_credentials)
-        missing = [
-            cred_name for cred_name in providers
-            if cred_name not in git_tokens
-        ]
+        missing = [cred_name for cred_name in providers if cred_name not in git_tokens]
         if missing:
             from agentworks.errors import StateError
 
@@ -219,9 +216,7 @@ def create_agent_on_vm(
         # write_file paths spell the home out (agent_target conventions).
         if providers:
             materials = build_credential_materials(providers, git_tokens)
-            agent_target.write_file(
-                f"{home}/.git-credentials", materials.store_content, mode="600"
-            )
+            agent_target.write_file(f"{home}/.git-credentials", materials.store_content, mode="600")
             agent_target.write_file(
                 f"{home}/{GIT_SCOPES_INCLUDE_PATH.removeprefix('~/')}",
                 materials.gitconfig_content,
@@ -237,9 +232,7 @@ def create_agent_on_vm(
                 f"(git config --global --get-all include.path | grep -qxF '{GIT_SCOPES_INCLUDE_PATH}' "
                 f"|| git config --global --add include.path '{GIT_SCOPES_INCLUDE_PATH}')"
             )
-            output.detail(
-                f"Git credentials configured for {output.count(len(providers), 'provider')}"
-            )
+            output.detail(f"Git credentials configured for {output.count(len(providers), 'provider')}")
 
     # User install commands + login-shell PATH profile fragment.
     _run_agent_install_commands(
@@ -277,35 +270,30 @@ def create_agent_on_vm(
                         if ref.ref:
                             agent_target.run(
                                 f"git -C {_shlex.quote(dest)} fetch",
-                                check=False, timeout=120,
+                                check=False,
+                                timeout=120,
                             )
                             checkout = agent_target.run(
                                 f"git -C {_shlex.quote(dest)} checkout {_shlex.quote(ref.ref)}",
                                 check=False,
                             )
                             if not checkout.ok:
-                                output.warn(
-                                    f"dotfiles checkout of '{ref.ref}' failed, skipping"
-                                )
+                                output.warn(f"dotfiles checkout of '{ref.ref}' failed, skipping")
                         else:
                             pull = agent_target.run(
                                 f"git -C {_shlex.quote(dest)} pull",
-                                check=False, timeout=120,
+                                check=False,
+                                timeout=120,
                             )
                             if not pull.ok:
-                                output.warn(
-                                    "dotfiles pull failed (local changes?), skipping"
-                                )
+                                output.warn("dotfiles pull failed (local changes?), skipping")
                     else:
-                        raise SourceRefError(
-                            f"dotfiles destination {dest} exists but is a different repo"
-                        )
+                        raise SourceRefError(f"dotfiles destination {dest} exists but is a different repo")
                 else:
                     clone_cmd = f"git clone {_shlex.quote(ref.path)} {_shlex.quote(dest)}"
                     if ref.ref:
                         clone_cmd = (
-                            f"git clone --branch {_shlex.quote(ref.ref)}"
-                            f" {_shlex.quote(ref.path)} {_shlex.quote(dest)}"
+                            f"git clone --branch {_shlex.quote(ref.ref)} {_shlex.quote(ref.path)} {_shlex.quote(dest)}"
                         )
                     agent_target.run(clone_cmd, timeout=120)
             else:
@@ -343,7 +331,8 @@ def create_agent_on_vm(
 
     def _agent_run_cmd(cmd: str, timeout: int) -> object:
         return agent_target.run(
-            f"{agent_shell} -lc {_shlex.quote(cmd)}", timeout=timeout,
+            f"{agent_shell} -lc {_shlex.quote(cmd)}",
+            timeout=timeout,
         )
 
     install_claude_plugins(
@@ -356,8 +345,12 @@ def create_agent_on_vm(
     # install (or any other later step) overwrote a shell rc file in
     # place. Idempotent grep-or-append.
     from agentworks.vms.initializer import _ensure_agentworks_files_sourced
+
     _ensure_agentworks_files_sourced(
-        agent_target, home=home, shell=agent_shell, logger=logger,
+        agent_target,
+        home=home,
+        shell=agent_shell,
+        logger=logger,
     )
 
 
@@ -491,7 +484,7 @@ def _write_agent_profile(
     lines = ["# Managed by agentworks -- do not edit"]
     for key, value in identity_env.items():
         lines.append(f"export {key}={shlex.quote(value)}")
-    for p in (path_additions or []):
+    for p in path_additions or []:
         expanded = p.replace("~", "$HOME", 1) if p.startswith("~") else p
         lines.append(f'export PATH="{expanded}:$PATH"')
     content = "\n".join(lines) + "\n"

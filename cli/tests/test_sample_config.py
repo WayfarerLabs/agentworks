@@ -18,9 +18,7 @@ from __future__ import annotations
 import tomllib
 from pathlib import Path
 
-SAMPLE_PATH = (
-    Path(__file__).resolve().parent.parent / "agentworks" / "sample-config.toml"
-)
+SAMPLE_PATH = Path(__file__).resolve().parent.parent / "agentworks" / "sample-config.toml"
 
 
 def _uncomment_examples(src: str) -> str:
@@ -76,10 +74,19 @@ def test_sample_config_examples_uncomment_cleanly() -> None:
     # legacy [azure] / [proxmox] examples are gone too: vm-sites are
     # resources now; the sample points at `agw resource sample vm-site`.)
     expected_top = {
-        "operator", "paths", "defaults", "named_console",
-        "git_credentials", "secrets", "secret_config",
-        "vm_templates", "admin", "agent_templates",
-        "workspace_templates", "session_templates", "session",
+        "operator",
+        "paths",
+        "defaults",
+        "named_console",
+        "git_credentials",
+        "secrets",
+        "secret_config",
+        "vm_templates",
+        "admin",
+        "agent_templates",
+        "workspace_templates",
+        "session_templates",
+        "session",
     }
     missing = expected_top - set(parsed.keys())
     assert not missing, f"missing top-level sections after uncomment: {missing}"

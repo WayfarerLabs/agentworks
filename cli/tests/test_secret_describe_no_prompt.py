@@ -74,9 +74,7 @@ def test_describe_secret_never_resolves_through_interactive_backends(
     from agentworks.secrets import SECRET_BACKEND_REGISTRY
 
     registry = build_registry(config)
-    monkeypatch.setattr(
-        SECRET_BACKEND_REGISTRY["prompt"], "batch_get", _fail_batch_get
-    )
+    monkeypatch.setattr(SECRET_BACKEND_REGISTRY["prompt"], "batch_get", _fail_batch_get)
 
     # Should complete without invoking the prompt provider.
     describe_secret(config, registry, "api-key")
@@ -105,15 +103,10 @@ def test_describe_secret_does_not_run_the_resolve_loop(
     config = load_config(cfg, warn_issues=False)
 
     def _fail_resolve_secrets(*args: object, **kwargs: object) -> None:
-        raise AssertionError(
-            "describe_secret ran the resolve loop; inspection must ask "
-            "the backends directly"
-        )
+        raise AssertionError("describe_secret ran the resolve loop; inspection must ask the backends directly")
 
     registry = build_registry(config)
-    monkeypatch.setattr(
-        "agentworks.secrets.resolve.resolve_secrets", _fail_resolve_secrets
-    )
+    monkeypatch.setattr("agentworks.secrets.resolve.resolve_secrets", _fail_resolve_secrets)
 
     describe_secret(config, registry, "api-key")
 

@@ -139,13 +139,9 @@ class TestCreateProvisioningOutput:
             )
 
         fake_network = SimpleNamespace(
-            public_ip_addresses=_collection(
-                SimpleNamespace(ip_address="10.0.0.4", id="/pip")
-            ),
+            public_ip_addresses=_collection(SimpleNamespace(ip_address="10.0.0.4", id="/pip")),
             network_security_groups=_collection(SimpleNamespace(id="/nsg")),
-            virtual_networks=_collection(
-                SimpleNamespace(subnets=[SimpleNamespace(id="/subnet")])
-            ),
+            virtual_networks=_collection(SimpleNamespace(subnets=[SimpleNamespace(id="/subnet")])),
             network_interfaces=_collection(SimpleNamespace(id="/nic")),
         )
         fake_compute = SimpleNamespace(
@@ -155,15 +151,9 @@ class TestCreateProvisioningOutput:
         # The SDK clients are per-instance cached accessors (keyed by
         # subscription); patch them on the class so the fakes are returned
         # without building a credential or touching Azure.
-        monkeypatch.setattr(
-            AzureVMPlatform, "_compute_client", lambda self, az: fake_compute
-        )
-        monkeypatch.setattr(
-            AzureVMPlatform, "_network_client", lambda self, az: fake_network
-        )
-        monkeypatch.setattr(
-            AzureVMPlatform, "_vm_exists", lambda self, compute, rg, name: False
-        )
+        monkeypatch.setattr(AzureVMPlatform, "_compute_client", lambda self, az: fake_compute)
+        monkeypatch.setattr(AzureVMPlatform, "_network_client", lambda self, az: fake_network)
+        monkeypatch.setattr(AzureVMPlatform, "_vm_exists", lambda self, compute, rg, name: False)
 
     @staticmethod
     def _request(*, cpus: int, memory: int) -> ProvisionRequest:
@@ -196,9 +186,7 @@ class TestCreateProvisioningOutput:
     def _provisioning_line(captured: CapturedOutput) -> str:
         # The provisioning announcement is a primary (info/BODY) line; the
         # concrete resource-creation sub-steps are the DETAIL lines below it.
-        return next(
-            m for m in captured.info if m.startswith("Provisioning Azure VM")
-        )
+        return next(m for m in captured.info if m.startswith("Provisioning Azure VM"))
 
     def test_exact_match_emits_spec_without_requested(
         self, monkeypatch: pytest.MonkeyPatch, captured_output: CapturedOutput
@@ -206,10 +194,7 @@ class TestCreateProvisioningOutput:
         self._wire(monkeypatch)
         self._platform().create(self._request(cpus=2, memory=8), RunContext())
         line = self._provisioning_line(captured_output)
-        assert line == (
-            "Provisioning Azure VM 'dev' in eastus: "
-            "size Standard_B2ms (2 vCPU / 8 GiB)..."
-        )
+        assert line == ("Provisioning Azure VM 'dev' in eastus: size Standard_B2ms (2 vCPU / 8 GiB)...")
         assert "for requested" not in line
         assert not captured_output.warnings
 
@@ -222,14 +207,10 @@ class TestCreateProvisioningOutput:
         line = self._provisioning_line(captured_output)
         # The line carries only the selected spec; the round-up detail is in
         # the warning, not doubled into the line.
-        assert line == (
-            "Provisioning Azure VM 'dev' in eastus: "
-            "size Standard_B4ms (4 vCPU / 16 GiB)..."
-        )
+        assert line == ("Provisioning Azure VM 'dev' in eastus: size Standard_B4ms (4 vCPU / 16 GiB)...")
         assert "for requested" not in line
         assert captured_output.warnings == [
-            "Rounded up to Standard_B4ms (4 vCPU / 16 GiB) "
-            "for requested 4 vCPU / 8 GiB."
+            "Rounded up to Standard_B4ms (4 vCPU / 16 GiB) for requested 4 vCPU / 8 GiB."
         ]
 
     def test_non_burstable_override_selected_and_emitted(
@@ -239,12 +220,7 @@ class TestCreateProvisioningOutput:
         this knob) is selected and its spec surfaced in the same shape."""
         self._wire(monkeypatch)
         sizes = [{"cpus": 2, "memory": 8, "size": "Standard_D2s_v5"}]
-        self._platform(vm_sizes=sizes).create(
-            self._request(cpus=2, memory=8), RunContext()
-        )
+        self._platform(vm_sizes=sizes).create(self._request(cpus=2, memory=8), RunContext())
         line = self._provisioning_line(captured_output)
-        assert line == (
-            "Provisioning Azure VM 'dev' in eastus: "
-            "size Standard_D2s_v5 (2 vCPU / 8 GiB)..."
-        )
+        assert line == ("Provisioning Azure VM 'dev' in eastus: size Standard_D2s_v5 (2 vCPU / 8 GiB)...")
         assert "for requested" not in line

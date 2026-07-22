@@ -90,9 +90,7 @@ class VMSiteNode:
         # world checks.
         from agentworks.orchestration.secrets import require_predicted_refs
 
-        require_predicted_refs(
-            self.key, self._secret_refs, ctx.config, self._registry
-        )
+        require_predicted_refs(self.key, self._secret_refs, ctx.config, self._registry)
         self._platform.preflight(ctx)
 
     def runup(self, ctx: RunContext) -> None:
@@ -187,10 +185,7 @@ class LiveVMNode:
             from agentworks.vms.templates import resolve_template
 
             tmpl = resolve_template(self._registry, self._row.template)
-            self._repair_refs = (
-                () if tmpl.tailscale_auth_key is None
-                else (tmpl.tailscale_auth_key,)
-            )
+            self._repair_refs = () if tmpl.tailscale_auth_key is None else (tmpl.tailscale_auth_key,)
         return self._repair_refs
 
     def confirmed_active(self) -> bool:
@@ -203,14 +198,10 @@ class LiveVMNode:
         # Truthiness on the host, matching the oracle: an empty string
         # takes the slow path, never a probe of "".
         host = row.tailscale_host
-        return bool(
-            not row.operator_stopped and host and _is_tailscale_reachable(host)
-        )
+        return bool(not row.operator_stopped and host and _is_tailscale_reachable(host))
 
     def observed_stopped(self, gate_secrets: SecretReader) -> bool:
-        observed = self._site.platform.status(
-            self._row, self._gate_ops_ctx(gate_secrets)
-        )
+        observed = self._site.platform.status(self._row, self._gate_ops_ctx(gate_secrets))
         self._observed = observed
         # RUNNING or UNKNOWN proceeds: a transient status failure must
         # not trigger a spurious start; the real op surfaces the error.
@@ -225,13 +216,10 @@ class LiveVMNode:
         # terminal, and auto-starting a VM the operator just stopped is
         # the one mistake the flag exists to prevent.
         current = self._db.get_vm(self._row.name)
-        manually_stopped = (
-            current.operator_stopped if current else self._row.operator_stopped
-        )
+        manually_stopped = current.operator_stopped if current else self._row.operator_stopped
         if manually_stopped:
             raise StateError(
-                f"VM '{self._row.name}' was manually stopped so it will "
-                f"not be auto-started",
+                f"VM '{self._row.name}' was manually stopped so it will not be auto-started",
                 entity_kind="vm",
                 entity_name=self._row.name,
                 hint=f"start it with: agw vm start {self._row.name}",
@@ -240,6 +228,7 @@ class LiveVMNode:
         output.info(f"VM '{self._row.name}' is {observed}. Starting...")
         platform = self._site.platform
         platform.start(self._row, self._gate_ops_ctx(gate_secrets))
+
         # Hold while tailscaled reattaches: a freshly booted WSL2
         # distro must not idle out during the handshake wait. The
         # rejoin auth key, needed only when the node fails to
@@ -249,8 +238,7 @@ class LiveVMNode:
             refs = self.repair_secret_refs()
             if not refs:
                 raise StateError(
-                    f"VM '{self._row.name}' must rejoin tailscale but its "
-                    f"template declares no auth key secret",
+                    f"VM '{self._row.name}' must rejoin tailscale but its template declares no auth key secret",
                     entity_kind="vm",
                     entity_name=self._row.name,
                 )
@@ -322,12 +310,8 @@ class VMTemplateNode:
                 f"Tailscale auth key's resolvability without config on "
                 f"the context (assembled for inspection?)"
             )
-        (decl,) = secret_declarations(
-            [self._tmpl.tailscale_auth_key], self._registry
-        )
-        predicted = predict_resolution(
-            (decl,), active_backends(ctx.config, self._registry)
-        )
+        (decl,) = secret_declarations([self._tmpl.tailscale_auth_key], self._registry)
+        predicted = predict_resolution((decl,), active_backends(ctx.config, self._registry))
         if predicted[decl.name] is None:
             raise ConfigError(
                 f"vm-template '{self._tmpl.name}': the Tailscale auth key "
@@ -394,8 +378,7 @@ class PendingVMNode:
     def mark_realized(self) -> None:
         if self._realized:
             raise StateError(
-                f"{self.key} was already marked realized; the "
-                f"pending-to-realized flip is one-way and once."
+                f"{self.key} was already marked realized; the pending-to-realized flip is one-way and once."
             )
         self._realized = True
 
@@ -406,8 +389,7 @@ class PendingVMNode:
             # The teardown contract: a raised error names the artifact
             # left standing (the unwind warning surfaces it verbatim).
             raise StateError(
-                f"the DB record for VM '{self._name}' could not be "
-                f"deleted and is left standing: {exc}",
+                f"the DB record for VM '{self._name}' could not be deleted and is left standing: {exc}",
                 entity_kind="vm",
                 entity_name=self._name,
             ) from exc
@@ -427,9 +409,7 @@ def vm_site_node(registry: Registry, name: str) -> VMSiteNode:
 
     decl = lookup_site(name, registry)
     platform = resolve_site(name, registry)
-    secret_refs = tuple(
-        ref for ref in decl.referenced_resources() if ref.kind == "secret"
-    )
+    secret_refs = tuple(ref for ref in decl.referenced_resources() if ref.kind == "secret")
     return VMSiteNode(name, platform, secret_refs, registry)
 
 

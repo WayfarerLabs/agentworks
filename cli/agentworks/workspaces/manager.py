@@ -113,9 +113,7 @@ def create_workspace(
 
     vm_node = live_vm_node(db, config, registry, vm)
 
-    pending_workspace = pending_workspace_node(
-        db, config, ws_name, vm_node, template_name
-    )
+    pending_workspace = pending_workspace_node(db, config, ws_name, vm_node, template_name)
     nodes = walk(pending_workspace)
     # The walk supplies the boundary union (the site's config secrets;
     # a workspace template's env secrets are runtime inputs, delivered
@@ -301,9 +299,7 @@ def reinit_workspace(
             entity_name=ws.vm_name,
         )
 
-    with gated_vm_boundary(
-        db, config, registry, vm, scope=_workspace_scope(db, vm, name)
-    ):
+    with gated_vm_boundary(db, config, registry, vm, scope=_workspace_scope(db, vm, name)):
         target = transport(vm, config)
         ws_group = ws.linux_group
         fixes = 0
@@ -512,15 +508,11 @@ def _reinit_git_identity(
 
         fixed = 0
         for key, value in declared:
-            current = target.run(
-                f"git -C {quoted_path} config --local --get {key}", check=False
-            )
+            current = target.run(f"git -C {quoted_path} config --local --get {key}", check=False)
             if current.ok and current.stdout.strip() == value:
                 output.detail(f"OK: git {key}")
                 continue
-            target.run(
-                f"git -C {quoted_path} config --local {key} {shlex.quote(value)}"
-            )
+            target.run(f"git -C {quoted_path} config --local {key} {shlex.quote(value)}")
             output.detail(f"Fixed: git {key}")
             fixed += 1
         return fixed
@@ -546,9 +538,7 @@ def _revert_grant_on_failure(db: Database, agent_name: str, ws_name: str) -> Non
         )
 
 
-def _rehome_partial_state_hint(
-    db: Database, ws_name: str, old_path: str, new_path: str
-) -> str:
+def _rehome_partial_state_hint(db: Database, ws_name: str, old_path: str, new_path: str) -> str:
     """Describe the actual DB state after a rehome failure / cancellation.
 
     The rehome flow copies files to the new path, then updates the DB. KI or
@@ -629,7 +619,8 @@ def rehome_workspace(
                 entity_name=name,
             ) from exc
         not_stopped = [
-            s for s in sessions
+            s
+            for s in sessions
             if s.pid != PID_STOPPED and status_map.get(s.name, SessionStatus.UNKNOWN) != SessionStatus.STOPPED
         ]
         if not_stopped:
@@ -685,10 +676,7 @@ def _rehome_vm(
 
     _guard_vm_status(vm)
     registry = build_registry(config)
-    with gated_vm_boundary(
-        db, config, registry, vm, scope=_workspace_scope(db, vm, ws_name)
-    ):
-
+    with gated_vm_boundary(db, config, registry, vm, scope=_workspace_scope(db, vm, ws_name)):
         target = transport(vm, config)
 
         # Verify source exists
@@ -841,10 +829,7 @@ def _rehome_vm(
                     f"during rehome: {e}",
                     entity_kind="workspace",
                     entity_name=ws_name,
-                    hint=(
-                        f"SSH log: {ssh_logger.path}. "
-                        f"{_rehome_partial_state_hint(db, ws_name, old_path, new_path)}"
-                    ),
+                    hint=(f"SSH log: {ssh_logger.path}. {_rehome_partial_state_hint(db, ws_name, old_path, new_path)}"),
                 ) from e
         finally:
             ssh_logger.close()
@@ -914,6 +899,7 @@ def delete_workspace(
     import contextlib
 
     from agentworks.ssh import SSHLogger
+
     ssh_logger = SSHLogger(ws.vm_name, "workspace-delete")
     output.info(f"Deleting workspace '{name}' on VM '{ws.vm_name}'...")
 
@@ -932,7 +918,10 @@ def delete_workspace(
                 registry = build_registry(config)
                 _keepalive_stack.enter_context(
                     gated_vm_boundary(
-                        db, config, registry, vm,
+                        db,
+                        config,
+                        registry,
+                        vm,
                         scope=_workspace_scope(db, vm, name),
                     )
                 )
@@ -977,11 +966,7 @@ def delete_workspace(
             sessions = db.list_sessions(workspace_name=name)
             sessions = ensure_pids_batch(sessions, db=db, config=config)
             # Snapshot console memberships before the FK cascade clears them.
-            console_pairs = [
-                (c.name, s.name)
-                for s in sessions
-                for c in db.list_consoles_for_session(s.name)
-            ]
+            console_pairs = [(c.name, s.name) for s in sessions for c in db.list_consoles_for_session(s.name)]
             unstoppable: list[str] = []
             for session in sessions:
                 status = check_session_status(session, target=target)
@@ -993,8 +978,14 @@ def delete_workspace(
                             unstoppable.append(session.name)
                             continue
                 elif status == SessionStatus.BROKEN:
-                    if session.pid and session.pid > 0 and force_kill_tmux_server(
-                        session.pid, target=target, socket_path=session.socket_path,
+                    if (
+                        session.pid
+                        and session.pid > 0
+                        and force_kill_tmux_server(
+                            session.pid,
+                            target=target,
+                            socket_path=session.socket_path,
+                        )
                     ):
                         pass  # killed successfully
                     else:
@@ -1073,6 +1064,7 @@ def copy_workspace(
     from agentworks.bootstrap import build_registry
     from agentworks.ssh import SSHLogger
     from agentworks.transports import SSHTransport, transport
+
     validate_name(dest_name)
 
     src_ws = db.get_workspace(source_name)
@@ -1107,7 +1099,10 @@ def copy_workspace(
             registry = build_registry(config)
             _keepalive_stack.enter_context(
                 gated_vm_boundary(
-                    db, config, registry, src_vm,
+                    db,
+                    config,
+                    registry,
+                    src_vm,
                     scope=_workspace_scope(db, src_vm, source_name),
                 )
             )
@@ -1147,7 +1142,10 @@ def copy_workspace(
             if dest_vm.name != src_vm.name:
                 _keepalive_stack.enter_context(
                     gated_vm_boundary(
-                        db, config, registry, dest_vm,
+                        db,
+                        config,
+                        registry,
+                        dest_vm,
                         scope=_workspace_scope(db, dest_vm, dest_name),
                     )
                 )
@@ -1291,5 +1289,3 @@ def _resolve_vm(db: Database, vm_name: str | None) -> VMRow:
     options = [f"{v.name}  ({v.site})" for v in usable_vms]
     idx = output.choose("Select a VM:", options)
     return usable_vms[idx]
-
-

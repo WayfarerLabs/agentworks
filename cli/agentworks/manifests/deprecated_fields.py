@@ -60,8 +60,7 @@ class DeprecatedField:
 # the bespoke reject in ``_decode_session_template`` emitted before this
 # facility replaced it.
 _SHELL_FLAT_FIELD_MESSAGE = (
-    "are the 'shell' harness's config; set harness: shell and move them "
-    "under spec.harness_config"
+    "are the 'shell' harness's config; set harness: shell and move them under spec.harness_config"
 )
 
 # Per-kind deprecated-field table, keyed by kind string. Seeding a new
@@ -82,10 +81,7 @@ def _grouped_notices(kind: str, matched: list[DeprecatedField]) -> list[str]:
     by_message: dict[str, list[str]] = {}
     for field in matched:
         by_message.setdefault(field.message, []).append(field.name)
-    return [
-        f"{kind} spec field(s) {', '.join(sorted(names))} {message}"
-        for message, names in by_message.items()
-    ]
+    return [f"{kind} spec field(s) {', '.join(sorted(names))} {message}" for message, names in by_message.items()]
 
 
 def check_deprecated_fields(kind: str, spec: dict[str, object]) -> list[str]:
@@ -144,13 +140,6 @@ def manifest_deprecation_notices(resources_dir: Path) -> list[str]:
             entries = DEPRECATED_FIELDS.get(doc.kind)
             if not entries:
                 continue
-            warns = [
-                field
-                for field in entries
-                if field.name in doc.spec and field.level == "warn"
-            ]
-            notices.extend(
-                f"{doc.where}: {line}"
-                for line in _grouped_notices(doc.kind, warns)
-            )
+            warns = [field for field in entries if field.name in doc.spec and field.level == "warn"]
+            notices.extend(f"{doc.where}: {line}" for line in _grouped_notices(doc.kind, warns))
     return notices

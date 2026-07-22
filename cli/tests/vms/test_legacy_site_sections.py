@@ -122,10 +122,7 @@ def test_defaults_platform_alias_maps_to_site(write_config) -> None:
         warn_deprecations=False,
     )
     assert config.defaults.site == "lima-local"
-    assert any(
-        "defaults.platform is deprecated" in issue
-        for issue in config.deprecation_issues
-    )
+    assert any("defaults.platform is deprecated" in issue for issue in config.deprecation_issues)
 
     config = load_config(
         write_config('[defaults]\nplatform = "azure"\n'),

@@ -41,15 +41,11 @@ def publish_to(registry: Registry) -> None:
     with importlib_resources.as_file(bundle) as bundle_dir:
         manifests = load_manifests(Path(bundle_dir))
 
-    assert not manifests.issues, (
-        f"bundled manifests must be issue-free: {manifests.issues}"
-    )
+    assert not manifests.issues, f"bundled manifests must be issue-free: {manifests.issues}"
     for entry in manifests.entries:
         registry.add(
             entry.kind,
             entry.name,
             entry.resource,
-            Origin.built_in(
-                source=f"{_BUILTIN_SOURCE}/{entry.location.file.name}"
-            ),
+            Origin.built_in(source=f"{_BUILTIN_SOURCE}/{entry.location.file.name}"),
         )

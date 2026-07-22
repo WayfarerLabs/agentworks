@@ -79,23 +79,17 @@ def test_validate_accepts_empty_config() -> None:
 
 def test_validate_rejects_unknown_field() -> None:
     with pytest.raises(ConfigError, match="unknown claude-code harness field"):
-        ClaudeCodeHarness.validate_config(
-            "session-template/claude", {"permision_mode": "typo"}
-        )
+        ClaudeCodeHarness.validate_config("session-template/claude", {"permision_mode": "typo"})
 
 
 def test_validate_rejects_non_string_model() -> None:
     with pytest.raises(ConfigError, match="model must be a string"):
-        ClaudeCodeHarness.validate_config(
-            "session-template/claude", {"model": 3}
-        )
+        ClaudeCodeHarness.validate_config("session-template/claude", {"model": 3})
 
 
 def test_validate_rejects_non_list_extra_args() -> None:
     with pytest.raises(ConfigError, match="extra_args must be a list of strings"):
-        ClaudeCodeHarness.validate_config(
-            "session-template/claude", {"extra_args": "just-a-string"}
-        )
+        ClaudeCodeHarness.validate_config("session-template/claude", {"extra_args": "just-a-string"})
 
 
 def test_construct_revalidates_config() -> None:
@@ -195,18 +189,14 @@ def test_restart_reads_the_stored_id_back_verbatim() -> None:
 
 def test_permission_mode_and_model_map_to_their_flags() -> None:
     target = _FakeTarget({f"{_SID}.jsonl": _FakeResult(1)})
-    command = _harness(
-        {"permission_mode": "acceptEdits", "model": "sonnet"}
-    ).start(_op_ctx(target))
+    command = _harness({"permission_mode": "acceptEdits", "model": "sonnet"}).start(_op_ctx(target))
     assert "--permission-mode acceptEdits" in command
     assert "--model sonnet" in command
 
 
 def test_extra_args_appended_verbatim_last_and_quoted() -> None:
     target = _FakeTarget({f"{_SID}.jsonl": _FakeResult(1)})
-    command = _harness(
-        {"model": "opus", "extra_args": ["--foo", "bar baz"]}
-    ).start(_op_ctx(target))
+    command = _harness({"model": "opus", "extra_args": ["--foo", "bar baz"]}).start(_op_ctx(target))
     # One argv token stays one token: "bar baz" is quoted, not re-split.
     assert shlex.quote("bar baz") in command
     # Appended last: after the managed --model flag.
@@ -219,9 +209,7 @@ def test_extra_args_with_shell_metacharacters_cannot_inject() -> None:
     must be ``shlex.quote``d into one inert argv token, never shell-active."""
     payload = "a'; touch /tmp/pwned #"
     target = _FakeTarget({f"{_SID}.jsonl": _FakeResult(1)})
-    command = _harness(
-        {"extra_args": ["--append-system-prompt", payload]}
-    ).start(_op_ctx(target))
+    command = _harness({"extra_args": ["--append-system-prompt", payload]}).start(_op_ctx(target))
 
     # The command is `sh -c '<inner>'`; the payload is nested-quoted (once
     # into the argv, once into the sh -c wrapper). Peeling both quoting

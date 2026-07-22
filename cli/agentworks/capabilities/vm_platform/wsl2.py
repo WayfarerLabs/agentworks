@@ -61,7 +61,10 @@ if sys.platform == "win32":
         _kernel32.CreateJobObjectW.argtypes = [wintypes.LPVOID, wintypes.LPCWSTR]
         _kernel32.SetInformationJobObject.restype = wintypes.BOOL
         _kernel32.SetInformationJobObject.argtypes = [
-            wintypes.HANDLE, wintypes.DWORD, wintypes.LPVOID, wintypes.DWORD,
+            wintypes.HANDLE,
+            wintypes.DWORD,
+            wintypes.LPVOID,
+            wintypes.DWORD,
         ]
         _kernel32.AssignProcessToJobObject.restype = wintypes.BOOL
         _kernel32.AssignProcessToJobObject.argtypes = [wintypes.HANDLE, wintypes.HANDLE]
@@ -178,6 +181,7 @@ def _cache_dir() -> Path:
 def _ps_quote(path: Path | str) -> str:
     """Quote a path for safe inclusion in a PowerShell single-quoted string."""
     return "'" + str(path).replace("'", "''") + "'"
+
 
 # Docker Hub OCI registry endpoints for the official Debian image
 _DOCKER_AUTH_URL = "https://auth.docker.io/token?service=registry.docker.io&scope=repository:library/debian:pull"
@@ -387,9 +391,7 @@ def _keepalive(distro_name: str, vm: VMRow, config: Config | None) -> Iterator[N
     # On other platforms _kernel32 is always None by design, so the note
     # would just be noise on every keepalive entry.
     if h_job is None and sys.platform == "win32":
-        output.detail(
-            "(note: Win32 Job Object unavailable; a hard-kill of this command may leave an orphan wsl.exe.)"
-        )
+        output.detail("(note: Win32 Job Object unavailable; a hard-kill of this command may leave an orphan wsl.exe.)")
 
     def _close_stderr() -> None:
         # Popen with stderr=PIPE leaves a read-end fd open until the Popen
@@ -409,16 +411,14 @@ def _keepalive(distro_name: str, vm: VMRow, config: Config | None) -> Iterator[N
     except subprocess.TimeoutExpired:
         rc = None  # still running, which is what we want
     if rc is not None:
-        stderr = (proc.stderr.read().decode("utf-8", errors="replace").strip() if proc.stderr else "")
+        stderr = proc.stderr.read().decode("utf-8", errors="replace").strip() if proc.stderr else ""
         _close_stderr()
         _close_handle(h_job)
         raise RuntimeError(
             f"WSL2 keepalive for distro {distro_name!r} exited immediately (rc={rc})"
             + (f": {stderr}" if stderr else "")
         )
-    output.detail(
-        f"Preventing idle-shutdown of WSL2 distro {distro_name!r} for the duration of this command..."
-    )
+    output.detail(f"Preventing idle-shutdown of WSL2 distro {distro_name!r} for the duration of this command...")
     try:
         if vm.tailscale_host and config is not None:
             target = transport(vm, config)
@@ -491,9 +491,7 @@ class WSL2Platform(VMPlatform):
             )
 
     @classmethod
-    def legacy_platform_metadata(
-        cls, row: Mapping[str, Any], legacy: Mapping[str, Any]
-    ) -> dict[str, str]:
+    def legacy_platform_metadata(cls, row: Mapping[str, Any], legacy: Mapping[str, Any]) -> dict[str, str]:
         # Pre-v27 rows recorded wsl_distro_name (always equal to the VM
         # name); read paths keyed off vm.name regardless. Either value
         # is the distro name for every existing row.
@@ -504,35 +502,25 @@ class WSL2Platform(VMPlatform):
         distro = vm.platform_metadata.get("distro_name")
         if not distro:
             raise StateError(
-                f"VM '{vm.name}' has no wsl2 distro_name in its platform "
-                f"metadata; the DB row is incomplete",
+                f"VM '{vm.name}' has no wsl2 distro_name in its platform metadata; the DB row is incomplete",
                 entity_kind="vm",
                 entity_name=vm.name,
             )
         return str(distro)
 
-    def vm_active(
-        self, vm: VMRow, *, config: Config | None = None
-    ) -> AbstractContextManager[None]:
+    def vm_active(self, vm: VMRow, *, config: Config | None = None) -> AbstractContextManager[None]:
         return _keepalive(self._distro_name(vm), vm, config)
 
     def create(self, request: ProvisionRequest, ctx: RunContext) -> ProvisionResult:
         # The platform owns the backend-side name; distro
         # names are the primary identifier, so a collision is an error.
-        distro_name = (
-            f"{request.system_slug}-{request.vm_name}"
-            if request.system_slug
-            else request.vm_name
-        )
+        distro_name = f"{request.system_slug}-{request.vm_name}" if request.system_slug else request.vm_name
         if self._distro_exists(distro_name):
             raise StateError(
                 f"a WSL2 distro named '{distro_name}' is already registered",
                 entity_kind="vm",
                 entity_name=request.vm_name,
-                hint=(
-                    "unregister it first (wsl --unregister) or pick a "
-                    "different VM name"
-                ),
+                hint=("unregister it first (wsl --unregister) or pick a different VM name"),
             )
         vm_name = distro_name
         swap = request.swap_gib if request.swap_gib is not None else 0
@@ -710,7 +698,10 @@ class WSL2Platform(VMPlatform):
         return str(vm.platform_metadata.get("distro_name", vm.name))
 
     def native_transport(
-        self, vm: VMRow, *, config: Config | None = None,
+        self,
+        vm: VMRow,
+        *,
+        config: Config | None = None,
     ) -> Transport | None:
         return WSL2Transport(distro_name=self._distro_name(vm), user=vm.admin_username)
 

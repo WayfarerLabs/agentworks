@@ -41,9 +41,7 @@ def _write_cfg(tmp_path: Path, body: str, ssh_keys: tuple[Path, Path]) -> Path:
     return p
 
 
-def test_admin_to_git_credentials_to_secret_walk(
-    tmp_path: Path, ssh_keys: tuple[Path, Path]
-) -> None:
+def test_admin_to_git_credentials_to_secret_walk(tmp_path: Path, ssh_keys: tuple[Path, Path]) -> None:
     """admin emits requirement for git_credentials:github;
     git_credentials:github emits requirement for secret:git-token-github;
     finalize walks the whole chain and auto-declares the secret with
@@ -80,9 +78,7 @@ def test_admin_to_git_credentials_to_secret_walk(
     assert decl.origin.source == ("git-credential", "github")
 
 
-def test_agent_template_to_git_credentials_to_secret_walk(
-    tmp_path: Path, ssh_keys: tuple[Path, Path]
-) -> None:
+def test_agent_template_to_git_credentials_to_secret_walk(tmp_path: Path, ssh_keys: tuple[Path, Path]) -> None:
     cfg = _write_cfg(
         tmp_path,
         """\
@@ -106,9 +102,7 @@ def test_agent_template_to_git_credentials_to_secret_walk(
     assert decl.origin.source == ("git-credential", "azdo")
 
 
-def test_collect_secrets_for_walks_admin_subgraph(
-    tmp_path: Path, ssh_keys: tuple[Path, Path]
-) -> None:
+def test_collect_secrets_for_walks_admin_subgraph(tmp_path: Path, ssh_keys: tuple[Path, Path]) -> None:
     """The ``collect_secrets_for`` helper walks the admin-template
     subgraph transitively (admin -> git_credentials -> secret) and
     returns the SecretDecls reachable along the way. Each token

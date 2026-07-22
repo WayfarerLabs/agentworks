@@ -96,9 +96,7 @@ class GitCredentialConfig(DeclaredResource):
 
         capability = GIT_CREDENTIAL_PROVIDER_REGISTRY.get(self.provider)
         if capability is not None:
-            for cref in capability.validate_config(
-                f"git-credential/{self.name}", self.provider_config
-            ):
+            for cref in capability.validate_config(f"git-credential/{self.name}", self.provider_config):
                 ref_cls = SecretReference if cref.kind == "secret" else _ResourceReq
                 refs.append(
                     ref_cls(

@@ -129,11 +129,7 @@ class OperationScope:
                 f"land with the commands that operate at it."
             )
         required, forbidden = rules
-        problems = [
-            f"requires {field!r}"
-            for field in required
-            if getattr(self, field) is None
-        ]
+        problems = [f"requires {field!r}" for field in required if getattr(self, field) is None]
         problems += [
             f"forbids {field!r} (got {getattr(self, field)!r})"
             for field in forbidden
@@ -145,10 +141,7 @@ class OperationScope:
             if (self.agent is not None) == self.admin:
                 problems.append("requires exactly one of 'agent' or 'admin'")
         elif self.admin:
-            problems.append(
-                "forbids 'admin' (SESSION vocabulary: exactly one of "
-                "agent/admin, at SESSION level only)"
-            )
+            problems.append("forbids 'admin' (SESSION vocabulary: exactly one of agent/admin, at SESSION level only)")
         if problems:
             raise StateError(
                 f"OperationScope level-to-fields invariant violated: a "
@@ -311,9 +304,7 @@ class Capability(ABC):
         self.owner_name = owner_name
         self.config = config
         self._secret_refs: tuple[ConfigReference, ...] = tuple(
-            ref
-            for ref in type(self).validate_config(self._owner_display, config)
-            if ref.kind == "secret"
+            ref for ref in type(self).validate_config(self._owner_display, config) if ref.kind == "secret"
         )
 
     @property
@@ -321,9 +312,7 @@ class Capability(ABC):
         return f"{self.owner_kind}/{self.owner_name}"
 
     @classmethod
-    def validate_config(
-        cls, owner: str, config: Mapping[str, object]
-    ) -> tuple[ConfigReference, ...]:
+    def validate_config(cls, owner: str, config: Mapping[str, object]) -> tuple[ConfigReference, ...]:
         """Validate ``config`` (the blob owned by ``owner``) and return
         the resource references it implies.
 
@@ -345,10 +334,7 @@ class Capability(ABC):
         """
         if config:
             display = getattr(cls, "name", cls.__name__)
-            raise ConfigError(
-                f"{owner}: the {display} capability accepts no "
-                f"configuration; got {sorted(config)}"
-            )
+            raise ConfigError(f"{owner}: the {display} capability accepts no configuration; got {sorted(config)}")
         return ()
 
     def disabled_reason(self) -> str | None:

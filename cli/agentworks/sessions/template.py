@@ -103,12 +103,8 @@ class SessionTemplate(DeclaredResource):
 
             capability = HARNESS_REGISTRY.get(self.harness)
             if capability is not None:
-                for cref in capability.validate_config(
-                    f"session-template/{self.name}", self.harness_config or {}
-                ):
-                    ref_cls = (
-                        SecretReference if cref.kind == "secret" else _ResourceRef
-                    )
+                for cref in capability.validate_config(f"session-template/{self.name}", self.harness_config or {}):
+                    ref_cls = SecretReference if cref.kind == "secret" else _ResourceRef
                     refs.append(
                         ref_cls(
                             name=cref.name,

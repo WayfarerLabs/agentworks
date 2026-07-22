@@ -93,7 +93,8 @@ def _stub_session_prep(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_session_create_eager_resolve_fires_before_db_insert(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """If resolve_for_command raises SecretUnavailableError, the session
     row must NOT be inserted (state mutation must come after eager
@@ -150,7 +151,8 @@ def test_session_create_eager_resolve_fires_before_db_insert(
 
 
 def test_session_create_calls_resolve_with_session_target(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """create_session registers a single SecretTarget (the one returned
     by ``_session_secret_target_pre_create``) on the operation's
@@ -190,9 +192,7 @@ def test_session_create_calls_resolve_with_session_target(
         real_register(self, targets)
 
     monkeypatch.setattr(_RealResolver, "register_targets", _register_spy)
-    monkeypatch.setattr(
-        _RealResolver, "resolve", lambda self: (_ for _ in ()).throw(_Sentinel())
-    )
+    monkeypatch.setattr(_RealResolver, "resolve", lambda self: (_ for _ in ()).throw(_Sentinel()))
 
     config = SimpleNamespace(session=SimpleNamespace(history_limit=50000))
 
@@ -218,7 +218,8 @@ def test_session_create_calls_resolve_with_session_target(
 
 
 def test_session_restart_broken_no_force_bails_before_eager_resolve(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A BROKEN session restarted without --force must raise BrokenStateError
     BEFORE eager-resolve runs. The operator gets a clean error without
@@ -245,9 +246,7 @@ def test_session_restart_broken_no_force_bails_before_eager_resolve(
         "_ensure_pid",
         lambda session, **kwargs: session,
     )
-    monkeypatch.setattr(
-        session_manager, "check_session_status", lambda *a, **k: SessionStatus.BROKEN
-    )
+    monkeypatch.setattr(session_manager, "check_session_status", lambda *a, **k: SessionStatus.BROKEN)
     monkeypatch.setattr(
         session_manager,
         "_build_session_target",
@@ -281,7 +280,8 @@ def test_session_restart_broken_no_force_bails_before_eager_resolve(
 
 
 def test_session_restart_eager_resolve_fires_before_kill(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """restart_session must call resolve_for_command BEFORE _kill_session.
     A failed eager-resolve leaves the running session untouched."""
@@ -307,9 +307,7 @@ def test_session_restart_eager_resolve_fires_before_kill(
         "_ensure_pid",
         lambda session, **kwargs: session,
     )
-    monkeypatch.setattr(
-        session_manager, "check_session_status", lambda *a, **k: SessionStatus.OK
-    )
+    monkeypatch.setattr(session_manager, "check_session_status", lambda *a, **k: SessionStatus.OK)
     monkeypatch.setattr(
         session_manager,
         "_build_session_target",
@@ -323,9 +321,7 @@ def test_session_restart_eager_resolve_fires_before_kill(
         env: dict[str, str] = {}
 
     monkeypatch.setattr(session_manager, "_resolve_template", lambda *a, **k: _Tmpl())
-    monkeypatch.setattr(
-        session_manager, "_session_secret_target", lambda *a, **k: object()
-    )
+    monkeypatch.setattr(session_manager, "_session_secret_target", lambda *a, **k: object())
 
     kill_calls: list[str] = []
 
@@ -363,7 +359,8 @@ def test_session_restart_eager_resolve_fires_before_kill(
 
 
 def test_console_add_shell_eager_resolve_fires_before_db_update(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """add_shell must call resolve_for_command BEFORE update_console_shells.
     A failed eager-resolve leaves the console's shell list unchanged."""
@@ -373,20 +370,16 @@ def test_console_add_shell_eager_resolve_fires_before_db_update(
 
     # Seed: a session + a console + a console-session membership.
     db._conn.execute(
-        "INSERT INTO sessions (name, workspace_name, template, mode) "
-        "VALUES ('s1', 'ws1', 'default', 'admin')"
+        "INSERT INTO sessions (name, workspace_name, template, mode) VALUES ('s1', 'ws1', 'default', 'admin')"
     )
     db._conn.execute("INSERT INTO consoles (name, vm_name) VALUES ('c1', 'vm1')")
     db._conn.execute(
-        "INSERT INTO console_sessions (console_name, session_name, shells, position) "
-        "VALUES ('c1', 's1', '[]', 0)"
+        "INSERT INTO console_sessions (console_name, session_name, shells, position) VALUES ('c1', 's1', '[]', 0)"
     )
     db._conn.commit()
 
     # Stub the secret-target builder so we don't need a real Config.
-    monkeypatch.setattr(
-        multi_console, "_pane_secret_target", lambda *a, **k: object()
-    )
+    monkeypatch.setattr(multi_console, "_pane_secret_target", lambda *a, **k: object())
 
     def _explode(*args: object, **kwargs: object) -> None:
         raise SecretUnavailableError(
@@ -456,8 +449,7 @@ def test_vm_reinit_does_not_eager_resolve_operator_env() -> None:
 
     src = inspect.getsource(vm_manager.reinit_vm)
     assert "SecretTarget(" not in src, (
-        "found SecretTarget(...) constructed in reinit_vm; provisioning "
-        "should not walk operator-env scopes."
+        "found SecretTarget(...) constructed in reinit_vm; provisioning should not walk operator-env scopes."
     )
 
 
@@ -473,8 +465,7 @@ def test_agent_create_does_not_eager_resolve_operator_env() -> None:
 
     src = inspect.getsource(agent_manager.create_agent)
     assert "resolve_for_command" not in src, (
-        "found resolve_for_command in create_agent; provisioning should "
-        "not prompt for operator-env secrets."
+        "found resolve_for_command in create_agent; provisioning should not prompt for operator-env secrets."
     )
 
 
@@ -487,13 +478,13 @@ def test_agent_reinit_does_not_eager_resolve_operator_env() -> None:
 
     src = inspect.getsource(agent_manager.reinit_agent)
     assert "resolve_for_command" not in src, (
-        "found resolve_for_command in reinit_agent; provisioning should "
-        "not prompt for operator-env secrets."
+        "found resolve_for_command in reinit_agent; provisioning should not prompt for operator-env secrets."
     )
 
 
 def test_vm_shell_env_target_joins_the_bind_boundary(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """The one-prompt-session pin for the runtime roots: shell_vm
     registers its env-chain SecretTarget on the operation's ONE
@@ -506,7 +497,8 @@ def test_vm_shell_env_target_joins_the_bind_boundary(
     sentinel_target = object()
 
     monkeypatch.setattr(
-        vm_manager, "_resolve_vm_admin_env_scopes",
+        vm_manager,
+        "_resolve_vm_admin_env_scopes",
         lambda *a, **k: vm_manager._VmAdminEnvScopes(vm={}, workspace=None, admin={}),
     )
     monkeypatch.setattr(vm_manager, "_vm_secret_target", lambda *a, **k: sentinel_target)
@@ -543,7 +535,8 @@ def test_vm_shell_env_target_joins_the_bind_boundary(
 
 
 def test_vm_shell_eager_resolve_fires_before_ssh(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """shell_vm must call resolve_for_command BEFORE opening the SSH
     session. A failed eager-resolve produces no SSH call."""
@@ -559,7 +552,8 @@ def test_vm_shell_eager_resolve_fires_before_ssh(
     monkeypatch.setattr(vm_manager, "_is_tailscale_reachable", lambda host: True)
 
     monkeypatch.setattr(
-        vm_manager, "_resolve_vm_admin_env_scopes",
+        vm_manager,
+        "_resolve_vm_admin_env_scopes",
         lambda *a, **k: vm_manager._VmAdminEnvScopes(vm={}, workspace=None, admin={}),
     )
 
@@ -598,7 +592,8 @@ def test_vm_shell_eager_resolve_fires_before_ssh(
 
 
 def test_vm_exec_eager_resolve_fires_before_ssh(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """exec_vm must call resolve_for_command BEFORE running the remote
     command. A failed eager-resolve raises before call_streaming runs."""
@@ -614,7 +609,8 @@ def test_vm_exec_eager_resolve_fires_before_ssh(
     monkeypatch.setattr(vm_manager, "_is_tailscale_reachable", lambda host: True)
 
     monkeypatch.setattr(
-        vm_manager, "_resolve_vm_admin_env_scopes",
+        vm_manager,
+        "_resolve_vm_admin_env_scopes",
         lambda *a, **k: vm_manager._VmAdminEnvScopes(vm={}, workspace=None, admin={}),
     )
 
@@ -635,9 +631,7 @@ def test_vm_exec_eager_resolve_fires_before_ssh(
             streaming_calls.append(cmd)
             return 0
 
-    monkeypatch.setattr(
-        "agentworks.transports.transport", lambda *a, **k: _Target()
-    )
+    monkeypatch.setattr("agentworks.transports.transport", lambda *a, **k: _Target())
 
     config = SimpleNamespace(
         vm=SimpleNamespace(env={}),
@@ -652,7 +646,8 @@ def test_vm_exec_eager_resolve_fires_before_ssh(
 
 
 def test_agent_exec_eager_resolve_fires_before_ssh(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """exec_agent must call resolve_for_command BEFORE running the
     remote command. A failed eager-resolve raises before call_streaming."""
@@ -665,13 +660,12 @@ def test_agent_exec_eager_resolve_fires_before_ssh(
     # gate opens (fast path) before the boundary; keep its
     # reachability probe off the network.
     monkeypatch.setattr("shutil.which", lambda name: f"/usr/bin/{name}")
-    monkeypatch.setattr(
-        "agentworks.vms.manager._is_tailscale_reachable", lambda host: True
-    )
+    monkeypatch.setattr("agentworks.vms.manager._is_tailscale_reachable", lambda host: True)
     db.insert_agent("a1", "vm1", "agt-a1", template="default")
 
     monkeypatch.setattr(
-        agent_manager, "_resolve_agent_direct_env_scopes",
+        agent_manager,
+        "_resolve_agent_direct_env_scopes",
         lambda *a, **k: agent_manager._AgentDirectEnvScopes(vm={}, workspace=None, agent={}),
     )
 
@@ -692,15 +686,16 @@ def test_agent_exec_eager_resolve_fires_before_ssh(
             streaming_calls.append(cmd)
             return 0
 
-    monkeypatch.setattr(
-        "agentworks.transports.agent_transport", lambda *a, **k: _Target()
-    )
+    monkeypatch.setattr("agentworks.transports.agent_transport", lambda *a, **k: _Target())
 
     config = SimpleNamespace()
 
     with pytest.raises(SecretUnavailableError, match="api-key"):
         agent_manager.exec_agent(
-            db, config, name="a1", command=["echo", "hi"],  # type: ignore[arg-type]
+            db,
+            config,
+            name="a1",
+            command=["echo", "hi"],  # type: ignore[arg-type]
         )
 
     assert streaming_calls == [], "eager-resolve must precede call_streaming"
@@ -708,7 +703,8 @@ def test_agent_exec_eager_resolve_fires_before_ssh(
 
 
 def test_agent_exec_env_target_joins_the_bind_boundary(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """The one-prompt-session pin for the agent roots (the Phase 7
     round-2 ordering bug lived here, not in the vm twins): exec_agent
@@ -722,12 +718,11 @@ def test_agent_exec_env_target_joins_the_bind_boundary(
     sentinel_target = object()
 
     monkeypatch.setattr(
-        agent_manager, "_resolve_agent_direct_env_scopes",
+        agent_manager,
+        "_resolve_agent_direct_env_scopes",
         lambda *a, **k: agent_manager._AgentDirectEnvScopes(vm={}, workspace=None, agent={}),
     )
-    monkeypatch.setattr(
-        agent_manager, "_agent_direct_secret_target", lambda *a, **k: sentinel_target
-    )
+    monkeypatch.setattr(agent_manager, "_agent_direct_secret_target", lambda *a, **k: sentinel_target)
     # Node construction binds the site's platform before the target
     # registration this test spies on; keep it host-independent (the
     # real lima site is disabled where limactl isn't installed).
@@ -751,7 +746,10 @@ def test_agent_exec_env_target_joins_the_bind_boundary(
 
     with pytest.raises(_Stop):
         agent_manager.exec_agent(
-            db, SimpleNamespace(), name="a1", command=["echo", "hi"],  # type: ignore[arg-type]
+            db,
+            SimpleNamespace(),
+            name="a1",
+            command=["echo", "hi"],  # type: ignore[arg-type]
         )
 
     assert bound_targets == [[sentinel_target]]
@@ -759,7 +757,8 @@ def test_agent_exec_env_target_joins_the_bind_boundary(
 
 
 def test_shell_agent_passes_workspace_scope_to_secret_target(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """shell_agent --workspace must include workspace-template env in
     the SecretTarget so workspace-scope secrets get eager-resolved.
@@ -775,19 +774,19 @@ def test_shell_agent_passes_workspace_scope_to_secret_target(
     captured_scopes: dict[str, object] = {}
 
     def _spy_scopes(
-        registry: object, vm: object, agent: object, *, ws: object = None,
+        registry: object,
+        vm: object,
+        agent: object,
+        *,
+        ws: object = None,
     ) -> object:
         # Record the ws arg so the test can pin "shell_agent passes the
         # workspace row through to the scope resolver."
         captured_scopes["ws"] = ws
         return agent_manager._AgentDirectEnvScopes(vm={}, workspace=None, agent={})
 
-    monkeypatch.setattr(
-        agent_manager, "_resolve_agent_direct_env_scopes", _spy_scopes
-    )
-    monkeypatch.setattr(
-        agent_manager, "_agent_direct_secret_target", lambda *a, **k: object()
-    )
+    monkeypatch.setattr(agent_manager, "_resolve_agent_direct_env_scopes", _spy_scopes)
+    monkeypatch.setattr(agent_manager, "_agent_direct_secret_target", lambda *a, **k: object())
     stub_vm_gates(monkeypatch)
 
     class _Sentinel(Exception):
@@ -806,7 +805,10 @@ def test_shell_agent_passes_workspace_scope_to_secret_target(
 
     with pytest.raises(_Sentinel):
         agent_manager.shell_agent(
-            db, config, name="a1", workspace_name="ws1",  # type: ignore[arg-type]
+            db,
+            config,
+            name="a1",
+            workspace_name="ws1",  # type: ignore[arg-type]
         )
 
     # The scope resolver received the workspace row, not None. The
@@ -820,7 +822,8 @@ def test_shell_agent_passes_workspace_scope_to_secret_target(
 
 
 def test_attach_console_build_path_eager_resolves_before_tmux(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """attach_console's first-attach build path opens new shells
     (admin shell + per-session shell panes). resolve_for_command must
@@ -843,14 +846,15 @@ def test_attach_console_build_path_eager_resolves_before_tmux(
             SimpleNamespace(run=lambda *a, **k: None),
         )
 
+    monkeypatch.setattr(multi_console, "_prepare_vm_target_for_attach", _fake_prepare)
     monkeypatch.setattr(
-        multi_console, "_prepare_vm_target_for_attach", _fake_prepare
+        multi_console,
+        "_console_tmux_exists",
+        lambda *a, **k: False,
     )
     monkeypatch.setattr(
-        multi_console, "_console_tmux_exists", lambda *a, **k: False,
-    )
-    monkeypatch.setattr(
-        multi_console, "_console_build_secret_targets",
+        multi_console,
+        "_console_build_secret_targets",
         lambda *a, **k: [object()],
     )
 
@@ -877,14 +881,13 @@ def test_attach_console_build_path_eager_resolves_before_tmux(
     with pytest.raises(SecretUnavailableError, match="api-key"):
         multi_console.attach_console(db, config, name="c1")  # type: ignore[arg-type]
 
-    assert build_called == [], (
-        "eager-resolve must fire before _build_console_tmux; build ran anyway"
-    )
+    assert build_called == [], "eager-resolve must fire before _build_console_tmux; build ran anyway"
     db.close()
 
 
 def test_console_build_secret_targets_excludes_session_attach_panes(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """_console_build_secret_targets enumerates only the panes that
     OPEN NEW SHELLS: the admin shell (when set) and each configured
@@ -901,28 +904,29 @@ def test_console_build_secret_targets_excludes_session_attach_panes(
     db = _seed_basic_db(tmp_path)
     # Seed: console with admin_shell=True + one session with two shells.
     db._conn.execute(
-        "INSERT INTO sessions (name, workspace_name, template, mode) "
-        "VALUES ('s1', 'ws1', 'default', 'admin')"
+        "INSERT INTO sessions (name, workspace_name, template, mode) VALUES ('s1', 'ws1', 'default', 'admin')"
     )
-    db._conn.execute(
-        "INSERT INTO consoles (name, vm_name, admin_shell) VALUES ('c1', 'vm1', 1)"
-    )
+    db._conn.execute("INSERT INTO consoles (name, vm_name, admin_shell) VALUES ('c1', 'vm1', 1)")
     # Two shells: one --admin, one not. Admin-mode session promotes the
     # non-admin shell to admin via use_admin = ... or session_user ==
     # admin_user.
     db._conn.execute(
         "INSERT INTO console_sessions (console_name, session_name, shells, position) "
-        "VALUES ('c1', 's1', '[{\"cwd\":null,\"admin\":true},{\"cwd\":null,\"admin\":false}]', 0)"
+        'VALUES (\'c1\', \'s1\', \'[{"cwd":null,"admin":true},{"cwd":null,"admin":false}]\', 0)'
     )
     db._conn.commit()
 
     sentinel_pane = object()
     sentinel_admin = object()
     monkeypatch.setattr(
-        multi_console, "_pane_secret_target", lambda *a, **k: sentinel_pane,
+        multi_console,
+        "_pane_secret_target",
+        lambda *a, **k: sentinel_pane,
     )
     monkeypatch.setattr(
-        multi_console, "_admin_only_secret_target", lambda *a, **k: sentinel_admin,
+        multi_console,
+        "_admin_only_secret_target",
+        lambda *a, **k: sentinel_admin,
     )
 
     vm = db.get_vm("vm1")
@@ -932,7 +936,10 @@ def test_console_build_secret_targets_excludes_session_attach_panes(
     from tests.conftest import _StubRegistry
 
     targets = multi_console._console_build_secret_targets(
-        db, _StubRegistry(SimpleNamespace()), console=console, vm=vm,  # type: ignore[arg-type]
+        db,
+        _StubRegistry(SimpleNamespace()),
+        console=console,
+        vm=vm,  # type: ignore[arg-type]
     )
 
     # Expected: 1 admin-shell + 2 shell panes (one per configured shell).
@@ -945,7 +952,8 @@ def test_console_build_secret_targets_excludes_session_attach_panes(
 
 
 def test_attach_console_existing_tmux_session_skips_eager_resolve(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """When the tmux session already exists (plain attach, not first-
     attach build), FRD R4 says no secrets are consumed. The wiring
@@ -968,11 +976,11 @@ def test_attach_console_existing_tmux_session_skips_eager_resolve(
             ),
         )
 
+    monkeypatch.setattr(multi_console, "_prepare_vm_target_for_attach", _fake_prepare)
     monkeypatch.setattr(
-        multi_console, "_prepare_vm_target_for_attach", _fake_prepare
-    )
-    monkeypatch.setattr(
-        multi_console, "_console_tmux_exists", lambda *a, **k: True,
+        multi_console,
+        "_console_tmux_exists",
+        lambda *a, **k: True,
     )
 
     resolve_called: list[bool] = []
@@ -981,9 +989,7 @@ def test_attach_console_existing_tmux_session_skips_eager_resolve(
         resolve_called.append(True)
         return {}
 
-    monkeypatch.setattr(
-        "agentworks.secrets.resolve_for_command", _track_resolve
-    )
+    monkeypatch.setattr("agentworks.secrets.resolve_for_command", _track_resolve)
 
     config = SimpleNamespace(
         named_console=SimpleNamespace(tmux_layout="aw-session-vertical"),
@@ -1005,7 +1011,8 @@ def test_attach_console_existing_tmux_session_skips_eager_resolve(
 
 
 def test_session_attach_does_not_eager_resolve(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """``session attach`` joins an existing tmux session via SSH; the
     existing session retains its create-time env (FRD R5 "Attach
@@ -1015,8 +1022,7 @@ def test_session_attach_does_not_eager_resolve(
 
     db = _seed_basic_db(tmp_path)
     db._conn.execute(
-        "INSERT INTO sessions (name, workspace_name, template, mode, pid) "
-        "VALUES ('s1', 'ws1', 'default', ?, 1234)",
+        "INSERT INTO sessions (name, workspace_name, template, mode, pid) VALUES ('s1', 'ws1', 'default', ?, 1234)",
         (SessionMode.ADMIN.value,),
     )
     db._conn.commit()
@@ -1047,10 +1053,13 @@ def test_session_attach_does_not_eager_resolve(
 
     monkeypatch.setattr(session_manager, "_prepare_vm", _fake_prepare_vm)
     monkeypatch.setattr(
-        session_manager, "_ensure_pid", lambda session, **kwargs: session,
+        session_manager,
+        "_ensure_pid",
+        lambda session, **kwargs: session,
     )
     monkeypatch.setattr(
-        session_manager, "check_session_status",
+        session_manager,
+        "check_session_status",
         lambda *a, **k: SessionStatus.OK,
     )
 
@@ -1059,14 +1068,13 @@ def test_session_attach_does_not_eager_resolve(
     # does not sys.exit; the CLI owns the process exit.
     assert session_manager.attach_session(db, config, name="s1") == 0  # type: ignore[arg-type]
 
-    assert resolve_called == [], (
-        "session attach joins existing shell; must not eager-resolve"
-    )
+    assert resolve_called == [], "session attach joins existing shell; must not eager-resolve"
     db.close()
 
 
 def test_session_list_does_not_eager_resolve(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """``session list`` reads the DB only; per FRD R4/R5 it opens no new
     shells and consumes no secrets. A spy on resolve_for_command must
@@ -1077,8 +1085,7 @@ def test_session_list_does_not_eager_resolve(
 
     db = _seed_basic_db(tmp_path)
     db._conn.execute(
-        "INSERT INTO sessions (name, workspace_name, template, mode) "
-        "VALUES ('s1', 'ws1', 'default', ?)",
+        "INSERT INTO sessions (name, workspace_name, template, mode) VALUES ('s1', 'ws1', 'default', ?)",
         (SessionMode.ADMIN.value,),
     )
     db._conn.commit()
@@ -1098,14 +1105,13 @@ def test_session_list_does_not_eager_resolve(
         no_status=True,  # avoid SSH liveness probes
     )
 
-    assert resolve_called == [], (
-        "session list reads DB only; must not eager-resolve secrets"
-    )
+    assert resolve_called == [], "session list reads DB only; must not eager-resolve secrets"
     db.close()
 
 
 def test_session_describe_does_not_eager_resolve(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """``session describe`` reads DB + best-effort liveness; per FRD R4/R5
     it opens no new shells and consumes no secrets."""
@@ -1114,8 +1120,7 @@ def test_session_describe_does_not_eager_resolve(
 
     db = _seed_basic_db(tmp_path)
     db._conn.execute(
-        "INSERT INTO sessions (name, workspace_name, template, mode) "
-        "VALUES ('s1', 'ws1', 'default', ?)",
+        "INSERT INTO sessions (name, workspace_name, template, mode) VALUES ('s1', 'ws1', 'default', ?)",
         (SessionMode.ADMIN.value,),
     )
     db._conn.commit()
@@ -1145,27 +1150,31 @@ def test_session_describe_does_not_eager_resolve(
 
     monkeypatch.setattr(session_manager, "_prepare_vm", _fake_prepare_vm)
     monkeypatch.setattr(
-        session_manager, "_ensure_pid", lambda session, **kwargs: session,
+        session_manager,
+        "_ensure_pid",
+        lambda session, **kwargs: session,
     )
     monkeypatch.setattr(
-        session_manager, "check_session_status",
+        session_manager,
+        "check_session_status",
         lambda *a, **k: SessionStatus.UNKNOWN,
     )
 
     config = SimpleNamespace(operator=SimpleNamespace(ssh_private_key=None))
     # describe_session has `name` as a keyword-only arg.
     session_manager.describe_session(
-        db, config, name="s1",  # type: ignore[arg-type]
+        db,
+        config,
+        name="s1",  # type: ignore[arg-type]
     )
 
-    assert resolve_called == [], (
-        "session describe must not eager-resolve secrets"
-    )
+    assert resolve_called == [], "session describe must not eager-resolve secrets"
     db.close()
 
 
 def test_console_add_sessions_does_not_eager_resolve_live_branch(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """``console add-sessions`` with a live tmux session: wraps existing
     sessions into new console windows via tmux new-window + attach. No
@@ -1174,12 +1183,9 @@ def test_console_add_sessions_does_not_eager_resolve_live_branch(
 
     db = _seed_basic_db(tmp_path)
     db._conn.execute(
-        "INSERT INTO sessions (name, workspace_name, template, mode) "
-        "VALUES ('s1', 'ws1', 'default', 'admin')"
+        "INSERT INTO sessions (name, workspace_name, template, mode) VALUES ('s1', 'ws1', 'default', 'admin')"
     )
-    db._conn.execute(
-        "INSERT INTO consoles (name, vm_name) VALUES ('c1', 'vm1')"
-    )
+    db._conn.execute("INSERT INTO consoles (name, vm_name) VALUES ('c1', 'vm1')")
     db._conn.commit()
 
     resolve_called: list[bool] = []
@@ -1195,30 +1201,38 @@ def test_console_add_sessions_does_not_eager_resolve_live_branch(
         run=lambda *a, **k: SimpleNamespace(ok=True, returncode=0, stdout="", stderr=""),
     )
     monkeypatch.setattr(
-        multi_console, "_live_target", lambda *a, **k: (fake_vm, fake_target),
+        multi_console,
+        "_live_target",
+        lambda *a, **k: (fake_vm, fake_target),
     )
     monkeypatch.setattr(
-        multi_console, "_console_tmux_exists", lambda *a, **k: True,
+        multi_console,
+        "_console_tmux_exists",
+        lambda *a, **k: True,
     )
     monkeypatch.setattr(
-        multi_console, "_add_session_window", lambda *a, **k: None,
+        multi_console,
+        "_add_session_window",
+        lambda *a, **k: None,
     )
 
     config = SimpleNamespace(
         named_console=SimpleNamespace(tmux_layout="aw-session-vertical"),
     )
     multi_console.add_sessions(
-        db, config, console_name="c1", session_specs=["s1"],  # type: ignore[arg-type]
+        db,
+        config,
+        console_name="c1",
+        session_specs=["s1"],  # type: ignore[arg-type]
     )
 
-    assert resolve_called == [], (
-        "console add-sessions even on the live branch must not eager-resolve"
-    )
+    assert resolve_called == [], "console add-sessions even on the live branch must not eager-resolve"
     db.close()
 
 
 def test_console_add_sessions_does_not_eager_resolve_db_only_branch(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """``console add-sessions`` DB-only branch (no live tmux): just
     inserts console_sessions rows. Trivially no secrets."""
@@ -1226,12 +1240,9 @@ def test_console_add_sessions_does_not_eager_resolve_db_only_branch(
 
     db = _seed_basic_db(tmp_path)
     db._conn.execute(
-        "INSERT INTO sessions (name, workspace_name, template, mode) "
-        "VALUES ('s1', 'ws1', 'default', 'admin')"
+        "INSERT INTO sessions (name, workspace_name, template, mode) VALUES ('s1', 'ws1', 'default', 'admin')"
     )
-    db._conn.execute(
-        "INSERT INTO consoles (name, vm_name) VALUES ('c1', 'vm1')"
-    )
+    db._conn.execute("INSERT INTO consoles (name, vm_name) VALUES ('c1', 'vm1')")
     db._conn.commit()
 
     resolve_called: list[bool] = []
@@ -1241,18 +1252,17 @@ def test_console_add_sessions_does_not_eager_resolve_db_only_branch(
         return {}
 
     monkeypatch.setattr("agentworks.secrets.resolve_for_command", _track_resolve)
-    monkeypatch.setattr(
-        multi_console, "_live_target", lambda *a, **k: None
-    )
+    monkeypatch.setattr(multi_console, "_live_target", lambda *a, **k: None)
 
     config = SimpleNamespace()
     multi_console.add_sessions(
-        db, config, console_name="c1", session_specs=["s1"],  # type: ignore[arg-type]
+        db,
+        config,
+        console_name="c1",
+        session_specs=["s1"],  # type: ignore[arg-type]
     )
 
-    assert resolve_called == [], (
-        "console add-sessions DB-only branch must not eager-resolve"
-    )
+    assert resolve_called == [], "console add-sessions DB-only branch must not eager-resolve"
     db.close()
 
 
@@ -1346,7 +1356,8 @@ def test_create_agent_on_vm_ends_with_ensure_files_sourced() -> None:
 
 
 def test_console_add_sessions_with_shells_eager_resolves(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """``console add-sessions s1+2`` requests 2 new shell panes per
     session. Per FRD R4 those panes consume secrets at open time, so
@@ -1357,14 +1368,15 @@ def test_console_add_sessions_with_shells_eager_resolves(
 
     db = _seed_basic_db(tmp_path)
     db._conn.execute(
-        "INSERT INTO sessions (name, workspace_name, template, mode) "
-        "VALUES ('s1', 'ws1', 'default', 'admin')"
+        "INSERT INTO sessions (name, workspace_name, template, mode) VALUES ('s1', 'ws1', 'default', 'admin')"
     )
     db._conn.execute("INSERT INTO consoles (name, vm_name) VALUES ('c1', 'vm1')")
     db._conn.commit()
 
     monkeypatch.setattr(
-        multi_console, "_pane_secret_target", lambda *a, **k: object(),
+        multi_console,
+        "_pane_secret_target",
+        lambda *a, **k: object(),
     )
 
     def _explode(*args: object, **kwargs: object) -> None:
@@ -1381,20 +1393,22 @@ def test_console_add_sessions_with_shells_eager_resolves(
 
     with pytest.raises(SecretUnavailableError, match="api-key"):
         multi_console.add_sessions(
-            db, config,  # type: ignore[arg-type]
-            console_name="c1", session_specs=["s1+2"],
+            db,
+            config,  # type: ignore[arg-type]
+            console_name="c1",
+            session_specs=["s1+2"],
         )
 
     # DB write must not have happened.
     assert db.get_console_session("c1", "s1") is None, (
-        "eager-resolve must fire BEFORE the console_sessions DB insert "
-        "when any spec requests shells"
+        "eager-resolve must fire BEFORE the console_sessions DB insert when any spec requests shells"
     )
     db.close()
 
 
 def test_console_add_sessions_without_shells_does_not_eager_resolve(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """``console add-sessions s1 s2`` (no +N) opens no new shells in the
     DB-write path; it only registers DB rows. The live-attach wrappers
@@ -1404,8 +1418,7 @@ def test_console_add_sessions_without_shells_does_not_eager_resolve(
 
     db = _seed_basic_db(tmp_path)
     db._conn.execute(
-        "INSERT INTO sessions (name, workspace_name, template, mode) "
-        "VALUES ('s1', 'ws1', 'default', 'admin')"
+        "INSERT INTO sessions (name, workspace_name, template, mode) VALUES ('s1', 'ws1', 'default', 'admin')"
     )
     db._conn.execute("INSERT INTO consoles (name, vm_name) VALUES ('c1', 'vm1')")
     db._conn.commit()
@@ -1422,19 +1435,19 @@ def test_console_add_sessions_without_shells_does_not_eager_resolve(
 
     config = SimpleNamespace()
     multi_console.add_sessions(
-        db, config,  # type: ignore[arg-type]
-        console_name="c1", session_specs=["s1"],
+        db,
+        config,  # type: ignore[arg-type]
+        console_name="c1",
+        session_specs=["s1"],
     )
 
-    assert resolve_called == [], (
-        "add-sessions without +N must not eager-resolve; wrappers only "
-        "join existing sessions"
-    )
+    assert resolve_called == [], "add-sessions without +N must not eager-resolve; wrappers only join existing sessions"
     db.close()
 
 
 def test_restore_session_window_missing_branch_eager_resolves(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """When restore_session's window-missing path rebuilds via
     _add_session_window, it opens new shells -- so eager-resolve must
@@ -1444,15 +1457,14 @@ def test_restore_session_window_missing_branch_eager_resolves(
 
     db = _seed_basic_db(tmp_path)
     db._conn.execute(
-        "INSERT INTO sessions (name, workspace_name, template, mode) "
-        "VALUES ('s1', 'ws1', 'default', 'admin')"
+        "INSERT INTO sessions (name, workspace_name, template, mode) VALUES ('s1', 'ws1', 'default', 'admin')"
     )
     db._conn.execute("INSERT INTO consoles (name, vm_name) VALUES ('c1', 'vm1')")
     # Two configured shells so the rebuild would open new panes.
     db._conn.execute(
         "INSERT INTO console_sessions (console_name, session_name, shells, position) "
         "VALUES ('c1', 's1', "
-        "'[{\"cwd\":null,\"admin\":true},{\"cwd\":null,\"admin\":false}]', 0)"
+        '\'[{"cwd":null,"admin":true},{"cwd":null,"admin":false}]\', 0)'
     )
     db._conn.commit()
 
@@ -1467,14 +1479,15 @@ def test_restore_session_window_missing_branch_eager_resolves(
     def _fake_prepare(*a: object, **k: object):  # noqa: ANN202
         yield (fake_vm, fake_target)
 
+    monkeypatch.setattr(multi_console, "_prepare_vm_target_for_attach", _fake_prepare)
     monkeypatch.setattr(
-        multi_console, "_prepare_vm_target_for_attach", _fake_prepare
+        multi_console,
+        "_console_tmux_exists",
+        lambda *a, **k: True,
     )
     monkeypatch.setattr(
-        multi_console, "_console_tmux_exists", lambda *a, **k: True,
-    )
-    monkeypatch.setattr(
-        multi_console, "_restore_session_secret_targets",
+        multi_console,
+        "_restore_session_secret_targets",
         lambda *a, **k: [object(), object()],
     )
 
@@ -1499,19 +1512,19 @@ def test_restore_session_window_missing_branch_eager_resolves(
 
     with pytest.raises(SecretUnavailableError, match="api-key"):
         multi_console.restore_session(
-            db, config,  # type: ignore[arg-type]
-            console_name="c1", session_name="s1",
+            db,
+            config,  # type: ignore[arg-type]
+            console_name="c1",
+            session_name="s1",
         )
 
-    assert add_called == [], (
-        "eager-resolve must fire BEFORE _add_session_window in the "
-        "window-missing rebuild branch"
-    )
+    assert add_called == [], "eager-resolve must fire BEFORE _add_session_window in the window-missing rebuild branch"
     db.close()
 
 
 def test_console_add_shell_promotes_admin_for_admin_mode_session(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """add_shell against an admin-mode session must promote the pane's
     is_admin_pane to True even when the operator passed ``admin=False``,
@@ -1524,13 +1537,11 @@ def test_console_add_shell_promotes_admin_for_admin_mode_session(
 
     db = _seed_basic_db(tmp_path)
     db._conn.execute(
-        "INSERT INTO sessions (name, workspace_name, template, mode) "
-        "VALUES ('s1', 'ws1', 'default', 'admin')"
+        "INSERT INTO sessions (name, workspace_name, template, mode) VALUES ('s1', 'ws1', 'default', 'admin')"
     )
     db._conn.execute("INSERT INTO consoles (name, vm_name) VALUES ('c1', 'vm1')")
     db._conn.execute(
-        "INSERT INTO console_sessions (console_name, session_name, shells, position) "
-        "VALUES ('c1', 's1', '[]', 0)"
+        "INSERT INTO console_sessions (console_name, session_name, shells, position) VALUES ('c1', 's1', '[]', 0)"
     )
     db._conn.commit()
 

@@ -51,9 +51,7 @@ def named_console_template(registry: Registry) -> NamedConsoleConfig:
     ``default``). Same always-materialize guarantee as
     ``admin_template``.
     """
-    return cast(
-        "NamedConsoleConfig", registry.lookup("named-console-template", "default")
-    )
+    return cast("NamedConsoleConfig", registry.lookup("named-console-template", "default"))
 
 
 def git_credential(registry: Registry, name: str) -> GitCredentialConfig | None:

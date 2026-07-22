@@ -195,10 +195,7 @@ def test_git_credential_provider_wins_over_type(tmp_path: Path) -> None:
     )
     cfg = load_config(config_file, warn_issues=False)
     assert cfg.git_credentials["ado"].provider == "azdo"
-    assert any(
-        "git_credentials.ado" in issue and "provider wins" in issue
-        for issue in cfg.config_issues
-    )
+    assert any("git_credentials.ado" in issue and "provider wins" in issue for issue in cfg.config_issues)
 
 
 def test_unexpected_top_level_keys_warns(tmp_path: Path) -> None:
@@ -410,13 +407,15 @@ def test_proxmox_config(tmp_path: Path, case: dict) -> None:
     priv.write_text("key")
 
     config_file = tmp_path / "config.toml"
-    config_file.write_text(dedent(f"""\
+    config_file.write_text(
+        dedent(f"""\
         [operator]
         ssh_public_key = "{pub.as_posix()}"
         ssh_private_key = "{priv.as_posix()}"
 
         {dedent(case["toml"])}
-    """))
+    """)
+    )
 
     if case["expect_error"]:
         with pytest.raises(ConfigError, match=case["expect_error"]):
@@ -465,22 +464,27 @@ def _minimal_config(tmp_path: Path, extra: str = "") -> Path:
     pub.write_text("key")
     priv.write_text("key")
     config_file = tmp_path / "config.toml"
-    config_file.write_text(dedent(f"""\
+    config_file.write_text(
+        dedent(f"""\
         [operator]
         ssh_public_key = "{pub.as_posix()}"
         ssh_private_key = "{priv.as_posix()}"
 
         {dedent(extra)}
-    """))
+    """)
+    )
     return config_file
 
 
 def test_claude_marketplaces_loads_cleanly(tmp_path: Path) -> None:
-    config_file = _minimal_config(tmp_path, """
+    config_file = _minimal_config(
+        tmp_path,
+        """
         [admin.config]
         claude_marketplaces = ["https://github.com/example/tools#v1"]
         claude_plugins = ["my-plugin@my-marketplace"]
-    """)
+    """,
+    )
     cfg = load_config(config_file, warn_issues=False)
     assert cfg.admin is not None
     assert cfg.admin.claude_marketplaces == ["https://github.com/example/tools#v1"]
@@ -488,11 +492,14 @@ def test_claude_marketplaces_loads_cleanly(tmp_path: Path) -> None:
 
 
 def test_claude_marketplaces_agent_template(tmp_path: Path) -> None:
-    config_file = _minimal_config(tmp_path, """
+    config_file = _minimal_config(
+        tmp_path,
+        """
         [agent_templates.claude]
         claude_marketplaces = ["https://github.com/example/tools#v1"]
         claude_plugins = ["my-plugin@my-marketplace"]
-    """)
+    """,
+    )
     cfg = load_config(config_file, warn_issues=False)
     assert cfg.agent_templates["claude"].claude_marketplaces == ["https://github.com/example/tools#v1"]
     assert cfg.agent_templates["claude"].claude_plugins == ["my-plugin@my-marketplace"]
@@ -500,10 +507,13 @@ def test_claude_marketplaces_agent_template(tmp_path: Path) -> None:
 
 
 def test_claude_marketplaces_rejects_string(tmp_path: Path) -> None:
-    config_file = _minimal_config(tmp_path, """
+    config_file = _minimal_config(
+        tmp_path,
+        """
         [admin.config]
         claude_marketplaces = "https://github.com/example/tools"
-    """)
+    """,
+    )
     with pytest.raises(ConfigError, match="must be a list of strings"):
         load_config(config_file)
 
@@ -511,7 +521,9 @@ def test_claude_marketplaces_rejects_string(tmp_path: Path) -> None:
 def test_toml_description_stored_for_template_kinds(tmp_path: Path) -> None:
     """description is framework-uniform: every declarable kind's TOML
     surface stores it onto the loaded dataclass, with no warnings."""
-    config_file = _minimal_config(tmp_path, """
+    config_file = _minimal_config(
+        tmp_path,
+        """
         [vm_templates.dev]
         description = "the dev box"
 
@@ -526,7 +538,8 @@ def test_toml_description_stored_for_template_kinds(tmp_path: Path) -> None:
 
         [named_console]
         description = "the default console"
-    """)
+    """,
+    )
     cfg = load_config(config_file, warn_issues=False)
     assert not cfg.config_issues
     assert cfg.vm_templates["dev"].description == "the dev box"
@@ -569,10 +582,13 @@ def test_named_console_tmux_layout_default_when_section_missing(tmp_path: Path) 
 def test_named_console_tmux_layout_accepts_valid_presets(tmp_path: Path, layout: str) -> None:
     """All five tmux preset layout names plus the agentworks-specific
     `aw-session-vertical` are accepted verbatim."""
-    config_file = _minimal_config(tmp_path, f"""
+    config_file = _minimal_config(
+        tmp_path,
+        f"""
         [named_console]
         tmux_layout = "{layout}"
-    """)
+    """,
+    )
     cfg = load_config(config_file)
     assert cfg.named_console is not None
     assert cfg.named_console.tmux_layout == layout
@@ -580,23 +596,27 @@ def test_named_console_tmux_layout_accepts_valid_presets(tmp_path: Path, layout:
 
 def test_named_console_tmux_layout_rejects_unknown(tmp_path: Path) -> None:
     """Unknown layout names fail at load with a list of valid alternatives."""
-    config_file = _minimal_config(tmp_path, """
+    config_file = _minimal_config(
+        tmp_path,
+        """
         [named_console]
         tmux_layout = "tabbed"
-    """)
+    """,
+    )
     with pytest.raises(ConfigError, match="named_console.tmux_layout must be one of"):
         load_config(config_file)
 
 
-def test_named_console_section_unexpected_keys_warn(
-    tmp_path: Path, capsys: pytest.CaptureFixture[str]
-) -> None:
+def test_named_console_section_unexpected_keys_warn(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     """Unknown keys in [named_console] surface as warnings, not silent ignores."""
-    config_file = _minimal_config(tmp_path, """
+    config_file = _minimal_config(
+        tmp_path,
+        """
         [named_console]
         tmux_layout = "tiled"
         unknown_key = "x"
-    """)
+    """,
+    )
     load_config(config_file)
     captured = capsys.readouterr()
     assert "unknown_key" in captured.err or "unknown_key" in captured.out

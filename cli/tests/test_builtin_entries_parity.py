@@ -76,8 +76,7 @@ EXPECTED_APT_SOURCES: dict[str, dict[str, Any]] = {
         "key_url": "https://ngrok-agent.s3.amazonaws.com/ngrok.asc",
         "key_path": "/etc/apt/keyrings/ngrok.gpg",
         "source": (
-            "deb [arch={arch} signed-by=/etc/apt/keyrings/ngrok.gpg] "
-            "https://ngrok-agent.s3.amazonaws.com bookworm main"
+            "deb [arch={arch} signed-by=/etc/apt/keyrings/ngrok.gpg] https://ngrok-agent.s3.amazonaws.com bookworm main"
         ),
         "source_file": "ngrok.list",
         "key_dearmor": True,
@@ -277,10 +276,7 @@ def _write_operator_config(
     pub.write_text("ssh-ed25519 X")
     priv.write_text("-----BEGIN-----")
     cfg = tmp_path / "config.toml"
-    cfg.write_text(
-        f'[operator]\nssh_public_key = "{pub}"\nssh_private_key = "{priv}"\n'
-        + toml_body
-    )
+    cfg.write_text(f'[operator]\nssh_public_key = "{pub}"\nssh_private_key = "{priv}"\n' + toml_body)
     if manifests:
         resources = tmp_path / "resources"
         resources.mkdir()
@@ -308,18 +304,12 @@ def test_bundled_builtin_rows_match_oracle(tmp_path: Path) -> None:
     sys_cmds = kind_dict(registry, "system-install-command")
     usr_cmds = kind_dict(registry, "user-install-command")
 
-    assert {
-        name: apt_source_payload(entry) for name, entry in srcs.items()
-    } == EXPECTED_APT_SOURCES
-    assert {
-        name: apt_package_payload(entry) for name, entry in pkgs.items()
-    } == EXPECTED_APT_PACKAGES
+    assert {name: apt_source_payload(entry) for name, entry in srcs.items()} == EXPECTED_APT_SOURCES
+    assert {name: apt_package_payload(entry) for name, entry in pkgs.items()} == EXPECTED_APT_PACKAGES
     assert {
         name: install_command_payload(entry) for name, entry in sys_cmds.items()
     } == EXPECTED_SYSTEM_INSTALL_COMMANDS
-    assert {
-        name: install_command_payload(entry) for name, entry in usr_cmds.items()
-    } == EXPECTED_USER_INSTALL_COMMANDS
+    assert {name: install_command_payload(entry) for name, entry in usr_cmds.items()} == EXPECTED_USER_INSTALL_COMMANDS
 
     # Provenance: every built-in row is a built-in origin pointed at the
     # bundled file for its kind (not the former agentworks.catalog source).
@@ -352,9 +342,7 @@ def test_operator_toml_override_wins_over_builtin(tmp_path: Path) -> None:
         apt_sources = ["github-cli"]
         """
     )
-    cfg = load_config(
-        _write_operator_config(tmp_path, toml_body=toml_body), warn_issues=False
-    )
+    cfg = load_config(_write_operator_config(tmp_path, toml_body=toml_body), warn_issues=False)
     registry = build_registry(cfg)
 
     gh = kind_dict(registry, "apt-package")["gh"]

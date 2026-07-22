@@ -45,8 +45,7 @@ def test_initializer_has_no_read_env_with_legacy_for_tailscale() -> None:
         "framework"
     )
     assert "read_env_with_legacy" not in src, (
-        "found read_env_with_legacy call in agentworks.vms.initializer; "
-        "Tailscale must resolve via the framework"
+        "found read_env_with_legacy call in agentworks.vms.initializer; Tailscale must resolve via the framework"
     )
 
 
@@ -74,8 +73,7 @@ def test_vm_manager_does_not_read_legacy_env_for_tailscale_in_collect() -> None:
     src = inspect.getsource(create_vm)
     forbidden_call = 'read_env_with_legacy("AW_TAILSCALE_AUTH_KEY"'
     assert forbidden_call not in src, (
-        "found legacy env-var fallback in create_vm; the create path "
-        "must resolve Tailscale via the framework"
+        "found legacy env-var fallback in create_vm; the create path must resolve Tailscale via the framework"
     )
     # The framework call shape is what we DO expect: the vm-template
     # node's preflight (run by the sweep) registers + predicts the key

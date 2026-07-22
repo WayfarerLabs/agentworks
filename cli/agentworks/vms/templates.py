@@ -51,9 +51,7 @@ class ResolvedVMTemplate:
         from agentworks.env.entry import env_references
         from agentworks.vms.template import tailscale_secret_reference
 
-        refs: list[ResourceReference] = list(
-            env_references(self.env, ("vm-template", self.name))
-        )
+        refs: list[ResourceReference] = list(env_references(self.env, ("vm-template", self.name)))
         refs.append(tailscale_secret_reference(self.tailscale_auth_key, self.name))
         return refs
 
@@ -100,9 +98,7 @@ def _resolve_from_dict(
     """
     if name in _visiting:
         path = " -> ".join((*_visiting, name))
-        raise ConfigError(
-            f"vm_templates inheritance cycle detected: {path}"
-        )
+        raise ConfigError(f"vm_templates inheritance cycle detected: {path}")
 
     if name not in templates:
         # Implicit default: return built-in defaults

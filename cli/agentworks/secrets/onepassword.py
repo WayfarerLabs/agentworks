@@ -91,8 +91,7 @@ _NOT_FOUND_MARKERS = (
 # The two accepted mapping forms, named in every validation error so an
 # operator on a rejected shape sees the path forward in one line.
 _FORMS_HINT = (
-    "use an 'op://vault/item/field' string, or a "
-    "{account, reference} table when a specific account must be pinned"
+    "use an 'op://vault/item/field' string, or a {account, reference} table when a specific account must be pinned"
 )
 _TABLE_KEYS = ("account", "reference")
 
@@ -283,9 +282,7 @@ class OnePasswordBackend:
             f"table (got {type(mapping).__name__})"
         )
 
-    def _resolved_ref(
-        self, secret: SecretDecl, mapping: MappingValue | None
-    ) -> _OpRef:
+    def _resolved_ref(self, secret: SecretDecl, mapping: MappingValue | None) -> _OpRef:
         owner = f"secret {secret.name!r}"
         if isinstance(mapping, str):
             _validate_op_uri(owner, mapping)
@@ -295,8 +292,7 @@ class OnePasswordBackend:
         # would_attempt gates this out, so reaching here means a hand-built
         # decl bypassed validate_chain (defense in depth, like env_var).
         raise ConfigError(
-            f"{owner}: the onepassword backend needs a "
-            f"backend_mappings.onepassword entry ({_FORMS_HINT})"
+            f"{owner}: the onepassword backend needs a backend_mappings.onepassword entry ({_FORMS_HINT})"
         )
 
     def would_attempt(
@@ -378,25 +374,15 @@ class OnePasswordBackend:
                     "{account, reference} mapping."
                 )
             else:
-                hint = (
-                    "run `op signin` (or enable the 1Password app's CLI "
-                    "integration) and retry"
-                )
+                hint = "run `op signin` (or enable the 1Password app's CLI integration) and retry"
             raise ConnectivityError(_signed_out_message(ref.account), hint=hint)
         if _matches(lowered, _NOT_FOUND_MARKERS):
             raise SecretMappingError(
-                f"secret {secret.name!r}: 1Password has no value at "
-                f"{ref.reference}",
-                hint=(
-                    "check the vault, item, and field in "
-                    "backend_mappings.onepassword"
-                ),
+                f"secret {secret.name!r}: 1Password has no value at {ref.reference}",
+                hint=("check the vault, item, and field in backend_mappings.onepassword"),
             )
         # Unrecognized failure. op's flat exit status means we cannot safely
         # call this a missing item, so surface it (halts the chain) rather
         # than guessing it into a soft miss.
         detail = result.stderr.strip() or f"op exited {result.returncode}"
-        raise ExternalError(
-            f"secret {secret.name!r}: reading {ref.reference} from 1Password "
-            f"failed: {detail}"
-        )
+        raise ExternalError(f"secret {secret.name!r}: reading {ref.reference} from 1Password failed: {detail}")

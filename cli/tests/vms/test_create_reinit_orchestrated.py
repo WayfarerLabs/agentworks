@@ -52,10 +52,7 @@ def make_config(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
 
     def _make(extra: str = ""):
         path = tmp_path / "config.toml"
-        path.write_text(
-            f'[operator]\nssh_public_key = "{key}.pub"\nssh_private_key = "{key}"\n'
-            + extra
-        )
+        path.write_text(f'[operator]\nssh_public_key = "{key}.pub"\nssh_private_key = "{key}"\n' + extra)
         return load_config(path, warn_issues=False, warn_deprecations=False)
 
     return _make
@@ -69,9 +66,7 @@ def _no_tailscale_check(monkeypatch: pytest.MonkeyPatch) -> None:
 # -- vm create: the derived graph --------------------------------------------
 
 
-def test_create_graph_derives_from_declared_resources(
-    make_config, db: Database
-) -> None:
+def test_create_graph_derives_from_declared_resources(make_config, db: Database) -> None:
     """The pending VM's graph: its edges are the resolved template, the
     chosen site, and the admin template's declared credentials, all
     real declared resources; the union is exactly the imperative
@@ -95,19 +90,16 @@ def test_create_graph_derives_from_declared_resources(
     config = make_config(
         PROXMOX_SECTION
         + GIT_CRED_SECTION
-        + "[admin.config]\ngit_credentials = [\"gh\"]\n"
-        + "[vm_templates.default.env]\nAPI_KEY = { secret = \"api-key\" }\n"
-        + "[secrets.api-key]\ndescription = \"runtime only\"\n"
+        + '[admin.config]\ngit_credentials = ["gh"]\n'
+        + '[vm_templates.default.env]\nAPI_KEY = { secret = "api-key" }\n'
+        + '[secrets.api-key]\ndescription = "runtime only"\n'
     )
     registry = build_registry(config)
     resolver = Resolver(config, registry)
     admin = admin_template(registry)
     assert admin.git_credentials == ["gh"]
 
-    creds = tuple(
-        git_credential_node(registry, name)
-        for name in admin.git_credentials
-    )
+    creds = tuple(git_credential_node(registry, name) for name in admin.git_credentials)
     template = vm_template_node(resolve_template(registry, None), resolver)
     site = vm_site_node(registry, "proxmox")
     pending = pending_vm_node(db, "nvm", template, site, creds)
@@ -191,9 +183,7 @@ def test_create_rollback_failure_warns_and_never_masks(
         raise RuntimeError("backend exploded")
 
     monkeypatch.setattr(LimaPlatform, "create", _boom)
-    monkeypatch.setattr(
-        _Db, "delete_vm", lambda self, name: (_ for _ in ()).throw(RuntimeError("db locked"))
-    )
+    monkeypatch.setattr(_Db, "delete_vm", lambda self, name: (_ for _ in ()).throw(RuntimeError("db locked")))
     with pytest.raises(ProvisioningError, match="backend exploded"):
         vm_manager.create_vm(db, make_config(), name="wvm")
     (warning,) = [w for w in captured_output.warnings if "rollback" in w]
@@ -256,7 +246,7 @@ def test_reinit_runs_initialization_through_the_gate(
     the activation span."""
     from agentworks.capabilities.vm_platform.lima import LimaPlatform
 
-    config = make_config(GIT_CRED_SECTION + "[admin.config]\ngit_credentials = [\"gh\"]\n")
+    config = make_config(GIT_CRED_SECTION + '[admin.config]\ngit_credentials = ["gh"]\n')
     _seed_provisioned_vm(db)
     monkeypatch.setattr(vm_manager, "_is_tailscale_reachable", lambda host: True)
     holds: list[str] = []
@@ -282,9 +272,7 @@ def test_reinit_runs_initialization_through_the_gate(
     monkeypatch.setattr(vm_manager, "run_initialization", _fake_init)
     import agentworks.transports as transports
 
-    monkeypatch.setattr(
-        transports, "transport", lambda vm, config, **kw: SimpleNamespace()
-    )
+    monkeypatch.setattr(transports, "transport", lambda vm, config, **kw: SimpleNamespace())
 
     vm_manager.reinit_vm(db, config, "rvm")
 
@@ -332,9 +320,7 @@ def test_reinit_resolves_the_stored_admin_template(
         """)
     )
     config = make_config(GIT_CRED_SECTION)
-    db.insert_vm(
-        "rvm", site="lima-local", hostname="rvm", admin_template="work"
-    )
+    db.insert_vm("rvm", site="lima-local", hostname="rvm", admin_template="work")
     db.update_vm_tailscale("rvm", "100.64.0.9")
     db.update_vm_provisioning_status("rvm", ProvisioningStatus.COMPLETE)
     monkeypatch.setattr(vm_manager, "_is_tailscale_reachable", lambda host: True)
@@ -355,9 +341,7 @@ def test_reinit_resolves_the_stored_admin_template(
     monkeypatch.setattr(vm_manager, "run_initialization", _fake_init)
     import agentworks.transports as transports
 
-    monkeypatch.setattr(
-        transports, "transport", lambda vm, config, **kw: SimpleNamespace()
-    )
+    monkeypatch.setattr(transports, "transport", lambda vm, config, **kw: SimpleNamespace())
 
     vm_manager.reinit_vm(db, config, "rvm")
 
@@ -414,9 +398,7 @@ def test_reinit_refuses_an_operator_stopped_vm_at_the_gate(
     config = make_config()
     _seed_provisioned_vm(db)
     db.set_operator_stopped("rvm", True)
-    monkeypatch.setattr(
-        LimaPlatform, "status", lambda self, vm, ctx: VMStatus.STOPPED
-    )
+    monkeypatch.setattr(LimaPlatform, "status", lambda self, vm, ctx: VMStatus.STOPPED)
 
     def _no_init(*a: object, **k: object) -> None:
         raise AssertionError("init ran despite the refusal")

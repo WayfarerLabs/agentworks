@@ -38,9 +38,7 @@ _SCOPE_FIELDS = {"repos", "owner", "token"}
 _NAME_RE = re.compile(r"^[A-Za-z0-9._-]+$")
 
 
-def _validated_scope(
-    owner_ctx: str, config: Mapping[str, object]
-) -> tuple[tuple[str, ...], str | None]:
+def _validated_scope(owner_ctx: str, config: Mapping[str, object]) -> tuple[tuple[str, ...], str | None]:
     """Shared shape validation for the github ``provider_config`` blob.
 
     Returns ``(repos, owner)``; at most one is non-empty/non-None.
@@ -52,44 +50,31 @@ def _validated_scope(
     unknown = sorted(set(config) - _SCOPE_FIELDS)
     if unknown == ["repo"]:
         raise ConfigError(
-            f"{owner_ctx}: unknown github provider field 'repo'; the "
-            f"field is 'repos' (a list, even for one repo)"
+            f"{owner_ctx}: unknown github provider field 'repo'; the field is 'repos' (a list, even for one repo)"
         )
     if unknown:
-        raise ConfigError(
-            f"{owner_ctx}: unknown github provider field(s): {', '.join(unknown)}"
-        )
+        raise ConfigError(f"{owner_ctx}: unknown github provider field(s): {', '.join(unknown)}")
     repos_raw = config.get("repos")
     org = config.get("owner")
     if repos_raw is not None and org is not None:
         raise ConfigError(
-            f"{owner_ctx}: repos and owner are mutually exclusive (a "
-            f"fine-grained PAT is scoped to one or the other)"
+            f"{owner_ctx}: repos and owner are mutually exclusive (a fine-grained PAT is scoped to one or the other)"
         )
 
     def _valid_repo(value: object) -> bool:
         return (
-            isinstance(value, str)
-            and value.count("/") == 1
-            and all(_NAME_RE.match(part) for part in value.split("/"))
+            isinstance(value, str) and value.count("/") == 1 and all(_NAME_RE.match(part) for part in value.split("/"))
         )
 
     repos: tuple[str, ...] = ()
     if repos_raw is not None:
-        if (
-            not isinstance(repos_raw, list)
-            or not repos_raw
-            or not all(_valid_repo(entry) for entry in repos_raw)
-        ):
+        if not isinstance(repos_raw, list) or not repos_raw or not all(_valid_repo(entry) for entry in repos_raw):
             raise ConfigError(
-                f'{owner_ctx}.repos must be a non-empty list of '
-                f'"owner/name" strings (GitHub name characters only)'
+                f'{owner_ctx}.repos must be a non-empty list of "owner/name" strings (GitHub name characters only)'
             )
         repos = tuple(dict.fromkeys(repos_raw))  # preserve order, drop repeats
     if org is not None and (not isinstance(org, str) or not _NAME_RE.match(org)):
-        raise ConfigError(
-            f"{owner_ctx}.owner must be a GitHub user/org name (no slash)"
-        )
+        raise ConfigError(f"{owner_ctx}.owner must be a GitHub user/org name (no slash)")
     return (repos, org if isinstance(org, str) else None)
 
 
@@ -118,9 +103,7 @@ class GitHubCredentialProvider(GitCredentialProvider):
     description = "GitHub personal access token"
 
     @classmethod
-    def validate_config(
-        cls, owner: str, config: Mapping[str, object]
-    ) -> tuple[ConfigReference, ...]:
+    def validate_config(cls, owner: str, config: Mapping[str, object]) -> tuple[ConfigReference, ...]:
         _validated_scope(owner, config)
         return (token_config_reference(owner, config),)
 
@@ -134,9 +117,7 @@ class GitHubCredentialProvider(GitCredentialProvider):
         super().__init__(owner_name, config or {}, description=description)
         # Scope shape re-parsed from the bound config (validate_config
         # already ran at construct, so this cannot raise).
-        self._repos, self._owner = _validated_scope(
-            self._owner_display, self.config
-        )
+        self._repos, self._owner = _validated_scope(self._owner_display, self.config)
 
     def _verify_token(self, token: str) -> None:
         """Check the PAT against ``GET /user``: 200 announces the login
@@ -166,9 +147,7 @@ class GitHubCredentialProvider(GitCredentialProvider):
                 login = parsed["login"]
         except (ValueError, UnicodeDecodeError):
             pass
-        expires = _parse_expiration(
-            headers.get("github-authentication-token-expiration")
-        )
+        expires = _parse_expiration(headers.get("github-authentication-token-expiration"))
         extras = []
         if login:
             extras.append(f"login {login}")

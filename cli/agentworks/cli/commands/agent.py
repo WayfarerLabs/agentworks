@@ -90,9 +90,7 @@ def agent_grant_workspaces(
         list[str] | None,
         typer.Argument(help="Workspace names (omit when using --all)"),
     ] = None,
-    all_workspaces: Annotated[
-        bool, typer.Option("--all", help="Grant access to all workspaces")
-    ] = False,
+    all_workspaces: Annotated[bool, typer.Option("--all", help="Grant access to all workspaces")] = False,
 ) -> None:
     """Grant an agent explicit access to workspaces."""
     from agentworks.agents.grants import grant_workspaces
@@ -114,9 +112,7 @@ def agent_revoke_workspaces(
         list[str] | None,
         typer.Argument(help="Workspace names (omit when using --all)"),
     ] = None,
-    all_workspaces: Annotated[
-        bool, typer.Option("--all", help="Remove all explicit grants")
-    ] = False,
+    all_workspaces: Annotated[bool, typer.Option("--all", help="Remove all explicit grants")] = False,
 ) -> None:
     """Revoke explicit workspace grants from an agent."""
     from agentworks.agents.grants import revoke_workspaces
@@ -167,9 +163,7 @@ def agent_shell(
     from agentworks.agents.manager import shell_agent
     from agentworks.config import load_config
 
-    raise typer.Exit(
-        shell_agent(get_db(), load_config(), name=name, workspace_name=workspace)
-    )
+    raise typer.Exit(shell_agent(get_db(), load_config(), name=name, workspace_name=workspace))
 
 
 @agent_app.command("delete")

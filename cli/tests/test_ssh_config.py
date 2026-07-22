@@ -404,5 +404,3 @@ def test_declined_slug_keeps_default_file_name(tmp_path: Path) -> None:
     _rebuild_config_dir(config, db)
 
     assert (ssh_dir / "config.d" / _MANAGED_CONF).exists()
-
-

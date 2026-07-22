@@ -192,11 +192,7 @@ def unknown_template_error(
     four hint shapes stay uniform (they are siblings).
     """
     names = sorted(available)
-    hint = (
-        f"available {label}s: {', '.join(names)}"
-        if names
-        else f"no {label}s are declared"
-    )
+    hint = f"available {label}s: {', '.join(names)}" if names else f"no {label}s are declared"
     return NotFoundError(
         f"Unknown {label}: {name}",
         entity_kind=kind,

@@ -225,9 +225,7 @@ def test_named_admin_template_is_accepted(tmp_path: Path) -> None:
         """,
     )
     manifests = load_manifests(root)
-    assert [(e.kind, e.name) for e in manifests.entries] == [
-        ("admin-template", "work")
-    ]
+    assert [(e.kind, e.name) for e in manifests.entries] == [("admin-template", "work")]
 
 
 def test_unknown_metadata_key_rejected(tmp_path: Path) -> None:

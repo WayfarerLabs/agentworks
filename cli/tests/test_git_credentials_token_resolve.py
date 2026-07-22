@@ -33,9 +33,7 @@ def _resolve_tokens(config: object, registry: object, names: list[str]) -> dict[
         resolver.register_name(secret_name)
     resolver.resolve()
     return {
-        node.provider.owner_name: ScopedSecrets(
-            resolver.values, node.secret_refs()
-        ).get(node.provider.secret_name)
+        node.provider.owner_name: ScopedSecrets(resolver.values, node.secret_refs()).get(node.provider.secret_name)
         for node in nodes
     }
 
@@ -90,7 +88,6 @@ def test_collect_git_tokens_resolves_default_secret_name(
 
     from agentworks.bootstrap import build_registry
 
-
     registry = build_registry(config)
     tokens = _resolve_tokens(config, registry, ["github"])
     assert tokens == {"github": "ghp_abc"}
@@ -120,7 +117,6 @@ def test_collect_git_tokens_resolves_custom_secret_name(
     monkeypatch.setenv("AW_SECRET_CUSTOM_TOK", "ghp_custom")
 
     from agentworks.bootstrap import build_registry
-
 
     registry = build_registry(config)
     tokens = _resolve_tokens(config, registry, ["github"])
@@ -156,20 +152,16 @@ def test_collect_git_tokens_batches_multiple_credentials(
 
     from agentworks.bootstrap import build_registry
 
-
     registry = build_registry(config)
     tokens = _resolve_tokens(config, registry, ["github", "azdo"])
     assert tokens == {"github": "ghp_aaa", "azdo": "azdo_bbb"}
 
 
-def test_collect_git_tokens_empty_list_returns_empty_dict(
-    tmp_path: Path, ssh_keys: tuple[Path, Path]
-) -> None:
+def test_collect_git_tokens_empty_list_returns_empty_dict(tmp_path: Path, ssh_keys: tuple[Path, Path]) -> None:
     cfg = _write_cfg(tmp_path, "", ssh_keys)
     config = load_config(cfg, warn_issues=False)
 
     from agentworks.bootstrap import build_registry
-
 
     registry = build_registry(config)
     assert _resolve_tokens(config, registry, []) == {}
@@ -241,7 +233,6 @@ def test_collect_git_tokens_credential_lines_use_resolved_value(
 
     from agentworks.bootstrap import build_registry
     from agentworks.capabilities.git_credential.github import GitHubCredentialProvider
-
 
     registry = build_registry(config)
     tokens = _resolve_tokens(config, registry, ["github"])

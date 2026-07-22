@@ -42,10 +42,7 @@ def make_config(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
 
     def _make(extra: str = ""):
         path = tmp_path / "config.toml"
-        path.write_text(
-            f'[operator]\nssh_public_key = "{key}.pub"\nssh_private_key = "{key}"\n'
-            + extra
-        )
+        path.write_text(f'[operator]\nssh_public_key = "{key}.pub"\nssh_private_key = "{key}"\n' + extra)
         return load_config(path, warn_issues=False, warn_deprecations=False)
 
     return _make
@@ -132,9 +129,7 @@ def test_create_vm_stores_and_provisions_selected_admin_template(
     config = make_config()
     captured: list[ProvisionRequest] = []
 
-    def _fake_create(
-        self: LimaPlatform, request: ProvisionRequest, ctx: object
-    ) -> ProvisionResult:
+    def _fake_create(self: LimaPlatform, request: ProvisionRequest, ctx: object) -> ProvisionResult:
         captured.append(request)
         return ProvisionResult(
             native_transport=SimpleNamespace(),  # type: ignore[arg-type]
@@ -200,9 +195,7 @@ def test_disabled_site_errors_before_tailscale_and_slug_prompt(
     from agentworks.errors import StateError
 
     config = make_config()
-    monkeypatch.setattr(
-        LimaPlatform, "disabled_reason", lambda self: "limactl not installed"
-    )
+    monkeypatch.setattr(LimaPlatform, "disabled_reason", lambda self: "limactl not installed")
 
     def _no_tailscale() -> None:
         raise AssertionError("tailscale probed for a disabled site")
@@ -324,9 +317,7 @@ def test_proxmox_token_resolves_end_to_end(
 
     captured: dict[str, object] = {}
 
-    def _fake_create(
-        self: ProxmoxPlatform, request: object, ctx: RunContext
-    ) -> ProvisionResult:
+    def _fake_create(self: ProxmoxPlatform, request: object, ctx: RunContext) -> ProvisionResult:
         captured["token"] = ctx.secret("proxmox-token")
         raise RuntimeError("halt after binding")
 

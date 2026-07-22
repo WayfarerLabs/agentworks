@@ -23,9 +23,7 @@ def test_system_scope_constructs_bare() -> None:
 def test_system_slug_is_allowed_at_every_constructible_level() -> None:
     OperationScope(level=ScopeLevel.SYSTEM, system_slug="lab")
     OperationScope(level=ScopeLevel.VM, system_slug="lab", vm="box")
-    OperationScope(
-        level=ScopeLevel.WORKSPACE, system_slug="lab", vm="box", workspace="ws1"
-    )
+    OperationScope(level=ScopeLevel.WORKSPACE, system_slug="lab", vm="box", workspace="ws1")
     OperationScope(level=ScopeLevel.AGENT, system_slug="lab", vm="box", agent="dev")
     OperationScope(
         level=ScopeLevel.SESSION,
@@ -89,15 +87,16 @@ def test_workspace_scope_requires_its_chain(field: str) -> None:
 def test_workspace_scope_forbids_deeper_names(field: str) -> None:
     with pytest.raises(StateError, match=f"forbids '{field}'"):
         OperationScope(
-            level=ScopeLevel.WORKSPACE, vm="box", workspace="ws1", **{field: "x"}  # type: ignore[arg-type]
+            level=ScopeLevel.WORKSPACE,
+            vm="box",
+            workspace="ws1",
+            **{field: "x"},  # type: ignore[arg-type]
         )
 
 
 def test_workspace_scope_forbids_admin() -> None:
     with pytest.raises(StateError, match="admin"):
-        OperationScope(
-            level=ScopeLevel.WORKSPACE, vm="box", workspace="ws1", admin=True
-        )
+        OperationScope(level=ScopeLevel.WORKSPACE, vm="box", workspace="ws1", admin=True)
 
 
 # -- the AGENT level (landed with the agent commands) ------------------------
@@ -124,7 +123,10 @@ def test_agent_scope_forbids_deeper_and_sideways_names(field: str) -> None:
     vm -> agent and a workspace name on it is mis-leveled."""
     with pytest.raises(StateError, match=f"forbids '{field}'"):
         OperationScope(
-            level=ScopeLevel.AGENT, vm="box", agent="dev", **{field: "x"}  # type: ignore[arg-type]
+            level=ScopeLevel.AGENT,
+            vm="box",
+            agent="dev",
+            **{field: "x"},  # type: ignore[arg-type]
         )
 
 
@@ -167,9 +169,7 @@ def test_session_scope_requires_its_chain(field: str) -> None:
 
 
 @pytest.mark.parametrize("agent,admin", [("dev", True), (None, False)])
-def test_session_scope_requires_exactly_one_launch_identity(
-    agent: str | None, admin: bool
-) -> None:
+def test_session_scope_requires_exactly_one_launch_identity(agent: str | None, admin: bool) -> None:
     """A session runs as its agent OR as the admin: both and neither
     are equally mis-leveled."""
     with pytest.raises(StateError, match="exactly one of 'agent' or 'admin'"):

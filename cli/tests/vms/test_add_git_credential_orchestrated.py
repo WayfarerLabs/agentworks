@@ -89,9 +89,7 @@ def verified_token(monkeypatch: pytest.MonkeyPatch) -> None:
     def _probe(url: str, headers: dict[str, str], *, timeout: float = 5.0):
         return (200, b'{"login": "x"}', {})
 
-    monkeypatch.setattr(
-        "agentworks.capabilities.git_credential.base._http_probe", _probe
-    )
+    monkeypatch.setattr("agentworks.capabilities.git_credential.base._http_probe", _probe)
 
 
 def _seed_vm(db: Database, *, tailscale: str | None = "100.64.0.9") -> VMRow:
@@ -104,9 +102,7 @@ def _seed_vm(db: Database, *, tailscale: str | None = "100.64.0.9") -> VMRow:
 
 
 def _reachable(monkeypatch: pytest.MonkeyPatch, value: bool) -> None:
-    monkeypatch.setattr(
-        vm_manager, "_is_tailscale_reachable", lambda host: value
-    )
+    monkeypatch.setattr(vm_manager, "_is_tailscale_reachable", lambda host: value)
 
 
 # -- the command end to end --------------------------------------------------
@@ -241,9 +237,7 @@ def test_runup_rejection_is_fatal_and_writes_nothing(
     def _probe(url: str, headers: dict[str, str], *, timeout: float = 5.0):
         return (401, b"", {})
 
-    monkeypatch.setattr(
-        "agentworks.capabilities.git_credential.base._http_probe", _probe
-    )
+    monkeypatch.setattr("agentworks.capabilities.git_credential.base._http_probe", _probe)
     with pytest.raises(TokenRejectedError, match="rejected the token"):
         vm_manager.add_git_credential(db, config, vm.name, "gh")
     assert target.writes == []
@@ -347,12 +341,8 @@ def test_stopped_vm_gate_resolves_once_and_seeds_the_boundary(
         return VMStatus.STOPPED
 
     monkeypatch.setattr(ProxmoxPlatform, "status", _status)
-    monkeypatch.setattr(
-        ProxmoxPlatform, "start", lambda self, row, ctx: events.append("start")
-    )
-    monkeypatch.setattr(
-        vm_manager, "_ensure_tailscale", lambda *a, **k: events.append("tailscale")
-    )
+    monkeypatch.setattr(ProxmoxPlatform, "start", lambda self, row, ctx: events.append("start"))
+    monkeypatch.setattr(vm_manager, "_ensure_tailscale", lambda *a, **k: events.append("tailscale"))
 
     vm_manager.add_git_credential(db, config, vm.name, "gh")
 
@@ -386,9 +376,7 @@ def test_operator_stopped_vm_refuses_via_the_reread_race_guard(
         return VMStatus.STOPPED
 
     monkeypatch.setattr(ProxmoxPlatform, "status", _status)
-    monkeypatch.setattr(
-        ProxmoxPlatform, "start", lambda self, row, ctx: started.append("start")
-    )
+    monkeypatch.setattr(ProxmoxPlatform, "start", lambda self, row, ctx: started.append("start"))
 
     with pytest.raises(StateError, match="manually stopped") as exc:
         vm_manager.add_git_credential(db, config, vm.name, "gh")

@@ -80,9 +80,7 @@ class VMSiteDecl(DeclaredResource):
         # Capability-implied references: the platform validates its
         # config block and returns the references it implies; this
         # resource (the config block's owner) attributes them to itself.
-        for cref in capability.validate_config(
-            f"vm-site/{self.name}", self.platform_config
-        ):
+        for cref in capability.validate_config(f"vm-site/{self.name}", self.platform_config):
             ref_cls = SecretReference if cref.kind == "secret" else _ResourceRef
             refs.append(
                 ref_cls(
@@ -149,9 +147,7 @@ def select_site(
     if len(names) == 1:
         return names[0]
     if not names:
-        disabled = [
-            f"{name} ({site_disabled_reason(decl)})" for name, decl in sites
-        ]
+        disabled = [f"{name} ({site_disabled_reason(decl)})" for name, decl in sites]
         detail = f" (disabled: {'; '.join(disabled)})" if disabled else ""
         raise ValidationError(
             f"no vm-sites are enabled on this host{detail}",
@@ -263,10 +259,7 @@ def ensure_site_enabled(decl: VMSiteDecl) -> None:
     if reason is not None:
         raise StateError(
             f"vm-site '{decl.name}' is disabled on this host: {reason}",
-            hint=(
-                "`agw doctor` lists each site's state; meet the "
-                "requirement or use an enabled site"
-            ),
+            hint=("`agw doctor` lists each site's state; meet the requirement or use an enabled site"),
         )
 
 

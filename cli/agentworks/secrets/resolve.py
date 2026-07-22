@@ -65,9 +65,7 @@ class ActiveBackend:
 
     def resolve(self, secrets: list[SecretDecl]) -> dict[str, str]:
         wants: list[tuple[SecretDecl, MappingValue | None]] = [
-            (s, mapping)
-            for s in secrets
-            if (mapping := self.mapping_for(s)) is not False
+            (s, mapping) for s in secrets if (mapping := self.mapping_for(s)) is not False
         ]
         if not wants:
             return {}
@@ -92,9 +90,7 @@ def active_backends(config: Config, registry: Registry) -> list[ActiveBackend]:
         try:
             registry.lookup("secret-backend", name)
         except KeyError:
-            registered = sorted(
-                entry.name for entry in registry.iter_kind("secret-backend")
-            )
+            registered = sorted(entry.name for entry in registry.iter_kind("secret-backend"))
             raise ConfigError(
                 f"[secret_config].backends names unknown backend {name!r}",
                 hint=f"registered backends: {registered}",
@@ -104,10 +100,7 @@ def active_backends(config: Config, registry: Registry) -> list[ActiveBackend]:
             # The capability resources mirror the code registry; a row
             # without an implementation means a publisher bug (or a
             # hand-built registry that skipped the secrets publisher).
-            raise ConfigError(
-                f"secret backend {name!r} has a registry row but no "
-                f"registered implementation"
-            )
+            raise ConfigError(f"secret backend {name!r} has a registry row but no registered implementation")
         backends.append(ActiveBackend(capability=capability))
     return backends
 
@@ -144,21 +137,14 @@ def validate_chain(config: Config, registry: Registry) -> None:
         for decl in all_decls.values():
             mapping = decl.backend_mappings.get(backend.name)
             if mapping is not None and mapping is not False:
-                backend.capability.validate_mapping(
-                    f"secret {decl.name!r}", mapping
-                )
+                backend.capability.validate_mapping(f"secret {decl.name!r}", mapping)
 
     operator_decls = [
         decl
         for decl in all_decls.values()
-        if getattr(getattr(decl, "origin", None), "variant", None)
-        == "operator-declared"
+        if getattr(getattr(decl, "origin", None), "variant", None) == "operator-declared"
     ]
-    unreachable = [
-        decl
-        for decl in operator_decls
-        if not any(b.would_attempt(decl) for b in backends)
-    ]
+    unreachable = [decl for decl in operator_decls if not any(b.would_attempt(decl) for b in backends)]
     if unreachable:
         names = ", ".join(sorted(d.name for d in unreachable))
         chain_str = ", ".join(b.name for b in backends) or "(empty)"
@@ -213,8 +199,7 @@ def _fail_unavailable(
         raise SecretUnavailableError(
             f"no active backend could resolve secret(s): {', '.join(names)}",
             hint=(
-                "; ".join(per_secret.values())
-                + f". `agw secret describe {names[0]}` shows how each "
+                "; ".join(per_secret.values()) + f". `agw secret describe {names[0]}` shows how each "
                 "backend looks a secret up (e.g. which environment "
                 "variable it reads)."
             ),
@@ -288,11 +273,7 @@ def resolve_secrets(
         # of and the end-of-loop raise stands.
         if errors is None and backend.interactive and output.is_interactive():
             remaining = backends[index:]
-            doomed = [
-                s
-                for s in missing
-                if not any(b.would_attempt(s) for b in remaining)
-            ]
+            doomed = [s for s in missing if not any(b.would_attempt(s) for b in remaining)]
             if doomed:
                 _fail_unavailable(doomed, backends, errors)
         attemptable = [s for s in missing if backend.would_attempt(s)]

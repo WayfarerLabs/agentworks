@@ -166,9 +166,9 @@ def test_known_apt_package_reference_resolves(tmp_path: Path) -> None:
     # and the framework's finalize attached the inbound reference from
     # vm-template:default.
     assert gh.origin.variant == "built-in"
-    assert any(
-        u.source == ("vm-template", "default") for u in gh.references
-    ), "vm-template:default reference should be on the apt_package"
+    assert any(u.source == ("vm-template", "default") for u in gh.references), (
+        "vm-template:default reference should be on the apt_package"
+    )
 
 
 # -- apt-package -> apt-source edges ---------------------------------------
@@ -216,13 +216,9 @@ def test_apt_package_references_flow_to_apt_source(tmp_path: Path) -> None:
     # ``gh`` depends on the ``github-cli`` apt-source among the built-in
     # entries; check the inbound edge lands on the source.
     github = registry.lookup("apt-source", "github-cli")
-    referencing_pkgs = [
-        entry.source for entry in github.references
-        if entry.source[0] == "apt-package"
-    ]
+    referencing_pkgs = [entry.source for entry in github.references if entry.source[0] == "apt-package"]
     assert ("apt-package", "gh") in referencing_pkgs, (
-        f"expected apt_package:gh to reference apt_source:github-cli; got "
-        f"{referencing_pkgs}"
+        f"expected apt_package:gh to reference apt_source:github-cli; got {referencing_pkgs}"
     )
 
 
@@ -288,7 +284,4 @@ def test_operator_declared_apt_source_layers_over_builtin(
     assert custom_src.origin.variant == "operator-declared"
     assert custom_src.name == "custom-src"
     # The referencing package shows up on the source's inbound edges.
-    assert any(
-        entry.source == ("apt-package", "custom-pkg")
-        for entry in custom_src.references
-    )
+    assert any(entry.source == ("apt-package", "custom-pkg") for entry in custom_src.references)

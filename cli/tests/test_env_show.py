@@ -59,8 +59,9 @@ def _all_platforms_supported(monkeypatch: pytest.MonkeyPatch) -> None:
     stub_platform_support(monkeypatch)
 
 
-def _seed_db(db: Database, *, with_workspace: bool = True, with_agent: bool = False,
-             with_session: bool = False) -> None:
+def _seed_db(
+    db: Database, *, with_workspace: bool = True, with_agent: bool = False, with_session: bool = False
+) -> None:
     db._conn.execute(
         "INSERT INTO vms (name, site, hostname, admin_username, tailscale_host) "
         "VALUES ('vm-1', 'lima-local', 'h', 'agentworks', '100.64.0.5')"
@@ -103,7 +104,8 @@ def test_unknown_vm_raises_validation_error(db: Database, tmp_path: Path) -> Non
 
 
 def test_session_flag_auto_resolves_workspace_agent_vm(
-    db: Database, tmp_path: Path,
+    db: Database,
+    tmp_path: Path,
 ) -> None:
     """--session s1 should infer workspace, agent, and vm from the session
     row. The dynamic identity vars (AGENTWORKS_SESSION, AGENTWORKS_WORKSPACE)
@@ -145,7 +147,8 @@ def test_workspace_flag_auto_resolves_vm(db: Database, tmp_path: Path) -> None:
 
 
 def test_session_scope_wins_over_vm_for_same_key(
-    db: Database, tmp_path: Path,
+    db: Database,
+    tmp_path: Path,
 ) -> None:
     """When the same key is set at both vm and session scope, the session
     value wins AND the row's scope label is 'session'."""
@@ -162,9 +165,7 @@ EDITOR = "nvim"
     config = load_config(cfg, warn_issues=False)
     _seed_db(db, with_workspace=True, with_agent=True, with_session=True)
     # Session was created with template='default'; rewrite to 'shell' for this test.
-    db._conn.execute(
-        "UPDATE sessions SET template = 'shell' WHERE name = 's1'"
-    )
+    db._conn.execute("UPDATE sessions SET template = 'shell' WHERE name = 's1'")
     db._conn.commit()
 
     rows = show_env(db, config, session_name="s1")
@@ -174,7 +175,8 @@ EDITOR = "nvim"
 
 
 def test_admin_env_appears_only_when_no_agent_context(
-    db: Database, tmp_path: Path,
+    db: Database,
+    tmp_path: Path,
 ) -> None:
     cfg = _write_config(
         tmp_path,
@@ -224,7 +226,9 @@ backends = ["env-var", "prompt"]
 
 
 def test_secret_revealed_with_flag(
-    db: Database, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    db: Database,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """--reveal-secrets resolves through the active backend chain."""
     monkeypatch.setenv("AW_SECRET_SHARED_TOKEN", "from-operator-env")
@@ -256,7 +260,8 @@ backends = ["env-var", "prompt"]
 
 
 def test_identity_var_overlays_user_env(
-    db: Database, tmp_path: Path,
+    db: Database,
+    tmp_path: Path,
 ) -> None:
     """User env that tries to set AGENTWORKS_SESSION gets the identity value
     at render time (per FRD R1; the operator's value is replaced)."""
@@ -269,9 +274,7 @@ AGENTWORKS_SESSION = "operator-override"
     )
     config = load_config(cfg, warn_issues=False)
     _seed_db(db, with_workspace=True, with_agent=True, with_session=True)
-    db._conn.execute(
-        "UPDATE sessions SET template = 'shell' WHERE name = 's1'"
-    )
+    db._conn.execute("UPDATE sessions SET template = 'shell' WHERE name = 's1'")
     db._conn.commit()
 
     rows = show_env(db, config, session_name="s1")
@@ -281,7 +284,8 @@ AGENTWORKS_SESSION = "operator-override"
 
 
 def test_identity_subset_skips_vm_stable_vars(
-    db: Database, tmp_path: Path,
+    db: Database,
+    tmp_path: Path,
 ) -> None:
     """The inline (env show) identity output mirrors the inline prelude
     subset: VM-stable vars (AGENTWORKS_VM / _VM_HOST / _PLATFORM) come from
@@ -303,7 +307,8 @@ def test_identity_subset_skips_vm_stable_vars(
 
 
 def test_return_type_is_list_of_resolved_env_rows(
-    db: Database, tmp_path: Path,
+    db: Database,
+    tmp_path: Path,
 ) -> None:
     """``show_env`` returns the structured rows in addition to printing,
     so tests can pin contracts without parsing formatted output."""

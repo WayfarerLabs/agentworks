@@ -69,14 +69,7 @@ def test_site_names_follow_the_vm_name_rules(tmp_path: Path) -> None:
 def test_platform_named_site_must_declare_that_platform(tmp_path: Path) -> None:
     """A site `vm-site/azure-vm` backed by lima would make
     `--site azure-vm` mean something other than it says."""
-    doc = (
-        "apiVersion: agentworks/v1\n"
-        "kind: vm-site\n"
-        "metadata:\n"
-        "  name: azure-vm\n"
-        "spec:\n"
-        "  platform: lima\n"
-    )
+    doc = "apiVersion: agentworks/v1\nkind: vm-site\nmetadata:\n  name: azure-vm\nspec:\n  platform: lima\n"
     (tmp_path / "site.yaml").write_text(doc)
     with pytest.raises(ConfigError, match="shadows a platform name"):
         load_manifests(tmp_path)
@@ -118,14 +111,7 @@ def test_unknown_platform_registers_a_disabled_site(tmp_path: Path) -> None:
     than break the registry."""
     from agentworks.vms.sites import site_disabled_reason
 
-    doc = (
-        "apiVersion: agentworks/v1\n"
-        "kind: vm-site\n"
-        "metadata:\n"
-        "  name: mystery\n"
-        "spec:\n"
-        "  platform: nope\n"
-    )
+    doc = "apiVersion: agentworks/v1\nkind: vm-site\nmetadata:\n  name: mystery\nspec:\n  platform: nope\n"
     site = _load_one(tmp_path, doc)
     assert site.platform == "nope"
     assert site.referenced_resources() == []
@@ -172,9 +158,7 @@ def test_host_disabled_site_emits_no_edges(
     host-gated platform WITH a config secret."""
     from agentworks.capabilities.vm_platform.proxmox import ProxmoxPlatform
 
-    monkeypatch.setattr(
-        ProxmoxPlatform, "unsupported_reason", classmethod(lambda cls: "no cluster os")
-    )
+    monkeypatch.setattr(ProxmoxPlatform, "unsupported_reason", classmethod(lambda cls: "no cluster os"))
     site = VMSiteDecl(
         name="px",
         platform="proxmox",
@@ -194,12 +178,7 @@ def test_bundled_sites_are_reserved(tmp_path: Path) -> None:
     from agentworks.manifests import builtin as builtin_manifests
 
     (tmp_path / "site.yaml").write_text(
-        "apiVersion: agentworks/v1\n"
-        "kind: vm-site\n"
-        "metadata:\n"
-        "  name: lima-local\n"
-        "spec:\n"
-        "  platform: lima\n"
+        "apiVersion: agentworks/v1\nkind: vm-site\nmetadata:\n  name: lima-local\nspec:\n  platform: lima\n"
     )
     manifests = load_manifests(tmp_path)
     registry = Registry.empty()

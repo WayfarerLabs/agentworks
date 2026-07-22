@@ -163,13 +163,9 @@ def publish_to(registry: Registry, config: Config | None = None) -> None:
     from agentworks.resources import Origin
 
     op_origin = Origin.operator_declared(file=CONFIG_PATH, line=0)
-    for sys_name, sys_cmd in _load_system_commands(
-        config.system_install_commands
-    ).items():
+    for sys_name, sys_cmd in _load_system_commands(config.system_install_commands).items():
         registry.add("system-install-command", sys_name, sys_cmd, op_origin)
-    for user_name, user_cmd in _load_user_commands(
-        config.user_install_commands
-    ).items():
+    for user_name, user_cmd in _load_user_commands(config.user_install_commands).items():
         registry.add("user-install-command", user_name, user_cmd, op_origin)
 
 

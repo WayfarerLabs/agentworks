@@ -99,9 +99,7 @@ def show_env(
     from agentworks.bootstrap import build_registry
 
     registry = build_registry(config)
-    vm_env, workspace_env, admin_env, agent_env, session_env = _resolve_scope_envs(
-        registry, ctx
-    )
+    vm_env, workspace_env, admin_env, agent_env, session_env = _resolve_scope_envs(registry, ctx)
 
     # Build the resource context for identity vars.
     resource_ctx = _build_resource_context(ctx, registry)
@@ -128,9 +126,7 @@ def show_env(
     # Reveal mode resolves each referenced secret exactly once (deduped
     # by name; several keys may reference one secret), per-secret so one
     # failure renders inline as <error: ...> without aborting the table.
-    values, errors = _reveal_values(
-        config, registry, user_env_merged, reveal=reveal_secrets
-    )
+    values, errors = _reveal_values(config, registry, user_env_merged, reveal=reveal_secrets)
 
     rows: list[ResolvedEnvRow] = []
     for key in sorted(user_env_merged.keys() | identity_env.keys()):
@@ -273,14 +269,16 @@ def _resolve_scope_envs(
     from agentworks.workspaces.templates import resolve_template as _resolve_ws_template
 
     vm_template: ResolvedVMTemplate = _resolve_vm_template(
-        registry, ctx.vm.template,
+        registry,
+        ctx.vm.template,
     )
     vm_env = vm_template.env
 
     workspace_env: dict[str, EnvEntry] | None = None
     if ctx.workspace is not None:
         ws_template: ResolvedWorkspaceTemplate = _resolve_ws_template(
-            registry, ctx.workspace.template,
+            registry,
+            ctx.workspace.template,
         )
         workspace_env = ws_template.env
 
@@ -288,18 +286,18 @@ def _resolve_scope_envs(
     agent_env: dict[str, EnvEntry] | None = None
     if ctx.agent is not None:
         agent_template: ResolvedAgentTemplate = _resolve_agent_template(
-            registry, ctx.agent.template,
+            registry,
+            ctx.agent.template,
         )
         agent_env = agent_template.env
     else:
-        admin_env = _admin_template(
-            registry, ctx.vm.admin_template or "default"
-        ).env
+        admin_env = _admin_template(registry, ctx.vm.admin_template or "default").env
 
     session_env: dict[str, EnvEntry] | None = None
     if ctx.session is not None:
         session_template: ResolvedSessionTemplate = _resolve_session_template(
-            registry, ctx.session.template,
+            registry,
+            ctx.session.template,
         )
         session_env = session_template.env
 
@@ -314,9 +312,7 @@ def _build_resource_context(ctx: _ResolvedContext, registry: Registry) -> Resour
     if ctx.session is not None:
         from agentworks.db import SessionMode
 
-        session_kind = (
-            "admin" if ctx.session.mode == SessionMode.ADMIN.value else "agent"
-        )
+        session_kind = "admin" if ctx.session.mode == SessionMode.ADMIN.value else "agent"
 
     user = ctx.agent.linux_user if ctx.agent is not None else ctx.vm.admin_username
 
@@ -459,9 +455,7 @@ def _print_table(
         return
 
     if not reveal_secrets and any(r.is_secret for r in rows):
-        output.detail(
-            "Secret values redacted. Pass --reveal-secrets to resolve and print."
-        )
+        output.detail("Secret values redacted. Pass --reveal-secrets to resolve and print.")
 
     # Sort by (scope-order, key) so the table groups by precedence ladder
     # and keys within each scope are alphabetical.

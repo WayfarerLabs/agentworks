@@ -64,9 +64,7 @@ def test_proxmox_runup_ok(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 @pytest.mark.parametrize("code", [401, 403])
-def test_proxmox_runup_rejection_is_fatal(
-    monkeypatch: pytest.MonkeyPatch, code: int
-) -> None:
+def test_proxmox_runup_rejection_is_fatal(monkeypatch: pytest.MonkeyPatch, code: int) -> None:
     def _boom(self: object) -> int:
         err = ProxmoxAPIError(f"failed ({code})")
         err.code = code
@@ -77,9 +75,7 @@ def test_proxmox_runup_rejection_is_fatal(
         _platform().runup(_ctx())
 
 
-def test_proxmox_runup_other_status_warns(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
-) -> None:
+def test_proxmox_runup_other_status_warns(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
     def _boom(self: object) -> int:
         err = ProxmoxAPIError("failed (500)")
         err.code = 500
@@ -90,9 +86,7 @@ def test_proxmox_runup_other_status_warns(
     assert "could not verify" in capsys.readouterr().err
 
 
-def test_proxmox_runup_network_warns(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
-) -> None:
+def test_proxmox_runup_network_warns(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
     def _boom(self: object) -> int:
         raise OSError("unreachable")
 
@@ -127,12 +121,8 @@ def _azure_platform() -> AzureVMPlatform:
 def _wire_rg(monkeypatch: pytest.MonkeyPatch, *, exists: bool) -> None:
     """Fake the cached resource client so ``check_existence`` returns
     ``exists`` without building a credential or touching Azure."""
-    fake_resource = SimpleNamespace(
-        resource_groups=SimpleNamespace(check_existence=lambda *a, **k: exists)
-    )
-    monkeypatch.setattr(
-        AzureVMPlatform, "_resource_client", lambda self, az: fake_resource
-    )
+    fake_resource = SimpleNamespace(resource_groups=SimpleNamespace(check_existence=lambda *a, **k: exists))
+    monkeypatch.setattr(AzureVMPlatform, "_resource_client", lambda self, az: fake_resource)
 
 
 def test_azure_runup_ok_when_group_exists(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -171,12 +161,8 @@ def _wire_rg_raises(monkeypatch: pytest.MonkeyPatch, exc: Exception) -> None:
     def _raise(*_a: object, **_k: object) -> bool:
         raise exc
 
-    fake_resource = SimpleNamespace(
-        resource_groups=SimpleNamespace(check_existence=_raise)
-    )
-    monkeypatch.setattr(
-        AzureVMPlatform, "_resource_client", lambda self, az: fake_resource
-    )
+    fake_resource = SimpleNamespace(resource_groups=SimpleNamespace(check_existence=_raise))
+    monkeypatch.setattr(AzureVMPlatform, "_resource_client", lambda self, az: fake_resource)
 
 
 def _auth_error() -> Exception:

@@ -126,7 +126,9 @@ def _resolve_agent_direct_env_scopes(
 
 
 def _agent_direct_secret_target(
-    scopes: _AgentDirectEnvScopes, *, label: str,
+    scopes: _AgentDirectEnvScopes,
+    *,
+    label: str,
 ) -> SecretTarget:
     """Build the SecretTarget for ``agent shell`` / ``agent exec`` from
     pre-resolved scope dicts.
@@ -147,7 +149,10 @@ def _agent_direct_secret_target(
 
 
 def _resolve_workspace_for_agent(
-    db: Database, vm: VMRow, agent: AgentRow, workspace_name: str | None,
+    db: Database,
+    vm: VMRow,
+    agent: AgentRow,
+    workspace_name: str | None,
 ) -> WorkspaceRow | None:
     """Resolve a ``--workspace`` flag for ``agent shell`` / ``agent exec``.
 
@@ -223,8 +228,7 @@ def _assert_agent_ssh_works(target: Transport, agent: AgentRow) -> None:
     # is our best indication that direct agent SSH is not yet provisioned.
     if probe.returncode == SSH_TRANSPORT_ERROR:
         raise StateError(
-            f"agent '{agent.name}' rejected direct SSH (likely predates the "
-            "direct-target-user-SSH rollout).",
+            f"agent '{agent.name}' rejected direct SSH (likely predates the direct-target-user-SSH rollout).",
             entity_kind="agent",
             entity_name=agent.name,
             hint=f"Run 'agw agent reinit {agent.name}' to populate its authorized_keys.",
@@ -311,9 +315,7 @@ def create_agent(
     vm_node = live_vm_node(db, config, registry, vm)
     tmpl_node = agent_template_node(registry, agent_tmpl)
 
-    pending_agent = pending_agent_node(
-        db, config, name, tmpl_node, vm_node
-    )
+    pending_agent = pending_agent_node(db, config, name, tmpl_node, vm_node)
     nodes = walk(pending_agent)
     # The walk supplies the boundary union (the credential tokens plus
     # the site's config secrets). Provisioning is hermetic: no
@@ -321,9 +323,7 @@ def create_agent(
     # site (agent shell, session create, etc.).
     for secret_name in secret_union(nodes):
         resolver.register_name(secret_name)
-    providers = {
-        node.provider.owner_name: node.provider for node in tmpl_node.credentials
-    }
+    providers = {node.provider.owner_name: node.provider for node in tmpl_node.credentials}
 
     scope = OperationScope(
         level=ScopeLevel.AGENT,
@@ -446,6 +446,7 @@ def delete_agent(
     vm = _require_vm(db, agent.vm_name)
 
     from agentworks.ssh import SSHLogger
+
     ssh_logger = SSHLogger(vm.name, "agent-delete")
     output.info(f"Deleting agent '{name}' on VM '{vm.name}'...")
     if vm_node is None:
@@ -482,7 +483,6 @@ def delete_agent(
             )
         boundary = vm_node.hold_active()
     with boundary:
-
         # Kill running sessions for this agent (status-aware)
         if agent_sessions:
             from agentworks.db import SessionStatus
@@ -492,11 +492,7 @@ def delete_agent(
             target = transport(vm, config, logger=ssh_logger)
             agent_sessions = ensure_pids_batch(agent_sessions, db=db, config=config)
             # Snapshot console memberships before db.delete_session cascades them.
-            console_pairs = [
-                (c.name, s.name)
-                for s in agent_sessions
-                for c in db.list_consoles_for_session(s.name)
-            ]
+            console_pairs = [(c.name, s.name) for s in agent_sessions for c in db.list_consoles_for_session(s.name)]
             unstoppable: list[str] = []
             for session in agent_sessions:
                 status = check_session_status(session, target=target)
@@ -508,8 +504,14 @@ def delete_agent(
                             unstoppable.append(session.name)
                             continue
                 elif status == SessionStatus.BROKEN:
-                    if session.pid and session.pid > 0 and force_kill_tmux_server(
-                        session.pid, target=target, socket_path=session.socket_path,
+                    if (
+                        session.pid
+                        and session.pid > 0
+                        and force_kill_tmux_server(
+                            session.pid,
+                            target=target,
+                            socket_path=session.socket_path,
+                        )
                     ):
                         pass  # killed successfully
                     else:
@@ -629,9 +631,7 @@ def reinit_agent(
     nodes = walk(agent_node, tmpl_node)
     for secret_name in secret_union(nodes):
         resolver.register_name(secret_name)
-    providers = {
-        node.provider.owner_name: node.provider for node in tmpl_node.credentials
-    }
+    providers = {node.provider.owner_name: node.provider for node in tmpl_node.credentials}
 
     scope = OperationScope(
         level=ScopeLevel.AGENT,
@@ -664,11 +664,16 @@ def reinit_agent(
         with output.section("Agent Initialization"):
             from agentworks.agents.initializer import create_agent_on_vm
             from agentworks.ssh import SSHLogger
+
             ssh_logger = SSHLogger(vm.name, "agent-reinit")
             try:
                 try:
                     create_agent_on_vm(
-                        vm, config, registry, agent_tmpl, agent.linux_user,
+                        vm,
+                        config,
+                        registry,
+                        agent_tmpl,
+                        agent.linux_user,
                         agent_name=agent.name,
                         git_tokens=git_tokens,
                         logger=ssh_logger,
@@ -846,7 +851,10 @@ def shell_agent(
     scopes = _resolve_agent_direct_env_scopes(registry, vm, agent, ws=ws)
 
     with gated_vm_boundary(
-        db, config, registry, vm,
+        db,
+        config,
+        registry,
+        vm,
         targets=[_agent_direct_secret_target(scopes, label=f"agent-shell={agent.name}")],
         scope=agent_scope(db, vm.name, agent.name),
     ) as (_vm_node, resolver):
@@ -950,7 +958,10 @@ def exec_agent(
     scopes = _resolve_agent_direct_env_scopes(registry, vm, agent, ws=ws)
 
     with gated_vm_boundary(
-        db, config, registry, vm,
+        db,
+        config,
+        registry,
+        vm,
         targets=[_agent_direct_secret_target(scopes, label=f"agent-exec={agent.name}")],
         scope=agent_scope(db, vm.name, agent.name),
     ) as (_vm_node, resolver):
@@ -986,7 +997,8 @@ def exec_agent(
         # ~/.local/bin, etc.) is set up. This matches the env an operator
         # gets via `agent shell`.
         return target.call_streaming(
-            f"$SHELL -lc {shlex.quote(remote_cmd)}", env=env,
+            f"$SHELL -lc {shlex.quote(remote_cmd)}",
+            env=env,
         )
 
 

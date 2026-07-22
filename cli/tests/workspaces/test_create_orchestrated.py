@@ -39,16 +39,12 @@ def mutation(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
     the realize body hands it."""
     captured: dict[str, Any] = {}
 
-    def _fake_create(
-        vm: Any, config: Any, ws_name: str, template: Any, *, logger: Any = None
-    ) -> str:
+    def _fake_create(vm: Any, config: Any, ws_name: str, template: Any, *, logger: Any = None) -> str:
         captured["ws_name"] = ws_name
         captured["template"] = template.name
         return f"/srv/{ws_name}"
 
-    monkeypatch.setattr(
-        "agentworks.workspaces.backends.vm.create_vm_workspace", _fake_create
-    )
+    monkeypatch.setattr("agentworks.workspaces.backends.vm.create_vm_workspace", _fake_create)
     monkeypatch.setattr(
         "agentworks.workspaces.backends.vm.generate_vscode_workspace",
         lambda vm, config, ws_name, path: f"/tmp/{ws_name}.code-workspace",
@@ -79,19 +75,16 @@ def _stop_the_vm(monkeypatch: pytest.MonkeyPatch, events: list[str]) -> None:
         "status",
         lambda self, row, ctx: events.append("status") or _VMStatus.STOPPED,
     )
-    monkeypatch.setattr(
-        ProxmoxPlatform, "start", lambda self, row, ctx: events.append("start")
-    )
-    monkeypatch.setattr(
-        vm_manager, "_ensure_tailscale", lambda *a, **k: events.append("tailscale")
-    )
+    monkeypatch.setattr(ProxmoxPlatform, "start", lambda self, row, ctx: events.append("start"))
+    monkeypatch.setattr(vm_manager, "_ensure_tailscale", lambda *a, **k: events.append("tailscale"))
 
 
 # -- the derived graph --------------------------------------------------------
 
 
 def test_create_graph_derives_from_row_and_pending_name(
-    db: Database, make_config  # noqa: ANN001
+    db: Database,
+    make_config,  # noqa: ANN001
 ) -> None:
     """The pending workspace's graph: its only edge is the VM (whose
     row's site field is the vm-site edge), so the union is the site's
@@ -195,9 +188,7 @@ def test_create_bad_template_bails_before_any_prompt_or_start(
     from agentworks.errors import NotFoundError
 
     with pytest.raises(NotFoundError, match="nope"):
-        workspace_manager.create_workspace(
-            db, config, name="ws1", vm_name="box", template_name="nope"
-        )
+        workspace_manager.create_workspace(db, config, name="ws1", vm_name="box", template_name="nope")
 
     assert resolve_counter == []  # no prompt, no backend pass
     assert events == []  # no status probe, no start
@@ -223,9 +214,9 @@ def test_create_never_resolves_the_template_env_secret(
     workspace_manager.create_workspace(db, config, name="ws1", vm_name="box")
 
     assert resolve_counter == [["proxmox-token"]]
-    assert all(
-        "ws-env-secret" not in burst for burst in resolve_counter
-    ), "the template env secret must never join a provisioning pass"
+    assert all("ws-env-secret" not in burst for burst in resolve_counter), (
+        "the template env secret must never join a provisioning pass"
+    )
     assert db.get_workspace("ws1") is not None
 
 
@@ -255,9 +246,7 @@ def test_create_mutation_failure_cleans_up_and_leaves_no_row(
 
     # Raise AFTER the directory exists (from the VS Code stub step) so
     # the cleanup path has partial state to remove.
-    monkeypatch.setattr(
-        "agentworks.workspaces.backends.vm.generate_vscode_workspace", _boom
-    )
+    monkeypatch.setattr("agentworks.workspaces.backends.vm.generate_vscode_workspace", _boom)
     deletes: list[str] = []
     monkeypatch.setattr(
         "agentworks.workspaces.backends.vm.delete_vm_workspace",

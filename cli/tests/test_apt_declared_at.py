@@ -68,10 +68,7 @@ def _write_operator_config(
     pub.write_text("ssh-ed25519 X")
     priv.write_text("-----BEGIN-----")
     cfg = tmp_path / "config.toml"
-    cfg.write_text(
-        f'[operator]\nssh_public_key = "{pub}"\nssh_private_key = "{priv}"\n'
-        + toml_body
-    )
+    cfg.write_text(f'[operator]\nssh_public_key = "{pub}"\nssh_private_key = "{priv}"\n' + toml_body)
     if manifests:
         resources = tmp_path / "resources"
         resources.mkdir()
@@ -117,9 +114,7 @@ def test_operator_yaml_entry_declared_at_points_at_operator_file(
     """An operator-declared YAML apt-source entry carries a ``declared_at``
     pointing at that operator ``resources/*.yaml`` file.
     """
-    src = _apt_sources(
-        tmp_path, manifests={"custom.yaml": _CUSTOM_APT_SOURCE_MANIFEST}
-    )["custom-repo"]
+    src = _apt_sources(tmp_path, manifests={"custom.yaml": _CUSTOM_APT_SOURCE_MANIFEST})["custom-repo"]
 
     assert src.declared_at.file.name == "custom.yaml"
     assert src.declared_at.line >= 1

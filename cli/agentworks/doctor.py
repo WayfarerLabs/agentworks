@@ -118,8 +118,7 @@ def run_checks(*, completion_version: str | None = None) -> HealthReport:
         sites = HealthGroup("VM sites")
         sites.info(
             "Declared sites",
-            "skipped (config or manifests unavailable; see the "
-            "Configuration group)",
+            "skipped (config or manifests unavailable; see the Configuration group)",
         )
         report.groups.append(sites)
     report.groups.append(config_group)
@@ -278,8 +277,7 @@ def _check_vm_sites(config: Config, registry: Registry) -> HealthGroup:
     if default_site is not None and default_site in disabled:
         g.warn(
             "defaults.site",
-            f"names '{default_site}', which is disabled: "
-            f"{disabled[default_site]}",
+            f"names '{default_site}', which is disabled: {disabled[default_site]}",
         )
 
     try:
@@ -429,8 +427,7 @@ def _check_config() -> tuple[HealthGroup, Config | None, Registry | None]:
     for section in config.noop_secret_backend_sections:
         g.warn(
             f"Config has a no-op {section} section",
-            "deprecated and ignored; remove it, or `agw resource migrate "
-            "--all` drops it",
+            "deprecated and ignored; remove it, or `agw resource migrate --all` drops it",
         )
 
     # SSH keys
@@ -500,7 +497,6 @@ def _check_ssh_key(g: HealthGroup, path: object, label: str) -> None:
             g.warn("SSH private key permissions", f"{oct(mode)}, recommend 600")
 
 
-
 def _check_secrets(config: Config, registry: Registry) -> HealthGroup:
     """Check every registry secret for a runtime-resolvable value.
 
@@ -546,11 +542,7 @@ def _check_secrets(config: Config, registry: Registry) -> HealthGroup:
     for name, decl in sorted(secrets.items()):
         auto = getattr(decl.origin, "variant", None) == "auto-declared"
         label = f"Secret {name!r} (auto)" if auto else f"Secret {name!r}"
-        invalid = sorted(
-            backend
-            for backend in decl.backend_mappings
-            if backend not in known_backends
-        )
+        invalid = sorted(backend for backend in decl.backend_mappings if backend not in known_backends)
         if invalid:
             noun = "backend" if len(invalid) == 1 else "backends"
             g.fail(
@@ -685,10 +677,12 @@ def _get_completion_paths() -> list[tuple[str, list[Path]]]:
     shells: list[tuple[str, list[Path]]] = []
 
     # Bash
-    shells.append((
-        "bash",
-        [home / ".local" / "share" / "bash-completion" / "completions" / "agentworks"],
-    ))
+    shells.append(
+        (
+            "bash",
+            [home / ".local" / "share" / "bash-completion" / "completions" / "agentworks"],
+        )
+    )
 
     # Zsh
     zsh_paths: list[Path] = [home / ".zfunc" / "_agentworks"]
@@ -705,10 +699,12 @@ def _get_completion_paths() -> list[tuple[str, list[Path]]]:
 
     profile = _query_powershell_profile()
     if profile is not None:
-        shells.append((
-            "powershell",
-            [profile.parent / "Completions" / "agentworks.ps1"],
-        ))
+        shells.append(
+            (
+                "powershell",
+                [profile.parent / "Completions" / "agentworks.ps1"],
+            )
+        )
 
     return shells
 

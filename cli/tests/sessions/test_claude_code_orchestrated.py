@@ -80,17 +80,11 @@ def _seed_db(tmp_path: Path) -> Database:
     return db
 
 
-def _cc_template(
-    monkeypatch: pytest.MonkeyPatch, config: dict[str, object] | None = None
-) -> None:
+def _cc_template(monkeypatch: pytest.MonkeyPatch, config: dict[str, object] | None = None) -> None:
     from agentworks.sessions import manager as session_manager
 
-    resolved = SimpleNamespace(
-        name="claude", harness="claude-code", harness_config=config or {}, env={}
-    )
-    monkeypatch.setattr(
-        session_manager, "_resolve_template", lambda *a, **k: resolved
-    )
+    resolved = SimpleNamespace(name="claude", harness="claude-code", harness_config=config or {}, env={})
+    monkeypatch.setattr(session_manager, "_resolve_template", lambda *a, **k: resolved)
 
 
 def _patch_transport(monkeypatch: pytest.MonkeyPatch, target: _ClaudeTarget) -> None:
@@ -99,14 +93,10 @@ def _patch_transport(monkeypatch: pytest.MonkeyPatch, target: _ClaudeTarget) -> 
     monkeypatch.setattr("agentworks.sessions.manager.transport", admin_factory)
 
 
-def _capture_pane_command(
-    monkeypatch: pytest.MonkeyPatch, events: list[str], captured: dict[str, str]
-) -> None:
+def _capture_pane_command(monkeypatch: pytest.MonkeyPatch, events: list[str], captured: dict[str, str]) -> None:
     from agentworks.sessions import tmux as tmux_mod
 
-    def _capture(
-        name: str, ws_path: str, command: str, linux_user: str, **kwargs: object
-    ) -> tuple[str, int]:
+    def _capture(name: str, ws_path: str, command: str, linux_user: str, **kwargs: object) -> tuple[str, int]:
         events.append("tmux_create")
         captured["command"] = command
         return ("/tmp/s1.sock", 4243)
@@ -122,9 +112,7 @@ def _common_stubs(monkeypatch: pytest.MonkeyPatch) -> None:
     stub_session_resolvers(monkeypatch)
     monkeypatch.setattr(tmux_mod, "deploy_restricted_config", lambda *a, **k: None)
     monkeypatch.setattr(session_manager, "_get_boot_id", lambda *a, **k: "boot-x")
-    monkeypatch.setattr(
-        session_manager, "_regenerate_tmuxinator", lambda *a, **k: None
-    )
+    monkeypatch.setattr(session_manager, "_regenerate_tmuxinator", lambda *a, **k: None)
 
 
 # -- create: launch string + minted id persists ------------------------------
@@ -164,9 +152,7 @@ def test_create_produces_launch_string_and_persists_the_minted_id(
     db.close()
 
 
-def test_create_resumes_when_a_transcript_exists(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_create_resumes_when_a_transcript_exists(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     from agentworks.sessions.manager import create_session
 
     db = _seed_db(tmp_path)
@@ -206,24 +192,18 @@ def _restart_stubs(
     from agentworks.sessions import manager as session_manager
 
     db = _seed_db(tmp_path)
-    db.insert_session(
-        "s1", "ws1", "claude", SessionMode.ADMIN, harness_state=stored_state
-    )
+    db.insert_session("s1", "ws1", "claude", SessionMode.ADMIN, harness_state=stored_state)
     db.update_session_pid("s1", 4242, boot_id="boot-x")
 
     events: list[str] = []
     captured: dict[str, str] = {}
-    _patch_transport(
-        monkeypatch, _ClaudeTarget(events, transcript_present=transcript_present)
-    )
+    _patch_transport(monkeypatch, _ClaudeTarget(events, transcript_present=transcript_present))
     _common_stubs(monkeypatch)
     _cc_template(monkeypatch)
     _capture_pane_command(monkeypatch, events, captured)
 
     monkeypatch.setattr(session_manager, "_ensure_pid", lambda session, **k: session)
-    monkeypatch.setattr(
-        session_manager, "check_session_status", lambda *a, **k: SessionStatus.OK
-    )
+    monkeypatch.setattr(session_manager, "check_session_status", lambda *a, **k: SessionStatus.OK)
 
     def _spy_kill(name: str, **kwargs: object) -> bool:
         events.append("kill")
@@ -233,9 +213,7 @@ def _restart_stubs(
     return db, events, captured
 
 
-def test_restart_reads_stored_id_and_resumes_after_the_kill(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_restart_reads_stored_id_and_resumes_after_the_kill(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     from agentworks.sessions.manager import restart_session
 
     db, events, captured = _restart_stubs(
@@ -268,9 +246,7 @@ def test_restart_of_a_pre_column_session_mints_and_persists_the_id(
     resume) and persists it, so the NEXT restart can resume."""
     from agentworks.sessions.manager import restart_session
 
-    db, events, captured = _restart_stubs(
-        tmp_path, monkeypatch, transcript_present=False, stored_state=None
-    )
+    db, events, captured = _restart_stubs(tmp_path, monkeypatch, transcript_present=False, stored_state=None)
     assert db.get_session("s1").harness_state == {}  # type: ignore[union-attr]
 
     restart_session(db, SimpleNamespace(session=SimpleNamespace(history_limit=1)), name="s1", yes=True)  # type: ignore[arg-type]

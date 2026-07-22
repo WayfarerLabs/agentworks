@@ -64,8 +64,7 @@ def validate_envelope(raw: object, location: SourceLocation) -> Document:
     if unknown:
         raise _err(
             location,
-            f"unknown manifest key(s) {sorted(unknown)}; "
-            f"expected {sorted(_ENVELOPE_KEYS)}",
+            f"unknown manifest key(s) {sorted(unknown)}; expected {sorted(_ENVELOPE_KEYS)}",
         )
 
     api_version = raw.get("apiVersion")
@@ -80,9 +79,7 @@ def validate_envelope(raw: object, location: SourceLocation) -> Document:
         raise _err(location, "kind is required and must be a string")
     handler = KIND_REGISTRY.get(kind)
     if handler is None:
-        valid = sorted(
-            k for k, h in KIND_REGISTRY.items() if h.category == "declarable"
-        )
+        valid = sorted(k for k, h in KIND_REGISTRY.items() if h.category == "declarable")
         hint = None
         kebab_guess = kind.replace("_", "-")
         if kebab_guess != kind and kebab_guess in KIND_REGISTRY:
@@ -105,8 +102,7 @@ def validate_envelope(raw: object, location: SourceLocation) -> Document:
     if unknown_meta:
         raise _err(
             location,
-            f"unknown metadata key(s) {sorted(unknown_meta)}; "
-            f"expected {sorted(_METADATA_KEYS)}",
+            f"unknown metadata key(s) {sorted(unknown_meta)}; expected {sorted(_METADATA_KEYS)}",
         )
     name = metadata.get("name")
     if not isinstance(name, str) or not name:

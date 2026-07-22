@@ -78,8 +78,7 @@ def _resolve_session_linux_user(db: Database, session: SessionRow, vm: VMRow) ->
         agent = db.get_agent(session.agent_name)
         if agent is None:
             raise NotFoundError(
-                f"agent '{session.agent_name}' not found "
-                f"(referenced by session '{session.name}')",
+                f"agent '{session.agent_name}' not found (referenced by session '{session.name}')",
                 entity_kind="agent",
                 entity_name=session.agent_name,
             )
@@ -302,9 +301,7 @@ def _require_vm_for_workspace(db: Database, ws: WorkspaceRow) -> VMRow:
     return vm
 
 
-def _session_scope(
-    db: Database, session: SessionRow, ws: WorkspaceRow, vm: VMRow
-) -> OperationScope:
+def _session_scope(db: Database, session: SessionRow, ws: WorkspaceRow, vm: VMRow) -> OperationScope:
     """The singular session ops' SESSION-level operation scope: the
     operation is about the session (running as its agent, or as the
     admin), even though the composed graph is the live VM alone; pass
@@ -368,9 +365,7 @@ def _prepare_vm(
         )
 
     registry = build_registry(config)
-    with gated_vm_boundary(
-        db, config, registry, vm, scope=_session_scope(db, session, ws, vm)
-    ):
+    with gated_vm_boundary(db, config, registry, vm, scope=_session_scope(db, session, ws, vm)):
         logger = SSHLogger(vm.name, operation) if operation else None
         target = transport(vm, config, logger=logger)
         run_command: RunCommand = target.run
@@ -455,9 +450,7 @@ def _distinct_vms_for_sessions(db: Database, sessions: list[SessionRow]) -> list
 
 
 @contextlib.contextmanager
-def _batch_vm_boundary(
-    db: Database, config: Config, vms: Sequence[VMRow]
-) -> Iterator[None]:
+def _batch_vm_boundary(db: Database, config: Config, vms: Sequence[VMRow]) -> Iterator[None]:
     """The batch session ops' composition root (stop_all_sessions,
     restart_all_sessions, list_sessions' status pass): ONE boundary
     over the distinct VMs, then each VM's activation gate and
@@ -516,10 +509,7 @@ def _batch_vm_boundary(
     registry = build_registry(config)
     resolver = Resolver(config, registry)
     site_nodes: dict[str, VMSiteNode] = {}
-    vm_nodes = [
-        live_vm_node(db, config, registry, vm, site_nodes=site_nodes)
-        for vm in vms
-    ]
+    vm_nodes = [live_vm_node(db, config, registry, vm, site_nodes=site_nodes) for vm in vms]
     nodes = walk(*vm_nodes)
     union = secret_union(nodes)
     for secret_name in union:
@@ -567,17 +557,13 @@ def _batch_vm_boundary(
             )
 
             (decl,) = secret_declarations([secret_name], registry)
-            return resolve_secrets([decl], active_backends(config, registry))[
-                secret_name
-            ]
+            return resolve_secrets([decl], active_backends(config, registry))[secret_name]
 
         return _resolve
 
     with contextlib.ExitStack() as stack:
         for vm_node in vm_nodes:
-            stack.enter_context(
-                activation_gate(vm_node, _gate_resolver(vm_node))
-            )
+            stack.enter_context(activation_gate(vm_node, _gate_resolver(vm_node)))
         yield
 
 
@@ -736,9 +722,7 @@ def _resolve_session_env_scopes(
                 entity_kind="agent",
                 entity_name=agent_name,
             )
-        resolved_agent_template = _resolve_agent_template(
-            registry, agent_row.template
-        )
+        resolved_agent_template = _resolve_agent_template(registry, agent_row.template)
         agent_env = resolved_agent_template.env
 
     session_env = _substitute_template_vars_in_env(
@@ -1040,8 +1024,8 @@ def batch_check_status(
             f"if [ $? -ne 0 ]; then "
             f"BOOT=$(cat /proc/sys/kernel/random/boot_id); "
             f"test -d /proc/{s.pid}; "
-            f"echo \"S:{name}:1:$BOOT:$?\"; "
-            f"else echo \"S:{name}:0\"; fi"
+            f'echo "S:{name}:1:$BOOT:$?"; '
+            f'else echo "S:{name}:0"; fi'
         )
     if not parts:
         return {}
@@ -1090,9 +1074,7 @@ def batch_check_status(
 # -- Interactive prompts (used by create_session) --------------------------
 
 
-def _prompt_workspace_choice(
-    db: Database, vm_filter: str | None
-) -> tuple[str | None, bool]:
+def _prompt_workspace_choice(db: Database, vm_filter: str | None) -> tuple[str | None, bool]:
     """Pick an existing workspace or commit to creating a new one.
 
     Returns ``(workspace_name, new_workspace)`` where exactly one is the
@@ -1123,10 +1105,7 @@ def _prompt_workspace_choice(
             output.info(f"Only showing workspaces on VM '{vm_filter}'")
     else:
         workspaces = all_workspaces
-    options = [
-        f"{ws.name}  (vm: {ws.vm_name}, template: {ws.template or '<none>'})"
-        for ws in workspaces
-    ]
+    options = [f"{ws.name}  (vm: {ws.vm_name}, template: {ws.template or '<none>'})" for ws in workspaces]
     options.append("[Create new workspace]")
     idx = output.choose("Select a workspace:", options)
     if idx == len(options) - 1:
@@ -1134,9 +1113,7 @@ def _prompt_workspace_choice(
     return workspaces[idx].name, False
 
 
-def _prompt_mode_choice(
-    db: Database, vm: VMRow | None
-) -> tuple[str | None, bool, bool]:
+def _prompt_mode_choice(db: Database, vm: VMRow | None) -> tuple[str | None, bool, bool]:
     """Pick admin, an existing agent, or commit to creating a new agent.
 
     Returns ``(agent_name, new_agent, admin)``. Exactly one of these
@@ -1172,9 +1149,7 @@ def _prompt_mode_choice(
         candidates = all_agents
     options = ["admin"]
     for a in candidates:
-        options.append(
-            f"agent: {a.name}  (vm: {a.vm_name}, template: {a.template or '<none>'})"
-        )
+        options.append(f"agent: {a.name}  (vm: {a.vm_name}, template: {a.template or '<none>'})")
     options.append("[Create new agent]")
     idx = output.choose("Run session as:", options)
     if idx == 0:
@@ -1446,8 +1421,7 @@ def create_session(
         if known_vm is not None and known_vm != existing_ws.vm_name:
             anchor_label = "--vm" if vm_name is not None else f"agent '{agent_name}'"
             raise ValidationError(
-                f"VM mismatch: {anchor_label}={known_vm}, "
-                f"workspace '{workspace_name}'={existing_ws.vm_name}",
+                f"VM mismatch: {anchor_label}={known_vm}, workspace '{workspace_name}'={existing_ws.vm_name}",
                 entity_kind="session",
                 entity_name=name,
             )
@@ -1606,7 +1580,11 @@ def create_session(
                 output.warn(advisory)
         _guard_vm_status(vm)
         pending_workspace = pending_workspace_node(
-            db, config, workspace_name, vm_node, workspace_template,
+            db,
+            config,
+            workspace_name,
+            vm_node,
+            workspace_template,
         )
         workspace_node = pending_workspace
     else:
@@ -1633,7 +1611,11 @@ def create_session(
         agent_tmpl = _resolve_agent_tmpl(registry, agent_template)
         agent_tmpl_node = agent_template_node(registry, agent_tmpl)
         pending_agent = pending_agent_node(
-            db, config, agent_name, agent_tmpl_node, vm_node,
+            db,
+            config,
+            agent_name,
+            agent_tmpl_node,
+            vm_node,
         )
         agent_node = pending_agent
     elif agent_name is not None:
@@ -1737,10 +1719,7 @@ def create_session(
                 from agentworks.vms.initializer import announce_git_credentials
 
                 announce_git_credentials(
-                    {
-                        cred.provider.owner_name: cred.provider
-                        for cred in agent_tmpl_node.credentials
-                    }
+                    {cred.provider.owner_name: cred.provider for cred in agent_tmpl_node.credentials}
                 )
 
             # Probe direct agent SSH for an EXISTING agent before any
@@ -1819,10 +1798,7 @@ def create_session(
                 assert agent_name is not None  # defaulted to ``name`` above
                 assert agent_tmpl is not None and agent_tmpl_node is not None
                 with output.section("Creating Agent"):
-                    output.info(
-                        f"Creating agent '{agent_name}' on VM '{vm.name}' "
-                        f"(template: {agent_tmpl.name})..."
-                    )
+                    output.info(f"Creating agent '{agent_name}' on VM '{vm.name}' (template: {agent_tmpl.name})...")
                     # Each credential's token, read through its node's
                     # SCOPED delivery (the boundary pass above covered
                     # them; the graph-derived fold replaces the nested
@@ -1923,12 +1899,8 @@ def create_session(
                         if not db.has_any_grant(resolved_agent_name, workspace_name):
                             from agentworks.agents.grants import add_to_workspace_group
 
-                            add_to_workspace_group(
-                                vm, config, db, linux_user, workspace_name
-                            )
-                        db.insert_agent_grant(
-                            resolved_agent_name, workspace_name, "implicit", session_name=name
-                        )
+                            add_to_workspace_group(vm, config, db, linux_user, workspace_name)
+                        db.insert_agent_grant(resolved_agent_name, workspace_name, "implicit", session_name=name)
 
                     # Op-start RunContext for the harness's start op: mirrors
                     # the runup readiness ctx above (targets), plus the scoped
@@ -2034,9 +2006,7 @@ def create_session(
                     else:
                         output.warn(f"Could not read boot ID for session '{name}', PID not stored")
                 else:
-                    output.warn(
-                        f"Could not capture PID for session '{name}', will auto-repair on next access"
-                    )
+                    output.warn(f"Could not capture PID for session '{name}', will auto-repair on next access")
 
             # The section is closed: the terminal result line and the
             # post-start bookkeeping (tmuxinator regen, console add) render
@@ -2218,9 +2188,7 @@ def stop_session(
         # rather than mid-kill. _build_session_target
         # always returns a same-uid target, so no sudo is needed for the
         # destructive ops below.
-        target = _build_session_target(
-            session, vm=vm, config=config, db=db, admin_target=admin_target
-        )
+        target = _build_session_target(session, vm=vm, config=config, db=db, admin_target=admin_target)
         kill_sudo = False
 
         if status == SessionStatus.BROKEN:
@@ -2258,9 +2226,7 @@ def stop_session(
         # (the column-0 result() below), so the shared helper must not also
         # emit its per-session "stopped" body line and double it up.
         output.info(f"Stopping session '{name}'...")
-        failed = _execute_stop(
-            [(session, target, True)], db=db, force=force, announce_stopped=False
-        )
+        failed = _execute_stop([(session, target, True)], db=db, force=force, announce_stopped=False)
         if failed:
             raise ExternalError(
                 f"failed to stop session '{name}': {failed[0][1]}",
@@ -2403,8 +2369,7 @@ def restart_session(
             is_legacy = session.socket_path is None and session.pid is not None and session.pid > 0
             if is_legacy:
                 output.info(
-                    f"Session '{name}' uses the legacy default-tmux-server model; "
-                    "migrating to per-session socket."
+                    f"Session '{name}' uses the legacy default-tmux-server model; migrating to per-session socket."
                 )
                 status = SessionStatus.STOPPED  # placeholder; legacy branch owns the kill below
             else:
@@ -2419,9 +2384,7 @@ def restart_session(
             # direct agent SSH. _build_session_target always returns a
             # same-uid target, so no sudo is needed for kill.
             is_admin = session.mode == SessionMode.ADMIN.value
-            session_target = _build_session_target(
-                session, vm=vm, config=config, db=db, admin_target=admin_target
-            )
+            session_target = _build_session_target(session, vm=vm, config=config, db=db, admin_target=admin_target)
             session_run_command: RunCommand = session_target.run
             kill_sudo = False
 
@@ -2460,9 +2423,7 @@ def restart_session(
                     entity_name=name,
                     hint="Use --force to restart.",
                 )
-            if status == SessionStatus.OK and not yes and not output.confirm(
-                f"Session '{name}' is running. Restart?"
-            ):
+            if status == SessionStatus.OK and not yes and not output.confirm(f"Session '{name}' is running. Restart?"):
                 raise UserAbort("restart cancelled")
 
         with output.section("Resolving Secrets"):
@@ -2685,9 +2646,9 @@ def stop_all_sessions(
         # Error if any sessions are still unknown after auto-repair.
         # PID_STOPPED sessions are known-stopped (excluded from status_map by design).
         unknown = [
-            s for s in sessions
-            if s.pid != PID_STOPPED
-            and (s.pid is None or s.boot_id is None or s.name not in status_map)
+            s
+            for s in sessions
+            if s.pid != PID_STOPPED and (s.pid is None or s.boot_id is None or s.name not in status_map)
         ]
         if unknown:
             names = ", ".join(s.name for s in unknown)
@@ -2785,7 +2746,8 @@ def restart_all_sessions(
         # status_map by ``batch_check_status``; restart_session migrates them
         # to the new model, so don't treat them as "unknown" here.
         unknown = [
-            s for s in sessions
+            s
+            for s in sessions
             if s.pid != PID_STOPPED
             and s.socket_path is not None
             and (s.pid is None or s.boot_id is None or s.name not in status_map)
@@ -2805,13 +2767,7 @@ def restart_all_sessions(
             # how to migrate (``--all``). The batch_check_status warning
             # already named them; this second message ties that warning to
             # an actionable next step from the command they just ran.
-            legacy_skipped = [
-                s.name
-                for s in sessions
-                if s.socket_path is None
-                and s.pid is not None
-                and s.pid > 0
-            ]
+            legacy_skipped = [s.name for s in sessions if s.socket_path is None and s.pid is not None and s.pid > 0]
             if legacy_skipped:
                 names = ", ".join(legacy_skipped)
                 output.warn(
@@ -2819,12 +2775,7 @@ def restart_all_sessions(
                     f"--all-stopped (can't determine state without a per-session "
                     f"socket). Use `--all` to migrate them: {names}"
                 )
-            sessions = [
-                s
-                for s in sessions
-                if s.pid == PID_STOPPED
-                or status_map.get(s.name) == SessionStatus.STOPPED
-            ]
+            sessions = [s for s in sessions if s.pid == PID_STOPPED or status_map.get(s.name) == SessionStatus.STOPPED]
 
         if not sessions:
             output.info("No matching sessions to restart.")
@@ -2892,9 +2843,7 @@ def delete_session(
         # actionable error rather than after the operator has already
         # confirmed the delete. The helper returns a same-uid target, so
         # no sudo is needed for the destructive ops below.
-        session_target = _build_session_target(
-            session, vm=vm, config=config, db=db, admin_target=admin_target
-        )
+        session_target = _build_session_target(session, vm=vm, config=config, db=db, admin_target=admin_target)
         session_run_command: RunCommand = session_target.run
         kill_sudo = False
 
@@ -2971,9 +2920,7 @@ def delete_session(
 
             # Consoles are admin-owned (carve-out): admin manages
             # admin's tmux server. Use admin_target regardless of session mode.
-            kill_session_windows(
-                admin_target, pairs=[(c, name) for c in member_consoles]
-            )
+            kill_session_windows(admin_target, pairs=[(c, name) for c in member_consoles])
 
         output.info(f"Session '{name}' deleted")
 
@@ -3192,9 +3139,7 @@ def list_sessions(
     # Auto-repair sessions with missing PIDs, then batch check.
     # The status path SSHes to every involved VM; anchor each one (no-op
     # on non-WSL2) so the probe doesn't lose them mid-check.
-    status_keepalive_vms: list[VMRow] = (
-        [] if no_status else _distinct_vms_for_sessions(db, sessions)
-    )
+    status_keepalive_vms: list[VMRow] = [] if no_status else _distinct_vms_for_sessions(db, sessions)
 
     status_map: dict[str, SessionStatus] = {}
     with _batch_vm_boundary(db, config, status_keepalive_vms):
@@ -3371,5 +3316,3 @@ def session_logs(
         # Raw data pipe (opaque tmux capture-pane output), not a structured message.
         # Intentionally not routed through the output handler.
         typer.echo(captured, nl=False)
-
-

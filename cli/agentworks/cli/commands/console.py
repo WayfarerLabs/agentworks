@@ -44,10 +44,7 @@ def console_create(
         bool,
         typer.Option(
             "--all-running",
-            help=(
-                "Like --all but only sessions whose live tmux state is OK "
-                "(one SSH probe; VM must be reachable)"
-            ),
+            help=("Like --all but only sessions whose live tmux state is OK (one SSH probe; VM must be reachable)"),
         ),
     ] = False,
     add_admin_shell: Annotated[
@@ -149,9 +146,7 @@ def console_describe(
 @console_app.command("attach")
 def console_attach(
     name: Annotated[str, typer.Argument(help="Console name")],
-    recreate: Annotated[
-        bool, typer.Option("--recreate", help="Kill and rebuild the console's tmux state")
-    ] = False,
+    recreate: Annotated[bool, typer.Option("--recreate", help="Kill and rebuild the console's tmux state")] = False,
     allow_nesting: Annotated[
         bool, typer.Option("--allow-nesting", help="Allow attaching from inside an existing tmux")
     ] = False,
@@ -228,9 +223,7 @@ def console_reorder_sessions(
     from agentworks.config import load_config
     from agentworks.sessions.multi_console import reorder_sessions
 
-    reorder_sessions(
-        get_db(), load_config(), console_name=name, session_names=sessions
-    )
+    reorder_sessions(get_db(), load_config(), console_name=name, session_names=sessions)
 
 
 @console_app.command("add-shell")

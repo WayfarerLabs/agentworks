@@ -48,8 +48,7 @@ def _seed(db: Database) -> None:
 
 def _seed_workspace(db: Database, *, vm_name: str, name: str) -> None:
     db._conn.execute(
-        "INSERT INTO workspaces (name, vm_name, workspace_path, linux_group) "
-        "VALUES (?, ?, ?, ?)",
+        "INSERT INTO workspaces (name, vm_name, workspace_path, linux_group) VALUES (?, ?, ?, ?)",
         (name, vm_name, f"/srv/{name}", f"ws-{name}"),
     )
     db._conn.commit()
@@ -78,12 +77,8 @@ def _stop_the_vm(monkeypatch: pytest.MonkeyPatch, events: list[str]) -> None:
         "status",
         lambda self, row, ctx: events.append("status") or VMStatus.STOPPED,
     )
-    monkeypatch.setattr(
-        ProxmoxPlatform, "start", lambda self, row, ctx: events.append("start")
-    )
-    monkeypatch.setattr(
-        vm_manager, "_ensure_tailscale", lambda *a, **k: events.append("tailscale")
-    )
+    monkeypatch.setattr(ProxmoxPlatform, "start", lambda self, row, ctx: events.append("start"))
+    monkeypatch.setattr(vm_manager, "_ensure_tailscale", lambda *a, **k: events.append("tailscale"))
 
 
 def _no_gate(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -94,9 +89,7 @@ def _no_gate(monkeypatch: pytest.MonkeyPatch) -> None:
     _reachable(monkeypatch, False)
 
 
-def _node_holding(
-    db: Database, config: object, platform: object, *, vm_name: str = "box"
-):  # noqa: ANN202
+def _node_holding(db: Database, config: object, platform: object, *, vm_name: str = "box"):  # noqa: ANN202
     """A live VM node for ``vm_name`` (default 'box') whose site holds
     the given platform: the shape a nested teardown hands
     ``delete_agent`` (it re-enters the hold through
@@ -153,7 +146,8 @@ def synced(monkeypatch: pytest.MonkeyPatch) -> list[object]:
 
 
 def test_graph_is_the_live_vm_alone_for_the_trio(
-    db: Database, make_config  # noqa: ANN001
+    db: Database,
+    make_config,  # noqa: ANN001
 ) -> None:
     """delete / grant / revoke share one graph: the live VM from its
     row (vm-site + vm), union = the site's config secret only. No
@@ -200,9 +194,7 @@ def test_grant_reachable_vm_is_one_boundary_burst(
     _seed_workspace(db, vm_name="box", name="ws1")
     _reachable(monkeypatch, True)
 
-    agent_grants.grant_workspaces(
-        db, config, agent_name="a1", workspace_names=["ws1"]
-    )
+    agent_grants.grant_workspaces(db, config, agent_name="a1", workspace_names=["ws1"])
 
     assert resolve_counter == [["proxmox-token"]]
     assert db.has_any_grant("a1", "ws1")
@@ -210,9 +202,7 @@ def test_grant_reachable_vm_is_one_boundary_burst(
     # The per-workspace lines stay info; the command's summary is a result().
     from agentworks.output import Role
 
-    assert (Role.RESULT, 0, "Agent 'a1' granted access to 1 workspace") in (
-        captured_output.lines
-    )
+    assert (Role.RESULT, 0, "Agent 'a1' granted access to 1 workspace") in (captured_output.lines)
 
 
 def test_grant_stopped_vm_gate_burst_seeds_the_whole_union(
@@ -231,9 +221,7 @@ def test_grant_stopped_vm_gate_burst_seeds_the_whole_union(
     events: list[str] = []
     _stop_the_vm(monkeypatch, events)
 
-    agent_grants.grant_workspaces(
-        db, config, agent_name="a1", workspace_names=["ws1"]
-    )
+    agent_grants.grant_workspaces(db, config, agent_name="a1", workspace_names=["ws1"])
 
     assert events == ["status", "start", "tailscale"]  # the gate ran
     assert resolve_counter == [["proxmox-token"]]
@@ -254,18 +242,14 @@ def test_revoke_reachable_vm_is_one_boundary_burst(
     db.insert_agent_grant("a1", "ws1", "explicit")
     _reachable(monkeypatch, True)
 
-    agent_grants.revoke_workspaces(
-        db, config, agent_name="a1", workspace_names=["ws1"]
-    )
+    agent_grants.revoke_workspaces(db, config, agent_name="a1", workspace_names=["ws1"])
 
     assert resolve_counter == [["proxmox-token"]]
     assert not db.has_any_grant("a1", "ws1")
     assert "Revoked: ws1" in captured_output.info
     from agentworks.output import Role
 
-    assert (Role.RESULT, 0, "Revoked 1 workspace grant from agent 'a1'") in (
-        captured_output.lines
-    )
+    assert (Role.RESULT, 0, "Revoked 1 workspace grant from agent 'a1'") in (captured_output.lines)
 
 
 def test_revoke_stopped_vm_gate_burst_seeds_the_whole_union(
@@ -283,9 +267,7 @@ def test_revoke_stopped_vm_gate_burst_seeds_the_whole_union(
     events: list[str] = []
     _stop_the_vm(monkeypatch, events)
 
-    agent_grants.revoke_workspaces(
-        db, config, agent_name="a1", workspace_names=["ws1"]
-    )
+    agent_grants.revoke_workspaces(db, config, agent_name="a1", workspace_names=["ws1"])
 
     assert events == ["status", "start", "tailscale"]
     assert resolve_counter == [["proxmox-token"]]
@@ -390,9 +372,7 @@ def test_grant_empty_request_fails_with_zero_resolves_and_zero_gate(
     _no_gate(monkeypatch)
 
     with pytest.raises(ValidationError, match="needs at least one workspace name"):
-        agent_grants.grant_workspaces(
-            db, config, agent_name="a1", workspace_names=[]
-        )
+        agent_grants.grant_workspaces(db, config, agent_name="a1", workspace_names=[])
 
     assert resolve_counter == []
     assert target.commands == []
@@ -410,9 +390,7 @@ def test_revoke_unknown_agent_fails_with_zero_resolves_and_zero_gate(
     _no_gate(monkeypatch)
 
     with pytest.raises(NotFoundError, match="agent 'ghost' not found"):
-        agent_grants.revoke_workspaces(
-            db, config, agent_name="ghost", workspace_names=["ws1"]
-        )
+        agent_grants.revoke_workspaces(db, config, agent_name="ghost", workspace_names=["ws1"])
 
     assert resolve_counter == []
     assert target.commands == []
@@ -443,9 +421,7 @@ def test_agent_scope_reaches_node_readiness(
 
     monkeypatch.setattr(ProxmoxPlatform, "preflight", _recording)
 
-    agent_grants.grant_workspaces(
-        db, config, agent_name="a1", workspace_names=["ws1"]
-    )
+    agent_grants.grant_workspaces(db, config, agent_name="a1", workspace_names=["ws1"])
 
     (scope,) = scopes
     assert scope is not None
@@ -513,9 +489,7 @@ def test_delete_nested_platform_path_reuses_the_callers_composition(
         def __init__(self) -> None:
             self.holds = 0
 
-        def vm_active(
-            self, row: object, *, config: object | None = None
-        ) -> contextlib.AbstractContextManager[None]:
+        def vm_active(self, row: object, *, config: object | None = None) -> contextlib.AbstractContextManager[None]:
             self.holds += 1
             return contextlib.nullcontext()
 
@@ -597,9 +571,7 @@ def test_grant_all_sets_flag_and_adds_every_vm_workspace(
     _seed_workspace(db, vm_name="other", name="elsewhere")
     _reachable(monkeypatch, True)
 
-    agent_grants.grant_workspaces(
-        db, config, agent_name="a1", workspace_names=[], grant_all=True
-    )
+    agent_grants.grant_workspaces(db, config, agent_name="a1", workspace_names=[], grant_all=True)
 
     row = db.get_agent("a1")
     assert row is not None and row.grant_all
@@ -623,9 +595,7 @@ def test_grant_missing_workspace_warns_and_skips(
     _seed_workspace(db, vm_name="box", name="ws1")
     _reachable(monkeypatch, True)
 
-    agent_grants.grant_workspaces(
-        db, config, agent_name="a1", workspace_names=["ws1", "nope"]
-    )
+    agent_grants.grant_workspaces(db, config, agent_name="a1", workspace_names=["ws1", "nope"])
 
     assert db.has_any_grant("a1", "ws1")
     assert not db.has_any_grant("a1", "nope")
@@ -650,16 +620,11 @@ def test_revoke_named_workspace_with_implicit_access_keeps_membership(
     db.insert_agent_grant("a1", "ws1", "implicit", session_name="s1")
     _reachable(monkeypatch, True)
 
-    agent_grants.revoke_workspaces(
-        db, config, agent_name="a1", workspace_names=["ws1"]
-    )
+    agent_grants.revoke_workspaces(db, config, agent_name="a1", workspace_names=["ws1"])
 
     assert db.has_any_grant("a1", "ws1")  # the implicit grant survives
     assert not any("gpasswd" in c for c in target.commands)
-    assert (
-        "Revoked: ws1 (still has implicit access via sessions)"
-        in captured_output.info
-    )
+    assert "Revoked: ws1 (still has implicit access via sessions)" in captured_output.info
 
 
 def test_revoke_all_warns_about_remaining_implicit_access(
@@ -689,9 +654,7 @@ def test_revoke_all_warns_about_remaining_implicit_access(
     db.insert_agent_grant("a1", "ws2", "explicit")
     _reachable(monkeypatch, True)
 
-    agent_grants.revoke_workspaces(
-        db, config, agent_name="a1", workspace_names=[], revoke_all=True
-    )
+    agent_grants.revoke_workspaces(db, config, agent_name="a1", workspace_names=[], revoke_all=True)
 
     row = db.get_agent("a1")
     assert row is not None and not row.grant_all
@@ -702,7 +665,4 @@ def test_revoke_all_warns_about_remaining_implicit_access(
     assert any("gpasswd -d agt-a1 ws-ws2" in c for c in target.commands)
     assert not any("ws-ws1" in c for c in target.commands)
     assert "All explicit grants revoked for agent 'a1'" in captured_output.info
-    assert (
-        "agent still has implicit access via sessions to: ws1"
-        in captured_output.warnings
-    )
+    assert "agent still has implicit access via sessions to: ws1" in captured_output.warnings

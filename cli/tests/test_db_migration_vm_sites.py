@@ -70,15 +70,9 @@ def _create_v27_db(path: str) -> sqlite3.Connection:
 
 def _seed_all_platforms(conn: sqlite3.Connection) -> None:
     """One row per platform, one remote-Lima row, one shadow-named host."""
-    conn.execute(
-        "INSERT INTO vm_hosts (name, ssh_host) VALUES ('gpu-box', 'me@gpu-box')"
-    )
-    conn.execute(
-        "INSERT INTO vm_hosts (name, ssh_host) VALUES ('wsl2', 'me@wsl2-host')"
-    )
-    conn.execute(
-        "INSERT INTO vm_hosts (name, ssh_host) VALUES ('azure-vm', 'me@az-box')"
-    )
+    conn.execute("INSERT INTO vm_hosts (name, ssh_host) VALUES ('gpu-box', 'me@gpu-box')")
+    conn.execute("INSERT INTO vm_hosts (name, ssh_host) VALUES ('wsl2', 'me@wsl2-host')")
+    conn.execute("INSERT INTO vm_hosts (name, ssh_host) VALUES ('azure-vm', 'me@az-box')")
     conn.executescript("""
         INSERT INTO vms (name, platform, admin_username)
             VALUES ('lvm', 'lima', 'admin');
@@ -137,9 +131,7 @@ def test_backfill_and_site_rename(tmp_path: Path, captured_output: CapturedOutpu
         assert by_name["lvm"].platform_metadata == {"instance_name": "lvm"}
         assert by_name["rvm"].platform_metadata == {"instance_name": "rvm"}
         assert by_name["wvm"].platform_metadata == {"distro_name": "wvm"}
-        assert by_name["avm"].platform_metadata == {
-            "resource_id": "/subscriptions/s/rg/r/p/vm/avm"
-        }
+        assert by_name["avm"].platform_metadata == {"resource_id": "/subscriptions/s/rg/r/p/vm/avm"}
         # Empty legacy context: proxmox node omitted, never guessed.
         assert by_name["pvm"].platform_metadata == {"vmid": "104"}
 
@@ -161,32 +153,22 @@ def test_backfill_and_site_rename(tmp_path: Path, captured_output: CapturedOutpu
 def test_table_rebuild_shape(tmp_path: Path, captured_output: CapturedOutput) -> None:
     db = _migrate(tmp_path)
     try:
-        info = {
-            row[1]: row for row in db._conn.execute("PRAGMA table_info(vms)")
-        }
-        for legacy in ("platform", "vm_host_name", "azure_resource_id",
-                       "wsl_distro_name", "proxmox_vmid"):
+        info = {row[1]: row for row in db._conn.execute("PRAGMA table_info(vms)")}
+        for legacy in ("platform", "vm_host_name", "azure_resource_id", "wsl_distro_name", "proxmox_vmid"):
             assert legacy not in info
         assert info["hostname"][3] == 1  # NOT NULL
         assert info["site"][3] == 1
         assert info["platform_metadata"][3] == 1
         assert info["operator_stopped"][3] == 1
 
-        tables = {
-            row[0]
-            for row in db._conn.execute(
-                "SELECT name FROM sqlite_master WHERE type = 'table'"
-            )
-        }
+        tables = {row[0] for row in db._conn.execute("SELECT name FROM sqlite_master WHERE type = 'table'")}
         assert "vm_hosts" not in tables
         assert "settings" in tables
     finally:
         db.close()
 
 
-def test_prints_site_manifest_snippets(
-    tmp_path: Path, captured_output: CapturedOutput
-) -> None:
+def test_prints_site_manifest_snippets(tmp_path: Path, captured_output: CapturedOutput) -> None:
     db = _migrate(tmp_path)
     try:
         # Everything on the warn channel (stderr): migrations run at
@@ -206,9 +188,7 @@ def test_prints_site_manifest_snippets(
         db.close()
 
 
-def test_proxmox_node_from_legacy_context(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_proxmox_node_from_legacy_context(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         "agentworks.db._load_legacy_toml",
         lambda: {"proxmox": {"node": "pve1"}},
@@ -231,10 +211,7 @@ def test_unknown_platform_fails_loudly_and_retry_works_after_fix(
     """
     db_path = tmp_path / "bad.db"
     conn = _create_v26_db(str(db_path))
-    conn.execute(
-        "INSERT INTO vms (name, platform, admin_username) "
-        "VALUES ('xvm', 'mystery', 'admin')"
-    )
+    conn.execute("INSERT INTO vms (name, platform, admin_username) VALUES ('xvm', 'mystery', 'admin')")
     conn.commit()
     conn.close()
     with pytest.raises(sqlite3.IntegrityError, match="unknown platform 'mystery'"):
@@ -300,10 +277,7 @@ def test_earlier_versions_checkpoint_when_a_later_one_fails(
             if stmt:
                 conn.execute(stmt)
         conn.execute("INSERT INTO schema_version (version) VALUES (?)", (version,))
-    conn.execute(
-        "INSERT INTO vms (name, platform, admin_username) "
-        "VALUES ('xvm', 'mystery', 'admin')"
-    )
+    conn.execute("INSERT INTO vms (name, platform, admin_username) VALUES ('xvm', 'mystery', 'admin')")
     conn.commit()
     conn.close()
 
@@ -353,25 +327,17 @@ def test_v28_drops_workspace_last_seen_at_and_preserves_rows(
     """
     db_path = tmp_path / "m28.db"
     conn = _create_v27_db(str(db_path))
-    conn.execute(
-        "INSERT INTO vms (name, site, hostname) VALUES ('box', 'lima-local', 'lima--box')"
-    )
+    conn.execute("INSERT INTO vms (name, site, hostname) VALUES ('box', 'lima-local', 'lima--box')")
     conn.execute(
         "INSERT INTO workspaces "
         "(name, vm_name, template, workspace_path, linux_group, created_at, last_seen_at) "
         "VALUES ('ws1', 'box', 'default', '/srv/ws1', 'ws-ws1', "
         "'2020-01-01T00:00:00Z', '2021-06-06T00:00:00Z')"
     )
+    conn.execute("INSERT INTO agents (name, vm_name, linux_user) VALUES ('a1', 'box', 'agt-a1')")
+    conn.execute("INSERT INTO sessions (name, workspace_name, template, mode) VALUES ('s1', 'ws1', 'default', 'admin')")
     conn.execute(
-        "INSERT INTO agents (name, vm_name, linux_user) VALUES ('a1', 'box', 'agt-a1')"
-    )
-    conn.execute(
-        "INSERT INTO sessions (name, workspace_name, template, mode) "
-        "VALUES ('s1', 'ws1', 'default', 'admin')"
-    )
-    conn.execute(
-        "INSERT INTO agent_workspace_grants (agent_name, workspace_name, grant_type) "
-        "VALUES ('a1', 'ws1', 'explicit')"
+        "INSERT INTO agent_workspace_grants (agent_name, workspace_name, grant_type) VALUES ('a1', 'ws1', 'explicit')"
     )
     conn.commit()
     conn.close()
@@ -394,9 +360,7 @@ def test_v28_drops_workspace_last_seen_at_and_preserves_rows(
         # No dangling FKs, and the version advanced to the latest (opening
         # the DB always migrates all the way forward).
         assert db._conn.execute("PRAGMA foreign_key_check").fetchall() == []
-        (version,) = db._conn.execute(
-            "SELECT MAX(version) FROM schema_version"
-        ).fetchone()
+        (version,) = db._conn.execute("SELECT MAX(version) FROM schema_version").fetchone()
         assert version == LATEST_VERSION
     finally:
         db.close()

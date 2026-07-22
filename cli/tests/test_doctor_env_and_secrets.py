@@ -53,13 +53,12 @@ def test_auto_declared_secrets_are_reported(tmp_path: Path) -> None:
     g = _check_secrets(config, build_registry(config))
     assert g.name == "Secrets"
     statuses = [(c.name, c.status, c.message) for c in g.checks]
-    assert statuses == [
-        ("Secret 'tailscale-auth-key' (auto)", Status.OK, "would resolve via prompt")
-    ], statuses
+    assert statuses == [("Secret 'tailscale-auth-key' (auto)", Status.OK, "would resolve via prompt")], statuses
 
 
 def test_secret_resolves_via_env_var_when_set(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """When AW_SECRET_<NAME> is set, doctor reports the secret as resolving
     via env-var."""
@@ -81,15 +80,14 @@ backends = ["env-var", "prompt"]
     g = _check_secrets(config, build_registry(config))
     msgs = [(c.status, c.name, c.message) for c in g.checks]
     assert any(
-        status == Status.OK
-        and "shared" in name
-        and "would resolve via env-var" in (msg or "")
+        status == Status.OK and "shared" in name and "would resolve via env-var" in (msg or "")
         for status, name, msg in msgs
     ), msgs
 
 
 def test_secret_resolves_via_prompt_when_env_var_unset(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """When env-var has nothing and prompt is in the chain, doctor reports
     the secret as resolving via prompt -- prompt is just another backend."""
@@ -110,14 +108,14 @@ backends = ["env-var", "prompt"]
     config = load_config(cfg, warn_issues=False)
     g = _check_secrets(config, build_registry(config))
     oks = [c for c in g.checks if c.status == Status.OK]
-    assert any(
-        "shared" in c.name and "would resolve via prompt" in (c.message or "")
-        for c in oks
-    ), [(c.name, c.message) for c in oks]
+    assert any("shared" in c.name and "would resolve via prompt" in (c.message or "") for c in oks), [
+        (c.name, c.message) for c in oks
+    ]
 
 
 def test_secret_not_available_when_env_var_unset_and_prompt_opted_out(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """When prompt is opted out via backend_mappings.prompt = false AND
     env-var has no value, doctor reports the secret as WARN (config is
@@ -140,10 +138,9 @@ backends = ["env-var", "prompt"]
     config = load_config(cfg, warn_issues=False)
     g = _check_secrets(config, build_registry(config))
     warns = [c for c in g.checks if c.status == Status.WARN]
-    assert any(
-        "opted-out" in c.name and "not available" in (c.message or "")
-        for c in warns
-    ), [(c.name, c.message) for c in warns]
+    assert any("opted-out" in c.name and "not available" in (c.message or "") for c in warns), [
+        (c.name, c.message) for c in warns
+    ]
 
 
 def test_mapping_to_undeclared_kind_fails(tmp_path: Path) -> None:
@@ -207,7 +204,8 @@ backends = ["env-var", "prompt"]
 
 
 def test_agentworks_identity_override_surfaces_in_configuration(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """An operator who sets AGENTWORKS_SESSION in their env table triggers
     a config-load warning. Doctor surfaces it once, in the Configuration
@@ -224,9 +222,7 @@ AGENTWORKS_SESSION = "operator-override"
     monkeypatch.setattr("agentworks.config.CONFIG_PATH", cfg)
     g, _, _ = _check_config()
     warns = [c for c in g.checks if c.status == Status.WARN]
-    assert any("AGENTWORKS_SESSION" in (c.message or "") for c in warns), (
-        [(c.name, c.message) for c in warns]
-    )
+    assert any("AGENTWORKS_SESSION" in (c.message or "") for c in warns), [(c.name, c.message) for c in warns]
 
 
 def test_doctor_surfaces_deprecation_nudges(tmp_path: Path, monkeypatch) -> None:
@@ -241,14 +237,8 @@ def test_doctor_surfaces_deprecation_nudges(tmp_path: Path, monkeypatch) -> None
     cfg = _write_config(tmp_path)  # has [vm_templates.default] + [admin.config]
     monkeypatch.setattr("agentworks.config.CONFIG_PATH", cfg)
     g, _, _ = _check_config()
-    warns = [
-        (c.name, c.message or "")
-        for c in g.checks
-        if c.status == Status.WARN
-    ]
-    ((name, message),) = [
-        w for w in warns if "deprecated TOML resource" in w[0]
-    ]
+    warns = [(c.name, c.message or "") for c in g.checks if c.status == Status.WARN]
+    ((name, message),) = [w for w in warns if "deprecated TOML resource" in w[0]]
     # Maintainer-specified row shape: the check NAME carries the fact,
     # the parenthetical carries the one next step.
     assert name == "Config has deprecated TOML resource declarations"
@@ -260,9 +250,7 @@ def test_doctor_surfaces_deprecation_nudges(tmp_path: Path, monkeypatch) -> None
     assert "[vm_templates.*]" not in line
 
 
-def test_doctor_shows_noop_secret_backend_sections(
-    tmp_path: Path, monkeypatch
-) -> None:
+def test_doctor_shows_noop_secret_backend_sections(tmp_path: Path, monkeypatch) -> None:
     cfg = _write_config(
         tmp_path,
         extras="""
@@ -271,15 +259,8 @@ def test_doctor_shows_noop_secret_backend_sections(
     )
     monkeypatch.setattr("agentworks.config.CONFIG_PATH", cfg)
     g, _, _ = _check_config()
-    warns = [
-        (c.name, c.message or "")
-        for c in g.checks
-        if c.status == Status.WARN
-    ]
-    assert any(
-        "[secret_backends.env-var]" in name and "remove it" in message
-        for name, message in warns
-    ), warns
+    warns = [(c.name, c.message or "") for c in g.checks if c.status == Status.WARN]
+    assert any("[secret_backends.env-var]" in name and "remove it" in message for name, message in warns), warns
 
 
 def test_manifest_issues_surface_as_doctor_rows(tmp_path: Path, monkeypatch, capsys) -> None:
@@ -355,8 +336,5 @@ bogus_key = 1
     fails = [c for c in g.checks if c.name == "Manifest" and c.status == Status.FAIL]
     assert fails and "broken.yaml" in (fails[0].message or "")
     # The TOML unknown-key warn row still rendered after the fail.
-    assert any(
-        c.name == "Config" and c.status == Status.WARN and "bogus_key" in (c.message or "")
-        for c in g.checks
-    )
+    assert any(c.name == "Config" and c.status == Status.WARN and "bogus_key" in (c.message or "") for c in g.checks)
     assert not any(c.name == "Config is valid" for c in g.checks)

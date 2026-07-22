@@ -129,11 +129,7 @@ class _FakeBackend:
 
     def resolve(self, secrets: list[SecretDecl]) -> dict[str, str]:
         self.resolve_calls.append([s.name for s in secrets])
-        return {
-            s.name: self._values[s.name]
-            for s in secrets
-            if s.name in self._values
-        }
+        return {s.name: self._values[s.name] for s in secrets if s.name in self._values}
 
 
 def _decl(name: str, **kw: object) -> SecretDecl:
@@ -153,9 +149,7 @@ def test_prediction_reports_the_first_producing_backend() -> None:
 
 
 def test_prediction_none_when_nothing_would_resolve() -> None:
-    assert predict_resolution([_decl("a")], _chain(_FakeBackend("env-var"))) == {
-        "a": None
-    }
+    assert predict_resolution([_decl("a")], _chain(_FakeBackend("env-var"))) == {"a": None}
 
 
 def test_interactive_backend_predicted_resolvable_when_interactive(
@@ -218,9 +212,7 @@ def _env_only_setup(tmp_path: Path) -> tuple[Config, Registry]:
     from agentworks.bootstrap import build_registry
     from tests.orchestrated_fixtures import write_operator_config
 
-    config = write_operator_config(
-        tmp_path, '[secret_config]\nbackends = ["env-var"]\n'
-    )
+    config = write_operator_config(tmp_path, '[secret_config]\nbackends = ["env-var"]\n')
     return config, build_registry(config)
 
 
@@ -230,9 +222,7 @@ def _env_and_prompt_setup(tmp_path: Path) -> tuple[Config, Registry]:
     from agentworks.bootstrap import build_registry
     from tests.orchestrated_fixtures import write_operator_config
 
-    config = write_operator_config(
-        tmp_path, '[secret_config]\nbackends = ["env-var", "prompt"]\n'
-    )
+    config = write_operator_config(tmp_path, '[secret_config]\nbackends = ["env-var", "prompt"]\n')
     return config, build_registry(config)
 
 
@@ -265,9 +255,7 @@ def test_require_predicted_refs_prompt_only_fails_fast_when_non_interactive(
         require_predicted_refs("vm-site/px", (_px_ref(),), config, registry)
 
 
-def test_require_predicted_refs_passes_when_resolvable(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_require_predicted_refs_passes_when_resolvable(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     config, registry = _env_only_setup(tmp_path)
     monkeypatch.setenv("AW_SECRET_PROXMOX_TOKEN", "tok")
     require_predicted_refs("vm-site/px", (_px_ref(),), config, registry)
@@ -285,8 +273,7 @@ def test_require_predicted_refs_refuses_with_owner_usage_framing(
     with pytest.raises(ConfigError) as exc:
         require_predicted_refs("vm-site/px", (_px_ref(),), config, registry)
     assert str(exc.value) == (
-        "vm-site/px: secret 'proxmox-token' (the Proxmox API token) is "
-        "not resolvable by any active backend"
+        "vm-site/px: secret 'proxmox-token' (the Proxmox API token) is not resolvable by any active backend"
     )
     assert exc.value.hint == (
         "`agw secret describe proxmox-token` shows how each backend "
@@ -310,9 +297,7 @@ def test_require_predicted_refs_without_config_is_loud(
     error rather than a crash (the old cannot-preflight-without-a-
     resolver guard's successor)."""
     _config, registry = _env_only_setup(tmp_path)
-    with pytest.raises(
-        ConfigError, match="without config on the context"
-    ) as exc:
+    with pytest.raises(ConfigError, match="without config on the context") as exc:
         require_predicted_refs("vm-site/px", (_px_ref(),), None, registry)
     assert str(exc.value).startswith("vm-site/px: ")
 
@@ -328,9 +313,7 @@ def test_scoped_reader_serves_declared_names() -> None:
 def test_scoped_reader_refuses_undeclared_names() -> None:
     """A node reads ONLY the secrets it declared: the declare/receive
     contract, enforced at delivery."""
-    reader = ScopedSecrets(
-        {"git-token-gh": "tok", "proxmox-token": "other"}, ("git-token-gh",)
-    )
+    reader = ScopedSecrets({"git-token-gh": "tok", "proxmox-token": "other"}, ("git-token-gh",))
     with pytest.raises(StateError, match="not declared"):
         reader.get("proxmox-token")
 

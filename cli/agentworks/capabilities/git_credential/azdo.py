@@ -33,9 +33,7 @@ class AzDOCredentialProvider(GitCredentialProvider):
     description = "Azure DevOps personal access token"
 
     @classmethod
-    def validate_config(
-        cls, owner: str, config: Mapping[str, object]
-    ) -> tuple[ConfigReference, ...]:
+    def validate_config(cls, owner: str, config: Mapping[str, object]) -> tuple[ConfigReference, ...]:
         org = config.get("org")
         if not isinstance(org, str) or not _ORG_RE.match(org):
             raise ConfigError(
@@ -46,9 +44,7 @@ class AzDOCredentialProvider(GitCredentialProvider):
             )
         unknown = sorted(set(config) - {"org", "token"})
         if unknown:
-            raise ConfigError(
-                f"{owner}: unknown azdo provider field(s): {', '.join(unknown)}"
-            )
+            raise ConfigError(f"{owner}: unknown azdo provider field(s): {', '.join(unknown)}")
         return (token_config_reference(owner, config),)
 
     def __init__(
@@ -95,9 +91,7 @@ class AzDOCredentialProvider(GitCredentialProvider):
     def helper_entry(self) -> HelperEntry:
         # The org doubles as the owner scope: AzDO remote paths start
         # with the org segment, so multiple orgs route naturally.
-        return HelperEntry(
-            host="dev.azure.com", username=self._org, owner=self._org
-        )
+        return HelperEntry(host="dev.azure.com", username=self._org, owner=self._org)
 
     def review_remote(self, url: str) -> list[str]:
         from urllib.parse import urlsplit

@@ -65,9 +65,7 @@ class AdminConfig(DeclaredResource):
         )
 
         source = ("admin-template", self.name)
-        refs: list[ResourceReference] = list(
-            env_references(self.env, source)
-        )
+        refs: list[ResourceReference] = list(env_references(self.env, source))
         refs.extend(credential_references(self.git_credentials, source))
         # Install-command references for user_install_commands.
         for cmd in self.user_install_commands:

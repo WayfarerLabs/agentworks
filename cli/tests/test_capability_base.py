@@ -31,14 +31,10 @@ class _SecretCap(Capability):
     owner_kind: ClassVar[str] = "thing"
 
     @classmethod
-    def validate_config(
-        cls, owner: str, config: Mapping[str, object]
-    ) -> tuple[ConfigReference, ...]:
+    def validate_config(cls, owner: str, config: Mapping[str, object]) -> tuple[ConfigReference, ...]:
         from agentworks.resources.reference import ConfigReference
 
-        return (
-            ConfigReference(name="the-token", kind="secret", usage="the API token"),
-        )
+        return (ConfigReference(name="the-token", kind="secret", usage="the API token"),)
 
 
 def test_construct_revalidates_config() -> None:

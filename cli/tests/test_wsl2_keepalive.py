@@ -72,7 +72,7 @@ def test_vm_active_spawns_keepalive_subprocess() -> None:
     with (
         patch("agentworks.capabilities.vm_platform.wsl2.subprocess.Popen", return_value=proc) as popen,
         _job_object_mocks(),
-        WSL2Platform("wsl2", {}).vm_active(_fake_vm("mydistro"))
+        WSL2Platform("wsl2", {}).vm_active(_fake_vm("mydistro")),
     ):
         popen.assert_called_once()
         args = popen.call_args[0][0]
@@ -97,7 +97,7 @@ def test_vm_active_terminates_on_exception() -> None:
         patch("agentworks.capabilities.vm_platform.wsl2.subprocess.Popen", return_value=proc),
         _job_object_mocks(),
         pytest.raises(RuntimeError, match="boom"),
-        WSL2Platform("wsl2", {}).vm_active(_fake_vm())
+        WSL2Platform("wsl2", {}).vm_active(_fake_vm()),
     ):
         raise RuntimeError("boom")
     proc.terminate.assert_called_once()
@@ -119,7 +119,7 @@ def test_vm_active_kills_if_terminate_doesnt_take() -> None:
     with (
         patch("agentworks.capabilities.vm_platform.wsl2.subprocess.Popen", return_value=proc),
         _job_object_mocks(),
-        WSL2Platform("wsl2", {}).vm_active(_fake_vm())
+        WSL2Platform("wsl2", {}).vm_active(_fake_vm()),
     ):
         pass
     proc.terminate.assert_called_once()
@@ -248,7 +248,7 @@ def test_vm_active_assigns_subprocess_to_kill_on_close_job() -> None:
     with (
         patch("agentworks.capabilities.vm_platform.wsl2.subprocess.Popen", return_value=proc),
         _job_object_mocks(create_returns=0xBEEF) as (create, assign, close),
-        WSL2Platform("wsl2", {}).vm_active(_fake_vm())
+        WSL2Platform("wsl2", {}).vm_active(_fake_vm()),
     ):
         pass
     create.assert_called_once_with()
@@ -285,7 +285,7 @@ def test_vm_active_falls_back_when_job_object_unavailable() -> None:
     with (
         patch("agentworks.capabilities.vm_platform.wsl2.subprocess.Popen", return_value=proc),
         _job_object_mocks(create_returns=None) as (create, assign, close),
-        WSL2Platform("wsl2", {}).vm_active(_fake_vm())
+        WSL2Platform("wsl2", {}).vm_active(_fake_vm()),
     ):
         pass
     create.assert_called_once_with()

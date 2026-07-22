@@ -615,18 +615,13 @@ def test_preserve_ssh_host_keys_emits_same_bytes_as_phase_a() -> None:
     # the canonical content that Phase A writes verbatim. The constant's
     # definition already satisfies this, but locking it as a test keeps
     # the equivalence load-bearing rather than incidental.
-    assert (
-        "".join(f"{line}\n" for line in SSH_PRESERVE_KEYS_LINES)
-        == SSH_PRESERVE_KEYS_CONTENT
-    )
+    assert "".join(f"{line}\n" for line in SSH_PRESERVE_KEYS_LINES) == SSH_PRESERVE_KEYS_CONTENT
 
 
 # -- Apple-vz SVE mask reconcile (Phase B repair of pre-mask VMs) -----------
 
 
-def _make_sve_target(
-    *, gated: bool, cmdline_active: bool = False, update_grub_ok: bool = True
-) -> MagicMock:
+def _make_sve_target(*, gated: bool, cmdline_active: bool = False, update_grub_ok: bool = True) -> MagicMock:
     """``Transport`` mock for ``_apply_sve_mask``.
 
     - ``gated``: the Apple-vz + SVE gate grep succeeds (an unmasked Apple guest).
@@ -711,9 +706,7 @@ def test_apply_sve_mask_warns_and_stops_on_update_grub_failure(
     logger.warning.assert_called_once()
     assert "update-grub failed" in "\n".join(warnings)
     # No /proc/cmdline check after a failed update-grub.
-    assert not any(
-        "/proc/cmdline" in c[0][0] for c in target.run.call_args_list
-    )
+    assert not any("/proc/cmdline" in c[0][0] for c in target.run.call_args_list)
 
 
 def test_apply_sve_mask_non_fatal_on_ssh_error() -> None:
@@ -761,9 +754,7 @@ def test_apply_sve_mask_emits_same_grub_bytes_as_phase_a() -> None:
     assert "printf '%s\\n' " in cmd
     for line in SVE_NOSVE_GRUB_LINES:
         assert shlex.quote(line) in cmd
-    assert (
-        "".join(f"{line}\n" for line in SVE_NOSVE_GRUB_LINES) == SVE_NOSVE_GRUB_CONTENT
-    )
+    assert "".join(f"{line}\n" for line in SVE_NOSVE_GRUB_LINES) == SVE_NOSVE_GRUB_CONTENT
 
 
 # -- install_claude_plugins ------------------------------------------------
@@ -1085,8 +1076,7 @@ def test_vm_initialization_step_and_subresult_roles(captured_output) -> None:  #
     assert (Role.DETAIL, 1, "Added /proc entry to /etc/fstab") in captured_output.lines
     # The step lines are NOT dimmed to DETAIL (the bug this guards against).
     assert not any(
-        role is Role.DETAIL and msg == "Ensuring hidepid=1 on /proc..."
-        for role, _level, msg in captured_output.lines
+        role is Role.DETAIL and msg == "Ensuring hidepid=1 on /proc..." for role, _level, msg in captured_output.lines
     )
 
 
@@ -1225,9 +1215,7 @@ def test_reconcile_authorized_keys_stage_and_install_when_owner_set(tmp_path) ->
     config = _make_keys_config(tmp_path)
     logger = MagicMock()
 
-    _reconcile_authorized_keys(
-        target, config, home="/home/claude", logger=logger, owner="claude"
-    )
+    _reconcile_authorized_keys(target, config, home="/home/claude", logger=logger, owner="claude")
 
     # Expected sequence:
     # 1. install -d to ensure /home/claude/.ssh exists with owner=claude
@@ -1251,10 +1239,7 @@ def test_reconcile_authorized_keys_stage_and_install_when_owner_set(tmp_path) ->
     assert "primary-key" in content
 
     # install -o claude -g claude -m 0600 ... authorized_keys
-    install_calls = [
-        c for c in target.run_log
-        if c.startswith("install ") and "authorized_keys" in c and "0600" in c
-    ]
+    install_calls = [c for c in target.run_log if c.startswith("install ") and "authorized_keys" in c and "0600" in c]
     assert len(install_calls) == 1
     assert "-o claude -g claude" in install_calls[0]
     assert "/home/claude/.ssh/authorized_keys" in install_calls[0]

@@ -102,8 +102,7 @@ class _SecretKind:
         """
         if not references:
             raise NoUnreferencedDefaultError(
-                "the secret kind has no reserved default name; "
-                "synthesize requires at least one reference"
+                "the secret kind has no reserved default name; synthesize requires at least one reference"
             )
         first = references[0]
         return SecretDecl(
@@ -112,9 +111,7 @@ class _SecretKind:
             origin=Origin.auto_declared(source=first.source),
         )
 
-    def instances(
-        self, db: Database, registry: Registry, resource: Any
-    ) -> Iterable[InstanceRef]:
+    def instances(self, db: Database, registry: Registry, resource: Any) -> Iterable[InstanceRef]:
         """Sessions whose subgraph (per current config) reaches this
         secret. For each session row, we project its identity through
         the framework's reference walk: the session's session_template,
@@ -139,14 +136,10 @@ class _SecretKind:
         for session in db.list_sessions():
             reachable = self._secrets_reachable_from_session(db, registry, session)
             if target_name in reachable:
-                yield InstanceRef(
-                    instance_kind="session", instance_name=session.name
-                )
+                yield InstanceRef(instance_kind="session", instance_name=session.name)
 
     @staticmethod
-    def _secrets_reachable_from_session(
-        db: Database, registry: Registry, session: SessionRow
-    ) -> set[str]:
+    def _secrets_reachable_from_session(db: Database, registry: Registry, session: SessionRow) -> set[str]:
         """Build the set of secret names a session's shell would see in
         its env per current config. Roots follow the env-and-secrets
         layering: a session's shell sees ``vm + workspace + (admin |
@@ -174,9 +167,7 @@ class _SecretKind:
         vm: VMRow | None = None
         workspace = db.get_workspace(session.workspace_name)
         if workspace is not None:
-            roots.append(
-                ("workspace-template", workspace.template or "default")
-            )
+            roots.append(("workspace-template", workspace.template or "default"))
             vm = db.get_vm(workspace.vm_name)
             if vm is not None:
                 roots.append(("vm-template", vm.template or "default"))
@@ -185,9 +176,7 @@ class _SecretKind:
         # reserved ``default``); a session whose VM row is missing falls
         # back to ``default``.
         if session.mode == "admin":
-            roots.append(
-                ("admin-template", (vm.admin_template if vm else None) or "default")
-            )
+            roots.append(("admin-template", (vm.admin_template if vm else None) or "default"))
         elif session.mode == "agent" and session.agent_name is not None:
             agent = db.get_agent(session.agent_name)
             if agent is not None:
@@ -220,8 +209,7 @@ class _SecretBackendKind:
 
     def synthesize(self, references: Sequence[ResourceReference]) -> SecretBackendEntry:
         raise NoUnreferencedDefaultError(
-            "the secret-backend kind has miss_policy='error'; synthesize "
-            "should never be dispatched"
+            "the secret-backend kind has miss_policy='error'; synthesize should never be dispatched"
         )
 
 

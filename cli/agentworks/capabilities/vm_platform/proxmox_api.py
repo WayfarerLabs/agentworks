@@ -84,9 +84,7 @@ class ProxmoxAPI:
                 resp_body = resp.read().decode()
         except urllib.error.HTTPError as e:
             err_body = e.read().decode() if e.fp else ""
-            err = ProxmoxAPIError(
-                f"Proxmox API {method} {path} failed ({e.code}): {err_body}"
-            )
+            err = ProxmoxAPIError(f"Proxmox API {method} {path} failed ({e.code}): {err_body}")
             err.code = e.code
             raise err from e
 
@@ -130,18 +128,14 @@ class ProxmoxAPI:
             params["storage"] = storage
         if pool:
             params["pool"] = pool
-        result = self._request(
-            "POST", f"/nodes/{node}/qemu/{template_vmid}/clone", params
-        )
+        result = self._request("POST", f"/nodes/{node}/qemu/{template_vmid}/clone", params)
         return str(result)
 
     def configure_vm(self, node: str, vmid: int, **params: Any) -> None:
         """Update VM configuration."""
         self._request("PUT", f"/nodes/{node}/qemu/{vmid}/config", params)
 
-    def resize_disk(
-        self, node: str, vmid: int, disk: str, size: str
-    ) -> None:
+    def resize_disk(self, node: str, vmid: int, disk: str, size: str) -> None:
         """Resize a VM disk (e.g. disk='scsi0', size='+20G')."""
         self._request(
             "PUT",
@@ -151,30 +145,22 @@ class ProxmoxAPI:
 
     def start_vm(self, node: str, vmid: int) -> str:
         """Start a VM. Returns the task UPID."""
-        result = self._request(
-            "POST", f"/nodes/{node}/qemu/{vmid}/status/start"
-        )
+        result = self._request("POST", f"/nodes/{node}/qemu/{vmid}/status/start")
         return str(result)
 
     def stop_vm(self, node: str, vmid: int) -> str:
         """Stop a VM. Returns the task UPID."""
-        result = self._request(
-            "POST", f"/nodes/{node}/qemu/{vmid}/status/stop"
-        )
+        result = self._request("POST", f"/nodes/{node}/qemu/{vmid}/status/stop")
         return str(result)
 
     def delete_vm(self, node: str, vmid: int) -> str:
         """Delete a VM. Returns the task UPID."""
-        result = self._request(
-            "DELETE", f"/nodes/{node}/qemu/{vmid}"
-        )
+        result = self._request("DELETE", f"/nodes/{node}/qemu/{vmid}")
         return str(result)
 
     def vm_status(self, node: str, vmid: int) -> dict[str, Any]:
         """Get current VM status."""
-        result = self._request(
-            "GET", f"/nodes/{node}/qemu/{vmid}/status/current"
-        )
+        result = self._request("GET", f"/nodes/{node}/qemu/{vmid}/status/current")
         return result  # type: ignore[no-any-return]
 
     # -- Tasks -----------------------------------------------------------------
@@ -191,27 +177,19 @@ class ProxmoxAPI:
         encoded_upid = urllib.parse.quote(upid, safe="")
         deadline = time.monotonic() + timeout
         while time.monotonic() < deadline:
-            result = self._request(
-                "GET", f"/nodes/{node}/tasks/{encoded_upid}/status"
-            )
+            result = self._request("GET", f"/nodes/{node}/tasks/{encoded_upid}/status")
             if result and result.get("status") == "stopped":
                 if result.get("exitstatus") != "OK":
-                    raise ProxmoxAPIError(
-                        f"Task failed: {result.get('exitstatus')}"
-                    )
+                    raise ProxmoxAPIError(f"Task failed: {result.get('exitstatus')}")
                 return
             time.sleep(poll_interval)
         raise ProxmoxAPIError(f"Task timed out after {timeout}s: {upid}")
 
     # -- Guest agent -----------------------------------------------------------
 
-    def guest_agent_network(
-        self, node: str, vmid: int
-    ) -> list[dict[str, Any]]:
+    def guest_agent_network(self, node: str, vmid: int) -> list[dict[str, Any]]:
         """Get network interfaces from the QEMU guest agent."""
-        result = self._request(
-            "GET", f"/nodes/{node}/qemu/{vmid}/agent/network-get-interfaces"
-        )
+        result = self._request("GET", f"/nodes/{node}/qemu/{vmid}/agent/network-get-interfaces")
         if result and "result" in result:
             data = result["result"]
             if isinstance(data, list):
@@ -261,9 +239,7 @@ class ProxmoxAPI:
 
         return None
 
-    def guest_agent_file_write(
-        self, node: str, vmid: int, path: str, content: str
-    ) -> None:
+    def guest_agent_file_write(self, node: str, vmid: int, path: str, content: str) -> None:
         """Write a file inside the VM via the guest agent.
 
         Sends raw content and lets Proxmox handle base64 encoding

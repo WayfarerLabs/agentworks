@@ -215,8 +215,7 @@ def synthesize_no_default(kind: str, references: Sequence[ResourceReference]) ->
     """
     if not references:
         raise NoUnreferencedDefaultError(
-            f"the {kind} kind has no reserved default name; "
-            f"synthesize is never invoked under the error miss policy"
+            f"the {kind} kind has no reserved default name; synthesize is never invoked under the error miss policy"
         )
     raise NoUnreferencedDefaultError(
         f"the {kind} kind has miss_policy='error'; synthesize should "

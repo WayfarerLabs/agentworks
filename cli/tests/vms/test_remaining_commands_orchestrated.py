@@ -41,9 +41,7 @@ def _reachable(monkeypatch: pytest.MonkeyPatch, value: bool) -> None:
     monkeypatch.setattr(vm_manager, "_is_tailscale_reachable", lambda host: value)
 
 
-def _fake_status(
-    monkeypatch: pytest.MonkeyPatch, status: VMStatus
-) -> list[str]:
+def _fake_status(monkeypatch: pytest.MonkeyPatch, status: VMStatus) -> list[str]:
     """Fake the platform's backend status read (recording the op order);
     ``start`` records too, so never-gates pins can assert its absence."""
     events: list[str] = []
@@ -52,12 +50,8 @@ def _fake_status(
         "status",
         lambda self, row, ctx: events.append("status") or status,
     )
-    monkeypatch.setattr(
-        ProxmoxPlatform, "start", lambda self, row, ctx: events.append("start")
-    )
-    monkeypatch.setattr(
-        vm_manager, "_ensure_tailscale", lambda *a, **k: events.append("tailscale")
-    )
+    monkeypatch.setattr(ProxmoxPlatform, "start", lambda self, row, ctx: events.append("start"))
+    monkeypatch.setattr(vm_manager, "_ensure_tailscale", lambda *a, **k: events.append("tailscale"))
     return events
 
 
@@ -68,12 +62,8 @@ def _fake_status(
 def _quiet_backend_reads(monkeypatch: pytest.MonkeyPatch) -> None:
     """Stub describe's non-status backend reads (the display name is a
     backend API render; the live-resource query SSHes to the VM)."""
-    monkeypatch.setattr(
-        ProxmoxPlatform, "display_backend_name", lambda self, row: "vmid 100"
-    )
-    monkeypatch.setattr(
-        vm_manager, "_query_live_resources", lambda vm, config: None
-    )
+    monkeypatch.setattr(ProxmoxPlatform, "display_backend_name", lambda self, row: "vmid 100")
+    monkeypatch.setattr(vm_manager, "_query_live_resources", lambda vm, config: None)
 
 
 def test_describe_running_vm_is_one_boundary_burst_and_reads_only(
@@ -163,7 +153,9 @@ def _ts_key(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_rekey_graph_roots_the_template_beside_the_live_vm(
-    db: Database, make_config, _ts_key: None  # noqa: ANN001
+    db: Database,
+    make_config,
+    _ts_key: None,  # noqa: ANN001
 ) -> None:
     """The rekey graph: the vm-template node roots FIRST (HEAD's
     template-readiness-before-platform-preflight precedence), the live
@@ -297,12 +289,8 @@ def _fake_rekey_transports(
         "agentworks.transports.transport",
         lambda vm, config, **kwargs: SSHTransport(host="100.64.0.9"),
     )
-    monkeypatch.setattr(
-        "agentworks.transports.wait_for_reconnect", lambda target: True
-    )
-    monkeypatch.setattr(
-        "agentworks.ssh_config.sync_ssh_config", lambda config, db: None
-    )
+    monkeypatch.setattr("agentworks.transports.wait_for_reconnect", lambda target: True)
+    monkeypatch.setattr("agentworks.ssh_config.sync_ssh_config", lambda config, db: None)
     import time
 
     monkeypatch.setattr(time, "sleep", lambda secs: None)
@@ -415,23 +403,14 @@ def test_rekey_wraps_steps_in_a_section(
 
     vm_manager.rekey_vm(db, config, "box")
 
-    assert any(
-        role is Role.HEADER and lvl == 0 and msg == "Rekeying 'box'"
-        for role, lvl, msg in captured_output.lines
-    )
-    body_l1 = [
-        msg for role, lvl, msg in captured_output.lines if role is Role.BODY and lvl == 1
-    ]
+    assert any(role is Role.HEADER and lvl == 0 and msg == "Rekeying 'box'" for role, lvl, msg in captured_output.lines)
+    body_l1 = [msg for role, lvl, msg in captured_output.lines if role is Role.BODY and lvl == 1]
     assert "Joining new tailnet..." in body_l1
     assert "Reading new Tailscale IP..." in body_l1
     # The read-back IP is a subordinate detail of the read step, not a step.
+    assert any(role is Role.DETAIL and msg.startswith("Tailscale IP:") for role, lvl, msg in captured_output.lines)
     assert any(
-        role is Role.DETAIL and msg.startswith("Tailscale IP:")
-        for role, lvl, msg in captured_output.lines
-    )
-    assert any(
-        role is Role.RESULT and lvl == 0 and "rekeyed successfully" in msg
-        for role, lvl, msg in captured_output.lines
+        role is Role.RESULT and lvl == 0 and "rekeyed successfully" in msg for role, lvl, msg in captured_output.lines
     )
 
 
@@ -506,12 +485,8 @@ def test_port_forward_stopped_vm_gates_then_forwards(
         "status",
         lambda self, row, ctx: events.append("status") or VMStatus.STOPPED,
     )
-    monkeypatch.setattr(
-        ProxmoxPlatform, "start", lambda self, row, ctx: events.append("start")
-    )
-    monkeypatch.setattr(
-        vm_manager, "_ensure_tailscale", lambda *a, **k: events.append("tailscale")
-    )
+    monkeypatch.setattr(ProxmoxPlatform, "start", lambda self, row, ctx: events.append("start"))
+    monkeypatch.setattr(vm_manager, "_ensure_tailscale", lambda *a, **k: events.append("tailscale"))
 
     assert vm_manager.port_forward_vm(db, config, "box", ["8080"]) == 0
 
@@ -592,9 +567,7 @@ def backup_env(
     monkeypatch.setattr("agentworks.ssh.LOG_DIR", tmp_path / "logs")
     target = SSHTransport(host="100.64.0.9")
     target.run = lambda *a, **k: SimpleNamespace(stdout="", ok=True)  # type: ignore[method-assign, assignment]
-    monkeypatch.setattr(
-        "agentworks.transports.transport", lambda vm, config, **kwargs: target
-    )
+    monkeypatch.setattr("agentworks.transports.transport", lambda vm, config, **kwargs: target)
     return make_config(f'[paths]\nbackups = "{tmp_path}/backups"\n')
 
 
@@ -644,9 +617,7 @@ def test_backup_stopped_vm_gates_then_backs_up(
         "status",
         lambda self, row, ctx: gate_events.append("status") or VMStatus.STOPPED,
     )
-    monkeypatch.setattr(
-        ProxmoxPlatform, "start", lambda self, row, ctx: gate_events.append("start")
-    )
+    monkeypatch.setattr(ProxmoxPlatform, "start", lambda self, row, ctx: gate_events.append("start"))
     monkeypatch.setattr(
         vm_manager,
         "_ensure_tailscale",
@@ -709,9 +680,7 @@ def test_backup_wraps_phases_in_a_section(
         role is Role.HEADER and lvl == 0 and msg.startswith("Backing up VM 'box'")
         for role, lvl, msg in captured_output.lines
     )
-    body_l1 = [
-        msg for role, lvl, msg in captured_output.lines if role is Role.BODY and lvl == 1
-    ]
+    body_l1 = [msg for role, lvl, msg in captured_output.lines if role is Role.BODY and lvl == 1]
     assert "Reading database (consistent snapshot)..." in body_l1
     assert "Exporting VM metadata..." in body_l1
     assert any(

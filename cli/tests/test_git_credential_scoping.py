@@ -79,9 +79,7 @@ def test_valid_scopes_accepted(blob: dict[str, object]) -> None:
 
 
 def test_token_override_in_provider_config() -> None:
-    refs = GitHubCredentialProvider.validate_config(
-        "git-credential/gh", {"token": "my-secret"}
-    )
+    refs = GitHubCredentialProvider.validate_config("git-credential/gh", {"token": "my-secret"})
     assert [(r.kind, r.name) for r in refs] == [("secret", "my-secret")]
 
 
@@ -129,47 +127,49 @@ def test_repo_scope_selected_by_path(tmp_path: Path) -> None:
     without the .git suffix, with or without a leading slash) picks the
     repo-scoped credential over the owner scope and the fallback."""
     providers = {
-        "widgets-bot": _gh(
-            config_name="widgets-bot", repos=["acme/widgets"]
-        ),
+        "widgets-bot": _gh(config_name="widgets-bot", repos=["acme/widgets"]),
         "acme-bot": _gh(config_name="acme-bot", owner="acme"),
         "gh": _gh(config_name="gh"),
     }
-    m = build_credential_materials(
-        providers, {"widgets-bot": "tokR", "acme-bot": "tokO", "gh": "tokF"}
-    )
+    m = build_credential_materials(providers, {"widgets-bot": "tokR", "acme-bot": "tokO", "gh": "tokF"})
     home = _write_home(tmp_path, m)
     for qpath in ("acme/widgets.git", "acme/widgets", "/acme/widgets.git"):
         out, _err = _run_helper(
-            m.helper_script, home, "get",
+            m.helper_script,
+            home,
+            "get",
             f"protocol=https\nhost=github.com\npath={qpath}\n",
         )
         assert "password=tokR" in out, qpath
     # Owner scope catches everything else under acme, including repos
     # nobody declared anywhere (the ad hoc clone case).
     out, _err = _run_helper(
-        m.helper_script, home, "get",
+        m.helper_script,
+        home,
+        "get",
         "protocol=https\nhost=github.com\npath=acme/undeclared.git\n",
     )
     assert "password=tokO" in out
     # Anything else on the host: the unscoped default.
     out, _err = _run_helper(
-        m.helper_script, home, "get",
+        m.helper_script,
+        home,
+        "get",
         "protocol=https\nhost=github.com\npath=other/repo.git\n",
     )
     assert "password=tokF" in out
     # No path at all (useHttpPath overridden / other tooling): serve
     # the default, but WARN: the operator may have stepped on the
     # setting scoping depends on.
-    out, err = _run_helper(
-        m.helper_script, home, "get", "protocol=https\nhost=github.com\n"
-    )
+    out, err = _run_helper(m.helper_script, home, "get", "protocol=https\nhost=github.com\n")
     assert "password=tokF" in out
     assert "no repository path" in err
     assert "useHttpPath" in err
     # With a path present, no such warning.
     _out, err = _run_helper(
-        m.helper_script, home, "get",
+        m.helper_script,
+        home,
+        "get",
         "protocol=https\nhost=github.com\npath=other/repo.git\n",
     )
     assert err == ""
@@ -177,16 +177,16 @@ def test_repo_scope_selected_by_path(tmp_path: Path) -> None:
 
 def test_multi_repo_list_selects_each(tmp_path: Path) -> None:
     providers = {
-        "wf-bot": _gh(
-            config_name="wf-bot", repos=["acme/widgets", "acme/gadgets"]
-        ),
+        "wf-bot": _gh(config_name="wf-bot", repos=["acme/widgets", "acme/gadgets"]),
         "gh": _gh(config_name="gh"),
     }
     m = build_credential_materials(providers, {"wf-bot": "tokR", "gh": "tokF"})
     home = _write_home(tmp_path, m)
     for repo in ("acme/widgets", "acme/gadgets"):
         out, _err = _run_helper(
-            m.helper_script, home, "get",
+            m.helper_script,
+            home,
+            "get",
             f"protocol=https\nhost=github.com\npath={repo}.git\n",
         )
         assert "password=tokR" in out, repo
@@ -199,7 +199,9 @@ def test_azdo_org_routes_by_first_segment(tmp_path: Path) -> None:
     m = build_credential_materials(providers, {"ado": "tokA"})
     home = _write_home(tmp_path, m)
     out, _err = _run_helper(
-        m.helper_script, home, "get",
+        m.helper_script,
+        home,
+        "get",
         "protocol=https\nhost=dev.azure.com\npath=my-org/proj/_git/repo\n",
     )
     assert "username=my-org" in out
@@ -217,7 +219,9 @@ def test_scoped_only_out_of_scope_serves_nothing(tmp_path: Path) -> None:
     m = build_credential_materials(providers, {"acme-bot": "tokO"})
     home = _write_home(tmp_path, m)
     out, err = _run_helper(
-        m.helper_script, home, "get",
+        m.helper_script,
+        home,
+        "get",
         "protocol=https\nhost=github.com\npath=other/repo.git\n",
     )
     # No scope matches, no unscoped credential: serve nothing (no leak).
@@ -225,11 +229,12 @@ def test_scoped_only_out_of_scope_serves_nothing(tmp_path: Path) -> None:
     assert "no credential is scoped to github.com/other/repo" in err
     # add-git-credential appends an UNSCOPED line; it becomes the fallback.
     (home / ".git-credentials").write_text(
-        (home / ".git-credentials").read_text()
-        + "https://x-access-token:added@github.com\n"
+        (home / ".git-credentials").read_text() + "https://x-access-token:added@github.com\n"
     )
     out, _err = _run_helper(
-        m.helper_script, home, "get",
+        m.helper_script,
+        home,
+        "get",
         "protocol=https\nhost=github.com\npath=other/repo.git\n",
     )
     assert "password=added" in out
@@ -351,9 +356,7 @@ def test_repo_and_owner_scopes_on_same_org_coexist() -> None:
     exact repo beats owner in the helper's selection order (pinned by
     execution in test_repo_scope_selected_by_path)."""
     providers = {
-        "widgets-bot": _gh(
-            config_name="widgets-bot", repos=["acme/widgets"]
-        ),
+        "widgets-bot": _gh(config_name="widgets-bot", repos=["acme/widgets"]),
         "acme-bot": _gh(config_name="acme-bot", owner="acme"),
     }
     build_credential_materials(providers, {"widgets-bot": "x", "acme-bot": "y"})
@@ -362,9 +365,7 @@ def test_repo_and_owner_scopes_on_same_org_coexist() -> None:
 # -- the credential helper ------------------------------------------------------
 
 
-def _run_helper(
-    script: str, home: Path, op: str, query: str
-) -> tuple[str, str]:
+def _run_helper(script: str, home: Path, op: str, query: str) -> tuple[str, str]:
     import os
     import subprocess
 
@@ -402,15 +403,15 @@ def test_helper_get_serves_scoped_and_fallback(tmp_path: Path) -> None:
     m = _scoped_materials()
     home = _write_home(tmp_path, m)
     out, err = _run_helper(
-        m.helper_script, home, "get",
+        m.helper_script,
+        home,
+        "get",
         "protocol=https\nhost=github.com\nusername=acme-bot\n",
     )
     assert "username=acme-bot" in out
     assert "password=tokS" in out
     assert err == ""
-    out, err = _run_helper(
-        m.helper_script, home, "get", "protocol=https\nhost=github.com\n"
-    )
+    out, err = _run_helper(m.helper_script, home, "get", "protocol=https\nhost=github.com\n")
     # Username-less query takes the FIRST line (unscoped fallback).
     assert "username=x-access-token" in out
     assert "password=tokF" in out
@@ -419,9 +420,7 @@ def test_helper_get_serves_scoped_and_fallback(tmp_path: Path) -> None:
 def test_helper_get_ignores_other_hosts(tmp_path: Path) -> None:
     m = _scoped_materials()
     home = _write_home(tmp_path, m)
-    out, err = _run_helper(
-        m.helper_script, home, "get", "protocol=https\nhost=gitlab.com\n"
-    )
+    out, err = _run_helper(m.helper_script, home, "get", "protocol=https\nhost=gitlab.com\n")
     assert out == ""
     assert err == ""
 
@@ -430,7 +429,9 @@ def test_helper_warns_on_foreign_username(tmp_path: Path) -> None:
     m = _scoped_materials()
     home = _write_home(tmp_path, m)
     _out, err = _run_helper(
-        m.helper_script, home, "get",
+        m.helper_script,
+        home,
+        "get",
         "protocol=https\nhost=github.com\nusername=alice\n",
     )
     assert "embeds username 'alice'" in err
@@ -445,7 +446,9 @@ def test_helper_erase_deletes_nothing_and_diagnoses(tmp_path: Path) -> None:
     home = _write_home(tmp_path, m)
     before = (home / ".git-credentials").read_text()
     out, err = _run_helper(
-        m.helper_script, home, "erase",
+        m.helper_script,
+        home,
+        "erase",
         "protocol=https\nhost=github.com\nusername=acme-bot\npassword=tokS\n",
     )
     assert (home / ".git-credentials").read_text() == before
@@ -459,7 +462,9 @@ def test_helper_erase_silent_for_foreign_credentials(tmp_path: Path) -> None:
     m = _scoped_materials()
     home = _write_home(tmp_path, m)
     _out, err = _run_helper(
-        m.helper_script, home, "erase",
+        m.helper_script,
+        home,
+        "erase",
         "protocol=https\nhost=example.com\nusername=alice\npassword=x\n",
     )
     assert err == ""
@@ -472,16 +477,18 @@ def test_helper_without_scopes_serves_but_never_warns(tmp_path: Path) -> None:
     m = build_credential_materials(providers, {"gh": "tokF"})
     home = _write_home(tmp_path, m)
     _out, err = _run_helper(
-        m.helper_script, home, "get",
+        m.helper_script,
+        home,
+        "get",
         "protocol=https\nhost=github.com\nusername=alice\n",
     )
     assert "bypasses" not in err
-    out, _err = _run_helper(
-        m.helper_script, home, "get", "protocol=https\nhost=github.com\n"
-    )
+    out, _err = _run_helper(m.helper_script, home, "get", "protocol=https\nhost=github.com\n")
     assert "password=tokF" in out
     _out, err = _run_helper(
-        m.helper_script, home, "erase",
+        m.helper_script,
+        home,
+        "erase",
         "protocol=https\nhost=github.com\nusername=x-access-token\n",
     )
     assert "rejected git credential 'gh'" in err
@@ -500,11 +507,7 @@ def test_initializer_writes_all_three_files() -> None:
     target = MagicMock()
     writes: list[tuple[str, str, str]] = []
     runs: list[str] = []
-    target.write_file.side_effect = (
-        lambda path, content, mode="600", **kw: writes.append(
-            (path, content, mode)
-        )
-    )
+    target.write_file.side_effect = lambda path, content, mode="600", **kw: writes.append((path, content, mode))
     target.run.side_effect = lambda cmd, **kw: runs.append(cmd)
 
     providers = {
@@ -535,9 +538,7 @@ def test_initializer_writes_all_three_files() -> None:
     assert helper.startswith("#!/bin/sh")
     assert helper_mode == "700"
     (cmd,) = runs
-    assert (
-        "--replace-all credential.helper '!~/.agentworks-git-cred-helper.sh'" in cmd
-    )
+    assert "--replace-all credential.helper '!~/.agentworks-git-cred-helper.sh'" in cmd
     assert "credential.helper store" not in cmd
     assert "grep -qxF '~/.agentworks-git-scopes.gitconfig'" in cmd
     assert "--add include.path '~/.agentworks-git-scopes.gitconfig'" in cmd
@@ -579,10 +580,7 @@ def test_toml_github_scope_keys_warn_and_unscope(tmp_path: Path) -> None:
         """)
     )
     config = load_config(cfg, warn_issues=False)
-    assert any(
-        "manifest-only" in issue and "IGNORED" in issue
-        for issue in config.config_issues
-    )
+    assert any("manifest-only" in issue and "IGNORED" in issue for issue in config.config_issues)
     assert config.git_credentials["gh"].provider_config == {}
 
 
@@ -631,9 +629,7 @@ def test_announce_git_credentials_reinforces_names(
     vm-template context lines."""
     from agentworks.vms.initializer import announce_git_credentials
 
-    announce_git_credentials(
-        {"github": _gh("github", owner="acme"), "azdo_ifc": _azdo("azdo_ifc", "org")}
-    )
+    announce_git_credentials({"github": _gh("github", owner="acme"), "azdo_ifc": _azdo("azdo_ifc", "org")})
     assert "Checking git-credential/github..." in captured_output.info
     assert "Checking git-credential/azdo_ifc..." in captured_output.info
     # Not the old friendly-label / display-name form.
@@ -767,7 +763,9 @@ def test_hostile_secret_name_cannot_inject(tmp_path: Path) -> None:
     m = build_credential_materials(providers, {"gh": "tok"})
     home = _write_home(tmp_path, m)
     _out, err = _run_helper(
-        m.helper_script, home, "erase",
+        m.helper_script,
+        home,
+        "erase",
         "protocol=https\nhost=github.com\nusername=x-access-token\n",
     )
     assert not (tmp_path / "pwned").exists()
@@ -785,9 +783,7 @@ def test_unsafe_scope_values_rejected_at_build() -> None:
             return HelperEntry(host="github.com", username="a b")
 
     with pytest.raises(ConfigError, match="unsafe"):
-        build_credential_materials(
-            {"s": _Sneaky("s", {})}, {"s": "t"}
-        )
+        build_credential_materials({"s": _Sneaky("s", {})}, {"s": "t"})
 
 
 def test_azdo_org_charset_validated() -> None:
@@ -808,7 +804,9 @@ def test_two_unscoped_creds_first_wins(tmp_path: Path) -> None:
     m = build_credential_materials(providers, {"gh1": "tok1", "gh2": "tok2"})
     home = _write_home(tmp_path, m)
     out, _err = _run_helper(
-        m.helper_script, home, "get",
+        m.helper_script,
+        home,
+        "get",
         "protocol=https\nhost=github.com\npath=any/repo.git\n",
     )
     assert "password=tok1" in out

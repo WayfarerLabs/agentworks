@@ -37,26 +37,17 @@ def resource_list(
     kind: str | None = typer.Option(
         None,
         "--kind",
-        help=(
-            "Filter to one or more kinds (CSV: --kind secret,vm-template). "
-            "Default: all kinds in the registry."
-        ),
+        help=("Filter to one or more kinds (CSV: --kind secret,vm-template). Default: all kinds in the registry."),
     ),
     origin_filter: str | None = typer.Option(
         None,
         "--origin",
-        help=(
-            "Filter by origin variant: operator, auto, or builtin. "
-            "Default: all origins."
-        ),
+        help=("Filter by origin variant: operator, auto, or builtin. Default: all origins."),
     ),
     names_only: bool = typer.Option(
         False,
         "--names-only",
-        help=(
-            "Emit one kind/name per line (no header, no formatting). "
-            "Used by shell completion."
-        ),
+        help=("Emit one kind/name per line (no header, no formatting). Used by shell completion."),
     ),
 ) -> None:
     """List every Resource in the Registry across all kinds.
@@ -126,10 +117,7 @@ def resource_kinds(
     names_only: bool = typer.Option(
         False,
         "--names-only",
-        help=(
-            "Emit one kind name per line (no header, no formatting). "
-            "Used by shell completion."
-        ),
+        help=("Emit one kind name per line (no header, no formatting). Used by shell completion."),
     ),
 ) -> None:
     """List every resource kind the app defines.
@@ -274,10 +262,7 @@ def resource_edit(
                     f"the file directly if the resource lives there."
                 )
             raise
-        output.warn(
-            f"config is currently failing validation ({exc}); opening "
-            f"the declaring manifest anyway"
-        )
+        output.warn(f"config is currently failing validation ({exc}); opening the declaring manifest anyway")
         path, line = found.location.file, found.location.line
     # Per-kind layout files hold many documents; the line tells the
     # operator where to look. (No editor +line heuristics -- keep it
@@ -347,15 +332,10 @@ def resource_migrate(
         bool,
         typer.Option(
             "--full",
-            help=(
-                "With --dry-run: include the full YAML documents and the "
-                "config.toml diff in the output."
-            ),
+            help=("With --dry-run: include the full YAML documents and the config.toml diff in the output."),
         ),
     ] = False,
-    yes: Annotated[
-        bool, typer.Option("--yes", help="Skip the confirmation prompt.")
-    ] = False,
+    yes: Annotated[bool, typer.Option("--yes", help="Skip the confirmation prompt.")] = False,
 ) -> None:
     """Move resources from config.toml to YAML manifests.
 
@@ -426,10 +406,7 @@ def resource_sample(
         str | None,
         typer.Argument(
             click_type=_SAMPLE_KIND_CHOICES,
-            help=(
-                "Kind to print a sample manifest for (e.g. secret, "
-                "vm-template). Required unless --all is passed."
-            ),
+            help=("Kind to print a sample manifest for (e.g. secret, vm-template). Required unless --all is passed."),
         ),
     ] = None,
     all_kinds: Annotated[

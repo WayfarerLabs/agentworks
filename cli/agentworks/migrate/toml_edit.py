@@ -66,25 +66,17 @@ def apply_toml_edits(
         if section in drop_sections:
             del body[index]
             continue
-        if section is None or section not in sections_with_units or not isinstance(
-            item, toml_items.Table
-        ):
+        if section is None or section not in sections_with_units or not isinstance(item, toml_items.Table):
             index += 1
             continue
 
         if section in singleton_sections:
             marker = markers.get((section, "default"))
-            index = _replace_entry(
-                body, index, section, item, mode, [marker] if marker else []
-            )
+            index = _replace_entry(body, index, section, item, mode, [marker] if marker else [])
             continue
 
         selected = {n for s, n in units if s == section}
-        children = [
-            key_name(k)
-            for k, _child in item.value.body
-            if k is not None
-        ]
+        children = [key_name(k) for k, _child in item.value.body if k is not None]
         hit = [n for n in children if n in selected]
         if not hit:
             index += 1
@@ -217,9 +209,7 @@ def _comment_block(rendered: str, markers: list[str]) -> list[BodyEntry]:
     for line in rendered.rstrip("\n").splitlines():
         lines.append(f"# {line}" if line.strip() else "#")
     entries: list[BodyEntry] = [
-        (None, Comment(Trivia(indent="", comment_ws="", comment=line, trail="\n")))
-        for line in lines
+        (None, Comment(Trivia(indent="", comment_ws="", comment=line, trail="\n"))) for line in lines
     ]
     entries.append((None, Whitespace("\n")))
     return entries
-

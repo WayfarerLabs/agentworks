@@ -72,9 +72,7 @@ def remote_advisories(registry: Registry, url: str) -> list[str]:
         provider_cls = GIT_CREDENTIAL_PROVIDER_REGISTRY.get(cred.provider)
         if provider_cls is None:
             continue
-        provider = provider_cls(
-            name, cred.provider_config, description=cred.description
-        )
+        provider = provider_cls(name, cred.provider_config, description=cred.description)
         for msg in provider.review_remote(url):
             if msg not in seen:
                 seen.add(msg)
@@ -126,17 +124,12 @@ def runup_and_filter(
         output.detail(f"Performing runup test for git-credential/{provider.owner_name}...")
 
     def on_reject(provider: GitCredentialProvider, exc: TokenRejectedError) -> None:
-        msg = (
-            f"git credential '{provider.owner_name}' rejected; skipping it "
-            f"(fix the token and reinit): {exc}"
-        )
+        msg = f"git credential '{provider.owner_name}' rejected; skipping it (fix the token and reinit): {exc}"
         output.warn(msg)
         if logger is not None:
             logger.warning(msg)
 
-    passed = runup_skip_and_degrade(
-        providers.values(), ctx, announce=announce, on_reject=on_reject
-    )
+    passed = runup_skip_and_degrade(providers.values(), ctx, announce=announce, on_reject=on_reject)
     return {provider.owner_name: provider for provider in passed}
 
 
@@ -179,7 +172,6 @@ GIT_CRED_HELPER_PATH = "~/.agentworks-git-cred-helper.sh"
 # credential remains (removing ALL credentials leaves both files stale,
 # a pre-existing gap shared with the store itself).
 GIT_SCOPES_INCLUDE_PATH = "~/.agentworks-git-scopes.gitconfig"
-
 
 
 def build_credential_materials(
@@ -280,8 +272,7 @@ _SH_SAFE_RE = re.compile(r"^[A-Za-z0-9._/-]+$")
 def _assert_sh_safe(what: str, value: str) -> None:
     if not _SH_SAFE_RE.match(value):
         raise ConfigError(
-            f"git credential {what} {value!r} contains characters unsafe "
-            f"for the generated credential helper"
+            f"git credential {what} {value!r} contains characters unsafe for the generated credential helper"
         )
 
 
@@ -300,20 +291,12 @@ def _selection_block(records: list[_CredRecord]) -> str:
     out: list[str] = []
     for host, host_entries in sorted(by_host.items()):
         out.append(f"    {host})")
-        repo_lines = [
-            f'        {"|".join(e.repos)}) echo {e.username}; return ;;'
-            for e in host_entries
-            if e.repos
-        ]
+        repo_lines = [f"        {'|'.join(e.repos)}) echo {e.username}; return ;;" for e in host_entries if e.repos]
         if repo_lines:
             out.append('        case "$1" in')
             out.extend(repo_lines)
             out.append("        esac")
-        owner_lines = [
-            f"        {e.owner}) echo {e.username}; return ;;"
-            for e in host_entries
-            if e.owner
-        ]
+        owner_lines = [f"        {e.owner}) echo {e.username}; return ;;" for e in host_entries if e.owner]
         if owner_lines:
             out.append('        case "${1%%/*}" in')
             out.extend(owner_lines)
@@ -351,15 +334,11 @@ def _helper_script(records: list[_CredRecord]) -> str:
     deliberately out of scope.
     """
     known = " ".join(sorted({r.entry.username for r in records}))
-    scoped_hosts = "|".join(
-        sorted({r.entry.host for r in records if r.entry.repos or r.entry.owner})
-    )
+    scoped_hosts = "|".join(sorted({r.entry.host for r in records if r.entry.repos or r.entry.owner}))
     # Usernames that own a scope: the fallback ("serve the first line for
     # the host") must skip these so a scoped credential never serves a URL
     # outside its scope.
-    scoped_users = " ".join(
-        sorted({r.entry.username for r in records if r.entry.repos or r.entry.owner})
-    )
+    scoped_users = " ".join(sorted({r.entry.username for r in records if r.entry.repos or r.entry.owner}))
     cases: list[str] = []
     seen: set[str] = set()
     for record in records:
@@ -369,8 +348,7 @@ def _helper_script(records: list[_CredRecord]) -> str:
         seen.add(username)
         cred_q = _sh_squote(f"agentworks: the remote rejected git credential '{record.name}'.")
         secret_q = _sh_squote(
-            f"The token in secret '{record.secret_name}' is likely invalid, "
-            f"expired, or lacks access."
+            f"The token in secret '{record.secret_name}' is likely invalid, expired, or lacks access."
         )
         cases.append(
             f"""        {username})

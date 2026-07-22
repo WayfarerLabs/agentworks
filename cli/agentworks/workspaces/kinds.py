@@ -48,13 +48,9 @@ class _WorkspaceTemplateKind:
         the non-empty-``references`` path is preserved.
         """
         source = references[0].source if references else ALWAYS_MATERIALIZE_SOURCE
-        return WorkspaceTemplate(
-            name="default", origin=Origin.auto_declared(source=source)
-        )
+        return WorkspaceTemplate(name="default", origin=Origin.auto_declared(source=source))
 
-    def instances(
-        self, db: Database, registry: Registry, resource: Any
-    ) -> Iterable[InstanceRef]:
+    def instances(self, db: Database, registry: Registry, resource: Any) -> Iterable[InstanceRef]:
         """Every workspace whose ``template`` column matches this
         WorkspaceTemplate's name -- or whose ``template`` is NULL when
         the resource is the reserved ``default``.

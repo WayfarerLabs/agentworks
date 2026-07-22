@@ -66,9 +66,7 @@ def test_warning_role_prefix_is_yellow_on_a_tty(
     assert _plain(err) == "Warning: careful now\n"
 
 
-def test_error_role_prefix_is_red_on_a_tty(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
-) -> None:
+def test_error_role_prefix_is_red_on_a_tty(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
     _tty(monkeypatch)
     TyperHandler().emit(Role.ERROR, "it broke", 0)
     err = capsys.readouterr().err
@@ -76,13 +74,11 @@ def test_error_role_prefix_is_red_on_a_tty(
     assert _plain(err) == "Error: it broke\n"
 
 
-def test_result_role_is_dim_green_on_a_tty(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
-) -> None:
+def test_result_role_is_dim_green_on_a_tty(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
     _tty(monkeypatch)
     TyperHandler().emit(Role.RESULT, "VM 'box' deleted", 0)
     out = capsys.readouterr().out
-    assert out == f"{click.style('VM \'box\' deleted', fg='green', dim=True)}\n"
+    assert out == f"{click.style("VM 'box' deleted", fg='green', dim=True)}\n"
     assert _plain(out) == "VM 'box' deleted\n"
 
 

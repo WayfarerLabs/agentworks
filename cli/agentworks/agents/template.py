@@ -53,9 +53,7 @@ class AgentTemplate(DeclaredResource):
         )
 
         source = ("agent-template", self.name)
-        refs: list[ResourceReference] = list(
-            env_references(self.env, source)
-        )
+        refs: list[ResourceReference] = list(env_references(self.env, source))
         refs.extend(credential_references(self.git_credentials, source))
         for parent in self.inherits:
             refs.append(

@@ -162,11 +162,7 @@ class Resolver:
 
         # Gate-seeded values are already resolved (by the gate's own
         # backend-chain pass); the boundary loop covers only the rest.
-        missing = [
-            decl
-            for name, decl in self._decls.items()
-            if name not in self._seeded
-        ]
+        missing = [decl for name, decl in self._decls.items() if name not in self._seeded]
         if not missing:
             self._values = dict(self._seeded)
             return

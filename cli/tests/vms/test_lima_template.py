@@ -65,9 +65,7 @@ def test_cap_awk_caps_giant_range_and_preserves_normal() -> None:
     idempotent. Exercised as the real shell/awk, not a Python reimplementation."""
     doc = _render()
     # Pull the awk expression out of the rendered cap script.
-    awk_line = next(
-        line.strip() for line in doc["provision"][0]["script"].splitlines() if "awk -F:" in line
-    )
+    awk_line = next(line.strip() for line in doc["provision"][0]["script"].splitlines() if "awk -F:" in line)
     # Isolate the standalone `awk -F: '...'` program from the surrounding
     # `"$f" >"$f.agw"` file/redirect suffix. Splitting on `>` naively is wrong
     # because the awk program itself contains a `>` comparison (`$3+0>65536`);
@@ -78,25 +76,11 @@ def test_cap_awk_caps_giant_range_and_preserves_normal() -> None:
     assert match is not None, f"could not find awk program in: {awk_line!r}"
     program = match.group(0)
 
-    sample = (
-        "agentworks:100000:65536\n"
-        "agt--wm-cda:165536:65536\n"
-        "scot:524288:1073741824\n"
-        "agt-agw-bp1:427680:65536\n"
-    )
-    expected = (
-        "agentworks:100000:65536\n"
-        "agt--wm-cda:165536:65536\n"
-        "scot:524288:65536\n"
-        "agt-agw-bp1:427680:65536\n"
-    )
+    sample = "agentworks:100000:65536\nagt--wm-cda:165536:65536\nscot:524288:1073741824\nagt-agw-bp1:427680:65536\n"
+    expected = "agentworks:100000:65536\nagt--wm-cda:165536:65536\nscot:524288:65536\nagt-agw-bp1:427680:65536\n"
 
-    first = subprocess.run(
-        program, input=sample, shell=True, capture_output=True, text=True, check=True
-    ).stdout
+    first = subprocess.run(program, input=sample, shell=True, capture_output=True, text=True, check=True).stdout
     assert first == expected
     # Idempotent: a second pass over already-capped content is a no-op.
-    second = subprocess.run(
-        program, input=first, shell=True, capture_output=True, text=True, check=True
-    ).stdout
+    second = subprocess.run(program, input=first, shell=True, capture_output=True, text=True, check=True).stdout
     assert second == expected

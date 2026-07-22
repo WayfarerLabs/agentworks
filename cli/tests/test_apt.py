@@ -81,10 +81,7 @@ def _write_operator_config(tmp_path: Path, *, toml_body: str = "") -> Path:
     pub.write_text("ssh-ed25519 X")
     priv.write_text("-----BEGIN-----")
     cfg = tmp_path / "config.toml"
-    cfg.write_text(
-        f'[operator]\nssh_public_key = "{pub}"\nssh_private_key = "{priv}"\n'
-        + toml_body
-    )
+    cfg.write_text(f'[operator]\nssh_public_key = "{pub}"\nssh_private_key = "{priv}"\n' + toml_body)
     return cfg
 
 
@@ -106,9 +103,7 @@ def test_bad_apt_source_reference_errors_at_build_registry(tmp_path: Path) -> No
         apt_sources = ["nonexistent"]
         """
     )
-    cfg = load_config(
-        _write_operator_config(tmp_path, toml_body=toml_body), warn_issues=False
-    )
+    cfg = load_config(_write_operator_config(tmp_path, toml_body=toml_body), warn_issues=False)
 
     with pytest.raises(ConfigError, match="nonexistent"):
         build_registry(cfg)

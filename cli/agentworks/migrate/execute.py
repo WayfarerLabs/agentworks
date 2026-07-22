@@ -68,9 +68,7 @@ def execute_plan(plan: MigrationPlan, config: Config) -> ExecutionResult:
                 # rollback; the append path records its length first for
                 # the same reason.
                 result.created.append(write.path)
-                write.path.write_text(
-                    "---\n".join(write.documents), encoding="utf-8"
-                )
+                write.path.write_text("---\n".join(write.documents), encoding="utf-8")
 
         _atomic_write(plan.config_path, plan.new_toml_text)
 
@@ -123,9 +121,7 @@ def _append_documents(path: Path, documents: list[str]) -> None:
 
 
 def _atomic_write(path: Path, text: str) -> None:
-    fd, tmp_name = tempfile.mkstemp(
-        dir=path.parent, prefix=f".{path.name}.", suffix=".tmp"
-    )
+    fd, tmp_name = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.", suffix=".tmp")
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as handle:
             handle.write(text)

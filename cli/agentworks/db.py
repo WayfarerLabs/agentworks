@@ -286,10 +286,7 @@ def _migrate_vm_sites(conn: sqlite3.Connection, context: MigrationContext) -> No
         "lima-local",
     }
     host_sites: dict[str, str] = {}  # host -> site
-    for row in conn.execute(
-        "SELECT DISTINCT vm_host_name AS host FROM vms "
-        "WHERE vm_host_name IS NOT NULL"
-    ).fetchall():
+    for row in conn.execute("SELECT DISTINCT vm_host_name AS host FROM vms WHERE vm_host_name IS NOT NULL").fetchall():
         host = row["host"]
         site = f"{host}-host" if host in reserved_site_names else host
         clash = next((h for h, s in host_sites.items() if s == site), None)
@@ -302,12 +299,8 @@ def _migrate_vm_sites(conn: sqlite3.Connection, context: MigrationContext) -> No
             )
         host_sites[host] = site
 
-    conn.execute(
-        "ALTER TABLE vms ADD COLUMN platform_metadata TEXT NOT NULL DEFAULT '{}'"
-    )
-    conn.execute(
-        "ALTER TABLE vms ADD COLUMN operator_stopped INTEGER NOT NULL DEFAULT 0"
-    )
+    conn.execute("ALTER TABLE vms ADD COLUMN platform_metadata TEXT NOT NULL DEFAULT '{}'")
+    conn.execute("ALTER TABLE vms ADD COLUMN operator_stopped INTEGER NOT NULL DEFAULT 0")
     conn.execute("ALTER TABLE vms ADD COLUMN hostname TEXT")
 
     # Backfill platform_metadata (the owning platform's hook) and
@@ -326,10 +319,7 @@ def _migrate_vm_sites(conn: sqlite3.Connection, context: MigrationContext) -> No
     # (the platform keeps the bare name; the site is one CONFIGURATION
     # of it). Remote rows are excluded here: they re-point at their
     # host-named sites below.
-    conn.execute(
-        "UPDATE vms SET platform = 'lima-local' "
-        "WHERE platform = 'lima' AND vm_host_name IS NULL"
-    )
+    conn.execute("UPDATE vms SET platform = 'lima-local' WHERE platform = 'lima' AND vm_host_name IS NULL")
 
     # Remote-Lima rows: the site IS the host. The operator must
     # declare the matching vm-site manifest; until then those VMs are
@@ -338,12 +328,8 @@ def _migrate_vm_sites(conn: sqlite3.Connection, context: MigrationContext) -> No
     # site map was validated pre-DDL above).
     site_hosts: dict[str, tuple[str | None, str]] = {}
     for host, site in host_sites.items():
-        conn.execute(
-            "UPDATE vms SET platform = ? WHERE vm_host_name = ?", (site, host)
-        )
-        host_row = conn.execute(
-            "SELECT ssh_host FROM vm_hosts WHERE name = ?", (host,)
-        ).fetchone()
+        conn.execute("UPDATE vms SET platform = ? WHERE vm_host_name = ?", (site, host))
+        host_row = conn.execute("SELECT ssh_host FROM vm_hosts WHERE name = ?", (host,)).fetchone()
         site_hosts[site] = (host_row["ssh_host"] if host_row else None, host)
 
     # Rebuild vms (the vm_host_name FK blocks DROP COLUMN): drop the
@@ -398,16 +384,10 @@ def _migrate_vm_sites(conn: sqlite3.Connection, context: MigrationContext) -> No
         # Database() open, including from the shell-completion helpers
         # that capture stdout (`agw vm list --names-only`), so stdout
         # must stay clean for machine consumers.
-        output.warn(
-            "remote-Lima VMs now live at host-named sites; declare each "
-            "site or those VMs stay unreachable:"
-        )
+        output.warn("remote-Lima VMs now live at host-named sites; declare each site or those VMs stay unreachable:")
         for site, (ssh_host, host) in sorted(site_hosts.items()):
             if site != host:
-                output.warn(
-                    f"(the host '{host}' shadows a platform name, so its "
-                    f"site is named '{site}')"
-                )
+                output.warn(f"(the host '{host}' shadows a platform name, so its site is named '{site}')")
             output.warn(f"vm-site '{site}': " + site_manifest_hint(site, vm_host=ssh_host))
 
 
@@ -901,10 +881,7 @@ class Database:
                             self._conn.execute(stmt)
                 violations = self._conn.execute("PRAGMA foreign_key_check").fetchall()
                 if violations:
-                    raise sqlite3.IntegrityError(
-                        f"foreign key violations after migration {version}: "
-                        f"{violations}"
-                    )
+                    raise sqlite3.IntegrityError(f"foreign key violations after migration {version}: {violations}")
                 self._conn.execute("INSERT INTO schema_version (version) VALUES (?)", (version,))
                 self._conn.commit()
         finally:
@@ -1023,16 +1000,13 @@ class Database:
         string is a written-but-empty value (e.g. the declined system
         slug), so callers can distinguish never-asked from declined.
         """
-        row = self._conn.execute(
-            "SELECT value FROM settings WHERE key = ?", (key,)
-        ).fetchone()
+        row = self._conn.execute("SELECT value FROM settings WHERE key = ?", (key,)).fetchone()
         return row["value"] if row else None
 
     def set_setting(self, key: str, value: str) -> None:
         """Write (or overwrite) one install-level settings row."""
         self._conn.execute(
-            "INSERT INTO settings (key, value) VALUES (?, ?) "
-            "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+            "INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
             (key, value),
         )
         self._conn.commit()
@@ -1048,8 +1022,7 @@ class Database:
         template: str | None = None,
     ) -> WorkspaceRow:
         self._conn.execute(
-            "INSERT INTO workspaces (name, vm_name, template, workspace_path, linux_group) "
-            "VALUES (?, ?, ?, ?, ?)",
+            "INSERT INTO workspaces (name, vm_name, template, workspace_path, linux_group) VALUES (?, ?, ?, ?, ?)",
             (name, vm_name, template, workspace_path, linux_group),
         )
         self._conn.commit()
@@ -1330,9 +1303,7 @@ class Database:
             params.extend(ws_params)
         vm_inner_clause, vm_params = _eq_or_in("vm_name", vm_name)
         if vm_inner_clause:
-            clauses.append(
-                f"s.workspace_name IN (SELECT name FROM workspaces WHERE {vm_inner_clause})"
-            )
+            clauses.append(f"s.workspace_name IN (SELECT name FROM workspaces WHERE {vm_inner_clause})")
             params.extend(vm_params)
         ag_clause, ag_params = _eq_or_in("s.agent_name", agent_name)
         if ag_clause:
@@ -1367,27 +1338,21 @@ class Database:
         )
         self._conn.commit()
 
-    def update_session_harness_state(
-        self, name: str, harness_state: dict[str, object]
-    ) -> None:
+    def update_session_harness_state(self, name: str, harness_state: dict[str, object]) -> None:
         """Persist the harness's per-session state blob (harness-owned,
         opaque to the core) after the harness op. Usually a no-op on
         restart (the value was minted and stored on create), but a
         session predating the ``harness_state`` column (backfilled to
         ``{}``) mints and stores here on its first restart."""
         self._conn.execute(
-            "UPDATE sessions SET harness_state = ?, "
-            "updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now') "
-            "WHERE name = ?",
+            "UPDATE sessions SET harness_state = ?, updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now') WHERE name = ?",
             (json.dumps(harness_state), name),
         )
         self._conn.commit()
 
     def update_session_socket_path(self, name: str, socket_path: str | None) -> None:
         self._conn.execute(
-            "UPDATE sessions SET socket_path = ?, "
-            "updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now') "
-            "WHERE name = ?",
+            "UPDATE sessions SET socket_path = ?, updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now') WHERE name = ?",
             (socket_path, name),
         )
         self._conn.commit()
@@ -1491,9 +1456,7 @@ class Database:
             clauses.append(
                 "EXISTS (SELECT 1 FROM console_sessions cs2 "
                 "JOIN sessions s ON s.name = cs2.session_name "
-                "WHERE cs2.console_name = c.name AND "
-                + " AND ".join(session_predicates)
-                + ")"
+                "WHERE cs2.console_name = c.name AND " + " AND ".join(session_predicates) + ")"
             )
         if clauses:
             sql += "WHERE " + " AND ".join(clauses) + " "
@@ -1539,9 +1502,7 @@ class Database:
         self._touch_console(console_name)
         self._commit_unless_in_tx()
 
-    def get_console_session(
-        self, console_name: str, session_name: str
-    ) -> ConsoleSessionRow | None:
+    def get_console_session(self, console_name: str, session_name: str) -> ConsoleSessionRow | None:
         row = self._conn.execute(
             "SELECT * FROM console_sessions WHERE console_name = ? AND session_name = ?",
             (console_name, session_name),
@@ -1556,9 +1517,7 @@ class Database:
         ).fetchall()
         return [_to_console_session(r) for r in rows]
 
-    def reorder_console_sessions(
-        self, console_name: str, ordered_session_names: list[str]
-    ) -> None:
+    def reorder_console_sessions(self, console_name: str, ordered_session_names: list[str]) -> None:
         """Rewrite ``console_sessions.position`` to match *ordered_session_names*.
 
         The list must contain every current member exactly once -- this is a
@@ -1589,15 +1548,13 @@ class Database:
             # Phase 1: park every row at -(old_position + 1) so no UNIQUE
             # collision can fire when phase 2 writes the new positions.
             self._conn.execute(
-                "UPDATE console_sessions SET position = -(position + 1) "
-                "WHERE console_name = ?",
+                "UPDATE console_sessions SET position = -(position + 1) WHERE console_name = ?",
                 (console_name,),
             )
             # Phase 2: assign final positions in the desired order.
             for new_pos, name in enumerate(ordered_session_names):
                 self._conn.execute(
-                    "UPDATE console_sessions SET position = ? "
-                    "WHERE console_name = ? AND session_name = ?",
+                    "UPDATE console_sessions SET position = ? WHERE console_name = ? AND session_name = ?",
                     (new_pos, console_name, name),
                 )
             self._touch_console(console_name)
@@ -1624,8 +1581,7 @@ class Database:
         shells: list[ShellEntry],
     ) -> None:
         self._conn.execute(
-            "UPDATE console_sessions SET shells = ? "
-            "WHERE console_name = ? AND session_name = ?",
+            "UPDATE console_sessions SET shells = ? WHERE console_name = ? AND session_name = ?",
             (json.dumps(shells), console_name, session_name),
         )
         self._touch_console(console_name)
@@ -1633,8 +1589,7 @@ class Database:
 
     def _touch_console(self, name: str) -> None:
         self._conn.execute(
-            "UPDATE consoles SET updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now') "
-            "WHERE name = ?",
+            "UPDATE consoles SET updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now') WHERE name = ?",
             (name,),
         )
 
@@ -1804,9 +1759,7 @@ def _parse_harness_state(raw: str, session_name: str) -> dict[str, object]:
         _warn_bad_harness_state(session_name, f"invalid JSON ({exc})")
         return {}
     if not isinstance(decoded, dict):
-        _warn_bad_harness_state(
-            session_name, f"expected a JSON object, got {type(decoded).__name__}"
-        )
+        _warn_bad_harness_state(session_name, f"expected a JSON object, got {type(decoded).__name__}")
         return {}
     return decoded
 
@@ -1814,10 +1767,7 @@ def _parse_harness_state(raw: str, session_name: str) -> dict[str, object]:
 def _warn_bad_harness_state(session_name: str, detail: str) -> None:
     from agentworks import output
 
-    output.warn(
-        f"session '{session_name}': ignoring malformed harness_state "
-        f"({detail}); treating it as empty."
-    )
+    output.warn(f"session '{session_name}': ignoring malformed harness_state ({detail}); treating it as empty.")
 
 
 def _to_vm_event(row: sqlite3.Row) -> VMEventRow:
@@ -1865,8 +1815,7 @@ def _parse_shells(raw: str, console_name: str, session_name: str) -> list[ShellE
         missing = {"cwd", "admin"} - set(entry.keys())
         if extra or missing:
             raise ValueError(
-                f"{where}[{i}]: keys must be exactly cwd, admin "
-                f"(extra={sorted(extra)}, missing={sorted(missing)})"
+                f"{where}[{i}]: keys must be exactly cwd, admin (extra={sorted(extra)}, missing={sorted(missing)})"
             )
         if entry["cwd"] is not None and not isinstance(entry["cwd"], str):
             raise ValueError(f"{where}[{i}].cwd: expected str or null")

@@ -76,9 +76,7 @@ class _TestOnlyBackend:
 
     def batch_get(self, wants: list[tuple[Any, Any]]) -> dict[str, str]:
         self.batch_get_calls.append([s.name for s, _ in wants])
-        return {
-            s.name: f"value-of-{s.name}" for s, m in wants if m is not None
-        }
+        return {s.name: f"value-of-{s.name}" for s, m in wants if m is not None}
 
 
 @pytest.fixture
@@ -128,9 +126,7 @@ def test_secret_backend_is_not_declarable(tmp_path: Path) -> None:
     assert "res.yaml" in str(exc.value)
 
 
-def test_chain_resolves_against_descriptor_rows(
-    tmp_path: Path, test_only_backend: Any
-) -> None:
+def test_chain_resolves_against_descriptor_rows(tmp_path: Path, test_only_backend: Any) -> None:
     """[secret_config].backends names capabilities; the runtime chain
     wraps them with the loop-side orchestration."""
     config = _config(
@@ -146,9 +142,7 @@ def test_chain_resolves_against_descriptor_rows(
     assert [b.interactive for b in backends] == [False, True]
 
 
-def test_structured_mapping_reaches_the_backend(
-    tmp_path: Path, test_only_backend: Any
-) -> None:
+def test_structured_mapping_reaches_the_backend(tmp_path: Path, test_only_backend: Any) -> None:
     """Per-secret store addressing lives in backend_mappings (the
     collapse's answer to the 1Password case): the structured dict rides
     through would_attempt / describe_lookup / batch_get."""
@@ -174,9 +168,7 @@ def test_structured_mapping_reaches_the_backend(
     assert values == {"s1": "value-of-s1"}
 
 
-def test_opt_out_never_reaches_the_capability(
-    tmp_path: Path, test_only_backend: Any
-) -> None:
+def test_opt_out_never_reaches_the_capability(tmp_path: Path, test_only_backend: Any) -> None:
     """The generic `false` opt-out is loop-side orchestration: an
     opted-out secret is excluded before the capability sees the
     batch."""
@@ -189,9 +181,7 @@ def test_opt_out_never_reaches_the_capability(
     )
     registry = build_registry(config)
     (backend,) = active_backends(config, registry)
-    opted_out = SecretDecl(
-        name="s1", description="s1", backend_mappings={"test-only": False}
-    )
+    opted_out = SecretDecl(name="s1", description="s1", backend_mappings={"test-only": False})
     assert not backend.would_attempt(opted_out)
     assert backend.describe_lookup(opted_out) is None
     assert backend.resolve([opted_out]) == {}
@@ -227,10 +217,7 @@ def test_legacy_toml_backend_section_is_warned_noop(tmp_path: Path) -> None:
         backends = ["env-var"]
         """,
     )
-    assert any(
-        "[secret_backends.env-var] is deprecated" in issue
-        for issue in config.deprecation_issues
-    )
+    assert any("[secret_backends.env-var] is deprecated" in issue for issue in config.deprecation_issues)
     registry = build_registry(config)
     row = registry.lookup("secret-backend", "env-var")
     assert row.origin.variant == "built-in"

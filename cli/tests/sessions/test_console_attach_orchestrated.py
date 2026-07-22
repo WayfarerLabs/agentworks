@@ -59,12 +59,8 @@ def _stop_the_vm(monkeypatch: pytest.MonkeyPatch, events: list[str]) -> None:
         "status",
         lambda self, row, ctx: events.append("status") or VMStatus.STOPPED,
     )
-    monkeypatch.setattr(
-        ProxmoxPlatform, "start", lambda self, row, ctx: events.append("start")
-    )
-    monkeypatch.setattr(
-        vm_manager, "_ensure_tailscale", lambda *a, **k: events.append("tailscale")
-    )
+    monkeypatch.setattr(ProxmoxPlatform, "start", lambda self, row, ctx: events.append("start"))
+    monkeypatch.setattr(vm_manager, "_ensure_tailscale", lambda *a, **k: events.append("tailscale"))
 
 
 class _FakeTarget:
@@ -86,9 +82,7 @@ class _FakeTarget:
 @pytest.fixture
 def target(monkeypatch: pytest.MonkeyPatch) -> _FakeTarget:
     fake = _FakeTarget()
-    monkeypatch.setattr(
-        "agentworks.transports.transport", lambda vm, config, **kwargs: fake
-    )
+    monkeypatch.setattr("agentworks.transports.transport", lambda vm, config, **kwargs: fake)
     return fake
 
 
@@ -96,7 +90,8 @@ def target(monkeypatch: pytest.MonkeyPatch) -> _FakeTarget:
 
 
 def test_attach_graph_is_the_live_vm_alone(
-    db: Database, make_config  # noqa: ANN001
+    db: Database,
+    make_config,  # noqa: ANN001
 ) -> None:
     """The lazily-decided console-node ruling: attach provisions
     nothing console-shaped, so no console node exists and the graph is
@@ -348,16 +343,13 @@ def test_restore_session_stopped_vm_drives_the_real_gated_composition(
         "VALUES ('s1', 'ws1', 'default', 'admin', '/tmp/s1.sock')"
     )
     db._conn.execute(
-        "INSERT INTO console_sessions (console_name, session_name, shells, position) "
-        "VALUES ('c1', 's1', '[]', 0)"
+        "INSERT INTO console_sessions (console_name, session_name, shells, position) VALUES ('c1', 's1', '[]', 0)"
     )
     db._conn.commit()
     events: list[str] = []
     _stop_the_vm(monkeypatch, events)
     fake = _FakeRestoreTarget()
-    monkeypatch.setattr(
-        "agentworks.transports.transport", lambda vm, config, **kwargs: fake
-    )
+    monkeypatch.setattr("agentworks.transports.transport", lambda vm, config, **kwargs: fake)
 
     multi_console.restore_session(db, config, console_name="c1", session_name="s1")
 

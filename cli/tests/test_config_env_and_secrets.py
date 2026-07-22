@@ -247,10 +247,9 @@ def test_agentworks_prefix_env_emits_warning(tmp_path: Path) -> None:
         """,
     )
     cfg = load_config(cfg_file, warn_issues=False)
-    assert any(
-        "AGENTWORKS_VM" in issue and "identity variable" in issue
-        for issue in cfg.config_issues
-    ), cfg.config_issues
+    assert any("AGENTWORKS_VM" in issue and "identity variable" in issue for issue in cfg.config_issues), (
+        cfg.config_issues
+    )
 
 
 def test_env_inline_table_unknown_key_rejected(tmp_path: Path) -> None:
@@ -385,9 +384,7 @@ def test_active_backends_stand_up_when_configured(tmp_path: Path) -> None:
     registry = build_registry(cfg)
     backends = active_backends(cfg, registry)
     # Smoke-check the chain: the first attempting backend is env-var.
-    first = next(
-        (b for b in backends if b.would_attempt(cfg.secrets["shared"])), None
-    )
+    first = next((b for b in backends if b.would_attempt(cfg.secrets["shared"])), None)
     assert first is not None
     assert first.name == "env-var"
 
@@ -487,15 +484,17 @@ def test_unknown_backend_kind_in_secret_backends_errors(
 @pytest.mark.parametrize(
     ("scope_extras", "context_label"),
     [
-        ("[vm_templates.default.env]\nAGENTWORKS_VM = \"override\"", "vm_templates.default.env"),
-        ("[admin.env]\nAGENTWORKS_PLATFORM = \"override\"", "admin.env"),
-        ("[agent_templates.claude.env]\nAGENTWORKS_AGENT = \"override\"", "agent_templates.claude.env"),
-        ("[workspace_templates.ws.env]\nAGENTWORKS_WORKSPACE = \"override\"", "workspace_templates.ws.env"),
-        ("[session_templates.shell.env]\nAGENTWORKS_SESSION = \"override\"", "session_templates.shell.env"),
+        ('[vm_templates.default.env]\nAGENTWORKS_VM = "override"', "vm_templates.default.env"),
+        ('[admin.env]\nAGENTWORKS_PLATFORM = "override"', "admin.env"),
+        ('[agent_templates.claude.env]\nAGENTWORKS_AGENT = "override"', "agent_templates.claude.env"),
+        ('[workspace_templates.ws.env]\nAGENTWORKS_WORKSPACE = "override"', "workspace_templates.ws.env"),
+        ('[session_templates.shell.env]\nAGENTWORKS_SESSION = "override"', "session_templates.shell.env"),
     ],
 )
 def test_agentworks_prefix_warning_fires_for_every_scope(
-    tmp_path: Path, scope_extras: str, context_label: str,
+    tmp_path: Path,
+    scope_extras: str,
+    context_label: str,
 ) -> None:
     """The AGENTWORKS_* override warning fires for every scope's env table,
     not just admin.env. Pin this so a future refactor that moves the check
@@ -503,10 +502,9 @@ def test_agentworks_prefix_warning_fires_for_every_scope(
     cfg_file = tmp_path / "config.toml"
     _write_base(cfg_file, extras="\n" + scope_extras + "\n")
     cfg = load_config(cfg_file, warn_issues=False)
-    assert any(
-        context_label in issue and "identity variable" in issue
-        for issue in cfg.config_issues
-    ), cfg.config_issues
+    assert any(context_label in issue and "identity variable" in issue for issue in cfg.config_issues), (
+        cfg.config_issues
+    )
 
 
 def test_plaintext_env_with_newline_warns_at_load(tmp_path: Path) -> None:
@@ -519,10 +517,7 @@ def test_plaintext_env_with_newline_warns_at_load(tmp_path: Path) -> None:
         extras='\n[admin.env]\nMULTILINE = "line1\\nline2"\n',
     )
     cfg = load_config(cfg_file, warn_issues=False)
-    assert any(
-        "MULTILINE" in issue and "newline" in issue
-        for issue in cfg.config_issues
-    ), cfg.config_issues
+    assert any("MULTILINE" in issue and "newline" in issue for issue in cfg.config_issues), cfg.config_issues
 
 
 def test_session_template_inherits_parent_env(tmp_path: Path) -> None:

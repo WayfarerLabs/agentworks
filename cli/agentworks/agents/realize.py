@@ -100,7 +100,11 @@ def realize_agent(
     try:
         try:
             create_agent_on_vm(
-                vm, config, registry, template, linux_user,
+                vm,
+                config,
+                registry,
+                template,
+                linux_user,
                 agent_name=name,
                 git_tokens=git_tokens,
                 logger=ssh_logger,

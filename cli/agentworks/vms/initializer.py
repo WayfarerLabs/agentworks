@@ -96,8 +96,7 @@ def _ensure_agentworks_files_sourced(
         profile_rcs.append(f"{home}/.zprofile")
     for rc in profile_rcs:
         target.run(
-            f"grep -q {AGENTWORKS_PROFILE} {rc} 2>/dev/null || "
-            f"printf '%s\\n' '{profile_source}' >> {rc}",
+            f"grep -q {AGENTWORKS_PROFILE} {rc} 2>/dev/null || printf '%s\\n' '{profile_source}' >> {rc}",
             check=False,
         )
 
@@ -107,8 +106,7 @@ def _ensure_agentworks_files_sourced(
         rc_files.append(f"{home}/.zshrc")
     for rc in rc_files:
         target.run(
-            f"grep -q {AGENTWORKS_RC} {rc} 2>/dev/null || "
-            f"printf '%s\\n' '{rc_source}' >> {rc}",
+            f"grep -q {AGENTWORKS_RC} {rc} 2>/dev/null || printf '%s\\n' '{rc_source}' >> {rc}",
             check=False,
         )
 
@@ -146,9 +144,7 @@ def _write_agentworks_profile(
             unique_paths.append(p)
 
     logger.step("Shell profile")
-    output.info(
-        f"Writing agentworks profile ({output.count(len(unique_paths), 'PATH entry', 'PATH entries')})..."
-    )
+    output.info(f"Writing agentworks profile ({output.count(len(unique_paths), 'PATH entry', 'PATH entries')})...")
 
     try:
         lines = ["# Managed by agentworks -- do not edit"]
@@ -262,10 +258,7 @@ def _write_skel_seeds(
             )
             target.run(f"sudo chmod 644 {path}")
     except SSHError as e:
-        msg = (
-            f"skel seed write failed: {e}. "
-            "Re-run `agw vm reinit` to retry."
-        )
+        msg = f"skel seed write failed: {e}. Re-run `agw vm reinit` to retry."
         logger.warning(msg)
         output.warn(msg)
 
@@ -289,9 +282,7 @@ def _write_agentworks_identity_profile(
     markers is opting in to having that content overwritten.
     """
     logger.step("Identity profile")
-    output.info(
-        f"Writing {AGENTWORKS_IDENTITY_PROFILE_PATH} ({output.count(len(identity_env), 'var')})..."
-    )
+    output.info(f"Writing {AGENTWORKS_IDENTITY_PROFILE_PATH} ({output.count(len(identity_env), 'var')})...")
 
     lines = ["# Managed by agentworks -- do not edit"]
     for key, value in identity_env.items():
@@ -329,15 +320,15 @@ def _write_agentworks_identity_profile(
             q_begin = shlex.quote(f"{marker}-begin")
             q_end = shlex.quote(f"{marker}-end")
             has_begin = target.run(
-                f"sudo grep -qF {q_begin} {q_zprofile}", check=False,
+                f"sudo grep -qF {q_begin} {q_zprofile}",
+                check=False,
             ).ok
             has_end = target.run(
-                f"sudo grep -qF {q_end} {q_zprofile}", check=False,
+                f"sudo grep -qF {q_end} {q_zprofile}",
+                check=False,
             ).ok
             if has_begin and has_end:
-                sed_script = shlex.quote(
-                    f"/^{marker}-begin/,/^{marker}-end/d"
-                )
+                sed_script = shlex.quote(f"/^{marker}-begin/,/^{marker}-end/d")
                 target.run(f"sudo sed -i {sed_script} {q_zprofile}")
             elif has_begin or has_end:
                 output.warn(
@@ -357,10 +348,7 @@ def _write_agentworks_identity_profile(
             f"printf '%s' {q_zsh_block} | sudo tee -a {q_zprofile} > /dev/null",
         )
     except SSHError as e:
-        msg = (
-            f"identity profile write failed: {e}. "
-            "Re-run `agw vm reinit` to retry."
-        )
+        msg = f"identity profile write failed: {e}. Re-run `agw vm reinit` to retry."
         logger.warning(msg)
         output.warn(msg)
 
@@ -423,9 +411,7 @@ def _write_sshd_accept_env(
                 target.run(f"sudo mv {q_bak} {q_path}", check=False)
             else:
                 target.run(f"sudo rm -f {q_path}", check=False)
-            raise SSHError(
-                f"sshd -t rejected the AcceptEnv fragment: {validate.stderr.strip()}"
-            )
+            raise SSHError(f"sshd -t rejected the AcceptEnv fragment: {validate.stderr.strip()}")
 
         # Validation OK: drop the backup (best-effort; orphaned .bak is
         # harmless since `.bak` doesn't match `*.conf` in sshd_config.d).
@@ -434,10 +420,7 @@ def _write_sshd_accept_env(
 
         target.run("sudo systemctl reload ssh", check=False)
     except SSHError as e:
-        msg = (
-            f"sshd AcceptEnv install failed: {e}. "
-            "Re-run `agw vm reinit` to retry."
-        )
+        msg = f"sshd AcceptEnv install failed: {e}. Re-run `agw vm reinit` to retry."
         logger.warning(msg)
         output.warn(msg)
 
@@ -474,10 +457,7 @@ def _install_sudoers_fragment(
         target.run(f"sudo chmod 0440 {q_staging}")
         validate = target.run(f"sudo visudo -cf {q_staging}", check=False)
         if not validate.ok:
-            raise SSHError(
-                f"visudo -cf rejected the {label} fragment: "
-                f"{validate.stderr.strip()}"
-            )
+            raise SSHError(f"visudo -cf rejected the {label} fragment: {validate.stderr.strip()}")
         target.run(f"sudo mv {q_staging} {q_path}")
     finally:
         # Always best-effort-remove the staging path. On the success path
@@ -518,10 +498,7 @@ def _write_sudoers_env_keep(
             label="env_keep",
         )
     except SSHError as e:
-        msg = (
-            f"sudoers env_keep install failed: {e}. "
-            "Re-run `agw vm reinit` to retry."
-        )
+        msg = f"sudoers env_keep install failed: {e}. Re-run `agw vm reinit` to retry."
         logger.warning(msg)
         output.warn(msg)
 
@@ -564,10 +541,7 @@ def _write_sudoers_console_setenv(
             label="console setenv",
         )
     except SSHError as e:
-        msg = (
-            f"sudoers console setenv install failed: {e}. "
-            "Re-run `agw vm reinit` to retry."
-        )
+        msg = f"sudoers console setenv install failed: {e}. Re-run `agw vm reinit` to retry."
         logger.warning(msg)
         output.warn(msg)
 
@@ -866,8 +840,7 @@ def _reconcile_authorized_keys(
         # between admin's write and the atomic install.
         target.write_file(staging, content, mode="0600")
         target.run(
-            f"install -o {quoted_owner} -g {quoted_owner} -m 0600 "
-            f"{shlex.quote(staging)} {home}/.ssh/authorized_keys",
+            f"install -o {quoted_owner} -g {quoted_owner} -m 0600 {shlex.quote(staging)} {home}/.ssh/authorized_keys",
             sudo=True,
         )
     finally:
@@ -956,8 +929,7 @@ def _apply_sve_mask(target: Transport, logger: SSHLogger) -> None:
     printf_args = " ".join(shlex.quote(line) for line in SVE_NOSVE_GRUB_LINES)
     try:
         target.run(
-            f"mkdir -p {shlex.quote(parent)} && printf '%s\\n' {printf_args} "
-            f"> {shlex.quote(SVE_NOSVE_GRUB_PATH)}",
+            f"mkdir -p {shlex.quote(parent)} && printf '%s\\n' {printf_args} > {shlex.quote(SVE_NOSVE_GRUB_PATH)}",
             sudo=True,
         )
         update = target.run("update-grub", sudo=True, check=False)
@@ -1306,8 +1278,7 @@ def resolve_git_credential_providers(
             # git-credential-provider miss policy at build_registry; this
             # guards direct callers that bypass that path.
             raise NotFoundError(
-                f"git credential '{name}' names unknown provider "
-                f"{cred_config.provider!r}",
+                f"git credential '{name}' names unknown provider {cred_config.provider!r}",
                 entity_kind="git-credential-provider",
                 entity_name=cred_config.provider,
             )
@@ -1917,7 +1888,9 @@ def _phase_b_setup(
         # on top of whatever the package shipped. The mirror is idempotent on
         # reinit (strip-and-rewrite via begin/end markers).
         _write_agentworks_identity_profile(
-            ts_target, vm_stable_identity_env(identity_ctx), logger,
+            ts_target,
+            vm_stable_identity_env(identity_ctx),
+            logger,
         )
 
         # /etc/skel seeds. MUST run AFTER apt for the same reason as the
@@ -1978,9 +1951,7 @@ def _phase_b_setup(
                 ensure_agent_socket_dir(ts_target, agent.linux_user)
                 removed = cleanup_stale_sockets(ts_target, agent.linux_user)
                 if removed:
-                    output.detail(
-                        f"Cleaned up {output.count(removed, 'stale socket')} for {agent.linux_user}"
-                    )
+                    output.detail(f"Cleaned up {output.count(removed, 'stale socket')} for {agent.linux_user}")
         except SSHError as e:
             msg = f"agent tmux socket setup failed: {e}"
             logger.warning(msg)
@@ -2057,9 +2028,7 @@ def _phase_b_setup(
 
         # Non-fatal: git credentials (before dotfiles and mise lockfile for private repos)
         if providers:
-            _configure_git_credentials(
-                vm_name, ts_target, providers, logger, git_tokens=git_tokens, config=config
-            )
+            _configure_git_credentials(vm_name, ts_target, providers, logger, git_tokens=git_tokens, config=config)
 
         # Non-fatal: dotfiles (can override mise config, can provide lockfile)
         if admin.dotfiles_source:
@@ -2090,7 +2059,11 @@ def _phase_b_setup(
         prune = admin.mise_prune_on_reinit
         if admin.mise_packages or admin.mise_lockfile:
             _run_mise_install(
-                ts_target, admin_shell, home, admin.mise_allow_unlocked, logger,
+                ts_target,
+                admin_shell,
+                home,
+                admin.mise_allow_unlocked,
+                logger,
                 prune=prune,
             )
         else:
@@ -2098,7 +2071,11 @@ def _phase_b_setup(
                 check = ts_target.run(f"test -f {home}/.config/mise/config.toml", check=False)
                 if check.ok:
                     _run_mise_install(
-                        ts_target, admin_shell, home, admin.mise_allow_unlocked, logger,
+                        ts_target,
+                        admin_shell,
+                        home,
+                        admin.mise_allow_unlocked,
+                        logger,
                         prune=prune,
                     )
             except SSHError:
@@ -2134,7 +2111,10 @@ def _phase_b_setup(
         # step (dotfiles install in particular) overwrote a shell rc file
         # in place. Idempotent grep-or-append.
         _ensure_agentworks_files_sourced(
-            ts_target, home=home, shell=admin_shell, logger=logger,
+            ts_target,
+            home=home,
+            shell=admin_shell,
+            logger=logger,
         )
 
 
@@ -2265,15 +2245,9 @@ def _configure_git_credentials(
     # wholesale every init, so removing scopes from config is
     # idempotent) rather than in ~/.gitconfig itself.
     try:
-        ts_target.write_file(
-            "~/.git-credentials", materials.store_content, mode="600"
-        )
-        ts_target.write_file(
-            GIT_SCOPES_INCLUDE_PATH, materials.gitconfig_content, mode="600"
-        )
-        ts_target.write_file(
-            GIT_CRED_HELPER_PATH, materials.helper_script, mode="700"
-        )
+        ts_target.write_file("~/.git-credentials", materials.store_content, mode="600")
+        ts_target.write_file(GIT_SCOPES_INCLUDE_PATH, materials.gitconfig_content, mode="600")
+        ts_target.write_file(GIT_CRED_HELPER_PATH, materials.helper_script, mode="700")
         # Our helper REPLACES credential-store in the same config slot
         # (single-value replace also migrates released VMs off 'store'
         # on their next reinit; store deletes the provisioned line on
@@ -2283,9 +2257,7 @@ def _configure_git_credentials(
             f"(git config --global --get-all include.path | grep -qxF '{GIT_SCOPES_INCLUDE_PATH}' "
             f"|| git config --global --add include.path '{GIT_SCOPES_INCLUDE_PATH}')",
         )
-        output.detail(
-            f"Git credentials configured for {output.count(len(providers), 'provider')}"
-        )
+        output.detail(f"Git credentials configured for {output.count(len(providers), 'provider')}")
     except SSHError as e:
         msg = f"git credential store setup failed: {e}"
         logger.warning(msg)

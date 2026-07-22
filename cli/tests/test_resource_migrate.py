@@ -91,9 +91,7 @@ test_exec = "my-user"
 """
 
 
-def _write_config(
-    tmp_path: Path, resources: str = MAXIMAL_RESOURCES, *, prefix: str = ""
-) -> Path:
+def _write_config(tmp_path: Path, resources: str = MAXIMAL_RESOURCES, *, prefix: str = "") -> Path:
     """``prefix`` lands before the first table header -- the only place
     a TOP-LEVEL assignment shape (``secrets = {...}``) can live."""
     pub = tmp_path / "id.pub"
@@ -246,9 +244,7 @@ def test_vm_site_description_refused_before_write(tmp_path: Path) -> None:
     loader silently drops it), so it must NOT ride into metadata: the
     pre-rows carry no description and verification would fail after
     writing. It falls into platform_config and refuses pre-write."""
-    resources = MAXIMAL_RESOURCES.replace(
-        'region = "eastus"', 'region = "eastus"\ndescription = "our sub"'
-    )
+    resources = MAXIMAL_RESOURCES.replace('region = "eastus"', 'region = "eastus"\ndescription = "our sub"')
     cfg = _write_config(tmp_path, resources)
     config = load_config(cfg, warn_issues=False)
     registry = build_registry(config)
@@ -260,9 +256,7 @@ def test_vm_site_stray_key_refused_before_write(tmp_path: Path) -> None:
     """A stray key the TOML loader silently drops would fail manifest
     validation after emission; the migrator refuses pre-write in the
     operator's TOML vocabulary instead."""
-    resources = MAXIMAL_RESOURCES.replace(
-        'region = "eastus"', 'region = "eastus"\nstray_key = "x"'
-    )
+    resources = MAXIMAL_RESOURCES.replace('region = "eastus"', 'region = "eastus"\nstray_key = "x"')
     cfg = _write_config(tmp_path, resources)
     config = load_config(cfg, warn_issues=False)
     registry = build_registry(config)
@@ -372,9 +366,7 @@ def test_singletons_emit_default_documents(tmp_path: Path) -> None:
     assert admin["metadata"]["name"] == "default"
     assert admin["spec"]["shell"] == "zsh"
     assert admin["spec"]["env"] == {"EDITOR": "nvim"}
-    (console,) = _loaded_docs(
-        tmp_path / "resources" / "named-console-templates.yaml"
-    )
+    (console,) = _loaded_docs(tmp_path / "resources" / "named-console-templates.yaml")
     assert console["spec"] == {"tmux_layout": "tiled"}
 
 
@@ -716,9 +708,7 @@ def test_backup_holds_the_original(tmp_path: Path) -> None:
     assert result.backup_path.read_text() == original
 
 
-def test_backup_taken_before_any_write(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_backup_taken_before_any_write(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """The backup must exist before the first manifest byte is written:
     force the very first write step to fail and assert the backup is
     already on disk with the original content."""
@@ -806,9 +796,7 @@ def _cli(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, args: list[str]):
     return CliRunner().invoke(app, args)
 
 
-def test_cli_migrate_bare_invocation_errors_with_hint(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_cli_migrate_bare_invocation_errors_with_hint(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     _write_config(tmp_path)
     result = _cli(tmp_path, monkeypatch, ["resource", "migrate", "--yes"])
     assert result.exit_code != 0
@@ -817,23 +805,17 @@ def test_cli_migrate_bare_invocation_errors_with_hint(
     assert "indicate resources to migrate" in str(result.exception)
 
 
-def test_cli_migrate_all_nothing_to_do_exits_zero(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_cli_migrate_all_nothing_to_do_exits_zero(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     _write_config(tmp_path, resources="")
     result = _cli(tmp_path, monkeypatch, ["resource", "migrate", "--all", "--yes"])
     assert result.exit_code == 0, result.stdout
     assert "Nothing to migrate" in result.stdout
 
 
-def test_cli_migrate_dry_run_writes_nothing(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_cli_migrate_dry_run_writes_nothing(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     cfg = _write_config(tmp_path)
     original = cfg.read_text()
-    result = _cli(
-        tmp_path, monkeypatch, ["resource", "migrate", "--all", "--dry-run"]
-    )
+    result = _cli(tmp_path, monkeypatch, ["resource", "migrate", "--all", "--dry-run"])
     assert result.exit_code == 0, result.stdout
     assert "Dry run: nothing was written." in result.stdout
     assert "Pass --full" in result.stdout
@@ -842,9 +824,7 @@ def test_cli_migrate_dry_run_writes_nothing(
     assert not (tmp_path / "resources").exists()
 
 
-def test_cli_migrate_dry_run_full_includes_content(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_cli_migrate_dry_run_full_includes_content(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     _write_config(tmp_path)
     result = _cli(
         tmp_path,
@@ -856,39 +836,27 @@ def test_cli_migrate_dry_run_full_includes_content(
     assert "Config.toml changes" in result.stdout
 
 
-def test_cli_migrate_full_requires_dry_run(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_cli_migrate_full_requires_dry_run(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     _write_config(tmp_path)
-    result = _cli(
-        tmp_path, monkeypatch, ["resource", "migrate", "--all", "--full", "--yes"]
-    )
+    result = _cli(tmp_path, monkeypatch, ["resource", "migrate", "--all", "--full", "--yes"])
     assert result.exit_code != 0
 
 
-def test_cli_migrate_yes_executes_and_verifies(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_cli_migrate_yes_executes_and_verifies(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     _write_config(tmp_path)
-    result = _cli(
-        tmp_path, monkeypatch, ["resource", "migrate", "--all", "--yes"]
-    )
+    result = _cli(tmp_path, monkeypatch, ["resource", "migrate", "--all", "--yes"])
     assert result.exit_code == 0, result.stdout
     assert "verified: registry unchanged" in result.stdout
     assert (tmp_path / "resources" / "secrets.yaml").exists()
 
 
-def test_cli_migrate_explicit_selector_miss_exits_nonzero(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_cli_migrate_explicit_selector_miss_exits_nonzero(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     _write_config(tmp_path, resources="")
     result = _cli(tmp_path, monkeypatch, ["resource", "migrate", "secret", "--yes"])
     assert result.exit_code != 0
 
 
-def test_cli_sample_stdout_and_write(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_cli_sample_stdout_and_write(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     _write_config(tmp_path, resources="")
     result = _cli(tmp_path, monkeypatch, ["resource", "sample", "secret"])
     assert result.exit_code == 0, result.stdout
@@ -903,9 +871,7 @@ def test_cli_sample_stdout_and_write(
     assert (tmp_path / "resources" / "secrets.yaml").exists()
 
 
-def test_verification_mismatch_rolls_back(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_verification_mismatch_rolls_back(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     cfg = _write_config(tmp_path)
     original = cfg.read_text()
     resources = tmp_path / "resources"
@@ -923,9 +889,7 @@ def test_verification_mismatch_rolls_back(
 
     import agentworks.migrate.execute as execute_mod
 
-    monkeypatch.setattr(
-        execute_mod, "first_difference", lambda pre, post: "forced difference"
-    )
+    monkeypatch.setattr(execute_mod, "first_difference", lambda pre, post: "forced difference")
 
     config, plan = _plan(cfg, [], all_resources=True, layout="per-resource")
     # Also append into the existing per-kind file to exercise truncation:

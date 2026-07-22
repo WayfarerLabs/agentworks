@@ -24,9 +24,7 @@ def test_missing_tailscale_fails_before_the_boundary(
     db.insert_vm("bvm", site="lima-local", hostname="bvm")  # no tailscale
 
     def _no_boundary(*args: object, **kwargs: object) -> None:
-        raise AssertionError(
-            "the boundary opened (and possibly prompted) before the guard"
-        )
+        raise AssertionError("the boundary opened (and possibly prompted) before the guard")
 
     monkeypatch.setattr(vm_backup, "gated_vm_boundary", _no_boundary)
 

@@ -45,8 +45,7 @@ class PromptBackend:
         # rather than silently ignore (maintainer ruling: mappings are
         # not yet in use in the wild, so strictness costs nothing).
         raise ConfigError(
-            f"{owner}: backend_mappings for the prompt backend has no "
-            f"meaning; remove it, or use false to opt out"
+            f"{owner}: backend_mappings for the prompt backend has no meaning; remove it, or use false to opt out"
         )
 
     def would_attempt(

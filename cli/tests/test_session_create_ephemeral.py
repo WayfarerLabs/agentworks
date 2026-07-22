@@ -240,9 +240,7 @@ def test_no_vm_anchor_with_zero_vms_raises(tmp_path: Path) -> None:
     db.close()
 
 
-def test_no_vm_anchor_with_single_vm_auto_selects(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_no_vm_anchor_with_single_vm_auto_selects(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """new_workspace + admin + no vm_name with exactly one VM auto-
     selects that VM without prompting (matches workspace/agent prompt
     helpers' single-item shortcut). Non-interactive mode is irrelevant
@@ -363,9 +361,7 @@ def test_agent_template_requires_new_agent(tmp_path: Path) -> None:
     db.close()
 
 
-def test_new_agent_with_explicit_agent_name(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_new_agent_with_explicit_agent_name(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """``--new-agent --agent-name X`` creates a new agent named X (not
     a lookup of existing). Regression for the bogus agent_name/new_agent
     mutex check that briefly existed."""
@@ -399,9 +395,7 @@ def test_new_agent_with_explicit_agent_name(
     db.close()
 
 
-def test_ephemeral_agent_name_defaults_to_session_name(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_ephemeral_agent_name_defaults_to_session_name(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """When ``new_agent=True`` is set without ``agent_name``, the new
     agent's name defaults to the session name. The service layer owns
     this default; the CLI just forwards None when --agent-name wasn't
@@ -530,8 +524,7 @@ def test_eager_resolve_fires_exactly_once_for_new_workspace_and_new_agent(
     def _ws_spy(db: object, config: object, registry: object, **kwargs: object) -> None:
         sequence.append("realize_workspace")
         db._conn.execute(  # type: ignore[attr-defined]
-            "INSERT INTO workspaces (name, vm_name, workspace_path, linux_group) "
-            "VALUES (?, ?, ?, ?)",
+            "INSERT INTO workspaces (name, vm_name, workspace_path, linux_group) VALUES (?, ?, ?, ?)",
             (kwargs["name"], kwargs["vm"].name, "/tmp/ws", f"ws-{kwargs['name']}"),  # type: ignore[attr-defined]
         )
         db._conn.commit()  # type: ignore[attr-defined]
@@ -550,9 +543,7 @@ def test_eager_resolve_fires_exactly_once_for_new_workspace_and_new_agent(
         sequence.append("session_slice")
         raise _Stop
 
-    monkeypatch.setattr(
-        "agentworks.sessions.manager._require_workspace", _stop_at_session_slice
-    )
+    monkeypatch.setattr("agentworks.sessions.manager._require_workspace", _stop_at_session_slice)
 
     config = SimpleNamespace(session=SimpleNamespace(history_limit=50000))
 
@@ -599,8 +590,7 @@ def test_session_create_frames_phases_like_a_plan(
 
     def _ws_spy(db: object, config: object, registry: object, **kwargs: object) -> None:
         db._conn.execute(  # type: ignore[attr-defined]
-            "INSERT INTO workspaces (name, vm_name, workspace_path, linux_group) "
-            "VALUES (?, ?, ?, ?)",
+            "INSERT INTO workspaces (name, vm_name, workspace_path, linux_group) VALUES (?, ?, ?, ?)",
             (kwargs["name"], kwargs["vm"].name, "/tmp/ws", f"ws-{kwargs['name']}"),  # type: ignore[attr-defined]
         )
         db._conn.commit()  # type: ignore[attr-defined]
@@ -663,9 +653,7 @@ def test_session_create_frames_phases_like_a_plan(
     db.close()
 
 
-def test_realize_bodies_take_domain_shaped_kwargs_only(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_realize_bodies_take_domain_shaped_kwargs_only(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Pin the realization-body seam contract: the bodies are
     phase-free domain code and receive domain-shaped kwargs ONLY. Everything power-shaped arrives already
     prepared by the orchestrator: the agent body's ``git_tokens`` are
@@ -688,8 +676,7 @@ def test_realize_bodies_take_domain_shaped_kwargs_only(
     def _ws_spy(db: object, config: object, registry: object, **kwargs: object) -> None:
         seam_kwargs["realize_workspace"] = set(kwargs)
         db._conn.execute(  # type: ignore[attr-defined]
-            "INSERT INTO workspaces (name, vm_name, workspace_path, linux_group) "
-            "VALUES (?, ?, ?, ?)",
+            "INSERT INTO workspaces (name, vm_name, workspace_path, linux_group) VALUES (?, ?, ?, ?)",
             (kwargs["name"], kwargs["vm"].name, "/tmp/ws", f"ws-{kwargs['name']}"),  # type: ignore[attr-defined]
         )
         db._conn.commit()  # type: ignore[attr-defined]
@@ -729,9 +716,7 @@ def test_realize_bodies_take_domain_shaped_kwargs_only(
     db.close()
 
 
-def test_failure_after_ephemeral_create_rolls_back_ephemerals(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_failure_after_ephemeral_create_rolls_back_ephemerals(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """If anything fails after create_workspace / create_agent have run,
     the orchestrator must call delete_agent and delete_workspace to undo
     them. Unused ephemerals must not survive a failed session create."""
@@ -749,8 +734,7 @@ def test_failure_after_ephemeral_create_rolls_back_ephemerals(
 
     def _ws_create(db: object, config: object, registry: object, **kwargs: object) -> None:
         db._conn.execute(  # type: ignore[attr-defined]
-            "INSERT INTO workspaces (name, vm_name, workspace_path, linux_group) "
-            "VALUES (?, ?, ?, ?)",
+            "INSERT INTO workspaces (name, vm_name, workspace_path, linux_group) VALUES (?, ?, ?, ?)",
             (kwargs["name"], kwargs["vm"].name, "/tmp/ws", f"ws-{kwargs['name']}"),  # type: ignore[attr-defined]
         )
         db._conn.commit()  # type: ignore[attr-defined]
@@ -790,9 +774,7 @@ def test_failure_after_ephemeral_create_rolls_back_ephemerals(
     db.close()
 
 
-def test_new_agent_inherits_vm_from_existing_workspace(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_new_agent_inherits_vm_from_existing_workspace(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """``new_agent=True`` against an existing workspace pins the VM via
     the workspace anchor; no ``vm_name`` is required."""
     from agentworks.sessions.manager import create_session
@@ -823,9 +805,7 @@ def test_new_agent_inherits_vm_from_existing_workspace(
     db.close()
 
 
-def test_validation_failure_does_not_trigger_rollback(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_validation_failure_does_not_trigger_rollback(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Cross-VM mismatch fails during validation, BEFORE any create_*
     is called. Rollback must not run."""
     from agentworks.sessions.manager import create_session
@@ -988,9 +968,7 @@ def _stub_for_post_prompt_flow(monkeypatch: pytest.MonkeyPatch) -> list[str]:
     return called
 
 
-def test_workspace_prompt_picks_existing(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_workspace_prompt_picks_existing(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """In interactive mode, the workspace prompt offers existing
     workspaces + ``[Create new]``. Picking an existing one continues
     the flow with that workspace as the anchor."""
@@ -1014,9 +992,7 @@ def test_workspace_prompt_picks_existing(
     db.close()
 
 
-def test_workspace_prompt_picks_create_new(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_workspace_prompt_picks_create_new(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Picking the ``[Create new workspace]`` option (last in the list)
     sets ``new_workspace=True``, so interactive mode is functionally
     equivalent to passing ``--new-workspace`` on the CLI."""
@@ -1057,9 +1033,7 @@ def test_workspace_prompt_picks_create_new(
     db.close()
 
 
-def test_mode_prompt_picks_admin(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_mode_prompt_picks_admin(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """In interactive mode, the mode prompt offers ``admin`` + existing
     agents on the resolved VM + ``[Create new agent]``. Picking
     ``admin`` continues in admin mode."""
@@ -1084,9 +1058,7 @@ def test_mode_prompt_picks_admin(
     db.close()
 
 
-def test_mode_prompt_picks_existing_agent(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_mode_prompt_picks_existing_agent(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Picking an existing agent (option > 0, not [Create new]) sets
     ``agent_name`` to that agent."""
     from agentworks.sessions.manager import create_session
@@ -1110,9 +1082,7 @@ def test_mode_prompt_picks_existing_agent(
     db.close()
 
 
-def test_mode_prompt_picks_create_new(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_mode_prompt_picks_create_new(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Picking the ``[Create new agent]`` option (last in the list)
     sets ``new_agent=True`` AND defaults ``agent_name`` to the session
     name. Regression: a prior shape sat the mode prompt after the
@@ -1160,9 +1130,7 @@ def test_mode_prompt_picks_create_new(
 # ---------------------------------------------------------------------------
 
 
-def test_workspace_prompt_filters_by_vm_flag(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_workspace_prompt_filters_by_vm_flag(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """With ``--vm vm-A`` set, the workspace chooser only shows
     workspaces on vm-A. Workspaces on other VMs are filtered out so the
     operator can't pick one that the cross-check would reject."""
@@ -1205,9 +1173,7 @@ def test_workspace_prompt_filters_by_vm_flag(
     db.close()
 
 
-def test_workspace_prompt_filters_by_existing_agent_vm(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_workspace_prompt_filters_by_existing_agent_vm(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """With ``--agent agt-A`` (on vm-A) set, the workspace chooser
     filters to workspaces on vm-A even when ``--vm`` was not passed.
     The agent's VM is the anchor."""
@@ -1244,9 +1210,7 @@ def test_workspace_prompt_filters_by_existing_agent_vm(
     db.close()
 
 
-def test_mode_prompt_filters_by_resolved_vm_with_info_line(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_mode_prompt_filters_by_resolved_vm_with_info_line(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Mode prompt lists only agents on the resolved VM, and prints the
     'Only showing agents on VM X' info line when other-VM agents are
     being omitted."""
@@ -1314,9 +1278,7 @@ def test_vm_and_existing_agent_mismatch_fails_before_workspace_prompt(
     db.close()
 
 
-def test_mode_prompt_picks_existing_agent_pins_vm_no_vm_prompt(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_mode_prompt_picks_existing_agent_pins_vm_no_vm_prompt(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """``--new-workspace`` + no ``--vm`` + no mode flag: workspace
     doesn't pin a VM, so the mode prompt lists agents across all VMs.
     Picking an existing agent pins the VM via that agent -- the VM
@@ -1368,9 +1330,7 @@ def test_mode_prompt_picks_existing_agent_pins_vm_no_vm_prompt(
     db.close()
 
 
-def test_mode_prompt_picks_admin_then_vm_prompt_fires(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_mode_prompt_picks_admin_then_vm_prompt_fires(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """``--new-workspace`` + no ``--vm`` + no mode flag: if the mode
     prompt picks ``admin``, the VM is still unresolved, so the VM
     prompt MUST fire afterwards."""
@@ -1480,9 +1440,7 @@ def _seed_parity_db(tmp_path: Path) -> Database:
 
 
 @pytest.mark.parametrize("mode", ["admin", "agent"])
-def test_secret_target_pre_create_parity_with_session_secret_target(
-    tmp_path: Path, mode: str
-) -> None:
+def test_secret_target_pre_create_parity_with_session_secret_target(tmp_path: Path, mode: str) -> None:
     """For existing workspace + (existing agent | admin mode), the two
     SecretTarget builders must produce equal targets so
     ``compute_needed_secrets`` is invariant across the two helpers."""
@@ -1536,8 +1494,6 @@ def test_secret_target_pre_create_parity_with_session_secret_target(
     from agentworks.bootstrap import build_registry
 
     registry = build_registry(config)
-    assert compute_needed_secrets([pre], registry) == compute_needed_secrets(
-        [post], registry
-    )
+    assert compute_needed_secrets([pre], registry) == compute_needed_secrets([post], registry)
 
     db.close()

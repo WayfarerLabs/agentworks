@@ -49,7 +49,9 @@ def test_secret_auto_declared_when_required_but_not_published() -> None:
     stub = _PublisherStub(
         reqs=(
             SecretReference(
-                name="api-key", kind="secret", usage="the API key",
+                name="api-key",
+                kind="secret",
+                usage="the API key",
                 source=("admin-template", "default"),
             ),
         ),
@@ -101,7 +103,9 @@ def test_operator_declared_secret_gets_usage_populated() -> None:
     stub_a = _PublisherStub(
         reqs=(
             SecretReference(
-                name="api-key", kind="secret", usage="the API env var",
+                name="api-key",
+                kind="secret",
+                usage="the API env var",
                 source=("admin-template", "default"),
             ),
         ),
@@ -109,7 +113,9 @@ def test_operator_declared_secret_gets_usage_populated() -> None:
     stub_b = _PublisherStub(
         reqs=(
             SecretReference(
-                name="api-key", kind="secret", usage="the agent's API env var",
+                name="api-key",
+                kind="secret",
+                usage="the agent's API env var",
                 source=("agent-template", "claude"),
             ),
         ),
@@ -137,7 +143,9 @@ def test_auto_declared_secret_origin_uses_first_matching_requirement() -> None:
     stub_a = _PublisherStub(
         reqs=(
             SecretReference(
-                name="shared-key", kind="secret", usage="A's use",
+                name="shared-key",
+                kind="secret",
+                usage="A's use",
                 source=("admin-template", "default"),
             ),
         ),
@@ -145,7 +153,9 @@ def test_auto_declared_secret_origin_uses_first_matching_requirement() -> None:
     stub_b = _PublisherStub(
         reqs=(
             SecretReference(
-                name="shared-key", kind="secret", usage="B's use",
+                name="shared-key",
+                kind="secret",
+                usage="B's use",
                 source=("vm-template", "default"),
             ),
         ),
@@ -172,7 +182,9 @@ def test_publish_order_determines_first_matching_origin_source() -> None:
     stub_a = _PublisherStub(
         reqs=(
             SecretReference(
-                name="shared-key", kind="secret", usage="A's use",
+                name="shared-key",
+                kind="secret",
+                usage="A's use",
                 source=("admin-template", "default"),
             ),
         ),
@@ -180,7 +192,9 @@ def test_publish_order_determines_first_matching_origin_source() -> None:
     stub_b = _PublisherStub(
         reqs=(
             SecretReference(
-                name="shared-key", kind="secret", usage="B's use",
+                name="shared-key",
+                kind="secret",
+                usage="B's use",
                 source=("vm-template", "default"),
             ),
         ),
@@ -211,8 +225,10 @@ class _ChainPublisher:
     def referenced_resources(self) -> tuple[SecretReference, ...]:
         return (
             SecretReference(
-                name=self.target_name, kind="secret",
-                usage="downstream", source=("publisher_kind", self.source_name),
+                name=self.target_name,
+                kind="secret",
+                usage="downstream",
+                source=("publisher_kind", self.source_name),
             ),
         )
 
@@ -236,12 +252,14 @@ def test_synthesize_path_walked_for_second_level_requirements() -> None:
     # Two operator-declared publishers both pointing at "shared".
     # finalize auto-declares "shared"; usage should have 2 entries.
     r.add(
-        "publisher_kind", "p1",
+        "publisher_kind",
+        "p1",
         _ChainPublisher(target_name="shared", source_name="p1"),
         _opdecl(),
     )
     r.add(
-        "publisher_kind", "p2",
+        "publisher_kind",
+        "p2",
         _ChainPublisher(target_name="shared", source_name="p2"),
         _opdecl(),
     )

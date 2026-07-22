@@ -41,23 +41,18 @@ if TYPE_CHECKING:
     from agentworks.db import Database
 
 
-def _seed_vm(
-    db: Database, name: str, host: str | None, *, site: str = "proxmox"
-) -> None:
+def _seed_vm(db: Database, name: str, host: str | None, *, site: str = "proxmox") -> None:
     db.insert_vm(name, site=site, hostname=name)
     if host is not None:
         db.update_vm_tailscale(name, host)
     db._conn.execute(
-        "INSERT INTO workspaces (name, vm_name, workspace_path, linux_group) "
-        "VALUES (?, ?, ?, ?)",
+        "INSERT INTO workspaces (name, vm_name, workspace_path, linux_group) VALUES (?, ?, ?, ?)",
         (f"ws-{name}", name, f"/srv/ws-{name}", f"ws-ws-{name}"),
     )
     db._conn.commit()
 
 
-def _seed_session(
-    db: Database, name: str, ws: str, *, agent: str | None = None
-) -> None:
+def _seed_session(db: Database, name: str, ws: str, *, agent: str | None = None) -> None:
     db.insert_session(
         name,
         ws,
@@ -132,7 +127,8 @@ def target(monkeypatch: pytest.MonkeyPatch) -> _FakeTarget:
 
 
 def test_batch_graph_two_vms_share_one_site_node(
-    db: Database, make_config  # noqa: ANN001
+    db: Database,
+    make_config,  # noqa: ANN001
 ) -> None:
     """Two live VM nodes on one site MUST share one ``VMSiteNode``
     object (the walk raises otherwise); the ``site_nodes`` memo is the
@@ -271,9 +267,7 @@ def test_batch_operator_stopped_vm_aborts_before_the_probes(
     _seed_session(db, "s-a", "ws-vm-a")
     db.set_operator_stopped("vm-a", True)
     _reachable(monkeypatch, False)
-    monkeypatch.setattr(
-        ProxmoxPlatform, "status", lambda self, row, ctx: VMStatus.STOPPED
-    )
+    monkeypatch.setattr(ProxmoxPlatform, "status", lambda self, row, ctx: VMStatus.STOPPED)
 
     def _no_transport(*a: object, **k: object) -> object:
         raise AssertionError("SSH probes must not run after a refused gate")
@@ -397,9 +391,7 @@ def test_batch_repair_path_resolves_the_rejoin_key_late(
     _seed_vm(db, "box", "100.64.0.9")
     _seed_session(db, "s1", "ws-box")
     _reachable(monkeypatch, False)
-    monkeypatch.setattr(
-        ProxmoxPlatform, "status", lambda self, row, ctx: VMStatus.STOPPED
-    )
+    monkeypatch.setattr(ProxmoxPlatform, "status", lambda self, row, ctx: VMStatus.STOPPED)
     monkeypatch.setattr(ProxmoxPlatform, "start", lambda self, row, ctx: None)
     keys: list[str] = []
 
@@ -445,9 +437,7 @@ def test_batch_gate_refuses_an_undeclared_outside_union_name(
     _seed_vm(db, "box", "100.64.0.9")
     _seed_session(db, "s1", "ws-box")
     _reachable(monkeypatch, False)
-    monkeypatch.setattr(
-        LiveVMNode, "gate_secret_refs", lambda self: ("rogue-secret",)
-    )
+    monkeypatch.setattr(LiveVMNode, "gate_secret_refs", lambda self: ("rogue-secret",))
 
     def _no_status(self: ProxmoxPlatform, row: object) -> VMStatus:
         raise AssertionError("observe must not run after the refused resolve")
@@ -529,9 +519,7 @@ def test_single_stop_ends_on_a_result_terminal_without_duplication(
     _seed_singular(db)
     _reachable(monkeypatch, True)
     monkeypatch.setattr("time.sleep", lambda _s: None)
-    monkeypatch.setattr(
-        session_manager, "_ensure_pid", lambda session, *, target, db: session
-    )
+    monkeypatch.setattr(session_manager, "_ensure_pid", lambda session, *, target, db: session)
     monkeypatch.setattr(
         session_manager,
         "check_session_status",
@@ -553,11 +541,7 @@ def test_single_stop_ends_on_a_result_terminal_without_duplication(
 
     # The terminal is exactly one RESULT line, not doubled by the helper's
     # per-session body line (announce_stopped=False suppresses it).
-    stopped = [
-        (role, msg)
-        for role, _lvl, msg in captured_output.lines
-        if msg == "Session 's1' stopped"
-    ]
+    stopped = [(role, msg) for role, _lvl, msg in captured_output.lines if msg == "Session 's1' stopped"]
     assert stopped == [(Role.RESULT, "Session 's1' stopped")]
 
 

@@ -52,9 +52,7 @@ def test_lima_start_proceeds_when_stopped(monkeypatch: pytest.MonkeyPatch, captu
     platform = LimaPlatform("lima", {})
     monkeypatch.setattr(LimaPlatform, "status", lambda self, vm, ctx: VMStatus.STOPPED)
     ran: list[str] = []
-    monkeypatch.setattr(
-        LimaPlatform, "_run_lima", lambda self, cmd, **k: ran.append(cmd) or ""
-    )
+    monkeypatch.setattr(LimaPlatform, "_run_lima", lambda self, cmd, **k: ran.append(cmd) or "")
     platform.start(_vm(), RunContext())  # type: ignore[arg-type]
     assert ran and "limactl start" in ran[0]
 

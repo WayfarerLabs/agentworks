@@ -101,9 +101,7 @@ def realize_workspace(
     # "Finished" footer before the rollback section, making the log misleading.
     try:
         try:
-            output.info(
-                f"Creating workspace '{name}' on VM '{vm.name}' (template: {template.name})..."
-            )
+            output.info(f"Creating workspace '{name}' on VM '{vm.name}' (template: {template.name})...")
             workspace_path = create_vm_workspace(vm, config, name, template, logger=ssh_logger)
 
             vscode_path = generate_vscode_workspace(vm, config, name, workspace_path)
@@ -165,15 +163,10 @@ def realize_workspace(
                     raise
                 except Exception as e:
                     failed.append(agent.name)
-                    output.warn(
-                        f"Failed to insert grant for agent '{agent.name}' on workspace "
-                        f"'{name}': {e}"
-                    )
+                    output.warn(f"Failed to insert grant for agent '{agent.name}' on workspace '{name}': {e}")
                     continue
                 try:
-                    add_to_workspace_group(
-                        vm, config, db, agent.linux_user, name, logger=ssh_logger
-                    )
+                    add_to_workspace_group(vm, config, db, agent.linux_user, name, logger=ssh_logger)
                     added += 1
                 except KeyboardInterrupt:
                     # KI is a BaseException and slips past `except Exception`,

@@ -114,15 +114,11 @@ class TestResponseParsing:
             "result": [
                 {
                     "name": "lo",
-                    "ip-addresses": [
-                        {"ip-address": "127.0.0.1", "ip-address-type": "ipv4"}
-                    ],
+                    "ip-addresses": [{"ip-address": "127.0.0.1", "ip-address-type": "ipv4"}],
                 },
                 {
                     "name": "eth0",
-                    "ip-addresses": [
-                        {"ip-address": "10.0.0.5", "ip-address-type": "ipv4"}
-                    ],
+                    "ip-addresses": [{"ip-address": "10.0.0.5", "ip-address-type": "ipv4"}],
                 },
             ]
         }

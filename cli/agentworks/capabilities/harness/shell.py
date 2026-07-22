@@ -60,9 +60,7 @@ class ShellHarness(Harness):
     description: ClassVar[str] = "Run an operator command or a login shell"
 
     @classmethod
-    def validate_config(
-        cls, owner: str, config: Mapping[str, object]
-    ) -> tuple[ConfigReference, ...]:
+    def validate_config(cls, owner: str, config: Mapping[str, object]) -> tuple[ConfigReference, ...]:
         """Shape-and-vocabulary only (FRD R2/R4): unknown fields raise;
         each present field is type-checked. Implies no resource
         reference, so it returns ``()``. Completeness (there is none for
@@ -71,30 +69,20 @@ class ShellHarness(Harness):
         """
         unknown = sorted(set(config) - _SHELL_FIELDS)
         if unknown:
-            raise ConfigError(
-                f"{owner}: unknown shell harness field(s): "
-                f"{', '.join(unknown)}"
-            )
+            raise ConfigError(f"{owner}: unknown shell harness field(s): {', '.join(unknown)}")
         for field_name in ("command", "restart_command"):
             value = config.get(field_name)
             if value is not None and not isinstance(value, str):
-                raise ConfigError(
-                    f"{owner}.{field_name} must be a string"
-                )
+                raise ConfigError(f"{owner}.{field_name} must be a string")
         required = config.get("required_commands")
         if required is not None and (
-            not isinstance(required, list)
-            or not all(isinstance(item, str) for item in required)
+            not isinstance(required, list) or not all(isinstance(item, str) for item in required)
         ):
-            raise ConfigError(
-                f"{owner}.required_commands must be a list of strings"
-            )
+            raise ConfigError(f"{owner}.required_commands must be a list of strings")
         return ()
 
     @classmethod
-    def merge_config(
-        cls, base: Mapping[str, object], child: Mapping[str, object]
-    ) -> dict[str, object]:
+    def merge_config(cls, base: Mapping[str, object], child: Mapping[str, object]) -> dict[str, object]:
         """Same-harness inheritance merge (FRD R5): scalars child-win via
         the shallow default; ``required_commands`` unions append-dedupe so
         a child overriding only ``command`` never silently drops the

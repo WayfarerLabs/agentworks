@@ -47,9 +47,7 @@ _RESOURCE_ATTRS = (
     "user_install_commands",
 )
 
-_READ_RE = re.compile(
-    r"\b(?:config|cfg)\.(?:" + "|".join(_RESOURCE_ATTRS) + r")\b"
-)
+_READ_RE = re.compile(r"\b(?:config|cfg)\.(?:" + "|".join(_RESOURCE_ATTRS) + r")\b")
 
 
 def test_no_config_resource_reads_outside_publishers() -> None:
@@ -58,13 +56,10 @@ def test_no_config_resource_reads_outside_publishers() -> None:
         rel = path.relative_to(_AGENTWORKS_ROOT)
         if rel in _PUBLISHER_ALLOWLIST:
             continue
-        for line_no, line in enumerate(
-            path.read_text(encoding="utf-8").splitlines(), start=1
-        ):
+        for line_no, line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
             if _READ_RE.search(line):
                 offenders.append(f"{rel}:{line_no}: {line.strip()}")
     assert not offenders, (
         "Config resource reads outside the publishers "
-        "(repoint them to Registry queries via agentworks.resources.access):\n"
-        + "\n".join(offenders)
+        "(repoint them to Registry queries via agentworks.resources.access):\n" + "\n".join(offenders)
     )

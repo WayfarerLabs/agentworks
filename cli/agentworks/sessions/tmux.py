@@ -75,8 +75,7 @@ def ensure_agent_socket_root(
     q_root = shlex.quote(AGENT_SOCKET_ROOT)
 
     probe = target.run(
-        f'if test -d {q_root}; then stat -c "%G %a" {q_root} 2>/dev/null || echo PROBE_FAILED; '
-        f"else echo MISSING; fi",
+        f'if test -d {q_root}; then stat -c "%G %a" {q_root} 2>/dev/null || echo PROBE_FAILED; else echo MISSING; fi',
         sudo=True,
         check=False,
     )
@@ -166,7 +165,8 @@ def cleanup_stale_sockets(target: Transport, linux_user: str) -> int:
     Returns the number of stale sockets removed.
     """
     return _cleanup_stale_sockets_under(
-        target, f"{AGENT_SOCKET_ROOT}/{linux_user}",
+        target,
+        f"{AGENT_SOCKET_ROOT}/{linux_user}",
     )
 
 
@@ -179,7 +179,8 @@ def cleanup_stale_admin_sockets(target: Transport, admin_username: str) -> int:
     repeated session create/delete cycles.
     """
     return _cleanup_stale_sockets_under(
-        target, f"{ADMIN_SOCKET_ROOT}/{admin_username}",
+        target,
+        f"{ADMIN_SOCKET_ROOT}/{admin_username}",
     )
 
 
@@ -331,9 +332,7 @@ def _grant_server_access(
     q_sock = shlex.quote(socket_path)
     grp = shlex.quote(AGENT_SOCKET_GROUP)
     run_command(
-        f"for u in $(getent group {grp} | cut -d: -f4 | tr ',' ' '); do "
-        f'tmux -S {q_sock} server-access -a "$u"; '
-        f"done",
+        f"for u in $(getent group {grp} | cut -d: -f4 | tr ',' ' '); do tmux -S {q_sock} server-access -a \"$u\"; done",
     )
 
 
@@ -446,13 +445,10 @@ def create_session(
     # is a conflict (something else owns this name).
     sock_exists = run_command(f"test -e {q_sock}", check=False)
     if getattr(sock_exists, "ok", False):
-        server_alive = run_command(
-            f"tmux -S {q_sock} list-sessions 2>/dev/null", check=False
-        )
+        server_alive = run_command(f"tmux -S {q_sock} list-sessions 2>/dev/null", check=False)
         if getattr(server_alive, "ok", False):
             raise RuntimeError(
-                f"Socket {sock} already has an active tmux server. "
-                f"Kill it first or choose a different session name."
+                f"Socket {sock} already has an active tmux server. Kill it first or choose a different session name."
             )
         from agentworks import output as _output
 
@@ -461,10 +457,7 @@ def create_session(
 
     # Create the session. SetEnv vars travel with run_command; tmux's -e
     # flags add them to the session-environment table.
-    cmd = (
-        f"tmux -S {q_sock} new-session -d -s {q_session} "
-        f"-c {q_path} -f {RESTRICTED_CONFIG_PATH}{env_flags}"
-    )
+    cmd = f"tmux -S {q_sock} new-session -d -s {q_session} -c {q_path} -f {RESTRICTED_CONFIG_PATH}{env_flags}"
     if pane_cmd:
         cmd += f" {shlex.quote(pane_cmd)}"
     run_command(cmd, env=env)

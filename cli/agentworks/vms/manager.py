@@ -89,6 +89,7 @@ def _resolve_vm_admin_env_scopes(
     ws_env: dict[str, EnvEntry] | None = None
     if ws is not None:
         from agentworks.workspaces.templates import resolve_template as _resolve_ws_template
+
         ws_env = _resolve_ws_template(registry, ws.template).env
 
     from agentworks.resources.access import admin_template
@@ -101,7 +102,9 @@ def _resolve_vm_admin_env_scopes(
 
 
 def _vm_secret_target(
-    scopes: _VmAdminEnvScopes, *, label: str,
+    scopes: _VmAdminEnvScopes,
+    *,
+    label: str,
 ) -> SecretTarget:
     """Build the SecretTarget for VM-level commands from pre-resolved scopes.
 
@@ -120,7 +123,9 @@ def _vm_secret_target(
 
 
 def _resolve_workspace_for_vm(
-    db: Database, vm: VMRow, workspace_name: str | None,
+    db: Database,
+    vm: VMRow,
+    workspace_name: str | None,
 ) -> WorkspaceRow | None:
     """Resolve a ``--workspace`` flag against a target VM.
 
@@ -303,10 +308,7 @@ def create_vm(
     # and platform construction is cheap and touches no secret
     # machinery; the walk union below is the boundary's source.
     # Nothing resolves yet.
-    cred_nodes = tuple(
-        git_credential_node(registry, cred_name)
-        for cred_name in admin.git_credentials
-    )
+    cred_nodes = tuple(git_credential_node(registry, cred_name) for cred_name in admin.git_credentials)
     providers = {node.provider.owner_name: node.provider for node in cred_nodes}
 
     # System slug: first interactive create prompts once (a blank
@@ -357,14 +359,10 @@ def create_vm(
         # them. The credentials' write-step runup stays deferred into
         # initialization, under the skip-and-degrade policy.
         site_node.runup(scoped_ctx(site_node.secret_refs()))
-        tailscale_auth_key = scoped_ctx(template_node.secret_refs()).secret(
-            vm_tmpl.tailscale_auth_key
-        )
+        tailscale_auth_key = scoped_ctx(template_node.secret_refs()).secret(vm_tmpl.tailscale_auth_key)
         # Each credential's token, read through its node's SCOPED delivery.
         git_tokens = {
-            node.provider.owner_name: scoped_ctx(node.secret_refs()).secret(
-                node.provider.secret_name
-            )
+            node.provider.owner_name: scoped_ctx(node.secret_refs()).secret(node.provider.secret_name)
             for node in cred_nodes
         }
 
@@ -855,7 +853,10 @@ def shell_vm(
     with contextlib.ExitStack() as stack:
         vm_node, resolver = stack.enter_context(
             gated_vm_boundary(
-                db, config, registry, vm,
+                db,
+                config,
+                registry,
+                vm,
                 targets=[_vm_secret_target(scopes, label=f"vm-shell={vm.name}")],
             )
         )
@@ -950,7 +951,10 @@ def exec_vm(
     scopes = _resolve_vm_admin_env_scopes(registry, vm, ws=ws)
 
     with gated_vm_boundary(
-        db, config, registry, vm,
+        db,
+        config,
+        registry,
+        vm,
         targets=[_vm_secret_target(scopes, label=f"vm-exec={vm.name}")],
     ) as (_vm_node, resolver):
         from agentworks.vms.sites import site_platform_name
@@ -1076,9 +1080,7 @@ def add_git_credential(db: Database, config: Config, name: str, credential_name:
         # skips and continues to partial): the operator asked to add
         # exactly this one credential.
         if config.defaults.runup_git_credentials:
-            output.info(
-                f"Performing runup test for git-credential/{credential_name}..."
-            )
+            output.info(f"Performing runup test for git-credential/{credential_name}...")
             cred_node.runup(scoped_ctx(cred_node.secret_refs()))
         # The materials-write op reads its token through the node's
         # SCOPED delivery: only the credential's declared secret names.
@@ -1510,9 +1512,7 @@ def rekey_vm(
         try:
             ipaddress.IPv4Address(new_ip)
         except ValueError:
-            raise SSHError(
-                f"tailscale ip -4 returned invalid address: {new_ip!r}\nfull output: {raw_ip}"
-            ) from None
+            raise SSHError(f"tailscale ip -4 returned invalid address: {new_ip!r}\nfull output: {raw_ip}") from None
         output.detail(f"Tailscale IP: {new_ip}")
 
         # Update DB and SSH config with the new IP (correct regardless of
@@ -1523,9 +1523,7 @@ def rekey_vm(
 
         # If the operator needs to share the VM back, pause before connectivity check
         if wait_for_share:
-            output.pause(
-                "Share the VM back to your tailnet, then press Enter to verify connectivity..."
-            )
+            output.pause("Share the VM back to your tailnet, then press Enter to verify connectivity...")
 
         # Always verify Tailscale SSH connectivity to the new IP
         output.info(f"Verifying SSH to {new_ip}...")
@@ -1619,10 +1617,7 @@ def delete_vm(
         # cleanup; broken backends are what delete exists to clean up.
         vm_node = None
         hint = getattr(e, "hint", None)
-        output.warn(
-            f"platform binding failed, skipping backend cleanup: {e}"
-            + (f"\n{hint}" if hint else "")
-        )
+        output.warn(f"platform binding failed, skipping backend cleanup: {e}" + (f"\n{hint}" if hint else ""))
 
     if vm_node is not None:
         assert ops_ctx is not None  # set beside vm_node above
@@ -1725,8 +1720,7 @@ def reinit_vm(
 
     if vm.provisioning_status != ProvisioningStatus.COMPLETE.value:
         raise StateError(
-            f"VM '{name}' provisioning is '{vm.provisioning_status}', not 'complete'. "
-            f"Cannot reinitialize.",
+            f"VM '{name}' provisioning is '{vm.provisioning_status}', not 'complete'. Cannot reinitialize.",
             entity_kind="vm",
             entity_name=name,
         )
@@ -1758,10 +1752,7 @@ def reinit_vm(
         ) from None
 
     verify_tailscale_available()
-    cred_nodes = tuple(
-        git_credential_node(registry, cred_name)
-        for cred_name in admin.git_credentials
-    )
+    cred_nodes = tuple(git_credential_node(registry, cred_name) for cred_name in admin.git_credentials)
     providers = {node.provider.owner_name: node.provider for node in cred_nodes}
 
     # The reinit graph: the live VM (whose row's site field is its edge
@@ -1808,9 +1799,7 @@ def reinit_vm(
         # write step). So the next banner the operator sees is
         # Initialization.
         git_tokens = {
-            node.provider.owner_name: scoped_ctx(node.secret_refs()).secret(
-                node.provider.secret_name
-            )
+            node.provider.owner_name: scoped_ctx(node.secret_refs()).secret(node.provider.secret_name)
             for node in cred_nodes
         }
 
@@ -2303,9 +2292,7 @@ def _ensure_tailscale(
 
         registry = build_registry(config)
         rejoin_vm_tmpl = resolve_template(registry, vm.template)
-        ts_decl = _lookup_or_synthesize_secret(
-            registry, rejoin_vm_tmpl.tailscale_auth_key
-        )
+        ts_decl = _lookup_or_synthesize_secret(registry, rejoin_vm_tmpl.tailscale_auth_key)
         resolved = resolve_for_command([], config, registry, extra_decls=[ts_decl])
         auth_key = resolved[rejoin_vm_tmpl.tailscale_auth_key]
 

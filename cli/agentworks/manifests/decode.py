@@ -56,6 +56,7 @@ KIND_SECTIONS: dict[str, tuple[str, ...]] = {
     "user-install-command": ("user_install_commands",),
 }
 
+
 class _FixedDecls:
     """Duck-typed stand-in for config's ``_SectionLineMap``: every lookup
     resolves to the manifest document's own location.
@@ -94,8 +95,7 @@ def decode_document(doc: Document, issues: list[str]) -> Any:
     # belongs in metadata, never in spec.
     if "description" in spec:
         raise ConfigError(
-            f"{doc.where}: description belongs in metadata.description, "
-            "not in spec",
+            f"{doc.where}: description belongs in metadata.description, not in spec",
         )
     if doc.description is not None:
         spec["description"] = doc.description
@@ -125,36 +125,28 @@ def decode_document(doc: Document, issues: list[str]) -> Any:
 def _decode_secret(doc: Document, spec: dict[str, object], issues: list[str]) -> Any:
     from agentworks.config import _load_secrets
 
-    result = _load_secrets(
-        {"secrets": {doc.name: spec}}, issues, _decls(doc.location)
-    )
+    result = _load_secrets({"secrets": {doc.name: spec}}, issues, _decls(doc.location))
     return result[doc.name]
 
 
 def _decode_vm_template(doc: Document, spec: dict[str, object], issues: list[str]) -> Any:
     from agentworks.config import _load_vm_templates
 
-    result = _load_vm_templates(
-        {"vm_templates": {doc.name: spec}}, issues, _decls(doc.location)
-    )
+    result = _load_vm_templates({"vm_templates": {doc.name: spec}}, issues, _decls(doc.location))
     return result[doc.name]
 
 
 def _decode_agent_template(doc: Document, spec: dict[str, object], issues: list[str]) -> Any:
     from agentworks.config import _load_agent_templates
 
-    result = _load_agent_templates(
-        {"agent_templates": {doc.name: spec}}, issues, _decls(doc.location)
-    )
+    result = _load_agent_templates({"agent_templates": {doc.name: spec}}, issues, _decls(doc.location))
     return result[doc.name]
 
 
 def _decode_workspace_template(doc: Document, spec: dict[str, object], issues: list[str]) -> Any:
     from agentworks.config import _load_workspace_templates
 
-    result = _load_workspace_templates(
-        {"workspace_templates": {doc.name: spec}}, issues, _decls(doc.location)
-    )
+    result = _load_workspace_templates({"workspace_templates": {doc.name: spec}}, issues, _decls(doc.location))
     return result[doc.name]
 
 
@@ -185,9 +177,7 @@ def _decode_session_template(doc: Document, spec: dict[str, object], issues: lis
                 f"session-template/{doc.name}",
                 harness_config if isinstance(harness_config, dict) else {},
             )
-    result = _load_session_templates(
-        {"session_templates": {doc.name: spec}}, issues, _decls(doc.location)
-    )
+    result = _load_session_templates({"session_templates": {doc.name: spec}}, issues, _decls(doc.location))
     return result[doc.name]
 
 
@@ -220,8 +210,7 @@ def _decode_git_credential(doc: Document, spec: dict[str, object], issues: list[
     if reserved:
         names = ", ".join(sorted(reserved))
         raise ConfigError(
-            f"spec.provider_config may not contain kind-owned field(s): "
-            f"{names}; they belong at the spec top level"
+            f"spec.provider_config may not contain kind-owned field(s): {names}; they belong at the spec top level"
         )
     if "token" in spec:
         raise ConfigError(
@@ -282,8 +271,7 @@ def _decode_vm_site(doc: Document, spec: dict[str, object], issues: list[str]) -
     platform = spec.pop("platform", None)
     if not isinstance(platform, str) or not platform:
         raise ConfigError(
-            "vm-site requires spec.platform (a vm-platform capability name, "
-            "e.g. lima, wsl2, azure-vm, proxmox)",
+            "vm-site requires spec.platform (a vm-platform capability name, e.g. lima, wsl2, azure-vm, proxmox)",
         )
     raw_config = spec.pop("platform_config", {})
     if not isinstance(raw_config, dict):
@@ -295,15 +283,13 @@ def _decode_vm_site(doc: Document, spec: dict[str, object], issues: list[str]) -
     if reserved:
         names = ", ".join(sorted(reserved))
         raise ConfigError(
-            f"spec.platform_config may not contain kind-owned field(s): "
-            f"{names}; they belong at the spec top level"
+            f"spec.platform_config may not contain kind-owned field(s): {names}; they belong at the spec top level"
         )
     description = spec.pop("description", None)
     if spec:
         extras = ", ".join(sorted(spec))
         raise ConfigError(
-            f"unknown vm-site spec field(s): {extras}; platform-specific "
-            "configuration goes under spec.platform_config"
+            f"unknown vm-site spec field(s): {extras}; platform-specific configuration goes under spec.platform_config"
         )
     # Capability validation on the TRUE blob, with this document's
     # file:line in the error. Unknown platform names are tolerated: the
@@ -346,17 +332,12 @@ def _decode_admin_template(doc: Document, spec: dict[str, object], issues: list[
     return result
 
 
-def _decode_named_console_template(
-    doc: Document, spec: dict[str, object], issues: list[str]
-) -> Any:
+def _decode_named_console_template(doc: Document, spec: dict[str, object], issues: list[str]) -> Any:
     from agentworks.config import _load_named_console
 
-    result = _load_named_console(
-        {"named_console": spec}, issues, _decls(doc.location)
-    )
+    result = _load_named_console({"named_console": spec}, issues, _decls(doc.location))
     assert result is not None  # the key is always present on this path
     return result
-
 
 
 def _decode_apt_source(doc: Document, spec: dict[str, object], issues: list[str]) -> Any:
@@ -371,17 +352,13 @@ def _decode_apt_package(doc: Document, spec: dict[str, object], issues: list[str
     return _load_apt_packages({doc.name: spec}, _decls(doc.location))[doc.name]
 
 
-def _decode_system_install_command(
-    doc: Document, spec: dict[str, object], issues: list[str]
-) -> Any:
+def _decode_system_install_command(doc: Document, spec: dict[str, object], issues: list[str]) -> Any:
     from agentworks.install_commands import _load_system_commands
 
     return _load_system_commands({doc.name: spec}, _decls(doc.location))[doc.name]
 
 
-def _decode_user_install_command(
-    doc: Document, spec: dict[str, object], issues: list[str]
-) -> Any:
+def _decode_user_install_command(doc: Document, spec: dict[str, object], issues: list[str]) -> Any:
     from agentworks.install_commands import _load_user_commands
 
     return _load_user_commands({doc.name: spec}, _decls(doc.location))[doc.name]

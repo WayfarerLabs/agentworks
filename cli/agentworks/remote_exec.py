@@ -115,10 +115,7 @@ def run_detached(
             # Stale result from an interrupted earlier attempt. Loud even
             # in quiet mode: silently consuming it once masked a VM-create
             # failure as an empty-output error.
-            output.warn(
-                f"{label}: clearing stale result files from a previous "
-                f"interrupted run ({base_path}.*)"
-            )
+            output.warn(f"{label}: clearing stale result files from a previous interrupted run ({base_path}.*)")
         # Write and start the wrapper script
         wrapper = _WRAPPER_TEMPLATE.format(
             command=command,
@@ -219,9 +216,7 @@ def _poll_until_done(
 
         # Hard timeout -- kill the remote process to avoid orphans
         if timeout is not None and (time.monotonic() - start_time) > timeout:
-            output.warn(
-                f"{label}: timed out after {timeout}s, killing remote process"
-            )
+            output.warn(f"{label}: timed out after {timeout}s, killing remote process")
             with contextlib.suppress(SSHError):
                 target.run(
                     f"test -f {pid_file} && kill $(cat {pid_file}) 2>/dev/null",
@@ -276,9 +271,7 @@ def _poll_until_done(
         # Warn if no output for a while
         quiet_secs = time.monotonic() - last_output_time
         if quiet_secs > quiet_timeout and not warned_quiet:
-            output.warn(
-                f"{label}: no output for {int(quiet_secs)}s (still running)..."
-            )
+            output.warn(f"{label}: no output for {int(quiet_secs)}s (still running)...")
             warned_quiet = True
 
     # Read the full output for the caller. Retry on SSH failure since the

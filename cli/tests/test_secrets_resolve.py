@@ -48,11 +48,7 @@ class _FakeBackend:
 
     def resolve(self, secrets: list[SecretDecl]) -> dict[str, str]:
         self.resolve_calls.append([s.name for s in secrets])
-        return {
-            s.name: self._values[s.name]
-            for s in secrets
-            if s.name in self._values
-        }
+        return {s.name: self._values[s.name] for s in secrets if s.name in self._values}
 
 
 def _decl(name: str, **kw: object) -> SecretDecl:
@@ -373,10 +369,7 @@ def test_collect_mode_default_is_unchanged_raise_behavior() -> None:
 def test_preview_reports_first_backend_with_value() -> None:
     b1 = _FakeBackend("env-var", values={"x": "from-env"})
     b2 = _FakeBackend("prompt", interactive=True)
-    assert (
-        preview_resolution(_decl("x"), _chain(b1, b2), interactive_available=True)
-        == "env-var"
-    )
+    assert preview_resolution(_decl("x"), _chain(b1, b2), interactive_available=True) == "env-var"
 
 
 def test_preview_falls_through_to_interactive() -> None:
@@ -385,10 +378,7 @@ def test_preview_falls_through_to_interactive() -> None:
     interactive input is available this run."""
     b1 = _FakeBackend("env-var")  # no values
     b2 = _FakeBackend("prompt", interactive=True)
-    assert (
-        preview_resolution(_decl("x"), _chain(b1, b2), interactive_available=True)
-        == "prompt"
-    )
+    assert preview_resolution(_decl("x"), _chain(b1, b2), interactive_available=True) == "prompt"
 
 
 def test_preview_interactive_unavailable_does_not_report_prompt() -> None:
@@ -397,10 +387,7 @@ def test_preview_interactive_unavailable_does_not_report_prompt() -> None:
     walks PAST the interactive backend and returns None."""
     b1 = _FakeBackend("env-var")  # no values
     b2 = _FakeBackend("prompt", interactive=True)
-    assert (
-        preview_resolution(_decl("x"), _chain(b1, b2), interactive_available=False)
-        is None
-    )
+    assert preview_resolution(_decl("x"), _chain(b1, b2), interactive_available=False) is None
 
 
 def test_preview_interactive_unavailable_still_reports_later_backend() -> None:
@@ -409,12 +396,7 @@ def test_preview_interactive_unavailable_still_reports_later_backend() -> None:
     b1 = _FakeBackend("env-var")  # no values
     b2 = _FakeBackend("prompt", interactive=True)
     b3 = _FakeBackend("vault", values={"x": "from-vault"})
-    assert (
-        preview_resolution(
-            _decl("x"), _chain(b1, b2, b3), interactive_available=False
-        )
-        == "vault"
-    )
+    assert preview_resolution(_decl("x"), _chain(b1, b2, b3), interactive_available=False) == "vault"
 
 
 def test_preview_never_probes_interactive_backends() -> None:
@@ -428,10 +410,7 @@ def test_preview_never_probes_interactive_backends() -> None:
 
     b1 = _FakeBackend("env-var")
     b2 = _ExplodingPrompt("prompt", interactive=True)
-    assert (
-        preview_resolution(_decl("x"), _chain(b1, b2), interactive_available=True)
-        == "prompt"
-    )
+    assert preview_resolution(_decl("x"), _chain(b1, b2), interactive_available=True) == "prompt"
 
 
 def test_preview_skips_opted_out_backend() -> None:
@@ -440,10 +419,7 @@ def test_preview_skips_opted_out_backend() -> None:
     b1 = _FakeBackend("env-var", values={"x": "from-env"})
     b2 = _FakeBackend("prompt", interactive=True)
     decl = _decl("x", backend_mappings={"env-var": False})
-    assert (
-        preview_resolution(decl, _chain(b1, b2), interactive_available=True)
-        == "prompt"
-    )
+    assert preview_resolution(decl, _chain(b1, b2), interactive_available=True) == "prompt"
 
 
 def test_preview_honors_opt_out_for_interactive_backend() -> None:
@@ -453,9 +429,7 @@ def test_preview_honors_opt_out_for_interactive_backend() -> None:
     b1 = _FakeBackend("env-var")  # no values; falls through
     b2 = _FakeBackend("prompt", interactive=True)
     decl = _decl("x", backend_mappings={"prompt": False})
-    assert (
-        preview_resolution(decl, _chain(b1, b2), interactive_available=True) is None
-    )
+    assert preview_resolution(decl, _chain(b1, b2), interactive_available=True) is None
 
 
 def test_preview_returns_none_when_no_backend_attempts() -> None:

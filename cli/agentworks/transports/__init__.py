@@ -111,7 +111,8 @@ def transport(
     Never falls back to the platform-native transport.
     """
     return transport_for_user(
-        vm, config,
+        vm,
+        config,
         user=vm.admin_username,
         default_timeout=default_timeout,
         logger=logger,
@@ -134,7 +135,8 @@ def agent_transport(
     and reinit).
     """
     return transport_for_user(
-        vm, config,
+        vm,
+        config,
         user=agent.linux_user,
         default_timeout=default_timeout,
         logger=logger,
@@ -178,8 +180,7 @@ def native_transport(
     target = platform.native_transport(vm, config=config)
     if target is None:
         raise StateError(
-            f"No native transport for VM '{vm.name}' "
-            f"(platform '{platform.name}').",
+            f"No native transport for VM '{vm.name}' (platform '{platform.name}').",
             entity_kind="vm",
             entity_name=vm.name,
             hint=platform.no_native_transport_hint,
