@@ -73,14 +73,19 @@ Nothing under this directory is load-bearing after merge; the directory is delet
   spread, extract a private `_reset_mouse_tracking()` helper rather than duplicating the gate.
 - **A red `Configuration error:`** label (ConfigError stays plain) and routing the remaining
   cascade/batch/shared-helper terminals through `result()`.
-- **Migrating `config` + `completion` to the output model (#217)** and **standardizing the thin-CLI
+- **Aligning `config` commands with the output model (#217)** and **standardizing the thin-CLI
   printed-error pattern (#218)**. A post-implementation audit of every command's output-method usage
   (sections, info-vs-detail, `result()`, `warn`/`error`) folded its correctness fixes into this PR
   (over-indented all-`detail` flows like `backup`/`rekey`/wsl2-create given sections + `info` steps,
   orphaned `detail` promoted, standalone terminals routed through `result()`, a few baked-in-format
-  strings cleaned up). The audit also found two modules never on the output model (`config.py`,
-  `completions/install.py`) and a pre-existing thin-CLI `typer.echo`+`Exit` error pattern; both were
-  left out of this effort's scope and are tracked as #217 / #218.
+  strings cleaned up). The audit also found two commands not on the output model. `config` is worth
+  aligning as a consistency fix (its `ConfigError` is already a first-class rendered error kind, and
+  `sync-vscode-workspaces` has `warn`/`result`-shaped output), tracked as #217. **`completion` is
+  deliberately left native `typer.echo`**: it is purely local, install-time CLI tooling with no
+  web/agent renderer, so the output model's renderer-independence rationale does not apply. The
+  pre-existing thin-CLI `typer.echo`+`Exit` error pattern is #218. (#217's title still names
+  completion; it is superseded by this note, the working token could create issues but not edit
+  them.)
 
 ### Review history
 
