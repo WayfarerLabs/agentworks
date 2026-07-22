@@ -129,11 +129,22 @@ class ClaudeCodeHarness(Harness):
         # ``pass_oauth_token = false`` over a parent that set
         # ``oauth_token_secret`` yields exactly this error on the merged
         # blob (issue #220), which is honest, intended behavior.
+        #
+        # Because this classmethod also fires per DECLARED blob at load
+        # (``SessionTemplate.referenced_resources``), before inheritance
+        # merging, the two fields must co-occur in the SAME declaration: a
+        # child overriding only ``oauth_token_secret`` must restate
+        # ``pass_oauth_token = true``, even when a parent already set it.
+        # The message spells that out so the inherited-true case is not a
+        # dead end.
         if "oauth_token_secret" in config and pass_oauth_token is not True:
             raise ConfigError(
                 f"{owner}.oauth_token_secret is set but pass_oauth_token is "
-                f"not true; a token secret name with nothing consuming it is "
-                f"a misconfiguration. Enable pass_oauth_token, or drop "
+                f"not true in the same harness_config block; a token secret "
+                f"name with nothing consuming it is a misconfiguration. Set "
+                f"pass_oauth_token = true alongside it (required even when a "
+                f"parent template already enables it; this check runs per "
+                f"declaration, before inheritance merging), or drop "
                 f"oauth_token_secret."
             )
         if pass_oauth_token is True:

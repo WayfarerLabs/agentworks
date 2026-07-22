@@ -96,8 +96,13 @@ class SessionTemplate(DeclaredResource):
                 )
             )
             # Plus whatever the selected harness's config block implies
-            # (a future secret-declaring harness gets auto-declaration
-            # and reachability for free; both built-ins imply nothing).
+            # (a secret-declaring harness gets auto-declaration and
+            # reachability for free: claude-code declares its OAuth token
+            # secret when pass_oauth_token is on; shell implies nothing).
+            # This fires per DECLARED blob, not the inheritance-merged
+            # one, so a cross-field harness rule must hold within each
+            # declaration on its own (issue #220: a child overriding
+            # oauth_token_secret must restate pass_oauth_token = true).
             # Unknown names skip: the miss policy reports them.
             from agentworks.capabilities.harness import HARNESS_REGISTRY
 

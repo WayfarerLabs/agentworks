@@ -1965,8 +1965,8 @@ def create_session(
 
                     # Op-start RunContext for the harness's start op: mirrors
                     # the runup readiness ctx above (targets), plus the scoped
-                    # secrets (the session node's declared union, empty for the
-                    # built-in shell harness; ScopedSecrets never delivers).
+                    # secrets (the session node's declared union: empty for
+                    # shell, claude-code's OAuth token when enabled).
                     # Template-var substitution lifts OUT of the harness and
                     # wraps its returned string. The op runs BEFORE the insert
                     # so a freshly minted harness_state (claude-code's session
@@ -2396,11 +2396,11 @@ def restart_session(
         registry=registry,
     )
     nodes = walk(session_node)
-    # The walk supplies the boundary union (the site's config secrets;
-    # live nodes declare nothing else). The session's env chain is
-    # deliberately NOT part of this boundary: it resolves after the
-    # BROKEN/confirm gates below, the recorded bail-before-prompt
-    # exception.
+    # The walk supplies the boundary union (the site's config secrets,
+    # plus the harness's declared secrets: claude-code's OAuth token when
+    # pass_oauth_token is on). The session's env chain is deliberately
+    # NOT part of this boundary: it resolves after the BROKEN/confirm
+    # gates below, the recorded bail-before-prompt exception.
     for secret_name in secret_union(nodes):
         resolver.register_name(secret_name)
 
@@ -2518,10 +2518,10 @@ def restart_session(
             # Capture the graph boundary union for the harness's op-start
             # context (matching the create path, which captures
             # ``resolver.values`` at its boundary). Inert for the built-in
-            # shell harness (empty ``secret_refs()``), but keeps the restart
-            # op ctx shape-correct for a future secret-declaring harness; the
-            # env-chain resolve (``resolve_for_command`` below) is a SEPARATE
-            # pass, not this graph union.
+            # shell harness (empty ``secret_refs()``); this is how a
+            # secret-declaring harness (claude-code's OAuth token) receives
+            # its values. The env-chain resolve (``resolve_for_command``
+            # below) is a SEPARATE pass, not this graph union.
             graph_secret_values = resolver.values
 
             # Eager-prompting orchestration (pass 2): resolve every secret

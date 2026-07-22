@@ -425,7 +425,10 @@ ssh_private_key = "~/.ssh/id_ed25519"        # required: used for SSH connection
 #     `ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN`, or a cloud-provider auth
 #     var, those SILENTLY win over the OAuth token.
 #   - Setting `oauth_token_secret` WITHOUT `pass_oauth_token = true` is a
-#     config error (a secret name with nothing consuming it).
+#     config error (a secret name with nothing consuming it). The two fields
+#     must appear in the SAME harness_config block: a child template that
+#     overrides only `oauth_token_secret` must restate
+#     `pass_oauth_token = true`, even when a parent already enables it.
 #pass_oauth_token = true
 #oauth_token_secret = "claude-code-oauth-token"   # optional; this is the default
 
