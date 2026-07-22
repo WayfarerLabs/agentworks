@@ -47,29 +47,34 @@ Definition of done: the new model exists and all primitives pass role + level to
 no section open and color disabled, every command renders byte-identically to today; full suite
 green.
 
-- [ ] Add `_level: ContextVar[int]` (default 0) to `output.py`; keep `_handler` a module global.
+- [x] Add `_level: ContextVar[int]` (default 0) to `output.py`; keep `_handler` a module global.
       `get_handler()`/`set_handler()` stay as-is (so worker-thread output keeps the installed
       handler); confirm `_entry.py` and the conftest fixture still work. Add public
       `non_interactive()`.
-- [ ] Implement `section()` context manager (header role at current level, body deeper, reset-safe).
-- [ ] Implement `result()` (depth-0 result role). Reserve `Role.ERROR`/`Role.STATUS` in the enum but
+- [x] Implement `section()` context manager (header role at current level, body deeper, reset-safe).
+- [x] Implement `result()` (depth-0 result role). Reserve `Role.ERROR`/`Role.STATUS` in the enum but
       add no public `error()`/`status()` primitive (ERROR wired at the entry catch in Phase 5).
-- [ ] Change the `OutputHandler` protocol to `emit(role, message, level)` + `level` on the
+- [x] Change the `OutputHandler` protocol to `emit(role, message, level)` + `level` on the
       interactive/progress methods; make `info`, `detail`, `warn`, `progress`, and all prompt
       primitives resolve level + role and pass them down (`info` = body, `detail` = de-emphasized
       body, both at ambient level). Keep `detail`'s `indent=` as a temporary deprecated relative
       nudge (`indent=n` -> `level + n`) so the tree stays green; explicit `indent=` callers are
       rewritten in the sweep and the parameter is deleted at the end of Phase 4.
-- [ ] Update all three handlers (`_DefaultHandler`, `TyperHandler`, `_TestHandler`) to own
+- [x] Update all three handlers (`_DefaultHandler`, `TyperHandler`, `_TestHandler`) to own
       indentation + decoration from role + level, including the prompt/`choose`/`prompt_secret`
       label and hint and the `Progress` handle's lines (LLD sec 5a); `_TestHandler` records
-      role/level. (No color yet; that is Phase 5.)
-- [ ] Unit tests for the state model: level push/pop, nesting, reset-on-exception, result-at-0,
+      role/level. (No color yet; that is Phase 5.) Note: to hold the byte-identical invariant at
+      level 0, the `Progress` handle's lines and the `prompt_secret` hint render at `pad(level + 1)`
+      rather than the LLD's literal `pad(level)` (both were hardcoded to 2 spaces today); see the
+      dev hand-off. `_TestHandler` also mirrors the rendered `HEADER` into `.info` so existing
+      `phase()`-header assertions pass until those sites convert in Phases 3-4.
+- [x] Unit tests for the state model: level push/pop, nesting, reset-on-exception, result-at-0,
       prompt/warn at level, role capture, backward-compat (no section -> column 0, plain).
-- [ ] Regression test: `warn()` emitted from a `ThreadPoolExecutor` worker is still seen by the
+- [x] Regression test: `warn()` emitted from a `ThreadPoolExecutor` worker is still seen by the
       installed handler (captured by `captured_output`), guarding the level-only / global-handler
       decision.
-- [ ] `agentworks-reviewer` + fresh-eyes pass; findings resolved.
+- [x] `agentworks-reviewer` + fresh-eyes pass; findings resolved (LLD sec 5a reconciled to
+      `pad(level+1)`; `choose()` inner prompts indented for R8; comment/STATUS-note nits).
 
 ## Phase 2: Confirm mouse-mode leak fix
 

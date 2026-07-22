@@ -178,10 +178,14 @@ def test_stale_status_cleared_when_reuse_disabled(mock_time: MagicMock) -> None:
 
     warnings: list[str] = []
 
+    from agentworks.output import Role
+
     class _WarnCapture:
+        def emit(self, role: Role, message: str, level: int) -> None:
+            if role is Role.WARNING:
+                warnings.append(message)
+
         def __getattr__(self, name: str):  # noqa: ANN204 - test stub
-            if name == "warn":
-                return warnings.append
             return lambda *a, **k: None
 
     previous = get_handler()
@@ -277,10 +281,7 @@ def test_polling_survives_transient_ssh_failures(mock_time: MagicMock) -> None:
         # to simulate SSH disruption during polling.
         # Setup phase: status check, pid check, write_file, rm, nohup launch
         if call_count == 0 and (
-            cmd.startswith("test -f")
-            or cmd.startswith("ps -p")
-            or cmd.startswith("rm -f")
-            or cmd.startswith("nohup")
+            cmd.startswith("test -f") or cmd.startswith("ps -p") or cmd.startswith("rm -f") or cmd.startswith("nohup")
         ):
             # First test -f calls are setup checks (no status/pid files yet)
             result.returncode = 1
@@ -317,6 +318,7 @@ def test_polling_survives_transient_ssh_failures(mock_time: MagicMock) -> None:
 
     assert result.exit_code == 0
     assert "output after recovery" in result.output
+
 
 @patch("agentworks.remote_exec.time")
 def test_run_detached_as_root(mock_time: MagicMock) -> None:
@@ -361,8 +363,12 @@ def test_run_detached_disables_force_tty_for_nohup_launch(mock_time: MagicMock) 
     status_exists_after = 1
 
     def run_side_effect(
-        cmd: str, *, check: bool = True, timeout: int | None = None,
-        sudo: bool = False, tty: bool | None = None,
+        cmd: str,
+        *,
+        check: bool = True,
+        timeout: int | None = None,
+        sudo: bool = False,
+        tty: bool | None = None,
     ):
         nonlocal poll_count
         if "nohup" in cmd:
@@ -422,8 +428,12 @@ def test_run_detached_timeout_kills_and_returns_partial(mock_time: MagicMock) ->
     target = MagicMock()
 
     def run_side_effect(
-        cmd: str, *, check: bool = True, timeout: int | None = None,
-        sudo: bool = False, tty: bool | None = None,
+        cmd: str,
+        *,
+        check: bool = True,
+        timeout: int | None = None,
+        sudo: bool = False,
+        tty: bool | None = None,
     ):
         result = MagicMock()
         result.stdout = ""

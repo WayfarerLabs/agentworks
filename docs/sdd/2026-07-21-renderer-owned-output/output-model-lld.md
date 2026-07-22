@@ -166,14 +166,21 @@ Notes:
 The prompt and progress paths also render at the ambient level; this is not optional polish, R8
 requires prompts (label and hint) inside their section, and R3 covers progress lines.
 
-| Method / line                        | Indent                           | Stream            |
-| ------------------------------------ | -------------------------------- | ----------------- |
-| `prompt` / `confirm` / `pause` label | `pad(level)` prefix on the label | stdin/stdout      |
-| `choose` message                     | `pad(level)`                     | stdout            |
-| `choose` options (`{i}) {opt}`)      | `pad(level + 1)`                 | stdout            |
-| `prompt_secret` label                | `pad(level)`                     | stderr (as today) |
-| `prompt_secret` hint                 | `pad(level)` (was hard `"  "`)   | stderr            |
-| `Progress.update` / `.done`          | `pad(level)`                     | stdout            |
+| Method / line                          | Indent                             | Stream            |
+| -------------------------------------- | ---------------------------------- | ----------------- |
+| `prompt` / `confirm` / `pause` label   | `pad(level)` prefix on the label   | stdin/stdout      |
+| `choose` message                       | `pad(level)`                       | stdout            |
+| `choose` options (`{i}) {opt}`)        | `pad(level + 1)`                   | stdout            |
+| `choose` `Choice:` / `Invalid` prompts | `pad(level)`                       | stdout            |
+| `prompt_secret` label                  | `pad(level)`                       | stderr (as today) |
+| `prompt_secret` hint                   | `pad(level + 1)` (was hard `"  "`) | stderr            |
+| `Progress.update` / `.done`            | `pad(level + 1)` (was hard `"  "`) | stdout            |
+
+The `prompt_secret` hint and `Progress` lines use `pad(level + 1)`, not `pad(level)`: both were
+hardcoded to a 2-space indent, so `pad(level)` would collapse them to column 0 at level 0 and break
+the byte-identical invariant. `pad(level + 1)` preserves the 2-space indent (they read as sub-lines,
+like DETAIL). The `choose` `Choice:` input and `Invalid` retry lines render at `pad(level)` (0
+spaces at level 0, byte-identical) so the whole `choose` block sits inside its section (R8).
 
 - The label indent is applied by prefixing the prompt string handed to `typer.prompt` /
   `click.prompt` / `input`; no ANSI is involved, so it is safe on the prompt path.
