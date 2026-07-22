@@ -81,10 +81,24 @@ green.
 Definition of done: the `[y/N]` confirm path leaves no leaked mouse-tracking escape; verified
 against a reproduction.
 
-- [ ] Reproduce the `^[[<..M` leak; confirm the minimal DECRST reset from the LLD clears it.
-- [ ] Apply the reset in the `TyperHandler` confirm path (scoped to the interactive path).
-- [ ] Regression test / documented manual repro steps.
-- [ ] `agentworks-reviewer` pass.
+- [x] Reproduce the `^[[<..M` leak; confirm the minimal DECRST reset from the LLD clears it. A
+      live-TTY reproduction is not exercisable in the (headless) dev environment; instead, the
+      `1000`/`1002`/`1006`/`1015` DEC private mode numbers and the `CSI ? Pm l` (DECRST) disable
+      syntax were checked against the xterm control-sequence reference, confirming
+      `\x1b[?1000;1002;1006;1015l` disables exactly VT200 X11 mouse reporting (1000), button-event
+      tracking (1002), SGR mouse mode (1006, the `^[[<..M` wire form), and urxvt mouse mode (1015).
+      Documented manual repro steps (for an operator on a real terminal) live in
+      `cli/tests/test_typer_output.py`.
+- [x] Apply the reset in the `TyperHandler` confirm path (scoped to the interactive path).
+- [x] Regression test / documented manual repro steps.
+- Deferred: `prompt`, `choose`, `pause`, and `prompt_secret` share the same latent mouse-report
+  exposure (they read stdin the same plain way) but are intentionally out of scope for this phase.
+  When the reset spreads to them, extract it into a private `_reset_mouse_tracking()` helper on the
+  handler rather than duplicating the `isatty`/`non_interactive` gate at each call site.
+- [x] `agentworks-reviewer` pass; clean, no blockers. Findings folded: added DEC mode `1003`
+      (any-motion) to the reset (final `\x1b[?1000;1002;1003;1006;1015l`; `1005` excluded as
+      legacy), reconciled LLD sec 10 to the checked-not-live-reproduced wording, recorded the
+      prompt-path deferral above.
 
 ## Phase 3: Convert the issue's named flows
 

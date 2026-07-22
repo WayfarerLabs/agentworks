@@ -269,16 +269,23 @@ here:
 
 ## 10. Confirm mouse-mode reset (`cli/_typer_output.py`, Phase 2)
 
-- Candidate DECRST reset, written to the prompt's terminal stream **before** reading confirm input:
-  `\x1b[?1000;1002;1006;1015l` (disables VT200 / button-event / SGR / urxvt mouse reporting). The
-  minimal subset is confirmed against a live reproduction in Phase 2; `1006` (SGR, the `^[[<..M`
-  form) is the primary culprit.
+- DECRST reset, written to the prompt's terminal stream **before** reading confirm input:
+  `\x1b[?1000;1002;1003;1006;1015l` (disables VT200 / button-event / any-motion / SGR / urxvt mouse
+  reporting; `1003` closes the any-motion gap so a full-screen TUI that left it on stops emitting
+  reports, and `1005` UTF-8 mouse is intentionally excluded as a legacy encoding superseded by
+  `1006`). The subset was checked against the xterm control-sequence reference in Phase 2; a
+  live-TTY reproduction was not exercisable in the (headless) dev environment, so live confirmation
+  is deferred to an operator (see the open-items note). `1006` (SGR, the `^[[<..M` form) is the
+  primary culprit.
 - Emitted only when the stream is a TTY (same `isatty` guard as color), so piped/non-interactive
   runs are unaffected. Scoped to the `TyperHandler` confirm path; other handlers and roles are
   untouched.
 
 ## Open items deferred to implementation (not decisions)
 
-- Exact minimal mouse-reset subset (pinned after the Phase 2 reproduction).
+- Exact mouse-reset subset: pinned as `\x1b[?1000;1002;1003;1006;1015l` (the LLD's candidate plus
+  `1003` any-motion), checked against the xterm control-sequence reference (Phase 2). A live-TTY
+  reproduction was not exercisable in the headless dev environment; an operator should confirm on a
+  real terminal using the manual repro steps documented in `cli/tests/test_typer_output.py`.
 - Whether `RESULT` mirrors into the test handler's `info` list or gets its own (leaning `info` for
   back-compat; finalize when updating conftest).

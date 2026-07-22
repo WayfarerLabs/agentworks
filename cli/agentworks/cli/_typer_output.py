@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import sys
 import time
 from typing import TYPE_CHECKING
 
@@ -9,10 +10,24 @@ import click
 import typer
 
 from agentworks.errors import UserAbort
-from agentworks.output import Role, _pad, _render_header
+from agentworks.output import Role, _pad, _render_header, non_interactive
 
 if TYPE_CHECKING:
     from agentworks.output import Progress
+
+# DECRST reset disabling every common xterm mouse-reporting mode: 1000
+# (X11), 1002 (button-event), 1003 (any-motion), 1006 (SGR, the
+# ``^[[<..M`` wire form), and 1015 (urxvt). 1003 is included so a
+# full-screen TUI that left any-motion tracking on keeps no reports
+# flowing after the reset. 1005 (UTF-8 mouse) is intentionally excluded:
+# a legacy encoding superseded by 1006. Guards against issue #211: a
+# prior interactive step can leave xterm mouse tracking enabled, so the
+# confirm prompt's plain input read picks up a stray mouse-event byte
+# sequence (the SGR/1006 form) that leaks into the next line of output.
+# Written to stdout (the stream ``typer.confirm`` prompts and reads on)
+# before the prompt is issued, and only when that stream is a real
+# terminal; see LLD sec 10.
+_MOUSE_TRACKING_DISABLE = "\x1b[?1000;1002;1003;1006;1015l"
 
 
 class _TyperProgress:
@@ -61,6 +76,17 @@ class TyperHandler:
             typer.echo(f"{_pad(level)}{message}")
 
     def confirm(self, message: str, level: int, default: bool = False) -> bool:
+        # stdout is the stream typer.confirm() prompts and reads on (its
+        # default err=False), so that is the stream that must be a real
+        # terminal for the reset to make sense; stream.isatty() is used
+        # rather than output.is_interactive() because that helper
+        # inspects stdin, not the stream the escape is written to (see
+        # the color gate in output-model-lld.md sec 9 for the same
+        # reasoning). non_interactive() additionally suppresses the
+        # reset under --non-interactive even if stdout happens to be a
+        # TTY, keeping piped/non-interactive output byte-plain.
+        if sys.stdout.isatty() and not non_interactive():
+            typer.echo(_MOUSE_TRACKING_DISABLE, nl=False)
         try:
             return typer.confirm(f"{_pad(level)}{message}", default=default)
         except click.exceptions.Abort:
