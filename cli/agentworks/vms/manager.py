@@ -1351,7 +1351,7 @@ def stop_vm(db: Database, config: Config, name: str) -> None:
     # The platform stop call doesn't need SSH to the VM, and holding a
     # wsl.exe sleep subprocess open would fight `wsl --terminate`.
     platform.stop(vm, ops_ctx)
-    output.info(f"VM '{name}' stopped")
+    output.result(f"VM '{name}' stopped")
 
 
 def rekey_vm(
@@ -1540,7 +1540,7 @@ def rekey_vm(
         assert isinstance(ts_target, SSHTransport)
         ts_target.host = new_ip
         if wait_for_reconnect(ts_target):
-            output.info(f"VM '{name}' rekeyed successfully. Tailscale IP: {new_ip}")
+            output.result(f"VM '{name}' rekeyed successfully. Tailscale IP: {new_ip}")
         else:
             output.warn(
                 f"VM '{name}' rekeyed but {new_ip} is not reachable via SSH. "
@@ -1670,7 +1670,7 @@ def delete_vm(
     from agentworks.ssh_config import sync_ssh_config
 
     sync_ssh_config(config, db)
-    output.info(f"VM '{name}' deleted")
+    output.result(f"VM '{name}' deleted")
 
 
 def reinit_vm(

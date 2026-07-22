@@ -443,9 +443,9 @@ def reinit_workspace(
             output.warn(f"agent membership check failed: {e}")
 
         if fixes > 0:
-            output.info(f"\nApplied {fixes} fix(es)")
+            output.result(f"\nApplied {fixes} fix(es)")
         else:
-            output.info("\nAlready up to date")
+            output.result("\nAlready up to date")
 
 
 def _reinit_git_identity(
@@ -849,7 +849,7 @@ def _rehome_vm(
         finally:
             ssh_logger.close()
 
-        output.info(f"\nWorkspace '{ws_name}' rehomed to {new_path}")
+        output.result(f"\nWorkspace '{ws_name}' rehomed to {new_path}")
 
 
 def delete_workspace(
@@ -1222,7 +1222,7 @@ def copy_workspace(
     finally:
         tmp_path.unlink(missing_ok=True)
 
-    output.info(f"Workspace '{source_name}' copied to '{dest_name}'")
+    output.result(f"Workspace '{source_name}' copied to '{dest_name}'")
 
 
 def _workspace_scope(db: Database, vm: VMRow, ws_name: str) -> OperationScope:

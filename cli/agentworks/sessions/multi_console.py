@@ -2104,4 +2104,4 @@ def delete_console(
             f"the VM will be replaced on next 'aw console attach'."
         )
     else:
-        output.info(f"Console '{name}' deleted.")
+        output.result(f"Console '{name}' deleted.")

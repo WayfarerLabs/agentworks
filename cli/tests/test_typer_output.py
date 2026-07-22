@@ -16,13 +16,141 @@ terminal's mouse-report byte stream. To verify by hand on a real terminal:
 
 from __future__ import annotations
 
+import re
 import sys
 
+import click
 import pytest
 import typer
 
 from agentworks import output
 from agentworks.cli._typer_output import TyperHandler
+from agentworks.output import Role
+
+# Strip SGR color escapes so a rendered line can be compared against its
+# byte-plain form (mirrors tests/test_session_agent_filter.py:_plain).
+_ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
+
+
+def _plain(s: str) -> str:
+    return _ANSI_RE.sub("", s)
+
+
+def _tty(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Make both captured streams report as terminals with color allowed."""
+    monkeypatch.delenv("NO_COLOR", raising=False)
+    monkeypatch.setattr(sys.stdout, "isatty", lambda: True)
+    monkeypatch.setattr(sys.stderr, "isatty", lambda: True)
+
+
+# --- Color on a TTY: each colorable role carries its palette entry --------
+
+
+def test_header_role_is_bold_on_a_tty(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
+    _tty(monkeypatch)
+    TyperHandler().emit(Role.HEADER, "Preflight", 0)
+    out = capsys.readouterr().out
+    # The `=== t ===` rule text is preserved; bold is the only TTY add.
+    assert click.style("=== Preflight ===", bold=True) in out
+    assert _plain(out) == "\n=== Preflight ===\n"
+
+
+def test_warning_role_prefix_is_yellow_on_a_tty(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    _tty(monkeypatch)
+    TyperHandler().emit(Role.WARNING, "careful now", 0)
+    err = capsys.readouterr().err
+    # Only the prefix is colored; the message stays default.
+    assert err == f"{click.style('Warning:', fg='yellow')} careful now\n"
+    assert _plain(err) == "Warning: careful now\n"
+
+
+def test_error_role_prefix_is_red_on_a_tty(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    _tty(monkeypatch)
+    TyperHandler().emit(Role.ERROR, "it broke", 0)
+    err = capsys.readouterr().err
+    assert err == f"{click.style('Error:', fg='red')} it broke\n"
+    assert _plain(err) == "Error: it broke\n"
+
+
+def test_result_role_is_dim_green_on_a_tty(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    _tty(monkeypatch)
+    TyperHandler().emit(Role.RESULT, "VM 'box' deleted", 0)
+    out = capsys.readouterr().out
+    assert out == f"{click.style('VM \'box\' deleted', fg='green', dim=True)}\n"
+    assert _plain(out) == "VM 'box' deleted\n"
+
+
+def test_detail_role_is_dim_on_a_tty(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
+    _tty(monkeypatch)
+    TyperHandler().emit(Role.DETAIL, "OK: acl package", 0)
+    out = capsys.readouterr().out
+    # DETAIL renders one level deeper than a sibling BODY line.
+    assert out == f"  {click.style('OK: acl package', dim=True)}\n"
+    assert _plain(out) == "  OK: acl package\n"
+
+
+def test_body_role_is_never_colored_on_a_tty(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    _tty(monkeypatch)
+    TyperHandler().emit(Role.BODY, "Creating workspace", 0)
+    out = capsys.readouterr().out
+    assert out == "Creating workspace\n"
+    assert _ANSI_RE.search(out) is None
+
+
+# --- Plain fallbacks: NO_COLOR, non-TTY, and --non-interactive ------------
+
+
+def _assert_all_roles_byte_plain(capsys: pytest.CaptureFixture[str]) -> None:
+    handler = TyperHandler()
+    handler.emit(Role.HEADER, "Preflight", 0)
+    handler.emit(Role.RESULT, "done", 0)
+    handler.emit(Role.DETAIL, "note", 0)
+    handler.emit(Role.BODY, "step", 0)
+    handler.emit(Role.WARNING, "careful", 0)
+    handler.emit(Role.ERROR, "broke", 0)
+    captured = capsys.readouterr()
+    assert captured.out == "\n=== Preflight ===\ndone\n  note\nstep\n"
+    assert captured.err == "Warning: careful\nError: broke\n"
+    assert _ANSI_RE.search(captured.out) is None
+    assert _ANSI_RE.search(captured.err) is None
+
+
+def test_no_color_env_forces_byte_plain_even_on_a_tty(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.setattr(sys.stdout, "isatty", lambda: True)
+    monkeypatch.setattr(sys.stderr, "isatty", lambda: True)
+    # NO_COLOR is honored by presence, any value (here the empty string).
+    monkeypatch.setenv("NO_COLOR", "")
+    _assert_all_roles_byte_plain(capsys)
+
+
+def test_non_tty_stream_is_byte_plain(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
+    monkeypatch.delenv("NO_COLOR", raising=False)
+    monkeypatch.setattr(sys.stdout, "isatty", lambda: False)
+    monkeypatch.setattr(sys.stderr, "isatty", lambda: False)
+    _assert_all_roles_byte_plain(capsys)
+
+
+def test_non_interactive_forces_byte_plain_even_on_a_tty(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.delenv("NO_COLOR", raising=False)
+    monkeypatch.setattr(sys.stdout, "isatty", lambda: True)
+    monkeypatch.setattr(sys.stderr, "isatty", lambda: True)
+    output.set_non_interactive(True)
+    try:
+        _assert_all_roles_byte_plain(capsys)
+    finally:
+        output.set_non_interactive(False)
 
 
 def test_confirm_resets_mouse_tracking_before_prompting_on_a_tty(

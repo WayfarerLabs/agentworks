@@ -30,7 +30,7 @@ def main() -> None:
         UserAbort,
         ValidationError,
     )
-    from agentworks.output import set_handler
+    from agentworks.output import error, set_handler
 
     set_handler(TyperHandler())
 
@@ -56,7 +56,9 @@ def main() -> None:
     except (NotFoundError, AlreadyExistsError, ValidationError, StateError, AuthorizationError) as e:
         # Clean domain errors: render as a one-liner with no traceback. These
         # are user-facing and a traceback adds noise without diagnostic value.
-        typer.echo(f"Error: {e}", err=True)
+        # The handler owns the (red on a TTY) `Error:` prefix, so pass the
+        # message without it.
+        error(str(e))
         echo_hint(e)
         raise SystemExit(1) from None
     except (ConnectivityError, ExternalError) as e:
@@ -64,8 +66,9 @@ def main() -> None:
         # full traceback to the error log so postmortem diagnosis can see
         # the underlying SSH command, platform API response, etc. Type-qualify
         # the message (Error: SSHError: ...) since these often have messages
-        # that don't carry the failure category in their text.
-        typer.echo(f"Error: {type(e).__name__}: {e}", err=True)
+        # that don't carry the failure category in their text. The handler
+        # owns the `Error:` prefix, so the rendered line is `Error: SSHError: ...`.
+        error(f"{type(e).__name__}: {e}")
         echo_hint(e)
         if debug_enabled():
             raise
@@ -90,7 +93,7 @@ def main() -> None:
         # `raise AgentworksError(...)` from falling into the generic Exception
         # traceback path. Renders as the same clean one-liner the domain
         # categories use.
-        typer.echo(f"Error: {e}", err=True)
+        error(str(e))
         echo_hint(e)
         raise SystemExit(1) from None
     except (click.exceptions.ClickException, click.exceptions.Exit, click.exceptions.Abort):
@@ -113,7 +116,7 @@ def main() -> None:
         if debug_enabled():
             raise
         log_path = record_unhandled_error(e)
-        typer.echo(f"Error: {type(e).__name__}: {e}", err=True)
+        error(f"{type(e).__name__}: {e}")
         if log_path is not None:
             typer.echo(
                 f"(full traceback written to {log_path}; "

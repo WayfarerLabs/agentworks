@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 from types import SimpleNamespace
 
+import click
 import pytest
 import typer
 
@@ -176,6 +178,66 @@ def test_main_wrapper_handles_keyboard_interrupt(
     assert exc_info.value.code == 130
     # No traceback logged -- a Ctrl-C isn't a bug to debug later.
     assert not (tmp_path / "logs" / "error.log").exists()
+
+
+def _domain_error_app() -> typer.Typer:
+    """A minimal app whose one command raises a clean domain error, so we
+    can drive main()'s ERROR-role rendering through the real catch."""
+    from agentworks.errors import NotFoundError
+
+    test_app = typer.Typer()
+
+    @test_app.callback()
+    def _cb() -> None:
+        pass
+
+    @test_app.command("boom")
+    def boom() -> None:
+        raise NotFoundError("vm 'x' not found")
+
+    return test_app
+
+
+def test_domain_error_renders_red_error_prefix_on_a_tty(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """On a TTY the entry catch routes domain errors through
+    ``output.error``, so the handler renders a red ``Error:`` prefix with
+    the message in the default color (mirroring the yellow ``Warning:``)."""
+    from agentworks import cli as cli_mod
+
+    monkeypatch.setattr(cli_mod, "app", _domain_error_app())
+    monkeypatch.setattr("sys.argv", ["agentworks", "boom"])
+    monkeypatch.delenv("NO_COLOR", raising=False)
+    monkeypatch.setattr(sys.stderr, "isatty", lambda: True)
+
+    with pytest.raises(SystemExit) as exc_info:
+        cli_mod.main()
+
+    assert exc_info.value.code == 1
+    err = capsys.readouterr().err
+    assert err == f"{click.style('Error:', fg='red')} vm 'x' not found\n"
+
+
+def test_domain_error_renders_plain_off_tty(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Off a TTY the same error renders byte-plain (matching today's
+    ``Error: <msg>``), with no ANSI leakage."""
+    from agentworks import cli as cli_mod
+
+    monkeypatch.setattr(cli_mod, "app", _domain_error_app())
+    monkeypatch.setattr("sys.argv", ["agentworks", "boom"])
+    monkeypatch.delenv("NO_COLOR", raising=False)
+    monkeypatch.setattr(sys.stderr, "isatty", lambda: False)
+
+    with pytest.raises(SystemExit) as exc_info:
+        cli_mod.main()
+
+    assert exc_info.value.code == 1
+    err = capsys.readouterr().err
+    assert err == "Error: vm 'x' not found\n"
+    assert "\x1b" not in err
 
 
 def test_create_session_rolls_back_on_keyboard_interrupt(

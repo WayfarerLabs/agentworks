@@ -85,10 +85,10 @@ class Role(Enum):
     STATUS = auto()     # reserved: list/describe status values (deferred fast-follow)
 ```
 
-- `ERROR` and `STATUS` are reserved now so the vocabulary is complete, but neither gets a public
-  free function in this effort: `ERROR` is emitted by the entry-point catch when color lands (Phase
-  5), and `STATUS` is the deferred status-column fast-follow. A public `output.error()` is added
-  later only if a caller needs to emit an error line outside the exception path.
+- `STATUS` stays reserved (no public free function): it is the deferred status-column fast-follow.
+  `ERROR` was reserved through Phases 1-4 and is wired in Phase 5: the "add `error()` only if a
+  caller needs it" trigger fired when the entry catch needed to emit ERROR-role lines, so
+  `output.error(message) -> emit(Role.ERROR, message, 0)` now exists (used only by `cli/_entry.py`).
 
 ## 4. Handler protocol (`agentworks/output.py`)
 
@@ -269,8 +269,10 @@ and is pinned here:
   `(full traceback written to ...)` / `(could not write ...)` notes are not errors and are not in
   R13's colorization set; they remain plain `typer.echo(..., err=True)`. This bounds the Phase 5
   change to the `Error:` one-liner.
-- No public `output.error()` free function is added (operator decision 1); the entry catch is the
-  only `ERROR` emitter for now.
+- A public `output.error(message)` free function is added (`emit(Role.ERROR, message, 0)`),
+  mirroring `warn`. The "add `error()` only if we need it" trigger (operator decision 1) fired here:
+  the entry catch is the caller that needs to emit ERROR-role lines. It remains the only `ERROR`
+  emitter.
 
 ## 10. Confirm mouse-mode reset (`cli/_typer_output.py`, Phase 2)
 

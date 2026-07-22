@@ -67,16 +67,16 @@ class Role(Enum):
     """The semantic intent of a one-shot output line.
 
     The handler maps role + section level to concrete indentation and
-    decoration (the free functions never pre-render either). ERROR and
-    STATUS are reserved so the vocabulary is complete; neither has a
-    public free function yet (ERROR is wired at the entry-point catch
-    when color lands; STATUS is the deferred status-column follow-up).
+    decoration (the free functions never pre-render either). ERROR is
+    emitted by :func:`error` (only from the CLI entry-point catch);
+    STATUS is reserved for the deferred status-column follow-up and has
+    no public free function yet.
     """
 
     BODY = auto()  # info(): a normal body line / step
     DETAIL = auto()  # detail(): de-emphasized / secondary body
     WARNING = auto()  # warn(): non-fatal warning, stderr
-    ERROR = auto()  # reserved: error rendering (wired at the entry catch later)
+    ERROR = auto()  # error(): failed terminal outcome, stderr (entry catch)
     HEADER = auto()  # section() header
     RESULT = auto()  # result(): terminal outcome line, always level 0
     STATUS = auto()  # reserved: list/describe status values (deferred)
@@ -418,6 +418,18 @@ def result(message: str) -> None:
     sections.
     """
     _handler.emit(Role.RESULT, message, 0)
+
+
+def error(message: str) -> None:
+    """Emit an error line: a command's failed terminal outcome.
+
+    Always renders at level 0 on stderr. The handler owns the ``Error:``
+    prefix (colored red on a TTY), so callers pass the message text
+    without it, exactly mirroring how :func:`warn` owns ``Warning:``.
+    Emitted only from the CLI entry-point catch (``cli/_entry.py``),
+    which is the sole ``ERROR``-role site.
+    """
+    _handler.emit(Role.ERROR, message, 0)
 
 
 def confirm(message: str, default: bool = False) -> bool:

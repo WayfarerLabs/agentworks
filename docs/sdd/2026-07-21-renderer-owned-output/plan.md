@@ -172,17 +172,40 @@ Definition of done: the terminal handler colorizes warning, error, section-heade
 on a TTY, and emits byte-plain output under `NO_COLOR`, a pipe, or `--non-interactive`.
 Status-column coloring is explicitly deferred to a fast-follow.
 
-- [ ] Implement `_color_enabled(stream)` in `TyperHandler` (`NO_COLOR` + output-stream `isatty()` +
-      `not output.non_interactive()`).
-- [ ] Apply the fixed palette by role: yellow `Warning:`, red `Error:`, bold section header,
-      scannable result line, dimmed de-emphasized (`detail`) body; normal `info` body stays
-      default-colored.
-- [ ] Verify plain output on non-TTY / `NO_COLOR` / `--non-interactive` (no ANSI leakage).
-- [ ] Add/scan tests for the ANSI-strip `_plain` pattern where a test reads a rendered TTY string;
-      no regression in non-interactive callers.
-- [ ] README note on the color convention and the `NO_COLOR` escape hatch (#145 acceptance).
-- [ ] `agentworks-reviewer` + fresh-eyes pass. Close #145 except the deferred status rollout; file /
-      note the status fast-follow.
+- [x] Implement `_color_enabled(stream)` in `TyperHandler` (`NO_COLOR` unset + target-stream
+      `isatty()` + `not output.non_interactive()`), checked against the target stream (stdout for
+      BODY/DETAIL/HEADER/RESULT, stderr for WARNING/ERROR).
+- [x] Apply the fixed palette by role via `click.style`: yellow `Warning:` prefix, red `Error:`
+      prefix, bold section header, dim-green result line, dimmed `detail` body; `info` body stays
+      default-colored. Only the styling is gated; indentation/decoration/stream are unchanged.
+- [x] Wire the `ERROR` role: add `output.error(message)` (`emit(Role.ERROR, message, 0)`) and route
+      `_entry.py`'s `Error:`-labeled branches through it (domain + `AgentworksError` ->
+      `error(str(e))`; connectivity/external + unhandled `Exception` ->
+      `error(f"{type(e).__name__}: {e}")`). `ConfigError`'s `Configuration error:`, `Aborted.`,
+      `Cancelled.`, and the traceback-note lines stay plain (LLD sec 9a). LLD sec 3 / sec 9a
+      updated: the "add `error()` if needed" trigger fired.
+- [x] Route standalone flat-command terminal lines through `result()` (deferred from Phase 4):
+      `delete_vm`, `stop_vm` (success line), `rekey_vm` (success line), `rehome_workspace`,
+      `copy_workspace`, `reinit_workspace` (both outcomes), and `delete_console` (clean-success
+      branch). Left as `info`: shared realizers (`realize_workspace`/`realize_agent`), cascade
+      helpers (`delete_workspace`/`delete_agent`, and `delete_session` whose "Session deleted"
+      precedes cascade cleanup), the `_execute_stop` batch body, `create_console`/
+      `delete_console_record` (shared), the platform-level start/stop/delete sub-steps, and no-op
+      early returns (e.g. "already stopped").
+- [x] Verify plain output on non-TTY / `NO_COLOR` / `--non-interactive` (no ANSI leakage); CliRunner
+      stdout is non-TTY so stays plain.
+- [x] Add/scan tests for the ANSI-strip `_plain` pattern where a test reads a rendered TTY string;
+      no regression in non-interactive callers. (Per-role TTY-color tests + plain-fallback tests in
+      `test_typer_output.py`; TTY/off-TTY `Error:` rendering in `test_error_wrapper.py`.)
+- [x] README note on the color convention and the `NO_COLOR` escape hatch (#145 acceptance).
+- [x] `agentworks-reviewer` + fresh-eyes (Sonnet) pass; both "ship-ready", no blockers, no
+      should-fix. Color-leak analysis verified robust (per-stream gating + `click.echo`'s own
+      ANSI-strip as defense-in-depth); ERROR wiring has no double-prefix; the `result()`-routing
+      judgment (incl. the `stop_vm`/`delete_console` sibling-consistency extension) accepted. Two
+      cosmetic nits declined (long RESULT line; a leading `\n` inside a styled span, renders
+      invisibly). `#145` satisfied except the deferred status-column fast-follow (recorded in
+      "Deliberately out of scope"); the PR body references #145 for the operator to close (token
+      lacks Issues write).
 
 ## Phase 6: Docs, conventions promotion, and closeout
 

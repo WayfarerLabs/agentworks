@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
+import os
 import sys
 import time
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, TextIO
 
 import click
 import typer
@@ -55,24 +56,52 @@ class _TyperProgress:
 
 
 class TyperHandler:
+    def _color_enabled(self, stream: TextIO) -> bool:
+        """True iff color should be applied to output on ``stream``.
+
+        Color is emitted only when the operator has not opted out
+        (``NO_COLOR`` unset, honored by presence for any value), the
+        target stream is a real terminal, and the invocation is not
+        ``--non-interactive``. ``stream.isatty()`` is checked against the
+        actual output stream (stdout for BODY/DETAIL/HEADER/RESULT,
+        stderr for WARNING/ERROR) rather than stdin, because color
+        depends on where the bytes land; see output-model-lld.md sec 9.
+        When this is false, the emit branches below bypass ``click.style``
+        entirely so output is byte-identical to the no-color rendering.
+        """
+        return os.environ.get("NO_COLOR") is None and stream.isatty() and not non_interactive()
+
     def emit(self, role: Role, message: str, level: int) -> None:
+        # Only the styling is gated on _color_enabled; indentation,
+        # decoration, and stream are identical to the plain handlers.
         if role is Role.WARNING:
-            typer.echo(f"{_pad(level)}Warning: {message}", err=True)
+            prefix = "Warning:"
+            if self._color_enabled(sys.stderr):
+                prefix = click.style(prefix, fg="yellow")
+            typer.echo(f"{_pad(level)}{prefix} {message}", err=True)
         elif role is Role.ERROR:
-            typer.echo(f"{_pad(level)}Error: {message}", err=True)
+            prefix = "Error:"
+            if self._color_enabled(sys.stderr):
+                prefix = click.style(prefix, fg="red")
+            typer.echo(f"{_pad(level)}{prefix} {message}", err=True)
         elif role is Role.HEADER:
             if level in (0, 1):
                 typer.echo("")
-            typer.echo(f"{_pad(level)}{_render_header(message, level)}")
+            header = _render_header(message, level)
+            if self._color_enabled(sys.stdout):
+                header = click.style(header, bold=True)
+            typer.echo(f"{_pad(level)}{header}")
         elif role is Role.DETAIL:
-            typer.echo(f"{_pad(level + 1)}{message}")
+            text = click.style(message, dim=True) if self._color_enabled(sys.stdout) else message
+            typer.echo(f"{_pad(level + 1)}{text}")
         elif role is Role.RESULT:
-            typer.echo(f"{_pad(0)}{message}")
+            text = click.style(message, fg="green", dim=True) if self._color_enabled(sys.stdout) else message
+            typer.echo(f"{_pad(0)}{text}")
         else:
-            # BODY renders as a plain body line. Reserved roles fall
-            # through here for now: wiring STATUS (the deferred
-            # fast-follow) or ERROR (Phase 5) must add its own explicit
-            # branch above, not lean on this BODY fall-through.
+            # BODY renders as a plain, default-colored body line. Reserved
+            # roles fall through here for now: wiring STATUS (the deferred
+            # fast-follow) must add its own explicit branch above, not
+            # lean on this BODY fall-through.
             typer.echo(f"{_pad(level)}{message}")
 
     def confirm(self, message: str, level: int, default: bool = False) -> bool:
