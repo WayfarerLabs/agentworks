@@ -21,8 +21,8 @@ issue, develop a fix, and coordinate disclosure.
 Agentworks is a tool for managing agentic workloads on developer-controlled infrastructure. Reports
 we are most interested in include:
 
-- Privilege escalation between agents, workspaces, or the admin user.
-- Escapes from the workspace or session isolation model.
+- Privilege escalation allowing agents or the admin user to escape their intended permissions.
+- Escapes from the agent or VM isolation model.
 - Mishandling of operator credentials (SSH keys, git credentials, Tailscale keys, etc.) by
   Agentworks itself.
 - Supply-chain risks in how Agentworks fetches or installs external tooling.

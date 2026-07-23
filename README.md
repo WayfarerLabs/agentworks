@@ -48,7 +48,7 @@ machine: sessions (each running a harness and drawing on injected secrets/config
 Linux users, work in workspaces, and can be grouped into named consoles, all reachable over the
 tailnet.
 
-![Agentworks VM internals: an Agentworks VM at a vm-site runs sessions, each pairing a tmux session and harness with injected secrets and config. Sessions run as fully isolated Linux users (an admin user plus per-agent users) and work inside workspaces backed by git repos. Any number of sessions can be organized into named consoles, and a tailnet NIC connects the VM directly to the tailnet regardless of platform. The VM sits on a configured platform instance, alongside other VMs in the site and other vm-sites.](docs/images/agw-vm-internals.png)
+![Agentworks VM internals: an Agentworks VM at a vm-site runs sessions, each pairing a tmux session and harness with injected secrets and config. Sessions run as fully isolated Linux users (the admin user or an agent user) and work inside workspaces backed by git repos. Any number of sessions can be organized into named consoles, and a tailnet NIC connects the VM directly to the tailnet regardless of platform. The VM sits on a configured platform instance, alongside other VMs in the site and other vm-sites.](docs/images/agw-vm-internals.png)
 
 ## The Problem Space
 
@@ -123,14 +123,14 @@ exclusive. A good platform should make it possible and straightforward to have b
 
 ## Core Concepts
 
-Agentworks organizes work into six core concepts. Most map to a group of commands documented in the
-[CLI reference](cli/README.md#commands):
+Agentworks organizes work into six core concepts.
 
 ### The Operator - The Person in Control
 
-Agentworks is currently designed around a single human "operator" who is in control of all agentic
+Agentworks is currently designed around a single human **operator** who is in control of all agentic
 workloads. The operator is responsible for creating VMs, workspaces, agents, and sessions, and for
-orchestrating how these components interact.
+orchestrating how these components interact. This is all done via a comprehensive CLI that runs on
+the operator's workstation. For more information, see the [CLI reference](cli/README.md#commands).
 
 Note that while you might find some exceptions, we generally reserve the term "user" for the
 technical Linux users that exist on the VMs (the admin user and the agentic identities).
@@ -140,7 +140,7 @@ technical Linux users that exist on the VMs (the admin user and the agentic iden
 VMs define the base **compute environment** for all workloads. As discussed in
 [ADR 0001](docs/adrs/0001-vm-based-infrastructure.md), Agentworks uses VMs as the fundamental unit
 of compute to provide for strong isolation while providing all the capabilities of a full Linux
-environment (full daemonized services, multi-user, ability to run containers, etc.).
+environment (full daemonized services, multi-user collaboration, ability to run containers, etc.).
 
 VMs further use a single operating system (Debian Bookworm, see
 [ADR 0002](docs/adrs/0002-use-debian-as-the-vm-base-image.md)) to ensure consistency and minimize VM
@@ -178,28 +178,29 @@ Agents are mapped to workspaces, either explicitly via grants or implicitly via 
 below). This mapping drives standard group and filesystem permissions that control what agents are
 able to access.
 
-Note that actors really drove the choice to use VMs as the fundamental compute unit. Containers and
-local workspaces were considered but ultimately rejected because they don't provide the necessary
-isolation for multiple actors to safely coexist. With VMs, actors enjoy all the security and
-isolation benefits of separate Linux users, which is a tried-and-true model that has been proven at
-massive scale for decades.
+Note that actors were a major driving factor in the choice to use VMs as the fundamental compute
+unit. Containers and local workspaces were considered but ultimately rejected because they don't
+provide the necessary isolation for multiple actors to safely coexist. With VMs, actors enjoy all
+the capability provided by a full Linux environment, including the ability to collaborate with other
+actors, all while leveraging the security and isolation benefits of separate Linux users, which is a
+tried-and-true model that has been proven at massive scale for decades.
 
 ### Sessions and Harnesses - The Workloads
 
-A **session** is a specification to run a specific **harness** as an agent in a workspace on a VM.
-The session is the outer wrapper (the tmux session, config/secret specifications, etc.) while the
-harness is the piece that knows how to run a particular tool (e.g. a Claude Code instance, or just a
-plain login shell): it owns starting and restarting the workload and checking that the tool's
-required executables are present on the launch target. A session template selects a harness (e.g.
-`harness: claude-code`) for a default experience and can further customize the behavior with a
-`harness_config` block. For even greater flexibility (e.g. the ability to run a tool that doesn't
-yet have a dedicated harness), the default `shell` harness simply runs a login shell, optionally
-executing a command or just leaving it in interactive mode; a template that names no harness runs
-this built-in `shell` harness.
+A **session** is a specification to run a specific **harness** as an agent user (or the admin user)
+in a workspace on a VM. The session is the outer wrapper (the tmux session, config/secret
+specifications, etc.) while the harness is the piece that knows how to run a particular tool (e.g. a
+Claude Code instance, or just a plain login shell): it owns starting and restarting the workload and
+checking that the tool's required executables are present on the launch target. A session template
+selects a harness (e.g. `harness: claude-code`) for a default experience and can further customize
+the behavior with a `harness_config` block. For even greater flexibility (e.g. the ability to run a
+tool that doesn't yet have a dedicated harness), the default `shell` harness simply runs a login
+shell, optionally executing a command or just leaving it in interactive mode; a template that names
+no harness runs this built-in `shell` harness.
 
-Because harnesses are a distinct extension layer, they can be built to integrate tightly with their
-target tool (e.g. Claude Code), maximizing the functionality and value of running that tool in
-Agentworks.
+Because harnesses are a distinct extension layer separate from the core, they can be built to
+integrate tightly with their target tool (e.g. Claude Code), maximizing the functionality and value
+of running that tool in Agentworks.
 
 A unique name and a persistent tmux session allow the operator to have any number of concurrent
 workloads running across their VMs, workspaces, and agents. Agentworks allows the operator to attach
