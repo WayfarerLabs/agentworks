@@ -36,10 +36,7 @@ if TYPE_CHECKING:
     from agentworks.sessions.nodes import PendingSessionNode
     from agentworks.sessions.templates import ResolvedSessionTemplate
     from agentworks.vms.nodes import LiveVMNode
-    from agentworks.workspaces.nodes import (
-        LiveWorkspaceNode,
-        PendingWorkspaceNode,
-    )
+    from agentworks.workspaces.nodes import PendingWorkspaceNode
     from agentworks.workspaces.templates import (
         ResolvedTemplate as ResolvedWorkspaceTemplate,
     )
@@ -93,7 +90,6 @@ class SessionGraph:
     """
 
     vm_node: LiveVMNode
-    workspace_node: LiveWorkspaceNode | PendingWorkspaceNode
     agent_node: LiveAgentNode | PendingAgentNode | None
     session_node: PendingSessionNode
     pending_workspace: PendingWorkspaceNode | None

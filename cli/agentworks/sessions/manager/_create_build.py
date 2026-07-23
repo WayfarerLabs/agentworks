@@ -173,7 +173,7 @@ def _build_session_graph(
         name,
         template,
         agent=agent_node,
-        admin=agent_name is None,
+        admin=plan.is_admin_mode,
         workspace=workspace_node,
         vm=vm_node,
     )
@@ -201,7 +201,7 @@ def _build_session_graph(
                 new_agent=new_agent,
                 agent_template=agent_template,
                 existing_agent=existing_agent,
-                is_admin_mode=(agent_name is None),
+                is_admin_mode=plan.is_admin_mode,
             ),
         ]
     )
@@ -213,12 +213,11 @@ def _build_session_graph(
         workspace=workspace_name,
         session=name,
         agent=agent_name,
-        admin=agent_name is None,
+        admin=plan.is_admin_mode,
     )
 
     return SessionGraph(
         vm_node=vm_node,
-        workspace_node=workspace_node,
         agent_node=agent_node,
         session_node=session_node,
         pending_workspace=pending_workspace,

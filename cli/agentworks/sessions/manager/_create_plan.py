@@ -9,10 +9,12 @@ settled :class:`SessionPlan` the build consumes.
 The eight sections accrete a shared working state (the canonicalized flag
 shape plus the VM anchor and its loaded rows), so they are threaded
 through one mutable :class:`_PlanDraft` carrier rather than a long
-parameter list. Splitting the sections into named helpers keeps each
-individually testable and under the complexity ceiling; the draft is
-frozen into the immutable :class:`SessionPlan` at the end. No side
-effect, DB call, or prompt was reordered relative to the original
+parameter list. Splitting the sections into named helpers gives each a
+cohesive purpose and keeps its complexity bounded, with the mutation
+contained to the shared draft. The sections are not independent: each
+runs only in sequence, building on the state the prior ones accreted, and
+the draft is frozen into the immutable :class:`SessionPlan` at the end. No
+side effect, DB call, or prompt was reordered relative to the original
 ``create_session`` prologue.
 """
 
@@ -103,11 +105,11 @@ def _validate_and_canonicalize_flags(draft: _PlanDraft, name: str) -> None:
     # ===== Canonicalize CLI-flag shape into internal form ===================
     #
     # After this block:
-    #   workspace_name : str | None   -- the workspace's name (None until
+    #   workspace_name : str | None   (the workspace's name, None until
     #                                    DB lookup / default-to-session-name)
-    #   new_workspace  : bool         -- True iff we're creating it
+    #   new_workspace  : bool         (True iff we're creating it)
     #   workspace_template : str | None
-    #   agent_name : str | None       -- the agent's name (None == admin mode)
+    #   agent_name : str | None       (the agent's name, None == admin mode)
     #   new_agent  : bool
     #   agent_template : str | None
     #
@@ -246,7 +248,7 @@ def _lookup_workspace_and_prompt_mode(db: Database, draft: _PlanDraft, name: str
     # ``known_vm`` is set, the chooser filters to that VM's agents; when
     # not, it shows agents across all VMs (each labeled with its VM) and
     # picking one sets the VM. ``admin`` and ``[Create new agent]`` don't
-    # pin a VM -- those paths fall through to the VM-prompt at the end.
+    # pin a VM: those paths fall through to the VM-prompt at the end.
 
     if draft.agent_name is None and not draft.new_agent and not draft.admin:
         vm_for_mode_prompt: VMRow | None = None
@@ -258,7 +260,7 @@ def _lookup_workspace_and_prompt_mode(db: Database, draft: _PlanDraft, name: str
         if chosen_agent is not None:
             # Existing-agent pick: the prompt already filtered by
             # ``known_vm`` (if set) OR the picked agent's VM becomes
-            # the new known_vm. No vm-anchor cross-check needed -- the
+            # the new known_vm. No vm-anchor cross-check needed: the
             # filter / pick path enforces agreement by construction.
             draft.agent_name = chosen_agent
             draft.existing_agent = db.get_agent(draft.agent_name)
