@@ -208,7 +208,6 @@ def create_session(
         admin=admin,
         vm_name=vm_name,
     )
-    target_vm_name = plan.target_vm_name
 
     # ===== Build the node graph (S9: nodes, resolver union, scope) ==========
     #
@@ -229,7 +228,7 @@ def create_session(
     # through the whole command, with its just-in-time values seeding
     # the boundary resolver so nothing resolves or prompts twice.
     with activation_gate(graph.vm_node, gate_secret_resolver(config, registry, graph.resolver)):
-        vm = _reload_vm(db, target_vm_name)
+        vm = _reload_vm(db, plan.target_vm_name)
         target, run_command = _build_live_transport(vm, config)
 
         secret_values, agent_target = _preflight_and_resolve(config, plan, graph, vm, target)
