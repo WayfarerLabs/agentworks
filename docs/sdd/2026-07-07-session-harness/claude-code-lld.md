@@ -234,16 +234,11 @@ never inspects session state.
 
 ## Config vocabulary (pinned, v1)
 
-`claude-code`'s `harness_config` vocabulary is five optional fields:
+`claude-code`'s `harness_config` vocabulary is exactly three optional fields:
 
 - `permission_mode` (string) -> `--permission-mode`
 - `model` (string) -> `--model`
 - `extra_args` (list of strings) -> appended verbatim
-- `pass_oauth_token` (bool) -> declares and delivers the OAuth token secret (issue #220; see the
-  out-of-v1 note below for the shape)
-- `oauth_token_secret` (string) -> the secret name the token is read from (default
-  `claude-code-oauth-token`); requires `pass_oauth_token = true` in the same block, and an empty
-  name is a `ConfigError` rather than a silent fallback to the default
 
 Any other field is a `ConfigError` from `validate_config` naming the harness and the field (FRD R4).
 
@@ -290,12 +285,9 @@ following are NOT built here; `extra_args` is the interim escape hatch for any o
 - **User-level MCP inheritance** and its non-inheritance default (the one harness-owned security
   fix; its provisioning face is the `claude-code` `harness-user-provisioner`, not this SDD).
 - **Question-timeout control** (a future `harness_config` field for unattended sessions).
-- **Claude-subscription (OAuth) authentication** IMPLEMENTED (issue #220): the shape pinned as a
-  provision-time credential, not an interactive step, so it never touches the walk-away boundary.
-  The operator runs `claude setup-token` (one-year token) and maps it to a declared secret; the
-  `harness_config` fields `pass_oauth_token` / `oauth_token_secret` declare that secret, and the
-  harness delivers its resolved value as the `CLAUDE_CODE_OAUTH_TOKEN` session env var (the
-  value-level `env_contributions` hook, never the pane command string).
+- **Claude-subscription (OAuth) authentication** (touches the walk-away boundary; deferred until its
+  shape is pinned). Note v2.1.205 exposes `claude setup-token` and `claude auth`, but wiring an auth
+  mode is out of v1.
 - **Remote-control enablement** (v2.1.205 has `--remote-control [name]`; a plain opt-in toggle, off
   by default, no special harness responsibility, exposed only when its field is added).
 

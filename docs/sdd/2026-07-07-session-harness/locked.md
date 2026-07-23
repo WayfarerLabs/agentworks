@@ -60,3 +60,22 @@ The FRD's "Target state: the harness as a tool adapter" is forward-looking: a se
 provisioning twin, a `harness-user-provisioner` (and possible `workspace` / `vm` kin), which would
 re-home `claude_marketplaces` / `claude_plugins` and the user-level MCP security default. None of
 that is in this effort; it is recorded so the v1 boundaries read as deliberate.
+
+## Post-lock ledger
+
+- **2026-07-22 (`feat/claude-code-oauth-token`, issue #220, post-lock):** the FRD R4 reserved future
+  direction "Claude-subscription (OAuth) authentication" shipped, with the shape pinned as a
+  provision-time credential rather than a launch-time interactive step, so it never touches the
+  walk-away invariant. The operator mints a long-lived token (`claude setup-token`) and maps it to a
+  declared secret; new `claude-code` `harness_config` fields `pass_oauth_token` /
+  `oauth_token_secret` declare that secret (the first secret-declaring harness: the `secret_refs`
+  plumbing this SDD left inert now carries a real reference, and `harness_config` is five fields,
+  not three), and a new value-level `Harness.env_contributions` hook delivers the resolved value
+  into the session env as `CLAUDE_CODE_OAUTH_TOKEN` at both create and restart, never on the pane
+  command string. Statements in the body files that the built-ins declare no secrets or that the
+  vocabulary is three fields now read as historical. Level note (operator ruling): auth is
+  conceptually a property of the user a session runs as, so the token declaration's target-state
+  home is the `harness-user-provisioner` recorded above, either persisting auth idempotently at the
+  user level if the tool supports that, or emitting user-level env merged into sessions at launch;
+  the session-template config is the interim home, and the launch-time `env_contributions` delivery
+  stays under both shapes.
