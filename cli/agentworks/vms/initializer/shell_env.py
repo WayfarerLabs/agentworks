@@ -116,6 +116,23 @@ def _write_agentworks_profile(
 
     try:
         lines = ["# Managed by agentworks -- do not edit"]
+        # Cross-agent isolation of the admin's files is enforced by the 0750
+        # admin home + private primary group (see the "Admin home permissions"
+        # step in driver._phase_b_setup): once agent users cannot search the
+        # home, files inside it are unreachable regardless of their own mode,
+        # so the umask adds nothing there. Its real value is defense-in-depth
+        # for artifacts the admin writes OUTSIDE its home: /tmp, $TMPDIR, and
+        # any world-traversable shared directory, where the file's own mode is
+        # what protects it. 027 is portable across sh/bash/zsh. It does NOT
+        # reduce group access inside a workspace: workspace dirs carry a POSIX
+        # default ACL (setfacl -d, see workspaces/backends/vm.py) that makes new
+        # files inherit group rwx regardless of the process umask, so
+        # collaboration is preserved. Coverage is partial by design: this rides
+        # the login-shell profile chain, so non-login `sh -c`, cron, systemd
+        # user units, and sftp/scp keep the default umask 022. The 0750 home is
+        # the boundary; the umask is a supplement. Emitted here (not appended
+        # separately) so it survives every rewrite of this file on reinit.
+        lines.append("umask 027")
         if identity_env:
             for key, value in identity_env.items():
                 lines.append(f"export {key}={shlex.quote(value)}")
@@ -132,6 +149,58 @@ def _write_agentworks_profile(
             )
     except SSHError as e:
         msg = f"shell profile write failed: {e}"
+        logger.warning(msg)
+        output.warn(msg)
+
+
+def _harden_admin_home(
+    target: Transport,
+    *,
+    home: str,
+    admin_username: str,
+    logger: SSHLogger,
+) -> None:
+    """Tighten the admin's home to mode 0750 and verify the primary group is
+    private. The admin counterpart of the agent-home hardening in
+    ``agentworks.agents.initializer.create_agent_on_vm``.
+
+    The bootstrap ``useradd -m`` honors the system umask (022), leaving the
+    admin home world-readable (0755), which lets any agent user on the VM read
+    the admin's git credentials, shell history, tool caches, and dotfiles.
+    Workspaces live at ``paths.vm_workspaces`` (validated outside ``/home``, see
+    ``config.validation.validate_vm_workspaces``), not under the admin home, so
+    nothing an agent must reach lives here and 0750 breaks no cross-user access.
+
+    The admin owns its own home, so the ``chmod`` needs no sudo (contrast the
+    agent path, where the admin transport chmods a DIFFERENT user's home). The
+    chmod is idempotent, so this is safe on both initial provision and reinit.
+
+    Post-condition guard: the bootstrap forces a private primary group on the
+    create path (``groupadd -f`` + ``useradd -g``), but reinit, VMs provisioned
+    before that step existed, and odd images can still leave a shared primary
+    group, which would make the 0750 home group-readable by whoever shares that
+    group. Warn (do not fail) so drift is surfaced with a fix hint rather than
+    silently defeating isolation; a hard fail could block a legitimately custom
+    setup, and the bootstrap already covers fresh creates.
+    """
+    logger.step("Admin home permissions")
+    try:
+        target.run(f"chmod 0750 {shlex.quote(home)}")
+
+        primary_group = target.run(f"id -gn {shlex.quote(admin_username)}", check=False)
+        if primary_group.ok and primary_group.stdout.strip() != admin_username:
+            msg = (
+                f"admin '{admin_username}' primary group is "
+                f"'{primary_group.stdout.strip()}', not a private per-user group; "
+                f"its home ({home}) cannot be made private and may be readable by "
+                f"other members of that group. Fix on the VM with "
+                f"'sudo groupadd {admin_username} && sudo usermod -g {admin_username} {admin_username}' "
+                f"and reinit, or check the image's group model."
+            )
+            logger.warning(msg)
+            output.warn(msg)
+    except SSHError as e:
+        msg = f"admin home permissions setup failed: {e}"
         logger.warning(msg)
         output.warn(msg)
 

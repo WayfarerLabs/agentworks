@@ -13,7 +13,7 @@ import sys
 from pathlib import Path
 
 from agentworks.config.models import DefaultsConfig, OperatorConfig, PathsConfig, _SectionLineMap
-from agentworks.config.validation import SSH_HOST_PREFIX_RE
+from agentworks.config.validation import SSH_HOST_PREFIX_RE, validate_vm_workspaces
 from agentworks.env import EnvEntry
 from agentworks.errors import ConfigError
 from agentworks.git_credentials.credential import GitCredentialConfig
@@ -209,6 +209,7 @@ def _load_paths(data: dict[str, object]) -> PathsConfig:
         raise ConfigError("[paths] must be a table")
     defaults = PathsConfig()
     vm_ws = str(raw["vm_workspaces"]) if "vm_workspaces" in raw else defaults.vm_workspaces
+    validate_vm_workspaces(vm_ws)
     if "vscode_workspaces" in raw:
         vscode_ws = _expand(str(raw["vscode_workspaces"]))
     elif "code_workspaces" in raw:
