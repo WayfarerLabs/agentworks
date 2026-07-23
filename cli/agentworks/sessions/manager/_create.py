@@ -56,6 +56,7 @@ def _build_live_transport(vm: VMRow, config: Config) -> tuple[Transport, RunComm
 
 def _preflight_and_resolve(
     config: Config,
+    *,
     plan: SessionPlan,
     graph: SessionGraph,
     vm: VMRow,
@@ -215,7 +216,7 @@ def create_session(
     # boundary secret union onto the resolver, and the operation scope.
     # No SSH, no DB writes, no secret resolution (that waits for the
     # gate).
-    graph = _build_session_graph(db, config, registry, plan, template_name=template_name)
+    graph = _build_session_graph(db, config, registry=registry, plan=plan, template_name=template_name)
 
     from agentworks.orchestration.activation import (
         activation_gate,
@@ -231,7 +232,7 @@ def create_session(
         vm = _reload_vm(db, plan.target_vm_name)
         target, run_command = _build_live_transport(vm, config)
 
-        secret_values, agent_target = _preflight_and_resolve(config, plan, graph, vm, target)
+        secret_values, agent_target = _preflight_and_resolve(config, plan=plan, graph=graph, vm=vm, target=target)
 
         # ===== Dependency-ordered roll-forward (S11) ========================
         #
@@ -239,4 +240,15 @@ def create_session(
         # the realized ephemerals on any failure. The two-level rollback
         # (session-slice teardown, then ephemeral unwind) and the emit
         # order live in _roll_forward.
-        _roll_forward(db, config, registry, plan, graph, vm, target, run_command, agent_target, secret_values)
+        _roll_forward(
+            db,
+            config,
+            registry=registry,
+            plan=plan,
+            graph=graph,
+            vm=vm,
+            target=target,
+            run_command=run_command,
+            agent_target=agent_target,
+            secret_values=secret_values,
+        )

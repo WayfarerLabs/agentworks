@@ -42,6 +42,7 @@ if TYPE_CHECKING:
 def _realize_ephemerals(
     db: Database,
     config: Config,
+    *,
     registry: Registry,
     plan: SessionPlan,
     graph: SessionGraph,
@@ -106,6 +107,7 @@ def _realize_ephemerals(
 def _start_session_slice(
     db: Database,
     config: Config,
+    *,
     registry: Registry,
     plan: SessionPlan,
     graph: SessionGraph,
@@ -350,6 +352,7 @@ def _start_session_slice(
 def _roll_forward(
     db: Database,
     config: Config,
+    *,
     registry: Registry,
     plan: SessionPlan,
     graph: SessionGraph,
@@ -371,8 +374,28 @@ def _roll_forward(
     # rolled back.
     log = RealizationLog()
     try:
-        _realize_ephemerals(db, config, registry, plan, graph, vm, secret_values, log)
-        _start_session_slice(db, config, registry, plan, graph, vm, target, run_command, agent_target, secret_values)
+        _realize_ephemerals(
+            db,
+            config,
+            registry=registry,
+            plan=plan,
+            graph=graph,
+            vm=vm,
+            secret_values=secret_values,
+            log=log,
+        )
+        _start_session_slice(
+            db,
+            config,
+            registry=registry,
+            plan=plan,
+            graph=graph,
+            vm=vm,
+            target=target,
+            run_command=run_command,
+            agent_target=agent_target,
+            secret_values=secret_values,
+        )
     except KeyboardInterrupt:
         output.warn(f"Cancelling session create '{plan.name}'... rolling back.")
         log.unwind()

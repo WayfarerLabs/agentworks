@@ -45,9 +45,9 @@ if TYPE_CHECKING:
 def _build_session_graph(
     db: Database,
     config: Config,
+    *,
     registry: Registry,
     plan: SessionPlan,
-    *,
     template_name: str | None,
 ) -> SessionGraph:
     """Resolve the template and build the node graph, resolver union, and
