@@ -19,8 +19,12 @@ Groups:
 
 ### Admin user
 
-The operator's identity on the VM. Created during Phase A (bootstrap). Has unrestricted sudo. Added
-to all workspace groups automatically.
+The operator's identity on the VM. Created during Phase A (bootstrap) with a private primary group
+(`useradd -m -U`) so the admin home can be locked down. Has unrestricted sudo. Added to all
+workspace groups automatically. Its home (`/home/agentworks`) is tightened to mode 0750 during Phase
+B (both initial provision and reinit), with the same `id -gn` post-condition guard and `umask 027`
+login-shell supplement as the agent home below; the reasoning is identical, applied to the admin's
+own credentials, history, and caches so agent users on the VM cannot read them.
 
 ### Agent users
 
@@ -95,6 +99,13 @@ Workspace group membership is NOT set during creation. It is managed entirely by
 | ------------- | ---------- | ------------- | --------------------------- |
 | Workspace dir | admin      | ws--WORKSPACE | Agents read/write via grant |
 | Agent home    | agent-user | agent-user    | Agent-private               |
+| Admin home    | admin      | admin         | Admin-private               |
+
+Workspaces must live outside `/home` (config load rejects a `paths.vm_workspaces` value at or under
+`/home`; see `config.validation.validate_vm_workspaces`). If a workspace were nested under a home,
+the 0750 homes above would have to be reopened to world-traversable for agents to reach it,
+defeating the isolation. Keeping workspaces on a data-volume path (default
+`/opt/agentworks/workspaces`) is what makes the 0750 homes safe.
 
 Agent-private is enforced, not just conventional. Cross-agent isolation of the home comes from the
 0750 mode plus the private primary group forced by `useradd -U`: with no other user in the group,

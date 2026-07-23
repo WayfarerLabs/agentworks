@@ -61,3 +61,39 @@ def validate_admin_username(admin_username: str) -> None:
             f"invalid admin_username '{admin_username}'. Must be a valid Linux username "
             "(lowercase, alphanumeric/hyphens/underscores, max 32 chars)"
         )
+
+
+def validate_vm_workspaces(path: str) -> None:
+    """Reject a ``paths.vm_workspaces`` value that lives at or under ``/home``.
+
+    ``/home`` is the Linux user-home namespace on the VM. The admin and agent
+    users each own ``/home/<user>``, and those homes are locked to mode 0750
+    (agent-private, admin-private) for cross-user isolation. A workspace tree
+    nested under ``/home`` would either collide with a future ``useradd -m``
+    home or force one of those homes back to world-traversable so agents could
+    reach the shared workspace, defeating the isolation. Keeping workspaces
+    outside ``/home`` is the single source of truth that makes the 0750 homes
+    safe, so we reject the misconfiguration at load time rather than warn at
+    provisioning time.
+
+    The path is normalized first (``//`` collapsed, trailing slash and ``.``
+    segments removed) so ``/home``, ``/home/``, ``/home/foo``, and
+    ``/home/foo/bar`` are all rejected. The check is ``== "/home"`` or a
+    ``/home/`` prefix on the normalized path, NOT a bare ``/home`` prefix, so
+    sibling paths that merely start with those characters (``/homelab``,
+    ``/home2/ws``) are accepted. Raises ``ConfigError`` (the type ``_load_paths``
+    already raises) with a migration hint.
+    """
+    import os.path
+
+    from agentworks.errors import ConfigError
+
+    normalized = os.path.normpath(path)
+    if normalized == "/home" or normalized.startswith("/home/"):
+        raise ConfigError(
+            f"paths.vm_workspaces must not be at or under /home (got {path!r}, "
+            f"normalized to {normalized!r}). /home is the Linux user-home namespace "
+            "on the VM and will collide with a future 'useradd -m'. Use the default "
+            "'/opt/agentworks/workspaces', or mount a data volume at that path (or "
+            "symlink it there), rather than nesting workspaces under /home."
+        )

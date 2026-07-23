@@ -44,6 +44,7 @@ from .packages import (
 )
 from .shell_env import (
     _ensure_agentworks_files_sourced,
+    _harden_admin_home,
     _write_agentworks_identity_profile,
     _write_agentworks_profile,
     _write_agentworks_rc,
@@ -665,18 +666,23 @@ def _phase_b_setup(
             logger.warning(msg)
             output.warn(msg)
 
+        # Non-fatal: tighten the admin's home to 0750 (mirrors the agent-home
+        # hardening in agents/initializer.py). Runs on both initial provision
+        # and reinit (both reach _phase_b_setup), so a pre-existing
+        # world-readable admin home is repaired on the next reinit.
+        _harden_admin_home(ts_target, home=home, admin_username=admin_username, logger=logger)
+
         # Non-fatal: reconcile authorized_keys
         _reconcile_authorized_keys(ts_target, config, home, logger)
 
         # Non-fatal: workspaces directory with ACLs for group-writable files.
         # Default ACLs ensure new files/dirs inherit group rwx regardless of umask.
         # Access ACLs fix existing files. Applied recursively to cover all workspaces.
+        # vm_workspaces is guaranteed outside /home: config load rejects a
+        # value at or under /home (see config.validation.validate_vm_workspaces),
+        # so the admin home can stay 0750 without a workspace under it forcing
+        # the home world-traversable. One source of truth, no runtime warning.
         workspaces_dir = config.paths.vm_workspaces
-        if workspaces_dir.startswith("/home/"):
-            output.warn(
-                f"vm_workspaces is under /home ({workspaces_dir}). "
-                "This may require the home directory to be world-traversable."
-            )
         try:
             # acl is now installed as a system package in _install_system_packages
             ts_target.run(f"mkdir -p {workspaces_dir}", sudo=True)
