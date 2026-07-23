@@ -33,6 +33,7 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from agentworks.config import Config
+    from agentworks.ssh import SSHLogger
 
 _TOKEN_VALUE = "sk-oauth-abc123"
 
@@ -48,7 +49,12 @@ class _Result:
 class _ClaudeTarget:
     """Transport double: answers the readiness ``command -v claude`` probe
     and the ``<sid>.jsonl`` find probe (transcript always present, so the
-    op resumes), recording nothing the tests need beyond an ok result."""
+    op resumes). ``received_logger`` records the op logger the manager
+    handed the transport factory, so the redaction tests can assert
+    against the logger the LAUNCH transport actually carries, not just
+    any logger the operation constructed."""
+
+    received_logger: SSHLogger | None = None
 
     def run(self, cmd: str, **kwargs: object) -> _Result:
         return _Result(ok=True)
@@ -93,11 +99,18 @@ CLAUDE_CODE_OAUTH_TOKEN = "operator-placeholder"
 """
 
 
-def _patch_transports(monkeypatch: pytest.MonkeyPatch) -> None:
+def _patch_transports(monkeypatch: pytest.MonkeyPatch) -> _ClaudeTarget:
     target = _ClaudeTarget()
-    admin_factory = lambda vm, config, **kwargs: target  # noqa: E731
+
+    def admin_factory(
+        *args: object, logger: SSHLogger | None = None, **kwargs: object
+    ) -> _ClaudeTarget:
+        target.received_logger = logger
+        return target
+
     monkeypatch.setattr("agentworks.transports.transport", admin_factory)
     monkeypatch.setattr("agentworks.sessions.manager.transport", admin_factory)
+    return target
 
 
 def _capture_launch(
@@ -278,49 +291,29 @@ def test_restart_harness_value_wins_over_operator_env_and_warns(
 # -- the resolved token is registered for redaction on the op logger ----------
 
 
-def _capture_loggers(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> list[object]:
-    """Capture every ``SSHLogger`` the operation constructs (rooted in
-    ``tmp_path``, not the user's config dir)."""
-    from agentworks.ssh import SSHLogger
-
-    monkeypatch.setattr("agentworks.ssh.LOG_DIR", tmp_path)
-    created: list[object] = []
-    real_init = SSHLogger.__init__
-
-    def _capturing_init(self: object, *args: object, **kwargs: object) -> None:
-        real_init(self, *args, **kwargs)  # type: ignore[arg-type]
-        created.append(self)
-
-    monkeypatch.setattr(SSHLogger, "__init__", _capturing_init)
-    return created
-
-
 def test_create_registers_the_token_for_redaction(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The create path registers every resolved secret value on the op
-    logger, so a command carrying the token (the tmux ``-e`` flags) is
-    redacted from the op log and from raised SSHError text (asserted
-    through the public ``sanitize`` surface)."""
+    """The create path registers every resolved secret value on the
+    logger carried by the LAUNCH transport (the one the manager handed
+    the transport factory), so a command carrying the token (the tmux
+    ``-e`` flags) is redacted from the op log and from raised SSHError
+    text (asserted through the public ``sanitize`` surface)."""
     from agentworks.sessions.manager import create_session
 
     monkeypatch.setenv("AW_SECRET_CLAUDE_CODE_OAUTH_TOKEN", _TOKEN_VALUE)
+    monkeypatch.setattr("agentworks.ssh.LOG_DIR", tmp_path)
     db = Database(tmp_path / "test.db")
     _seed_lima_vm(db)
     config = _make_config(tmp_path, _CC_TEMPLATE)
-    _patch_transports(monkeypatch)
+    target = _patch_transports(monkeypatch)
     _common_stubs(monkeypatch)
     _capture_launch(monkeypatch, {})
-    loggers = _capture_loggers(monkeypatch, tmp_path)
 
     create_session(db, config, name="s1", workspace="ws1", admin=True, template_name="claude")
 
-    assert any(
-        lg.sanitize(_TOKEN_VALUE) == "[REDACTED]"  # type: ignore[attr-defined]
-        for lg in loggers
-    ), "no op logger has the token registered for redaction"
+    assert target.received_logger is not None
+    assert target.received_logger.sanitize(_TOKEN_VALUE) == "[REDACTED]"
     db.close()
 
 
@@ -328,11 +321,13 @@ def test_restart_registers_the_token_for_redaction(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """The restart path registers the values from BOTH resolve passes
-    (the graph union carries the token) on the op logger."""
+    (the graph union carries the token) on the launch transport's
+    logger."""
     from agentworks.sessions import manager as session_manager
     from agentworks.sessions.manager import restart_session
 
     monkeypatch.setenv("AW_SECRET_CLAUDE_CODE_OAUTH_TOKEN", _TOKEN_VALUE)
+    monkeypatch.setattr("agentworks.ssh.LOG_DIR", tmp_path)
     db = Database(tmp_path / "test.db")
     _seed_lima_vm(db)
     db.insert_session(
@@ -344,7 +339,7 @@ def test_restart_registers_the_token_for_redaction(
     )
     db.update_session_pid("s1", 4242, boot_id="boot-x")
     config = _make_config(tmp_path, _CC_TEMPLATE)
-    _patch_transports(monkeypatch)
+    target = _patch_transports(monkeypatch)
     _common_stubs(monkeypatch)
     monkeypatch.setattr(session_manager, "_ensure_pid", lambda session, **k: session)
     monkeypatch.setattr(
@@ -352,14 +347,11 @@ def test_restart_registers_the_token_for_redaction(
     )
     monkeypatch.setattr(session_manager, "_kill_session", lambda *a, **k: True)
     _capture_launch(monkeypatch, {})
-    loggers = _capture_loggers(monkeypatch, tmp_path)
 
     restart_session(db, config, name="s1", yes=True)
 
-    assert any(
-        lg.sanitize(_TOKEN_VALUE) == "[REDACTED]"  # type: ignore[attr-defined]
-        for lg in loggers
-    ), "no op logger has the token registered for redaction"
+    assert target.received_logger is not None
+    assert target.received_logger.sanitize(_TOKEN_VALUE) == "[REDACTED]"
     db.close()
 
 

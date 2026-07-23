@@ -107,6 +107,7 @@ def _build_session_target(
     config: Config,
     db: Database,
     admin_target: Transport,
+    logger: SSHLogger | None = None,
 ) -> Transport:
     """Pick the SSH transport for destructive operations on a single session.
 
@@ -115,6 +116,12 @@ def _build_session_target(
     an agent ``Transport`` and probes it; raises StateError with a reinit hint
     if the agent's authorized_keys aren't provisioned.
     For admin sessions, returns the admin target unchanged.
+
+    ``logger`` (when the operation keeps one, e.g. restart) rides into a
+    freshly built agent transport so its commands, from the SSH probe
+    onward, land in the op log and its error text passes the logger's
+    redactions; the admin branch returns ``admin_target`` as-is, which
+    already carries the op logger at those call sites.
 
     Single-session paths use this to make kill / restart operations
     consistent with create: every destructive step on an agent session
@@ -143,7 +150,7 @@ def _build_session_target(
     from agentworks.agents.manager import _assert_agent_ssh_works
     from agentworks.transports import agent_transport
 
-    agent_target = agent_transport(vm, config, agent)
+    agent_target = agent_transport(vm, config, agent, logger=logger)
     _assert_agent_ssh_works(agent_target, agent)
     return agent_target
 
@@ -2486,16 +2493,15 @@ def restart_session(
             # direct agent SSH. _build_session_target always returns a
             # same-uid target, so no sudo is needed for kill.
             is_admin = session.mode == SessionMode.ADMIN.value
+            # The op logger rides into the target (an agent transport for
+            # agent sessions; ``admin_target`` already carries it): its
+            # commands, from the SSH probe through the secret-bearing
+            # tmux launch below, land in the op log and its error text
+            # passes the redactions. Mirrors the create-path builds.
             session_target = _build_session_target(
-                session, vm=vm, config=config, db=db, admin_target=admin_target
+                session, vm=vm, config=config, db=db, admin_target=admin_target,
+                logger=logger,
             )
-            # Attach the op logger (initializer pattern: the ABC declares
-            # ``logger``). For admin sessions this is ``admin_target``,
-            # which already carries it; for agent sessions it is a fresh
-            # agent transport, and the attachment is what routes its
-            # commands (including the secret-bearing tmux launch below)
-            # into the op log and its error text through the redactions.
-            session_target.logger = logger
             session_run_command: RunCommand = session_target.run
             kill_sudo = False
 

@@ -336,7 +336,9 @@ def run(
                 # redaction pass the log file gets (no logger attached
                 # means no registered redactions to apply).
                 msg = f"SSH command failed (exit {result.returncode}): {command}\nstderr: {result.stderr.strip()}"
-                raise SSHError(logger.sanitize(msg) if logger is not None else msg)
+                if logger is not None:
+                    msg = logger.sanitize(msg)
+                raise SSHError(msg)
             return ssh_result
         except subprocess.TimeoutExpired as err:
             last_err = err
