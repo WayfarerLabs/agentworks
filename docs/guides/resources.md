@@ -204,13 +204,22 @@ spec:
     permission_mode: acceptEdits # optional; forwarded to `claude --permission-mode`
     model: opus # optional; forwarded to `claude --model`
     extra_args: [--append-system-prompt, "session {{session_name}}"] # optional escape hatch
+    pass_oauth_token: true # optional; inject a Claude Code OAuth token, skip interactive login
+    oauth_token_secret: claude-code-oauth-token # optional; the secret to read it from (this default)
 ```
 
-- `harness_config` is three optional fields: `permission_mode` and `model` forward verbatim to
+- `harness_config` is five optional fields: `permission_mode` and `model` forward verbatim to
   `claude --permission-mode` / `--model` (their choice sets are Claude's, not validated here), and
   `extra_args` is a list of raw argv tokens appended last, the escape hatch for any flag the harness
   does not model. Unknown fields are errors. `extra_args` elements support the `{{session_name}}` /
   `{{workspace_name}}` variables.
+- `pass_oauth_token` / `oauth_token_secret` wire a long-lived Claude Code OAuth token (minted with
+  `claude setup-token`, subscription accounts only) into the session as the
+  `CLAUDE_CODE_OAUTH_TOKEN` env var so it skips the interactive login. The token is read from the
+  named secret (default `claude-code-oauth-token`) and rides the env channel like any other session
+  secret. Setting `oauth_token_secret` requires `pass_oauth_token = true` in the same block. Watch
+  the precedence footgun: an `ANTHROPIC_API_KEY` / `ANTHROPIC_AUTH_TOKEN` / cloud-provider auth var
+  already in the target env silently wins over the OAuth token.
 - The only requirement checked on the launch target is that `claude` is installed. The chosen action
   (resume vs new session) is announced in the pane on start, so it is never silent.
 

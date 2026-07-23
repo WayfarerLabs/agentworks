@@ -203,9 +203,12 @@ class ClaudeCodeHarness(Harness):
         The value was already resolved by the graph's boundary pass;
         ``ctx.secret`` reads it from the scoped view (the name was declared
         by :meth:`validate_config`, so the session node's ``secret_refs()``
-        covers it, and the hook never touches a resolver). Riding the env
-        channel (not the pane command string) keeps the token out of
-        ``/proc/*/cmdline``, ``ps``, and tmux's ``pane_start_command``.
+        covers it, and the hook never touches a resolver). The token rides
+        the env channel like every other session secret, never baked into
+        the persistent pane command string (which would sit readable in
+        tmux's ``pane_start_command`` for the session's whole lifetime); it
+        shares exactly the exposure class of existing secret-backed env
+        directives.
         """
         if self.config.get("pass_oauth_token") is not True:
             return {}

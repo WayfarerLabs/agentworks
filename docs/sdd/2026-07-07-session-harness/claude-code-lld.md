@@ -234,11 +234,16 @@ never inspects session state.
 
 ## Config vocabulary (pinned, v1)
 
-`claude-code`'s `harness_config` vocabulary is exactly three optional fields:
+`claude-code`'s `harness_config` vocabulary is five optional fields:
 
 - `permission_mode` (string) -> `--permission-mode`
 - `model` (string) -> `--model`
 - `extra_args` (list of strings) -> appended verbatim
+- `pass_oauth_token` (bool) -> declares and delivers the OAuth token secret (issue #220; see the
+  out-of-v1 note below for the shape)
+- `oauth_token_secret` (string) -> the secret name the token is read from (default
+  `claude-code-oauth-token`); requires `pass_oauth_token = true` in the same block, and an empty
+  name is a `ConfigError` rather than a silent fallback to the default
 
 Any other field is a `ConfigError` from `validate_config` naming the harness and the field (FRD R4).
 

@@ -933,6 +933,12 @@ def _merge_harness_env(
     touches neither the env-chain resolve nor ``compose_env``'s drift
     guard. Identity vars (``AGENTWORKS_*``) need no carve-out: a harness
     contributes none, so the merge never shadows one.
+
+    A secret contribution (claude-code's OAuth token) lands in the session
+    env here, so it reaches the pane over the same env channel as every
+    other session secret rather than being baked into the pane command
+    string; it shares the exposure class of the existing secret-backed env
+    directives, no better and no worse.
     """
     for key, value in harness.env_contributions(ctx).items():
         if key in session_env:

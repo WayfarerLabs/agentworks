@@ -419,8 +419,13 @@ ssh_private_key = "~/.ssh/id_ed25519"        # required: used for SSH connection
 # backend reads `AW_SECRET_CLAUDE_CODE_OAUTH_TOKEN`. Notes:
 #   - Subscription accounts only (Pro / Max / Team / Enterprise), NOT
 #     Console API accounts.
-#   - The token rides the env channel, never the pane command string, so it
-#     does not leak through `ps` / `/proc` / tmux.
+#   - The token rides the env channel like every other session secret: it is
+#     never baked into the persistent pane command string (which would sit
+#     readable via tmux's `pane_start_command` for the whole session life).
+#     It shares the exposure class of any other secret-backed env var, no
+#     better: env handed to a session does transiently appear in the
+#     `tmux new-session` argv and persists in tmux's session-environment
+#     table, so treat it with the same care as your other session secrets.
 #   - Precedence footgun: if the target env already carries
 #     `ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN`, or a cloud-provider auth
 #     var, those SILENTLY win over the OAuth token.

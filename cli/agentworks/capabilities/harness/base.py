@@ -225,8 +225,10 @@ class Harness(Capability):
         by the graph's boundary resolve), so this never touches a resolver
         and never entangles the env-chain resolve or ``compose_env``'s
         drift guard. A secret value delivered here rides the env channel,
-        never the pane command string, so it cannot leak through
-        ``/proc/*/cmdline``, ``ps``, or tmux's ``pane_start_command``.
+        never baked into the pane command string (which would sit readable
+        in tmux's ``pane_start_command`` for the session's whole lifetime);
+        it shares the exposure class of every other secret-backed env
+        directive.
 
         Default: no contributions. ``shell`` does not override it;
         ``claude-code`` overrides it to pass an OAuth token when

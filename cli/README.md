@@ -544,7 +544,7 @@ The `claude-code` harness runs Claude Code as the session: `session create` star
 session and `session restart` resumes the same conversation when its transcript still exists on disk
 (launching fresh when Claude never wrote one). It needs only that `claude` is installed on the
 launch target, and announces the chosen action (resume vs new session) in the pane, so the decision
-is never silent. Its `harness_config` vocabulary is three optional fields:
+is never silent. Its `harness_config` vocabulary is five optional fields:
 
 - `permission_mode`: forwarded verbatim to `claude --permission-mode` (its choice set is Claude's,
   not validated here).
@@ -552,6 +552,19 @@ is never silent. Its `harness_config` vocabulary is three optional fields:
 - `extra_args`: a list of raw argv tokens appended last, the escape hatch for any flag the harness
   does not model. Each element is one argv token (shell-quoted, never re-split), and elements
   support the `{{session_name}}` / `{{workspace_name}}` variables.
+- `pass_oauth_token`: when `true`, the harness wires a long-lived Claude Code OAuth token into the
+  launched session as the `CLAUDE_CODE_OAUTH_TOKEN` env var, so the session skips the interactive
+  login. You mint the token yourself with `claude setup-token` (a one-year lifetime, subscription
+  accounts only: Pro / Max / Team / Enterprise, not Console API accounts) and map it to a secret via
+  your secret backend. The token rides the env channel like any other session secret, never baked
+  into the pane command string. Precedence footgun: if the target env already carries
+  `ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN`, or a cloud-provider auth var, those silently win over
+  the OAuth token.
+- `oauth_token_secret`: the name of the secret the token is read from (default
+  `claude-code-oauth-token`). Setting it requires `pass_oauth_token = true` in the same
+  `harness_config` block (a secret name with nothing consuming it is a config error); a child
+  template overriding only this field must restate `pass_oauth_token = true`. An empty name is
+  rejected rather than silently falling back to the default.
 
 ```yaml
 apiVersion: agentworks/v1
