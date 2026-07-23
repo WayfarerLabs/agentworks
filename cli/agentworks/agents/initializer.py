@@ -87,6 +87,19 @@ def create_agent_on_vm(
     else:
         admin_target.run(f"usermod -s {shell_path} {linux_user}", sudo=True)
 
+    # Tighten the agent's home to 0750. ``useradd -m`` honors the system
+    # umask (022), leaving home world-readable (0755), which lets any
+    # other agent user on the VM read this agent's scratch artifacts,
+    # logs, shell history, cloned repos, and tool caches. Per-agent Linux
+    # users exist to keep agent credentials and state separate, so a
+    # world-readable $HOME undercuts the isolation. Debian's ``useradd``
+    # creates a private user group (user:user), so 0750 is effectively
+    # private. Idempotent: a no-op when already 0750, so it also fixes
+    # pre-existing agents on reinit. Kept in phase 1 on the admin
+    # transport: this runs before authorized_keys is installed, so the
+    # agent's own SSH session does not exist yet.
+    admin_target.run(f"chmod 0750 {home}", sudo=True)
+
     # Tmux socket infrastructure for the agent (root-owned ``/var/lib/``
     # parent; admin is the only transport that can create it).
     # ensure_agent_socket_root first so this works on VMs that haven't
@@ -482,6 +495,17 @@ def _write_agent_profile(
     from agentworks.vms.initializer import AGENTWORKS_PROFILE
 
     lines = ["# Managed by agentworks -- do not edit"]
+    # Tighten the default file mode for the agent's login shells so files
+    # the agent writes OUTSIDE a workspace (in its own home: scratch,
+    # logs, tool caches) are not group/world-readable, matching the 0750
+    # home. This does NOT reduce group access inside a workspace: the
+    # workspace dir carries a POSIX default ACL (setfacl -d, see
+    # workspaces/backends/vm.py) and a default ACL makes new files inherit
+    # group rwx regardless of the process umask, so collaboration is
+    # preserved. 027 is portable across sh/bash/zsh. Emitted here (not
+    # appended separately) so it survives the second _write_agent_profile
+    # call, which overwrites this file with the accumulated PATH.
+    lines.append("umask 027")
     for key, value in identity_env.items():
         lines.append(f"export {key}={shlex.quote(value)}")
     for p in path_additions or []:

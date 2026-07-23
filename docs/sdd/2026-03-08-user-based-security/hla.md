@@ -72,12 +72,15 @@ Grants are stored in the `agent_workspace_grants` table:
 When an agent is created on a VM:
 
 1. Create the Linux user: `useradd -m -s <shell> agt--<name>`
-2. Configure shell rc file (prompt)
-3. Configure git credentials (if specified in template)
-4. Run user install commands (from template)
-5. Sync dotfiles (from template)
-6. Configure mise (from template)
-7. Record in database
+2. Tighten the home directory to mode 0750 (`useradd -m` honors the system umask, which leaves it
+   world-readable at 0755) and set `umask 027` in the agent's managed profile fragment, so the home
+   is private to the agent user
+3. Configure shell rc file (prompt)
+4. Configure git credentials (if specified in template)
+5. Run user install commands (from template)
+6. Sync dotfiles (from template)
+7. Configure mise (from template)
+8. Record in database
 
 Workspace group membership is NOT set during creation. It is managed entirely by the grant system.
 
@@ -87,6 +90,13 @@ Workspace group membership is NOT set during creation. It is managed entirely by
 | ------------- | ---------- | ------------- | --------------------------- |
 | Workspace dir | admin      | ws--WORKSPACE | Agents read/write via grant |
 | Agent home    | agent-user | agent-user    | Agent-private               |
+
+Agent-private is enforced, not just conventional: the home is mode 0750 (Debian `useradd` gives each
+user a private group, so 0750 is effectively owner-only for other agents) and the agent's login
+shells run with `umask 027`. The umask does not reduce group access to files created inside a
+workspace: the workspace directory carries a POSIX default ACL (`setfacl -d`) that makes new files
+inherit group rwx regardless of the process umask, so cross-agent collaboration in workspaces is
+preserved.
 
 ## What This Model Prevents
 
