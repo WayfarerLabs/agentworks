@@ -81,11 +81,51 @@ def create_agent_on_vm(
 
     # Create user with the template's shell (idempotent: skip if exists).
     shell_path = f"/bin/{agent_shell}" if "/" not in agent_shell else agent_shell
+    # ``-U`` (``--user-group``) forces a per-user private primary group
+    # regardless of the base image's ``USERGROUPS_ENAB`` setting. This is
+    # load-bearing for the 0750 home below: 0750 is only agent-private if
+    # the group half grants access to nobody but this user. On an image
+    # where new users land in a shared primary group (e.g. ``users``,
+    # GID 100), a bare ``useradd`` plus 0750 would GRANT every other agent
+    # group read+execute on this home, an inversion of the goal. We do
+    # not assume a clean Debian image (see capabilities/vm_platform/README).
     user_exists = admin_target.run(f"id {linux_user}", sudo=True, check=False)
     if not user_exists.ok:
-        admin_target.run(f"useradd -m -s {shell_path} {linux_user}", sudo=True)
+        admin_target.run(f"useradd -m -U -s {shell_path} {linux_user}", sudo=True)
     else:
         admin_target.run(f"usermod -s {shell_path} {linux_user}", sudo=True)
+
+    # Tighten the agent's home to 0750. ``useradd -m`` honors the system
+    # umask (022), leaving home world-readable (0755), which lets any
+    # other agent user on the VM read this agent's scratch artifacts,
+    # logs, shell history, cloned repos, and tool caches. Per-agent Linux
+    # users exist to keep agent credentials and state separate, so a
+    # world-readable $HOME undercuts the isolation. With the private
+    # primary group enforced above, 0750 is effectively owner-only.
+    # Idempotent: a no-op when already 0750, so it also fixes pre-existing
+    # agents on reinit. Kept in phase 1 on the admin transport: this runs
+    # before authorized_keys is installed, so the agent's own SSH session
+    # does not exist yet.
+    admin_target.run(f"chmod 0750 {home}", sudo=True)
+
+    # Post-condition guard: verify the primary group really is private.
+    # ``-U`` enforces this on the create path, but reinit, pre-existing
+    # agents created before ``-U`` was added, and odd images can still
+    # leave a shared primary group, which would make the 0750 home
+    # group-readable by whoever shares that group. Warn (do not fail) so
+    # the drift is surfaced with a fix hint rather than silently defeating
+    # isolation: a hard fail here could block a legitimately custom setup
+    # or a partial-state reinit, and ``-U`` already covers fresh creates.
+    primary_group = admin_target.run(f"id -gn {linux_user}", sudo=True, check=False)
+    if primary_group.ok and primary_group.stdout.strip() != linux_user:
+        output.warn(
+            f"agent '{linux_user}' primary group is "
+            f"'{primary_group.stdout.strip()}', not a private per-user group; "
+            f"its home ({home}) cannot be made private and may be readable by "
+            f"other members of that group. Fix on the VM with "
+            f"'sudo groupadd {linux_user} && sudo usermod -g {linux_user} {linux_user}' "
+            f"and reinit, or check the image's group model."
+        )
 
     # Tmux socket infrastructure for the agent (root-owned ``/var/lib/``
     # parent; admin is the only transport that can create it).
@@ -482,6 +522,23 @@ def _write_agent_profile(
     from agentworks.vms.initializer import AGENTWORKS_PROFILE
 
     lines = ["# Managed by agentworks -- do not edit"]
+    # Cross-agent isolation is enforced by the 0750 home + private primary
+    # group (see create_agent_on_vm): once other agents cannot search the
+    # home, files inside it are unreachable regardless of their own mode,
+    # so the umask adds nothing there. Its real value is defense-in-depth
+    # for artifacts the agent writes OUTSIDE its home: /tmp, $TMPDIR, and
+    # any world-traversable shared directory, where the file's own mode is
+    # what protects it. 027 is portable across sh/bash/zsh. It does NOT
+    # reduce group access inside a workspace: the workspace dir carries a
+    # POSIX default ACL (setfacl -d, see workspaces/backends/vm.py) that
+    # makes new files inherit group rwx regardless of the process umask,
+    # so collaboration is preserved. Coverage is partial by design: this
+    # rides the login-shell profile chain, so non-login `sh -c`, cron,
+    # systemd user units, and sftp/scp keep the default umask 022. The
+    # 0750 home is the boundary; the umask is a supplement. Emitted here
+    # (not appended separately) so it survives the second
+    # _write_agent_profile call, which overwrites this file with PATH.
+    lines.append("umask 027")
     for key, value in identity_env.items():
         lines.append(f"export {key}={shlex.quote(value)}")
     for p in path_additions or []:

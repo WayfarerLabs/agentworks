@@ -71,13 +71,21 @@ Grants are stored in the `agent_workspace_grants` table:
 
 When an agent is created on a VM:
 
-1. Create the Linux user: `useradd -m -s <shell> agt--<name>`
-2. Configure shell rc file (prompt)
-3. Configure git credentials (if specified in template)
-4. Run user install commands (from template)
-5. Sync dotfiles (from template)
-6. Configure mise (from template)
-7. Record in database
+1. Create the Linux user with a private primary group: `useradd -m -U -s <shell> agt--<name>`. The
+   `-U` (`--user-group`) is load-bearing, not cosmetic: it forces a per-user private group
+   regardless of the image's `USERGROUPS_ENAB` setting, without which the 0750 home below could
+   grant a shared primary group read access.
+2. Tighten the home directory to mode 0750 (`useradd -m` honors the system umask, which leaves it
+   world-readable at 0755), so the home is private to the agent user. A post-condition guard
+   verifies the primary group really is private (`id -gn` equals the username) and warns if not, so
+   drift on a reinit, a pre-existing agent, or an odd image is surfaced rather than silently
+   defeating it.
+3. Configure shell rc file (prompt), including `umask 027` in the agent's managed profile fragment
+4. Configure git credentials (if specified in template)
+5. Run user install commands (from template)
+6. Sync dotfiles (from template)
+7. Configure mise (from template)
+8. Record in database
 
 Workspace group membership is NOT set during creation. It is managed entirely by the grant system.
 
@@ -87,6 +95,23 @@ Workspace group membership is NOT set during creation. It is managed entirely by
 | ------------- | ---------- | ------------- | --------------------------- |
 | Workspace dir | admin      | ws--WORKSPACE | Agents read/write via grant |
 | Agent home    | agent-user | agent-user    | Agent-private               |
+
+Agent-private is enforced, not just conventional. Cross-agent isolation of the home comes from the
+0750 mode plus the private primary group forced by `useradd -U`: with no other user in the group,
+0750 is effectively owner-only, and because other agents cannot search the home, files inside it are
+unreachable regardless of their own mode. A post-condition guard warns if the primary group is ever
+found to be shared (drift from a reinit or an unexpected image), because 0750 over a shared group
+would leak the home.
+
+The agent's login shells also run with `umask 027`. This is defense-in-depth for artifacts the agent
+writes _outside_ its home (in `/tmp`, `$TMPDIR`, or any world-traversable shared directory), where
+the file's own mode is what protects it; it adds nothing to in-home protection, which the 0750 home
+already provides. Its coverage is partial by design: the umask rides the login-shell profile chain,
+so non-login `sh -c`, cron, systemd user units, and sftp/scp keep the default umask 022. The 0750
+home is the boundary; the umask is a supplement. The umask does not reduce group access to files
+created inside a workspace either: the workspace directory carries a POSIX default ACL
+(`setfacl -d`) that makes new files inherit group rwx regardless of the process umask, so
+cross-agent collaboration in workspaces is preserved.
 
 ## What This Model Prevents
 
