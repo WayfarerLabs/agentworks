@@ -232,6 +232,49 @@ def test_harness_value_wins_over_operator_env_and_warns(
     db.close()
 
 
+def test_restart_harness_value_wins_over_operator_env_and_warns(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, captured_output: object
+) -> None:
+    """The restart-path mirror of the create-path collision test: both
+    launch sites route through the one ``_merge_harness_env`` helper, and
+    this pins the restart wiring end to end."""
+    from agentworks.sessions import manager as session_manager
+    from agentworks.sessions.manager import restart_session
+
+    monkeypatch.setenv("AW_SECRET_CLAUDE_CODE_OAUTH_TOKEN", _TOKEN_VALUE)
+    db = Database(tmp_path / "test.db")
+    _seed_lima_vm(db)
+    db.insert_session(
+        "s1",
+        "ws1",
+        "claude",
+        SessionMode.ADMIN,
+        harness_state={"session_id": "939b1597-7c61-5ace-80f4-14617b7b4257"},
+    )
+    db.update_session_pid("s1", 4242, boot_id="boot-x")
+    config = _make_config(tmp_path, _CC_TEMPLATE_WITH_COLLISION)
+    _patch_transports(monkeypatch)
+    _common_stubs(monkeypatch)
+    monkeypatch.setattr(session_manager, "_ensure_pid", lambda session, **k: session)
+    monkeypatch.setattr(
+        session_manager, "check_session_status", lambda *a, **k: SessionStatus.OK
+    )
+    monkeypatch.setattr(session_manager, "_kill_session", lambda *a, **k: True)
+    captured: dict[str, object] = {}
+    _capture_launch(monkeypatch, captured)
+
+    restart_session(db, config, name="s1", yes=True)
+
+    env = captured["env"]
+    assert isinstance(env, dict)
+    assert env["CLAUDE_CODE_OAUTH_TOKEN"] == _TOKEN_VALUE
+    warnings = captured_output.warnings  # type: ignore[attr-defined]
+    assert any(
+        "CLAUDE_CODE_OAUTH_TOKEN" in w and "claude-code" in w for w in warnings
+    ), warnings
+    db.close()
+
+
 # -- the resolved token is registered for redaction on the op logger ----------
 
 
