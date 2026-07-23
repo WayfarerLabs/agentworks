@@ -87,6 +87,15 @@ All of these suggest similar solutions, though. You need strong guardrails (isol
 etc.) to ensure that _when_ things go sideways, the blast radius is contained and the operator
 retains control.
 
+Being precise about what those guardrails do is as important as having them. Agentworks builds its
+isolation from VM boundaries plus standard Linux users, groups, and filesystem permissions. That
+separates agents' credentials and state from one another and bounds what a mistaken or compromised
+agent can reach. Two things it deliberately does not do: it is not a kernel-level sandbox (agents on
+one VM share a kernel, so a local privilege escalation is a path between them), and it does not yet
+constrain outbound network access, so an agent that reads untrusted content can still reach the
+network with whatever it can read (tracked in
+[#224](https://github.com/WayfarerLabs/agentworks/issues/224)).
+
 ### Workload Management
 
 Anyone who has had more than one or two parallel agentic sessions has likely run into the problem of
@@ -174,6 +183,13 @@ processes, private files, shell environment, etc. This allows for the creation o
 identities with different privileges and capabilities. Agents only have the access granted to their
 user by the operator.
 
+The boundary this creates is the standard Unix one: discretionary access control between users
+sharing a kernel. It gives each agent its own credentials, home directory, and processes, and keeps
+one agent's mistakes and compromises away from another's state. It is intentionally not a sandbox
+that restricts what the agent's own user may do; within its granted access, an agent has the full
+run of a Linux system. That is the point of the design, and it is why the VM is the boundary that
+does the heavy lifting when a stronger one is needed.
+
 Agents are mapped to workspaces, either explicitly via grants or implicitly via sessions (see
 below). This mapping drives standard group and filesystem permissions that control what agents are
 able to access.
@@ -240,6 +256,18 @@ This model provides several isolation mechanisms, which operators can compose to
 desired security posture. While the system is optimized around the full isolation model (VMs,
 agents, and workspaces), this is by no means required. Operators are free to use any subset that
 makes sense for their security and operational requirements.
+
+Composition runs the other way too. Because agents are Linux users and workspaces are Linux groups,
+granting _partial_ access costs no more than withholding it, which makes graduated privilege between
+cooperating agents a practical everyday pattern rather than a special case. A research agent can be
+created with workspace access and nothing else, gather material, and leave artifacts behind for a
+more privileged agent to act on, so the privileged agent never crawls untrusted content itself.
+Models built on container-per-agent isolation can express the separation, but pay for the sharing in
+volumes, networking, or an orchestrator; here both halves are ordinary filesystem permissions.
+
+A handoff like that narrows exposure rather than eliminating it. Whatever the low-privilege agent
+writes is still attacker-influenced input to whoever reads it next, so those artifacts are best
+treated as data to be evaluated, not as instructions to be followed.
 
 ### Ephemerality
 
