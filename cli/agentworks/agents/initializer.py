@@ -87,7 +87,7 @@ def create_agent_on_vm(
     # the group half grants access to nobody but this user. On an image
     # where new users land in a shared primary group (e.g. ``users``,
     # GID 100), a bare ``useradd`` plus 0750 would GRANT every other agent
-    # group read+execute on this home -- an inversion of the goal. We do
+    # group read+execute on this home, an inversion of the goal. We do
     # not assume a clean Debian image (see capabilities/vm_platform/README).
     user_exists = admin_target.run(f"id {linux_user}", sudo=True, check=False)
     if not user_exists.ok:
