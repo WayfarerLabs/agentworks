@@ -76,7 +76,7 @@ def realize_agent(
     linux_user = derive_linux_user(name)
     ssh_logger = SSHLogger(vm.name, "agent-create")
     # Delivered secret values register on the scope's logger up front
-    # (the initialize_vm / reinit_vm pattern): the materials write only
+    # (the bootstrap_vm / reinit_vm pattern): the materials write only
     # ever logs paths and byte counts, so this is defense in depth
     # against any future command or traceback embedding a token.
     for token in git_tokens.values():

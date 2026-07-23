@@ -801,7 +801,7 @@ class AzureVMPlatform(VMPlatform):
 
         The attach happens inside :meth:`create` (Azure needs the IP to
         drive cloud-init bootstrap); this hook fires at the async
-        Tailscale-ready point inside ``initialize_vm`` to close the
+        Tailscale-ready point inside ``bootstrap_vm`` (Phase A) to close the
         public-exposure window.
         """
         self.detach_public_ip(vm)

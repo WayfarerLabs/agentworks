@@ -253,7 +253,7 @@ class VMPlatform(Capability):
         :meth:`transient_route` is genuine: the matching attach lives
         inside :meth:`create` (cloud-init bootstrap needs the IP) and
         the detach fires at an async Tailscale-ready point inside
-        ``initialize_vm``, neither of which is an ExitStack-shaped
+        ``bootstrap_vm`` (Phase A), neither of which is an ExitStack-shaped
         lifecycle.
         """
 

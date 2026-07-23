@@ -22,7 +22,7 @@ from __future__ import annotations
 
 from agentworks.vms.initializer import (
     announce_git_credentials,
-    initialize_vm,
+    bootstrap_vm,
     rejoin_tailscale,
     run_initialization,
     verify_tailscale_available,
@@ -81,12 +81,12 @@ __all__ = [
     "_warned_tailscale_missing",
     "add_git_credential",
     "announce_git_credentials",
+    "bootstrap_vm",
     "create_vm",
     "delete_vm",
     "describe_vm",
     "exec_vm",
     "gated_vm_boundary",
-    "initialize_vm",
     "list_vms",
     "port_forward_vm",
     "reinit_vm",

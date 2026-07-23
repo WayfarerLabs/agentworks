@@ -13,6 +13,7 @@ from agentworks.ssh_config import (
     _rebuild_config_dir,
     _remove_legacy_section,
     ssh_host_alias,
+    sync_ssh_config,
 )
 
 
@@ -126,6 +127,30 @@ def _mock_vm(name: str, host: str) -> MagicMock:
     vm.tailscale_host = host
     vm.admin_username = "agentworks"
     return vm
+
+
+def test_sync_ssh_config_announce_controls_the_synced_line(tmp_path: Path, captured_output) -> None:  # noqa: ANN001
+    """``sync_ssh_config`` emits 'SSH config synced' by default and stays
+    silent under ``announce=False``. Either way the managed file is written,
+    so the silent form (``vm create``'s post-init re-sync) is a real sync,
+    just without the duplicate line."""
+    config, ssh_dir = _mock_config(tmp_path)
+    db = MagicMock()
+    db.get_setting.return_value = None
+    db.list_vms.return_value = [_mock_vm("dev-vm", "100.64.0.1")]
+    db.list_agents.return_value = []
+    conf = ssh_dir / "config.d" / _MANAGED_CONF
+
+    sync_ssh_config(config, db)
+    assert "SSH config synced" in captured_output.info
+    assert conf.exists()  # the announcing sync wrote the file
+
+    # A silent re-sync still writes the file but adds no output line.
+    conf.unlink()
+    before = list(captured_output.info)
+    sync_ssh_config(config, db, announce=False)
+    assert captured_output.info == before  # no new line
+    assert conf.exists()  # still written for correctness
 
 
 def test_rebuild_config_dir(tmp_path: Path) -> None:
