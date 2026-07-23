@@ -18,9 +18,115 @@ from ._create_plan import _resolve_session_plan
 
 if TYPE_CHECKING:
     from agentworks.config import Config
-    from agentworks.db import AgentRow, Database
+    from agentworks.db import AgentRow, Database, VMRow
     from agentworks.sessions.tmux import RunCommand
     from agentworks.transports import Transport
+
+    from ._create_types import SessionGraph, SessionPlan
+
+
+def _reload_vm(db: Database, target_vm_name: str) -> VMRow:
+    """Reload the VM row inside the gate and assert it has an address.
+
+    The gate may have rejoined Tailscale (only when the VM was
+    stopped/deallocated) and updated ``vms.tailscale_host``. The
+    in-memory ``vm`` from the pre-check would otherwise read stale and
+    the address check below could spuriously raise. (The pre-create
+    SecretTarget read only ``vm.template``, which a refresh cannot
+    change, so the pre-refresh row was safe to target; the nodes keep
+    their construction row, whose identity fields a refresh cannot change
+    either.)
+    """
+    refreshed_vm = db.get_vm(target_vm_name)
+    assert refreshed_vm is not None  # existed above; the gate cannot remove it
+    if refreshed_vm.tailscale_host is None:
+        raise StateError(
+            f"VM '{refreshed_vm.name}' has no Tailscale address",
+            entity_kind="vm",
+            entity_name=refreshed_vm.name,
+        )
+    return refreshed_vm
+
+
+def _build_live_transport(vm: VMRow, config: Config) -> tuple[Transport, RunCommand]:
+    """Build the admin SSH transport for the live VM and its run command."""
+    from agentworks.ssh import SSHLogger
+
+    logger = SSHLogger(vm.name, "session-create")
+    target = _mgr.transport(vm, config, logger=logger)
+    run_command: RunCommand = target.run
+    return target, run_command
+
+
+def _preflight_and_resolve(
+    config: Config,
+    plan: SessionPlan,
+    graph: SessionGraph,
+    vm: VMRow,
+    target: Transport,
+) -> tuple[dict[str, str], Transport | None]:
+    """Run the Preflight sweep and the Resolving-Secrets boundary resolve.
+
+    Both output sections are emitted here, in place. Names the resources
+    this create touches (the session template, any ephemeral workspace /
+    agent templates, the ephemeral agent's git credentials) in the same
+    ``<kind>/<name>`` form vm/agent create use, then runs the readiness
+    sweep and the one boundary resolve. Returns the resolved secret
+    values and the existing-agent transport, which is probed here (before
+    any prompt or mutation, the earlier-failure win) and is ``None`` for
+    a pending or admin target.
+    """
+    from agentworks.capabilities.base import RunContext
+    from agentworks.orchestration.readiness import preflight_all
+
+    with output.section("Preflight"):
+        output.info(f"Checking session-template/{graph.template.name}...")
+        if plan.new_workspace:
+            assert graph.workspace_tmpl is not None  # resolved at build above
+            output.info(f"Checking workspace-template/{graph.workspace_tmpl.name}...")
+        if plan.new_agent:
+            assert graph.agent_tmpl is not None  # resolved at build above
+            output.info(f"Checking agent-template/{graph.agent_tmpl.name}...")
+        if graph.agent_tmpl_node is not None:
+            from agentworks.vms.initializer import announce_git_credentials
+
+            announce_git_credentials(
+                {cred.provider.owner_name: cred.provider for cred in graph.agent_tmpl_node.credentials}
+            )
+
+        # Probe direct agent SSH for an EXISTING agent before any prompt
+        # or mutation: a pre-rollout agent surfaces as an actionable
+        # StateError with nothing to roll back (the orchestrated flow
+        # moves this probe, and the required-commands probe below, ahead
+        # of the resolve boundary: the earlier-failure win). An ephemeral
+        # agent's probe runs right after its realization in roll-forward.
+        agent_target: Transport | None = None
+        if graph.agent_node is not None and not plan.new_agent:
+            from agentworks.agents.manager import _assert_agent_ssh_works
+            from agentworks.transports import agent_transport
+
+            assert plan.existing_agent is not None
+            agent_target = agent_transport(vm, config, plan.existing_agent)
+            _assert_agent_ssh_works(agent_target, plan.existing_agent)
+
+        # PREFLIGHT-ALL against the one command-start context: the
+        # required-commands check probes a realized (existing) agent or
+        # the admin target NOW and defers on a pending one; each
+        # git-credential provider predicts its token's resolvability.
+        # Then the boundary resolve: the walk-away point.
+        preflight_all(
+            graph.nodes,
+            RunContext(
+                config=config,
+                operation_scope=graph.scope,
+                admin_target=target,
+                agent_target=agent_target,
+            ),
+        )
+
+    with output.section("Resolving Secrets"):
+        graph.resolver.resolve()
+    return graph.resolver.values, agent_target
 
 
 def create_session(
@@ -117,7 +223,6 @@ def create_session(
     new_workspace = plan.new_workspace
     agent_name = plan.agent_name
     new_agent = plan.new_agent
-    existing_agent = plan.existing_agent
     vm = plan.vm
     target_vm_name = plan.target_vm_name
 
@@ -135,9 +240,7 @@ def create_session(
     pending_agent = graph.pending_agent
     agent_tmpl = graph.agent_tmpl
     agent_tmpl_node = graph.agent_tmpl_node
-    agent_node = graph.agent_node
     session_node = graph.session_node
-    nodes = graph.nodes
     resolver = graph.resolver
     scope = graph.scope
 
@@ -147,7 +250,6 @@ def create_session(
         activation_gate,
         gate_secret_resolver,
     )
-    from agentworks.orchestration.readiness import preflight_all
     from agentworks.orchestration.secrets import ScopedSecrets
     from agentworks.orchestration.unwind import RealizationLog
 
@@ -157,85 +259,10 @@ def create_session(
     # through the whole command, with its just-in-time values seeding
     # the boundary resolver so nothing resolves or prompts twice.
     with activation_gate(vm_node, gate_secret_resolver(config, registry, resolver)):
-        # Reload the VM row: the gate may have rejoined Tailscale (only
-        # when the VM was stopped/deallocated) and updated
-        # ``vms.tailscale_host``. The in-memory ``vm`` from our pre-check
-        # would otherwise read stale and the check below could spuriously
-        # raise. (The SecretTarget above read only vm.template, which a
-        # refresh cannot change, so the pre-refresh row was safe to
-        # target; the nodes keep their construction row, whose identity
-        # fields a refresh cannot change either.)
-        refreshed_vm = db.get_vm(target_vm_name)
-        assert refreshed_vm is not None  # existed above; the gate cannot remove it
-        vm = refreshed_vm
-        if vm.tailscale_host is None:
-            raise StateError(
-                f"VM '{vm.name}' has no Tailscale address",
-                entity_kind="vm",
-                entity_name=vm.name,
-            )
+        vm = _reload_vm(db, target_vm_name)
+        target, run_command = _build_live_transport(vm, config)
 
-        from agentworks.ssh import SSHLogger
-
-        logger = SSHLogger(vm.name, "session-create")
-        target = _mgr.transport(vm, config, logger=logger)
-        run_command: RunCommand = target.run
-
-        # Preflight phase: name the resources this create touches (the
-        # session template, any ephemeral workspace / agent templates, and
-        # the ephemeral agent's git credentials) in the same
-        # <kind>/<name> form vm/agent create use, then run the readiness
-        # sweep. Framed as a phase so session create reads like a plan
-        # executing, matching vm create.
-        with output.section("Preflight"):
-            output.info(f"Checking session-template/{template.name}...")
-            if new_workspace:
-                assert workspace_tmpl is not None  # resolved at build above
-                output.info(f"Checking workspace-template/{workspace_tmpl.name}...")
-            if new_agent:
-                assert agent_tmpl is not None  # resolved at build above
-                output.info(f"Checking agent-template/{agent_tmpl.name}...")
-            if agent_tmpl_node is not None:
-                from agentworks.vms.initializer import announce_git_credentials
-
-                announce_git_credentials(
-                    {cred.provider.owner_name: cred.provider for cred in agent_tmpl_node.credentials}
-                )
-
-            # Probe direct agent SSH for an EXISTING agent before any
-            # prompt or mutation: a pre-rollout agent surfaces as an
-            # actionable StateError with nothing to roll back (the
-            # orchestrated flow moves this probe, and the required-commands
-            # probe below, ahead of the resolve boundary: the
-            # earlier-failure win). An ephemeral agent's probe runs right
-            # after its realization below.
-            agent_target: Transport | None = None
-            if agent_node is not None and not new_agent:
-                from agentworks.agents.manager import _assert_agent_ssh_works
-                from agentworks.transports import agent_transport
-
-                assert existing_agent is not None
-                agent_target = agent_transport(vm, config, existing_agent)
-                _assert_agent_ssh_works(agent_target, existing_agent)
-
-            # PREFLIGHT-ALL against the one command-start context: the
-            # required-commands check probes a realized (existing) agent or
-            # the admin target NOW and defers on a pending one; each
-            # git-credential provider predicts its token's resolvability.
-            # Then the boundary resolve: the walk-away point.
-            preflight_all(
-                nodes,
-                RunContext(
-                    config=config,
-                    operation_scope=scope,
-                    admin_target=target,
-                    agent_target=agent_target,
-                ),
-            )
-
-        with output.section("Resolving Secrets"):
-            resolver.resolve()
-        secret_values = resolver.values
+        secret_values, agent_target = _preflight_and_resolve(config, plan, graph, vm, target)
 
         def scoped_ctx(secret_names: tuple[str, ...]) -> RunContext:
             return RunContext(
