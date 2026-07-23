@@ -439,8 +439,12 @@ name. The user's `~/.tmux.conf` (customizable via dotfiles) is loaded first so t
 keybindings (prefix, detach, copy mode, scroll) work for direct `session attach`. Window/pane
 creation, session management, and the command prompt are selectively unbound.
 
-Agent-mode sessions run on a per-agent tmux socket so the agent's shell connects directly to the
-tmux pane PTY. The socket path is persisted in the database.
+Agent-mode sessions each get their own tmux socket, so every session runs as its own tmux server
+rather than as a window in a shared one. The sockets are grouped in a per-agent directory whose
+ownership keeps one agent from reaching another's (cross-agent isolation), and giving each session
+its own server means it inherits the environment delivered over its own SSH connection instead of
+leaking env across sessions through a shared server. The agent's shell attaches directly to the tmux
+pane PTY, and each socket path is persisted in the database.
 
 #### Named Console
 
