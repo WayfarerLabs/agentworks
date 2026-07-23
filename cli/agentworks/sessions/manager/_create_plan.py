@@ -6,12 +6,19 @@ validation, the existing-workspace lookup, the mode prompt, and VM
 resolution. Every prompt and cross-check fires here; the result is a
 settled :class:`SessionPlan` the build consumes.
 
-The body is the original ``create_session`` prologue moved verbatim: no
-side effect, DB call, or prompt was reordered in the extraction.
+The eight sections accrete a shared working state (the canonicalized flag
+shape plus the VM anchor and its loaded rows), so they are threaded
+through one mutable :class:`_PlanDraft` carrier rather than a long
+parameter list. Splitting the sections into named helpers keeps each
+individually testable and under the complexity ceiling; the draft is
+frozen into the immutable :class:`SessionPlan` at the end. No side
+effect, DB call, or prompt was reordered relative to the original
+``create_session`` prologue.
 """
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 import agentworks.sessions.manager as _mgr
@@ -28,45 +35,65 @@ if TYPE_CHECKING:
     from agentworks.db import AgentRow, Database, VMRow, WorkspaceRow
 
 
-def _resolve_session_plan(
-    db: Database,
-    *,
-    name: str,
-    workspace: str | None,
-    new_workspace: bool,
-    workspace_name: str | None,
-    workspace_template: str | None,
-    agent: str | None,
-    new_agent: bool,
-    agent_name: str | None,
-    agent_template: str | None,
-    admin: bool,
-    vm_name: str | None,
-) -> SessionPlan:
-    """Validate flags, run the prompts, and resolve every anchor into a
-    settled :class:`SessionPlan` (sections S1-S8)."""
+@dataclass
+class _PlanDraft:
+    """The mutable working state accreted across sections S1-S8.
+
+    Holds the canonicalized flag shape (mutated by the canonicalize and
+    mode-prompt sections) and the accreting VM anchor: ``known_vm`` plus
+    the loaded ``existing_agent`` / ``existing_ws`` rows that pinned it,
+    and finally the resolved ``vm`` / ``target_vm_name``. The raw
+    ``workspace`` / ``agent`` flags are consumed by canonicalization and
+    unused afterward.
+    """
+
+    workspace: str | None
+    agent: str | None
+    workspace_name: str | None
+    new_workspace: bool
+    workspace_template: str | None
+    agent_name: str | None
+    new_agent: bool
+    agent_template: str | None
+    admin: bool
+    known_vm: str | None
+    existing_agent: AgentRow | None = None
+    existing_ws: WorkspaceRow | None = None
+    vm: VMRow | None = None
+    target_vm_name: str | None = None
+
+
+def _validate_and_canonicalize_flags(draft: _PlanDraft, name: str) -> None:
+    """S1-S2: reject invalid flag combinations, then canonicalize the
+    CLI-flag shape into internal form.
+
+    After this: ``workspace_name`` / ``agent_name`` carry the chosen
+    names (``agent_name is None`` means admin mode), ``new_workspace`` /
+    ``new_agent`` say whether to create them, and the raw ``workspace`` /
+    ``agent`` / ``admin`` flags are consumed.
+    """
     # ===== Flag-shape validation (mutexes + ephemeral-arg gating) ===========
 
-    if workspace and new_workspace:
+    if draft.workspace and draft.new_workspace:
         raise ValidationError(
             "specify --workspace or --new-workspace, not both",
             entity_kind="session",
             entity_name=name,
         )
-    if not new_workspace and (workspace_name or workspace_template):
+    if not draft.new_workspace and (draft.workspace_name or draft.workspace_template):
         raise ValidationError(
             "--workspace-name and --workspace-template require --new-workspace",
             entity_kind="session",
             entity_name=name,
         )
-    agent_modes = sum(1 for x in (bool(agent), new_agent, admin) if x)
+    agent_modes = sum(1 for x in (bool(draft.agent), draft.new_agent, draft.admin) if x)
     if agent_modes > 1:
         raise ValidationError(
             "specify at most one of --agent, --new-agent, or --admin",
             entity_kind="session",
             entity_name=name,
         )
-    if not new_agent and (agent_name or agent_template):
+    if not draft.new_agent and (draft.agent_name or draft.agent_template):
         raise ValidationError(
             "--agent-name and --agent-template require --new-agent",
             entity_kind="session",
@@ -86,42 +113,44 @@ def _resolve_session_plan(
     #
     # ``workspace`` / ``agent`` / ``admin`` are consumed here and unused below.
 
-    if workspace:
-        workspace_name = workspace
-    if agent:
-        agent_name = agent
-    if admin:
-        agent_name = None
-        new_agent = False
+    if draft.workspace:
+        draft.workspace_name = draft.workspace
+    if draft.agent:
+        draft.agent_name = draft.agent
+    if draft.admin:
+        draft.agent_name = None
+        draft.new_agent = False
 
-    # ===== Early VM-anchor narrowing for the workspace prompt ===============
-    #
-    # If ``--vm`` and/or ``--agent`` were specified, they already pin a VM.
-    # Load the agent row now (rather than in the later VM-anchor block) so
-    # we can:
-    #   1. Cross-check ``--vm`` against the agent's VM before any prompt
-    #      fires (no point prompting for a workspace when we know the
-    #      command is inconsistent).
-    #   2. Filter the workspace chooser to workspaces on the known VM,
-    #      so the operator doesn't have to mentally exclude irrelevant
-    #      entries (and so picking one on the wrong VM isn't reachable).
-    existing_agent: AgentRow | None = None
-    known_vm: str | None = vm_name
-    if not new_agent and agent_name is not None:
-        existing_agent = db.get_agent(agent_name)
-        if existing_agent is None:
+
+def _narrow_and_prompt_workspace(db: Database, draft: _PlanDraft, name: str) -> None:
+    """S3-S4: narrow the VM anchor by an existing ``--agent``, then run
+    the workspace prompt filtered to that anchor.
+
+    If ``--vm`` and/or ``--agent`` were specified they already pin a VM.
+    Load the agent row now (rather than in the later VM-anchor block) so
+    we can:
+      1. Cross-check ``--vm`` against the agent's VM before any prompt
+         fires (no point prompting for a workspace when we know the
+         command is inconsistent).
+      2. Filter the workspace chooser to workspaces on the known VM, so
+         the operator doesn't have to mentally exclude irrelevant entries
+         (and so picking one on the wrong VM isn't reachable).
+    """
+    if not draft.new_agent and draft.agent_name is not None:
+        draft.existing_agent = db.get_agent(draft.agent_name)
+        if draft.existing_agent is None:
             raise NotFoundError(
-                f"agent '{agent_name}' not found",
+                f"agent '{draft.agent_name}' not found",
                 entity_kind="agent",
-                entity_name=agent_name,
+                entity_name=draft.agent_name,
             )
-        if known_vm is not None and known_vm != existing_agent.vm_name:
+        if draft.known_vm is not None and draft.known_vm != draft.existing_agent.vm_name:
             raise ValidationError(
-                f"VM mismatch: --vm={known_vm}, agent '{agent_name}'={existing_agent.vm_name}",
+                f"VM mismatch: --vm={draft.known_vm}, agent '{draft.agent_name}'={draft.existing_agent.vm_name}",
                 entity_kind="session",
                 entity_name=name,
             )
-        known_vm = existing_agent.vm_name
+        draft.known_vm = draft.existing_agent.vm_name
 
     # ===== Workspace prompt (force explicit choice even with one option) ===
     #
@@ -132,26 +161,28 @@ def _resolve_session_plan(
     # to passing ``--new-workspace`` on the CLI. Filter to ``known_vm``
     # when other anchors pin one. Non-interactive: raise.
 
-    if not workspace_name and not new_workspace:
-        chosen_existing, new_workspace = _mgr._prompt_workspace_choice(db, known_vm)
+    if not draft.workspace_name and not draft.new_workspace:
+        chosen_existing, draft.new_workspace = _mgr._prompt_workspace_choice(db, draft.known_vm)
         if chosen_existing is not None:
-            workspace_name = chosen_existing
+            draft.workspace_name = chosen_existing
 
-    # ===== Pure validation (no SSH, no mutations) ===========================
 
+def _validate_names_and_existence(db: Database, draft: _PlanDraft, name: str) -> None:
+    """S5: default ephemeral names, validate every name, and run the pure
+    DB existence checks (no SSH, no mutations)."""
     # Default ephemeral resource names to the session name when omitted.
-    if new_workspace and workspace_name is None:
-        workspace_name = name
-    if new_agent and agent_name is None:
-        agent_name = name
-    assert workspace_name is not None  # invariant after canonicalize + prompt
+    if draft.new_workspace and draft.workspace_name is None:
+        draft.workspace_name = name
+    if draft.new_agent and draft.agent_name is None:
+        draft.agent_name = name
+    assert draft.workspace_name is not None  # invariant after canonicalize + prompt
 
     validate_name(name)
-    if new_workspace:
-        validate_name(workspace_name)
-    if new_agent:
-        assert agent_name is not None
-        validate_name(agent_name)
+    if draft.new_workspace:
+        validate_name(draft.workspace_name)
+    if draft.new_agent:
+        assert draft.agent_name is not None
+        validate_name(draft.agent_name)
 
     # DB existence checks. Session must not exist. Ephemeral workspace /
     # agent must not exist; existing workspace / agent must exist.
@@ -161,45 +192,52 @@ def _resolve_session_plan(
             entity_kind="session",
             entity_name=name,
         )
-    if new_workspace and db.get_workspace(workspace_name) is not None:
+    if draft.new_workspace and db.get_workspace(draft.workspace_name) is not None:
         raise AlreadyExistsError(
-            f"workspace '{workspace_name}' already exists",
+            f"workspace '{draft.workspace_name}' already exists",
             entity_kind="workspace",
-            entity_name=workspace_name,
+            entity_name=draft.workspace_name,
         )
-    if new_agent:
-        assert agent_name is not None  # defaulted to ``name`` above
-        if db.get_agent(agent_name) is not None:
+    if draft.new_agent:
+        assert draft.agent_name is not None  # defaulted to ``name`` above
+        if db.get_agent(draft.agent_name) is not None:
             raise AlreadyExistsError(
-                f"agent '{agent_name}' already exists",
+                f"agent '{draft.agent_name}' already exists",
                 entity_kind="agent",
-                entity_name=agent_name,
+                entity_name=draft.agent_name,
             )
 
+
+def _lookup_workspace_and_prompt_mode(db: Database, draft: _PlanDraft, name: str, vm_name: str | None) -> None:
+    """S6-S7: load an existing workspace (accreting its VM), then run the
+    mode prompt filtered to the accreted VM.
+
+    The existing-workspace load contributes its VM to ``known_vm`` before
+    the mode prompt fires, so the mode prompt can filter agents by the
+    workspace's VM and a downstream VM mismatch surfaces before the mode
+    prompt rather than after. The mode prompt then fires before VM
+    resolution so an operator's pick of an existing agent can pin the VM.
+    """
+    assert draft.workspace_name is not None  # defaulted in the validation section
+
     # ===== Existing-workspace lookup + VM-anchor accretion =================
-    #
-    # If the operator named an existing workspace, load it now -- both
-    # to validate it exists and to contribute its VM to ``known_vm``
-    # before the mode prompt fires. This lets the mode prompt filter
-    # agents by the workspace's VM, and lets a downstream VM mismatch
-    # surface before the mode prompt rather than after.
-    existing_ws: WorkspaceRow | None = None
-    if not new_workspace:
-        existing_ws = db.get_workspace(workspace_name)
-        if existing_ws is None:
+    if not draft.new_workspace:
+        draft.existing_ws = db.get_workspace(draft.workspace_name)
+        if draft.existing_ws is None:
             raise NotFoundError(
-                f"workspace '{workspace_name}' not found",
+                f"workspace '{draft.workspace_name}' not found",
                 entity_kind="workspace",
-                entity_name=workspace_name,
+                entity_name=draft.workspace_name,
             )
-        if known_vm is not None and known_vm != existing_ws.vm_name:
-            anchor_label = "--vm" if vm_name is not None else f"agent '{agent_name}'"
+        if draft.known_vm is not None and draft.known_vm != draft.existing_ws.vm_name:
+            anchor_label = "--vm" if vm_name is not None else f"agent '{draft.agent_name}'"
             raise ValidationError(
-                f"VM mismatch: {anchor_label}={known_vm}, workspace '{workspace_name}'={existing_ws.vm_name}",
+                f"VM mismatch: {anchor_label}={draft.known_vm}, "
+                f"workspace '{draft.workspace_name}'={draft.existing_ws.vm_name}",
                 entity_kind="session",
                 entity_name=name,
             )
-        known_vm = existing_ws.vm_name
+        draft.known_vm = draft.existing_ws.vm_name
 
     # ===== Mode prompt (force explicit choice; no silent default) ==========
     #
@@ -210,22 +248,22 @@ def _resolve_session_plan(
     # picking one sets the VM. ``admin`` and ``[Create new agent]`` don't
     # pin a VM -- those paths fall through to the VM-prompt at the end.
 
-    if agent_name is None and not new_agent and not admin:
+    if draft.agent_name is None and not draft.new_agent and not draft.admin:
         vm_for_mode_prompt: VMRow | None = None
-        if known_vm is not None:
-            vm_for_mode_prompt = db.get_vm(known_vm)
+        if draft.known_vm is not None:
+            vm_for_mode_prompt = db.get_vm(draft.known_vm)
             assert vm_for_mode_prompt is not None  # known_vm was sourced from a real row
 
-        chosen_agent, new_agent, admin = _mgr._prompt_mode_choice(db, vm_for_mode_prompt)
+        chosen_agent, draft.new_agent, draft.admin = _mgr._prompt_mode_choice(db, vm_for_mode_prompt)
         if chosen_agent is not None:
             # Existing-agent pick: the prompt already filtered by
             # ``known_vm`` (if set) OR the picked agent's VM becomes
             # the new known_vm. No vm-anchor cross-check needed -- the
             # filter / pick path enforces agreement by construction.
-            agent_name = chosen_agent
-            existing_agent = db.get_agent(agent_name)
-            assert existing_agent is not None  # came from list_agents
-            known_vm = existing_agent.vm_name
+            draft.agent_name = chosen_agent
+            draft.existing_agent = db.get_agent(draft.agent_name)
+            assert draft.existing_agent is not None  # came from list_agents
+            draft.known_vm = draft.existing_agent.vm_name
 
         # Re-run the agent-specific default / validation / existence
         # checks that the upfront block did for the flag path. The
@@ -236,48 +274,51 @@ def _resolve_session_plan(
         # the eager-resolve SecretTarget with ``is_admin_mode=True``
         # (wrong scope) and asserts ``agent_name is not None``
         # inside the ephemeral-create block.
-        if new_agent:
-            if agent_name is None:
-                agent_name = name
-            validate_name(agent_name)
-            if db.get_agent(agent_name) is not None:
+        if draft.new_agent:
+            if draft.agent_name is None:
+                draft.agent_name = name
+            validate_name(draft.agent_name)
+            if db.get_agent(draft.agent_name) is not None:
                 raise AlreadyExistsError(
-                    f"agent '{agent_name}' already exists",
+                    f"agent '{draft.agent_name}' already exists",
                     entity_kind="agent",
-                    entity_name=agent_name,
+                    entity_name=draft.agent_name,
                 )
 
-    # ===== VM resolution (final step; prompts only if nothing pinned it) ===
-    #
-    # By this point every anchor (vm_name, existing workspace, existing
-    # agent -- whether passed as a flag or picked from a prompt) has
-    # contributed to ``known_vm`` and the cross-checks fired as each
-    # anchor was loaded. If ``known_vm`` is still ``None`` we genuinely
-    # have no anchor (e.g. ``--new-workspace --admin`` with no ``--vm``),
-    # so prompt for VM. The cross-check below is defense-in-depth: a
-    # future refactor that adds a new anchor without piping it through
-    # ``known_vm`` would trip it.
-    if known_vm is None:
-        vm = _mgr._prompt_vm(db)
+
+def _resolve_target_vm(db: Database, draft: _PlanDraft, name: str, vm_name: str | None) -> None:
+    """S8: resolve the target VM (prompting only if nothing pinned it) and
+    cross-check every anchor against it.
+
+    By this point every anchor (``vm_name``, existing workspace, existing
+    agent, whether passed as a flag or picked from a prompt) has
+    contributed to ``known_vm`` and the cross-checks fired as each anchor
+    loaded. A still-``None`` ``known_vm`` means no anchor at all (e.g.
+    ``--new-workspace --admin`` with no ``--vm``), so prompt. The final
+    cross-check is defense-in-depth: a future refactor that adds a new
+    anchor without piping it through ``known_vm`` would trip it.
+    """
+    if draft.known_vm is None:
+        draft.vm = _mgr._prompt_vm(db)
     else:
-        loaded_vm = db.get_vm(known_vm)
+        loaded_vm = db.get_vm(draft.known_vm)
         if loaded_vm is None:
             raise NotFoundError(
-                f"VM '{known_vm}' not found",
+                f"VM '{draft.known_vm}' not found",
                 entity_kind="vm",
-                entity_name=known_vm,
+                entity_name=draft.known_vm,
             )
-        vm = loaded_vm
-    target_vm_name = vm.name
+        draft.vm = loaded_vm
+    draft.target_vm_name = draft.vm.name
 
     vm_anchors: list[tuple[str, str]] = []
     if vm_name is not None:
         vm_anchors.append(("--vm", vm_name))
-    if existing_ws is not None:
-        vm_anchors.append((f"workspace '{workspace_name}'", existing_ws.vm_name))
-    if existing_agent is not None:
-        vm_anchors.append((f"agent '{agent_name}'", existing_agent.vm_name))
-    if any(candidate != target_vm_name for _, candidate in vm_anchors):
+    if draft.existing_ws is not None:
+        vm_anchors.append((f"workspace '{draft.workspace_name}'", draft.existing_ws.vm_name))
+    if draft.existing_agent is not None:
+        vm_anchors.append((f"agent '{draft.agent_name}'", draft.existing_agent.vm_name))
+    if any(candidate != draft.target_vm_name for _, candidate in vm_anchors):
         detail = ", ".join(f"{src}={v}" for src, v in vm_anchors)
         raise ValidationError(
             f"VM mismatch: {detail}",
@@ -285,16 +326,55 @@ def _resolve_session_plan(
             entity_name=name,
         )
 
-    return SessionPlan(
-        name=name,
+
+def _resolve_session_plan(
+    db: Database,
+    *,
+    name: str,
+    workspace: str | None,
+    new_workspace: bool,
+    workspace_name: str | None,
+    workspace_template: str | None,
+    agent: str | None,
+    new_agent: bool,
+    agent_name: str | None,
+    agent_template: str | None,
+    admin: bool,
+    vm_name: str | None,
+) -> SessionPlan:
+    """Validate flags, run the prompts, and resolve every anchor into a
+    settled :class:`SessionPlan` (sections S1-S8)."""
+    draft = _PlanDraft(
+        workspace=workspace,
+        agent=agent,
         workspace_name=workspace_name,
         new_workspace=new_workspace,
         workspace_template=workspace_template,
         agent_name=agent_name,
         new_agent=new_agent,
         agent_template=agent_template,
-        existing_ws=existing_ws,
-        existing_agent=existing_agent,
-        vm=vm,
-        target_vm_name=target_vm_name,
+        admin=admin,
+        known_vm=vm_name,
+    )
+
+    _validate_and_canonicalize_flags(draft, name)
+    _narrow_and_prompt_workspace(db, draft, name)
+    _validate_names_and_existence(db, draft, name)
+    _lookup_workspace_and_prompt_mode(db, draft, name, vm_name)
+    _resolve_target_vm(db, draft, name, vm_name)
+
+    assert draft.workspace_name is not None  # defaulted in the validation section
+    assert draft.vm is not None and draft.target_vm_name is not None  # set by _resolve_target_vm
+    return SessionPlan(
+        name=name,
+        workspace_name=draft.workspace_name,
+        new_workspace=draft.new_workspace,
+        workspace_template=draft.workspace_template,
+        agent_name=draft.agent_name,
+        new_agent=draft.new_agent,
+        agent_template=draft.agent_template,
+        existing_ws=draft.existing_ws,
+        existing_agent=draft.existing_agent,
+        vm=draft.vm,
+        target_vm_name=draft.target_vm_name,
     )
