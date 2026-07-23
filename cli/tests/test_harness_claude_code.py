@@ -142,6 +142,18 @@ def test_validate_orphan_error_also_fires_when_pass_is_explicitly_false() -> Non
         )
 
 
+@pytest.mark.parametrize("empty", ["", "   ", "\t"])
+def test_validate_rejects_empty_oauth_token_secret(empty: str) -> None:
+    """An empty or whitespace-only name must not silently fall back to the
+    default secret (the ``_oauth_secret_name`` fallback would map the token
+    to the DEFAULT behind the operator's back); reject it loudly."""
+    with pytest.raises(ConfigError, match="oauth_token_secret is empty"):
+        ClaudeCodeHarness.validate_config(
+            "session-template/claude",
+            {"pass_oauth_token": True, "oauth_token_secret": empty},
+        )
+
+
 def test_validate_declares_default_secret_when_passing_enabled() -> None:
     (ref,) = ClaudeCodeHarness.validate_config(
         "session-template/claude", {"pass_oauth_token": True}

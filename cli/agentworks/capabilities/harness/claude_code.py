@@ -123,6 +123,17 @@ class ClaudeCodeHarness(Harness):
         oauth_token_secret = config.get("oauth_token_secret")
         if oauth_token_secret is not None and not isinstance(oauth_token_secret, str):
             raise ConfigError(f"{owner}.oauth_token_secret must be a string")
+        # An empty or whitespace-only name is not a valid secret reference:
+        # left to the silent ``_oauth_secret_name`` fallback it would map the
+        # token to the DEFAULT secret behind the operator's back, exactly the
+        # kind of misconfiguration this feature surfaces loudly rather than
+        # papering over. Reject it here (the co-occurrence guard below only
+        # checks the field is PRESENT, not that it names something).
+        if isinstance(oauth_token_secret, str) and not oauth_token_secret.strip():
+            raise ConfigError(
+                f"{owner}.oauth_token_secret is empty; give a secret name or "
+                f"drop the field to use the default ('{_DEFAULT_OAUTH_TOKEN_SECRET}')."
+            )
         # An orphan secret name (a name with nothing consuming it) is a
         # misconfiguration, surfaced loudly. This also catches the
         # child-wins inheritance wrinkle: a child setting
