@@ -232,6 +232,94 @@ def test_harness_value_wins_over_operator_env_and_warns(
     db.close()
 
 
+# -- the resolved token is registered for redaction on the op logger ----------
+
+
+def _capture_loggers(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> list[object]:
+    """Capture every ``SSHLogger`` the operation constructs (rooted in
+    ``tmp_path``, not the user's config dir)."""
+    from agentworks.ssh import SSHLogger
+
+    monkeypatch.setattr("agentworks.ssh.LOG_DIR", tmp_path)
+    created: list[object] = []
+    real_init = SSHLogger.__init__
+
+    def _capturing_init(self: object, *args: object, **kwargs: object) -> None:
+        real_init(self, *args, **kwargs)  # type: ignore[arg-type]
+        created.append(self)
+
+    monkeypatch.setattr(SSHLogger, "__init__", _capturing_init)
+    return created
+
+
+def test_create_registers_the_token_for_redaction(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The create path registers every resolved secret value on the op
+    logger, so a command carrying the token (the tmux ``-e`` flags) is
+    redacted from the op log and from raised SSHError text (asserted
+    through the public ``sanitize`` surface)."""
+    from agentworks.sessions.manager import create_session
+
+    monkeypatch.setenv("AW_SECRET_CLAUDE_CODE_OAUTH_TOKEN", _TOKEN_VALUE)
+    db = Database(tmp_path / "test.db")
+    _seed_lima_vm(db)
+    config = _make_config(tmp_path, _CC_TEMPLATE)
+    _patch_transports(monkeypatch)
+    _common_stubs(monkeypatch)
+    _capture_launch(monkeypatch, {})
+    loggers = _capture_loggers(monkeypatch, tmp_path)
+
+    create_session(db, config, name="s1", workspace="ws1", admin=True, template_name="claude")
+
+    assert any(
+        lg.sanitize(_TOKEN_VALUE) == "[REDACTED]"  # type: ignore[attr-defined]
+        for lg in loggers
+    ), "no op logger has the token registered for redaction"
+    db.close()
+
+
+def test_restart_registers_the_token_for_redaction(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The restart path registers the values from BOTH resolve passes
+    (the graph union carries the token) on the op logger."""
+    from agentworks.sessions import manager as session_manager
+    from agentworks.sessions.manager import restart_session
+
+    monkeypatch.setenv("AW_SECRET_CLAUDE_CODE_OAUTH_TOKEN", _TOKEN_VALUE)
+    db = Database(tmp_path / "test.db")
+    _seed_lima_vm(db)
+    db.insert_session(
+        "s1",
+        "ws1",
+        "claude",
+        SessionMode.ADMIN,
+        harness_state={"session_id": "939b1597-7c61-5ace-80f4-14617b7b4257"},
+    )
+    db.update_session_pid("s1", 4242, boot_id="boot-x")
+    config = _make_config(tmp_path, _CC_TEMPLATE)
+    _patch_transports(monkeypatch)
+    _common_stubs(monkeypatch)
+    monkeypatch.setattr(session_manager, "_ensure_pid", lambda session, **k: session)
+    monkeypatch.setattr(
+        session_manager, "check_session_status", lambda *a, **k: SessionStatus.OK
+    )
+    monkeypatch.setattr(session_manager, "_kill_session", lambda *a, **k: True)
+    _capture_launch(monkeypatch, {})
+    loggers = _capture_loggers(monkeypatch, tmp_path)
+
+    restart_session(db, config, name="s1", yes=True)
+
+    assert any(
+        lg.sanitize(_TOKEN_VALUE) == "[REDACTED]"  # type: ignore[attr-defined]
+        for lg in loggers
+    ), "no op logger has the token registered for redaction"
+    db.close()
+
+
 # -- an unmapped token fails at preflight, for free --------------------------
 
 

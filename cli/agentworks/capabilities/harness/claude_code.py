@@ -208,7 +208,8 @@ class ClaudeCodeHarness(Harness):
         the persistent pane command string (which would sit readable in
         tmux's ``pane_start_command`` for the session's whole lifetime); it
         shares exactly the exposure class of existing secret-backed env
-        directives.
+        directives, and like theirs its resolved value is registered for
+        redaction from agentworks's own op logs and error output.
         """
         if self.config.get("pass_oauth_token") is not True:
             return {}

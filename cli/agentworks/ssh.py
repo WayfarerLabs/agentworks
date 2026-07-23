@@ -114,7 +114,16 @@ class SSHLogger:
         if secret:
             self._redact.append(secret)
 
-    def _sanitize(self, text: str) -> str:
+    def sanitize(self, text: str) -> str:
+        """Apply the registered redactions to ``text``.
+
+        Public so surfaces OUTSIDE the log file reuse the same pass: the
+        SSH runners embed the executed command in the ``SSHError`` they
+        raise, which propagates to the console, so they sanitize that
+        message with this before raising. The log file itself needs no
+        caller-side call: ``_write`` funnels every byte through here
+        already.
+        """
         for secret in self._redact:
             text = text.replace(secret, "[REDACTED]")
         return text
@@ -208,7 +217,7 @@ class SSHLogger:
         # redactions registered mid-operation cover everything written
         # afterwards). Callers therefore never pre-sanitize.
         with open(self.path, "a", encoding="utf-8", errors="replace") as f:
-            f.write(self._sanitize(text))
+            f.write(self.sanitize(text))
 
 
 SSH_CONNECT_TIMEOUT = 30
@@ -322,9 +331,12 @@ def run(
             if logger is not None:
                 logger.log_command(command, ssh_result)
             if check and not ssh_result.ok:
-                raise SSHError(
-                    f"SSH command failed (exit {result.returncode}): {command}\nstderr: {result.stderr.strip()}"
-                )
+                # The message embeds the raw command and stderr, and it
+                # propagates to the console, so it takes the same
+                # redaction pass the log file gets (no logger attached
+                # means no registered redactions to apply).
+                msg = f"SSH command failed (exit {result.returncode}): {command}\nstderr: {result.stderr.strip()}"
+                raise SSHError(logger.sanitize(msg) if logger is not None else msg)
             return ssh_result
         except subprocess.TimeoutExpired as err:
             last_err = err
@@ -335,6 +347,7 @@ def run(
     msg = f"SSH command timed out after {retries} attempts ({timeout}s each): {command}"
     if logger is not None:
         logger.log_error(msg)
+        msg = logger.sanitize(msg)  # the raised copy needs its own pass
     raise SSHError(msg) from last_err
 
 

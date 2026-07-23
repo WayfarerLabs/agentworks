@@ -938,7 +938,10 @@ def _merge_harness_env(
     env here, so it reaches the pane over the same env channel as every
     other session secret rather than being baked into the pane command
     string; it shares the exposure class of the existing secret-backed env
-    directives, no better and no worse.
+    directives, no better and no worse. Both launch sites register every
+    resolved secret value on the op logger before the launch, so the
+    command text carrying the env (the tmux ``-e`` flags) is redacted from
+    the op log and from a failing command's SSHError text.
     """
     for key, value in harness.env_contributions(ctx).items():
         if key in session_env:
@@ -1795,7 +1798,10 @@ def create_session(
                 from agentworks.transports import agent_transport
 
                 assert existing_agent is not None
-                agent_target = agent_transport(vm, config, existing_agent)
+                # The op logger rides along so the agent-side commands
+                # (including the secret-bearing tmux launch below) are
+                # logged AND their error text passes the redaction pass.
+                agent_target = agent_transport(vm, config, existing_agent, logger=logger)
                 _assert_agent_ssh_works(agent_target, existing_agent)
 
             # PREFLIGHT-ALL against the one command-start context: the
@@ -1816,6 +1822,14 @@ def create_session(
         with output.section("Resolving Secrets"):
             resolver.resolve()
         secret_values = resolver.values
+        # Register every resolved secret VALUE for redaction before any
+        # transport command can carry one: the session env (secret-backed
+        # env directives, the harness's OAuth token) is embedded in the
+        # ``tmux new-session`` command string as ``-e KEY=VAL`` flags,
+        # which the transport writes to the op log and, on failure, embeds
+        # in the raised SSHError. ``add_redaction`` skips empty values.
+        for secret_value in secret_values.values():
+            logger.add_redaction(secret_value)
 
         def scoped_ctx(secret_names: tuple[str, ...]) -> RunContext:
             return RunContext(
@@ -1914,7 +1928,10 @@ def create_session(
                     from agentworks.agents.manager import _assert_agent_ssh_works
                     from agentworks.transports import agent_transport
 
-                    agent_target = agent_transport(vm, config, agent_row)
+                    # Logger attached for the same reason as the
+                    # existing-agent build above: logged commands plus
+                    # redacted error text on the secret-bearing launch.
+                    agent_target = agent_transport(vm, config, agent_row, logger=logger)
                     _assert_agent_ssh_works(agent_target, agent_row)
             else:
                 mode = SessionMode.ADMIN
@@ -2472,6 +2489,13 @@ def restart_session(
             session_target = _build_session_target(
                 session, vm=vm, config=config, db=db, admin_target=admin_target
             )
+            # Attach the op logger (initializer pattern: the ABC declares
+            # ``logger``). For admin sessions this is ``admin_target``,
+            # which already carries it; for agent sessions it is a fresh
+            # agent transport, and the attachment is what routes its
+            # commands (including the secret-bearing tmux launch below)
+            # into the op log and its error text through the redactions.
+            session_target.logger = logger
             session_run_command: RunCommand = session_target.run
             kill_sudo = False
 
@@ -2561,6 +2585,18 @@ def restart_session(
                 config,
                 registry,
             )
+
+            # Register every resolved secret VALUE from BOTH passes for
+            # redaction before any transport command can carry one: the
+            # session env is embedded in the ``tmux new-session`` command
+            # string as ``-e KEY=VAL`` flags, which the transport writes
+            # to the op log and, on failure, embeds in the raised
+            # SSHError. ``add_redaction`` skips empty values.
+            for secret_value in (
+                *graph_secret_values.values(),
+                *secret_values.values(),
+            ):
+                logger.add_redaction(secret_value)
 
         with output.section("Starting Session"):
             output.info(f"Restarting session '{name}'...")

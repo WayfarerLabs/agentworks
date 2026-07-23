@@ -426,6 +426,9 @@ ssh_private_key = "~/.ssh/id_ed25519"        # required: used for SSH connection
 #     better: env handed to a session does transiently appear in the
 #     `tmux new-session` argv and persists in tmux's session-environment
 #     table, so treat it with the same care as your other session secrets.
+#     Agentworks redacts resolved secret values from its own operation logs
+#     (under `~/.config/agentworks/logs/`) and from the error output of a
+#     failed launch command.
 #   - Precedence footgun: if the target env already carries
 #     `ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN`, or a cloud-provider auth
 #     var, those SILENTLY win over the OAuth token.

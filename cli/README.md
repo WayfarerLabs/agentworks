@@ -557,7 +557,8 @@ is never silent. Its `harness_config` vocabulary is five optional fields:
   login. You mint the token yourself with `claude setup-token` (a one-year lifetime, subscription
   accounts only: Pro / Max / Team / Enterprise, not Console API accounts) and map it to a secret via
   your secret backend. The token rides the env channel like any other session secret, never baked
-  into the pane command string. Precedence footgun: if the target env already carries
+  into the pane command string, and agentworks redacts resolved secret values from its own operation
+  logs and launch-failure error output. Precedence footgun: if the target env already carries
   `ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN`, or a cloud-provider auth var, those silently win over
   the OAuth token.
 - `oauth_token_secret`: the name of the secret the token is read from (default

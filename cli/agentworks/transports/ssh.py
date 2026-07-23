@@ -186,15 +186,25 @@ class SSHTransport(Transport):
             if self.logger is not None:
                 self.logger.log_command(command, ssh_result)
             if check and not ssh_result.ok:
-                raise SSHError(
+                # The message embeds the raw command and stderr (which
+                # can carry secrets: a session's env rides the tmux
+                # ``-e KEY=VAL`` flags inside the command string), and it
+                # propagates to the console. So it takes the same
+                # redaction pass the log file gets. No logger attached
+                # means no registered redactions to apply: unchanged.
+                msg = (
                     f"SSH command failed (exit {result.returncode}): {command}\n"
                     f"stderr: {result.stderr.strip()}"
                 )
+                if self.logger is not None:
+                    msg = self.logger.sanitize(msg)
+                raise SSHError(msg)
             return ssh_result
 
         msg = f"SSH command timed out after {attempts} attempts ({t}s each): {command}"
         if self.logger is not None:
             self.logger.log_error(msg)
+            msg = self.logger.sanitize(msg)  # the raised copy needs its own pass
         raise SSHError(msg) from last_err
 
     def interactive(

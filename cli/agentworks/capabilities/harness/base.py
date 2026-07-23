@@ -228,7 +228,9 @@ class Harness(Capability):
         never baked into the pane command string (which would sit readable
         in tmux's ``pane_start_command`` for the session's whole lifetime);
         it shares the exposure class of every other secret-backed env
-        directive.
+        directive, and the session manager registers every resolved secret
+        value on the op logger so agentworks's own logs and error output
+        redact it.
 
         Default: no contributions. ``shell`` does not override it;
         ``claude-code`` overrides it to pass an OAuth token when
