@@ -53,6 +53,26 @@ def test_accepts_non_home_paths(path: str) -> None:
     validate_vm_workspaces(path)
 
 
+def test_rejects_home_path_on_windows_style_host(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Host-independence regression. ``paths.vm_workspaces`` is always a VM-side
+    POSIX path, but agentworks runs natively on Windows, where ``os.path`` is
+    ``ntpath`` and ``ntpath.normpath('/home/foo')`` returns ``'\\home\\foo'``,
+    which matches neither the ``== '/home'`` nor the ``/home/`` prefix check.
+
+    The validator must normalize with ``posixpath`` regardless of host, so we
+    simulate a Windows host by repointing ``os.path`` at ``ntpath`` (on Linux
+    CI, ``os.path is posixpath``, so a revert to ``os.path.normpath`` would pick
+    up the patched separator and silently accept the path) and assert
+    ``/home/foo`` is STILL rejected. This fails loudly if anyone swaps
+    ``posixpath`` back to ``os.path``. CI only runs Linux, so nothing else
+    catches this."""
+    import ntpath
+
+    monkeypatch.setattr("os.path", ntpath)
+    with pytest.raises(ConfigError, match="must not be at or under /home"):
+        validate_vm_workspaces("/home/foo")
+
+
 def _write_config(tmp_path: Path, vm_workspaces: str) -> Path:
     """Minimal valid config with a ``[paths]`` table for the load-path test."""
     pub = tmp_path / "id_ed25519.pub"

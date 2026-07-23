@@ -175,13 +175,13 @@ def _harden_admin_home(
     agent path, where the admin transport chmods a DIFFERENT user's home). The
     chmod is idempotent, so this is safe on both initial provision and reinit.
 
-    Post-condition guard: the bootstrap ``useradd -U`` forces a private primary
-    group on the create path, but reinit, VMs provisioned before ``-U`` was
-    added, and odd images can still leave a shared primary group, which would
-    make the 0750 home group-readable by whoever shares that group. Warn (do not
-    fail) so drift is surfaced with a fix hint rather than silently defeating
-    isolation; a hard fail could block a legitimately custom setup, and ``-U``
-    already covers fresh creates.
+    Post-condition guard: the bootstrap forces a private primary group on the
+    create path (``groupadd -f`` + ``useradd -g``), but reinit, VMs provisioned
+    before that step existed, and odd images can still leave a shared primary
+    group, which would make the 0750 home group-readable by whoever shares that
+    group. Warn (do not fail) so drift is surfaced with a fix hint rather than
+    silently defeating isolation; a hard fail could block a legitimately custom
+    setup, and the bootstrap already covers fresh creates.
     """
     logger.step("Admin home permissions")
     try:

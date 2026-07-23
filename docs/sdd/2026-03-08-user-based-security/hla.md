@@ -20,11 +20,13 @@ Groups:
 ### Admin user
 
 The operator's identity on the VM. Created during Phase A (bootstrap) with a private primary group
-(`useradd -m -U`) so the admin home can be locked down. Has unrestricted sudo. Added to all
-workspace groups automatically. Its home (`/home/agentworks`) is tightened to mode 0750 during Phase
-B (both initial provision and reinit), with the same `id -gn` post-condition guard and `umask 027`
-login-shell supplement as the agent home below; the reasoning is identical, applied to the admin's
-own credentials, history, and caches so agent users on the VM cannot read them.
+(`groupadd -f "$VM_USER"` then `useradd -m -g "$VM_USER"`, an idempotent form that forces a private
+group without the whole-bootstrap abort that `useradd -U` risks when the group already exists) so
+the admin home can be locked down. Has unrestricted sudo. Added to all workspace groups
+automatically. Its home (`/home/agentworks`) is tightened to mode 0750 during Phase B (both initial
+provision and reinit), with the same `id -gn` post-condition guard and `umask 027` login-shell
+supplement as the agent home below; the reasoning is identical, applied to the admin's own
+credentials, history, and caches so agent users on the VM cannot read them.
 
 ### Agent users
 

@@ -68,19 +68,25 @@ VM_HOSTNAME={vm_hostname}
 SWAP_GB={swap}
 
 # -- Step 1: Ensure user --
-# ``-U`` (``--user-group``) forces a per-user private primary group regardless
-# of the base image's ``USERGROUPS_ENAB`` setting. This is load-bearing for the
-# 0750 admin home tightened in Phase B: 0750 is only admin-private if the group
-# half grants access to nobody but the admin. On an image where new users land
-# in a shared primary group (e.g. ``users``, GID 100), a bare ``useradd`` plus
-# 0750 would grant every agent in that group read+execute on the admin home. The
-# Phase B ``id -gn`` guard warns if an already-existing admin (created before
-# ``-U``, or on an odd image) still has a shared primary group.
+# Force a per-user private primary group regardless of the base image's
+# USERGROUPS_ENAB setting. This is load-bearing for the 0750 admin home
+# tightened in Phase B: 0750 is only admin-private if the group half grants
+# access to nobody but the admin. On an image where new users land in a shared
+# primary group (e.g. `users`, GID 100), a bare `useradd` plus 0750 would grant
+# every agent in that group read+execute on the admin home. We create the group
+# explicitly with `groupadd -f` (exits 0 if it already exists) and assign it as
+# the primary group with `useradd -g`, rather than `useradd -U`: under
+# `set -euo pipefail`, `useradd -U` aborts the entire bootstrap if a group named
+# $VM_USER already exists (a partial prior run, or a template whose username
+# collides with a system group), whereas `groupadd -f` is idempotent. The
+# Phase B `id -gn` guard warns if an already-existing admin (created before this
+# step, or on an odd image) still has a shared primary group.
 echo "##STEP## Ensure user"
 if id "$VM_USER" >/dev/null 2>&1; then
     echo "##SUCCESS## user $VM_USER already exists"
 else
-    useradd -m -U -s /bin/bash "$VM_USER"
+    groupadd -f "$VM_USER"
+    useradd -m -g "$VM_USER" -s /bin/bash "$VM_USER"
     echo "##SUCCESS## user $VM_USER created"
 fi
 usermod -aG sudo "$VM_USER"

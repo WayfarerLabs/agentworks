@@ -126,6 +126,21 @@ def test_harden_admin_home_private_primary_group_is_quiet() -> None:
     assert not any("primary group" in w for w in logger.warnings)
 
 
+def test_harden_admin_home_ssh_error_warns_not_raises() -> None:
+    """A transport failure during the chmod is non-fatal: the helper warns and
+    returns rather than propagating, so admin home hardening cannot abort init."""
+    from agentworks.ssh import SSHError
+
+    class _FailingTarget(_SpyTarget):
+        def run(self, command: str, **kwargs: object) -> _SpyResult:
+            raise SSHError("boom")
+
+    logger = _SpyLogger()
+    _harden_admin_home(_FailingTarget(), home=HOME, admin_username=ADMIN, logger=logger)
+
+    assert any("admin home permissions setup failed" in w for w in logger.warnings)
+
+
 # ---------------------------------------------------------------------------
 # umask 027 in the admin profile fragment
 # ---------------------------------------------------------------------------
@@ -159,11 +174,13 @@ def test_admin_profile_umask_present_even_with_no_paths() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_bootstrap_useradd_forces_private_group() -> None:
-    """The create-time bootstrap ``useradd`` carries ``-U`` so the admin's
-    primary group is a per-user private group regardless of the image's
-    ``USERGROUPS_ENAB``; without it, the 0750 home could leak to a shared
-    primary group."""
+def test_bootstrap_forces_private_group_idempotently() -> None:
+    """The create-time bootstrap forces a per-user private primary group
+    (``groupadd -f`` + ``useradd -g``) so the admin's primary group is private
+    regardless of the image's ``USERGROUPS_ENAB``; without it, the 0750 home
+    could leak to a shared primary group. The ``groupadd -f`` + ``-g`` form is
+    idempotent, unlike ``useradd -U``, which would abort the whole bootstrap
+    under ``set -euo pipefail`` if a group named ``$VM_USER`` already exists."""
     script = generate_bootstrap_script(
         admin_username="agentworks",
         ssh_public_key="ssh-ed25519 AAAA testkey",
@@ -172,4 +189,10 @@ def test_bootstrap_useradd_forces_private_group() -> None:
         hostname="lima--myvm",
     )
 
-    assert 'useradd -m -U -s /bin/bash "$VM_USER"' in script
+    assert 'groupadd -f "$VM_USER"' in script
+    assert 'useradd -m -g "$VM_USER" -s /bin/bash "$VM_USER"' in script
+    # The abort-prone form must not creep back in.
+    assert "useradd -m -U" not in script
+
+    # groupadd precedes useradd -g (the group must exist before it is assigned).
+    assert script.index('groupadd -f "$VM_USER"') < script.index('useradd -m -g "$VM_USER"')

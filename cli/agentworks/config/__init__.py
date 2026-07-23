@@ -100,6 +100,7 @@ from agentworks.config.validation import (
     VM_USER_RE,
     validate_admin_username,
     validate_name,
+    validate_vm_workspaces,
 )
 
 # ConfigError is defined in agentworks.errors and re-exported here for backward
@@ -150,4 +151,5 @@ __all__ = [
     "load_config",
     "validate_admin_username",
     "validate_name",
+    "validate_vm_workspaces",
 ]

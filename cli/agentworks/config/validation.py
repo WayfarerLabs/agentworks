@@ -83,12 +83,19 @@ def validate_vm_workspaces(path: str) -> None:
     sibling paths that merely start with those characters (``/homelab``,
     ``/home2/ws``) are accepted. Raises ``ConfigError`` (the type ``_load_paths``
     already raises) with a migration hint.
+
+    Normalization uses ``posixpath`` explicitly, not ``os.path``. This value is
+    always a VM-side POSIX path regardless of the operator's host OS, and
+    agentworks runs natively on Windows, where ``os.path`` is ``ntpath``:
+    ``ntpath.normpath('/home/foo')`` returns ``'\\home\\foo'``, which would
+    match neither branch below and silently accept every ``/home`` path.
+    ``posixpath`` is the house choice for VM paths across the codebase.
     """
-    import os.path
+    import posixpath
 
     from agentworks.errors import ConfigError
 
-    normalized = os.path.normpath(path)
+    normalized = posixpath.normpath(path)
     if normalized == "/home" or normalized.startswith("/home/"):
         raise ConfigError(
             f"paths.vm_workspaces must not be at or under /home (got {path!r}, "
