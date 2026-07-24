@@ -44,6 +44,13 @@ Source files in `.rulesync/` are the canonical input; never edit generated outpu
 Significant development efforts follow the SDD workflow. See [docs/sdd/](docs/sdd/) for existing
 specs and the `sdd` rule in `.rulesync/` for the full workflow description.
 
+Once an SDD's `locked.md` lands on `main`, its feature directory is locked. CI enforces this via
+`./scripts/check-locked-sdds.sh` (run on every PR and push to `main`): the only changes it permits
+under a locked directory are updating `locked.md` itself or deleting the directory in full down to
+the `locked.md` tombstone. Introducing `locked.md` in the same PR as the final SDD edits is allowed;
+the check compares against the merge-base with `main`, so only a pre-existing lockfile freezes the
+directory.
+
 ## Conventional Commits
 
 All commit messages follow the [Conventional Commits](https://www.conventionalcommits.org/)

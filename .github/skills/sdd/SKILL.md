@@ -96,6 +96,13 @@ paragraph above governs.
 A locked SDD is immutable but not permanent. See [Deleting Stale SDDs](#deleting-stale-sdds) for the
 post-lock lifecycle.
 
+CI enforces this rule via `./scripts/check-locked-sdds.sh` (run on every PR and push to `main`).
+Once a feature directory's `locked.md` is present on `main`, the check fails any change under that
+directory except two: updating `locked.md` itself, or deleting the whole directory down to the
+`locked.md` tombstone (a full wipe, not a partial deletion). It compares against the merge-base with
+`main`, so a PR that introduces `locked.md` alongside the final SDD edits is fine; only a lockfile
+that was _already_ on `main` freezes the directory.
+
 ## SDDs Are Not Permanent
 
 **Overarching rule:** no one should ever need to read anything under `docs/sdd/` to understand or
