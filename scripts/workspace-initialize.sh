@@ -141,6 +141,8 @@ JSONEOF
 step_setup_rulesync() {
     echo ""
     echo "--- Step 1: Rulesync ---"
+    echo "Claude Code, Codex CLI, and GitHub Copilot are committed to the repo already;"
+    echo "you only need a local config here for other tools (Cursor, Gemini, etc.)."
 
     local config_file="$REPO_ROOT/rulesync.local.jsonc"
 
