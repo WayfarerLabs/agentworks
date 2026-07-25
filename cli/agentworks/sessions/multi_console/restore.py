@@ -160,7 +160,7 @@ def restore_session(
                     config,
                     registry,
                 )
-            built = _mc._add_session_window(
+            result = _mc._add_session_window(
                 target,
                 db,
                 registry,
@@ -171,7 +171,7 @@ def restore_session(
                 layout=layout,
                 preserve_memo={},
             )
-            if not built:
+            if not result.built:
                 # _add_session_window warns and skips rather than raising, so
                 # without this check restore-session would print "Rebuilt
                 # window ..." and exit 0 over a window that was never built.
@@ -180,6 +180,20 @@ def restore_session(
                     entity_kind="console",
                     entity_name=console_name,
                     hint=(f"Run `agw console attach {console_name} --recreate` to rebuild the console from scratch."),
+                )
+            if result.failed_shells:
+                # The window is up but a shell pane failed to split or, worse,
+                # split without getting its @agentworks-shell-index tag. An
+                # untagged pane would make the next restore-session hit the
+                # untagged-pane refusal, converting a repairable window into a
+                # --recreate-only one. Escalate now, symmetric with the additive
+                # repair path below, rather than reporting a clean rebuild.
+                raise ExternalError(
+                    f"restore-session rebuilt window '{session_name}' but failed to "
+                    f"create/tag config indices {result.failed_shells} (see warnings above).",
+                    entity_kind="console",
+                    entity_name=console_name,
+                    hint=(f"Run `agw console attach {console_name} --recreate` to rebuild from scratch."),
                 )
             output.result(f"Rebuilt window '{session_name}' in console '{console_name}'.")
             return
@@ -285,7 +299,7 @@ def restore_session(
             )
             # Still focus the session pane on this no-op path so post-restore
             # landing focus is consistent whether or not repairs were needed.
-            _focus_session_pane(target, q_con, q_win)
+            _focus_session_pane(target, q_con, q_win, base_pidx)
             return
 
         # Strict subset: figure out which config indices are missing.
@@ -377,5 +391,5 @@ def restore_session(
         # recreate behavior; restore-session is a repair, not an attach, but
         # we still want consistent landing focus).
         _apply_layout(target, q_con, q_win, layout)
-        _focus_session_pane(target, q_con, q_win)
+        _focus_session_pane(target, q_con, q_win, base_pidx)
         output.result(f"Restored {output.count(len(missing), 'shell pane')} in '{session_name}'.")

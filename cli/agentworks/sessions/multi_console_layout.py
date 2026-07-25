@@ -54,9 +54,9 @@ def _apply_layout(target: Transport, q_con: str, q_win: str, layout: str) -> Non
     Tmux preset names (`tiled`, `main-vertical`, etc.) go through
     `select-layout` as-is. The agentworks-specific ``aw-session-vertical``
     has no tmux preset equivalent: it stacks all panes vertically and
-    sizes the session pane (pane 0) to the top 50%, with shell panes
-    sharing the bottom 50% in equal-height rows. We build a custom tmux
-    layout string with explicit per-pane heights (the
+    sizes the session pane (the lowest-indexed pane) to the top 50%, with
+    shell panes sharing the bottom 50% in equal-height rows. We build a
+    custom tmux layout string with explicit per-pane heights (the
     `select-layout even-vertical` + `resize-pane` approach can't give
     pixel-equal shell rows because tmux's resize delta only affects a
     single neighbor at a time).
@@ -135,9 +135,15 @@ def _build_aw_session_vertical_layout_string(query_output: str) -> str | None:
     Output: a complete tmux layout string `<checksum>,WxH,0,0[children]`
     where children are leaf nodes laid out vertically:
 
-      - pane 0 (session) gets the top H/2 lines
-      - panes 1..N (shells) share the remaining (H/2 - 1) lines evenly,
-        accounting for 1-line borders between each pair of adjacent panes
+      - the lowest-indexed pane (session) gets the top H/2 lines
+      - the remaining panes (shells) share the remaining (H/2 - 1) lines
+        evenly, accounting for 1-line borders between each pair of
+        adjacent panes
+
+    Pane indices normally start at 0, but the console tmux server inherits
+    the admin user's ~/.tmux.conf, so `pane-base-index 1` makes them start
+    at 1. Only the ordering by index matters here (the session pane is the
+    lowest), not the absolute value, so both bases render identically.
 
     The top-level node is hard-coded as a vertical split (``[...]``); if a
     horizontal variant is ever wanted, switch to ``{...}`` and recompute
@@ -157,9 +163,10 @@ def _build_aw_session_vertical_layout_string(query_output: str) -> str | None:
         return None
     # Don't trust tmux to emit list-panes output in pane_index order: parse
     # the index, sort by it, then take pane_ids in index order. Also require
-    # the index sequence to start at 0 and be contiguous -- a missing pane 0
-    # (the session pane) means we'd put a shell into the session slot and
-    # the layout would be wrong.
+    # the index sequence to be contiguous starting from the window's lowest
+    # live pane index (0 normally, 1 under `pane-base-index 1`). A gap means
+    # we can't tell which pane belongs in which slot, so we'd risk putting a
+    # shell into the session slot and rendering the layout wrong.
     indexed: list[tuple[int, str]] = []
     for line in lines[1:]:
         parts = line.split()
@@ -173,9 +180,10 @@ def _build_aw_session_vertical_layout_string(query_output: str) -> str | None:
     if not indexed:
         return None
     indexed.sort(key=lambda p: p[0])
-    if [idx for idx, _ in indexed] != list(range(len(indexed))):
-        # Non-contiguous or missing pane 0 -- can't build a sensible layout
-        # without knowing which pane belongs in which slot.
+    base_pidx = indexed[0][0]
+    if [idx for idx, _ in indexed] != list(range(base_pidx, base_pidx + len(indexed))):
+        # Non-contiguous indices: can't build a sensible layout without
+        # knowing which pane belongs in which slot.
         return None
     pane_ids = [pid for _, pid in indexed]
     n = len(pane_ids)
@@ -220,14 +228,22 @@ def _tmux_layout_checksum(s: str) -> int:
     return csum
 
 
-def _focus_session_pane(target: Transport, q_con: str, q_win: str) -> None:
-    """Move tmux's active pane to the session pane (pane 0) of a window.
+def _focus_session_pane(target: Transport, q_con: str, q_win: str, base_pidx: int) -> None:
+    """Move tmux's active pane to the session pane of a window.
 
     Called after building or repairing a window so the operator lands on
     the session output, not the most-recently-created shell pane (which
     is whatever tmux selected after the last `split-window`).
+
+    The session pane is the window's lowest-indexed pane. That is index 0
+    normally, but the console tmux server inherits the admin user's
+    ~/.tmux.conf, so `pane-base-index 1` makes it index 1 (and then no pane
+    ever reports index 0, so a literal `.0` target would fail). Callers pass
+    the base index they already know: the repair paths have it from the pane
+    listing, and the build path captures it from the session pane created by
+    `tmux new-window`.
     """
-    target.run(f"tmux select-pane -t {q_con}:{q_win}.0", check=False)
+    target.run(f"tmux select-pane -t {q_con}:{q_win}.{base_pidx}", check=False)
 
 
 # -- Pane / window reordering ----------------------------------------------

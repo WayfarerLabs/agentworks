@@ -18,7 +18,13 @@ from agentworks.sessions.multi_console import (
     restore_session,
 )
 from agentworks.sessions.multi_console_layout import SHELL_INDEX_OPTION
-from tests._consoles_support import _seed_sessions, _seed_vm, _stub_build_registry, _StubConfig  # noqa: F401
+from tests._consoles_support import (  # noqa: F401
+    _seed_sessions,
+    _seed_vm,
+    _stub_build_registry,
+    _StubConfig,
+    _StubVerticalLayoutConfig,
+)
 from tests.conftest import _FakeResult, _FakeTarget
 
 if TYPE_CHECKING:
@@ -201,6 +207,56 @@ def test_restore_session_rebuild_raises_when_new_window_fails(
     assert not any("Rebuilt window" in m for m in captured_output.info)
 
 
+def test_restore_session_rebuild_raises_when_shell_split_fails(
+    db: Database, fake_target: _FakeTarget, captured_output: CapturedOutput
+) -> None:
+    """The rebuild path must escalate symmetrically with the additive path: if
+    a shell pane fails to split while rebuilding a missing window, it raises
+    (with a --recreate hint) rather than reporting a clean rebuild. Otherwise a
+    transient split failure would silently produce a partial window."""
+    _seed_vm(db, with_tailscale=True)
+    _seed_sessions(db, ["a"])
+    create_console(db, name="con", vm_name="vm1", session_specs=["a+2"])
+
+    fake_target.responses["has-session -t aw-console-con"] = _FakeResult(returncode=0)
+    fake_target.responses["list-windows -t aw-console-con"] = _FakeResult(stdout="other\n")
+    # new-window succeeds (default ok); split-window succeeds but prints no
+    # pane id, so _split_shell_pane can't tag the pane and returns None.
+    fake_target.responses["split-window -t aw-console-con:a"] = _FakeResult(stdout="")
+
+    with pytest.raises(ExternalError, match=r"failed to create/tag config indices \[0, 1\]") as excinfo:
+        restore_session(db, _StubConfig(), console_name="con", session_name="a")
+
+    assert "agw console attach con --recreate" in (excinfo.value.hint or "")
+    # No clean-rebuild success line on a partial rebuild.
+    assert not any("Rebuilt window" in m for m in captured_output.info)
+
+
+def test_restore_session_rebuild_raises_when_shell_tag_fails(
+    db: Database, fake_target: _FakeTarget, captured_output: CapturedOutput
+) -> None:
+    """The tag-failure sub-case is the one that bites: a rebuilt window left
+    with an untagged shell pane makes the NEXT restore-session hit the
+    untagged-pane refusal. So a split that succeeds but whose set-option tag
+    fails must also escalate during rebuild."""
+    _seed_vm(db, with_tailscale=True)
+    _seed_sessions(db, ["a"])
+    create_console(db, name="con", vm_name="vm1", session_specs=["a+1"])
+
+    fake_target.responses["has-session -t aw-console-con"] = _FakeResult(returncode=0)
+    fake_target.responses["list-windows -t aw-console-con"] = _FakeResult(stdout="other\n")
+    # The pane splits and reports its id, but tagging it fails, so
+    # _split_shell_pane returns None (the pane is live but untagged).
+    fake_target.responses["split-window -t aw-console-con:a"] = _FakeResult(stdout="%9\n")
+    fake_target.responses["set-option -p"] = _FakeResult(returncode=1, stderr="tmux refused set-option")
+
+    with pytest.raises(ExternalError, match=r"failed to create/tag config indices \[0\]") as excinfo:
+        restore_session(db, _StubConfig(), console_name="con", session_name="a")
+
+    assert "agw console attach con --recreate" in (excinfo.value.hint or "")
+    assert not any("Rebuilt window" in m for m in captured_output.info)
+
+
 def test_restore_session_rebuild_refuses_when_session_row_gone(db: Database, fake_target: _FakeTarget) -> None:
     """The window-missing path rebuilds from config, but _add_session_window
     only warns and skips when the session row is gone. Check the session up
@@ -295,6 +351,10 @@ def test_restore_session_refuses_when_session_pane_killed_leaves_duplicate(
         pytest.param("a+2", "a\n", "%1|0|\n%2|1|0\n%3|2|0\n", id="duplicate-tags"),
         pytest.param("a+1", "a\n", "%1|0|\n%2|1|0\n%3|2|1\n", id="out-of-range-tag"),
         pytest.param("a+1", "a\n", "", id="unparseable-pane-list"),
+        # pane-base-index 1: session pane at 1, shells above it.
+        pytest.param("a+1", "a\n", "%1|1|\n%2|2|0\n", id="healthy-base-1"),
+        pytest.param("a+2", "a\n", "%1|1|\n%2|2|0\n", id="shell-pane-missing-base-1"),
+        pytest.param("a+1", "a\n", "%1|1|0\n", id="session-pane-killed-base-1"),
     ],
 )
 def test_restore_session_never_destroys_live_tmux_state(
@@ -353,6 +413,10 @@ def test_restore_session_healthy_under_pane_base_index_one(
 
     assert any("already matches config" in m for m in captured_output.info)
     assert not any("split-window" in c for c in fake_target.commands)
+    # Focus lands on the session pane at its actual index (1 here), not a
+    # literal .0 that tmux would reject under `pane-base-index 1`.
+    assert "tmux select-pane -t aw-console-con:a.1" in fake_target.commands
+    assert not any("select-pane -t aw-console-con:a.0" in c for c in fake_target.commands)
 
 
 def test_restore_session_refuses_killed_session_pane_under_pane_base_index_one(
@@ -374,10 +438,15 @@ def test_restore_session_refuses_killed_session_pane_under_pane_base_index_one(
         restore_session(db, _StubConfig(), console_name="con", session_name="a")
 
 
-def test_restore_session_reorders_relative_to_the_session_pane(db: Database, fake_target: _FakeTarget) -> None:
+def test_restore_session_reorders_relative_to_the_session_pane(
+    db: Database, fake_target: _FakeTarget, captured_output: CapturedOutput
+) -> None:
     """Shell config index N belongs one slot after the session pane plus N, so
     under `pane-base-index 1` (session pane at index 1) config index 1 belongs
-    at pane 3, not pane 2."""
+    at pane 3, not pane 2. The repair also re-applies the default layout, and
+    under base index 1 the aw-session-vertical builder must accept the 1..N pane
+    run and apply a real select-layout (not warn and skip), then focus the
+    session pane at its actual index."""
     _seed_vm(db, with_tailscale=True)
     _seed_sessions(db, ["a"])
     create_console(db, name="con", vm_name="vm1", session_specs=["a+2"])
@@ -387,15 +456,28 @@ def test_restore_session_reorders_relative_to_the_session_pane(db: Database, fak
     # Session pane at index 1; config index 0 is missing, so the surviving
     # shell (config index 1) sits at index 2 and has to move up to index 3.
     # The fake replays this same listing to the reorder pass, which is enough
-    # to pin which slot a tagged pane is aimed at.
-    fake_target.responses["list-panes -t aw-console-con:a"] = _FakeResult(stdout="%1|1|\n%2|2|1\n")
+    # to pin which slot a tagged pane is aimed at. Key on the tagged -F format
+    # so this response does not also answer the layout query's list-panes call
+    # (which uses a different -F and must fall through to display-message).
+    fake_target.responses["-F '#{pane_id}|#{pane_index}|#{@agentworks-shell-index}'"] = _FakeResult(
+        stdout="%1|1|\n%2|2|1\n"
+    )
     fake_target.responses["split-window -t aw-console-con:a"] = _FakeResult(stdout="%9\n")
+    # aw-session-vertical layout query: geometry + pane list indexed from 1
+    # (base index 1). session %1 at 1, new pane %9 at 2, surviving %2 at 3.
+    fake_target.responses["display-message -t aw-console-con:a"] = _FakeResult(stdout="80x36\n1 %1\n2 %9\n3 %2\n")
 
     fake_target.commands.clear()
-    restore_session(db, _StubConfig(), console_name="con", session_name="a")
+    restore_session(db, _StubVerticalLayoutConfig(), console_name="con", session_name="a")
 
     swaps = [c for c in fake_target.commands if "swap-pane" in c]
     assert swaps == ["tmux swap-pane -s %2 -t aw-console-con:a.3"]
+    # The vertical layout applied for real (a computed select-layout string),
+    # with no "too small or unparseable" warning under base index 1.
+    assert any("select-layout -t aw-console-con:a" in c for c in fake_target.commands)
+    assert not any("could not build aw-session-vertical" in w for w in captured_output.warnings)
+    # Focus lands on the session pane at index 1, not a literal .0.
+    assert "tmux select-pane -t aw-console-con:a.1" in fake_target.commands
 
 
 # -- restore-session: additive shell-pane repair ---------------------------
