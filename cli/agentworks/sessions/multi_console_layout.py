@@ -233,9 +233,15 @@ def _focus_session_pane(target: Transport, q_con: str, q_win: str) -> None:
 # -- Pane / window reordering ----------------------------------------------
 
 
-def _list_shell_panes(target: Transport, q_con: str, q_win: str) -> list[tuple[str, int, int | None]] | None:
-    """Return live shell panes for a console window as (pane_id, pane_index,
-    config_index_or_None). Excludes pane_index 0 (the session pane).
+def _list_panes_with_tags(target: Transport, q_con: str, q_win: str) -> list[tuple[str, int, int | None]] | None:
+    """Return every live pane for a console window as (pane_id, pane_index,
+    config_index_or_None), including the session pane at pane_index 0.
+
+    The session pane is created by ``tmux new-window`` and left untagged, so it
+    comes back with config_index None; shell panes created by
+    ``_split_shell_pane`` carry an ``@agentworks-shell-index`` tag. Callers use
+    the untagged-ness of pane 0 to tell "the session-attach pane is still there"
+    from "the operator killed it and tmux compacted a shell into slot 0".
 
     Returns None if the tmux query failed.
     """
@@ -255,9 +261,6 @@ def _list_shell_panes(target: Transport, q_con: str, q_win: str) -> list[tuple[s
             pidx = int(pidx_s)
         except ValueError:
             continue
-        if pidx == 0:
-            # Session pane: not part of the configured shell list.
-            continue
         cidx: int | None
         if cidx_s:
             try:
@@ -268,6 +271,19 @@ def _list_shell_panes(target: Transport, q_con: str, q_win: str) -> list[tuple[s
             cidx = None
         panes.append((pid, pidx, cidx))
     return panes
+
+
+def _list_shell_panes(target: Transport, q_con: str, q_win: str) -> list[tuple[str, int, int | None]] | None:
+    """Return live shell panes for a console window as (pane_id, pane_index,
+    config_index_or_None). Excludes pane_index 0 (the session pane).
+
+    Returns None if the tmux query failed.
+    """
+    all_panes = _list_panes_with_tags(target, q_con, q_win)
+    if all_panes is None:
+        return None
+    # pane_index 0 is the session pane, not part of the configured shell list.
+    return [(pid, pidx, cidx) for pid, pidx, cidx in all_panes if pidx != 0]
 
 
 def _reorder_shell_panes(target: Transport, q_con: str, q_win: str, configured_count: int) -> None:

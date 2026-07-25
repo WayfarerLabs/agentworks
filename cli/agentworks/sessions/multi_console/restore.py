@@ -24,7 +24,7 @@ from agentworks.resources.access import named_console_template
 from agentworks.sessions.multi_console_layout import (
     _apply_layout,
     _focus_session_pane,
-    _list_shell_panes,
+    _list_panes_with_tags,
     _reorder_shell_panes,
 )
 
@@ -46,12 +46,20 @@ def restore_session(
 ) -> None:
     """Reconcile a single session window's live tmux state against its configured
     shell list. Additive only: rebuilds the window if missing, fills in any
-    panes the user accidentally killed (in their correct config positions), but
-    refuses to remove panes if the user has more live than configured.
+    shell panes the user accidentally killed (in their correct config
+    positions), but refuses to remove panes if the user has more live than
+    configured.
 
-    Strict on untagged panes: a window built before pane-tagging was added has
-    no way to determine which configured shell is missing, so we refuse and
-    direct the operator to `attach --recreate`.
+    Rebuilds the whole window from config in two cases: the window is gone, or
+    the window survives but its session-attach pane (untagged pane_index 0) was
+    killed. In the latter case tmux compacts a shell pane into slot 0, so the
+    console shows a shell instead of the session; the attach pane can't be
+    reinserted additively at index 0, so the window is torn down and recreated.
+
+    Strict on untagged shell panes: a window built before pane-tagging was added
+    (or one an operator hand-split with `tmux split-window`) has no way to
+    determine which configured shell is missing, so we refuse and direct the
+    operator to `attach --recreate`.
     """
     from agentworks.bootstrap import build_registry
 
@@ -87,7 +95,15 @@ def restore_session(
         layout = named_console_template(registry).tmux_layout
         configured_count = len(member.shells)
 
-        # Window present?
+        # Is the window present, and if so does it still have its session-attach
+        # pane? The session pane is pane_index 0, created untagged by
+        # `tmux new-window`; every shell pane carries an @agentworks-shell-index
+        # tag. When the operator kills the session pane, tmux compacts a tagged
+        # shell down into slot 0, so a window that exists but has no untagged
+        # pane 0 has lost its attach-to-session pane (the console then shows a
+        # shell instead of the session). Additive repair can't reinsert the
+        # attach pane at index 0, so both "window missing" and "session pane
+        # missing" take the rebuild path below.
         res = target.run(
             f"tmux list-windows -t {q_con} -F '#{{window_name}}'",
             check=False,
@@ -99,17 +115,53 @@ def restore_session(
                 entity_name=console_name,
             )
         windows = res.stdout.strip().splitlines()
-        if session_name not in windows:
-            output.info(f"window '{session_name}' is missing; rebuilding from config...")
+        window_present = session_name in windows
+
+        all_panes: list[tuple[str, int, int | None]] | None = None
+        session_pane_present = False
+        if window_present:
+            all_panes = _list_panes_with_tags(target, q_con, q_win)
+            if all_panes is None:
+                raise ExternalError(
+                    f"failed to list panes for window '{session_name}'",
+                    entity_kind="console",
+                    entity_name=console_name,
+                )
+            pane0 = next((p for p in all_panes if p[1] == 0), None)
+            session_pane_present = pane0 is not None and pane0[2] is None
+
+        if not window_present or not session_pane_present:
+            # Guard before the destructive kill-window below. If the session or
+            # its workspace has been deleted out from under the console,
+            # _add_session_window only warns and returns (it does not raise), so
+            # rebuilding a *present* (broken) window would tear it down, build
+            # nothing, and still report success. Fail loudly instead, matching
+            # the additive path's session/workspace checks further down.
+            session = db.get_session(session_name)
+            if session is None:
+                raise StateError(
+                    f"session '{session_name}' no longer exists in the database",
+                    entity_kind="session",
+                    entity_name=session_name,
+                    hint="Remove the session from the console first.",
+                )
+            if _resolve_workspace_path(db, session) is None:
+                raise StateError(
+                    f"workspace for session '{session_name}' is missing; cannot restore.",
+                    entity_kind="session",
+                    entity_name=session_name,
+                )
+
+            reason = "window" if not window_present else "session pane"
+            output.info(f"{reason} for '{session_name}' is missing; rebuilding window from config...")
             # Eager-prompting orchestration:
-            # the window-rebuild path also opens new shells (one per
-            # configured shell entry, via _add_session_window ->
-            # _split_shell_pane). Resolve every referenced secret BEFORE
-            # any pane is opened. Targets cover ALL configured shells in
-            # this case (the window is missing, so every pane is new).
-            # Conditional-need exception to the one-boundary-resolve
-            # contract: whether the window is missing is only knowable
-            # from live tmux state, post-bind (same class as the
+            # the rebuild path opens new shells (one per configured shell entry,
+            # via _add_session_window -> _split_shell_pane). Resolve every
+            # referenced secret BEFORE any pane is opened. Targets cover ALL
+            # configured shells in this case (the window is rebuilt from
+            # scratch, so every pane is new). Conditional-need exception to the
+            # one-boundary-resolve contract: whether a rebuild is needed is only
+            # knowable from live tmux state, post-bind (same class as the
             # Tailscale rejoin).
             from agentworks.secrets import resolve_for_command
 
@@ -127,6 +179,11 @@ def restore_session(
                     config,
                     registry,
                 )
+            if window_present:
+                # The window exists but lost its session pane; tear it down
+                # first. _add_session_window issues `tmux new-window`, which
+                # would otherwise leave a second window with the same name.
+                target.run(f"tmux kill-window -t {q_con}:{q_win}", check=False)
             _mc._add_session_window(
                 target,
                 db,
@@ -141,17 +198,11 @@ def restore_session(
             output.result(f"Rebuilt window '{session_name}' in console '{console_name}'.")
             return
 
-        # Window exists. Enumerate shell panes (skipping pane_index 0, the session
-        # pane). The session pane is created via tmux new-window and intentionally
-        # left untagged; every shell pane is created via _split_shell_pane and
-        # gets an @agentworks-shell-index tag.
-        shell_panes = _list_shell_panes(target, q_con, q_win)
-        if shell_panes is None:
-            raise ExternalError(
-                f"failed to list panes for window '{session_name}'",
-                entity_kind="console",
-                entity_name=console_name,
-            )
+        # Window exists with its session pane intact. Shell panes are every pane
+        # except pane_index 0 (the untagged session pane). Each shell pane is
+        # created via _split_shell_pane and gets an @agentworks-shell-index tag.
+        assert all_panes is not None  # guaranteed: window_present implies it was set above
+        shell_panes = [p for p in all_panes if p[1] != 0]
 
         untagged = [pid for pid, _pidx, cidx in shell_panes if cidx is None]
         if untagged:

@@ -260,8 +260,10 @@ def console_restore_session(
 ) -> None:
     """Reconcile a session window's live shell panes against the configured list.
 
-    Re-adds any panes you killed (e.g. accidentally), restoring each one to
-    its original position. Refuses to remove panes if you have more live than
+    Re-adds any shell panes you killed (e.g. accidentally), restoring each one
+    to its original position. If the window's session pane itself was killed
+    (so the console shows a plain shell instead of the session), rebuilds the
+    whole window from config. Refuses to remove panes if you have more live than
     configured; for that, use `console attach --recreate`. Consoles created
     before pane-tagging existed require `attach --recreate` once to retag from
     scratch.

@@ -177,6 +177,96 @@ def test_restore_session_rebuilds_missing_window(db: Database, fake_target: _Fak
 
     new_windows = [c for c in fake_target.commands if "new-window -t aw-console-con" in c]
     assert len(new_windows) == 1
+    # A missing window has nothing to tear down: the rebuild path must not
+    # issue a kill-window (that guard is what keeps it from targeting a
+    # non-existent window). Pin it so a future refactor can't regress it.
+    assert not any("kill-window" in c for c in fake_target.commands)
+
+
+def test_restore_session_rebuilds_when_session_pane_killed(db: Database, fake_target: _FakeTarget) -> None:
+    """If the operator kills the session-attach pane (untagged pane_index 0),
+    tmux compacts a tagged shell down into slot 0. restore-session must notice
+    that no untagged session pane remains and rebuild the window, rather than
+    treat the shell now at index 0 as the session pane (which would leave the
+    console showing a shell and silently add a duplicate shell)."""
+    _seed_vm(db, with_tailscale=True)
+    _seed_sessions(db, ["a"])
+    create_console(db, name="con", vm_name="vm1", session_specs=["a+1"])
+
+    fake_target.responses["has-session -t aw-console-con"] = _FakeResult(returncode=0)
+    fake_target.responses["list-windows -t aw-console-con"] = _FakeResult(stdout="a\n")
+    # Session pane gone: the one configured shell (tag 0) has compacted into
+    # slot 0, so there is no untagged pane_index 0.
+    fake_target.responses["list-panes -t aw-console-con:a"] = _FakeResult(stdout="%1|0|0\n")
+    # Rebuild re-splits the shell; give it a pane id so the tag step has a target.
+    fake_target.responses["split-window -t aw-console-con:a"] = _FakeResult(stdout="%9\n")
+
+    fake_target.commands.clear()
+    restore_session(db, _StubConfig(), console_name="con", session_name="a")
+
+    # The broken window is torn down and recreated (not additively patched).
+    assert any("kill-window -t aw-console-con:a" in c for c in fake_target.commands)
+    assert any("new-window -t aw-console-con" in c for c in fake_target.commands)
+
+
+def test_restore_session_rebuilds_when_session_pane_killed_leaves_duplicate(
+    db: Database, fake_target: _FakeTarget
+) -> None:
+    """The stuck state seen in the wild: the session pane was killed and a
+    prior restore-session (which skipped pane_index 0) added a duplicate shell,
+    so both live panes are tagged 0. Because there is still no untagged pane 0,
+    restore-session rebuilds rather than reporting "already matches config" or
+    raising a duplicate-tags error."""
+    _seed_vm(db, with_tailscale=True)
+    _seed_sessions(db, ["a"])
+    create_console(db, name="con", vm_name="vm1", session_specs=["a+1"])
+
+    fake_target.responses["has-session -t aw-console-con"] = _FakeResult(returncode=0)
+    fake_target.responses["list-windows -t aw-console-con"] = _FakeResult(stdout="a\n")
+    # Two panes, both tagged 0 (no untagged session pane) -- the observed bug.
+    fake_target.responses["list-panes -t aw-console-con:a"] = _FakeResult(stdout="%1|0|0\n%2|1|0\n")
+    fake_target.responses["split-window -t aw-console-con:a"] = _FakeResult(stdout="%9\n")
+
+    fake_target.commands.clear()
+    # Must not raise (the old code would no-op via _list_shell_panes skipping
+    # pane 0, seeing a single tag-0 shell == configured count).
+    restore_session(db, _StubConfig(), console_name="con", session_name="a")
+
+    assert any("kill-window -t aw-console-con:a" in c for c in fake_target.commands)
+    assert any("new-window -t aw-console-con" in c for c in fake_target.commands)
+
+
+def test_restore_session_rebuild_aborts_without_destroying_window_when_session_gone(
+    db: Database, fake_target: _FakeTarget
+) -> None:
+    """The rebuild path is destructive: it kills the present (broken) window
+    before recreating it. If the session row has been deleted from the DB,
+    _add_session_window would only warn-and-skip (it does not raise), so
+    restore-session must refuse BEFORE kill-window rather than tear down the
+    still-visible window, build nothing, and falsely report success."""
+    _seed_vm(db, with_tailscale=True)
+    _seed_sessions(db, ["a"])
+    create_console(db, name="con", vm_name="vm1", session_specs=["a+1"])
+
+    # Corrupt state: the session row is gone but the console member survives.
+    # ON DELETE CASCADE would normally remove the member with the session, so
+    # disable FKs to reproduce the orphaned-member state the guard defends against.
+    db._conn.execute("PRAGMA foreign_keys = OFF")
+    db._conn.execute("DELETE FROM sessions WHERE name = 'a'")
+    db._conn.commit()
+
+    fake_target.responses["has-session -t aw-console-con"] = _FakeResult(returncode=0)
+    fake_target.responses["list-windows -t aw-console-con"] = _FakeResult(stdout="a\n")
+    # Session pane gone (shell compacted into slot 0) -> would take the rebuild path.
+    fake_target.responses["list-panes -t aw-console-con:a"] = _FakeResult(stdout="%1|0|0\n")
+
+    fake_target.commands.clear()
+    with pytest.raises(StateError, match="no longer exists in the database"):
+        restore_session(db, _StubConfig(), console_name="con", session_name="a")
+
+    # The present (broken) window must survive untouched: no destructive tmux ops.
+    assert not any("kill-window" in c for c in fake_target.commands)
+    assert not any("new-window" in c for c in fake_target.commands)
 
 
 def test_restore_session_raises_when_split_returns_no_pane_id(db: Database, fake_target: _FakeTarget) -> None:
