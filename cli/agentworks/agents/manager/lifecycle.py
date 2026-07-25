@@ -367,8 +367,15 @@ def reinit_agent(
     config: Config,
     *,
     name: str,
+    update_template: str | None = None,
 ) -> None:
     """Re-run agent setup using the stored template.
+
+    `update_template` re-points the agent to a different declared template
+    before reinit. It is validated against the registry and persisted
+    pre-boundary (alongside the not-found check), so a bad name costs zero
+    prompts and leaves the row untouched; the resolve below then uses the
+    NEW template.
 
     Orchestrated: the graph derives from the agent's row and its stored
     template (the live agent node, the template node whose declared
@@ -396,9 +403,21 @@ def reinit_agent(
             entity_name=name,
         )
 
-    agent_tmpl = resolve_template(registry, agent.template)
-
     vm = _require_vm(db, agent.vm_name)
+
+    # Re-point before resolving: validate the new template exists, persist
+    # it, and mutate the in-memory row so the resolve below uses the NEW
+    # template. Both cheap not-found checks (agent, VM) run first, so a bad
+    # agent / VM / template name raises pre-boundary and costs zero prompts,
+    # and only a valid re-point is ever persisted.
+    if update_template is not None:
+        from agentworks.resources.access import require_declared_template
+
+        require_declared_template(registry, "agent-template", update_template)
+        db.update_agent_template(name, update_template)
+        agent.template = update_template
+
+    agent_tmpl = resolve_template(registry, agent.template)
 
     # BUILD: the live agent from its row, plus the resolved template
     # whose declared credentials become edges (the template is a

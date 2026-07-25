@@ -36,6 +36,9 @@ provider = "github"
 
 [agent_templates.default]
 git_credentials = ["gh"]
+
+[agent_templates.other]
+git_credentials = ["gh"]
 """
 
 
@@ -319,6 +322,94 @@ def test_reinit_mutation_failure_wraps_and_keeps_the_agent(
         agent_manager.reinit_agent(db, config, name="dev")
 
     assert db.get_agent("dev") is not None  # re-runnable, as before
+
+
+# -- --update-template re-points before reinit --------------------------------
+
+
+def test_reinit_update_template_repoints_and_resolves_the_new_template(
+    db: Database,
+    make_config,  # noqa: ANN001
+    monkeypatch: pytest.MonkeyPatch,
+    captured_output,  # noqa: ANN001
+) -> None:
+    """``agent reinit --update-template other`` persists the new stored
+    template and reinit resolves + sets up against it (not the old one)."""
+    config = make_config()
+    _seed_vm(db)
+    db.insert_agent("dev", "box", "agt-dev", template="default")
+    _reachable(monkeypatch, True)
+
+    captured: dict[str, Any] = {}
+
+    def _capture(vm: Any, config_: Any, registry: Any, agent_tmpl: Any, linux_user: str, **kwargs: Any) -> None:
+        captured["template"] = agent_tmpl.name
+
+    monkeypatch.setattr(agent_initializer, "create_agent_on_vm", _capture)
+    monkeypatch.setattr("agentworks.ssh_config.sync_ssh_config", lambda *a, **k: None)
+
+    agent_manager.reinit_agent(db, config, name="dev", update_template="other")
+
+    assert captured["template"] == "other"  # setup ran against the NEW template
+    row = db.get_agent("dev")
+    assert row is not None and row.template == "other"  # persisted
+
+
+def test_reinit_unknown_update_template_raises_and_keeps_the_row(
+    db: Database,
+    make_config,  # noqa: ANN001
+    resolve_counter: list[list[str]],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An undeclared ``--update-template`` name fails pre-boundary with a
+    typed NotFoundError; nothing is persisted, nothing resolves, and the
+    stored template is left as it was (validate BEFORE any side effect)."""
+    from agentworks.errors import NotFoundError
+
+    config = make_config()
+    _seed_vm(db)
+    db.insert_agent("dev", "box", "agt-dev", template="default")
+
+    def _boom(*a: Any, **k: Any) -> None:
+        raise AssertionError("setup must not run for an invalid template name")
+
+    monkeypatch.setattr(agent_initializer, "create_agent_on_vm", _boom)
+
+    with pytest.raises(NotFoundError, match="Unknown agent template"):
+        agent_manager.reinit_agent(db, config, name="dev", update_template="ghost")
+
+    assert resolve_counter == []  # refused before any secret resolve
+    row = db.get_agent("dev")
+    assert row is not None and row.template == "default"  # unchanged
+
+
+def test_reinit_update_template_persists_before_convergence_so_a_mid_failure_keeps_the_new_binding(
+    db: Database,
+    make_config,  # noqa: ANN001
+    monkeypatch: pytest.MonkeyPatch,
+    captured_output,  # noqa: ANN001
+) -> None:
+    """The re-point is persisted BEFORE the on-VM convergence, so a setup
+    failure mid-reinit leaves the agent bound to the NEW template (the op
+    is non-atomic and re-runnable): the wrapped ExternalError propagates,
+    but the row already points at 'other', so a plain `agent reinit` (no
+    flag) re-converges toward it."""
+    config = make_config()
+    _seed_vm(db)
+    db.insert_agent("dev", "box", "agt-dev", template="default")
+    _reachable(monkeypatch, True)
+
+    def _boom(*a: Any, **k: Any) -> None:
+        raise RuntimeError("ssh exploded")
+
+    monkeypatch.setattr(agent_initializer, "create_agent_on_vm", _boom)
+    monkeypatch.setattr("agentworks.ssh_config.sync_ssh_config", lambda *a, **k: None)
+
+    with pytest.raises(ExternalError, match="reinitializing agent: ssh exploded"):
+        agent_manager.reinit_agent(db, config, name="dev", update_template="other")
+
+    row = db.get_agent("dev")
+    assert row is not None and row.template == "other"  # persisted before the failed convergence
 
 
 # -- the operation scope reaches readiness ------------------------------------

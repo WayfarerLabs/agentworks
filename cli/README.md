@@ -247,7 +247,7 @@ Manage agents (isolated Linux users) on VMs. Agents are VM-scoped and access wor
 | `agw agent create <name> [--vm]`                       | Create an agent on a VM                  |
 | `agw agent list [--vm <vm>]`                           | List agents                              |
 | `agw agent describe <name>`                            | Show agent details and grants            |
-| `agw agent reinit <name>`                              | Re-run agent setup                       |
+| `agw agent reinit <name> [--update-template <tmpl>]`   | Re-run agent setup                       |
 | `agw agent grant-workspaces <name> <ws>...`            | Grant workspace access                   |
 | `agw agent grant-workspaces <name> --all`              | Grant access to all workspaces           |
 | `agw agent revoke-workspaces <name> <ws>...`           | Revoke workspace access                  |
@@ -258,6 +258,10 @@ Manage agents (isolated Linux users) on VMs. Agents are VM-scoped and access wor
 
 `agent create <name>` takes the agent name as a required positional. Optional flags: `--vm`,
 `--template`, and `--grant-all-workspaces`.
+
+`agent reinit --update-template <tmpl>` re-points the agent to a different declared template
+(validated against the resource registry, then persisted) before re-running setup. An unknown
+template name is rejected up front, leaving the stored binding unchanged.
 
 `agent shell` and `agent exec` both SSH directly as the agent's Linux user. `agent shell` opens an
 interactive login shell (sources the agent's profile). `agent exec` runs a single command
