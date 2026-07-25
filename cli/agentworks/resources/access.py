@@ -16,6 +16,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any, cast
 
+from agentworks.errors import unknown_template_error
+
 if TYPE_CHECKING:
     from agentworks.git_credentials.credential import GitCredentialConfig
     from agentworks.resources.registry import Registry
@@ -30,6 +32,31 @@ def kind_dict(registry: Registry, kind: str) -> dict[str, Any]:
     The shape the template resolvers' ``resolve_from_dict`` consume.
     """
     return dict(registry.iter_kind_items(kind))
+
+
+def require_declared_template(registry: Registry, kind: str, name: str) -> None:
+    """Assert that ``name`` is a declared template of ``kind``, else raise.
+
+    This exists for ORDERING, not because the resolvers are silent on a
+    miss: ``resolve_from_dict`` (the vm / workspace / agent / session
+    resolvers) already raises ``unknown_template_error`` on an unknown
+    non-default name. The re-point flow (``--update-template`` on ``agent
+    reinit``) persists the new binding to the DB and only then resolves it,
+    so the persist must be gated by an explicit up-front check; without it a
+    bad name would land the re-point and the downstream resolve would raise
+    on an already-mutated row.
+
+    Shares ``unknown_template_error`` with the resolvers so all five callers
+    frame a missing template the same way.
+    """
+    available = kind_dict(registry, kind)
+    if name not in available:
+        raise unknown_template_error(
+            kind=kind,
+            label=kind.replace("-", " "),
+            name=name,
+            available=available,
+        )
 
 
 def admin_template(registry: Registry, name: str = "default") -> AdminConfig:

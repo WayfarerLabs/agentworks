@@ -174,6 +174,7 @@ DYNAMIC_COMPLETIONS: dict[tuple[str, str], str] = {
     ("agent.create", "template"): "agent_templates",
     ("agent.describe", "name"): "agents",
     ("agent.reinit", "name"): "agents",
+    ("agent.reinit", "update_template"): "agent_templates",
     ("agent.grant-workspaces", "name"): "agents",
     ("agent.grant-workspaces", "workspaces"): "workspaces",
     ("agent.revoke-workspaces", "name"): "agents",

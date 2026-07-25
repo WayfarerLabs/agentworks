@@ -389,6 +389,16 @@ class Database:
         self._conn.execute("DELETE FROM agents WHERE name = ?", (name,))
         self._conn.commit()
 
+    def update_agent_template(self, name: str, template: str) -> None:
+        """Re-point the agent's stored template (used by
+        ``--update-template`` on ``agent reinit``). The caller fetches the
+        row first, so the WHERE match is guaranteed."""
+        self._conn.execute(
+            "UPDATE agents SET template = ? WHERE name = ?",
+            (template, name),
+        )
+        self._conn.commit()
+
     def list_agents_on_vm_with_grant_all(self, vm_name: str) -> list[AgentRow]:
         """List agents on a VM that have grant_all enabled."""
         rows = self._conn.execute(

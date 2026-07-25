@@ -2,7 +2,23 @@
 
 Agentworks init and reinit operations are designed to be safe to re-run. The general goal was to be
 as idempotent as possible but that was not always achievable. This document describes what is and is
-not idempotent across `vm reinit` and `agent reinit`.
+not idempotent across `vm reinit`, `agent reinit`, and `workspace reinit`.
+
+## Re-pointing the bound template
+
+`agent reinit` accepts `--update-template <name>`. The DB declares the desired state and reinit
+converges live state to it, so re-pointing is a two-part operation: the flag changes _which_
+template the agent is bound to (validated against the resource registry, then persisted to the DB),
+and the existing reinit run then applies it exactly as it applies any template change. Plain reinit
+already re-reads the current content of the stored template each run; the flag only changes the
+binding.
+
+An undeclared template name is rejected up front, before any prompt or on-VM work, and leaves the
+stored binding untouched.
+
+The re-point is persisted before the on-VM convergence, so it is deliberately non-atomic: if setup
+fails partway through, the agent stays bound to the new template and a plain `agent reinit <name>`
+(no flag) re-converges toward it.
 
 ## VM reinit
 
