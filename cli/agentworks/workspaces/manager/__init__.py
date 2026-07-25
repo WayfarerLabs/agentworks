@@ -1,7 +1,7 @@
 """Workspace lifecycle orchestration.
 
 The package is split by concern: ``create`` (create / describe / list),
-``reinit`` (reinit, its git-identity convergence, and the rehome
+``repair`` (repair, its git-identity convergence, and the rehome
 partial-state hint), ``rehome`` (rehome), ``delete`` (delete), ``copy``
 (copy), plus shared ``_common`` (VM resolution, the VM-status guard, and
 the shared workspace operation scope). This module re-exports the full
@@ -16,7 +16,7 @@ from agentworks.workspaces.manager.copy import copy_workspace
 from agentworks.workspaces.manager.create import create_workspace, describe_workspace, list_workspaces
 from agentworks.workspaces.manager.delete import delete_workspace
 from agentworks.workspaces.manager.rehome import rehome_workspace
-from agentworks.workspaces.manager.reinit import _revert_grant_on_failure, reinit_workspace
+from agentworks.workspaces.manager.repair import _revert_grant_on_failure, repair_workspace
 
 __all__ = [
     "_guard_vm_status",
@@ -27,5 +27,5 @@ __all__ = [
     "describe_workspace",
     "list_workspaces",
     "rehome_workspace",
-    "reinit_workspace",
+    "repair_workspace",
 ]

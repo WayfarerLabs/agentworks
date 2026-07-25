@@ -16,7 +16,7 @@ from agentworks.errors import (
 )
 from agentworks.vms.manager import gated_vm_boundary
 from agentworks.workspaces.manager._common import _guard_vm_status, _workspace_scope
-from agentworks.workspaces.manager.reinit import _rehome_partial_state_hint
+from agentworks.workspaces.manager.repair import _rehome_partial_state_hint
 
 if TYPE_CHECKING:
     from agentworks.config import Config

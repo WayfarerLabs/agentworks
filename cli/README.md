@@ -221,7 +221,7 @@ Manage workspaces on VMs.
 | `agw workspace list`                 | List workspaces                     |
 | `agw workspace copy <source> <name>` | Copy a workspace to a new VM        |
 | `agw workspace rehome <name>`        | Move workspace to a new path        |
-| `agw workspace reinit <name>`        | Reinit workspace infrastructure     |
+| `agw workspace repair <name>`        | Repair workspace infrastructure     |
 | `agw workspace delete <name>`        | Delete a workspace                  |
 
 `workspace create <name>` takes the workspace name as a required positional. Optional flags: `--vm`,

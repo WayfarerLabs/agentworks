@@ -91,21 +91,22 @@ def workspace_rehome(
     rehome_workspace(get_db(), load_config(), name, target_path=target, remove_old=remove_old, yes=yes)
 
 
-@workspace_app.command("reinit")
-def workspace_reinit(
+@workspace_app.command("repair")
+def workspace_repair(
     name: Annotated[str, typer.Argument(help="Workspace name")],
 ) -> None:
-    """Re-run workspace initialization: group, permissions, ACLs, agent access.
+    """Repair workspace infrastructure: group, permissions, ACLs, agent access.
 
-    Idempotent. Converges live VM state (group existence, directory ownership,
-    permissions, ACLs, parent traversal, agent group membership) to match what
-    the DB declares for this workspace. Same semantic as `vm reinit` and
-    `agent reinit`.
+    Idempotent. Converges live VM workspace state (group existence, directory
+    ownership, permissions, ACLs, parent traversal, agent access, and git
+    identity) to match what the DB declares for this workspace. The workspace
+    analog of the `vm reinit` / `agent reinit` convergence, named `repair`
+    because reconciling that on-VM infrastructure is what it does.
     """
     from agentworks.config import load_config
-    from agentworks.workspaces.manager import reinit_workspace
+    from agentworks.workspaces.manager import repair_workspace
 
-    reinit_workspace(get_db(), load_config(), name)
+    repair_workspace(get_db(), load_config(), name)
 
 
 @workspace_app.command("delete")

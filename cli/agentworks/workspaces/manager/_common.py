@@ -1,7 +1,7 @@
 """Shared helpers for the workspace lifecycle commands.
 
 VM resolution, the VM-status guard, and the WORKSPACE-level operation scope
-are used across create/reinit/rehome/delete/copy, so they live here rather
+are used across create/repair/rehome/delete/copy, so they live here rather
 than in any one of those submodules.
 """
 
