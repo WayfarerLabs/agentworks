@@ -298,12 +298,20 @@ def _add_session_window(
     vm: VMRow,
     layout: str,
     preserve_memo: PreserveEnvMemo,
-) -> None:
+) -> bool:
     """Create one session window in the console and attach its shell panes.
 
     Missing or off-VM sessions are skipped with a warning; this keeps the
     console attach functional even if a session has been deleted out from
     under it.
+
+    Returns True when the window was built as configured, False when it was
+    skipped with a warning (no window, or a window without its shell panes).
+    Whole-console builders ignore the result and move on to the next window;
+    `restore_session`, which builds exactly one window and reports on it, uses
+    it so a skipped build can't be reported as a success. Individual pane
+    failures inside the window stay best-effort and are warned about by
+    `_split_shell_pane`.
     """
     from agentworks.sessions.multi_console_layout import _apply_layout, _focus_session_pane
 
@@ -316,11 +324,11 @@ def _add_session_window(
         output.warn(
             f"session '{member.session_name}' is in console '{console_name}' but no longer exists; skipping window"
         )
-        return
+        return False
     workspace_path = _resolve_workspace_path(db, session)
     if workspace_path is None:
         output.warn(f"workspace for session '{member.session_name}' is missing; skipping window")
-        return
+        return False
 
     q_con = shlex.quote(tmux_session_name(console_name))
     q_session = shlex.quote(session.name)
@@ -332,7 +340,7 @@ def _add_session_window(
     )
     if not res.ok:
         output.warn(f"failed to add window for '{session.name}': {res.stderr.strip()}")
-        return
+        return False
 
     if member.shells:
         # _session_linux_user raises NotFoundError if the session points at an
@@ -346,7 +354,7 @@ def _add_session_window(
             session_user = _session_linux_user(db, session, vm)
         except NotFoundError as exc:
             output.warn(f"agent for session '{session.name}' is missing ({exc}); skipping shell panes for this window")
-            return
+            return False
         for config_index, shell in enumerate(member.shells):
             _split_shell_pane(
                 target,
@@ -369,6 +377,7 @@ def _add_session_window(
     # rather than the most-recently-created shell pane. Done unconditionally
     # (cheap, and consistent across windows with and without shells).
     _focus_session_pane(target, q_con, q_session)
+    return True
 
 
 def _build_console_tmux(

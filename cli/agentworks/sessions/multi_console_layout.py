@@ -235,13 +235,13 @@ def _focus_session_pane(target: Transport, q_con: str, q_win: str) -> None:
 
 def _list_panes_with_tags(target: Transport, q_con: str, q_win: str) -> list[tuple[str, int, int | None]] | None:
     """Return every live pane for a console window as (pane_id, pane_index,
-    config_index_or_None), including the session pane at pane_index 0.
+    config_index_or_None), including the session pane.
 
     The session pane is created by ``tmux new-window`` and left untagged, so it
     comes back with config_index None; shell panes created by
-    ``_split_shell_pane`` carry an ``@agentworks-shell-index`` tag. Callers use
-    the untagged-ness of pane 0 to tell "the session-attach pane is still there"
-    from "the operator killed it and tmux compacted a shell into slot 0".
+    ``_split_shell_pane`` carry an ``@agentworks-shell-index`` tag. That is what
+    lets ``restore_session`` tell "the session-attach pane is still there" from
+    "the operator killed it and tmux renumbered a shell into its slot".
 
     Returns None if the tmux query failed.
     """
@@ -273,23 +273,12 @@ def _list_panes_with_tags(target: Transport, q_con: str, q_win: str) -> list[tup
     return panes
 
 
-def _list_shell_panes(target: Transport, q_con: str, q_win: str) -> list[tuple[str, int, int | None]] | None:
-    """Return live shell panes for a console window as (pane_id, pane_index,
-    config_index_or_None). Excludes pane_index 0 (the session pane).
-
-    Returns None if the tmux query failed.
-    """
-    all_panes = _list_panes_with_tags(target, q_con, q_win)
-    if all_panes is None:
-        return None
-    # pane_index 0 is the session pane, not part of the configured shell list.
-    return [(pid, pidx, cidx) for pid, pidx, cidx in all_panes if pidx != 0]
-
-
 def _reorder_shell_panes(target: Transport, q_con: str, q_win: str, configured_count: int) -> None:
-    """Reorder shell panes so pane_index N+1 holds the pane with
-    @agentworks-shell-index N. Shell panes live at pane_index >= 1 (the
-    session pane occupies pane_index 0).
+    """Reorder shell panes so the pane tagged @agentworks-shell-index N sits
+    one slot after the session pane plus N. The session pane is the
+    lowest-indexed pane in the window (index 0 normally, index 1 when the
+    inherited ~/.tmux.conf sets `pane-base-index 1`); shell panes are all the
+    rest.
 
     One tmux list-panes round trip up front, then we track positions in
     memory across swaps: pane_ids are stable, so after each `swap-pane` we
@@ -297,16 +286,21 @@ def _reorder_shell_panes(target: Transport, q_con: str, q_win: str, configured_c
     our local map. Best-effort: if a swap fails, we keep going and let
     select-layout handle the geometry.
     """
-    panes = _list_shell_panes(target, q_con, q_win)
-    if panes is None:
+    all_panes = _list_panes_with_tags(target, q_con, q_win)
+    if not all_panes:
+        # Failed query, or a window with no panes we could parse: either way
+        # there is nothing we can reorder safely.
         return
+    base_pidx = min(pidx for _pid, pidx, _cidx in all_panes)
+    # The session pane is not part of the configured shell list.
+    panes = [p for p in all_panes if p[1] != base_pidx]
     # pane_index by pane_id; mutated as we issue swaps so the next iteration
     # sees the current layout without another SSH round trip.
     pidx_by_pid: dict[str, int] = {pid: pidx for pid, pidx, _cidx in panes}
     pid_by_cidx: dict[int, str] = {cidx: pid for pid, _pidx, cidx in panes if cidx is not None}
 
     for target_cidx in range(configured_count):
-        target_pidx = target_cidx + 1
+        target_pidx = base_pidx + 1 + target_cidx
         src_pid = pid_by_cidx.get(target_cidx)
         if src_pid is None:
             continue
@@ -314,8 +308,8 @@ def _reorder_shell_panes(target: Transport, q_con: str, q_win: str, configured_c
         if src_pidx == target_pidx:
             continue
         # Find the pane currently sitting at target_pidx so we can update its
-        # in-memory pane_index after the swap. There must be one (panes at
-        # pane_index 1..N are all shell panes by construction).
+        # in-memory pane_index after the swap. There must be one (every pane
+        # after the session pane is a shell pane by construction).
         displaced_pid = next(
             (pid for pid, pidx in pidx_by_pid.items() if pidx == target_pidx),
             None,
