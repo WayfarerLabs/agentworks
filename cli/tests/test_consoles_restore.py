@@ -573,10 +573,22 @@ def test_restore_session_splits_missing_config_indices_and_tags_them(db: Databas
 # `test_stateful_model_catches_kill_window_then_new_window_destruction`).
 # The tests below drive restore-session against a `TmuxModel` seeded into
 # each state and assert on the RESULTING MODEL STATE (session still alive,
-# window still present, panes intact/correct), not merely on the absence
-# of a `kill-*` string. That is a strictly stronger check: a future
-# destructive change that is merely wrong about state would leave the
-# model broken even if it never emitted a literally-named kill command.
+# window still present, panes intact/correct) in addition to the old
+# `kill-*` string-absence pin (kept as a cheap secondary check).
+#
+# How much the model-state assertion adds depends on the path:
+#   - Refusal cases (`test_restore_session_refuses_and_leaves_the_model_intact`)
+#     take no mutating action, so `pane_rows == before` holds trivially
+#     whether or not any mutator is correct. There these tests prove exactly
+#     no-mutation-and-no-destructive-command, no more: the string-absence pin
+#     and the unchanged-state assertion are two readings of the same fact.
+#   - The mutation-dependent proofs are the ones that DO drive mutators
+#     through the model: `test_restore_session_additively_repairs_a_missing_shell_pane`
+#     (the split/tag/reorder repair must land the panes in the right slots)
+#     and `test_stateful_model_catches_kill_window_then_new_window_destruction`
+#     (the destructive remedy leaves the model with the session destroyed,
+#     which the stateless fake could not represent). Those are where asserting
+#     on state is genuinely stronger than a string check.
 
 
 def _make_console(db: Database, session_spec: str) -> None:

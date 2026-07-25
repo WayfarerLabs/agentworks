@@ -59,6 +59,69 @@ def test_killing_the_session_attach_pane_compacts_a_shell_into_the_lowest_slot(b
     assert tag == 0
 
 
+@pytest.mark.parametrize("base", [0, 1])
+def test_killing_the_untagged_pane_by_id_compacts_a_shell_into_the_lowest_slot(base: int) -> None:
+    """Kill-by-``%id`` must honor pane_base_index. Regression for the
+    double-subtracted base in kill_pane_by_id: under base 1, killing the
+    untagged attach pane by its id used to no-op (the round-tripped 0-based
+    position went negative), leaving both panes alive. The surviving shell
+    must compact into the window's lowest slot, exactly as kill-by-index."""
+    model = TmuxModel(pane_base_index=base)
+    model.seed_session(CON, "a", pane_tags=(None, 0))
+    rows = model.pane_rows(CON, "a")
+    assert rows is not None
+    attach_pane_id = rows[0][0]  # the untagged session-attach pane at slot base
+
+    assert model.kill_pane_by_id(attach_pane_id)
+
+    rows = model.pane_rows(CON, "a")
+    assert rows is not None
+    assert len(rows) == 1
+    _pid, pidx, tag = rows[0]
+    assert pidx == base  # the shell compacted down into the lowest slot
+    assert tag == 0
+
+
+@pytest.mark.parametrize("base", [0, 1])
+def test_killing_the_untagged_pane_by_id_via_dispatch(base: int) -> None:
+    """The same fix reached through the command string the console layer
+    emits (``kill-pane -t %id``), not just the direct mutator."""
+    model = TmuxModel(pane_base_index=base)
+    model.seed_session(CON, "a", pane_tags=(None, 0))
+    rows = model.pane_rows(CON, "a")
+    assert rows is not None
+    attach_pane_id = rows[0][0]
+
+    assert model.dispatch(f"tmux kill-pane -t {attach_pane_id}").ok
+
+    rows = model.pane_rows(CON, "a")
+    assert rows is not None
+    assert [(pidx, tag) for _pid, pidx, tag in rows] == [(base, 0)]
+
+
+# -- window index slots (persistent, gapped, lowest-free-fill) -------------
+
+
+@pytest.mark.parametrize("base", [0, 1])
+def test_killing_a_middle_window_leaves_a_gap_and_new_windows_fill_it(base: int) -> None:
+    """Window indices are persistent slots (renumber-windows off): killing a
+    non-last window leaves a gap, and the next new window fills the lowest
+    free slot rather than appending at the tail."""
+    model = TmuxModel(window_base_index=base)
+    model.new_session(CON, "w0")
+    model.new_window(CON, "w1")
+    model.new_window(CON, "w2")
+    assert model.windows_with_index(CON) == [(base, "w0"), (base + 1, "w1"), (base + 2, "w2")]
+
+    # Kill the middle window: its slot (base+1) becomes a gap.
+    assert model.kill_window(CON, "w1")
+    assert model.windows_with_index(CON) == [(base, "w0"), (base + 2, "w2")]
+
+    # The next new window fills the gap at base+1, not the tail.
+    model.new_window(CON, "w3")
+    assert model.windows_with_index(CON) == [(base, "w0"), (base + 1, "w3"), (base + 2, "w2")]
+
+
 # -- last-window-kill destroys the session ---------------------------------
 
 

@@ -18,7 +18,7 @@ query methods that the model self-tests drive directly. A command the
 model does not understand (or a non-tmux command such as the sudo
 preserve-env probe) falls through to a default-OK ``_FakeResult``.
 
-Three tmux behaviors are modeled faithfully, because that is where the
+These tmux behaviors are modeled faithfully, because that is where the
 bug class lives:
 
 1. Pane compaction. Pane indices are positional (``pane_base_index`` plus
@@ -26,12 +26,33 @@ bug class lives:
    with no bookkeeping. Killing an untagged session-attach pane leaves a
    tagged shell as the window's lowest-indexed pane, the exact shape
    ``restore_session`` refuses to repair.
-2. Last-window-kill destroys the session. tmux requires at least one
+2. Window index slots. Unlike panes, window indices are persistent slots:
+   tmux does not renumber windows on kill (``renumber-windows`` is off by
+   default and the console server does not set it), so killing a non-last
+   window leaves a gap and a new window fills the lowest free slot rather
+   than the tail. The model stores each window's assigned index instead of
+   deriving it from list position, which matters because
+   ``_reorder_session_windows`` reads live, possibly-gapped indices.
+3. Last-window-kill destroys the session. tmux requires at least one
    window, so killing a session's last window removes the session; a
    later ``has-session`` then fails and a ``new-window`` against it fails.
-3. Session / window / pane lifecycle. ``new-session`` makes a session with
+4. Session / window / pane lifecycle. ``new-session`` makes a session with
    one window (one pane at ``pane_base_index``); ``new-window`` adds a
    window with one pane; ``split-window`` adds a pane to a window.
+
+``tests/test_tmux_model_conformance.py`` pins this model to a real local
+tmux server: it drives identical operation sequences through both and
+asserts the observable structure agrees, so a hand-model lie shows up as a
+conformance failure. Real tmux is the ground truth there.
+
+Fidelity boundaries (deliberate simplifications the conformance test stays
+within, rather than bugs):
+
+- ``split_window`` always appends the new pane at the tail. Real tmux
+  assigns a split pane's index from its spatial position in the layout
+  tree; for the linear splits the console layer performs (splitting to add
+  a shell) that position is the tail, so the model matches within that
+  envelope but does not reproduce tmux's general spatial insertion.
 
 Opt-in: a ``_FakeTarget`` built without a ``model`` behaves exactly as
 before, so every existing stateless test is untouched.
@@ -63,9 +84,14 @@ class Pane:
 
 @dataclass
 class Window:
-    """One tmux window: an ordered list of panes."""
+    """One tmux window: an ordered list of panes plus its assigned index.
+
+    The index is a stored slot, not a list position: unlike panes, tmux
+    does not renumber windows on kill, so slots can be gapped (see the
+    module docstring's window-index-slots note)."""
 
     name: str
+    index: int
     panes: list[Pane] = field(default_factory=list)
 
 
@@ -120,9 +146,24 @@ class TmuxModel:
         return self._add_window(self._sessions[session], window_name, pane_tags)
 
     def _add_window(self, s: Session, name: str, pane_tags: tuple[int | None, ...]) -> Window:
-        w = Window(name, [Pane(self._alloc_pane_id(), tag) for tag in pane_tags])
+        panes = [Pane(self._alloc_pane_id(), tag) for tag in pane_tags]
+        w = Window(name, self._next_window_index(s), panes)
         s.windows.append(w)
+        # Keep windows in ascending index order, the order tmux lists them in.
+        s.windows.sort(key=lambda win: win.index)
         return w
+
+    def _next_window_index(self, s: Session) -> int:
+        """The lowest free window index at or above ``window_base_index``.
+
+        tmux (with ``renumber-windows`` off) assigns a new window the
+        lowest unused slot, filling any gap a killed window left behind
+        rather than always appending at the tail."""
+        used = {w.index for w in s.windows}
+        idx = self.window_base_index
+        while idx in used:
+            idx += 1
+        return idx
 
     # -- tmux operation methods (also reached via dispatch) -----------------
 
@@ -193,12 +234,19 @@ class TmuxModel:
         return True
 
     def kill_pane_by_id(self, pane_id: str) -> bool:
-        """Model ``tmux kill-pane`` targeted by pane id."""
+        """Model ``tmux kill-pane`` targeted by pane id.
+
+        ``_index_of`` returns a 0-based list position, but ``kill_pane``
+        expects a tmux pane index (``pane_base_index`` plus list position)
+        and subtracts the base back off. Add the base here so the two agree;
+        otherwise, under ``pane_base_index=1``, killing list-position 0 would
+        no-op and killing position 1 would delete the wrong pane."""
         for session_name, s in self._sessions.items():
             for w in s.windows:
                 for pane in w.panes:
                     if pane.pane_id == pane_id:
-                        return self.kill_pane(session_name, w.name, self._index_of(w, pane))
+                        index = self.pane_base_index + self._index_of(w, pane)
+                        return self.kill_pane(session_name, w.name, index)
         return False
 
     def kill_session(self, session: str) -> bool:
@@ -220,15 +268,18 @@ class TmuxModel:
         return True
 
     def swap_windows(self, session: str, index_a: int, index_b: int) -> bool:
-        """Model ``tmux swap-window``: exchange two windows by index."""
+        """Model ``tmux swap-window``: exchange the two windows occupying the
+        given index slots. The windows trade slots (and therefore trade the
+        indices tmux reports); no renumbering of any other window occurs."""
         s = self._sessions.get(session)
         if s is None:
             return False
-        pos_a = index_a - self.window_base_index
-        pos_b = index_b - self.window_base_index
-        if not (0 <= pos_a < len(s.windows) and 0 <= pos_b < len(s.windows)):
+        win_a = next((w for w in s.windows if w.index == index_a), None)
+        win_b = next((w for w in s.windows if w.index == index_b), None)
+        if win_a is None or win_b is None:
             return False
-        s.windows[pos_a], s.windows[pos_b] = s.windows[pos_b], s.windows[pos_a]
+        win_a.index, win_b.index = win_b.index, win_a.index
+        s.windows.sort(key=lambda win: win.index)
         return True
 
     # -- queries ------------------------------------------------------------
@@ -244,7 +295,8 @@ class TmuxModel:
         s = self._sessions.get(session)
         if s is None:
             return []
-        return [(self.window_base_index + i, w.name) for i, w in enumerate(s.windows)]
+        # ``s.windows`` is kept sorted by index, so this is already ascending.
+        return [(w.index, w.name) for w in s.windows]
 
     def get_window(self, session: str, window_name: str) -> Window | None:
         s = self._sessions.get(session)
