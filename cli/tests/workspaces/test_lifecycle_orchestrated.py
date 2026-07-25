@@ -1,4 +1,4 @@
-"""``workspace reinit`` / ``workspace rehome`` / ``workspace delete`` /
+"""``workspace repair`` / ``workspace rehome`` / ``workspace delete`` /
 ``workspace copy`` through the orchestrated model: the shared derived
 graph (the live VM alone; deliberately NO live workspace node, the
 workspace has no capability instances and nothing realization-shaped),
@@ -66,7 +66,7 @@ def _seed(db: Database, *, ws: str = "ws1") -> None:
     db.insert_vm("box", site="proxmox", hostname="box")
     db.update_vm_tailscale("box", "100.64.0.9")
     # rehome and copy guard on init status pre-gate; the seeded row
-    # must be COMPLETE for them (reinit and delete never guarded).
+    # must be COMPLETE for them (repair and delete never guarded).
     db.update_vm_init_status("box", InitStatus.COMPLETE)
     _seed_workspace(db, vm_name="box", name=ws)
 
@@ -182,11 +182,11 @@ def test_graph_is_the_live_vm_alone_no_workspace_node(
     db: Database,
     make_config,  # noqa: ANN001
 ) -> None:
-    """reinit / rehome / delete / copy share one graph per VM: the live
+    """repair / rehome / delete / copy share one graph per VM: the live
     VM from its row (vm-site + vm), union = the site's config secret
     only. Deliberately NO live workspace node: the workspace here has
     no capability instances, no secret refs, no readiness, and nothing
-    realization-shaped (delete unwinds nothing, reinit converges,
+    realization-shaped (delete unwinds nothing, repair converges,
     rehome / copy mutate through the VM transport), so introducing one
     would be over-orchestration."""
     from agentworks.bootstrap import build_registry
@@ -216,7 +216,7 @@ def test_graph_is_the_live_vm_alone_no_workspace_node(
 # -- gate-prompt parity (the per-command carries) -----------------------------
 
 
-def test_reinit_reachable_vm_is_one_boundary_burst(
+def test_repair_reachable_vm_is_one_boundary_burst(
     db: Database,
     make_config,  # noqa: ANN001
     resolve_counter: list[list[str]],
@@ -228,14 +228,14 @@ def test_reinit_reachable_vm_is_one_boundary_burst(
     _seed(db)
     _reachable(monkeypatch, True)
 
-    workspace_manager.reinit_workspace(db, config, "ws1")
+    workspace_manager.repair_workspace(db, config, "ws1")
 
     assert resolve_counter == [["proxmox-token"]]
     assert any("chmod 2770 /srv/ws1" in c for c in target.commands)
-    assert "Reinitializing workspace 'ws1' on VM 'box'..." in captured_output.info
+    assert "Repairing workspace 'ws1' on VM 'box'..." in captured_output.info
 
 
-def test_reinit_stopped_vm_gate_burst_seeds_the_whole_union(
+def test_repair_stopped_vm_gate_burst_seeds_the_whole_union(
     db: Database,
     make_config,  # noqa: ANN001
     resolve_counter: list[list[str]],
@@ -250,14 +250,14 @@ def test_reinit_stopped_vm_gate_burst_seeds_the_whole_union(
     events: list[str] = []
     _stop_the_vm(monkeypatch, events)
 
-    workspace_manager.reinit_workspace(db, config, "ws1")
+    workspace_manager.repair_workspace(db, config, "ws1")
 
     assert events == ["status", "start", "tailscale"]  # the gate ran
     assert resolve_counter == [["proxmox-token"]]
     assert any("chmod 2770 /srv/ws1" in c for c in target.commands)
 
 
-def test_reinit_converges_git_identity_on_the_checkout(
+def test_repair_converges_git_identity_on_the_checkout(
     db: Database,
     make_config,  # noqa: ANN001
     target: _FakeAdminTarget,
@@ -265,7 +265,7 @@ def test_reinit_converges_git_identity_on_the_checkout(
     captured_output,  # noqa: ANN001
 ) -> None:
     """A git identity declared on the template is stamped into the
-    checkout's repo-local config on reinit (the fake answers the rev-parse
+    checkout's repo-local config on repair (the fake answers the rev-parse
     repo probe ok, and the config --get probe empty, so both fields apply)."""
     config = make_config(
         '[workspace_templates.default]\ngit_user_name = "Ada Lovelace"\ngit_user_email = "ada@example.com"\n'
@@ -273,7 +273,7 @@ def test_reinit_converges_git_identity_on_the_checkout(
     _seed(db)
     _reachable(monkeypatch, True)
 
-    workspace_manager.reinit_workspace(db, config, "ws1")
+    workspace_manager.repair_workspace(db, config, "ws1")
 
     assert any("git -C /srv/ws1 config --local user.name 'Ada Lovelace'" in c for c in target.commands)
     assert any("git -C /srv/ws1 config --local user.email ada@example.com" in c for c in target.commands)
@@ -281,7 +281,7 @@ def test_reinit_converges_git_identity_on_the_checkout(
 
 class _RevParseFailingTarget(_FakeAdminTarget):
     """Admin target whose `git rev-parse` fails with a chosen stderr, so
-    the reinit identity probe can exercise its no-repo vs error branches."""
+    the repair identity probe can exercise its no-repo vs error branches."""
 
     def __init__(self, *, rev_parse_stderr: str) -> None:
         super().__init__()
@@ -302,7 +302,7 @@ def _wire_target(monkeypatch: pytest.MonkeyPatch, fake: _FakeAdminTarget) -> Non
     monkeypatch.setattr("agentworks.workspaces.backends.vm.transport", factory)
 
 
-def test_reinit_skips_git_identity_when_not_a_repo(
+def test_repair_skips_git_identity_when_not_a_repo(
     db: Database,
     make_config,  # noqa: ANN001
     monkeypatch: pytest.MonkeyPatch,
@@ -320,13 +320,13 @@ def test_reinit_skips_git_identity_when_not_a_repo(
     _seed(db)
     _reachable(monkeypatch, True)
 
-    workspace_manager.reinit_workspace(db, config, "ws1")
+    workspace_manager.repair_workspace(db, config, "ws1")
 
     assert not any("config" in c for c in fake.commands)
     assert not any("git identity" in w for w in captured_output.warnings)
 
 
-def test_reinit_git_identity_warns_on_unexpected_probe_failure(
+def test_repair_git_identity_warns_on_unexpected_probe_failure(
     db: Database,
     make_config,  # noqa: ANN001
     monkeypatch: pytest.MonkeyPatch,
@@ -342,26 +342,26 @@ def test_reinit_git_identity_warns_on_unexpected_probe_failure(
     _seed(db)
     _reachable(monkeypatch, True)
 
-    workspace_manager.reinit_workspace(db, config, "ws1")
+    workspace_manager.repair_workspace(db, config, "ws1")
 
     assert not any("config" in c for c in fake.commands)
     assert any("git identity skipped" in w for w in captured_output.warnings)
 
 
-def test_reinit_default_template_stamps_no_identity(
+def test_repair_default_template_stamps_no_identity(
     db: Database,
     make_config,  # noqa: ANN001
     target: _FakeAdminTarget,
     monkeypatch: pytest.MonkeyPatch,
     captured_output,  # noqa: ANN001
 ) -> None:
-    """No identity declared (the bare default template): reinit emits no
+    """No identity declared (the bare default template): repair emits no
     git commands at all, not even the repo probe."""
     config = make_config()
     _seed(db)
     _reachable(monkeypatch, True)
 
-    workspace_manager.reinit_workspace(db, config, "ws1")
+    workspace_manager.repair_workspace(db, config, "ws1")
 
     assert not any(c.startswith("git ") for c in target.commands)
 
@@ -430,7 +430,7 @@ def test_workspace_scope_reaches_node_readiness(
 
     monkeypatch.setattr(ProxmoxPlatform, "preflight", _recording)
 
-    workspace_manager.reinit_workspace(db, config, "ws1")
+    workspace_manager.repair_workspace(db, config, "ws1")
 
     (scope,) = scopes
     assert scope is not None
@@ -503,7 +503,7 @@ def test_rehome_overlapping_paths_fail_with_zero_resolves_and_zero_gate(
     assert target.commands == []
 
 
-def test_reinit_unknown_workspace_fails_with_zero_resolves_and_zero_gate(
+def test_repair_unknown_workspace_fails_with_zero_resolves_and_zero_gate(
     db: Database,
     make_config,  # noqa: ANN001
     resolve_counter: list[list[str]],
@@ -515,7 +515,7 @@ def test_reinit_unknown_workspace_fails_with_zero_resolves_and_zero_gate(
     _no_gate(monkeypatch)
 
     with pytest.raises(NotFoundError, match="workspace 'ghost' not found"):
-        workspace_manager.reinit_workspace(db, config, "ghost")
+        workspace_manager.repair_workspace(db, config, "ghost")
 
     assert resolve_counter == []
     assert target.commands == []

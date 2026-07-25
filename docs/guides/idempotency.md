@@ -1,8 +1,8 @@
 # Idempotency
 
-Agentworks init and reinit operations are designed to be safe to re-run. The general goal was to be
-as idempotent as possible but that was not always achievable. This document describes what is and is
-not idempotent across `vm reinit`, `agent reinit`, and `workspace reinit`.
+Agentworks init, reinit, and repair operations are designed to be safe to re-run. The general goal
+was to be as idempotent as possible but that was not always achievable. This document describes what
+is and is not idempotent across `vm reinit`, `agent reinit`, and `workspace repair`.
 
 ## Re-pointing the bound template
 
@@ -92,9 +92,9 @@ recreated (skipped if exists), but the shell is updated if the template changed.
 | ----------------------- | ------------------------------------------------------------------------ |
 | Dotfiles (local source) | Overwritten, not merged. Side effects from previous installs may linger. |
 
-## Workspace reinit
+## Workspace repair
 
-`workspace reinit` converges the on-VM workspace to the DB and template. It never re-clones the repo
+`workspace repair` converges the on-VM workspace to the DB and template. It never re-clones the repo
 (the checkout is preserved) and never removes on-VM state.
 
 ### Fully idempotent

@@ -1,4 +1,4 @@
-"""Workspace reinit (live-state convergence) and its supporting helpers.
+"""Workspace repair (live-state convergence) and its supporting helpers.
 
 ``_rehome_partial_state_hint`` lives here (rather than in ``rehome.py``)
 purely to keep both files comfortably under the line-count budget; it is
@@ -22,12 +22,12 @@ if TYPE_CHECKING:
     from agentworks.transports import Transport
 
 
-def reinit_workspace(
+def repair_workspace(
     db: Database,
     config: Config,
     name: str,
 ) -> None:
-    """Re-run workspace initialization to converge live VM state to the DB.
+    """Repair a workspace by converging its live VM state to the DB.
 
     Idempotent and forward-only. Steps split into two shapes:
 
@@ -45,9 +45,12 @@ def reinit_workspace(
     the template after create is stamped into the checkout's repo-local
     config, and an already-correct value reports `OK:`.
 
-    Same semantic as `vm reinit` and `agent reinit`: the declared state in
-    the DB is the source of truth; this reinit converges live state to
-    match.
+    This is the workspace analog of the `vm reinit` / `agent reinit`
+    convergence (the declared state in the DB is the source of truth, and
+    live state is converged to match), but it is honestly named `repair`
+    because that is what it does: reconcile a workspace's on-VM
+    infrastructure (group, ownership, permissions, ACLs, parent traversal,
+    agent access, git identity) with what the DB declares.
 
     Orchestrated (``vms.manager.gated_vm_boundary``, WORKSPACE scope):
     the graph is the live VM alone (the workspace has no capability
@@ -89,7 +92,7 @@ def reinit_workspace(
         ws_group = ws.linux_group
         fixes = 0
 
-        output.info(f"Reinitializing workspace '{name}' on VM '{vm.name}'...")
+        output.info(f"Repairing workspace '{name}' on VM '{vm.name}'...")
 
         # 0. Ensure acl package is installed (needed for setfacl)
         try:
@@ -179,12 +182,12 @@ def reinit_workspace(
             output.warn(f"parent traversal fix failed: {e}")
 
         # 5b. Converge the checkout's git identity. Repo-local config is
-        # actor-agnostic and idempotent, so identity joins the reinit
+        # actor-agnostic and idempotent, so identity joins the repair
         # convergence set: an identity added or changed on the template
         # after create lands here (detection-based, so an unchanged value
         # reports OK). Only meaningful when the workspace is a git repo; a
         # declared identity on a repo-less workspace is a no-op.
-        fixes += _reinit_git_identity(target, registry, ws)
+        fixes += _repair_git_identity(target, registry, ws)
 
         # 6. Reconcile agent group membership
         # Get agents that SHOULD be in the group (have any grant)
@@ -224,12 +227,12 @@ def reinit_workspace(
             output.warn(f"agent membership check failed: {e}")
 
         if fixes > 0:
-            output.result(f"\nApplied {fixes} fix(es)")
+            output.result(f"\nRepaired {fixes} issue(s)")
         else:
-            output.result("\nAlready up to date")
+            output.result("\nNo issues found")
 
 
-def _reinit_git_identity(
+def _repair_git_identity(
     target: Transport,
     registry: Registry,
     ws: WorkspaceRow,
