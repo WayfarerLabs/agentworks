@@ -407,3 +407,36 @@ def test_attach_console_skips_window_when_agent_missing(
     assert len(new_windows) == 1
     splits = [c for c in fake_target.commands if "split-window -t aw-console-con:s" in c]
     assert splits == []
+
+
+def test_attach_console_continues_when_one_shell_split_fails(
+    db: Database, fake_target: _FakeTarget, captured_output: CapturedOutput
+) -> None:
+    """A single shell pane failing to split must not abort building the whole
+    console. _add_session_window records the failure in its result, but the
+    whole-console builder ignores that and warns-and-continues, so the other
+    windows and their panes are still built. Guards against the finding-1
+    rebuild-path escalation leaking into the attach path."""
+    from agentworks.sessions.multi_console import attach_console
+
+    _seed_vm(db, with_tailscale=True)
+    _seed_sessions(db, ["alpha", "beta"])
+    create_console(db, name="con", vm_name="vm1", session_specs=["alpha+1", "beta+1"])
+
+    fake_target.responses["has-session -t aw-console-con"] = _FakeResult(returncode=1)
+    fake_target.responses["list-windows -t aw-console-con"] = _FakeResult(
+        returncode=0, stdout="_PLACEHOLDER\nalpha\nbeta\n"
+    )
+    # alpha's shell fails to split (no pane id printed); beta's succeeds.
+    fake_target.responses["split-window -t aw-console-con:alpha"] = _FakeResult(stdout="")
+    fake_target.responses["split-window -t aw-console-con:beta"] = _FakeResult(stdout="%9\n")
+
+    # Must not raise despite the failed shell in alpha.
+    attach_console(db, _StubConfig(), name="con", allow_nesting=True)
+
+    new_windows = [c for c in fake_target.commands if "new-window -t aw-console-con" in c]
+    assert len(new_windows) == 2  # both windows built despite alpha's shell failure
+    # beta's shell still split even though alpha's failed.
+    assert any("split-window -t aw-console-con:beta" in c for c in fake_target.commands)
+    # The failure surfaced as a warning, not a raised error.
+    assert any("couldn't capture its id" in w for w in captured_output.warnings)

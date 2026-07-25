@@ -260,11 +260,13 @@ def console_restore_session(
 ) -> None:
     """Reconcile a session window's live shell panes against the configured list.
 
-    Re-adds any panes you killed (e.g. accidentally), restoring each one to
-    its original position. Refuses to remove panes if you have more live than
-    configured; for that, use `console attach --recreate`. Consoles created
-    before pane-tagging existed require `attach --recreate` once to retag from
-    scratch.
+    Re-adds any shell panes you killed (e.g. accidentally), restoring each one
+    to its original position, and rebuilds the window if it is gone entirely.
+    Never kills a live pane or window: if you have more panes live than
+    configured, or the window's session pane itself was killed (so the console
+    shows a plain shell instead of the session), it refuses and points you at
+    `console attach --recreate`. Consoles created before pane-tagging existed
+    require `attach --recreate` once to retag from scratch.
     """
     from agentworks.config import load_config
     from agentworks.sessions.multi_console import restore_session

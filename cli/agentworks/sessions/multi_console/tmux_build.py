@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import posixpath
 import shlex
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 import agentworks.sessions.multi_console as _mc
@@ -38,6 +39,32 @@ if TYPE_CHECKING:
 def _resolve_workspace_path(db: Database, session: SessionRow) -> str | None:
     ws = db.get_workspace(session.workspace_name)
     return ws.workspace_path if ws else None
+
+
+@dataclass(frozen=True)
+class SessionWindowBuild:
+    """Outcome of building one session window in a console.
+
+    ``built`` is the structural result: True when the window itself was
+    created (``tmux new-window`` succeeded and the session, workspace, and
+    agent were all resolvable), False when the whole window was skipped with a
+    warning. ``failed_shells`` lists the configured shell indices whose panes
+    could not be split or tagged; it is only meaningful when ``built`` is True,
+    since a skipped window never reaches its shells.
+
+    Two kinds of caller read this differently:
+
+    - Whole-console builders (``_build_console_tmux``, ``add_sessions``) ignore
+      it and warn-and-continue, so one bad shell in one window never aborts
+      building an entire console.
+    - ``restore_session``, rebuilding a single missing window on the operator's
+      behalf, inspects both fields and raises ``ExternalError`` if the window
+      was skipped or any shell failed, so a partial rebuild is loud rather than
+      a silent exit-0 that would leave the window a `--recreate`-only case.
+    """
+
+    built: bool
+    failed_shells: list[int] = field(default_factory=list)
 
 
 # Agent linux user -> whether this VM's sudoers honors --preserve-env for it.
@@ -174,10 +201,11 @@ def _split_shell_pane(
 
     Returns the new pane id on full success (split + tag both completed), or
     None if either step failed (tmux refused the split, or the pane was created
-    but its id couldn't be captured so the tag couldn't be set). Callers in
-    best-effort paths (`add_shell`, `_add_session_window`) may ignore the
-    return value; `restore_session` checks each return so a partial restore
-    is loud rather than a silent exit-0."""
+    but its id couldn't be captured so the tag couldn't be set). `add_shell`
+    ignores the return value (best-effort). `_add_session_window` records which
+    config indices came back None in its `SessionWindowBuild.failed_shells`, and
+    `restore_session` checks each return so a partial restore is loud rather
+    than a silent exit-0."""
     from agentworks.sessions.multi_console_layout import SHELL_INDEX_OPTION
     from agentworks.sessions.tmux import _tmux_env_flags
 
@@ -298,12 +326,23 @@ def _add_session_window(
     vm: VMRow,
     layout: str,
     preserve_memo: PreserveEnvMemo,
-) -> None:
+) -> SessionWindowBuild:
     """Create one session window in the console and attach its shell panes.
 
     Missing or off-VM sessions are skipped with a warning; this keeps the
     console attach functional even if a session has been deleted out from
     under it.
+
+    Returns a `SessionWindowBuild`. `built` is True when the window itself was
+    created, False when the whole window was skipped with a warning (no session
+    row, no workspace, `tmux new-window` failed, or a missing agent).
+    `failed_shells` lists the configured shell indices whose panes failed to
+    split or tag (best-effort per pane; `_split_shell_pane` warns on each).
+
+    Whole-console builders ignore the result and move on to the next window, so
+    one bad shell never aborts building an entire console. `restore_session`,
+    which rebuilds exactly one window and reports on it, inspects both fields so
+    a skipped build or a failed shell can't be reported as a success.
     """
     from agentworks.sessions.multi_console_layout import _apply_layout, _focus_session_pane
 
@@ -316,24 +355,36 @@ def _add_session_window(
         output.warn(
             f"session '{member.session_name}' is in console '{console_name}' but no longer exists; skipping window"
         )
-        return
+        return SessionWindowBuild(built=False)
     workspace_path = _resolve_workspace_path(db, session)
     if workspace_path is None:
         output.warn(f"workspace for session '{member.session_name}' is missing; skipping window")
-        return
+        return SessionWindowBuild(built=False)
 
     q_con = shlex.quote(tmux_session_name(console_name))
     q_session = shlex.quote(session.name)
     wrapper = _attach_loop_wrapper(session.name, session.socket_path)
 
+    # -P -F '#{pane_index}' makes new-window print the created session pane's
+    # index. It is the window's lowest live pane index (0 normally, 1 under an
+    # inherited `pane-base-index 1`) and is what _focus_session_pane targets;
+    # capturing it here avoids a second round trip and keeps focus correct
+    # under either base index.
     res = target.run(
-        f"tmux new-window -t {q_con} -n {q_session} {shlex.quote(wrapper)}",
+        f"tmux new-window -t {q_con} -n {q_session} -P -F '#{{pane_index}}' {shlex.quote(wrapper)}",
         check=False,
     )
     if not res.ok:
         output.warn(f"failed to add window for '{session.name}': {res.stderr.strip()}")
-        return
+        return SessionWindowBuild(built=False)
+    try:
+        base_pidx = int(res.stdout.strip())
+    except ValueError:
+        # tmux is expected to print the pane index under -P -F; if it didn't,
+        # fall back to 0 (the base-index-0 default) rather than fail the build.
+        base_pidx = 0
 
+    failed_shells: list[int] = []
     if member.shells:
         # _session_linux_user raises NotFoundError if the session points at an
         # agent row that's gone (FK violation under PRAGMA foreign_keys = OFF,
@@ -346,9 +397,9 @@ def _add_session_window(
             session_user = _session_linux_user(db, session, vm)
         except NotFoundError as exc:
             output.warn(f"agent for session '{session.name}' is missing ({exc}); skipping shell panes for this window")
-            return
+            return SessionWindowBuild(built=False)
         for config_index, shell in enumerate(member.shells):
-            _split_shell_pane(
+            pane_id = _split_shell_pane(
                 target,
                 db,
                 registry,
@@ -364,11 +415,14 @@ def _add_session_window(
                 config_index=config_index,
                 preserve_memo=preserve_memo,
             )
+            if pane_id is None:
+                failed_shells.append(config_index)
         _apply_layout(target, q_con, q_session, layout)
     # Focus the session pane so the operator lands on the attach output
     # rather than the most-recently-created shell pane. Done unconditionally
     # (cheap, and consistent across windows with and without shells).
-    _focus_session_pane(target, q_con, q_session)
+    _focus_session_pane(target, q_con, q_session, base_pidx)
+    return SessionWindowBuild(built=True, failed_shells=failed_shells)
 
 
 def _build_console_tmux(

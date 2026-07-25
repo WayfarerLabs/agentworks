@@ -14,29 +14,17 @@ from agentworks.sessions.multi_console import (
     create_console,
     restore_session,
 )
-from tests._consoles_support import _seed_sessions, _seed_vm, _stub_build_registry, _StubConfig  # noqa: F401
+from tests._consoles_support import (  # noqa: F401
+    _seed_sessions,
+    _seed_vm,
+    _stub_build_registry,
+    _StubConfig,
+    _StubVerticalLayoutConfig,
+)
 from tests.conftest import _FakeResult, _FakeTarget
 
 if TYPE_CHECKING:
     from tests.conftest import CapturedOutput
-
-
-class _StubVerticalLayoutConfig(_StubConfig):
-    """Stub config whose named_console layout selects aw-session-vertical.
-
-    Inherits the empty vm/agent/workspace/session_templates + admin + resolver
-    defaults from ``_StubConfig`` so console env-resolution code doesn't crash;
-    overrides the named-console layout.
-    """
-
-    class _NC:
-        tmux_layout: str = "aw-session-vertical"
-
-    # _NC mirrors _StubNamedConsoleConfig's surface (just ``tmux_layout``)
-    # but isn't structurally identical to mypy. Tests pass _StubConfig
-    # subclasses to the SUT via ducktyping; the real Config type isn't
-    # involved here.
-    named_console = _NC()  # type: ignore[assignment]
 
 
 def test_apply_layout_preset_emits_simple_select_layout(
@@ -141,9 +129,9 @@ def test_build_aw_session_vertical_layout_string_edge_cases() -> None:
     # Window too small for the geometry (4 panes can't fit in H=4).
     too_small = _build_aw_session_vertical_layout_string("80x4\n0 %1\n1 %2\n2 %3\n3 %4\n")
     assert too_small is None
-    # Non-contiguous pane indices (missing pane 0): can't assign a session
-    # slot, so we refuse to build rather than put a shell in the top slot.
-    assert _build_aw_session_vertical_layout_string("80x36\n1 %1\n2 %2\n") is None
+    # Non-contiguous pane indices (a gap at index 1): can't assign panes to
+    # slots, so we refuse to build rather than misplace one.
+    assert _build_aw_session_vertical_layout_string("80x36\n0 %1\n2 %2\n") is None
 
 
 def test_build_aw_session_vertical_layout_string_sorts_panes_by_index() -> None:
@@ -157,6 +145,22 @@ def test_build_aw_session_vertical_layout_string_sorts_panes_by_index() -> None:
     reversed_in = _build_aw_session_vertical_layout_string("80x36\n2 %33\n1 %32\n0 %31\n")
     sorted_in = _build_aw_session_vertical_layout_string("80x36\n0 %31\n1 %32\n2 %33\n")
     assert reversed_in == sorted_in
+
+
+def test_build_aw_session_vertical_layout_string_under_pane_base_index_one() -> None:
+    """Under `pane-base-index 1` panes are indexed 1..N with no pane 0. The
+    lowest-indexed pane is still the session pane, so the builder must accept a
+    contiguous run starting at 1 and produce the same geometry it would for the
+    same pane ids at base 0 (only the index labels differ, and those never
+    reach the layout string)."""
+    from agentworks.sessions.multi_console_layout import (
+        _build_aw_session_vertical_layout_string,
+    )
+
+    base_one = _build_aw_session_vertical_layout_string("80x36\n1 %31\n2 %32\n3 %33\n")
+    base_zero = _build_aw_session_vertical_layout_string("80x36\n0 %31\n1 %32\n2 %33\n")
+    assert base_one is not None
+    assert base_one == base_zero
 
 
 def test_apply_layout_aw_session_vertical_silent_on_single_pane(
@@ -204,12 +208,48 @@ def test_apply_layout_aw_session_vertical_warns_on_genuine_failure(
     assert any("could not build aw-session-vertical" in w for w in captured_output.warnings)
 
 
+def test_apply_layout_aw_session_vertical_applies_under_pane_base_index_one(
+    fake_target: _FakeTarget, captured_output: CapturedOutput
+) -> None:
+    """Under `pane-base-index 1` the pane list comes back indexed 1..N. The
+    default layout must still apply (a real select-layout call) with no
+    misleading `too small or unparseable` warning."""
+    from agentworks.sessions.multi_console_layout import (
+        _apply_aw_session_vertical_layout,
+    )
+
+    fake_target.responses["display-message -t aw-console-con:alpha"] = _FakeResult(
+        returncode=0, stdout="80x36\n1 %1\n2 %2\n"
+    )
+
+    _apply_aw_session_vertical_layout(
+        fake_target,
+        "aw-console-con",
+        "alpha",  # type: ignore[arg-type]
+    )
+
+    assert any("select-layout -t aw-console-con:alpha" in c for c in fake_target.commands)
+    assert not any("could not build aw-session-vertical" in w for w in captured_output.warnings)
+
+
 def test_focus_session_pane_emits_select_pane(fake_target: _FakeTarget) -> None:
     from agentworks.sessions.multi_console_layout import _focus_session_pane
 
-    _focus_session_pane(fake_target, "aw-console-con", "alpha")  # type: ignore[arg-type]
+    _focus_session_pane(fake_target, "aw-console-con", "alpha", 0)  # type: ignore[arg-type]
     assert fake_target.commands == [
         "tmux select-pane -t aw-console-con:alpha.0",
+    ]
+
+
+def test_focus_session_pane_targets_base_index(fake_target: _FakeTarget) -> None:
+    """Under `pane-base-index 1` the session pane reports index 1 and no pane
+    ever reports index 0, so focus must target the given base index, not a
+    literal 0 (which tmux rejects with `can't find pane: 0`)."""
+    from agentworks.sessions.multi_console_layout import _focus_session_pane
+
+    _focus_session_pane(fake_target, "aw-console-con", "alpha", 1)  # type: ignore[arg-type]
+    assert fake_target.commands == [
+        "tmux select-pane -t aw-console-con:alpha.1",
     ]
 
 

@@ -368,6 +368,7 @@ panes you want preloaded into a session's window.
 | `agw console remove-sessions <name> <sessions...>`  | Remove session windows                                            |
 | `agw console reorder-sessions <name> <sessions...>` | Bump member sessions to the front in the order given              |
 | `agw console add-shell <name> <session>`            | Add a shell pane to a session window (accepts `--cwd`, `--admin`) |
+| `agw console restore-session <name> <session>`      | Repair one session window against its configured shell list       |
 
 `console create` accepts:
 
@@ -412,6 +413,14 @@ agw console create everything --vm aw-private --all
 # Add an admin shell rooted in a sub-path of the workspace.
 agw console add-shell backend auth-server --cwd src/api --admin
 ```
+
+`console restore-session` repairs a single session window in a running console: it re-adds shell
+panes you killed by accident (each back in its configured position) and rebuilds the window from
+config if it is gone entirely. It is additive and never kills a live pane or window, so it refuses,
+pointing you at `console attach --recreate`, when the fix would require destroying live state: more
+panes live than configured, shell panes it can't map back to the config (untagged, duplicated, or
+out of range), or a window whose session pane itself was killed (the console then shows a plain
+shell where the session should be).
 
 Memberships and shell layouts persist in the database. `agw console attach` builds the tmux session
 on first attach (or with `--recreate`); subsequent attaches reuse the running tmux session. Adding

@@ -95,3 +95,21 @@ class _StubConfig:
     workspace_templates: dict[str, object] = {}  # noqa: RUF012
     session_templates: dict[str, object] = {}  # noqa: RUF012
     admin: _StubAdminConfig = _StubAdminConfig()
+
+
+class _StubVerticalLayoutConfig(_StubConfig):
+    """Stub config whose named_console layout selects aw-session-vertical.
+
+    Inherits the empty vm/agent/workspace/session_templates + admin + resolver
+    defaults from ``_StubConfig`` so console env-resolution code doesn't crash;
+    overrides only the named-console layout.
+    """
+
+    class _NC:
+        tmux_layout: str = "aw-session-vertical"
+
+    # _NC mirrors _StubNamedConsoleConfig's surface (just ``tmux_layout``)
+    # but isn't structurally identical to mypy. Tests pass _StubConfig
+    # subclasses to the SUT via ducktyping; the real Config type isn't
+    # involved here.
+    named_console = _NC()  # type: ignore[assignment]

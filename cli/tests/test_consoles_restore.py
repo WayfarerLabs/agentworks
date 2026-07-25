@@ -6,6 +6,7 @@ Registry-stub fixture now live in ``tests/_consoles_support.py``."""
 
 from __future__ import annotations
 
+import contextlib
 from typing import TYPE_CHECKING
 
 import pytest
@@ -17,7 +18,13 @@ from agentworks.sessions.multi_console import (
     restore_session,
 )
 from agentworks.sessions.multi_console_layout import SHELL_INDEX_OPTION
-from tests._consoles_support import _seed_sessions, _seed_vm, _stub_build_registry, _StubConfig  # noqa: F401
+from tests._consoles_support import (  # noqa: F401
+    _seed_sessions,
+    _seed_vm,
+    _stub_build_registry,
+    _StubConfig,
+    _StubVerticalLayoutConfig,
+)
 from tests.conftest import _FakeResult, _FakeTarget
 
 if TYPE_CHECKING:
@@ -158,7 +165,7 @@ def test_restore_session_noop_when_live_matches_config(
     assert "tmux select-pane -t aw-console-con:a.0" in fake_target.commands
 
 
-# -- restore-session: happy paths ------------------------------------------
+# -- restore-session: window-missing rebuild -------------------------------
 
 
 def test_restore_session_rebuilds_missing_window(db: Database, fake_target: _FakeTarget) -> None:
@@ -177,6 +184,331 @@ def test_restore_session_rebuilds_missing_window(db: Database, fake_target: _Fak
 
     new_windows = [c for c in fake_target.commands if "new-window -t aw-console-con" in c]
     assert len(new_windows) == 1
+
+
+def test_restore_session_rebuild_focuses_session_pane_under_pane_base_index_one(
+    db: Database, fake_target: _FakeTarget
+) -> None:
+    """On the rebuild path, the session pane's index comes from the
+    `new-window -P -F '#{pane_index}'` capture, not the live pane listing the
+    repair path uses. Under an inherited `pane-base-index 1` server the fresh
+    window's only pane reports index 1, so focus must target `.1`, not the
+    literal `.0` (which does not exist under base index 1 and would leave the
+    operator on whatever pane tmux last selected). Pins the one base-index-1
+    surface the repair-path tests do not reach."""
+    _seed_vm(db, with_tailscale=True)
+    _seed_sessions(db, ["a"])
+    create_console(db, name="con", vm_name="vm1", session_specs=["a"])
+
+    fake_target.responses["has-session -t aw-console-con"] = _FakeResult(returncode=0)
+    # Window absent, so restore-session takes the rebuild path.
+    fake_target.responses["list-windows -t aw-console-con"] = _FakeResult(stdout="other\n")
+    # The freshly built window's pane reports index 1 (pane-base-index 1).
+    fake_target.responses["new-window -t aw-console-con"] = _FakeResult(stdout="1\n")
+
+    fake_target.commands.clear()
+    restore_session(db, _StubConfig(), console_name="con", session_name="a")
+
+    select_panes = [c for c in fake_target.commands if "select-pane -t aw-console-con:a" in c]
+    assert select_panes, "expected the rebuild path to focus the session pane"
+    assert all(".1" in c and ".0" not in c for c in select_panes)
+
+
+def test_restore_session_rebuild_raises_when_new_window_fails(
+    db: Database, fake_target: _FakeTarget, captured_output: CapturedOutput
+) -> None:
+    """_add_session_window warns and skips rather than raising when
+    `tmux new-window` fails, so restore-session must check that the window was
+    actually built before claiming it rebuilt one."""
+    _seed_vm(db, with_tailscale=True)
+    _seed_sessions(db, ["a"])
+    create_console(db, name="con", vm_name="vm1", session_specs=["a+1"])
+
+    fake_target.responses["has-session -t aw-console-con"] = _FakeResult(returncode=0)
+    fake_target.responses["list-windows -t aw-console-con"] = _FakeResult(stdout="other\n")
+    fake_target.responses["new-window -t aw-console-con"] = _FakeResult(returncode=1, stderr="no space for window")
+
+    with pytest.raises(ExternalError, match="failed to rebuild window 'a'"):
+        restore_session(db, _StubConfig(), console_name="con", session_name="a")
+
+    # RESULT lines mirror into .info; the success line must not be among them.
+    assert not any("Rebuilt window" in m for m in captured_output.info)
+
+
+def test_restore_session_rebuild_raises_when_shell_split_fails(
+    db: Database, fake_target: _FakeTarget, captured_output: CapturedOutput
+) -> None:
+    """The rebuild path must escalate symmetrically with the additive path: if
+    a shell pane fails to split while rebuilding a missing window, it raises
+    (with a --recreate hint) rather than reporting a clean rebuild. Otherwise a
+    transient split failure would silently produce a partial window."""
+    _seed_vm(db, with_tailscale=True)
+    _seed_sessions(db, ["a"])
+    create_console(db, name="con", vm_name="vm1", session_specs=["a+2"])
+
+    fake_target.responses["has-session -t aw-console-con"] = _FakeResult(returncode=0)
+    fake_target.responses["list-windows -t aw-console-con"] = _FakeResult(stdout="other\n")
+    # new-window succeeds (default ok); split-window succeeds but prints no
+    # pane id, so _split_shell_pane can't tag the pane and returns None.
+    fake_target.responses["split-window -t aw-console-con:a"] = _FakeResult(stdout="")
+
+    with pytest.raises(ExternalError, match=r"failed to create/tag config indices \[0, 1\]") as excinfo:
+        restore_session(db, _StubConfig(), console_name="con", session_name="a")
+
+    assert "agw console attach con --recreate" in (excinfo.value.hint or "")
+    # No clean-rebuild success line on a partial rebuild.
+    assert not any("Rebuilt window" in m for m in captured_output.info)
+
+
+def test_restore_session_rebuild_raises_when_shell_tag_fails(
+    db: Database, fake_target: _FakeTarget, captured_output: CapturedOutput
+) -> None:
+    """The tag-failure sub-case is the one that bites: a rebuilt window left
+    with an untagged shell pane makes the NEXT restore-session hit the
+    untagged-pane refusal. So a split that succeeds but whose set-option tag
+    fails must also escalate during rebuild."""
+    _seed_vm(db, with_tailscale=True)
+    _seed_sessions(db, ["a"])
+    create_console(db, name="con", vm_name="vm1", session_specs=["a+1"])
+
+    fake_target.responses["has-session -t aw-console-con"] = _FakeResult(returncode=0)
+    fake_target.responses["list-windows -t aw-console-con"] = _FakeResult(stdout="other\n")
+    # The pane splits and reports its id, but tagging it fails, so
+    # _split_shell_pane returns None (the pane is live but untagged).
+    fake_target.responses["split-window -t aw-console-con:a"] = _FakeResult(stdout="%9\n")
+    fake_target.responses["set-option -p"] = _FakeResult(returncode=1, stderr="tmux refused set-option")
+
+    with pytest.raises(ExternalError, match=r"failed to create/tag config indices \[0\]") as excinfo:
+        restore_session(db, _StubConfig(), console_name="con", session_name="a")
+
+    assert "agw console attach con --recreate" in (excinfo.value.hint or "")
+    assert not any("Rebuilt window" in m for m in captured_output.info)
+
+
+def test_restore_session_rebuild_refuses_when_session_row_gone(db: Database, fake_target: _FakeTarget) -> None:
+    """The window-missing path rebuilds from config, but _add_session_window
+    only warns and skips when the session row is gone. Check the session up
+    front so the operator gets the specific reason rather than a generic
+    rebuild failure."""
+    _seed_vm(db, with_tailscale=True)
+    _seed_sessions(db, ["a"])
+    create_console(db, name="con", vm_name="vm1", session_specs=["a+1"])
+
+    # Corrupt state: the session row is gone but the console member survives.
+    # ON DELETE CASCADE would normally remove the member with the session, so
+    # disable FKs to reproduce the orphaned-member state the guard defends against.
+    db._conn.execute("PRAGMA foreign_keys = OFF")
+    db._conn.execute("DELETE FROM sessions WHERE name = 'a'")
+    db._conn.commit()
+
+    fake_target.responses["has-session -t aw-console-con"] = _FakeResult(returncode=0)
+    # Window 'a' is absent, so this run would take the rebuild path.
+    fake_target.responses["list-windows -t aw-console-con"] = _FakeResult(stdout="other\n")
+
+    fake_target.commands.clear()
+    with pytest.raises(StateError, match="no longer exists in the database"):
+        restore_session(db, _StubConfig(), console_name="con", session_name="a")
+
+    assert not any("new-window" in c for c in fake_target.commands)
+
+
+# -- restore-session: refuses rather than destroying live state ------------
+
+
+def test_restore_session_refuses_when_session_pane_killed(db: Database, fake_target: _FakeTarget) -> None:
+    """If the operator kills the session-attach pane, tmux renumbers a tagged
+    shell down into its slot, so the lowest-indexed pane carries a shell tag
+    instead of being untagged. Repairing that means recreating the window,
+    which would destroy the operator's live shell panes (and, for a
+    single-member console, the console itself), so restore-session refuses and
+    points at `attach --recreate`."""
+    _seed_vm(db, with_tailscale=True)
+    _seed_sessions(db, ["a"])
+    create_console(db, name="con", vm_name="vm1", session_specs=["a+1"])
+
+    fake_target.responses["has-session -t aw-console-con"] = _FakeResult(returncode=0)
+    fake_target.responses["list-windows -t aw-console-con"] = _FakeResult(stdout="a\n")
+    # Session pane gone: the one configured shell (tag 0) has moved into slot 0,
+    # so the lowest-indexed pane is tagged.
+    fake_target.responses["list-panes -t aw-console-con:a"] = _FakeResult(stdout="%1|0|0\n")
+
+    fake_target.commands.clear()
+    with pytest.raises(StateError, match="lost its session-attach pane") as excinfo:
+        restore_session(db, _StubConfig(), console_name="con", session_name="a")
+
+    assert "agw console attach con --recreate" in (excinfo.value.hint or "")
+    # Read-only probes only: the window and its live panes are left exactly as
+    # they were, so the operator decides whether to recreate.
+    assert fake_target.commands == [
+        "tmux has-session -t aw-console-con 2>/dev/null",
+        "tmux list-windows -t aw-console-con -F '#{window_name}'",
+        "tmux list-panes -t aw-console-con:a -F '#{pane_id}|#{pane_index}|#{@agentworks-shell-index}'",
+    ]
+
+
+def test_restore_session_refuses_when_session_pane_killed_leaves_duplicate(
+    db: Database, fake_target: _FakeTarget
+) -> None:
+    """The stuck state seen in the wild: the session pane was killed and a prior
+    restore-session (which skipped pane_index 0 unconditionally) added a
+    duplicate shell, so both live panes are tagged 0. The lowest-indexed pane is
+    still tagged, so this is reported as the missing session pane it is, not as
+    "already matches config" and not as a duplicate-tags corruption."""
+    _seed_vm(db, with_tailscale=True)
+    _seed_sessions(db, ["a"])
+    create_console(db, name="con", vm_name="vm1", session_specs=["a+1"])
+
+    fake_target.responses["has-session -t aw-console-con"] = _FakeResult(returncode=0)
+    fake_target.responses["list-windows -t aw-console-con"] = _FakeResult(stdout="a\n")
+    # Two panes, both tagged 0 (no untagged session pane): the observed bug.
+    fake_target.responses["list-panes -t aw-console-con:a"] = _FakeResult(stdout="%1|0|0\n%2|1|0\n")
+
+    with pytest.raises(StateError, match="lost its session-attach pane"):
+        restore_session(db, _StubConfig(), console_name="con", session_name="a")
+
+
+@pytest.mark.parametrize(
+    ("session_spec", "windows", "panes"),
+    [
+        pytest.param("a+1", "other\n", "", id="window-missing"),
+        pytest.param("a+1", "a\n", "%1|0|\n%2|1|0\n", id="healthy"),
+        pytest.param("a+2", "a\n", "%1|0|\n%2|1|0\n", id="shell-pane-missing"),
+        pytest.param("a+1", "a\n", "%1|0|0\n", id="session-pane-killed"),
+        pytest.param("a+1", "a\n", "%1|0|0\n%2|1|0\n", id="session-pane-killed-duplicate"),
+        pytest.param("a+2", "a\n", "%1|0|\n%2|1|\n%3|2|\n", id="untagged-shells"),
+        pytest.param("a+2", "a\n", "%1|0|\n%2|1|0\n%3|2|0\n", id="duplicate-tags"),
+        pytest.param("a+1", "a\n", "%1|0|\n%2|1|0\n%3|2|1\n", id="out-of-range-tag"),
+        pytest.param("a+1", "a\n", "", id="unparseable-pane-list"),
+        # pane-base-index 1: session pane at 1, shells above it.
+        pytest.param("a+1", "a\n", "%1|1|\n%2|2|0\n", id="healthy-base-1"),
+        pytest.param("a+2", "a\n", "%1|1|\n%2|2|0\n", id="shell-pane-missing-base-1"),
+        pytest.param("a+1", "a\n", "%1|1|0\n", id="session-pane-killed-base-1"),
+    ],
+)
+def test_restore_session_never_destroys_live_tmux_state(
+    db: Database,
+    fake_target: _FakeTarget,
+    session_spec: str,
+    windows: str,
+    panes: str,
+) -> None:
+    """restore-session is additive on every path: whatever it finds live, it
+    never issues a destructive tmux command. A window it killed to rebuild
+    would take the operator's running shells with it, and for a single-member
+    console tmux would destroy the whole console session along with its last
+    window. Pins the property the command's contract rests on."""
+    _seed_vm(db, with_tailscale=True)
+    _seed_sessions(db, ["a"])
+    create_console(db, name="con", vm_name="vm1", session_specs=[session_spec])
+
+    fake_target.responses["has-session -t aw-console-con"] = _FakeResult(returncode=0)
+    fake_target.responses["list-windows -t aw-console-con"] = _FakeResult(stdout=windows)
+    fake_target.responses["list-panes -t aw-console-con:a"] = _FakeResult(stdout=panes)
+    # Any pane the repair paths do open comes back with a pane id to tag.
+    fake_target.responses["split-window -t aw-console-con:a"] = _FakeResult(stdout="%9\n")
+
+    fake_target.commands.clear()
+    # Every corrupt state raises; the point here is what was NOT run, so accept
+    # either outcome and assert on the commands.
+    with contextlib.suppress(StateError, ExternalError):
+        restore_session(db, _StubConfig(), console_name="con", session_name="a")
+
+    destructive = [c for c in fake_target.commands if "kill-window" in c or "kill-pane" in c or "kill-session" in c]
+    assert destructive == []
+
+
+# -- restore-session: pane-base-index ---------------------------------------
+
+
+def test_restore_session_healthy_under_pane_base_index_one(
+    db: Database, fake_target: _FakeTarget, captured_output: CapturedOutput
+) -> None:
+    """The console tmux server inherits the admin user's ~/.tmux.conf, so
+    `set -g pane-base-index 1` makes the session-attach pane report index 1 and
+    no pane ever report index 0. The session pane is the lowest-indexed pane,
+    not literally pane 0, so this window is healthy."""
+    _seed_vm(db, with_tailscale=True)
+    _seed_sessions(db, ["a"])
+    create_console(db, name="con", vm_name="vm1", session_specs=["a+2"])
+
+    fake_target.responses["has-session -t aw-console-con"] = _FakeResult(returncode=0)
+    fake_target.responses["list-windows -t aw-console-con"] = _FakeResult(stdout="a\n")
+    # Session pane at index 1 (untagged), shells at 2 and 3.
+    fake_target.responses["list-panes -t aw-console-con:a"] = _FakeResult(stdout="%1|1|\n%2|2|0\n%3|3|1\n")
+
+    fake_target.commands.clear()
+    restore_session(db, _StubConfig(), console_name="con", session_name="a")
+
+    assert any("already matches config" in m for m in captured_output.info)
+    assert not any("split-window" in c for c in fake_target.commands)
+    # Focus lands on the session pane at its actual index (1 here), not a
+    # literal .0 that tmux would reject under `pane-base-index 1`.
+    assert "tmux select-pane -t aw-console-con:a.1" in fake_target.commands
+    assert not any("select-pane -t aw-console-con:a.0" in c for c in fake_target.commands)
+
+
+def test_restore_session_refuses_killed_session_pane_under_pane_base_index_one(
+    db: Database, fake_target: _FakeTarget
+) -> None:
+    """The mirror of the healthy case: under `pane-base-index 1` a killed
+    session pane leaves a tagged shell as the lowest-indexed pane, and that is
+    still the refusal."""
+    _seed_vm(db, with_tailscale=True)
+    _seed_sessions(db, ["a"])
+    create_console(db, name="con", vm_name="vm1", session_specs=["a+2"])
+
+    fake_target.responses["has-session -t aw-console-con"] = _FakeResult(returncode=0)
+    fake_target.responses["list-windows -t aw-console-con"] = _FakeResult(stdout="a\n")
+    # Session pane killed: the shells renumbered down to 1 and 2.
+    fake_target.responses["list-panes -t aw-console-con:a"] = _FakeResult(stdout="%2|1|0\n%3|2|1\n")
+
+    with pytest.raises(StateError, match=r"pane 1 is a shell pane"):
+        restore_session(db, _StubConfig(), console_name="con", session_name="a")
+
+
+def test_restore_session_reorders_relative_to_the_session_pane(
+    db: Database, fake_target: _FakeTarget, captured_output: CapturedOutput
+) -> None:
+    """Shell config index N belongs one slot after the session pane plus N, so
+    under `pane-base-index 1` (session pane at index 1) config index 1 belongs
+    at pane 3, not pane 2. The repair also re-applies the default layout, and
+    under base index 1 the aw-session-vertical builder must accept the 1..N pane
+    run and apply a real select-layout (not warn and skip), then focus the
+    session pane at its actual index."""
+    _seed_vm(db, with_tailscale=True)
+    _seed_sessions(db, ["a"])
+    create_console(db, name="con", vm_name="vm1", session_specs=["a+2"])
+
+    fake_target.responses["has-session -t aw-console-con"] = _FakeResult(returncode=0)
+    fake_target.responses["list-windows -t aw-console-con"] = _FakeResult(stdout="a\n")
+    # Session pane at index 1; config index 0 is missing, so the surviving
+    # shell (config index 1) sits at index 2 and has to move up to index 3.
+    # The fake replays this same listing to the reorder pass, which is enough
+    # to pin which slot a tagged pane is aimed at. Key on the tagged -F format
+    # so this response does not also answer the layout query's list-panes call
+    # (which uses a different -F and must fall through to display-message).
+    fake_target.responses["-F '#{pane_id}|#{pane_index}|#{@agentworks-shell-index}'"] = _FakeResult(
+        stdout="%1|1|\n%2|2|1\n"
+    )
+    fake_target.responses["split-window -t aw-console-con:a"] = _FakeResult(stdout="%9\n")
+    # aw-session-vertical layout query: geometry + pane list indexed from 1
+    # (base index 1). session %1 at 1, new pane %9 at 2, surviving %2 at 3.
+    fake_target.responses["display-message -t aw-console-con:a"] = _FakeResult(stdout="80x36\n1 %1\n2 %9\n3 %2\n")
+
+    fake_target.commands.clear()
+    restore_session(db, _StubVerticalLayoutConfig(), console_name="con", session_name="a")
+
+    swaps = [c for c in fake_target.commands if "swap-pane" in c]
+    assert swaps == ["tmux swap-pane -s %2 -t aw-console-con:a.3"]
+    # The vertical layout applied for real (a computed select-layout string),
+    # with no "too small or unparseable" warning under base index 1.
+    assert any("select-layout -t aw-console-con:a" in c for c in fake_target.commands)
+    assert not any("could not build aw-session-vertical" in w for w in captured_output.warnings)
+    # Focus lands on the session pane at index 1, not a literal .0.
+    assert "tmux select-pane -t aw-console-con:a.1" in fake_target.commands
+
+
+# -- restore-session: additive shell-pane repair ---------------------------
 
 
 def test_restore_session_raises_when_split_returns_no_pane_id(db: Database, fake_target: _FakeTarget) -> None:

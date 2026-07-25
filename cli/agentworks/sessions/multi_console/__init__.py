@@ -75,6 +75,7 @@ from .secrets_env import (
 )
 from .tmux_build import (
     PreserveEnvMemo,
+    SessionWindowBuild,
     _add_session_window,
     _build_console_tmux,
     _resolve_workspace_path,
@@ -86,6 +87,7 @@ __all__ = [
     "ADMIN_SHELL_WINDOW",
     "PreserveEnvMemo",
     "SessionSpec",
+    "SessionWindowBuild",
     "TMUX_PREFIX",
     "_SUDO_PRESERVE_PROBE_VAR",
     "_add_session_window",
