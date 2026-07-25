@@ -186,6 +186,34 @@ def test_restore_session_rebuilds_missing_window(db: Database, fake_target: _Fak
     assert len(new_windows) == 1
 
 
+def test_restore_session_rebuild_focuses_session_pane_under_pane_base_index_one(
+    db: Database, fake_target: _FakeTarget
+) -> None:
+    """On the rebuild path, the session pane's index comes from the
+    `new-window -P -F '#{pane_index}'` capture, not the live pane listing the
+    repair path uses. Under an inherited `pane-base-index 1` server the fresh
+    window's only pane reports index 1, so focus must target `.1`, not the
+    literal `.0` (which does not exist under base index 1 and would leave the
+    operator on whatever pane tmux last selected). Pins the one base-index-1
+    surface the repair-path tests do not reach."""
+    _seed_vm(db, with_tailscale=True)
+    _seed_sessions(db, ["a"])
+    create_console(db, name="con", vm_name="vm1", session_specs=["a"])
+
+    fake_target.responses["has-session -t aw-console-con"] = _FakeResult(returncode=0)
+    # Window absent, so restore-session takes the rebuild path.
+    fake_target.responses["list-windows -t aw-console-con"] = _FakeResult(stdout="other\n")
+    # The freshly built window's pane reports index 1 (pane-base-index 1).
+    fake_target.responses["new-window -t aw-console-con"] = _FakeResult(stdout="1\n")
+
+    fake_target.commands.clear()
+    restore_session(db, _StubConfig(), console_name="con", session_name="a")
+
+    select_panes = [c for c in fake_target.commands if "select-pane -t aw-console-con:a" in c]
+    assert select_panes, "expected the rebuild path to focus the session pane"
+    assert all(".1" in c and ".0" not in c for c in select_panes)
+
+
 def test_restore_session_rebuild_raises_when_new_window_fails(
     db: Database, fake_target: _FakeTarget, captured_output: CapturedOutput
 ) -> None:
