@@ -33,7 +33,7 @@ Three targets are shared, and their generated output **is** checked in:
 
 CI runs `./scripts/rulesync-upgen.sh --check` (which calls `rulesync generate` for all three shared
 targets) to catch drift. Generated output for any _other_ target (`.cursor/`, `.gemini/`, etc.) is
-gitignored. Never edit any generated output directly; rerun the generator instead.
+gitignored. Never edit any generated output directly; rerun `./scripts/rulesync-upgen.sh` instead.
 
 The markdown linters (cspell, markdownlint-cli2, prettier) scan the whole repo, but each is
 configured to **skip rulesync's committed outputs** (the `.github/` copilot trees plus `CLAUDE.md`,
