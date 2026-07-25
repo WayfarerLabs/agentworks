@@ -25,10 +25,15 @@ from tests._consoles_support import (  # noqa: F401
     _StubConfig,
     _StubVerticalLayoutConfig,
 )
+from tests._tmux_model import TmuxModel
 from tests.conftest import _FakeResult, _FakeTarget
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from tests.conftest import CapturedOutput
+
+CON = "aw-console-con"
 
 
 # -- restore-session: argument and live-state validation -------------------
@@ -556,3 +561,158 @@ def test_restore_session_splits_missing_config_indices_and_tags_them(db: Databas
     assert any(f"-t %9 {SHELL_INDEX_OPTION} 1" in c for c in set_options)
     layouts = [c for c in fake_target.commands if "select-layout -t aw-console-con:a tiled" in c]
     assert len(layouts) == 1
+
+
+# -- restore-session: prove-by-consequence against a stateful tmux model ----
+#
+# The tests above pin restore-session's behavior against the stateless
+# `_FakeTarget` (a fixed substring -> response map). That fake cannot
+# represent tmux STATE: a kill-window has no effect on a later
+# list-windows, so the destructive-remedy bug the command's contract
+# guards against slipped through green once (see
+# `test_stateful_model_catches_kill_window_then_new_window_destruction`).
+# The tests below drive restore-session against a `TmuxModel` seeded into
+# each state and assert on the RESULTING MODEL STATE (session still alive,
+# window still present, panes intact/correct), not merely on the absence
+# of a `kill-*` string. That is a strictly stronger check: a future
+# destructive change that is merely wrong about state would leave the
+# model broken even if it never emitted a literally-named kill command.
+
+
+def _make_console(db: Database, session_spec: str) -> None:
+    """Seed the VM, session, and console DB rows a restore-session run reads."""
+    _seed_vm(db, with_tailscale=True)
+    _seed_sessions(db, ["a"])
+    create_console(db, name="con", vm_name="vm1", session_specs=[session_spec])
+
+
+def _destructive(commands: list[str]) -> list[str]:
+    return [c for c in commands if "kill-window" in c or "kill-pane" in c or "kill-session" in c]
+
+
+@pytest.mark.parametrize(
+    ("base", "pane_tags", "session_spec", "match"),
+    [
+        # Killed attach pane: the one shell compacted into the lowest slot, so
+        # the lowest-indexed pane is tagged. Single-window console, so a
+        # recreate here would take the console's last window (and the whole
+        # tmux session) with it. This is the positive counterpart: the CURRENT
+        # restore refuses and the console survives untouched.
+        pytest.param(0, (0,), "a+1", "lost its session-attach pane", id="killed-attach-pane"),
+        # The stuck duplicate-shell state seen in the wild: session pane killed,
+        # a prior buggy restore added a duplicate shell, so both panes are
+        # tagged 0. Still reported as the missing session pane it is.
+        pytest.param(0, (0, 0), "a+1", "lost its session-attach pane", id="stuck-duplicate-shell"),
+        # Same physics under an inherited pane-base-index 1.
+        pytest.param(1, (0,), "a+2", r"pane 1 is a shell pane", id="killed-attach-pane-base-1"),
+    ],
+)
+def test_restore_session_refuses_and_leaves_the_model_intact(
+    db: Database,
+    console_target_factory: Callable[..., _FakeTarget],
+    base: int,
+    pane_tags: tuple[int | None, ...],
+    session_spec: str,
+    match: str,
+) -> None:
+    """In each corrupted state restore-session cannot safely repair, it raises
+    and leaves live tmux exactly as it found it: the session stays alive, the
+    window stays present, and its panes are byte-for-byte unchanged."""
+    _make_console(db, session_spec)
+    model = TmuxModel(pane_base_index=base)
+    model.seed_session(CON, "a", pane_tags=pane_tags)
+    before = model.pane_rows(CON, "a")
+    target = console_target_factory(model)
+
+    with pytest.raises(StateError, match=match):
+        restore_session(db, _StubConfig(), console_name="con", session_name="a")
+
+    # The console survives and nothing about the window changed.
+    assert model.has_session(CON)
+    assert "a" in model.window_names(CON)
+    assert model.pane_rows(CON, "a") == before
+    assert _destructive(target.commands) == []
+
+
+@pytest.mark.parametrize("base", [0, 1])
+def test_restore_session_is_a_noop_on_a_healthy_model(
+    db: Database,
+    console_target_factory: Callable[..., _FakeTarget],
+    captured_output: CapturedOutput,
+    base: int,
+) -> None:
+    """A window whose live panes already match config is left untouched: no
+    splits, no kills, and the model still holds exactly the session pane plus
+    the one configured shell."""
+    _make_console(db, "a+1")
+    model = TmuxModel(pane_base_index=base)
+    model.seed_session(CON, "a", pane_tags=(None, 0))
+    target = console_target_factory(model)
+
+    restore_session(db, _StubConfig(), console_name="con", session_name="a")
+
+    assert any("already matches config" in m for m in captured_output.info)
+    assert not any("split-window" in c for c in target.commands)
+    assert _destructive(target.commands) == []
+    assert model.has_session(CON)
+    rows = model.pane_rows(CON, "a")
+    assert rows is not None
+    assert [tag for _pid, _pidx, tag in rows] == [None, 0]
+
+
+def test_restore_session_additively_repairs_a_missing_shell_pane(
+    db: Database,
+    console_target_factory: Callable[..., _FakeTarget],
+) -> None:
+    """The additive path, proved by consequence: with one of two configured
+    shells live, restore-session splits the missing shell back in and tags it,
+    leaving the model with the session pane plus both shells in config order,
+    while never destroying the pane that was already there."""
+    _make_console(db, "a+2")
+    model = TmuxModel()
+    # Session pane (untagged) plus config-index-0 shell live; index 1 missing.
+    model.seed_session(CON, "a", pane_tags=(None, 0))
+    surviving_shell_id = model.pane_rows(CON, "a")[1][0]  # type: ignore[index]
+    target = console_target_factory(model)
+
+    restore_session(db, _StubConfig(), console_name="con", session_name="a")
+
+    assert model.has_session(CON)
+    rows = model.pane_rows(CON, "a")
+    assert rows is not None
+    # Session pane still lowest and untagged; both shells present, in order.
+    assert [pidx for _pid, pidx, _tag in rows] == [0, 1, 2]
+    assert [tag for _pid, _pidx, tag in rows] == [None, 0, 1]
+    # The pre-existing shell pane was never destroyed, just kept in place.
+    assert any(pid == surviving_shell_id for pid, _pidx, _tag in rows)
+    assert _destructive(target.commands) == []
+
+
+def test_stateful_model_catches_kill_window_then_new_window_destruction() -> None:
+    """Regression proof that the stateful harness catches the original
+    console-destroying remedy.
+
+    The bug the restore-session contract guards against was a repair that did
+    `kill-window` on a window and then `new-window` to rebuild it. For a
+    single-window console that is fatal: tmux requires at least one window, so
+    killing the only window destroys the whole tmux session, and the follow-up
+    `new-window` then has no session to attach to. Against the OLD stateless
+    fake this sequence looked green (the post-kill list-windows still replayed
+    its seed and new-window still returned default-OK), which is precisely how
+    the bug reached main. The destructive code is no longer in the tree, so we
+    drive the model through that exact sequence directly and show the model
+    now reports the console destroyed and the new-window failing.
+    """
+    model = TmuxModel()
+    model.new_session(CON, "a")  # single-window console
+    assert model.has_session(CON)
+
+    # The old destructive remedy: kill the window, then rebuild it.
+    assert model.dispatch(f"tmux kill-window -t {CON}:a").ok
+    # tmux destroys the session with its last window: has-session now fails...
+    assert not model.dispatch(f"tmux has-session -t {CON} 2>/dev/null").ok
+    assert not model.has_session(CON)
+    # ...and the follow-up new-window against the dead session fails, exactly
+    # as it would against real tmux (and exactly what the stateless fake could
+    # not represent, since it returned default-OK regardless of state).
+    assert not model.dispatch(f"tmux new-window -t {CON} -n a -P -F '#{{pane_index}}'").ok
