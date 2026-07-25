@@ -7,6 +7,7 @@ from collections.abc import Generator
 from contextlib import AbstractContextManager
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Protocol
 
 import pytest
 
@@ -168,21 +169,48 @@ class _FakeResult:
         return self.returncode == 0
 
 
+class _SupportsDispatch(Protocol):
+    """The one method ``_FakeTarget`` needs from a stateful tmux model.
+
+    Typed as a Protocol (rather than importing ``tests._tmux_model.TmuxModel``)
+    because that module imports ``_FakeResult`` from here; a concrete import
+    the other way would be circular. ``TmuxModel`` satisfies it structurally.
+    """
+
+    def dispatch(self, command: str) -> _FakeResult: ...
+
+
 class _FakeTarget:
     """Captures the commands run against it. Supports a per-test override map
     that lets us simulate (e.g.) `has-session` returning nonzero on first probe.
+
+    Optionally stateful: pass a ``model`` (a ``tests._tmux_model.TmuxModel``)
+    and ``run()`` answers from live tmux state instead of a fixed default.
+    Resolution order is override map first, then the model, then default-OK,
+    so a test can still force a specific failure (e.g. "make this one
+    split-window fail") on top of an otherwise stateful target. Without a
+    model the target is the original stateless substring map, so every
+    existing test is unaffected.
     """
 
-    def __init__(self, responses: dict[str, _FakeResult] | None = None) -> None:
+    def __init__(
+        self,
+        responses: dict[str, _FakeResult] | None = None,
+        *,
+        model: _SupportsDispatch | None = None,
+    ) -> None:
         self.commands: list[str] = []
         # Substring -> response. First matching substring wins; default = ok.
         self.responses = responses or {}
+        self.model = model
 
     def run(self, command: str, **kwargs: object) -> _FakeResult:
         self.commands.append(command)
         for needle, response in self.responses.items():
             if needle in command:
                 return response
+        if self.model is not None:
+            return self.model.dispatch(command)
         return _FakeResult()
 
 
@@ -277,10 +305,14 @@ def stub_vm_gates(monkeypatch: pytest.MonkeyPatch) -> _StubPlatform:
     return platform
 
 
-@pytest.fixture
-def fake_target(monkeypatch: pytest.MonkeyPatch) -> _FakeTarget:
-    """Install a FakeTarget for the transport layer and stub the VM gates."""
-    target = _FakeTarget()
+def install_fake_target(monkeypatch: pytest.MonkeyPatch, target: _FakeTarget) -> _FakeTarget:
+    """Route the transport layer through ``target`` and stub the VM gates.
+
+    Shared by the ``fake_target`` fixture (stateless) and the
+    ``console_target_factory`` fixture (stateful, model-backed), so both
+    install the same transport seams and gate stubs. Returns ``target`` for
+    the caller to keep a reference.
+    """
     # ``agentworks.transports.transport`` is the canonical admin-transport
     # factory; ``agentworks.sessions.manager.transport`` covers manager's
     # eager top-level import (used by batch_check_all_sessions and friends).
@@ -298,6 +330,37 @@ def fake_target(monkeypatch: pytest.MonkeyPatch) -> _FakeTarget:
     # fake target exposes it as a no-op so attach flows return cleanly.
     target.interactive = lambda command, **kwargs: 0  # type: ignore[attr-defined]
     return target
+
+
+@pytest.fixture
+def fake_target(monkeypatch: pytest.MonkeyPatch) -> _FakeTarget:
+    """Install a FakeTarget for the transport layer and stub the VM gates."""
+    return install_fake_target(monkeypatch, _FakeTarget())
+
+
+@pytest.fixture
+def console_target_factory(monkeypatch: pytest.MonkeyPatch):  # noqa: ANN201 - returns a local factory
+    """Return a factory that installs a stateful, model-backed fake target.
+
+    Usage::
+
+        def test_x(db, console_target_factory):
+            model = TmuxModel()
+            model.seed_session("aw-console-con", "a", pane_tags=(None, 0))
+            target = console_target_factory(model)
+            restore_session(db, _StubConfig(), console_name="con", session_name="a")
+            assert model.has_session("aw-console-con")
+
+    The installed target routes through the same transport seams / gate
+    stubs as ``fake_target``; ``responses`` still layers per-test overrides
+    on top of the model (override map wins), so a test can force one command
+    to fail while the rest stay stateful.
+    """
+
+    def _make(model: _SupportsDispatch | None = None, responses: dict[str, _FakeResult] | None = None) -> _FakeTarget:
+        return install_fake_target(monkeypatch, _FakeTarget(responses=responses, model=model))
+
+    return _make
 
 
 class _StubSessionTemplate:
