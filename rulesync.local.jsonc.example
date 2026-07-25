@@ -1,6 +1,9 @@
 {
   // Personal rulesync target configuration (gitignored).
-  // Copy this to rulesync.local.jsonc and adjust targets to your AI tool(s).
-  // Full target list: npx rulesync generate --help
-  "targets": ["claudecode"]
+  // Copy this to rulesync.local.jsonc for AI tools that are NOT already
+  // committed to the repo. Claude Code, Codex CLI, and GitHub Copilot are
+  // shared targets (see rulesync.jsonc) and need no local config.
+  // Adjust "targets" to your tool(s). Full target list:
+  // https://rulesync.dyoshikawa.com/reference/supported-tools.html
+  "targets": ["cursor"]
 }

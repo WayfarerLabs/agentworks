@@ -16,8 +16,11 @@ subagents) across tools. If you are contributing with an AI assistant, you shoul
 
 ### Initialize your workspace
 
-First thing after cloning, copy the example local config and edit it for whatever assistant(s) you
-use, then regenerate the outputs:
+Claude Code, Codex CLI, and GitHub Copilot work out of the box: their generated context is committed
+to the repo, so a fresh clone already has it. No setup step needed for those tools.
+
+If you use a different assistant (Cursor, Gemini, etc.), copy the example local config, add your
+tool(s), and regenerate the outputs:
 
 ```bash
 cp rulesync.local.jsonc.example rulesync.local.jsonc
@@ -25,17 +28,24 @@ cp rulesync.local.jsonc.example rulesync.local.jsonc
 ./scripts/rulesync-upgen.sh
 ```
 
-`rulesync.local.jsonc` is gitignored; only your local assistant's generated files (`.claude/`,
-`.cursor/`, etc.) get produced for you and stay out of the repo.
+`rulesync.local.jsonc` is gitignored, and the extra tools' generated files (`.cursor/`, `.gemini/`,
+etc.) stay out of the repo.
 
 ### What gets committed
 
-GitHub Copilot is the one shared target (declared in `rulesync.jsonc`). Its generated output lives
-at `.github/copilot-instructions.md`, `.github/instructions/`, `.github/agents/`, and
-`.github/skills/` and **is** checked in so Copilot Code Review can see the project's rules and
-subagents on every PR. CI verifies this output stays in sync with `.rulesync/` sources via
-`rulesync generate --check`. If you edit a source file, regenerate via the script above and commit
-the result.
+Three targets are shared, declared in `rulesync.jsonc`, and their generated output **is** checked
+in:
+
+- **GitHub Copilot** (`.github/copilot-instructions.md`, `.github/instructions/`, `.github/agents/`,
+  `.github/skills/`) so Copilot Code Review sees the project's rules and subagents on every PR.
+- **Claude Code** (`CLAUDE.md`, `.claude/agents/`, `.claude/rules/`, `.claude/skills/`) and **Codex
+  CLI** (`AGENTS.md`, `.codex/`) so those agents have full context on a fresh clone with no setup.
+  Only the rulesync-generated directories are committed; personal files such as
+  `.claude/settings.local.json` stay gitignored.
+
+CI verifies all three stay in sync with `.rulesync/` sources via
+`./scripts/rulesync-upgen.sh --check`. If you edit a source file, regenerate via the script above
+and commit the result.
 
 Source files in `.rulesync/` are the canonical input; never edit generated output directly.
 
@@ -82,20 +92,21 @@ or add a word.
 ### Editing rulesync sources
 
 Files under `.rulesync/` are markdown; they get linted by markdownlint-cli2 and prettier just like
-the rest of the repo. Rulesync's _generated_ output (committed under `.github/`) is deliberately
-excluded from the linters via each tool's config; otherwise the linters and rulesync would fight
-(prettier reformats a file, next `rulesync generate` overwrites it, repeat).
+the rest of the repo. Rulesync's _generated_ output (the committed shared-target output under
+`.github/`, `.claude/`, `.codex/`, and the root `CLAUDE.md` / `AGENTS.md`) is deliberately excluded
+from the linters via each tool's config; otherwise the linters and rulesync would fight (prettier
+reformats a file, next `rulesync generate` overwrites it, repeat).
 
 **Lint before you regenerate.** Prettier may reformat the source, and running it after regeneration
-leaves the generated copilot output out of sync with the prettified source, so CI's drift check will
-fail. The right order is:
+leaves the generated output out of sync with the prettified source, so CI's drift check will fail.
+The right order is:
 
 1. Edit the `.rulesync/` source.
 2. `./scripts/lint-files.sh --fix` prettifies the source (and the rest of the repo).
-3. `./scripts/rulesync-upgen.sh` regenerates the committed copilot output. Your
-   `rulesync.local.jsonc` targets can be anything; upgen always refreshes the copilot output
+3. `./scripts/rulesync-upgen.sh` regenerates the committed output for all shared targets. Your
+   `rulesync.local.jsonc` targets can be anything; upgen always refreshes the shared output
    regardless.
 4. Commit both the source and the generated files.
 
-To verify the committed copilot output is up to date without regenerating, use
+To verify the committed shared-target output is up to date without regenerating, use
 `./scripts/rulesync-upgen.sh --check`. CI invokes the same script.

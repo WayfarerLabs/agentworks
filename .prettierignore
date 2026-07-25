@@ -9,6 +9,10 @@
 .github/instructions/
 .github/agents/
 .github/skills/
+CLAUDE.md
+.claude/
+AGENTS.md
+.codex/
 
 # Virtual envs
 cli/.venv/

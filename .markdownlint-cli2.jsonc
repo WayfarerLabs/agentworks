@@ -3,9 +3,9 @@
     // dev opted into, build artifacts, venvs, etc.) are skipped automatically.
     "gitignore": true,
     // Explicit ignores cover (a) tracked-but-generated files we don't want
-    // markdownlint touching (CHANGELOG.md from release-please; copilot
-    // rulesync output) and (b) paths that may not be gitignored on every
-    // workspace.
+    // markdownlint touching (CHANGELOG.md from release-please; the committed
+    // rulesync output for copilot, claudecode, and codexcli) and (b) paths
+    // that may not be gitignored on every workspace.
     "ignores": [
         "cli/.venv/**",
         "cli/.venv64/**",
@@ -14,5 +14,9 @@
         ".github/instructions/**",
         ".github/agents/**",
         ".github/skills/**",
+        "CLAUDE.md",
+        ".claude/**",
+        "AGENTS.md",
+        ".codex/**",
     ],
 }
