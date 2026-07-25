@@ -122,6 +122,26 @@ def test_killing_a_middle_window_leaves_a_gap_and_new_windows_fill_it(base: int)
     assert model.windows_with_index(CON) == [(base, "w0"), (base + 1, "w3"), (base + 2, "w2")]
 
 
+@pytest.mark.parametrize("base", [0, 1])
+def test_swap_windows_across_a_gap_exchanges_slots_and_keeps_the_gap(base: int) -> None:
+    """swap-window on GAPPED, non-contiguous indices (the case
+    _reorder_session_windows faces) exchanges the two windows' slots and
+    leaves the gap between them untouched."""
+    model = TmuxModel(window_base_index=base)
+    model.new_session(CON, "w0")  # slot base
+    model.new_window(CON, "w1")  # slot base+1
+    model.new_window(CON, "w2")  # slot base+2
+    assert model.kill_window(CON, "w1")  # gap at base+1: w0(base), w2(base+2)
+
+    # Swap the two occupied, non-adjacent slots across the gap.
+    assert model.swap_windows(CON, base, base + 2)
+    assert model.windows_with_index(CON) == [(base, "w2"), (base + 2, "w0")]
+
+    # And through the command string the reorder path emits.
+    assert model.dispatch(f"tmux swap-window -s {CON}:{base} -t {CON}:{base + 2}").ok
+    assert model.windows_with_index(CON) == [(base, "w0"), (base + 2, "w2")]
+
+
 # -- last-window-kill destroys the session ---------------------------------
 
 

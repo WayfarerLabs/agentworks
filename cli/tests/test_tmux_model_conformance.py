@@ -40,6 +40,10 @@ SESSION = "aw-console-con"
 # A harmless long-lived command so panes do not exit on their own; teardown's
 # kill-server reaps them.
 HOLD = "sleep 100000"
+# A generous per-command bound: normal tmux calls return in milliseconds, so
+# this never trips under load, but a hung tmux fails the test instead of
+# hanging the whole suite.
+COMMAND_TIMEOUT_SECONDS = 10
 
 
 class _Tmux(Protocol):
@@ -89,14 +93,20 @@ class RealTmux:
             # -f is honored only at server start; pass it on the first call.
             cmd += ["-f", self._config]
         cmd += args
-        result = subprocess.run(cmd, capture_output=True, text=True, check=False)
+        result = subprocess.run(cmd, capture_output=True, text=True, check=False, timeout=COMMAND_TIMEOUT_SECONDS)
         self._started = True
         if check and result.returncode != 0:
             raise AssertionError(f"tmux {args} failed: rc={result.returncode} stderr={result.stderr!r}")
         return result
 
     def kill_server(self) -> None:
-        subprocess.run([self._tmux, "-L", self._socket, "kill-server"], capture_output=True, text=True, check=False)
+        subprocess.run(
+            [self._tmux, "-L", self._socket, "kill-server"],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=COMMAND_TIMEOUT_SECONDS,
+        )
         with contextlib.suppress(OSError):
             os.unlink(self._config)
 
@@ -120,6 +130,9 @@ class RealTmux:
 
     def kill_window(self, session: str, window: str) -> None:
         self._run(["kill-window", "-t", f"{session}:{window}"])
+
+    def swap_windows(self, session: str, index_a: int, index_b: int) -> None:
+        self._run(["swap-window", "-s", f"{session}:{index_a}", "-t", f"{session}:{index_b}"])
 
     # -- queries (mirror TmuxModel) -----------------------------------------
 
@@ -195,6 +208,7 @@ class Pair:
     structural pane), so the caller never handles a raw id."""
 
     def __init__(self, base_index: int, real: RealTmux) -> None:
+        self.base_index = base_index
         self.model = TmuxModel(pane_base_index=base_index, window_base_index=base_index)
         self.real = real
 
@@ -216,6 +230,10 @@ class Pair:
     def kill_window(self, window: str) -> None:
         assert self.model.kill_window(SESSION, window)
         self.real.kill_window(SESSION, window)
+
+    def swap_windows(self, index_a: int, index_b: int) -> None:
+        assert self.model.swap_windows(SESSION, index_a, index_b)
+        self.real.swap_windows(SESSION, index_a, index_b)
 
     def kill_lowest_untagged_pane(self, window: str) -> None:
         model_pane = _lowest_untagged_pane_id(self.model, SESSION, window)
@@ -243,9 +261,11 @@ def pair(request: pytest.FixtureRequest) -> Iterator[Pair]:
 @pytest.mark.parametrize("pair", [0, 1], indirect=True, ids=["base0", "base1"])
 def test_conformance_window_and_pane_lifecycle(pair: Pair) -> None:
     """The model matches real tmux across the operation classes that carry the
-    bug: split + tag, gapped window indices, gap-filling new windows, killing
-    the untagged attach pane so a shell compacts into its slot, and killing
-    the last window to destroy the session."""
+    bug: split + tag, gapped window indices, a swap across those gapped indices
+    (the operation _reorder_session_windows performs), gap-filling new windows,
+    killing the untagged attach pane so a shell compacts into its slot, and
+    killing the last window to destroy the session."""
+    base = pair.base_index
     # A session with one window and its untagged attach pane.
     pair.new_session("a")
     pair.agree()
@@ -264,6 +284,14 @@ def test_conformance_window_and_pane_lifecycle(pair: Pair) -> None:
     # b's slot rather than renumbering c down. This is finding 2: the model
     # must leave the same gap, not a contiguous relabel.
     pair.kill_window("b")
+    pair.agree()
+
+    # Swap across the gap while it is still open: "a" sits at base and "c" at
+    # base+2, with base+1 empty. This is the non-contiguous swap
+    # _reorder_session_windows issues on live, gapped tmux indices, the exact
+    # case that motivates the window-index-slot model. After the swap "c" must
+    # hold base and "a" hold base+2, with base+1 still a gap, on both sides.
+    pair.swap_windows(base, base + 2)
     pair.agree()
 
     # A new window fills the lowest free slot (b's old index), not the tail.
