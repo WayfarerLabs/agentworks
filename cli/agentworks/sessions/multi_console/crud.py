@@ -22,7 +22,11 @@ from agentworks import output
 from agentworks.config import validate_name
 from agentworks.errors import AlreadyExistsError, NotFoundError, ValidationError
 from agentworks.resources.access import named_console_template
-from agentworks.sessions.multi_console_layout import _apply_layout, _reorder_session_windows
+from agentworks.sessions.multi_console_layout import (
+    _apply_layout,
+    _reorder_session_windows,
+    _reorder_shell_panes,
+)
 
 from ._helpers import (
     SessionSpec,
@@ -220,7 +224,21 @@ def add_sessions(
                 vm=vm,
                 layout=named_console_template(registry).tmux_layout,
                 preserve_memo=preserve_memo,
+                # Append each new member past the last window (not into a
+                # reclaimed low slot) so live order matches config even before
+                # the reorder pass below.
+                place_last=True,
             )
+        # Settle live window order to the configured (DB) order, the same
+        # ordering invariant the build/restore/reorder paths uphold. Deterministic
+        # regardless of the admin's `renumber-windows` setting, and it also
+        # corrects any pre-existing drift left by an earlier op.
+        ordered_windows = [m.session_name for m in db.list_console_sessions(console_name)]
+        _reorder_session_windows(
+            target,
+            console_name=console_name,
+            ordered_session_windows=ordered_windows,
+        )
 
 
 def remove_sessions(
@@ -459,8 +477,15 @@ def add_shell(
         )
         q_con = shlex.quote(tmux_session_name(console_name))
         q_win = shlex.quote(session_name)
-        # No _focus_session_pane here: the operator is mid-attach when they
-        # run `add-shell`; pulling focus off their current pane would be
-        # jarring. The layout still re-applies so geometry reflects the new
-        # pane count.
+        # `_split_shell_pane` splits the window's active pane, which after an
+        # attach is the session pane, so the new shell lands directly below it,
+        # above the existing shells. Reorder the shell panes back into tagged
+        # config order (`[0]`, `[1]`, ...), the same ordering invariant the
+        # build/restore paths uphold. len(new_shells) is the full shell count
+        # after this append.
+        _reorder_shell_panes(target, q_con, q_win, len(new_shells))
+        # Re-apply the layout to redistribute geometry after the split and
+        # swaps (mirrors the restore_session sequence). No _focus_session_pane
+        # here: the operator is mid-attach when they run `add-shell`; pulling
+        # focus off their current pane would be jarring.
         _apply_layout(target, q_con, q_win, named_console_template(registry).tmux_layout)

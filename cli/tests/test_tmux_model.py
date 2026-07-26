@@ -123,6 +123,37 @@ def test_killing_a_middle_window_leaves_a_gap_and_new_windows_fill_it(base: int)
 
 
 @pytest.mark.parametrize("base", [0, 1])
+def test_new_window_at_an_explicit_index_lands_there_not_lowest_free(base: int) -> None:
+    """``new-window -t <session>:<idx>`` with a free index creates the window at
+    that exact slot, not the lowest free one. This is how ``add_sessions``
+    appends past the last window (targeting max+1) so a reclaimed low slot, e.g.
+    the retired placeholder's index, does not pull the new window to the front
+    under ``renumber-windows off``."""
+    model = TmuxModel(window_base_index=base)
+    model.new_session(CON, "w0")  # slot base
+    model.new_window(CON, "wa")  # slot base+1
+    model.new_window(CON, "wb")  # slot base+2
+    assert model.kill_window(CON, "w0")  # free the lowest slot (base)
+    assert model.windows_with_index(CON) == [(base + 1, "wa"), (base + 2, "wb")]
+
+    # Append past the last window (base+2) at base+3 rather than filling base.
+    res = model.dispatch(f"tmux new-window -t {CON}:{base + 3} -n wc -P -F '#{{pane_index}}'")
+    assert res.ok
+    assert model.windows_with_index(CON) == [(base + 1, "wa"), (base + 2, "wb"), (base + 3, "wc")]
+
+
+def test_new_window_at_an_occupied_index_is_refused() -> None:
+    """Real tmux refuses ``new-window`` at an already-occupied index without
+    ``-k``; the model mirrors that (no mutation, non-zero result)."""
+    model = TmuxModel()
+    model.new_session(CON, "w0")  # index 0
+    model.new_window(CON, "w1")  # index 1
+
+    assert not model.dispatch(f"tmux new-window -t {CON}:0 -n dup -P -F '#{{pane_index}}'").ok
+    assert model.windows_with_index(CON) == [(0, "w0"), (1, "w1")]
+
+
+@pytest.mark.parametrize("base", [0, 1])
 def test_swap_windows_across_a_gap_exchanges_slots_and_keeps_the_gap(base: int) -> None:
     """swap-window on GAPPED, non-contiguous indices (the case
     _reorder_session_windows faces) exchanges the two windows' slots and
