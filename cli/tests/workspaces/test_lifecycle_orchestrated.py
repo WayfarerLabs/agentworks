@@ -30,6 +30,7 @@ from agentworks.capabilities.base import RunContext
 from agentworks.capabilities.vm_platform.proxmox import ProxmoxPlatform
 from agentworks.db import InitStatus, VMStatus
 from agentworks.errors import (
+    ExternalError,
     NotFoundError,
     StateError,
     UserAbort,
@@ -886,6 +887,184 @@ def test_delete_stopped_vm_gate_burst_seeds_the_whole_union(
     assert events == ["status", "start", "tailscale"]
     assert resolve_counter == [["proxmox-token"]]
     assert db.get_workspace("ws1") is None
+
+
+# -- delete removes the workspace's Linux group (issue #249) -------------------
+
+
+def test_delete_removes_the_workspace_group_after_the_directory(
+    db: Database,
+    make_config,  # noqa: ANN001
+    target: _FakeAdminTarget,
+    monkeypatch: pytest.MonkeyPatch,
+    captured_output,  # noqa: ANN001
+) -> None:
+    """Delete tears down the workspace's Linux group (``groupdel``), the
+    symmetric counterpart of the ``groupadd`` at create, so no residual
+    group survives the delete (issue #249). The removal runs on the VM
+    transport AFTER the directory is gone: the ``groupdel`` command
+    appears strictly after the ``rm -rf`` of the workspace path."""
+    config = make_config()
+    _seed(db)
+    _reachable(monkeypatch, True)
+
+    workspace_manager.delete_workspace(db, config, "ws1", yes=True)
+
+    dir_removed = next(i for i, c in enumerate(target.commands) if "rm -rf /srv/ws1" in c)
+    group_removed = next(i for i, c in enumerate(target.commands) if "groupdel ws-ws1" in c)
+    assert group_removed > dir_removed
+    assert db.get_workspace("ws1") is None
+
+
+def test_delete_group_removal_uses_the_recorded_linux_group(
+    db: Database,
+    make_config,  # noqa: ANN001
+    target: _FakeAdminTarget,
+    monkeypatch: pytest.MonkeyPatch,
+    captured_output,  # noqa: ANN001
+) -> None:
+    """The group removed is the one RECORDED on the workspace row, not a
+    re-derivation from the name: a legacy workspace whose on-VM group
+    keeps the older ``ws--`` prefix drops that exact group, so the
+    residue it actually owns is the one that goes."""
+    config = make_config()
+    db.insert_vm("box", site="proxmox", hostname="box")
+    db.update_vm_tailscale("box", "100.64.0.9")
+    db.update_vm_init_status("box", InitStatus.COMPLETE)
+    db.insert_workspace(
+        "legacy",
+        vm_name="box",
+        workspace_path="/srv/legacy",
+        template="default",
+        linux_group="ws--legacy",
+    )
+    _reachable(monkeypatch, True)
+
+    workspace_manager.delete_workspace(db, config, "legacy", yes=True)
+
+    assert any("groupdel ws--legacy" in c for c in target.commands)
+    assert not any("groupdel ws-legacy" in c for c in target.commands)
+
+
+class _CheckAwareTarget(_FakeAdminTarget):
+    """Admin target that models the real transport's ``check`` contract:
+    a command matching a failing needle raises ``SSHError`` only under
+    ``check=True`` (the default); under ``check=False`` it returns a
+    non-ok result without raising, exactly as the SSH transport does."""
+
+    def run(self, cmd: str, **kwargs: object) -> SimpleNamespace:
+        self.commands.append(cmd)
+        failing = any(needle in cmd for needle in self._failing)
+        if failing and kwargs.get("check", True):
+            from agentworks.ssh import SSHError
+
+            raise SSHError(f"command failed: {cmd}")
+        return SimpleNamespace(ok=not failing, returncode=0 if not failing else 1, stdout="", stderr="")
+
+
+def test_delete_group_removal_failure_does_not_break_the_delete(
+    db: Database,
+    make_config,  # noqa: ANN001
+    monkeypatch: pytest.MonkeyPatch,
+    captured_output: CapturedOutput,
+) -> None:
+    """A group that ``groupdel`` cannot remove (already gone, or refused)
+    is tolerated: the removal is issued with ``check=False``, so the
+    non-zero exit never raises, the delete still finishes (row gone,
+    success reported), and no 'remote cleanup failed' warning fires."""
+    fake = _CheckAwareTarget(failing=("groupdel",))
+    _wire_target(monkeypatch, fake)
+
+    config = make_config()
+    _seed(db)
+    _reachable(monkeypatch, True)
+
+    workspace_manager.delete_workspace(db, config, "ws1", yes=True)
+
+    assert any("groupdel ws-ws1" in c for c in fake.commands)
+    assert db.get_workspace("ws1") is None
+    assert "Workspace 'ws1' deleted" in captured_output.info
+    assert not any("remote cleanup failed" in w for w in captured_output.warnings)
+
+
+# -- create-rollback reclaims the fresh group too (same window, issue #249) ----
+
+
+def _seed_vm_only(db: Database) -> None:
+    """A COMPLETE, reachable-host VM row with no workspace: the create
+    path makes the workspace itself, so its rollback tests must not
+    pre-seed one."""
+    db.insert_vm("box", site="proxmox", hostname="box")
+    db.update_vm_tailscale("box", "100.64.0.9")
+    db.update_vm_init_status("box", InitStatus.COMPLETE)
+
+
+def _boom_after_create(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Force a failure AFTER ``create_vm_workspace`` returns: the VS Code
+    stub step raises, so ``workspace_path`` is already set and the
+    rollback's on-VM teardown (directory + fresh group) fires."""
+
+    def _boom(*args: object, **kwargs: object) -> str:
+        raise RuntimeError("stub exploded")
+
+    monkeypatch.setattr("agentworks.workspaces.backends.vm.generate_vscode_workspace", _boom)
+
+
+def test_create_rollback_removes_the_fresh_workspace_group(
+    db: Database,
+    make_config,  # noqa: ANN001
+    monkeypatch: pytest.MonkeyPatch,
+    captured_output: CapturedOutput,
+) -> None:
+    """A create that fails after ``create_vm_workspace`` returns rolls
+    back the on-VM state through ``delete_vm_workspace``, which now also
+    removes the group create just made. The removed group carries the
+    fresh ``ws-`` prefix (``workspace_group('ws1')``), and the
+    ``groupdel`` runs after the directory ``rm -rf``, mirroring the
+    delete path. ``failing=('test -d',)`` makes the create-time
+    existence probe report the directory absent so create proceeds."""
+    fake = _FakeAdminTarget(failing=("test -d",))
+    _wire_target(monkeypatch, fake)
+
+    config = make_config()
+    _seed_vm_only(db)
+    _reachable(monkeypatch, True)
+    _boom_after_create(monkeypatch)
+
+    with pytest.raises(ExternalError, match="creating workspace: stub exploded"):
+        workspace_manager.create_workspace(db, config, name="ws1", vm_name="box")
+
+    dir_removed = next(i for i, c in enumerate(fake.commands) if c.startswith("rm -rf") and "ws1" in c)
+    group_removed = next(i for i, c in enumerate(fake.commands) if "groupdel ws-ws1" in c)
+    assert group_removed > dir_removed
+    assert db.get_workspace("ws1") is None
+
+
+def test_create_rollback_tolerates_a_groupdel_failure(
+    db: Database,
+    make_config,  # noqa: ANN001
+    monkeypatch: pytest.MonkeyPatch,
+    captured_output: CapturedOutput,
+) -> None:
+    """A ``groupdel`` that fails during create rollback does not mask the
+    original create error, nor turn the rollback itself into a warning:
+    the removal is issued ``check=False``, so the non-zero exit never
+    raises. The original ``ExternalError`` propagates cleanly and no
+    'rollback during workspace create' warning fires."""
+    fake = _CheckAwareTarget(failing=("test -d", "groupdel"))
+    _wire_target(monkeypatch, fake)
+
+    config = make_config()
+    _seed_vm_only(db)
+    _reachable(monkeypatch, True)
+    _boom_after_create(monkeypatch)
+
+    with pytest.raises(ExternalError, match="creating workspace: stub exploded"):
+        workspace_manager.create_workspace(db, config, name="ws1", vm_name="box")
+
+    assert any("groupdel ws-ws1" in c for c in fake.commands)
+    assert db.get_workspace("ws1") is None
+    assert not any("rollback during workspace create" in w for w in captured_output.warnings)
 
 
 # -- the operation scope reaches readiness ------------------------------------
