@@ -837,8 +837,8 @@ def test_first_repair_after_create_is_a_noop(
     # Create applied the recursive canonical ACL (the same spec repair uses),
     # not a top-dir-only default. Assert on shape, path-agnostically.
     create_acls = [c for c in fake.commands if "setfacl" in c]
-    assert any(c.startswith("find ") and "setfacl -d -m g::rwx -m m::rwx" in c for c in create_acls)
-    assert any("setfacl -R -m g::rwx -m m::rwx" in c for c in create_acls)
+    assert any(c.startswith("find ") and "setfacl -d -m g::rwx -m m::rwx -m o::---" in c for c in create_acls)
+    assert any("setfacl -R -m g::rwx -m m::rwx -m o::---" in c for c in create_acls)
     assert fake._acl_canonical
 
     workspace_manager.repair_workspace(db, config, "ws1")
@@ -846,6 +846,74 @@ def test_first_repair_after_create_is_a_noop(
     assert "OK: ACLs" in captured_output.detail
     assert not any(line.startswith("Fixed:") for line in captured_output.detail)
     assert "\nNo issues found" in captured_output.info
+
+
+# -- #254: repair hardens a workspace created under the old default:other -----
+
+
+_PRE254_ACL = (
+    "user::rwx\ngroup::rwx\nmask::rwx\nother::r-x\n"
+    "default:user::rwx\ndefault:group::rwx\ndefault:mask::rwx\ndefault:other::r-x"
+)
+_HARDENED_ACL = (
+    "user::rwx\ngroup::rwx\nmask::rwx\nother::---\n"
+    "default:user::rwx\ndefault:group::rwx\ndefault:mask::rwx\ndefault:other::---"
+)
+
+
+class _OtherStillGrantedTarget(_FakeAdminTarget):
+    """A workspace created before #254: its ACL still grants ``other`` r-x on
+    both the access entry AND the default entry, so new files inherited
+    world-read/traverse. ``apply_workspace_acls`` now denies ``other``; the
+    recursive setfacl carrying ``o::---`` flips the persisting path from the
+    pre-#254 ACL to the hardened one between the before/after getfacl
+    snapshots, so ``_acls_changed`` detects a real change and the ACL step
+    reports ``Fixed: ACLs``. Every other probe reports already-converged."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._hardened = False
+
+    def run(self, cmd: str, **kwargs: object) -> SimpleNamespace:
+        self.commands.append(cmd)
+        stdout = ""
+        if "setfacl" in cmd and "o::---" in cmd:
+            self._hardened = True  # the other-denial apply converges the tree
+        elif "getfacl" in cmd:
+            entries = _HARDENED_ACL if self._hardened else _PRE254_ACL
+            stdout = _acl_block("srv/ws1", entries)
+        elif "id -nG" in cmd:
+            stdout = "admin ws-ws1"  # admin already in the group
+        return SimpleNamespace(ok=True, returncode=0, stdout=stdout, stderr="")
+
+
+def test_repair_hardens_other_bits_on_a_pre254_workspace(
+    db: Database,
+    make_config,  # noqa: ANN001
+    monkeypatch: pytest.MonkeyPatch,
+    captured_output: CapturedOutput,
+) -> None:
+    """A workspace whose live ACL still carries ``default:other::r-x`` (created
+    before #254): repair applies the ``o::---`` spec, the before/after snapshots
+    differ ONLY on the other entries, so the ACL step legitimately reports
+    ``Fixed: ACLs`` (not a false positive, the #247 detection is right) while
+    every other step reports OK. The setfacl commands carry ``o::---`` on both
+    the default-on-dirs and recursive-access applications."""
+    fake = _OtherStillGrantedTarget()
+    _wire_target(monkeypatch, fake)
+    config = make_config()
+    _seed(db)
+    _reachable(monkeypatch, True)
+
+    workspace_manager.repair_workspace(db, config, "ws1")
+
+    assert "Fixed: ACLs" in captured_output.detail
+    assert "OK: directory ownership and permissions" in captured_output.detail
+    assert "OK: parent traversal" in captured_output.detail
+    assert "\nRepaired 1 issue(s)" in captured_output.info
+    # The other-denial rode in on both applications.
+    assert any(c.startswith("find ") and "setfacl -d" in c and "o::---" in c for c in fake.commands)
+    assert any(c.startswith("setfacl -R") and "o::---" in c for c in fake.commands)
 
 
 def test_delete_reachable_vm_is_one_boundary_burst(

@@ -124,7 +124,11 @@ so non-login `sh -c`, cron, systemd user units, and sftp/scp keep the default um
 home is the boundary; the umask is a supplement. The umask does not reduce group access to files
 created inside a workspace either: the workspace directory carries a POSIX default ACL
 (`setfacl -d`) that makes new files inherit group rwx regardless of the process umask, so
-cross-agent collaboration in workspaces is preserved.
+cross-agent collaboration in workspaces is preserved. That same default ACL denies `other`
+(`default:other::---`, see #254), so entries created inside a workspace are not world-readable or
+world-traversable, and the recursive access spec (`other::---`) strips any `other` bits existing
+entries carried from before the denial. The canonical spec lives in one place,
+`workspaces.acls.apply_workspace_acls`.
 
 ## What This Model Prevents
 

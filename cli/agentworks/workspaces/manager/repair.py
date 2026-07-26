@@ -185,7 +185,7 @@ def repair_workspace(
             output.warn(f"permission fix failed: {e}")
 
         # 4. Fix ACLs
-        # apply_workspace_acls applies the canonical group ACL, the SAME spec
+        # apply_workspace_acls applies the canonical workspace ACL, the SAME spec
         # workspace create applies, so a freshly created workspace is already
         # converged and this reports OK on a first repair.
         # setfacl has no changed/unchanged signal, so snapshot the tree's ACLs
