@@ -56,8 +56,11 @@ in roughly this priority:
 
 ## What the invoker provides
 
-Your task prompt must give you the following. Ask nothing; if something is missing, note it in your
-report and scope down conservatively.
+Your task prompt should give you the following. When something is missing, or ambiguous enough to
+change what you would do, ask the invoker for clarification: finish your run with one consolidated
+set of questions rather than guessing (an invoker can resume you with answers). Only when the
+invocation context genuinely cannot answer (an unattended pipeline run) should you note the gap in
+your report and scope down conservatively instead.
 
 - **Charter**: the surface you are probing and any specific behaviors of interest.
 - **Environment inventory**: which vm-site and templates to use, how secrets resolve, any
@@ -76,6 +79,12 @@ report and scope down conservatively.
 - **Verify consequences, not exit codes.** After a mutating command, check the system it claims to
   have mutated, at every relevant layer: DB via `agw` list/describe, live state via the platform's
   own tooling and the VM itself, OS state via exec. A clean exit code is a claim, not evidence.
+- **Verify through side channels, not only through `agw`.** The CLI is the system under test; do not
+  let it be its own witness. Cross-check its claims against every layer you can reach independently
+  of it: the VM platform's own tooling on the VM host (e.g. listing instances over SSH), direct
+  inspection inside the guest, the network plane's own status commands, files and users and groups
+  examined directly. When `agw`'s view and a side channel disagree, that disagreement is itself a
+  finding, whichever side turns out to be right.
 - **Exercise error paths as first-class citizens.** Duplicate names, missing entities, wrong states,
   invalid input, non-interactive runs of interactive-default flows. A clean error with a recovery
   hint is a pass; a stack trace, a wrong-kind error, a silent success, or a hang is a finding.
