@@ -471,9 +471,9 @@ def test_delete_session_reports_affected_consoles(
     manager_mod.delete_session(db, _StubConfig(), name="s", yes=True)
 
     # The affected consoles (alpha, beta) are named in c.name order; the
-    # unrelated console (gamma) is not.
-    report = [m for m in captured_output.info if m.startswith("Removed 's' from console(s):")]
-    assert report == ["Removed 's' from console(s): alpha, beta"]
+    # unrelated console (gamma) is not. Two consoles -> plural noun.
+    report = [m for m in captured_output.info if m.startswith("Removed 's' from console")]
+    assert report == ["Removed 's' from consoles: alpha, beta"]
 
 
 def test_delete_session_offers_and_deletes_now_empty_console(
@@ -631,11 +631,53 @@ def test_delete_session_yes_reports_but_keeps_empty_console(
 
     manager_mod.delete_session(db, _StubConfig(), name="s", yes=True)
 
+    # A single affected console uses the singular noun.
+    assert "Removed 's' from console: beta" in captured_output.info
     # Left in place but empty, with a warning that points at the manual delete.
     assert db.get_console("beta") is not None
     assert db.list_console_sessions("beta") == []
     assert any(
         "beta" in w and "no configured sessions" in w and "agw console delete beta" in w
+        for w in captured_output.warnings
+    )
+
+
+def test_delete_session_warns_when_offered_console_delete_raises(
+    db: Database,
+    fake_target: _FakeTarget,
+    monkeypatch: pytest.MonkeyPatch,
+    captured_output: CapturedOutput,
+) -> None:
+    """If the confirmed empty-console delete raises an AgentworksError (e.g. VM
+    unreachable in its teardown), the session is still reported deleted, a
+    warning names the console, and the command completes without propagating."""
+    from agentworks.db import PID_STOPPED
+    from agentworks.sessions import manager as manager_mod
+
+    _seed_vm(db, with_tailscale=True)
+    _seed_sessions(db, ["s"])
+    db.update_session_pid("s", PID_STOPPED)
+    create_console(db, name="beta", vm_name="vm1", session_specs=["s"])
+
+    monkeypatch.setattr(manager_mod, "_regenerate_tmuxinator", lambda *a, **k: None)
+    monkeypatch.setattr("agentworks.sessions.multi_console.kill_session_windows", lambda *a, **k: None)
+
+    def _boom(*a: object, **k: object) -> None:
+        raise ConnectivityError("vm unreachable", entity_kind="vm", entity_name="vm1")
+
+    monkeypatch.setattr("agentworks.sessions.multi_console.delete_console", _boom)
+
+    # Accept both confirms (the session delete and the empty-console offer).
+    monkeypatch.setattr("agentworks.output.confirm", lambda *a, **k: True)
+
+    # The AgentworksError from the console teardown is swallowed with a warning;
+    # it must not propagate out of delete_session.
+    manager_mod.delete_session(db, _StubConfig(), name="s", yes=False)
+
+    assert db.get_session("s") is None
+    assert "Session 's' deleted" in captured_output.info
+    assert any(
+        "Could not delete empty console 'beta'" in w and "agw console delete beta" in w
         for w in captured_output.warnings
     )
 

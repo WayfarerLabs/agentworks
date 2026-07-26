@@ -9,6 +9,7 @@ import agentworks.sessions.manager as _mgr
 from agentworks import output
 from agentworks.db import PID_STOPPED, SessionStatus
 from agentworks.errors import (
+    AgentworksError,
     BrokenStateError,
     ExternalError,
     StateError,
@@ -145,7 +146,8 @@ def delete_session(
         # This is the operator signal issue #248 asks for: the cascade used to
         # silently empty a console built around a single session with no trace.
         if member_consoles:
-            output.info(f"Removed '{name}' from console(s): {', '.join(member_consoles)}")
+            noun = "console" if len(member_consoles) == 1 else "consoles"
+            output.info(f"Removed '{name}' from {noun}: {', '.join(member_consoles)}")
             emptied = [c for c in member_consoles if not db.list_console_sessions(c)]
             for empty_console in emptied:
                 # A console is an operator-authored view, not a resource this
@@ -161,7 +163,21 @@ def delete_session(
                 ):
                     from agentworks.sessions.multi_console import delete_console
 
-                    delete_console(db, config, name=empty_console, yes=True)
+                    # The session is already gone; deleting the now-empty
+                    # console is a secondary convenience the operator just
+                    # confirmed. If its (best-effort) teardown still raises an
+                    # AgentworksError (e.g. VM unreachable, or a NotFound race),
+                    # warn and continue rather than aborting the whole command
+                    # after "Session '<name>' deleted" already printed. A
+                    # non-AgentworksError is an unexpected bug and still
+                    # propagates.
+                    try:
+                        delete_console(db, config, name=empty_console, yes=True)
+                    except AgentworksError as exc:
+                        output.warn(
+                            f"Could not delete empty console '{empty_console}': {exc}. "
+                            f"Remove it with 'agw console delete {empty_console}'."
+                        )
                 elif yes:
                     output.warn(
                         f"Console '{empty_console}' now has no configured sessions; delete it with "
