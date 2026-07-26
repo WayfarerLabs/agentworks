@@ -151,13 +151,12 @@ def delete_session(
             emptied = [c for c in member_consoles if not db.list_console_sessions(c)]
             for empty_console in emptied:
                 # A console is an operator-authored view, not a resource this
-                # session created, so we deliberately do NOT mirror the
+                # session created, so this deliberately does NOT mirror the
                 # created_workspace / created_agent auto-delete-on-yes paths
                 # below: deleting it is a separate destructive act on a
                 # resource the operator never named on this command line.
                 # Offer it interactively; under --yes report it and leave it
-                # for the operator to remove by hand. (This --yes choice is
-                # noted in the PR for maintainer confirmation.)
+                # for the operator to remove by hand.
                 if not yes and output.confirm(
                     f"Console '{empty_console}' has no configured sessions left. Delete it?",
                 ):
