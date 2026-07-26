@@ -110,20 +110,17 @@ def run_checks(*, completion_version: str | None = None) -> HealthReport:
     report.groups.append(_check_required_tools())
     report.groups.append(_check_tailscale())
     report.groups.append(_check_vm_platforms())
+    # The None checks are spelled out at both sites (not hoisted into a
+    # boolean local) because mypy's narrowing does not flow through one.
     if config is not None and registry is not None:
         report.groups.append(_check_vm_sites(config, registry))
     else:
-        # The group renders before Configuration explains the failure;
-        # an empty slot would read as "no sites", which isn't known.
-        sites = HealthGroup("VM sites")
-        sites.info(
-            "Declared sites",
-            "skipped (config or manifests unavailable; see the Configuration group)",
-        )
-        report.groups.append(sites)
+        report.groups.append(_skipped_group("VM sites", "Declared sites"))
     report.groups.append(config_group)
     if config is not None and registry is not None:
         report.groups.append(_check_secrets(config, registry))
+    else:
+        report.groups.append(_skipped_group("Secrets", "Declared secrets"))
     report.groups.append(_check_database())
 
     if completion_version is not None:
@@ -135,6 +132,27 @@ def run_checks(*, completion_version: str | None = None) -> HealthReport:
 # ---------------------------------------------------------------------------
 # Individual check groups
 # ---------------------------------------------------------------------------
+
+
+def _skipped_group(name: str, item: str) -> HealthGroup:
+    """Render a group that cannot run because config or manifests are
+    unavailable (degraded mode).
+
+    A config/registry-dependent group renders in presentation order,
+    before the Configuration group that explains the failure. Omitting it
+    entirely would read as a real (empty) result: "no sites", "no
+    secrets". So it renders one explicit skip row instead, giving an
+    operator comparing a healthy run to a degraded one a clear signal
+    that the group was not checked and where to look for why. Any future
+    config-dependent group routes its degraded case through here so it
+    gets the same visible skip for free.
+    """
+    g = HealthGroup(name)
+    g.info(
+        item,
+        "skipped (config or manifests unavailable; see the Configuration group)",
+    )
+    return g
 
 
 def _check_system() -> HealthGroup:
