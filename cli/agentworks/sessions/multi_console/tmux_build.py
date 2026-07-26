@@ -315,6 +315,31 @@ def _split_shell_pane(
     return pane_id
 
 
+def _last_window_index(target: Transport, q_con: str) -> int | None:
+    """Return the highest live window index in the console, or None if the
+    listing failed or produced nothing parseable.
+
+    Lets a caller target ``tmux new-window`` at the slot just past the last
+    window so the new window lands at the tail rather than filling a reclaimed
+    low slot. That matters under the stock ``renumber-windows off``: a console
+    whose transient placeholder (or a killed window) freed a low index would
+    otherwise pull a bare ``new-window`` to the front (see the ``place_last``
+    branch of ``_add_session_window``). Best-effort like everything else here:
+    a failed listing returns None and the caller falls back to plain
+    ``new-window``.
+    """
+    res = target.run(f"tmux list-windows -t {q_con} -F '#{{window_index}}'", check=False)
+    if not res.ok:
+        return None
+    indices: list[int] = []
+    for line in res.stdout.strip().splitlines():
+        try:
+            indices.append(int(line.strip()))
+        except ValueError:
+            continue
+    return max(indices) if indices else None
+
+
 def _add_session_window(
     target: Transport,
     db: Database,
@@ -326,12 +351,26 @@ def _add_session_window(
     vm: VMRow,
     layout: str,
     preserve_memo: PreserveEnvMemo,
+    place_last: bool = False,
 ) -> SessionWindowBuild:
     """Create one session window in the console and attach its shell panes.
 
     Missing or off-VM sessions are skipped with a warning; this keeps the
     console attach functional even if a session has been deleted out from
     under it.
+
+    ``place_last`` controls where the new window lands. By default ``tmux
+    new-window`` fills the lowest free window index, which is what the build
+    path wants (it appends behind a placeholder, in order) and what
+    ``restore_session`` wants (it refills the killed window's own vacated slot).
+    ``add_sessions`` appends a brand-new member, so it passes ``place_last=True``
+    to target an explicit index one past the current last window; otherwise,
+    under the stock ``renumber-windows off``, a reclaimed low slot (e.g. the
+    retired placeholder's index 0) would pull the new window in front of every
+    existing session window. ``add_sessions`` also runs ``_reorder_session_windows``
+    afterward, so final order is settled deterministically either way; the
+    explicit index keeps the window at the tail even if that best-effort
+    reorder cannot run.
 
     Returns a `SessionWindowBuild`. `built` is True when the window itself was
     created, False when the whole window was skipped with a warning (no session
@@ -365,13 +404,23 @@ def _add_session_window(
     q_session = shlex.quote(session.name)
     wrapper = _attach_loop_wrapper(session.name, session.socket_path)
 
+    # When appending a new member, target an explicit index one past the last
+    # window so it lands at the tail rather than in a reclaimed low slot (see
+    # the place_last docstring). A failed listing falls back to plain
+    # new-window; the caller's reorder pass still settles order.
+    new_window_target = q_con
+    if place_last:
+        last_index = _last_window_index(target, q_con)
+        if last_index is not None:
+            new_window_target = f"{q_con}:{last_index + 1}"
+
     # -P -F '#{pane_index}' makes new-window print the created session pane's
     # index. It is the window's lowest live pane index (0 normally, 1 under an
     # inherited `pane-base-index 1`) and is what _focus_session_pane targets;
     # capturing it here avoids a second round trip and keeps focus correct
     # under either base index.
     res = target.run(
-        f"tmux new-window -t {q_con} -n {q_session} -P -F '#{{pane_index}}' {shlex.quote(wrapper)}",
+        f"tmux new-window -t {new_window_target} -n {q_session} -P -F '#{{pane_index}}' {shlex.quote(wrapper)}",
         check=False,
     )
     if not res.ok:

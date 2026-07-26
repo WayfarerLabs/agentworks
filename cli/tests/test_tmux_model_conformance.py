@@ -115,8 +115,9 @@ class RealTmux:
     def new_session(self, session: str, window: str) -> None:
         self._run(["new-session", "-d", "-s", session, "-n", window, HOLD])
 
-    def new_window(self, session: str, window: str) -> None:
-        self._run(["new-window", "-t", session, "-n", window, HOLD])
+    def new_window(self, session: str, window: str, index: int | None = None) -> None:
+        target = session if index is None else f"{session}:{index}"
+        self._run(["new-window", "-t", target, "-n", window, HOLD])
 
     def split_window(self, session: str, window: str) -> str:
         result = self._run(["split-window", "-t", f"{session}:{window}", "-P", "-F", "#{pane_id}", HOLD])
@@ -220,6 +221,10 @@ class Pair:
         assert self.model.new_window(SESSION, window) is not None
         self.real.new_window(SESSION, window)
 
+    def new_window_at(self, index: int, window: str) -> None:
+        assert self.model.new_window(SESSION, window, index=index) is not None
+        self.real.new_window(SESSION, window, index=index)
+
     def split_and_tag(self, window: str, tag: int) -> None:
         model_pane = self.model.split_window(SESSION, window)
         assert model_pane is not None
@@ -311,6 +316,24 @@ def test_conformance_window_and_pane_lifecycle(pair: Pair) -> None:
         pair.agree()
     assert not pair.model.has_session(SESSION)
     assert not pair.real.has_session(SESSION)
+
+
+@pytest.mark.parametrize("pair", [0, 1], indirect=True, ids=["base0", "base1"])
+def test_conformance_new_window_at_explicit_index_appends_past_last(pair: Pair) -> None:
+    """``add_sessions`` targets ``new-window -t <con>:<max+1>`` so a new member
+    lands past the last window instead of filling a reclaimed low slot. Pin that
+    the model places an explicit free index exactly where real tmux does,
+    including leaving the vacated low slot empty."""
+    base = pair.base_index
+    pair.new_session("w0")  # slot base
+    pair.new_window("wa")  # slot base+1
+    pair.new_window("wb")  # slot base+2
+    pair.kill_window("w0")  # free the lowest slot (base)
+    pair.agree()
+
+    # Append past the last window at base+3 rather than into the freed base slot.
+    pair.new_window_at(base + 3, "wc")
+    pair.agree()
 
 
 @pytest.mark.parametrize("pair", [0, 1], indirect=True, ids=["base0", "base1"])

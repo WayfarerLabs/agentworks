@@ -25,10 +25,16 @@ from agentworks.sessions.multi_console import (
     reorder_sessions,
 )
 from tests._consoles_support import _seed_sessions, _seed_vm, _stub_build_registry, _StubConfig  # noqa: F401
+from tests._tmux_model import TmuxModel
 from tests.conftest import _FakeResult, _FakeTarget
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from tests.conftest import CapturedOutput
+
+# tmux session name for console "con"; see tmux_session_name.
+CON = "aw-console-con"
 
 
 def test_add_session_live_sync_skipped_when_console_absent(db: Database, fake_target: _FakeTarget) -> None:
@@ -84,6 +90,75 @@ def test_add_session_live_sync_adds_window_for_bare_spec(
     # Bare spec: a window but no shell panes.
     splits = [c for c in fake_target.commands if "split-window -t aw-console-con:b" in c]
     assert splits == []
+
+
+def test_add_sessions_appends_new_window_last_under_renumber_off(
+    db: Database,
+    console_target_factory: Callable[..., _FakeTarget],
+) -> None:
+    """Regression for issue #246 (b): with the placeholder retired (index 0
+    free) under the stock ``renumber-windows off``, add-sessions must land the
+    new window LAST, not in the reclaimed low slot, so live window order matches
+    DB order.
+
+    Driven against the stateful tmux model so the reclaimed-slot physics is
+    real: a bare ``new-window`` fills index 0, while the fix targets an explicit
+    index past the last window and then reorders to config order."""
+    _seed_vm(db, with_tailscale=True)
+    _seed_sessions(db, ["a", "b", "c"])
+    create_console(db, name="con", vm_name="vm1", session_specs=["a", "b"])
+
+    # Reproduce the post-attach live layout with the placeholder retired: build
+    # placeholder(0), a(1), b(2), then kill the placeholder so index 0 is free
+    # (renumber-windows off leaves the gap rather than compacting).
+    model = TmuxModel()
+    model.new_session(CON, "_PLACEHOLDER")  # index 0
+    model.new_window(CON, "a")  # index 1
+    model.new_window(CON, "b")  # index 2
+    assert model.kill_window(CON, "_PLACEHOLDER")  # free index 0
+    assert model.windows_with_index(CON) == [(1, "a"), (2, "b")]
+    target = console_target_factory(model)
+
+    add_sessions(db, _StubConfig(), console_name="con", session_specs=["c"])
+
+    # The new window landed at the tail (index 3), not the reclaimed slot 0.
+    assert model.windows_with_index(CON) == [(1, "a"), (2, "b"), (3, "c")]
+    # Live window order matches DB order.
+    live_order = [name for _idx, name in model.windows_with_index(CON)]
+    db_order = [m.session_name for m in db.list_console_sessions("con")]
+    assert live_order == db_order == ["a", "b", "c"]
+    # The append targeted an explicit index one past the last window.
+    assert any("new-window -t aw-console-con:3 " in cmd for cmd in target.commands)
+
+
+def test_add_sessions_reorders_to_config_order_when_new_window_lands_low(
+    db: Database,
+    console_target_factory: Callable[..., _FakeTarget],
+) -> None:
+    """Even if the append lands the new window in a low slot (e.g. the reorder
+    is the only thing that can save order because a prior op left drift), the
+    final reorder pass settles live order to config order. Here the console is
+    seeded already out of order (b before a) with the placeholder gap; after
+    add-sessions of c, live order must match DB order [a, b, c]."""
+    _seed_vm(db, with_tailscale=True)
+    _seed_sessions(db, ["a", "b", "c"])
+    create_console(db, name="con", vm_name="vm1", session_specs=["a", "b"])
+
+    # Live tmux is out of order relative to the DB: b at the low slot, a above.
+    model = TmuxModel()
+    model.new_session(CON, "b")  # index 0
+    model.new_window(CON, "a")  # index 1
+    assert model.windows_with_index(CON) == [(0, "b"), (1, "a")]
+    # Installs the model-backed transport seam (side effect); no handle needed.
+    console_target_factory(model)
+
+    add_sessions(db, _StubConfig(), console_name="con", session_specs=["c"])
+
+    # The reorder pass settles everything to DB order regardless of where the
+    # append or the pre-existing windows sat.
+    live_order = [name for _idx, name in model.windows_with_index(CON)]
+    db_order = [m.session_name for m in db.list_console_sessions("con")]
+    assert live_order == db_order == ["a", "b", "c"]
 
 
 def test_remove_session_live_sync_kills_window(db: Database, fake_target: _FakeTarget) -> None:

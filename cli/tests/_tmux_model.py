@@ -29,10 +29,13 @@ bug class lives:
 2. Window index slots. Unlike panes, window indices are persistent slots:
    tmux does not renumber windows on kill (``renumber-windows`` is off by
    default and the console server does not set it), so killing a non-last
-   window leaves a gap and a new window fills the lowest free slot rather
-   than the tail. The model stores each window's assigned index instead of
-   deriving it from list position, which matters because
-   ``_reorder_session_windows`` reads live, possibly-gapped indices.
+   window leaves a gap and a bare ``new-window`` fills the lowest free slot
+   rather than the tail. A ``new-window`` with an explicit ``-t
+   <session>:<idx>`` lands at that exact slot instead (how ``add_sessions``
+   appends past the last window), and an already-occupied index is refused.
+   The model stores each window's assigned index instead of deriving it from
+   list position, which matters because ``_reorder_session_windows`` reads
+   live, possibly-gapped indices.
 3. Last-window-kill destroys the session. tmux requires at least one
    window, so killing a session's last window removes the session; a
    later ``has-session`` then fails and a ``new-window`` against it fails.
@@ -146,8 +149,16 @@ class TmuxModel:
         return self._add_window(self._sessions[session], window_name, pane_tags)
 
     def _add_window(self, s: Session, name: str, pane_tags: tuple[int | None, ...]) -> Window:
+        """Add a window at the lowest free index (tmux's default placement)."""
+        return self._add_window_at(s, name, None, pane_tags)
+
+    def _add_window_at(self, s: Session, name: str, index: int | None, pane_tags: tuple[int | None, ...]) -> Window:
+        """Add a window at ``index``, or the lowest free index when ``index`` is
+        None (tmux's default placement)."""
+        if index is None:
+            index = self._next_window_index(s)
         panes = [Pane(self._alloc_pane_id(), tag) for tag in pane_tags]
-        w = Window(name, self._next_window_index(s), panes)
+        w = Window(name, index, panes)
         s.windows.append(w)
         # Keep windows in ascending index order, the order tmux lists them in.
         s.windows.sort(key=lambda win: win.index)
@@ -175,14 +186,24 @@ class TmuxModel:
         self.seed_session(session, window_name, pane_tags=(None,))
         return True
 
-    def new_window(self, session: str, window_name: str) -> str | None:
+    def new_window(self, session: str, window_name: str, *, index: int | None = None) -> str | None:
         """Model ``tmux new-window``: add a window with one untagged pane.
         Returns the new pane's index string (for ``-P -F '#{pane_index}'``),
-        or None if the session does not exist (the last-window-kill case)."""
+        or None on failure.
+
+        With ``index`` None the window fills the lowest free slot (tmux's
+        default ``-t <session>`` placement). An explicit ``index`` (tmux's
+        ``-t <session>:<idx>``) lands the window at that exact slot, which is
+        how ``add_sessions`` appends past the last window; real tmux refuses an
+        already-occupied index without ``-k``, so the model returns None (no
+        mutation) in that case. Also returns None if the session does not exist
+        (the last-window-kill case)."""
         s = self._sessions.get(session)
         if s is None:
             return None
-        self._add_window(s, window_name, (None,))
+        if index is not None and any(w.index == index for w in s.windows):
+            return None
+        self._add_window_at(s, window_name, index, (None,))
         return str(self.pane_base_index)
 
     def split_window(self, session: str, window_name: str) -> str | None:
@@ -377,8 +398,12 @@ class TmuxModel:
         if not self.has_session(session):
             return _FakeResult(returncode=1, stderr=f"can't find session: {session}")
         fmt = _opt(tokens, "-F") or ""
-        if "window_index" in fmt:
+        if "window_index" in fmt and "window_name" in fmt:
             lines = [f"{idx}|{name}" for idx, name in self.windows_with_index(session)]
+        elif "window_index" in fmt:
+            # Index-only form (``-F '#{window_index}'``), used by
+            # ``_last_window_index`` to find the tail slot for an append.
+            lines = [str(idx) for idx, _name in self.windows_with_index(session)]
         else:
             lines = self.window_names(session)
         return _FakeResult(stdout=_join(lines))
@@ -404,11 +429,16 @@ class TmuxModel:
         return _FakeResult(returncode=1, stderr=f"duplicate session: {session}")
 
     def _dispatch_new_window(self, tokens: list[str]) -> _FakeResult:
-        session = (_opt(tokens, "-t") or "").split(":", 1)[0]
-        window_name = _opt(tokens, "-n") or ""
-        pane_index = self.new_window(session, window_name)
-        if pane_index is None:
+        session, index = _parse_window_index_target(_opt(tokens, "-t") or "")
+        if not self.has_session(session):
             return _FakeResult(returncode=1, stderr=f"can't find session: {session}")
+        window_name = _opt(tokens, "-n") or ""
+        pane_index = self.new_window(session, window_name, index=index)
+        if pane_index is None:
+            # The session exists (checked above), so the only remaining failure
+            # is an explicit target index that is already occupied (real tmux
+            # refuses without -k).
+            return _FakeResult(returncode=1, stderr=f"index in use: {index}")
         stdout = _join([pane_index]) if "-P" in tokens else ""
         return _FakeResult(stdout=stdout)
 
