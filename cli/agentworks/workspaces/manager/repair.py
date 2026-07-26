@@ -29,16 +29,24 @@ def repair_workspace(
 ) -> None:
     """Repair a workspace by converging its live VM state to the DB.
 
-    Idempotent and forward-only. Steps split into two shapes:
+    Idempotent and forward-only. Every step is detection-based: it
+    reports `Fixed:` only when it actually changed live state and `OK:`
+    when state was already correct, so the closing `Repaired N issue(s)`
+    / `No issues found` is truthful. Steps split into two shapes by HOW
+    they detect a change:
 
-    - **Detection-based** (group existence, admin membership, agent group
-      membership against the grant table): probe live state first and only
-      apply a fix when state diverges. Report `Fixed:` when a fix ran,
-      `OK:` when no change was needed.
-    - **Always-applied** (directory ownership, permissions, SGID, ACLs,
-      parent-directory traversal): re-run their canonical commands every
-      time; the underlying chown/chmod/setfacl are no-ops on already-correct
-      state. Report `OK:` on success.
+    - **Probe-first** (group existence, admin membership, agent group
+      membership against the grant table): read live state, then apply a
+      fix only when it diverges.
+    - **Apply-and-observe** (directory ownership, permissions, SGID,
+      ACLs, parent-directory traversal): re-run their canonical
+      commands every time (the underlying chown/chmod/setfacl are no-ops
+      on already-correct state) but observe whether anything actually
+      changed. chown/chmod carry `-c`, coreutils' own changed/unchanged
+      signal (a line per entry they alter, silence otherwise); setfacl
+      has no such signal, so its step snapshots the tree's ACLs before
+      and after and compares. A real change reports `Fixed:`, an
+      unchanged run `OK:`.
 
     Git identity (the template's `git_user_name` / `git_user_email`)
     converges here too, detection-based: an identity added or changed on
@@ -90,6 +98,7 @@ def repair_workspace(
     with gated_vm_boundary(db, config, registry, vm, scope=_workspace_scope(db, vm, name)):
         target = transport(vm, config)
         ws_group = ws.linux_group
+        quoted_ws = shlex.quote(ws.workspace_path)
         fixes = 0
 
         output.info(f"Repairing workspace '{name}' on VM '{vm.name}'...")
@@ -137,47 +146,76 @@ def repair_workspace(
         except SSHError as e:
             output.warn(f"admin group check failed: {e}")
 
-        # 3. Fix directory permissions (recursive chgrp so ACLs apply correctly)
+        # 3. Fix directory ownership, permissions, and SGID (recursive chgrp
+        # so ACLs apply correctly). The -c (changes) flag makes chown/chmod
+        # print a line per entry they actually alter and stay silent
+        # otherwise, so a non-empty result across the three commands means
+        # we genuinely converged something (Fixed) rather than re-applied a
+        # no-op (OK). Note 2770 already carries the SGID bit on the top
+        # directory; the recursive g+s below re-applies it to subdirectories.
         try:
-            target.run(f"chown -R {vm.admin_username}:{ws_group} {ws.workspace_path}", sudo=True, timeout=120)
-            target.run(f"chmod 2770 {ws.workspace_path}", sudo=True)
+            owner = target.run(f"chown -R -c {vm.admin_username}:{ws_group} {quoted_ws}", sudo=True, timeout=120)
+            mode = target.run(f"chmod -c 2770 {quoted_ws}", sudo=True)
             # Set SGID on all subdirectories so new files inherit the workspace group.
             # This is critical for atomic-write tools (including Claude Code) that
             # create a temp file and rename it over the original.
-            target.run(
-                f"find {shlex.quote(ws.workspace_path)} -type d -exec chmod g+s {{}} +",
+            sgid = target.run(
+                f"find {quoted_ws} -type d -exec chmod -c g+s {{}} +",
                 sudo=True,
                 timeout=120,
             )
-            output.detail("OK: directory ownership and permissions")
+            if owner.stdout.strip() or mode.stdout.strip() or sgid.stdout.strip():
+                output.detail("Fixed: directory ownership and permissions")
+                fixes += 1
+            else:
+                output.detail("OK: directory ownership and permissions")
         except SSHError as e:
             output.warn(f"permission fix failed: {e}")
 
         # 4. Fix ACLs
         # Default ACLs only apply to directories; use find to avoid warnings on files.
         # Effective ACLs apply to all entries and should not produce output.
+        # setfacl has no changed/unchanged signal, so snapshot the tree's ACLs
+        # before and after and compare: getfacl prints entries in a fixed
+        # canonical order and includes the mask, so an equal snapshot means
+        # nothing changed (no false Fixed on a healthy workspace). Comparing
+        # the actual before/after state, rather than reconstructing the
+        # desired ACL, keeps this correct as the applied spec evolves.
         try:
+            before = target.run(f"getfacl -R -n {quoted_ws}", sudo=True, check=False)
             target.run(
-                f"find {ws.workspace_path} -type d -exec setfacl -d -m g::rwx -m m::rwx {{}} +",
+                f"find {quoted_ws} -type d -exec setfacl -d -m g::rwx -m m::rwx {{}} +",
                 sudo=True,
                 timeout=120,
             )
             target.run(
-                f"setfacl -R -m g::rwx -m m::rwx {ws.workspace_path}",
+                f"setfacl -R -m g::rwx -m m::rwx {quoted_ws}",
                 sudo=True,
                 timeout=120,
             )
-            output.detail("OK: ACLs")
+            after = target.run(f"getfacl -R -n {quoted_ws}", sudo=True, check=False)
+            if before.stdout != after.stdout:
+                output.detail("Fixed: ACLs")
+                fixes += 1
+            else:
+                output.detail("OK: ACLs")
         except SSHError as e:
             output.warn(f"ACL fix failed: {e}")
 
-        # 5. Fix parent directory traversal
+        # 5. Fix parent directory traversal. Each ancestor's chmod carries
+        # -c, so the loop's aggregated stdout is non-empty exactly when we
+        # opened traversal that was missing (Fixed) and empty when every
+        # ancestor was already a+x (OK).
         try:
-            target.run(
-                f'sh -c \'p={ws.workspace_path}; while [ "$p" != "/" ]; do chmod a+x "$p"; p=$(dirname "$p"); done\'',
-                sudo=True,
+            traversal_cmd = (
+                f'sh -c \'p={ws.workspace_path}; while [ "$p" != "/" ]; do chmod -c a+x "$p"; p=$(dirname "$p"); done\''
             )
-            output.detail("OK: parent traversal")
+            traversal = target.run(traversal_cmd, sudo=True)
+            if traversal.stdout.strip():
+                output.detail("Fixed: parent traversal")
+                fixes += 1
+            else:
+                output.detail("OK: parent traversal")
         except SSHError as e:
             output.warn(f"parent traversal fix failed: {e}")
 
