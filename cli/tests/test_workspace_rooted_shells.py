@@ -467,18 +467,11 @@ def test_exec_agent_workspace_prefixes_cd(
         # Misplaced agw flag with a remote command that also has its own
         # short flags downstream.
         ["--workspace", "ws1", "-x", "foo"],
-        # Bare ``-``-prefixed remote command (not an agw flag, but still
-        # rejected because the remote shell would choke).
+        # Bare ``-``-prefixed remote command -- not an agw flag, but
+        # still rejected because the remote shell would choke.
         ["-weird", "args"],
         # Lone short flag.
         ["-x"],
-        # A ``--``-PREFIXED first token that is NOT the bare ``--``
-        # separator: it starts with ``-`` but ``command[0] != "--"``, so
-        # the separator branch does not fire and it is rejected. This
-        # pins the exact distinction the fix rests on: ``--version`` as
-        # the first token with no separator is rejected, whereas
-        # ``-- --version`` (a real separator) runs.
-        ["--version"],
     ],
 )
 def test_exec_vm_rejects_dash_prefixed_command(
@@ -486,12 +479,10 @@ def test_exec_vm_rejects_dash_prefixed_command(
     monkeypatch: pytest.MonkeyPatch,
     command: list[str],
 ) -> None:
-    """Any ``vm exec`` whose remote-command argv starts with ``-`` and
-    was NOT introduced by a ``--`` separator is rejected before any SSH
-    work. The guard cannot tell a misplaced agw flag from a dash-led
-    remote command, so the hint must name both recoveries: the flag
-    before the positional, and the ``--`` separator / ``sh -c``
-    fallback."""
+    """Any ``vm exec`` whose remote-command argv starts with ``-`` is
+    rejected before any SSH work. The hint is the same regardless of
+    whether the leading token is an agw flag or some other ``-``-
+    prefixed token; the operator decides whether the hint applies."""
     from agentworks.vms import manager as vm_manager
 
     db = _seed_db(tmp_path)
@@ -501,9 +492,7 @@ def test_exec_vm_rejects_dash_prefixed_command(
     with pytest.raises(ValidationError, match="cannot start with '-'") as exc_info:
         vm_manager.exec_vm(db, config, "vm1", command)  # type: ignore[arg-type]
     hint = exc_info.value.hint or ""
-    assert "put it before the name" in hint
-    assert "put '--' before" in hint
-    assert "sh -c" in hint
+    assert "agentworks args must come before the first positional argument" in hint
 
 
 def test_exec_agent_rejects_dash_prefixed_command(
@@ -526,8 +515,7 @@ def test_exec_agent_rejects_dash_prefixed_command(
             command=["--workspace", "ws1", "pwd"],
         )
     hint = exc_info.value.hint or ""
-    assert "put '--' before" in hint
-    assert "sh -c" in hint
+    assert "agentworks args must come before the first positional argument" in hint
 
 
 # ---------------------------------------------------------------------------

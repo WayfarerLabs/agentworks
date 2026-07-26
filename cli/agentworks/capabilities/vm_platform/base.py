@@ -273,12 +273,21 @@ class VMPlatform(Capability):
         """Hold the VM against the backend's own idle-shutdown mechanism
         for the duration of the context.
 
-        Callers converge the power state first (the orchestrated
-        activation gate, or a create's just-provisioned VM), so on
-        entry the VM is either running or was just started. Default
-        no-op for platforms without an idle-shutdown mechanism (lima,
-        azure, proxmox); wsl2 overrides to anchor the distro against
-        ``vmIdleTimeout``. ``config`` carries operator settings (wsl2
-        builds the Tailscale transport for its reconnect wait).
+        A pure power-hold on every platform: it holds power, and does no
+        connectivity verification or retry (that is handled uniformly by
+        the shared paths, which run inside this hold). Callers converge
+        the power state first (the orchestrated activation gate, or a
+        create's just-provisioned VM), so on entry the VM is either
+        running or was just started. Because no platform's hold retries
+        connectivity, a gate that finds the target not confirmed-active
+        yet not observed-stopped either (``ensure_active`` skips
+        ``auto_start`` when a status probe reports RUNNING while
+        tailscaled is mid-reattach) proceeds into the hold and the op and
+        surfaces a plain SSHError, uniformly, rather than a WSL2-only
+        reachability retry. Default no-op for platforms without
+        an idle-shutdown mechanism (lima, azure, proxmox); wsl2 overrides
+        to anchor the distro against ``vmIdleTimeout``. ``config`` is
+        reserved operator settings, available to a platform whose hold
+        needs them (none does today).
         """
         return nullcontext()

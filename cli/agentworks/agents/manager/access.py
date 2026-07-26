@@ -155,10 +155,10 @@ def exec_agent(
     import shlex
 
     from agentworks.env import ResourceContext, compose_env
-    from agentworks.exec_validation import normalize_exec_command
+    from agentworks.exec_validation import reject_dash_prefixed_command
     from agentworks.transports import agent_transport
 
-    command = normalize_exec_command(command, kind="agent", name=name)
+    reject_dash_prefixed_command(command, kind="agent", name=name)
 
     agent = db.get_agent(name)
     if agent is None:

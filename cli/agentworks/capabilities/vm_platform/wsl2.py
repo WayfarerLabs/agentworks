@@ -16,7 +16,7 @@ from agentworks import output
 from agentworks.capabilities.vm_platform.base import ProvisionRequest, ProvisionResult, VMPlatform
 from agentworks.db import VMStatus
 from agentworks.errors import StateError
-from agentworks.transports import WSL2Transport, transport, wait_for_reconnect
+from agentworks.transports import WSL2Transport
 
 if TYPE_CHECKING:
     from collections.abc import Iterator, Mapping
@@ -341,7 +341,7 @@ def _download_debian_rootfs(tarball_path: Path) -> None:
 
 
 @contextlib.contextmanager
-def _keepalive(distro_name: str, vm: VMRow, config: Config | None) -> Iterator[None]:
+def _keepalive(distro_name: str) -> Iterator[None]:
     """Anchor a WSL2 distro for the duration of the context.
 
     Spawns ``wsl --distribution NAME -- sleep infinity`` as a background
@@ -351,11 +351,23 @@ def _keepalive(distro_name: str, vm: VMRow, config: Config | None) -> Iterator[N
     If the distro happens to be stopped on entry, the same subprocess
     boots it.
 
-    When the VM has already joined Tailscale (``vm.tailscale_host`` is
-    set) AND we have a config to build an SSH target from, we wait for
-    Tailscale SSH to be reachable before yielding: a stopped distro
-    needs a few seconds for tailscaled to reattach to the tailnet after
-    boot, and callers expect a ready VM.
+    This is a pure power-hold: it anchors and (if needed) boots the
+    distro, nothing more. Verifying Tailscale connectivity is NOT this
+    function's job; the shared paths handle that uniformly across all
+    platforms (``_ensure_tailscale`` on ``vm start`` and gate
+    auto-start, the gate itself on the generic held-active span), and
+    every one of them runs inside this hold, so the anchor covers the
+    verification without duplicating it here.
+
+    The hold does no connectivity retry, deliberately. One gate path has
+    no reachability wait around it: when ``ensure_active`` finds the VM
+    not confirmed-active (tailscale ping failed) but not observed-stopped
+    either (``status()`` reports RUNNING anyway, e.g. tailscaled
+    mid-reattach), it skips ``auto_start`` and enters this hold and the
+    op directly. The earlier WSL2 wait was a safety net there; without
+    it, WSL2 surfaces a plain SSHError on that path like every other
+    platform. That parity is the point of the uniformity change, not a
+    regression: do not re-add a wait here to paper over it.
 
     On exit: ``terminate()`` the subprocess (TerminateProcess on Windows;
     SIGTERM on POSIX, though this code path is Windows-only in practice),
@@ -420,9 +432,6 @@ def _keepalive(distro_name: str, vm: VMRow, config: Config | None) -> Iterator[N
         )
     output.detail(f"Preventing idle-shutdown of WSL2 distro {distro_name!r} for the duration of this command...")
     try:
-        if vm.tailscale_host and config is not None:
-            target = transport(vm, config)
-            wait_for_reconnect(target)
         yield
     finally:
         # Cleanup is best-effort. If the wsl.exe subprocess has already
@@ -509,7 +518,9 @@ class WSL2Platform(VMPlatform):
         return str(distro)
 
     def vm_active(self, vm: VMRow, *, config: Config | None = None) -> AbstractContextManager[None]:
-        return _keepalive(self._distro_name(vm), vm, config)
+        # config is part of the base-class contract (a pure power-hold on
+        # every platform); wsl2's anchor needs only the distro name.
+        return _keepalive(self._distro_name(vm))
 
     def create(self, request: ProvisionRequest, ctx: RunContext) -> ProvisionResult:
         # The platform owns the backend-side name; distro

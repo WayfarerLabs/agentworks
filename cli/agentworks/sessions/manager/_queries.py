@@ -9,7 +9,6 @@ import agentworks.sessions.manager as _mgr
 from agentworks import output
 from agentworks.db import PID_STOPPED, SessionStatus
 from agentworks.errors import (
-    AgentworksError,
     BrokenStateError,
     ExternalError,
     StateError,
@@ -138,50 +137,6 @@ def delete_session(
             kill_session_windows(admin_target, pairs=[(c, name) for c in member_consoles])
 
         output.info(f"Session '{name}' deleted")
-
-        # Report the consoles that referenced this session, and handle any
-        # left empty by the FK cascade. ``member_consoles`` was snapshotted
-        # before the delete (the cascade zeroes ``console_sessions``), so a
-        # member whose configured-session count is now zero has been emptied.
-        # This is the operator signal issue #248 asks for: the cascade used to
-        # silently empty a console built around a single session with no trace.
-        if member_consoles:
-            noun = "console" if len(member_consoles) == 1 else "consoles"
-            output.info(f"Removed '{name}' from {noun}: {', '.join(member_consoles)}")
-            emptied = [c for c in member_consoles if not db.list_console_sessions(c)]
-            for empty_console in emptied:
-                # A console is an operator-authored view, not a resource this
-                # session created, so this deliberately does NOT mirror the
-                # created_workspace / created_agent auto-delete-on-yes paths
-                # below: deleting it is a separate destructive act on a
-                # resource the operator never named on this command line.
-                # Offer it interactively; under --yes report it and leave it
-                # for the operator to remove by hand.
-                if not yes and output.confirm(
-                    f"Console '{empty_console}' has no configured sessions left. Delete it?",
-                ):
-                    from agentworks.sessions.multi_console import delete_console
-
-                    # The session is already gone; deleting the now-empty
-                    # console is a secondary convenience the operator just
-                    # confirmed. If its (best-effort) teardown still raises an
-                    # AgentworksError (e.g. VM unreachable, or a NotFound race),
-                    # warn and continue rather than aborting the whole command
-                    # after "Session '<name>' deleted" already printed. A
-                    # non-AgentworksError is an unexpected bug and still
-                    # propagates.
-                    try:
-                        delete_console(db, config, name=empty_console, yes=True)
-                    except AgentworksError as exc:
-                        output.warn(
-                            f"Could not delete empty console '{empty_console}': {exc}. "
-                            f"Remove it with 'agw console delete {empty_console}'."
-                        )
-                elif yes:
-                    output.warn(
-                        f"Console '{empty_console}' now has no configured sessions; delete it with "
-                        f"'agw console delete {empty_console}' if it is no longer needed."
-                    )
 
         # If this session created its workspace, offer to delete it
         if session.created_workspace:

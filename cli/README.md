@@ -51,14 +51,6 @@ agw session create s1 --vm my-vm --new-workspace --new-agent
 agw session create s2 --vm my-vm --new-workspace --new-agent
 agw console create my-console s1 s2+1      # The + syntax gives you extra shells as that agent
 agw console attach my-console
-
-# Deleting a session drops it from any console that referenced it (no dangling
-# references are left behind). session delete lists the affected consoles, and
-# for any console left with no sessions it offers to delete the now-empty
-# console (interactively). Under --yes it reports the empty console but leaves
-# it for you to remove with `agw console delete <name>`.
-agw session delete s1                      # Reports that my-console still referenced s1
-
 agw console delete my-console              # Extra shells are lost but sessions are preserved
 ```
 
@@ -202,10 +194,6 @@ directory on this VM. The workspace's template env joins the env chain (between 
 `AGENTWORKS_WORKSPACE` / `AGENTWORKS_WORKSPACE_DIR` are set in the session. The shell variant `cd`s
 into the workspace; the exec variant runs the command from the workspace directory. A workspace that
 lives on a different VM is rejected with a `ValidationError` before any SSH work.
-
-In both exec commands the `--` separator is only required when the remote command's first token
-starts with `-` (it stops agentworks from reading the token as its own option); without it, a
-dash-led first token is rejected with a hint naming the recoveries. Bare commands need no `--`.
 
 Combining `--workspace` with `--platform` works (the shell still `cd`s into the workspace) but the
 workspace's template env and the `AGENTWORKS_WORKSPACE` identity vars are not delivered: the

@@ -250,7 +250,7 @@ def test_create_mutation_failure_cleans_up_and_leaves_no_row(
     deletes: list[str] = []
     monkeypatch.setattr(
         "agentworks.workspaces.backends.vm.delete_vm_workspace",
-        lambda vm, config_, ws_name, path, linux_group, *, logger=None: deletes.append(path),
+        lambda vm, config_, ws_name, path, *, logger=None: deletes.append(path),
     )
 
     with pytest.raises(ExternalError, match="creating workspace: ssh exploded"):
