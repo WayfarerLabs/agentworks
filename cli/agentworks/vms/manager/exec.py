@@ -177,10 +177,10 @@ def exec_vm(
 
     import agentworks.vms.manager as _mgr
     from agentworks.env import ResourceContext, compose_env
-    from agentworks.exec_validation import reject_dash_prefixed_command
+    from agentworks.exec_validation import normalize_exec_command
     from agentworks.transports import transport
 
-    reject_dash_prefixed_command(command, kind="vm", name=name)
+    command = normalize_exec_command(command, kind="vm", name=name)
 
     vm = _require_vm(db, name)
     # Init failure warns instead of blocks. exec is the non-interactive

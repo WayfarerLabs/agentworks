@@ -241,11 +241,122 @@ def test_exec_dash_prefixed_command_fails_with_zero_resolves_and_zero_gate(
     _seed_vm(db)
     _no_gate(monkeypatch)
 
-    with pytest.raises(ValidationError, match="cannot start with '-'"):
+    with pytest.raises(ValidationError, match="cannot start with '-'") as exc_info:
         vm_manager.exec_vm(db, config, "box", ["--workspace", "ws1", "pwd"])
+
+    # The hint names the real workaround: the `--` separator (and the
+    # `sh -c` fallback), not the misleading "put agentworks args first".
+    hint = exc_info.value.hint or ""
+    assert "put '--' before" in hint
+    assert "sh -c" in hint
+    assert resolve_counter == []
+    assert target.streaming_calls == []
+
+
+def test_exec_double_dash_separator_runs_dash_led_command(
+    db: Database,
+    make_config,  # noqa: ANN001
+    resolve_counter: list[list[str]],
+    target: _FakeTarget,
+    monkeypatch: pytest.MonkeyPatch,
+    captured_output,  # noqa: ANN001
+) -> None:
+    """`vm exec box -- --version` consumes the leading `--` separator and
+    runs the dash-led remote command verbatim; the leading-dash guard
+    steps aside because the operator marked where the command begins."""
+    config = make_config(VM_ENV_SECTION)
+    _seed_vm(db)
+    _reachable(monkeypatch, True)
+
+    rc = vm_manager.exec_vm(db, config, "box", ["--", "--version"])
+
+    assert rc == 0
+    ((cmd, _env),) = target.streaming_calls
+    assert cmd == "--version"
+
+
+def test_exec_double_dash_separator_strips_only_the_first(
+    db: Database,
+    make_config,  # noqa: ANN001
+    resolve_counter: list[list[str]],
+    target: _FakeTarget,
+    monkeypatch: pytest.MonkeyPatch,
+    captured_output,  # noqa: ANN001
+) -> None:
+    """Only ONE leading `--` is consumed; a later `--` is part of the
+    remote command and is preserved verbatim."""
+    config = make_config(VM_ENV_SECTION)
+    _seed_vm(db)
+    _reachable(monkeypatch, True)
+
+    rc = vm_manager.exec_vm(db, config, "box", ["--", "git", "log", "--", "path"])
+
+    assert rc == 0
+    ((cmd, _env),) = target.streaming_calls
+    assert cmd == "git log -- path"
+
+
+def test_exec_double_dash_separator_preserves_an_adjacent_second(
+    db: Database,
+    make_config,  # noqa: ANN001
+    resolve_counter: list[list[str]],
+    target: _FakeTarget,
+    monkeypatch: pytest.MonkeyPatch,
+    captured_output,  # noqa: ANN001
+) -> None:
+    """Back-to-back separators: only the FIRST `--` is consumed, so an
+    immediately-adjacent second `--` survives as the remote command's
+    own first token."""
+    config = make_config(VM_ENV_SECTION)
+    _seed_vm(db)
+    _reachable(monkeypatch, True)
+
+    rc = vm_manager.exec_vm(db, config, "box", ["--", "--", "x"])
+
+    assert rc == 0
+    ((cmd, _env),) = target.streaming_calls
+    assert cmd == "-- x"
+
+
+def test_exec_missing_command_after_double_dash_fails_pre_gate(
+    db: Database,
+    make_config,  # noqa: ANN001
+    resolve_counter: list[list[str]],
+    target: _FakeTarget,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A bare `--` with nothing after it is a missing command, rejected
+    before any resolve or gate."""
+    config = make_config()
+    _seed_vm(db)
+    _no_gate(monkeypatch)
+
+    with pytest.raises(ValidationError, match="missing command after '--'"):
+        vm_manager.exec_vm(db, config, "box", ["--"])
 
     assert resolve_counter == []
     assert target.streaming_calls == []
+
+
+def test_exec_bare_flag_after_command_word_still_works(
+    db: Database,
+    make_config,  # noqa: ANN001
+    resolve_counter: list[list[str]],
+    target: _FakeTarget,
+    monkeypatch: pytest.MonkeyPatch,
+    captured_output,  # noqa: ANN001
+) -> None:
+    """A flag that follows a command word (no separator needed) runs as
+    before: `vm exec box free -m` is unaffected by the `--` handling."""
+    config = make_config(VM_ENV_SECTION)
+    _seed_vm(db)
+    _reachable(monkeypatch, True)
+
+    rc = vm_manager.exec_vm(db, config, "box", ["free", "-m"])
+
+    assert rc == 0
+    ((cmd, _env),) = target.streaming_calls
+    assert cmd == "free -m"
 
 
 def test_cross_vm_workspace_mismatch_fails_with_zero_resolves_and_zero_gate(

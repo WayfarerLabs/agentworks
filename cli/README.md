@@ -203,6 +203,10 @@ directory on this VM. The workspace's template env joins the env chain (between 
 into the workspace; the exec variant runs the command from the workspace directory. A workspace that
 lives on a different VM is rejected with a `ValidationError` before any SSH work.
 
+In both exec commands the `--` separator is only required when the remote command's first token
+starts with `-` (it stops agentworks from reading the token as its own option); without it, a
+dash-led first token is rejected with a hint naming the recoveries. Bare commands need no `--`.
+
 Combining `--workspace` with `--platform` works (the shell still `cd`s into the workspace) but the
 workspace's template env and the `AGENTWORKS_WORKSPACE` identity vars are not delivered: the
 platform-native transports (`limactl shell`, `wsl.exe`) drop the `env=` kwarg by design. Treat
