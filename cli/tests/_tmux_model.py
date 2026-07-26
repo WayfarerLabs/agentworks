@@ -559,7 +559,8 @@ def _parse_target(target: str) -> tuple[str, str | None, int | None]:
 
 
 def _parse_window_index_target(target: str) -> tuple[str, int | None]:
-    """Split a ``<session>:<window_index>`` swap-window target."""
+    """Split a ``<session>:<window_index>`` target (swap-window, and
+    new-window when an explicit index is given)."""
     session, _, idx_str = target.partition(":")
     try:
         return session, int(idx_str)
