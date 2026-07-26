@@ -124,8 +124,10 @@ flags were removed in the same change (see the ADR).
 
 Post-lock follow-up. The "Name validation parity" note in `manifest-schema-lld.md` (max 30 for the
 `secret` kind, "Tightening this uniformly is a candidate follow-up AFTER the migration equivalence
-window") anticipated this change; the equivalence window is now well past. The locked LLD is not
-edited in place (it is a point-in-time record); this entry is the authoritative note.
+window") gated any cap revision on the migration equivalence window, which is now well past; this
+change revises the cap in the opposite direction from the uniform tightening that note sketched
+(secrets get their own larger bound because they never derive Linux usernames). The locked LLD is
+not edited in place (it is a point-in-time record); this entry is the authoritative note.
 
 The 30-char cap (`MAX_NAME_LENGTH`) exists ONLY because VM / workspace / session / agent names get
 derived into Linux usernames on the VM (32-char limit, minus agent-username suffix headroom). Secret
