@@ -131,6 +131,39 @@ def test_add_sessions_appends_new_window_last_under_renumber_off(
     assert any("new-window -t aw-console-con:3 " in cmd for cmd in target.commands)
 
 
+def test_add_sessions_appends_multiple_new_windows_in_order_at_the_tail(
+    db: Database,
+    console_target_factory: Callable[..., _FakeTarget],
+) -> None:
+    """Regression for issue #246 (b), multi-add: adding two or more sessions at
+    once must land every new window in order at the tail, not in reclaimed low
+    slots. Each `_add_session_window` re-probes `_last_window_index`, so member
+    N targets one past member N-1's freshly created window; this pins that
+    per-iteration incremental targeting under the stock `renumber-windows off`."""
+    _seed_vm(db, with_tailscale=True)
+    _seed_sessions(db, ["a", "b", "c", "d"])
+    create_console(db, name="con", vm_name="vm1", session_specs=["a", "b"])
+
+    # Post-attach layout with the placeholder retired: a(1), b(2), index 0 free.
+    model = TmuxModel()
+    model.new_session(CON, "_PLACEHOLDER")  # index 0
+    model.new_window(CON, "a")  # index 1
+    model.new_window(CON, "b")  # index 2
+    assert model.kill_window(CON, "_PLACEHOLDER")  # free index 0
+    assert model.windows_with_index(CON) == [(1, "a"), (2, "b")]
+    # Installs the model-backed transport seam (side effect); no handle needed.
+    console_target_factory(model)
+
+    add_sessions(db, _StubConfig(), console_name="con", session_specs=["c", "d"])
+
+    # Both new windows landed at the tail in argument order (3, 4), not in the
+    # reclaimed slot 0, and live order matches DB order.
+    assert model.windows_with_index(CON) == [(1, "a"), (2, "b"), (3, "c"), (4, "d")]
+    live_order = [name for _idx, name in model.windows_with_index(CON)]
+    db_order = [m.session_name for m in db.list_console_sessions("con")]
+    assert live_order == db_order == ["a", "b", "c", "d"]
+
+
 def test_add_sessions_reorders_to_config_order_when_new_window_lands_low(
     db: Database,
     console_target_factory: Callable[..., _FakeTarget],

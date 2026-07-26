@@ -477,11 +477,6 @@ def add_shell(
         )
         q_con = shlex.quote(tmux_session_name(console_name))
         q_win = shlex.quote(session_name)
-        # No _focus_session_pane here: the operator is mid-attach when they
-        # run `add-shell`; pulling focus off their current pane would be
-        # jarring. The layout still re-applies so geometry reflects the new
-        # pane count.
-        _apply_layout(target, q_con, q_win, named_console_template(registry).tmux_layout)
         # `_split_shell_pane` splits the window's active pane, which after an
         # attach is the session pane, so the new shell lands directly below it,
         # above the existing shells. Reorder the shell panes back into tagged
@@ -489,3 +484,8 @@ def add_shell(
         # build/restore paths uphold. len(new_shells) is the full shell count
         # after this append.
         _reorder_shell_panes(target, q_con, q_win, len(new_shells))
+        # Re-apply the layout to redistribute geometry after the split and
+        # swaps (mirrors the restore_session sequence). No _focus_session_pane
+        # here: the operator is mid-attach when they run `add-shell`; pulling
+        # focus off their current pane would be jarring.
+        _apply_layout(target, q_con, q_win, named_console_template(registry).tmux_layout)
