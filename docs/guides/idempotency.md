@@ -63,8 +63,9 @@ These add things on reinit but do not remove them when removed from config:
 
 ## Agent reinit
 
-`agent reinit` re-runs the full agent setup using the stored template. The Linux user is not
-recreated (skipped if exists), but the shell is updated if the template changed.
+`agent reinit` re-runs the full agent setup using the stored template. The user step converges
+rather than blindly creating: an existing user is left in place (with its shell corrected if the
+template changed), and a missing user is created.
 
 The user step is detection-based and reports the true outcome (it is verifying, not blindly
 creating): it probes the agent user with `getent passwd` first, then reports `Created agent user`
