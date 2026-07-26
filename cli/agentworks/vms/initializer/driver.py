@@ -27,7 +27,6 @@ from agentworks.db import InitStatus, ProvisioningStatus
 from agentworks.env import ResourceContext, vm_stable_identity_env
 from agentworks.ssh import SSHError, SSHLogger
 from agentworks.transports import SSHTransport, Transport
-from agentworks.workspaces.acls import apply_workspace_acls
 
 from .credentials import _configure_git_credentials
 from .mise import (
@@ -55,6 +54,7 @@ from .shell_env import (
     _write_sudoers_env_keep,
 )
 from .ssh_keys import _apply_sve_mask, _preserve_ssh_host_keys, _reconcile_authorized_keys
+from .workspaces_dir import _setup_workspaces_directory
 
 if TYPE_CHECKING:
     from agentworks.capabilities.git_credential.base import GitCredentialProvider
@@ -676,32 +676,11 @@ def _phase_b_setup(
         # Non-fatal: reconcile authorized_keys
         _reconcile_authorized_keys(ts_target, config, home, logger)
 
-        # Non-fatal: workspaces directory with ACLs for group-writable files.
-        # Default ACLs ensure new files/dirs inherit group rwx regardless of umask.
-        # Access ACLs fix existing files. Applied recursively to cover all workspaces.
-        # vm_workspaces is guaranteed outside /home: config load rejects a
-        # value at or under /home (see config.validation.validate_vm_workspaces),
-        # so the admin home can stay 0750 without a workspace under it forcing
-        # the home world-traversable. One source of truth, no runtime warning.
-        workspaces_dir = config.paths.vm_workspaces
-        try:
-            # acl is now installed as a system package in _install_system_packages
-            ts_target.run(f"mkdir -p {workspaces_dir}", sudo=True)
-            # Ensure all parent directories are traversable by agents
-            ts_target.run(
-                f'sh -c \'p={workspaces_dir}; while [ "$p" != "/" ]; do chmod a+x "$p"; p=$(dirname "$p"); done\'',
-                sudo=True,
-            )
-            # The canonical group ACL on the workspaces parent, through the
-            # shared apply_workspace_acls helper that workspace create and
-            # repair also use, so those three cannot drift. (workspace copy and
-            # rehome still apply ACLs inline, outside this helper; unifying them
-            # is tracked as issue #263.)
-            apply_workspace_acls(ts_target, workspaces_dir)
-        except SSHError as e:
-            msg = f"workspaces directory setup failed: {e}"
-            logger.warning(msg)
-            output.warn(msg)
+        # Non-fatal: the shared workspaces parent directory and its canonical
+        # ACL (recursive over all workspaces). The ACL apply and the
+        # parent-traversal re-grant are order-dependent, so they live in one
+        # helper that documents and enforces the order (see #254).
+        _setup_workspaces_directory(ts_target, config, logger)
 
         # Non-fatal: mise config (written before dotfiles so dotfiles can override)
         mise_path: list[str] = _mise_shims_path(home)
