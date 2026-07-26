@@ -692,9 +692,11 @@ def _phase_b_setup(
                 f'sh -c \'p={workspaces_dir}; while [ "$p" != "/" ]; do chmod a+x "$p"; p=$(dirname "$p"); done\'',
                 sudo=True,
             )
-            # The canonical group ACL on the workspaces parent, the same spec
-            # (and shared helper) workspace create and repair apply per
-            # workspace, so the three never drift.
+            # The canonical group ACL on the workspaces parent, through the
+            # shared apply_workspace_acls helper that workspace create and
+            # repair also use, so those three cannot drift. (workspace copy and
+            # rehome still apply ACLs inline, outside this helper; unifying them
+            # is tracked as issue #263.)
             apply_workspace_acls(ts_target, workspaces_dir)
         except SSHError as e:
             msg = f"workspaces directory setup failed: {e}"

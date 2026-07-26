@@ -1,10 +1,15 @@
 """The canonical workspace ACL, in one place.
 
-``workspace create``, ``workspace repair``, and the VM init driver all apply
-the same group ACL to a workspace tree. Keeping the spec here means the three
-can never drift, and in particular a freshly created workspace is already in
-repair's canonical state, so a first ``workspace repair`` is a true no-op
-(``OK: ACLs`` / ``No issues found``) rather than reporting a spurious fix.
+``workspace create``, ``workspace repair``, and the VM init driver apply this
+group ACL through the shared ``apply_workspace_acls`` helper below, so those
+three cannot drift from each other. In particular a freshly created workspace
+is already in repair's canonical state, so a first ``workspace repair`` is a
+true no-op (``OK: ACLs`` / ``No issues found``) rather than reporting a spurious
+fix.
+
+Two other call sites, ``workspace copy`` and ``workspace rehome``, still apply
+ACLs inline rather than through this helper, so the guarantee above does NOT
+extend to them; folding them onto this spec is tracked as issue #263.
 """
 
 from __future__ import annotations

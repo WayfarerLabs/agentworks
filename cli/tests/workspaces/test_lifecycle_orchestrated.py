@@ -376,6 +376,23 @@ def _acl_block(path: str, entries: str) -> str:
     return f"# file: {path}\n# owner: 1000\n# group: 1000\n{entries}\n"
 
 
+def _self_inclusive_traversal_line(cmd: str, ws_mode: int | None) -> tuple[str, int | None]:
+    """Model the workspace dir's mode through the parent-traversal step.
+
+    Step 3's ``chmod -c 2770`` gives the workspace dir the canonical mode (SGID,
+    no world-execute bit); the fakes record it as ``ws_mode``. The traversal
+    loop then walks ``a+x`` up a chain of paths. A SELF-INCLUSIVE walk (the
+    pre-fix ``p="$1"`` shape) applies ``a+x`` to the workspace dir itself,
+    flipping 2770 to 2771 and printing a change line, which is exactly the
+    step-5-fights-step-3 bug. A parent-first walk (``p=$(dirname "$1")``) never
+    touches the workspace dir, so it stays silent. Returns the change output
+    (empty when nothing changed) and the possibly-updated mode.
+    """
+    if 'p="$1"' in cmd and ws_mode == 0o2770:
+        return "mode of '/srv/ws1' changed from 2770 to 2771\n", 0o2771
+    return "", ws_mode
+
+
 class _RepairProbeTarget(_FakeAdminTarget):
     """Admin target that simulates specific live-state divergences so the
     apply-and-observe repair steps exercise their Fixed-vs-OK detection.
@@ -408,6 +425,10 @@ class _RepairProbeTarget(_FakeAdminTarget):
         self._getfacl_ok = getfacl_ok
         self._group = group
         self._getfacl_calls = 0
+        # The workspace dir's mode, as live state across the repair steps:
+        # None until step 3's chmod stamps the canonical 2770, then updated by
+        # a self-inclusive parent-traversal walk (the bug) to 2771.
+        self._ws_mode: int | None = None
 
     def _getfacl_snapshot(self) -> str:
         self._getfacl_calls += 1
@@ -422,6 +443,15 @@ class _RepairProbeTarget(_FakeAdminTarget):
             return _acl_block("srv/ws1", _HEALTHY_ACL) + "\n" + _acl_block(churn_path, _HEALTHY_ACL)
         return _acl_block("srv/ws1", _HEALTHY_ACL)
 
+    def _traversal_output(self, cmd: str) -> str:
+        """The parent-traversal step's stdout: a self-inclusive walk on the
+        canonical 2770 workspace prints a change line (the bug), and a genuinely
+        missing ancestor bit ('traversal' damage) prints one independently."""
+        line, self._ws_mode = _self_inclusive_traversal_line(cmd, self._ws_mode)
+        if "traversal" in self._damaged:
+            line += "mode of '/srv' changed from 0700 to 0711\n"
+        return line
+
     def run(self, cmd: str, **kwargs: object) -> SimpleNamespace:
         self.commands.append(cmd)
         stdout = ""
@@ -431,14 +461,18 @@ class _RepairProbeTarget(_FakeAdminTarget):
             return SimpleNamespace(ok=False, returncode=1, stdout="", stderr="getfacl: error")
         if "chown -R -c" in cmd and "owner" in self._damaged:
             stdout = "changed ownership of '/srv/ws1/f'\n"
-        elif "chmod -c 2770" in cmd and "mode" in self._damaged:
-            stdout = "mode of '/srv/ws1' changed from 0700 to 2770\n"
+        elif "chmod -c 2770" in cmd:
+            # Step 3 stamps the canonical workspace mode (2770: SGID, no world
+            # bits); record it so a later self-inclusive a+x walk is observable.
+            self._ws_mode = 0o2770
+            if "mode" in self._damaged:
+                stdout = "mode of '/srv/ws1' changed from 0700 to 2770\n"
         elif "chmod -c g+s" in cmd and "sgid" in self._damaged:
             stdout = "mode of '/srv/ws1/d' changed from 0770 to 2770\n"
         elif "getfacl" in cmd:
             stdout = self._getfacl_snapshot()
-        elif "chmod -c a+x" in cmd and "traversal" in self._damaged:
-            stdout = "mode of '/srv' changed from 0700 to 0711\n"
+        elif "chmod -c a+x" in cmd:
+            stdout = self._traversal_output(cmd)
         elif "id -nG" in cmd:
             # The admin membership probe: report admin already in the group
             # so that detection-based step is a no-op in these scenarios.
@@ -637,6 +671,9 @@ def test_repair_acls_indeterminate_when_getfacl_fails(
     assert "OK: ACLs" not in captured_output.detail
     assert not any(line.startswith("Fixed: ACLs") for line in captured_output.detail)
     assert any("indeterminate" in w and "could not run" in w for w in captured_output.warnings)
+    # The closing line must agree with the warning: not a clean "No issues
+    # found", but qualified with the unverified-step count.
+    assert "\nNo issues found (1 step(s) could not be verified)" in captured_output.info
     # apply_workspace_acls still ran: convergence is unaffected by the probe.
     assert any("setfacl -R -m g::rwx" in c for c in fake.commands)
 
@@ -676,9 +713,10 @@ def test_repair_parent_traversal_quotes_a_spaced_path(
 
     traversal = next(c for c in fake.commands if "chmod -c a+x" in c)
     # The path rides in as the shlex-quoted positional arg after `_`, and the
-    # loop reads it from "$1", so the raw path never touches the script body.
+    # loop seeds from the PARENT of "$1" (dirname), so the raw path never
+    # touches the script body and the workspace dir itself is never a+x'd.
     assert traversal.endswith(f"_ {shlex.quote(spaced_path)}")
-    assert 'p="$1"' in traversal
+    assert 'p=$(dirname "$1")' in traversal
     assert f"p={spaced_path}" not in traversal
 
 
@@ -747,6 +785,10 @@ class _CreateThenRepairTarget(_FakeAdminTarget):
     def __init__(self) -> None:
         super().__init__()
         self._acl_canonical = False
+        # Same workspace-mode state the repair steps drive (see
+        # _self_inclusive_traversal_line): repair's step 3 stamps 2770, so a
+        # self-inclusive a+x walk would show up as a spurious Fixed here too.
+        self._ws_mode: int | None = None
 
     def run(self, cmd: str, **kwargs: object) -> SimpleNamespace:
         self.commands.append(cmd)
@@ -754,6 +796,10 @@ class _CreateThenRepairTarget(_FakeAdminTarget):
         ok = True
         if cmd.startswith("test -d"):
             ok = False  # create's existence precheck must see "absent" to proceed
+        elif "chmod -c 2770" in cmd:
+            self._ws_mode = 0o2770  # repair step 3 stamps the canonical mode
+        elif "chmod -c a+x" in cmd:
+            stdout, self._ws_mode = _self_inclusive_traversal_line(cmd, self._ws_mode)
         elif "setfacl -R -m g::rwx" in cmd:
             self._acl_canonical = True  # the recursive access apply converges the tree
         elif "getfacl" in cmd:

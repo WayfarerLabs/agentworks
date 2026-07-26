@@ -104,6 +104,11 @@ def repair_workspace(
         ws_group = ws.linux_group
         quoted_ws = shlex.quote(ws.workspace_path)
         fixes = 0
+        # Steps whose convergence ran but whose Fixed-vs-OK outcome could not
+        # be verified (currently only the ACL step, when a getfacl snapshot
+        # fails). Tracked so the closing line does not silently claim "No
+        # issues found" over an unverified step.
+        indeterminate = 0
 
         output.info(f"Repairing workspace '{name}' on VM '{vm.name}'...")
 
@@ -204,8 +209,10 @@ def repair_workspace(
             if not before.ok or not after.ok:
                 # Convergence still ran (apply_workspace_acls above), but the
                 # before/after probe did not, so we cannot tell OK from Fixed.
-                # Warn rather than report a no-op we did not verify.
+                # Warn rather than report a no-op we did not verify, and mark
+                # the step indeterminate so the closing line stays honest.
                 output.warn("ACLs applied, but the before/after check could not run (state indeterminate)")
+                indeterminate += 1
             elif _acls_changed(before.stdout, after.stdout):
                 output.detail("Fixed: ACLs")
                 fixes += 1
@@ -214,16 +221,21 @@ def repair_workspace(
         except SSHError as e:
             output.warn(f"ACL fix failed: {e}")
 
-        # 5. Fix parent directory traversal. Each ancestor's chmod carries
-        # -c, so the loop's aggregated stdout is non-empty exactly when we
-        # opened traversal that was missing (Fixed) and empty when every
-        # ancestor was already a+x (OK). The path is passed as a positional
-        # arg ($1) so shlex.quote handles spaces / metacharacters cleanly
-        # rather than interpolating a raw path into the sh -c script.
+        # 5. Fix parent directory traversal. The walk seeds from the PARENT of
+        # the workspace (`dirname "$1"`), never the workspace dir itself: the
+        # workspace's own mode is step 3's business (canonical 2770, which
+        # deliberately carries no world bits), and an `a+x` on it would flip
+        # 2770 to 2771 and fight step 3, so a pristine workspace would report
+        # Fixed on every run and never reach "No issues found". Only true
+        # ancestors get a+x. Each ancestor's chmod carries -c, so the loop's
+        # aggregated stdout is non-empty exactly when we opened traversal that
+        # was missing (Fixed) and empty when every ancestor was already a+x
+        # (OK). The path rides as a positional arg ($1) so shlex.quote handles
+        # spaces / metacharacters cleanly rather than interpolating a raw path
+        # into the sh -c script.
         try:
-            traversal_cmd = (
-                f'sh -c \'p="$1"; while [ "$p" != "/" ]; do chmod -c a+x "$p"; p=$(dirname "$p"); done\' _ {quoted_ws}'
-            )
+            walk = 'p=$(dirname "$1"); while [ "$p" != "/" ]; do chmod -c a+x "$p"; p=$(dirname "$p"); done'
+            traversal_cmd = f"sh -c {shlex.quote(walk)} _ {quoted_ws}"
             traversal = target.run(traversal_cmd, sudo=True)
             if traversal.stdout.strip():
                 output.detail("Fixed: parent traversal")
@@ -278,10 +290,13 @@ def repair_workspace(
         except SSHError as e:
             output.warn(f"agent membership check failed: {e}")
 
+        # A step whose verification was indeterminate qualifies the closing
+        # line either way: it must not read as a clean bill of health.
+        qualifier = f" ({indeterminate} step(s) could not be verified)" if indeterminate else ""
         if fixes > 0:
-            output.result(f"\nRepaired {fixes} issue(s)")
+            output.result(f"\nRepaired {fixes} issue(s){qualifier}")
         else:
-            output.result("\nNo issues found")
+            output.result(f"\nNo issues found{qualifier}")
 
 
 def _parse_getfacl(text: str) -> dict[str, frozenset[str]]:
