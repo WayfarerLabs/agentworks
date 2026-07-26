@@ -846,6 +846,12 @@ wrong-scope) happens at the capability `runup()` stage inside provisioning ops, 
 the planned `agw doctor --runup` (which may prompt). The Tailscale group checks only workstation
 connectivity; the auth key is the `tailscale-auth-key` secret row.
 
+When the config or a resource manifest fails to load, the groups that depend on them (VM sites,
+Secrets) do not vanish: each renders a single
+`[info] ... skipped (config or manifests unavailable; see the Configuration group)` row, so a
+degraded run keeps the same section skeleton as a healthy one and the Configuration group carries
+the actual failure.
+
 ### Secret Backends
 
 A **backend** is a capability resource that produces secret values (`env-var`, `prompt`; future

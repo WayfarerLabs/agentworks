@@ -189,21 +189,6 @@ def test_run_checks_group_order_and_config_failure_placeholder(
         assert "Configuration" in message, group_name
 
 
-def test_skipped_group_renders_explicit_skip_row() -> None:
-    """A config-dependent group that cannot run in degraded mode renders
-    one explicit info-level skip row (never a silent empty group), so an
-    operator sees the group was not checked and where to look for why."""
-    from agentworks import doctor
-
-    g = doctor._skipped_group("Secrets", "Declared secrets")
-
-    assert g.name == "Secrets"
-    assert len(g.checks) == 1
-    assert g.checks[0].status is doctor.Status.INFO
-    assert g.checks[0].name == "Declared secrets"
-    assert g.checks[0].message == "skipped (config or manifests unavailable; see the Configuration group)"
-
-
 @pytest.mark.integration
 def test_run_checks_secrets_group_skips_not_vanishes_when_config_broken(
     monkeypatch: pytest.MonkeyPatch,

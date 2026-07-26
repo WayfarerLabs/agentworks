@@ -110,6 +110,8 @@ def run_checks(*, completion_version: str | None = None) -> HealthReport:
     report.groups.append(_check_required_tools())
     report.groups.append(_check_tailscale())
     report.groups.append(_check_vm_platforms())
+    # The None checks are spelled out at both sites (not hoisted into a
+    # boolean local) because mypy's narrowing does not flow through one.
     if config is not None and registry is not None:
         report.groups.append(_check_vm_sites(config, registry))
     else:
