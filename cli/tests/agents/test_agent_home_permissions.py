@@ -1,13 +1,19 @@
-"""Agent home-directory isolation: the two enforcement points added for
-issue #228 (a world-readable ``$HOME`` let any other agent user on the
-VM read another agent's scratch, logs, and caches).
+"""Agent home-directory isolation and honest agent-user reporting: the
+enforcement points on ``create_agent_on_vm``, the single path shared by
+``agent create`` and ``agent reinit``. Exercising that function directly
+with recording transports proves create AND reinit behave correctly.
 
-Both changes live on ``create_agent_on_vm``, the single path shared by
-``agent create`` and ``agent reinit``, so exercising that function
-directly with recording transports proves create AND reinit apply them:
+Issue #228 (home isolation) added:
 
 1. an admin-side ``chmod 0750`` of the agent's home, and
 2. a ``umask 027`` line in the managed ``~/.agentworks-profile.sh``.
+
+Issue #252 (verifying agent-user step) made the user-setup report the
+DETECTED outcome instead of an unconditional "Creating user..." line:
+created when the user was absent, already-exists when it converged as a
+no-op, and shell-corrected when an existing user's login shell diverged
+from the template. Because the message is driven by state, not by the
+caller, ``reinit`` of a truly-gone agent user honestly reports a create.
 
 The transports are fakes that record every ``run`` / ``write_file``;
 the config, registry, and resolved template are real (a minimal default
@@ -46,25 +52,40 @@ class _Result:
 class _RecordingTransport:
     """Records ``run`` / ``write_file`` calls and returns benign results.
 
-    ``user_exists`` selects the ``id <user>`` branch: False drives the
-    ``useradd`` (create) path, True the ``usermod`` (reinit) path.
+    ``user_exists`` selects the ``getent passwd <user>`` branch: False
+    drives the ``useradd`` (create) path, True the existing-user path.
+    ``shell`` is the login shell that ``getent passwd`` reports for an
+    existing user (field 7); it defaults to a value that DIFFERS from the
+    default template's ``/bin/bash`` so the existing-user path takes the
+    ``usermod`` shell-correction branch, matching the pre-#252 behavior
+    where reinit always ran ``usermod``. A test that wants the converged
+    no-op path passes ``shell="/bin/bash"``.
     ``primary_group`` is what ``id -gn <user>`` reports; it defaults to
     the username (a private per-user group, the healthy case), and a test
     overrides it to a shared group to exercise the post-condition guard.
     """
 
-    def __init__(self, *, user_exists: bool = False, primary_group: str | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        user_exists: bool = False,
+        primary_group: str | None = None,
+        shell: str = "/bin/sh",
+    ) -> None:
         self.runs: list[tuple[str, bool]] = []
         self.writes: list[tuple[str, str, str | None]] = []
         self._user_exists = user_exists
         self._primary_group = primary_group or LINUX_USER
+        self._shell = shell
 
     def run(self, cmd: str, *, sudo: bool = False, check: bool = True, timeout: int | None = None) -> _Result:
         self.runs.append((cmd, sudo))
         if cmd.startswith(f"id -gn {LINUX_USER}"):
             return _Result(stdout=self._primary_group)
-        if cmd.startswith(f"id {LINUX_USER}"):
-            return _Result(ok=self._user_exists, returncode=0 if self._user_exists else 1)
+        if cmd.startswith(f"getent passwd {LINUX_USER}"):
+            if not self._user_exists:
+                return _Result(ok=False, returncode=2)
+            return _Result(stdout=f"{LINUX_USER}:x:1001:1001::{HOME}:{self._shell}")
         if cmd.startswith("mktemp"):
             # _reconcile_authorized_keys stages into a mktemp path and
             # raises on an empty one, so hand back a plausible path.
@@ -83,6 +104,7 @@ def _run_create_on_vm(
     *,
     user_exists: bool,
     primary_group: str | None = None,
+    shell: str = "/bin/sh",
 ) -> tuple[_RecordingTransport, _RecordingTransport]:
     """Drive ``create_agent_on_vm`` with recording transports and return
     them (admin, agent)."""
@@ -97,7 +119,7 @@ def _run_create_on_vm(
     registry = build_registry(config)
     template = resolve_template(registry, None)
 
-    admin = _RecordingTransport(user_exists=user_exists, primary_group=primary_group)
+    admin = _RecordingTransport(user_exists=user_exists, primary_group=primary_group, shell=shell)
     agent = _RecordingTransport(user_exists=user_exists)
     monkeypatch.setattr(agent_initializer, "transport", lambda *a, **k: admin)
     monkeypatch.setattr("agentworks.transports.transport_for_user", lambda *a, **k: agent)
@@ -214,9 +236,9 @@ def test_create_writes_umask_027_into_profile(db: Database, config: Any, monkeyp
 
 
 def test_reinit_reapplies_both_enforcements(db: Database, config: Any, monkeypatch: pytest.MonkeyPatch) -> None:
-    """Reinit (existing user: the ``usermod`` branch) re-applies both the
-    ``chmod 0750`` and the ``umask 027``, so a pre-existing world-readable
-    agent home is repaired on the next reinit."""
+    """Reinit (existing user with a diverged shell: the ``usermod``
+    branch) re-applies both the ``chmod 0750`` and the ``umask 027``, so a
+    pre-existing world-readable agent home is repaired on the next reinit."""
     admin, agent = _run_create_on_vm(db, config, monkeypatch, user_exists=True)
 
     # Took the reinit branch (usermod, not useradd), yet still chmods.
@@ -226,3 +248,66 @@ def test_reinit_reapplies_both_enforcements(db: Database, config: Any, monkeypat
 
     writes = _profile_writes(agent)
     assert writes and all("umask 027" in content for content in writes)
+
+
+# -- honest agent-user reporting (issue #252) ---------------------------------
+
+
+def test_create_absent_user_reports_created_not_creating(
+    db: Database, config: Any, monkeypatch: pytest.MonkeyPatch, captured_output: Any
+) -> None:
+    """First-time create (user absent): ``useradd`` runs and the step
+    reports the user was CREATED. The old unconditional "Creating
+    user..." wording is gone."""
+    admin, _agent = _run_create_on_vm(db, config, monkeypatch, user_exists=False)
+
+    assert any(cmd.startswith("useradd") for cmd, _ in admin.runs)
+    assert any(f"Created agent user '{LINUX_USER}'" in m for m in captured_output.info)
+    assert not any("Creating user" in m for m in captured_output.info)
+    assert not any("already exists" in m for m in captured_output.info)
+
+
+def test_reinit_gone_user_reports_created_not_silently_reinitialized(
+    db: Database, config: Any, monkeypatch: pytest.MonkeyPatch, captured_output: Any
+) -> None:
+    """The critical case: a truly-gone agent user on reinit is recreated
+    and reported as CREATED, not silently converged. Because the message
+    is driven by detected state (user absent) rather than the caller,
+    reinit and create report the recreation identically."""
+    admin, _agent = _run_create_on_vm(db, config, monkeypatch, user_exists=False)
+
+    assert any(cmd.startswith("useradd") for cmd, _ in admin.runs)
+    assert any(f"Created agent user '{LINUX_USER}'" in m for m in captured_output.info)
+    assert not any("Creating user" in m for m in captured_output.info)
+
+
+def test_reinit_converged_user_reports_already_exists_and_skips_usermod(
+    db: Database, config: Any, monkeypatch: pytest.MonkeyPatch, captured_output: Any
+) -> None:
+    """Reinit of a healthy agent whose shell already matches the template
+    (``/bin/bash``): a converging no-op. The step reports the user already
+    exists, does NOT say "Creating user", and runs no ``usermod`` (nothing
+    to converge), matching ``workspace repair``'s "OK" no-op reporting."""
+    admin, _agent = _run_create_on_vm(db, config, monkeypatch, user_exists=True, shell="/bin/bash")
+
+    assert not any(cmd.startswith("useradd") for cmd, _ in admin.runs)
+    assert not any(cmd.startswith("usermod -s") for cmd, _ in admin.runs)
+    assert any(f"Agent user '{LINUX_USER}' already exists" in m for m in captured_output.info)
+    assert not any("Creating user" in m for m in captured_output.info)
+    assert not any("Created agent user" in m for m in captured_output.info)
+
+
+def test_reinit_diverged_shell_reports_fixed_and_runs_usermod(
+    db: Database, config: Any, monkeypatch: pytest.MonkeyPatch, captured_output: Any
+) -> None:
+    """Reinit of an existing user whose login shell diverges from the
+    template (``/bin/zsh`` on the VM vs. the default template's
+    ``/bin/bash``): ``usermod -s`` converges it and the step reports the
+    correction with the before/after shells."""
+    admin, _agent = _run_create_on_vm(db, config, monkeypatch, user_exists=True, shell="/bin/zsh")
+
+    assert any(cmd.startswith("usermod -s /bin/bash") for cmd, _ in admin.runs)
+    assert not any(cmd.startswith("useradd") for cmd, _ in admin.runs)
+    assert any(f"Fixed agent user '{LINUX_USER}'" in m and "/bin/zsh -> /bin/bash" in m for m in captured_output.info)
+    assert not any("Creating user" in m for m in captured_output.info)
+    assert not any("already exists" in m for m in captured_output.info)

@@ -66,11 +66,19 @@ These add things on reinit but do not remove them when removed from config:
 `agent reinit` re-runs the full agent setup using the stored template. The Linux user is not
 recreated (skipped if exists), but the shell is updated if the template changed.
 
+The user step is detection-based and reports the true outcome (it is verifying, not blindly
+creating): it probes the agent user with `getent passwd` first, then reports `Created agent user`
+when the user was absent, `Agent user '<name>' already exists` when it converged as a no-op, or
+`Fixed agent user '<name>': shell <old> -> <new>` when an existing user's login shell diverged from
+the template. Because the report is driven by detected state rather than by the calling command, a
+truly-gone agent user recreated on reinit is honestly reported as created, not silently
+"reinitialized" into existence.
+
 ### Fully idempotent
 
 | Step                  | Notes                                                                        |
 | --------------------- | ---------------------------------------------------------------------------- |
-| User creation         | Skipped if exists; shell updated if template changed                         |
+| User creation         | Detection-based: created if absent, shell corrected if diverged, else no-op  |
 | Workspace group       | Skipped if exists                                                            |
 | Shell rc (prompt)     | Overwritten from template                                                    |
 | Git credentials       | Overwritten from template                                                    |
@@ -99,10 +107,8 @@ recreated (skipped if exists), but the shell is updated if the template changed.
 
 ### Fully idempotent
 
-| Step                         | Notes                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
-| ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Workspace group + membership | Group created if missing; admin and granted agents reconciled against the grants. Reports `Fixed:` per change, `OK:` when already correct.                                                                                                                                                                                                                                                                                                                               |
-| Ownership, permissions, SGID | Canonical chown/chmod re-run every time (no-ops on already-correct state), but carry `-c` so the step observes whether anything changed and reports `Fixed:` vs `OK:` accordingly.                                                                                                                                                                                                                                                                                       |
-| ACLs                         | Canonical setfacl (the same recursive spec `workspace create` and VM init apply, via one shared helper) re-run every time; the step snapshots the tree's ACLs with `getfacl` before and after and compares, reporting `Fixed:` only on a real change and `OK:` otherwise. Because create and repair share the spec, a first repair of a freshly created workspace is a no-op.                                                                                            |
-| Parent traversal             | `chmod a+x` re-applied up each ancestor, seeded from the workspace's PARENT so the walk never touches the workspace dir's own canonical `2770` (which carries no world bits by design). Carries `-c`, so the step reports `Fixed:` when it opened a missing traversal bit and `OK:` when every ancestor was already traversable. A freshly created workspace whose ancestors are already traversable reports `OK:` here, so a first repair after create is a true no-op. |
-| Git identity                 | Template `git_user_name` / `git_user_email` stamped into the checkout's repo-local config; detection-based, so an already-correct value is left as-is. No-op when no identity is declared or the workspace has no repo.                                                                                                                                                                                                                                                  |
+| Step                         | Notes                                                                                                                                                                                                                   |
+| ---------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Workspace group + membership | Group created if missing; admin and granted agents reconciled against the grants.                                                                                                                                       |
+| Ownership, permissions, ACLs | Canonical chown/chmod/setfacl re-run every time; no-ops on already-correct state.                                                                                                                                       |
+| Git identity                 | Template `git_user_name` / `git_user_email` stamped into the checkout's repo-local config; detection-based, so an already-correct value is left as-is. No-op when no identity is declared or the workspace has no repo. |
