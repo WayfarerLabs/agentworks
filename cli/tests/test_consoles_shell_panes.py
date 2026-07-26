@@ -18,13 +18,19 @@ import pytest
 from agentworks.db import Database
 from agentworks.sessions import multi_console
 from agentworks.sessions.multi_console import add_shell, create_console, delete_console
-from agentworks.sessions.multi_console_layout import SHELL_INDEX_OPTION
+from agentworks.sessions.multi_console_layout import SHELL_INDEX_OPTION, _reorder_shell_panes
 from agentworks.vms.initializer import AGENTWORKS_SUDOERS_ENV_KEEP_PATTERNS
 from tests._consoles_support import _seed_sessions, _seed_vm, _stub_build_registry, _StubConfig  # noqa: F401
+from tests._tmux_model import TmuxModel
 from tests.conftest import _FakeResult, _FakeTarget
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from tests.conftest import CapturedOutput
+
+# tmux session name for console "con"; see tmux_session_name.
+CON = "aw-console-con"
 
 
 def test_add_shell_live_sync_splits_pane_and_tiles(db: Database, fake_target: _FakeTarget) -> None:
@@ -376,6 +382,66 @@ def test_split_shell_pane_warns_when_split_returns_no_pane_id(
         "couldn't capture its id" in w and "untagged" in w and "attach con --recreate" in w
         for w in captured_output.warnings
     )
+
+
+# -- Shell-pane ordering (issue #246 part a) -------------------------------
+
+
+def test_reorder_shell_panes_puts_tagged_shells_into_config_order(
+    console_target_factory: Callable[..., _FakeTarget],
+) -> None:
+    """Direct proof of the corrective helper on the exact shape the add-shell
+    bug produces: a window whose shell panes sit out of config order (tag 1
+    above tag 0, as a `split-window` after the session pane leaves them).
+    `_reorder_shell_panes` swaps them back so pane index N+1 carries config tag
+    N (session pane stays lowest and untagged)."""
+    model = TmuxModel()
+    # Session pane (untagged) then shells in the wrong order: tag 1 at index 1,
+    # tag 0 at index 2. This is what real tmux leaves after add-shell splits the
+    # new shell in directly below the active session pane.
+    model.seed_session(CON, "a", pane_tags=(None, 1, 0))
+    target = console_target_factory(model)
+
+    _reorder_shell_panes(target, CON, "a", 2)
+
+    rows = model.pane_rows(CON, "a")
+    assert rows is not None
+    assert [(pidx, tag) for _pid, pidx, tag in rows] == [(0, None), (1, 0), (2, 1)]
+
+
+def test_add_shell_reorders_shell_panes_into_config_order(
+    db: Database,
+    console_target_factory: Callable[..., _FakeTarget],
+) -> None:
+    """Regression for issue #246 (a): add-shell must leave the window's shell
+    panes in tagged config order.
+
+    `_split_shell_pane` splits the window's active pane, which after an attach
+    is the session pane, so a new shell lands directly below it, above the
+    existing shells. (The stateful model appends splits at the tail, a
+    documented fidelity boundary, so we start from a window already carrying the
+    out-of-order shape a prior split left, tags [1, 0], and prove add-shell's
+    reorder step settles the whole window, including the freshly split pane,
+    back into order [0, 1, 2].) Without the reorder call the window would stay
+    out of order."""
+    _seed_vm(db, with_tailscale=True)
+    _seed_sessions(db, ["a"])
+    # Two configured shells already; the new one becomes config index 2.
+    create_console(db, name="con", vm_name="vm1", session_specs=["a+2"])
+
+    model = TmuxModel()
+    # Live window is out of config order (tag 1 above tag 0), the state a
+    # previous unfixed add-shell leaves behind.
+    model.seed_session(CON, "a", pane_tags=(None, 1, 0))
+    # Installs the model-backed transport seam (side effect); no handle needed.
+    console_target_factory(model)
+
+    add_shell(db, _StubConfig(), console_name="con", session_name="a")
+
+    rows = model.pane_rows(CON, "a")
+    assert rows is not None
+    # Session pane lowest and untagged; all three shells in config order.
+    assert [(pidx, tag) for _pid, pidx, tag in rows] == [(0, None), (1, 0), (2, 1), (3, 2)]
 
 
 def test_split_shell_pane_warns_when_set_option_fails(
