@@ -191,51 +191,41 @@ def test_vm_active_cleanup_tolerates_already_dead_subprocess() -> None:
     proc.stderr.close.assert_called_once()
 
 
-def test_vm_active_waits_for_tailscale_when_host_known() -> None:
-    """If vm.tailscale_host is set AND config is provided, wait for SSH."""
+def test_vm_active_does_not_verify_connectivity() -> None:
+    """vm_active is a pure power-hold: even with a known tailscale_host and
+    a config in hand, it runs no connectivity wait of its own. It only
+    spawns the anchor subprocess (which also boots a stopped distro as a
+    side effect); Tailscale verification is the shared paths' job, done
+    uniformly across platforms inside this hold. This is the guarantee
+    that keeps ``vm start`` from double-printing the reconnect wording.
+
+    This drives the REAL ``WSL2Platform.vm_active`` -> ``_keepalive``, so
+    it is the regression guard: if a future change reintroduces the
+    module-level ``from agentworks.transports import transport,
+    wait_for_reconnect`` and a bare ``wait_for_reconnect(...)`` call into
+    ``_keepalive``, the mocks below intercept it and
+    ``wait.assert_not_called()`` fails for the right reason (an assertion,
+    not an incidental subprocess/SSH crash). ``create=True`` is required
+    because the current pure-power-hold code deliberately does NOT import
+    either name, so the attributes do not exist on the wsl2 module until a
+    reintroduction (or this patch) puts them there.
+    """
     proc = _running_proc()
-    fake_target = MagicMock()
-    fake_config = MagicMock()
     with (
-        patch("agentworks.capabilities.vm_platform.wsl2.subprocess.Popen", return_value=proc),
-        patch("agentworks.capabilities.vm_platform.wsl2.transport", return_value=fake_target) as build,
-        patch("agentworks.capabilities.vm_platform.wsl2.wait_for_reconnect") as wait,
+        patch("agentworks.capabilities.vm_platform.wsl2.subprocess.Popen", return_value=proc) as popen,
+        patch("agentworks.capabilities.vm_platform.wsl2.wait_for_reconnect", create=True) as wait,
+        patch("agentworks.capabilities.vm_platform.wsl2.transport", create=True),
         _job_object_mocks(),
     ):
         vm = _fake_vm(tailscale_host="100.64.0.5")
-        with WSL2Platform("wsl2", {}).vm_active(vm, config=fake_config):
+        with WSL2Platform("wsl2", {}).vm_active(vm, config=MagicMock()):
             pass
-        build.assert_called_once_with(vm, fake_config)
-        wait.assert_called_once_with(fake_target)
-
-
-def test_vm_active_skips_tailscale_wait_when_host_unknown() -> None:
-    """Pre-bootstrap: no tailscale_host, no wait, no SSH config build."""
-    proc = _running_proc()
-    with (
-        patch("agentworks.capabilities.vm_platform.wsl2.subprocess.Popen", return_value=proc),
-        patch("agentworks.capabilities.vm_platform.wsl2.transport") as build,
-        patch("agentworks.capabilities.vm_platform.wsl2.wait_for_reconnect") as wait,
-        _job_object_mocks(),
-    ):
-        with WSL2Platform("wsl2", {}).vm_active(_fake_vm(tailscale_host=None), config=MagicMock()):
-            pass
-        build.assert_not_called()
-        wait.assert_not_called()
-
-
-def test_vm_active_skips_tailscale_wait_when_config_missing() -> None:
-    """Even with a known host, no config means we can't build an SSH target."""
-    proc = _running_proc()
-    with (
-        patch("agentworks.capabilities.vm_platform.wsl2.subprocess.Popen", return_value=proc),
-        patch("agentworks.capabilities.vm_platform.wsl2.transport") as build,
-        patch("agentworks.capabilities.vm_platform.wsl2.wait_for_reconnect") as wait,
-        _job_object_mocks(),
-    ):
-        with WSL2Platform("wsl2", {}).vm_active(_fake_vm(tailscale_host="100.64.0.5"), config=None):
-            pass
-        build.assert_not_called()
+        # The anchor subprocess still spawns. `wsl --distribution NAME --
+        # sleep infinity` both anchors against vmIdleTimeout and boots the
+        # distro if it was stopped, so this one call is the boot too.
+        popen.assert_called_once()
+        assert popen.call_args[0][0] == ["wsl", "--distribution", "wsltest", "--", "sleep", "infinity"]
+        # But the hold itself never verifies connectivity.
         wait.assert_not_called()
 
 

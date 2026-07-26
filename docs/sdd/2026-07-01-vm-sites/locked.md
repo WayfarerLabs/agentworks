@@ -123,3 +123,12 @@ semantic property; the behavioral guard suite is the enforcement).
 
 The FRD, HLA, plan, capability-model note, and LLDs are accurate as-built as of this date. They are
 now locked.
+
+## Addendum: 2026-07-26 (PR #271)
+
+`vm_active` is now a pure power-hold on every platform and no longer performs a reconnect wait, so
+the HLA's WSL2 justification for `config` on the hold path (building the Tailscale transport for
+that wait) no longer holds. `config` remains on `vm_active`'s signature as reserved operator
+settings (the base-class contract), but no platform's hold uses it today. The Azure
+`native_transport()` public-IP rationale for `config` is unchanged. See
+`capabilities/vm_platform/wsl2.py::_keepalive`.

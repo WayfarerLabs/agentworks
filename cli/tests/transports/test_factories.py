@@ -22,6 +22,7 @@ from agentworks.transports import (
     LimaTransport,
     RemoteLimaTransport,
     SSHTransport,
+    TailscaleWait,
     Transport,
     WSL2Transport,
     agent_transport,
@@ -401,3 +402,33 @@ def test_wait_for_reconnect_accepts_any_transport() -> None:
         assert isinstance(t, Transport)
         with patch.object(t, "run", return_value=SSHResult(returncode=0, stdout="", stderr="")):
             assert wait_for_reconnect(t) is True
+
+
+def test_tailscale_wait_wording_is_a_closed_set() -> None:
+    """The context vocabulary pins the exact operator-facing strings, so
+    a byte-level regression in either message pair is caught here."""
+    reconnect_waiting = "Waiting for Tailscale to reconnect (this may take several minutes)..."
+    assert TailscaleWait.RECONNECT.waiting_message == reconnect_waiting
+    assert TailscaleWait.RECONNECT.success_message == "Tailscale SSH reconnected"
+    assert TailscaleWait.VERIFY.waiting_message == "Verifying Tailscale connectivity..."
+    assert TailscaleWait.VERIFY.success_message == "Tailscale SSH reachable"
+
+
+def test_wait_for_reconnect_default_context_is_reconnect(captured_output) -> None:  # noqa: ANN001
+    """The default context emits the reconnect wording."""
+    t = SSHTransport(host="1.2.3.4", user="agentworks")
+    with patch.object(t, "run", return_value=SSHResult(returncode=0, stdout="", stderr="")):
+        assert wait_for_reconnect(t) is True
+    assert any("Waiting for Tailscale to reconnect" in line for line in captured_output.detail)
+    assert any("Tailscale SSH reconnected" in line for line in captured_output.detail)
+
+
+def test_wait_for_reconnect_verify_context_emits_verify_wording(captured_output) -> None:  # noqa: ANN001
+    """``context=TailscaleWait.VERIFY`` selects the truthful verify lines
+    and never the scary reconnect wording."""
+    t = SSHTransport(host="1.2.3.4", user="agentworks")
+    with patch.object(t, "run", return_value=SSHResult(returncode=0, stdout="", stderr="")):
+        assert wait_for_reconnect(t, context=TailscaleWait.VERIFY) is True
+    assert any("Verifying Tailscale connectivity" in line for line in captured_output.detail)
+    assert any("Tailscale SSH reachable" in line for line in captured_output.detail)
+    assert not any("reconnect" in line for line in captured_output.detail)

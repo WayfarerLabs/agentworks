@@ -99,6 +99,13 @@ before yielding. Every manager-layer function that touches a VM wraps in this co
 Tailscale SSH); the keepalive just prevents WSL2 from idle-shutting the distro while a command is
 mid-flight.
 
+> **Superseded by PR #271 (2026-07-26):** `vm_active` is now a pure power-hold on every platform.
+> The WSL2 override no longer waits for SSH reachability before yielding (the "wait for SSH
+> reachability before yielding" clause above is retired), and `config` is no longer used for any
+> reconnect wait. Connectivity verification is handled uniformly by the shared paths
+> (`_ensure_tailscale`, the activation gate), which run inside the hold. The subprocess anchor and
+> stopped-distro boot are unchanged. See `capabilities/vm_platform/wsl2.py::_keepalive`.
+
 ### Forward-looking note
 
 The symmetric "Azure auto-deallocate when idle" feature listed under "Remaining future items" maps

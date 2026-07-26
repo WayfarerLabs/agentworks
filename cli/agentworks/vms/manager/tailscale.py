@@ -193,6 +193,7 @@ def _ensure_tailscale(
     platform: VMPlatform,
     *,
     auth_key_source: Callable[[], str] | None = None,
+    already_running: bool = False,
 ) -> None:
     """After starting a VM, verify Tailscale connectivity and rejoin if
     needed. ``platform`` is the caller's bound platform (the gates never
@@ -205,9 +206,18 @@ def _ensure_tailscale(
     conditional-need timing as the internal resolve below. ``None``
     keeps today's behavior for the imperative callers: this function
     resolves the key itself, late.
+
+    ``already_running`` picks the operator-facing wording for the
+    initial connectivity probe. The VM was never down on that path, so
+    "reconnect (may take several minutes)" would read as scary recovery
+    work; the caller passes ``True`` to get truthful "verifying" /
+    "reachable" wording instead. It changes only the messages, not the
+    probe or the rejoin behavior: a probe that fails still falls through
+    to the same rejoin path below, whose wording stays "reconnect"
+    because a rejoin genuinely is one.
     """
     import agentworks.vms.manager as _mgr
-    from agentworks.transports import native_transport, transport, wait_for_reconnect
+    from agentworks.transports import TailscaleWait, native_transport, transport, wait_for_reconnect
 
     # Refresh VM row in case tailscale_host was cleared on stop
     vm = _require_vm(db, vm.name)
@@ -215,7 +225,10 @@ def _ensure_tailscale(
     # If we have a known Tailscale host, wait for it to reconnect after boot.
     # This avoids unnecessarily attaching a public IP on Azure.
     if vm.tailscale_host:
-        if wait_for_reconnect(transport(vm, config)):
+        target = transport(vm, config)
+        context = TailscaleWait.VERIFY if already_running else TailscaleWait.RECONNECT
+        reachable = wait_for_reconnect(target, context=context)
+        if reachable:
             return
 
         # Tailscale didn't reconnect (ephemeral key expired, etc.)

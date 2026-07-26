@@ -301,7 +301,7 @@ def start_vm(db: Database, config: Config, name: str) -> None:
     # internal late resolve (the documented conditional-need exception):
     # there is no gate here to hand a lazy reader through.
     with vm_node.hold_active():
-        _mgr._ensure_tailscale(db, config, vm, platform)
+        _mgr._ensure_tailscale(db, config, vm, platform, already_running=status == VMStatus.RUNNING)
     # Only emit "is ready" on the path that actually started the VM. When
     # status was already RUNNING we already said so above, and Tailscale
     # verification is usually a no-op (handshake already valid), so an
