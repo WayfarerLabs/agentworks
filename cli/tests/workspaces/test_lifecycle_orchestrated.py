@@ -30,6 +30,7 @@ from agentworks.capabilities.base import RunContext
 from agentworks.capabilities.vm_platform.proxmox import ProxmoxPlatform
 from agentworks.db import InitStatus, VMStatus
 from agentworks.errors import (
+    ExternalError,
     NotFoundError,
     StateError,
     UserAbort,
@@ -231,7 +232,7 @@ def test_repair_reachable_vm_is_one_boundary_burst(
     workspace_manager.repair_workspace(db, config, "ws1")
 
     assert resolve_counter == [["proxmox-token"]]
-    assert any("chmod 2770 /srv/ws1" in c for c in target.commands)
+    assert any("chmod -c 2770 /srv/ws1" in c for c in target.commands)
     assert "Repairing workspace 'ws1' on VM 'box'..." in captured_output.info
 
 
@@ -254,7 +255,7 @@ def test_repair_stopped_vm_gate_burst_seeds_the_whole_union(
 
     assert events == ["status", "start", "tailscale"]  # the gate ran
     assert resolve_counter == [["proxmox-token"]]
-    assert any("chmod 2770 /srv/ws1" in c for c in target.commands)
+    assert any("chmod -c 2770 /srv/ws1" in c for c in target.commands)
 
 
 def test_repair_converges_git_identity_on_the_checkout(
@@ -366,6 +367,488 @@ def test_repair_default_template_stamps_no_identity(
     assert not any(c.startswith("git ") for c in target.commands)
 
 
+_HEALTHY_ACL = "user::rwx\ngroup::rwx\nmask::rwx\nother::---"
+_DAMAGED_ACL = "user::rwx\ngroup::r-x\nother::---"  # narrowed group, mask stripped
+
+
+def _acl_block(path: str, entries: str) -> str:
+    """One ``getfacl -R -n`` record: the ``# file:`` header, the owner/group
+    comment lines the parser must ignore, then the ACL entries."""
+    return f"# file: {path}\n# owner: 1000\n# group: 1000\n{entries}\n"
+
+
+def _self_inclusive_traversal_line(cmd: str, ws_mode: int | None) -> tuple[str, int | None]:
+    """Model the workspace dir's mode through the parent-traversal step.
+
+    Step 3's ``chmod -c 2770`` gives the workspace dir the canonical mode (SGID,
+    no world-execute bit); the fakes record it as ``ws_mode``. The traversal
+    loop then walks ``a+x`` up a chain of paths. A SELF-INCLUSIVE walk (the
+    pre-fix ``p="$1"`` shape) applies ``a+x`` to the workspace dir itself,
+    flipping 2770 to 2771 and printing a change line, which is exactly the
+    step-5-fights-step-3 bug. A parent-first walk (``p=$(dirname "$1")``) never
+    touches the workspace dir, so it stays silent. Returns the change output
+    (empty when nothing changed) and the possibly-updated mode.
+    """
+    if 'p="$1"' in cmd and ws_mode == 0o2770:
+        return "mode of '/srv/ws1' changed from 2770 to 2771\n", 0o2771
+    return "", ws_mode
+
+
+class _RepairProbeTarget(_FakeAdminTarget):
+    """Admin target that simulates specific live-state divergences so the
+    apply-and-observe repair steps exercise their Fixed-vs-OK detection.
+
+    ``damaged`` names the categories whose canonical command should signal a
+    real change: 'owner'/'mode'/'sgid' (chown/chmod -c print a change line),
+    'acl' (the before/after getfacl snapshots differ on a persisting path),
+    'traversal' (a parent chmod -c prints a change line). Every other command
+    answers ok with the silent/unchanged output a healthy workspace would
+    produce, so the admin membership probe sees itself already in the group
+    and the getfacl snapshots match when 'acl' is absent.
+
+    ``acl_churn`` models ordinary filesystem churn: the two getfacl snapshots
+    share one persisting path (identical ACL) but each also carries a path the
+    other lacks (a temp file created then renamed away). The intersect-compare
+    must ignore those and report OK, not a spurious Fixed.
+    """
+
+    def __init__(
+        self,
+        *,
+        damaged: frozenset[str] = frozenset(),
+        acl_churn: bool = False,
+        getfacl_ok: bool = True,
+        group: str = "ws-ws1",
+    ) -> None:
+        super().__init__()
+        self._damaged = damaged
+        self._acl_churn = acl_churn
+        self._getfacl_ok = getfacl_ok
+        self._group = group
+        self._getfacl_calls = 0
+        # The workspace dir's mode, as live state across the repair steps:
+        # None until step 3's chmod stamps the canonical 2770, then updated by
+        # a self-inclusive parent-traversal walk (the bug) to 2771.
+        self._ws_mode: int | None = None
+
+    def _getfacl_snapshot(self) -> str:
+        self._getfacl_calls += 1
+        first = self._getfacl_calls == 1
+        if "acl" in self._damaged and first:
+            # Before: the persisting path's ACL is narrowed / mask-stripped.
+            return _acl_block("srv/ws1", _DAMAGED_ACL)
+        if self._acl_churn:
+            # A persisting path with identical ACL in both snapshots, plus a
+            # path that exists in only one (churn the compare must ignore).
+            churn_path = "srv/ws1/tmp-before" if first else "srv/ws1/tmp-after"
+            return _acl_block("srv/ws1", _HEALTHY_ACL) + "\n" + _acl_block(churn_path, _HEALTHY_ACL)
+        return _acl_block("srv/ws1", _HEALTHY_ACL)
+
+    def _traversal_output(self, cmd: str) -> str:
+        """The parent-traversal step's stdout: a self-inclusive walk on the
+        canonical 2770 workspace prints a change line (the bug), and a genuinely
+        missing ancestor bit ('traversal' damage) prints one independently."""
+        line, self._ws_mode = _self_inclusive_traversal_line(cmd, self._ws_mode)
+        if "traversal" in self._damaged:
+            line += "mode of '/srv' changed from 0700 to 0711\n"
+        return line
+
+    def run(self, cmd: str, **kwargs: object) -> SimpleNamespace:
+        self.commands.append(cmd)
+        stdout = ""
+        if "getfacl" in cmd and not self._getfacl_ok:
+            # Simulate a transient getfacl failure: the snapshot is missing,
+            # so the ACL step has no change data to compare.
+            return SimpleNamespace(ok=False, returncode=1, stdout="", stderr="getfacl: error")
+        if "chown -R -c" in cmd and "owner" in self._damaged:
+            stdout = "changed ownership of '/srv/ws1/f'\n"
+        elif "chmod -c 2770" in cmd:
+            # Step 3 stamps the canonical workspace mode (2770: SGID, no world
+            # bits); record it so a later self-inclusive a+x walk is observable.
+            self._ws_mode = 0o2770
+            if "mode" in self._damaged:
+                stdout = "mode of '/srv/ws1' changed from 0700 to 2770\n"
+        elif "chmod -c g+s" in cmd and "sgid" in self._damaged:
+            stdout = "mode of '/srv/ws1/d' changed from 0770 to 2770\n"
+        elif "getfacl" in cmd:
+            stdout = self._getfacl_snapshot()
+        elif "chmod -c a+x" in cmd:
+            stdout = self._traversal_output(cmd)
+        elif "id -nG" in cmd:
+            # The admin membership probe: report admin already in the group
+            # so that detection-based step is a no-op in these scenarios.
+            stdout = f"admin {self._group}"
+        return SimpleNamespace(ok=True, returncode=0, stdout=stdout, stderr="")
+
+
+def test_repair_healthy_workspace_reports_ok_for_every_step(
+    db: Database,
+    make_config,  # noqa: ANN001
+    monkeypatch: pytest.MonkeyPatch,
+    captured_output: CapturedOutput,
+) -> None:
+    """A workspace whose live state already matches: every apply-and-observe
+    step reports OK (no false Fixed), the closing line is the truthful
+    'No issues found', and convergence still runs (the canonical commands
+    execute even when they are no-ops)."""
+    fake = _RepairProbeTarget()
+    _wire_target(monkeypatch, fake)
+    config = make_config()
+    _seed(db)
+    _reachable(monkeypatch, True)
+
+    workspace_manager.repair_workspace(db, config, "ws1")
+
+    assert "OK: directory ownership and permissions" in captured_output.detail
+    assert "OK: ACLs" in captured_output.detail
+    assert "OK: parent traversal" in captured_output.detail
+    assert not any(line.startswith("Fixed:") for line in captured_output.detail)
+    assert "\nNo issues found" in captured_output.info
+    # Convergence is unconditional: the canonical commands still ran.
+    assert any("chmod -c 2770 /srv/ws1" in c for c in fake.commands)
+    assert any("setfacl -R -m g::rwx" in c for c in fake.commands)
+
+
+def test_repair_fully_damaged_workspace_reports_fixed_per_step(
+    db: Database,
+    make_config,  # noqa: ANN001
+    monkeypatch: pytest.MonkeyPatch,
+    captured_output: CapturedOutput,
+) -> None:
+    """Wrong owner/mode, missing SGID, a stripped ACL, and a missing parent
+    traversal bit: each apply-and-observe step reports Fixed, the count is
+    the truthful 'Repaired 3 issue(s)' (ownership/permissions/SGID collapse
+    to one category), and convergence still runs."""
+    fake = _RepairProbeTarget(damaged=frozenset({"owner", "mode", "sgid", "acl", "traversal"}))
+    _wire_target(monkeypatch, fake)
+    config = make_config()
+    _seed(db)
+    _reachable(monkeypatch, True)
+
+    workspace_manager.repair_workspace(db, config, "ws1")
+
+    assert "Fixed: directory ownership and permissions" in captured_output.detail
+    assert "Fixed: ACLs" in captured_output.detail
+    assert "Fixed: parent traversal" in captured_output.detail
+    assert "\nRepaired 3 issue(s)" in captured_output.info
+    assert "\nNo issues found" not in captured_output.info
+    assert any("chmod -c 2770 /srv/ws1" in c for c in fake.commands)
+
+
+def test_repair_partial_damage_reports_only_the_diverged_step(
+    db: Database,
+    make_config,  # noqa: ANN001
+    monkeypatch: pytest.MonkeyPatch,
+    captured_output: CapturedOutput,
+) -> None:
+    """Only the ACL diverges: ACLs report Fixed while ownership/permissions
+    and parent traversal report OK, and the count is the truthful 'Repaired
+    1 issue(s)' (no over-counting of the still-correct steps)."""
+    fake = _RepairProbeTarget(damaged=frozenset({"acl"}))
+    _wire_target(monkeypatch, fake)
+    config = make_config()
+    _seed(db)
+    _reachable(monkeypatch, True)
+
+    workspace_manager.repair_workspace(db, config, "ws1")
+
+    assert "Fixed: ACLs" in captured_output.detail
+    assert "OK: directory ownership and permissions" in captured_output.detail
+    assert "OK: parent traversal" in captured_output.detail
+    assert "\nRepaired 1 issue(s)" in captured_output.info
+
+
+def test_repair_sgid_only_damage_reports_permissions_fixed(
+    db: Database,
+    make_config,  # noqa: ANN001
+    monkeypatch: pytest.MonkeyPatch,
+    captured_output: CapturedOutput,
+) -> None:
+    """SGID diverged while owner and mode are already correct: only the SGID
+    command signals a change, so the permissions category still reports Fixed
+    and counts once. This pins the OR-collapse of owner/mode/sgid: under an
+    AND collapse the two silent (healthy) commands would force OK and this
+    would fail."""
+    fake = _RepairProbeTarget(damaged=frozenset({"sgid"}))
+    _wire_target(monkeypatch, fake)
+    config = make_config()
+    _seed(db)
+    _reachable(monkeypatch, True)
+
+    workspace_manager.repair_workspace(db, config, "ws1")
+
+    assert "Fixed: directory ownership and permissions" in captured_output.detail
+    assert "OK: ACLs" in captured_output.detail
+    assert "OK: parent traversal" in captured_output.detail
+    assert "\nRepaired 1 issue(s)" in captured_output.info
+
+
+def test_repair_mode_only_damage_reports_permissions_fixed(
+    db: Database,
+    make_config,  # noqa: ANN001
+    monkeypatch: pytest.MonkeyPatch,
+    captured_output: CapturedOutput,
+) -> None:
+    """Mode diverged while owner and SGID are already correct: a second
+    isolated case pinning the OR-collapse from a different member (again
+    fails under an AND collapse, where owner's silence would force OK)."""
+    fake = _RepairProbeTarget(damaged=frozenset({"mode"}))
+    _wire_target(monkeypatch, fake)
+    config = make_config()
+    _seed(db)
+    _reachable(monkeypatch, True)
+
+    workspace_manager.repair_workspace(db, config, "ws1")
+
+    assert "Fixed: directory ownership and permissions" in captured_output.detail
+    assert "\nRepaired 1 issue(s)" in captured_output.info
+
+
+def test_repair_owner_only_damage_reports_permissions_fixed(
+    db: Database,
+    make_config,  # noqa: ANN001
+    monkeypatch: pytest.MonkeyPatch,
+    captured_output: CapturedOutput,
+) -> None:
+    """Owner diverged while mode and SGID are already correct: the third
+    isolated case, pinning the last member of the owner/mode/sgid `or`
+    collapse (fails under an AND collapse, where mode/sgid silence forces
+    OK). Together the three isolated tests pin every sub-signal."""
+    fake = _RepairProbeTarget(damaged=frozenset({"owner"}))
+    _wire_target(monkeypatch, fake)
+    config = make_config()
+    _seed(db)
+    _reachable(monkeypatch, True)
+
+    workspace_manager.repair_workspace(db, config, "ws1")
+
+    assert "Fixed: directory ownership and permissions" in captured_output.detail
+    assert "\nRepaired 1 issue(s)" in captured_output.info
+
+
+def test_repair_acl_churn_does_not_report_false_fixed(
+    db: Database,
+    make_config,  # noqa: ANN001
+    monkeypatch: pytest.MonkeyPatch,
+    captured_output: CapturedOutput,
+) -> None:
+    """A healthy-but-busy workspace: a file is created/renamed between the two
+    getfacl snapshots (so the snapshots' path sets differ) but every persisting
+    path's ACL is unchanged. The intersect-compare must report OK, not a
+    spurious Fixed, keeping 'No issues found' truthful. A whole-output
+    byte-compare would fail here."""
+    fake = _RepairProbeTarget(acl_churn=True)
+    _wire_target(monkeypatch, fake)
+    config = make_config()
+    _seed(db)
+    _reachable(monkeypatch, True)
+
+    workspace_manager.repair_workspace(db, config, "ws1")
+
+    assert "OK: ACLs" in captured_output.detail
+    assert not any(line.startswith("Fixed:") for line in captured_output.detail)
+    assert "\nNo issues found" in captured_output.info
+
+
+def test_repair_acls_indeterminate_when_getfacl_fails(
+    db: Database,
+    make_config,  # noqa: ANN001
+    monkeypatch: pytest.MonkeyPatch,
+    captured_output: CapturedOutput,
+) -> None:
+    """Both getfacl snapshots fail (transient SSH error): the ACL step has no
+    change data, so it must NOT claim OK (or count a fix), it must warn that
+    the state is indeterminate. Convergence still ran (apply_workspace_acls),
+    only the verification is missing. Fails before the fix, where empty-vs-empty
+    snapshots compared equal and printed a confirmed OK: ACLs."""
+    fake = _RepairProbeTarget(getfacl_ok=False)
+    _wire_target(monkeypatch, fake)
+    config = make_config()
+    _seed(db)
+    _reachable(monkeypatch, True)
+
+    workspace_manager.repair_workspace(db, config, "ws1")
+
+    assert "OK: ACLs" not in captured_output.detail
+    assert not any(line.startswith("Fixed: ACLs") for line in captured_output.detail)
+    assert any("indeterminate" in w and "could not run" in w for w in captured_output.warnings)
+    # The closing line must agree with the warning: not a clean "No issues
+    # found", but qualified with the unverified-step count.
+    assert "\nNo issues found (1 step(s) could not be verified)" in captured_output.info
+    # apply_workspace_acls still ran: convergence is unaffected by the probe.
+    assert any("setfacl -R -m g::rwx" in c for c in fake.commands)
+
+
+def test_repair_parent_traversal_quotes_a_spaced_path(
+    db: Database,
+    make_config,  # noqa: ANN001
+    monkeypatch: pytest.MonkeyPatch,
+    captured_output: CapturedOutput,
+) -> None:
+    """Regression for the traversal quoting fix: a workspace_path with a space
+    and a shell metacharacter is passed as the positional `$1` (shlex-quoted),
+    never interpolated raw into the sh -c script. Guards against a re-introduced
+    raw interpolation, which would split the path on the space and execute the
+    metacharacter."""
+    import shlex
+
+    from agentworks.db import InitStatus
+
+    spaced_path = "/srv/my ws;danger"
+    db.insert_vm("box", site="proxmox", hostname="box")
+    db.update_vm_tailscale("box", "100.64.0.9")
+    db.update_vm_init_status("box", InitStatus.COMPLETE)
+    db.insert_workspace(
+        "ws1",
+        vm_name="box",
+        workspace_path=spaced_path,
+        template="default",
+        linux_group="ws-ws1",
+    )
+    fake = _RepairProbeTarget()
+    _wire_target(monkeypatch, fake)
+    config = make_config()
+    _reachable(monkeypatch, True)
+
+    workspace_manager.repair_workspace(db, config, "ws1")
+
+    traversal = next(c for c in fake.commands if "chmod -c a+x" in c)
+    # The path rides in as the shlex-quoted positional arg after `_`, and the
+    # loop seeds from the PARENT of "$1" (dirname), so the raw path never
+    # touches the script body and the workspace dir itself is never a+x'd.
+    assert traversal.endswith(f"_ {shlex.quote(spaced_path)}")
+    assert 'p=$(dirname "$1")' in traversal
+    assert f"p={spaced_path}" not in traversal
+
+
+# -- the ACL intersect-compare helper (churn-robust change detection) ---------
+
+
+def test_acls_changed_identical_snapshots_is_no_change() -> None:
+    from agentworks.workspaces.manager.repair import _acls_changed
+
+    snap = _acl_block("srv/ws1", _HEALTHY_ACL)
+    assert _acls_changed(snap, snap) is False
+
+
+def test_acls_changed_ignores_added_and_removed_paths() -> None:
+    """Churn only: the shared path is unchanged; a path appears in one
+    snapshot and not the other. Not a repair."""
+    from agentworks.workspaces.manager.repair import _acls_changed
+
+    before = _acl_block("srv/ws1", _HEALTHY_ACL) + "\n" + _acl_block("srv/ws1/gone", _HEALTHY_ACL)
+    after = _acl_block("srv/ws1", _HEALTHY_ACL) + "\n" + _acl_block("srv/ws1/new", _HEALTHY_ACL)
+    assert _acls_changed(before, after) is False
+
+
+def test_acls_changed_detects_change_on_a_persisting_path() -> None:
+    from agentworks.workspaces.manager.repair import _acls_changed
+
+    before = _acl_block("srv/ws1", _DAMAGED_ACL)
+    after = _acl_block("srv/ws1", _HEALTHY_ACL)
+    assert _acls_changed(before, after) is True
+
+
+def test_acls_changed_detects_real_change_even_amid_churn() -> None:
+    """The coordinator's explicit case: a persisting path is genuinely
+    re-ACLed WHILE other paths churn. The real change is still detected."""
+    from agentworks.workspaces.manager.repair import _acls_changed
+
+    before = _acl_block("srv/ws1", _DAMAGED_ACL) + "\n" + _acl_block("srv/ws1/gone", _HEALTHY_ACL)
+    after = _acl_block("srv/ws1", _HEALTHY_ACL) + "\n" + _acl_block("srv/ws1/new", _HEALTHY_ACL)
+    assert _acls_changed(before, after) is True
+
+
+def test_acls_changed_ownership_comment_lines_are_ignored() -> None:
+    """The ``# owner:`` / ``# group:`` header lines are not ACL entries: a
+    workspace whose owner changed (step 3) between snapshots but whose ACL
+    entries match is not an ACL change."""
+    from agentworks.workspaces.manager.repair import _acls_changed
+
+    before = f"# file: srv/ws1\n# owner: 0\n# group: 0\n{_HEALTHY_ACL}\n"
+    after = f"# file: srv/ws1\n# owner: 1000\n# group: 1000\n{_HEALTHY_ACL}\n"
+    assert _acls_changed(before, after) is False
+
+
+# -- create and repair share one canonical ACL (first repair is a no-op) ------
+
+
+class _CreateThenRepairTarget(_FakeAdminTarget):
+    """Stateful fake spanning a create then a repair on one workspace.
+
+    The canonical ACL that create applies (via ``apply_workspace_acls``)
+    persists as ``_acl_canonical``, so the subsequent repair's before/after
+    getfacl snapshots both reflect it and the ACL step is a true no-op. Every
+    other repair probe reports already-converged, so the first repair of a
+    freshly created workspace finds nothing to fix.
+    """
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._acl_canonical = False
+        # Same workspace-mode state the repair steps drive (see
+        # _self_inclusive_traversal_line): repair's step 3 stamps 2770, so a
+        # self-inclusive a+x walk would show up as a spurious Fixed here too.
+        self._ws_mode: int | None = None
+
+    def run(self, cmd: str, **kwargs: object) -> SimpleNamespace:
+        self.commands.append(cmd)
+        stdout = ""
+        ok = True
+        if cmd.startswith("test -d"):
+            ok = False  # create's existence precheck must see "absent" to proceed
+        elif "chmod -c 2770" in cmd:
+            self._ws_mode = 0o2770  # repair step 3 stamps the canonical mode
+        elif "chmod -c a+x" in cmd:
+            stdout, self._ws_mode = _self_inclusive_traversal_line(cmd, self._ws_mode)
+        elif "setfacl -R -m g::rwx" in cmd:
+            self._acl_canonical = True  # the recursive access apply converges the tree
+        elif "getfacl" in cmd:
+            entries = _HEALTHY_ACL if self._acl_canonical else _DAMAGED_ACL
+            stdout = _acl_block("srv/ws1", entries)
+        elif "id -nG" in cmd:
+            stdout = "admin ws-ws1"  # admin already in the group
+        return SimpleNamespace(ok=ok, returncode=0 if ok else 1, stdout=stdout, stderr="")
+
+
+def test_first_repair_after_create_is_a_noop(
+    db: Database,
+    make_config,  # noqa: ANN001
+    monkeypatch: pytest.MonkeyPatch,
+    captured_output: CapturedOutput,
+) -> None:
+    """create and repair now apply the IDENTICAL canonical ACL through the
+    shared ``apply_workspace_acls`` helper, so a freshly created workspace is
+    already in repair's canonical state: the first repair reports OK: ACLs and
+    the truthful No issues found. Create applies the recursive spec (default
+    ACL on dirs + recursive access), not the old top-dir-only form."""
+    from agentworks.workspaces.backends.vm import create_vm_workspace
+    from agentworks.workspaces.templates import ResolvedTemplate
+
+    fake = _CreateThenRepairTarget()
+    _wire_target(monkeypatch, fake)
+    config = make_config()
+    _seed(db)
+    _reachable(monkeypatch, True)
+
+    vm = db.get_vm("box")
+    assert vm is not None
+    create_vm_workspace(vm, config, "ws1", ResolvedTemplate(name="default", repo=None))
+
+    # Create applied the recursive canonical ACL (the same spec repair uses),
+    # not a top-dir-only default. Assert on shape, path-agnostically.
+    create_acls = [c for c in fake.commands if "setfacl" in c]
+    assert any(c.startswith("find ") and "setfacl -d -m g::rwx -m m::rwx" in c for c in create_acls)
+    assert any("setfacl -R -m g::rwx -m m::rwx" in c for c in create_acls)
+    assert fake._acl_canonical
+
+    workspace_manager.repair_workspace(db, config, "ws1")
+
+    assert "OK: ACLs" in captured_output.detail
+    assert not any(line.startswith("Fixed:") for line in captured_output.detail)
+    assert "\nNo issues found" in captured_output.info
+
+
 def test_delete_reachable_vm_is_one_boundary_burst(
     db: Database,
     make_config,  # noqa: ANN001
@@ -404,6 +887,184 @@ def test_delete_stopped_vm_gate_burst_seeds_the_whole_union(
     assert events == ["status", "start", "tailscale"]
     assert resolve_counter == [["proxmox-token"]]
     assert db.get_workspace("ws1") is None
+
+
+# -- delete removes the workspace's Linux group (issue #249) -------------------
+
+
+def test_delete_removes_the_workspace_group_after_the_directory(
+    db: Database,
+    make_config,  # noqa: ANN001
+    target: _FakeAdminTarget,
+    monkeypatch: pytest.MonkeyPatch,
+    captured_output,  # noqa: ANN001
+) -> None:
+    """Delete tears down the workspace's Linux group (``groupdel``), the
+    symmetric counterpart of the ``groupadd`` at create, so no residual
+    group survives the delete (issue #249). The removal runs on the VM
+    transport AFTER the directory is gone: the ``groupdel`` command
+    appears strictly after the ``rm -rf`` of the workspace path."""
+    config = make_config()
+    _seed(db)
+    _reachable(monkeypatch, True)
+
+    workspace_manager.delete_workspace(db, config, "ws1", yes=True)
+
+    dir_removed = next(i for i, c in enumerate(target.commands) if "rm -rf /srv/ws1" in c)
+    group_removed = next(i for i, c in enumerate(target.commands) if "groupdel ws-ws1" in c)
+    assert group_removed > dir_removed
+    assert db.get_workspace("ws1") is None
+
+
+def test_delete_group_removal_uses_the_recorded_linux_group(
+    db: Database,
+    make_config,  # noqa: ANN001
+    target: _FakeAdminTarget,
+    monkeypatch: pytest.MonkeyPatch,
+    captured_output,  # noqa: ANN001
+) -> None:
+    """The group removed is the one RECORDED on the workspace row, not a
+    re-derivation from the name: a legacy workspace whose on-VM group
+    keeps the older ``ws--`` prefix drops that exact group, so the
+    residue it actually owns is the one that goes."""
+    config = make_config()
+    db.insert_vm("box", site="proxmox", hostname="box")
+    db.update_vm_tailscale("box", "100.64.0.9")
+    db.update_vm_init_status("box", InitStatus.COMPLETE)
+    db.insert_workspace(
+        "legacy",
+        vm_name="box",
+        workspace_path="/srv/legacy",
+        template="default",
+        linux_group="ws--legacy",
+    )
+    _reachable(monkeypatch, True)
+
+    workspace_manager.delete_workspace(db, config, "legacy", yes=True)
+
+    assert any("groupdel ws--legacy" in c for c in target.commands)
+    assert not any("groupdel ws-legacy" in c for c in target.commands)
+
+
+class _CheckAwareTarget(_FakeAdminTarget):
+    """Admin target that models the real transport's ``check`` contract:
+    a command matching a failing needle raises ``SSHError`` only under
+    ``check=True`` (the default); under ``check=False`` it returns a
+    non-ok result without raising, exactly as the SSH transport does."""
+
+    def run(self, cmd: str, **kwargs: object) -> SimpleNamespace:
+        self.commands.append(cmd)
+        failing = any(needle in cmd for needle in self._failing)
+        if failing and kwargs.get("check", True):
+            from agentworks.ssh import SSHError
+
+            raise SSHError(f"command failed: {cmd}")
+        return SimpleNamespace(ok=not failing, returncode=0 if not failing else 1, stdout="", stderr="")
+
+
+def test_delete_group_removal_failure_does_not_break_the_delete(
+    db: Database,
+    make_config,  # noqa: ANN001
+    monkeypatch: pytest.MonkeyPatch,
+    captured_output: CapturedOutput,
+) -> None:
+    """A group that ``groupdel`` cannot remove (already gone, or refused)
+    is tolerated: the removal is issued with ``check=False``, so the
+    non-zero exit never raises, the delete still finishes (row gone,
+    success reported), and no 'remote cleanup failed' warning fires."""
+    fake = _CheckAwareTarget(failing=("groupdel",))
+    _wire_target(monkeypatch, fake)
+
+    config = make_config()
+    _seed(db)
+    _reachable(monkeypatch, True)
+
+    workspace_manager.delete_workspace(db, config, "ws1", yes=True)
+
+    assert any("groupdel ws-ws1" in c for c in fake.commands)
+    assert db.get_workspace("ws1") is None
+    assert "Workspace 'ws1' deleted" in captured_output.info
+    assert not any("remote cleanup failed" in w for w in captured_output.warnings)
+
+
+# -- create-rollback reclaims the fresh group too (same window, issue #249) ----
+
+
+def _seed_vm_only(db: Database) -> None:
+    """A COMPLETE, reachable-host VM row with no workspace: the create
+    path makes the workspace itself, so its rollback tests must not
+    pre-seed one."""
+    db.insert_vm("box", site="proxmox", hostname="box")
+    db.update_vm_tailscale("box", "100.64.0.9")
+    db.update_vm_init_status("box", InitStatus.COMPLETE)
+
+
+def _boom_after_create(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Force a failure AFTER ``create_vm_workspace`` returns: the VS Code
+    stub step raises, so ``workspace_path`` is already set and the
+    rollback's on-VM teardown (directory + fresh group) fires."""
+
+    def _boom(*args: object, **kwargs: object) -> str:
+        raise RuntimeError("stub exploded")
+
+    monkeypatch.setattr("agentworks.workspaces.backends.vm.generate_vscode_workspace", _boom)
+
+
+def test_create_rollback_removes_the_fresh_workspace_group(
+    db: Database,
+    make_config,  # noqa: ANN001
+    monkeypatch: pytest.MonkeyPatch,
+    captured_output: CapturedOutput,
+) -> None:
+    """A create that fails after ``create_vm_workspace`` returns rolls
+    back the on-VM state through ``delete_vm_workspace``, which now also
+    removes the group create just made. The removed group carries the
+    fresh ``ws-`` prefix (``workspace_group('ws1')``), and the
+    ``groupdel`` runs after the directory ``rm -rf``, mirroring the
+    delete path. ``failing=('test -d',)`` makes the create-time
+    existence probe report the directory absent so create proceeds."""
+    fake = _FakeAdminTarget(failing=("test -d",))
+    _wire_target(monkeypatch, fake)
+
+    config = make_config()
+    _seed_vm_only(db)
+    _reachable(monkeypatch, True)
+    _boom_after_create(monkeypatch)
+
+    with pytest.raises(ExternalError, match="creating workspace: stub exploded"):
+        workspace_manager.create_workspace(db, config, name="ws1", vm_name="box")
+
+    dir_removed = next(i for i, c in enumerate(fake.commands) if c.startswith("rm -rf") and "ws1" in c)
+    group_removed = next(i for i, c in enumerate(fake.commands) if "groupdel ws-ws1" in c)
+    assert group_removed > dir_removed
+    assert db.get_workspace("ws1") is None
+
+
+def test_create_rollback_tolerates_a_groupdel_failure(
+    db: Database,
+    make_config,  # noqa: ANN001
+    monkeypatch: pytest.MonkeyPatch,
+    captured_output: CapturedOutput,
+) -> None:
+    """A ``groupdel`` that fails during create rollback does not mask the
+    original create error, nor turn the rollback itself into a warning:
+    the removal is issued ``check=False``, so the non-zero exit never
+    raises. The original ``ExternalError`` propagates cleanly and no
+    'rollback during workspace create' warning fires."""
+    fake = _CheckAwareTarget(failing=("test -d", "groupdel"))
+    _wire_target(monkeypatch, fake)
+
+    config = make_config()
+    _seed_vm_only(db)
+    _reachable(monkeypatch, True)
+    _boom_after_create(monkeypatch)
+
+    with pytest.raises(ExternalError, match="creating workspace: stub exploded"):
+        workspace_manager.create_workspace(db, config, name="ws1", vm_name="box")
+
+    assert any("groupdel ws-ws1" in c for c in fake.commands)
+    assert db.get_workspace("ws1") is None
+    assert not any("rollback during workspace create" in w for w in captured_output.warnings)
 
 
 # -- the operation scope reaches readiness ------------------------------------

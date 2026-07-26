@@ -210,12 +210,6 @@ bound `platform_config` deliberately: it carries OPERATOR settings, not site con
 public-IP path needs `config.operator.ssh_private_key`; WSL2's reconnect wait builds the Tailscale
 transport from operator config). The two kinds of configuration stay separate.
 
-> **Superseded by PR #271 (2026-07-26):** `vm_active` is now a pure power-hold on every platform and
-> no longer performs a reconnect wait, so the WSL2 justification above (`config` used to build the
-> Tailscale transport for that wait) no longer holds. `config` remains on `vm_active`'s signature as
-> reserved operator settings (the base-class contract), but no platform's hold uses it today. The
-> Azure `native_transport()` public-IP rationale for `config` is unchanged.
-
 ## The vm-site and vm-platform kinds
 
 Both kinds register from the VM domain (`vms/kinds.py`, alongside the existing vm-template kind, per

@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING
 from agentworks import output
 from agentworks.errors import NotFoundError
 from agentworks.vms.manager import gated_vm_boundary
+from agentworks.workspaces.acls import apply_workspace_acls
 from agentworks.workspaces.manager._common import _workspace_scope
 
 if TYPE_CHECKING:
@@ -29,16 +30,27 @@ def repair_workspace(
 ) -> None:
     """Repair a workspace by converging its live VM state to the DB.
 
-    Idempotent and forward-only. Steps split into two shapes:
+    Idempotent and forward-only. Every step is detection-based: it
+    reports `Fixed:` only when it actually changed live state and `OK:`
+    when state was already correct, so the closing `Repaired N issue(s)`
+    / `No issues found` is truthful. Steps split into two shapes by HOW
+    they detect a change:
 
-    - **Detection-based** (group existence, admin membership, agent group
-      membership against the grant table): probe live state first and only
-      apply a fix when state diverges. Report `Fixed:` when a fix ran,
-      `OK:` when no change was needed.
-    - **Always-applied** (directory ownership, permissions, SGID, ACLs,
-      parent-directory traversal): re-run their canonical commands every
-      time; the underlying chown/chmod/setfacl are no-ops on already-correct
-      state. Report `OK:` on success.
+    - **Probe-first** (group existence, admin membership, agent group
+      membership against the grant table): read live state, then apply a
+      fix only when it diverges.
+    - **Apply-and-observe** (directory ownership, permissions, SGID,
+      ACLs, parent-directory traversal): re-run their canonical
+      commands every time (the underlying chown/chmod/setfacl are no-ops
+      on already-correct state) but observe whether anything actually
+      changed. chown/chmod carry `-c`, coreutils' own changed/unchanged
+      signal (a line per entry they alter, silence otherwise); setfacl
+      has no such signal, so its step snapshots the tree's ACLs before
+      and after and compares. A real change reports `Fixed:`, an
+      unchanged run `OK:`. The ACL step applies the canonical spec through
+      the shared `apply_workspace_acls` helper, the same one `workspace
+      create` uses, so a freshly created workspace is already converged
+      and its first repair reports `OK: ACLs`.
 
     Git identity (the template's `git_user_name` / `git_user_email`)
     converges here too, detection-based: an identity added or changed on
@@ -90,7 +102,13 @@ def repair_workspace(
     with gated_vm_boundary(db, config, registry, vm, scope=_workspace_scope(db, vm, name)):
         target = transport(vm, config)
         ws_group = ws.linux_group
+        quoted_ws = shlex.quote(ws.workspace_path)
         fixes = 0
+        # Steps whose convergence ran but whose Fixed-vs-OK outcome could not
+        # be verified (currently only the ACL step, when a getfacl snapshot
+        # fails). Tracked so the closing line does not silently claim "No
+        # issues found" over an unverified step.
+        indeterminate = 0
 
         output.info(f"Repairing workspace '{name}' on VM '{vm.name}'...")
 
@@ -137,47 +155,93 @@ def repair_workspace(
         except SSHError as e:
             output.warn(f"admin group check failed: {e}")
 
-        # 3. Fix directory permissions (recursive chgrp so ACLs apply correctly)
+        # 3. Fix directory ownership, permissions, and SGID (recursive chgrp
+        # so ACLs apply correctly). The -c (changes) flag makes chown/chmod
+        # print a line per entry they actually alter and stay silent
+        # otherwise, so a non-empty result across the three commands means
+        # we genuinely converged something (Fixed) rather than re-applied a
+        # no-op (OK). Note 2770 already carries the SGID bit on the top
+        # directory; the recursive g+s below re-applies it to subdirectories.
+        # On a badly-damaged large tree this stdout can be sizable (one line
+        # per altered entry), but detection only needs its truthiness, so we
+        # never parse it, just test whether anything was printed.
         try:
-            target.run(f"chown -R {vm.admin_username}:{ws_group} {ws.workspace_path}", sudo=True, timeout=120)
-            target.run(f"chmod 2770 {ws.workspace_path}", sudo=True)
+            owner = target.run(f"chown -R -c {vm.admin_username}:{ws_group} {quoted_ws}", sudo=True, timeout=120)
+            mode = target.run(f"chmod -c 2770 {quoted_ws}", sudo=True)
             # Set SGID on all subdirectories so new files inherit the workspace group.
             # This is critical for atomic-write tools (including Claude Code) that
             # create a temp file and rename it over the original.
-            target.run(
-                f"find {shlex.quote(ws.workspace_path)} -type d -exec chmod g+s {{}} +",
+            sgid = target.run(
+                f"find {quoted_ws} -type d -exec chmod -c g+s {{}} +",
                 sudo=True,
                 timeout=120,
             )
-            output.detail("OK: directory ownership and permissions")
+            if owner.stdout.strip() or mode.stdout.strip() or sgid.stdout.strip():
+                output.detail("Fixed: directory ownership and permissions")
+                fixes += 1
+            else:
+                output.detail("OK: directory ownership and permissions")
         except SSHError as e:
             output.warn(f"permission fix failed: {e}")
 
         # 4. Fix ACLs
-        # Default ACLs only apply to directories; use find to avoid warnings on files.
-        # Effective ACLs apply to all entries and should not produce output.
+        # apply_workspace_acls applies the canonical group ACL, the SAME spec
+        # workspace create applies, so a freshly created workspace is already
+        # converged and this reports OK on a first repair.
+        # setfacl has no changed/unchanged signal, so snapshot the tree's ACLs
+        # before and after and compare. A naive whole-output compare would be
+        # fooled by ordinary churn: a file created, renamed, or deleted by an
+        # active session between the two snapshots (exactly the atomic-write
+        # temp-file renames step 3 calls out) would shift the output and read
+        # as a spurious fix. So we compare per-path ACL entries only for paths
+        # present in BOTH snapshots (`_acls_changed`): added/removed paths are
+        # ignored as churn, while a real ACL change on a persisting path is
+        # still detected. Comparing actual before/after state, rather than
+        # reconstructing the desired ACL, keeps this correct as the applied
+        # spec evolves. getfacl uses check=False because a getfacl hiccup must
+        # not mask the real SSHError a failing setfacl would surface; but if a
+        # snapshot did fail we have no change data, so we report the check as
+        # indeterminate rather than claiming a confirmed OK.
         try:
-            target.run(
-                f"find {ws.workspace_path} -type d -exec setfacl -d -m g::rwx -m m::rwx {{}} +",
-                sudo=True,
-                timeout=120,
-            )
-            target.run(
-                f"setfacl -R -m g::rwx -m m::rwx {ws.workspace_path}",
-                sudo=True,
-                timeout=120,
-            )
-            output.detail("OK: ACLs")
+            before = target.run(f"getfacl -R -n {quoted_ws}", sudo=True, check=False, timeout=120)
+            apply_workspace_acls(target, ws.workspace_path)
+            after = target.run(f"getfacl -R -n {quoted_ws}", sudo=True, check=False, timeout=120)
+            if not before.ok or not after.ok:
+                # Convergence still ran (apply_workspace_acls above), but the
+                # before/after probe did not, so we cannot tell OK from Fixed.
+                # Warn rather than report a no-op we did not verify, and mark
+                # the step indeterminate so the closing line stays honest.
+                output.warn("ACLs applied, but the before/after check could not run (state indeterminate)")
+                indeterminate += 1
+            elif _acls_changed(before.stdout, after.stdout):
+                output.detail("Fixed: ACLs")
+                fixes += 1
+            else:
+                output.detail("OK: ACLs")
         except SSHError as e:
             output.warn(f"ACL fix failed: {e}")
 
-        # 5. Fix parent directory traversal
+        # 5. Fix parent directory traversal. The walk seeds from the PARENT of
+        # the workspace (`dirname "$1"`), never the workspace dir itself: the
+        # workspace's own mode is step 3's business (canonical 2770, which
+        # deliberately carries no world bits), and an `a+x` on it would flip
+        # 2770 to 2771 and fight step 3, so a pristine workspace would report
+        # Fixed on every run and never reach "No issues found". Only true
+        # ancestors get a+x. Each ancestor's chmod carries -c, so the loop's
+        # aggregated stdout is non-empty exactly when we opened traversal that
+        # was missing (Fixed) and empty when every ancestor was already a+x
+        # (OK). The path rides as a positional arg ($1) so shlex.quote handles
+        # spaces / metacharacters cleanly rather than interpolating a raw path
+        # into the sh -c script.
         try:
-            target.run(
-                f'sh -c \'p={ws.workspace_path}; while [ "$p" != "/" ]; do chmod a+x "$p"; p=$(dirname "$p"); done\'',
-                sudo=True,
-            )
-            output.detail("OK: parent traversal")
+            walk = 'p=$(dirname "$1"); while [ "$p" != "/" ]; do chmod -c a+x "$p"; p=$(dirname "$p"); done'
+            traversal_cmd = f"sh -c {shlex.quote(walk)} _ {quoted_ws}"
+            traversal = target.run(traversal_cmd, sudo=True)
+            if traversal.stdout.strip():
+                output.detail("Fixed: parent traversal")
+                fixes += 1
+            else:
+                output.detail("OK: parent traversal")
         except SSHError as e:
             output.warn(f"parent traversal fix failed: {e}")
 
@@ -226,10 +290,55 @@ def repair_workspace(
         except SSHError as e:
             output.warn(f"agent membership check failed: {e}")
 
+        # A step whose verification was indeterminate qualifies the closing
+        # line either way: it must not read as a clean bill of health.
+        qualifier = f" ({indeterminate} step(s) could not be verified)" if indeterminate else ""
         if fixes > 0:
-            output.result(f"\nRepaired {fixes} issue(s)")
+            output.result(f"\nRepaired {fixes} issue(s){qualifier}")
         else:
-            output.result("\nNo issues found")
+            output.result(f"\nNo issues found{qualifier}")
+
+
+def _parse_getfacl(text: str) -> dict[str, frozenset[str]]:
+    """Parse ``getfacl -R -n`` output into ``{path: acl-entry-set}``.
+
+    Each record starts with a ``# file: <path>`` line followed by that
+    path's ACL entries (``user::rwx``, ``group::rwx``, ``mask::rwx``,
+    ``default:...``). Comment lines (``# owner:``, ``# group:``,
+    ``# flags:``) are not ACL entries and are dropped, so ownership churn
+    never registers as an ACL change. Entries go into a set so the compare
+    is order-independent (getfacl's traversal order between two adjacent
+    snapshots is stable, but the set makes the compare robust regardless).
+    """
+    blocks: dict[str, frozenset[str]] = {}
+    path: str | None = None
+    entries: set[str] = set()
+    for raw in text.splitlines():
+        line = raw.strip()
+        if line.startswith("# file:"):
+            if path is not None:  # flush the record we just finished
+                blocks[path] = frozenset(entries)
+            path = line[len("# file:") :].strip()
+            entries = set()
+        elif line and not line.startswith("#") and path is not None:
+            entries.add(line)
+    if path is not None:
+        blocks[path] = frozenset(entries)
+    return blocks
+
+
+def _acls_changed(before: str, after: str) -> bool:
+    """True when any path present in BOTH getfacl snapshots has different
+    ACL entries.
+
+    Paths that appear in only one snapshot are ignored: files created,
+    renamed, or deleted by an active session between the two ``getfacl``
+    runs are ordinary churn, not an ACL repair. A path that persists across
+    both snapshots with genuinely re-ACLed entries is still detected.
+    """
+    b = _parse_getfacl(before)
+    a = _parse_getfacl(after)
+    return any(b[path] != a[path] for path in b.keys() & a.keys())
 
 
 def _repair_git_identity(

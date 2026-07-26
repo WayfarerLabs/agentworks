@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING
 from agentworks import output
 from agentworks.errors import AlreadyExistsError
 from agentworks.transports import transport
+from agentworks.workspaces.acls import apply_workspace_acls
 from agentworks.workspaces.tmuxinator import console_session_name, generate_config
 
 if TYPE_CHECKING:
@@ -53,8 +54,10 @@ def create_vm_workspace(
     target.run(f"mkdir -p {workspace_path}", sudo=True)
     target.run(f"chown {vm.admin_username}:{ws_group} {workspace_path}", sudo=True)
     target.run(f"chmod 2770 {workspace_path}", sudo=True)
-    # Set default ACLs so files created inside are group-writable
-    target.run(f"setfacl -d -m g::rwx -m m::rwx {workspace_path}", sudo=True)
+    # The canonical workspace ACL is applied at the end (apply_workspace_acls),
+    # after any clone and other content is placed, so existing entries are
+    # covered too. This is the same recursive spec workspace repair applies,
+    # so a first repair of this workspace is a true no-op.
 
     # Git clone if repo is set
     if template.repo:
@@ -115,6 +118,12 @@ def create_vm_workspace(
             timeout=10,
         )
 
+    # Canonical workspace ACL, applied last so every entry written above (a
+    # clone, the tmuxinator config) is covered, and future entries inherit via
+    # the default ACL. Shared with workspace repair so the two never drift and
+    # a first repair of this workspace is a no-op.
+    apply_workspace_acls(target, workspace_path)
+
     return workspace_path
 
 
@@ -123,10 +132,24 @@ def delete_vm_workspace(
     config: Config,
     ws_name: str,
     workspace_path: str,
+    linux_group: str,
     *,
     logger: SSHLogger | None = None,
 ) -> None:
-    """Delete a workspace from a VM."""
+    """Delete a workspace from a VM.
+
+    Tears down what :func:`create_vm_workspace` set up: the directory,
+    the tmuxinator symlink, and the workspace's Linux group. ``groupadd``
+    at create time has a symmetric ``groupdel`` here, so a deleted
+    workspace leaves no residual group on the VM (issue #249). Callers
+    pass the recorded ``linux_group`` rather than re-deriving it, so
+    legacy workspaces (older ``ws--`` prefix) drop the group they
+    actually own.
+
+    Group removal runs last, once the directory is gone and after the
+    caller has removed the agent members; ``groupdel`` removes the group
+    regardless of remaining supplementary members (the admin's included).
+    """
     from agentworks.ssh import SSHError
 
     assert vm.tailscale_host is not None
@@ -136,6 +159,11 @@ def delete_vm_workspace(
         target.run(f"rm -rf {workspace_path}", sudo=True, timeout=30)
         session = console_session_name(ws_name)
         target.run(f"rm -f ~/.config/tmuxinator/{session}.yml", check=False, timeout=10)
+        # Remove the workspace's Linux group. check=False so a group that
+        # is already gone (or, defensively, one groupdel refuses to remove)
+        # is tolerated rather than failing the delete, mirroring the
+        # best-effort group-membership teardown in agents/grants.py.
+        target.run(f"/usr/sbin/groupdel {linux_group}", sudo=True, check=False, timeout=10)
     except SSHError as e:
         output.warn(f"remote cleanup failed: {e}")
 

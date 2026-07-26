@@ -230,8 +230,119 @@ def test_exec_dash_prefixed_command_fails_with_zero_resolves_and_zero_gate(
     _seed(db)
     _no_gate(monkeypatch)
 
-    with pytest.raises(ValidationError, match="cannot start with '-'"):
+    with pytest.raises(ValidationError, match="cannot start with '-'") as exc_info:
         agent_manager.exec_agent(db, config, name="a1", command=["--workspace", "ws1", "pwd"])
+
+    # The hint names the real workaround: the `--` separator (and the
+    # `sh -c` fallback), not the misleading "put agentworks args first".
+    hint = exc_info.value.hint or ""
+    assert "put '--' before" in hint
+    assert "sh -c" in hint
+    assert resolve_counter == []
+    assert target.streaming_calls == []
+
+
+def test_exec_double_dash_separator_runs_dash_led_command(
+    db: Database,
+    make_config,  # noqa: ANN001
+    resolve_counter: list[list[str]],
+    target: _FakeAgentTarget,
+    monkeypatch: pytest.MonkeyPatch,
+    captured_output,  # noqa: ANN001
+) -> None:
+    """`agent exec a1 -- --version` consumes the leading `--` separator
+    and runs the dash-led remote command verbatim inside the login
+    shell; the leading-dash guard steps aside."""
+    config = make_config(AGENT_ENV_SECTION)
+    _seed(db)
+    _reachable(monkeypatch, True)
+
+    rc = agent_manager.exec_agent(db, config, name="a1", command=["--", "--version"])
+
+    assert rc == 0
+    ((cmd, _env),) = target.streaming_calls
+    assert cmd == "$SHELL -lc --version"
+
+
+def test_exec_double_dash_separator_strips_only_the_first(
+    db: Database,
+    make_config,  # noqa: ANN001
+    resolve_counter: list[list[str]],
+    target: _FakeAgentTarget,
+    monkeypatch: pytest.MonkeyPatch,
+    captured_output,  # noqa: ANN001
+) -> None:
+    """Only ONE leading `--` is consumed; a later `--` is part of the
+    remote command and is preserved verbatim inside the login shell."""
+    config = make_config(AGENT_ENV_SECTION)
+    _seed(db)
+    _reachable(monkeypatch, True)
+
+    rc = agent_manager.exec_agent(db, config, name="a1", command=["--", "git", "log", "--", "path"])
+
+    assert rc == 0
+    ((cmd, _env),) = target.streaming_calls
+    assert cmd == "$SHELL -lc 'git log -- path'"
+
+
+def test_exec_double_dash_separator_preserves_an_adjacent_second(
+    db: Database,
+    make_config,  # noqa: ANN001
+    resolve_counter: list[list[str]],
+    target: _FakeAgentTarget,
+    monkeypatch: pytest.MonkeyPatch,
+    captured_output,  # noqa: ANN001
+) -> None:
+    """Back-to-back separators: only the FIRST `--` is consumed, so an
+    immediately-adjacent second `--` survives as the remote command's
+    own first token (mirror of the vm exec sibling case)."""
+    config = make_config(AGENT_ENV_SECTION)
+    _seed(db)
+    _reachable(monkeypatch, True)
+
+    rc = agent_manager.exec_agent(db, config, name="a1", command=["--", "--", "x"])
+
+    assert rc == 0
+    ((cmd, _env),) = target.streaming_calls
+    assert cmd == "$SHELL -lc '-- x'"
+
+
+def test_exec_bare_flag_after_command_word_still_works(
+    db: Database,
+    make_config,  # noqa: ANN001
+    resolve_counter: list[list[str]],
+    target: _FakeAgentTarget,
+    monkeypatch: pytest.MonkeyPatch,
+    captured_output,  # noqa: ANN001
+) -> None:
+    """A flag that follows a command word (no separator needed) runs as
+    before: `agent exec a1 free -m` is unaffected by the `--` handling."""
+    config = make_config(AGENT_ENV_SECTION)
+    _seed(db)
+    _reachable(monkeypatch, True)
+
+    rc = agent_manager.exec_agent(db, config, name="a1", command=["free", "-m"])
+
+    assert rc == 0
+    ((cmd, _env),) = target.streaming_calls
+    assert cmd == "$SHELL -lc 'free -m'"
+
+
+def test_exec_missing_command_after_double_dash_fails_pre_gate(
+    db: Database,
+    make_config,  # noqa: ANN001
+    resolve_counter: list[list[str]],
+    target: _FakeAgentTarget,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A bare `--` with nothing after it is a missing command, rejected
+    before any resolve or gate."""
+    config = make_config()
+    _seed(db)
+    _no_gate(monkeypatch)
+
+    with pytest.raises(ValidationError, match="missing command after '--'"):
+        agent_manager.exec_agent(db, config, name="a1", command=["--"])
 
     assert resolve_counter == []
     assert target.streaming_calls == []

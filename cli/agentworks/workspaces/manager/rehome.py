@@ -226,13 +226,17 @@ def _rehome_vm(
                 except SSHError as e:
                     output.warn(f"ACL setup failed: {e}")
 
-                # Fix parent directory traversal. sudo=True already wraps the
+                # Fix parent directory traversal. Seed the walk from the PARENT
+                # of the new path (`dirname {np}`), never the workspace dir
+                # itself: its own mode was just set to the canonical 2770 above
+                # (no world bits by design), and an a+x on it would flip 2770 to
+                # 2771. Only true ancestors need a+x. sudo=True already wraps the
                 # command in `sudo -n bash -c '<quoted>'`, so the script runs in
                 # a single bash context. No extra `sh -c '...'` indirection is
                 # needed (and the explicit wrapper made path quoting impossible
                 # to do safely).
                 target.run(
-                    f'p={np}; while [ "$p" != "/" ]; do chmod a+x "$p"; p=$(dirname "$p"); done',
+                    f'p=$(dirname {np}); while [ "$p" != "/" ]; do chmod a+x "$p"; p=$(dirname "$p"); done',
                     sudo=True,
                 )
 
