@@ -198,7 +198,7 @@ def delete_workspace(
         if vm is not None:
             from agentworks.workspaces.backends.vm import delete_vm_workspace
 
-            delete_vm_workspace(vm, config, name, ws.workspace_path, logger=ssh_logger)
+            delete_vm_workspace(vm, config, name, ws.workspace_path, ws.linux_group, logger=ssh_logger)
 
         ssh_logger.close()
 
