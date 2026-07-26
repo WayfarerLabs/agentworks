@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING
 from agentworks import output
 from agentworks.errors import NotFoundError
 from agentworks.vms.manager import gated_vm_boundary
+from agentworks.workspaces.acls import apply_workspace_acls
 from agentworks.workspaces.manager._common import _workspace_scope
 
 if TYPE_CHECKING:
@@ -46,7 +47,10 @@ def repair_workspace(
       signal (a line per entry they alter, silence otherwise); setfacl
       has no such signal, so its step snapshots the tree's ACLs before
       and after and compares. A real change reports `Fixed:`, an
-      unchanged run `OK:`.
+      unchanged run `OK:`. The ACL step applies the canonical spec through
+      the shared `apply_workspace_acls` helper, the same one `workspace
+      create` uses, so a freshly created workspace is already converged
+      and its first repair reports `OK: ACLs`.
 
     Git identity (the template's `git_user_name` / `git_user_email`)
     converges here too, detection-based: an identity added or changed on
@@ -153,6 +157,9 @@ def repair_workspace(
         # we genuinely converged something (Fixed) rather than re-applied a
         # no-op (OK). Note 2770 already carries the SGID bit on the top
         # directory; the recursive g+s below re-applies it to subdirectories.
+        # On a badly-damaged large tree this stdout can be sizable (one line
+        # per altered entry), but detection only needs its truthiness, so we
+        # never parse it, just test whether anything was printed.
         try:
             owner = target.run(f"chown -R -c {vm.admin_username}:{ws_group} {quoted_ws}", sudo=True, timeout=120)
             mode = target.run(f"chmod -c 2770 {quoted_ws}", sudo=True)
@@ -173,28 +180,26 @@ def repair_workspace(
             output.warn(f"permission fix failed: {e}")
 
         # 4. Fix ACLs
-        # Default ACLs only apply to directories; use find to avoid warnings on files.
-        # Effective ACLs apply to all entries and should not produce output.
+        # apply_workspace_acls applies the canonical group ACL, the SAME spec
+        # workspace create applies, so a freshly created workspace is already
+        # converged and this reports OK on a first repair.
         # setfacl has no changed/unchanged signal, so snapshot the tree's ACLs
-        # before and after and compare: getfacl prints entries in a fixed
-        # canonical order and includes the mask, so an equal snapshot means
-        # nothing changed (no false Fixed on a healthy workspace). Comparing
-        # the actual before/after state, rather than reconstructing the
-        # desired ACL, keeps this correct as the applied spec evolves.
+        # before and after and compare. A naive whole-output compare would be
+        # fooled by ordinary churn: a file created, renamed, or deleted by an
+        # active session between the two snapshots (exactly the atomic-write
+        # temp-file renames step 3 calls out) would shift the output and read
+        # as a spurious fix. So we compare per-path ACL entries only for paths
+        # present in BOTH snapshots (`_acls_changed`): added/removed paths are
+        # ignored as churn, while a real ACL change on a persisting path is
+        # still detected. Comparing actual before/after state, rather than
+        # reconstructing the desired ACL, keeps this correct as the applied
+        # spec evolves. getfacl uses check=False because a getfacl hiccup must
+        # not mask the real SSHError a failing setfacl would surface.
         try:
-            before = target.run(f"getfacl -R -n {quoted_ws}", sudo=True, check=False)
-            target.run(
-                f"find {quoted_ws} -type d -exec setfacl -d -m g::rwx -m m::rwx {{}} +",
-                sudo=True,
-                timeout=120,
-            )
-            target.run(
-                f"setfacl -R -m g::rwx -m m::rwx {quoted_ws}",
-                sudo=True,
-                timeout=120,
-            )
-            after = target.run(f"getfacl -R -n {quoted_ws}", sudo=True, check=False)
-            if before.stdout != after.stdout:
+            before = target.run(f"getfacl -R -n {quoted_ws}", sudo=True, check=False, timeout=120)
+            apply_workspace_acls(target, ws.workspace_path)
+            after = target.run(f"getfacl -R -n {quoted_ws}", sudo=True, check=False, timeout=120)
+            if _acls_changed(before.stdout, after.stdout):
                 output.detail("Fixed: ACLs")
                 fixes += 1
             else:
@@ -205,10 +210,12 @@ def repair_workspace(
         # 5. Fix parent directory traversal. Each ancestor's chmod carries
         # -c, so the loop's aggregated stdout is non-empty exactly when we
         # opened traversal that was missing (Fixed) and empty when every
-        # ancestor was already a+x (OK).
+        # ancestor was already a+x (OK). The path is passed as a positional
+        # arg ($1) so shlex.quote handles spaces / metacharacters cleanly
+        # rather than interpolating a raw path into the sh -c script.
         try:
             traversal_cmd = (
-                f'sh -c \'p={ws.workspace_path}; while [ "$p" != "/" ]; do chmod -c a+x "$p"; p=$(dirname "$p"); done\''
+                f'sh -c \'p="$1"; while [ "$p" != "/" ]; do chmod -c a+x "$p"; p=$(dirname "$p"); done\' _ {quoted_ws}'
             )
             traversal = target.run(traversal_cmd, sudo=True)
             if traversal.stdout.strip():
@@ -268,6 +275,48 @@ def repair_workspace(
             output.result(f"\nRepaired {fixes} issue(s)")
         else:
             output.result("\nNo issues found")
+
+
+def _parse_getfacl(text: str) -> dict[str, frozenset[str]]:
+    """Parse ``getfacl -R -n`` output into ``{path: acl-entry-set}``.
+
+    Each record starts with a ``# file: <path>`` line followed by that
+    path's ACL entries (``user::rwx``, ``group::rwx``, ``mask::rwx``,
+    ``default:...``). Comment lines (``# owner:``, ``# group:``,
+    ``# flags:``) are not ACL entries and are dropped, so ownership churn
+    never registers as an ACL change. Entries go into a set so the compare
+    is order-independent (getfacl's traversal order between two adjacent
+    snapshots is stable, but the set makes the compare robust regardless).
+    """
+    blocks: dict[str, frozenset[str]] = {}
+    path: str | None = None
+    entries: set[str] = set()
+    for raw in text.splitlines():
+        line = raw.strip()
+        if line.startswith("# file:"):
+            if path is not None:  # flush the record we just finished
+                blocks[path] = frozenset(entries)
+            path = line[len("# file:") :].strip()
+            entries = set()
+        elif line and not line.startswith("#") and path is not None:
+            entries.add(line)
+    if path is not None:
+        blocks[path] = frozenset(entries)
+    return blocks
+
+
+def _acls_changed(before: str, after: str) -> bool:
+    """True when any path present in BOTH getfacl snapshots has different
+    ACL entries.
+
+    Paths that appear in only one snapshot are ignored: files created,
+    renamed, or deleted by an active session between the two ``getfacl``
+    runs are ordinary churn, not an ACL repair. A path that persists across
+    both snapshots with genuinely re-ACLed entries is still detected.
+    """
+    b = _parse_getfacl(before)
+    a = _parse_getfacl(after)
+    return any(b[path] != a[path] for path in b.keys() & a.keys())
 
 
 def _repair_git_identity(

@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING
 from agentworks import output
 from agentworks.errors import AlreadyExistsError
 from agentworks.transports import transport
+from agentworks.workspaces.acls import apply_workspace_acls
 from agentworks.workspaces.tmuxinator import console_session_name, generate_config
 
 if TYPE_CHECKING:
@@ -53,8 +54,10 @@ def create_vm_workspace(
     target.run(f"mkdir -p {workspace_path}", sudo=True)
     target.run(f"chown {vm.admin_username}:{ws_group} {workspace_path}", sudo=True)
     target.run(f"chmod 2770 {workspace_path}", sudo=True)
-    # Set default ACLs so files created inside are group-writable
-    target.run(f"setfacl -d -m g::rwx -m m::rwx {workspace_path}", sudo=True)
+    # The canonical workspace ACL is applied at the end (apply_workspace_acls),
+    # after any clone and other content is placed, so existing entries are
+    # covered too. This is the same recursive spec workspace repair applies,
+    # so a first repair of this workspace is a true no-op.
 
     # Git clone if repo is set
     if template.repo:
@@ -114,6 +117,12 @@ def create_vm_workspace(
             f"ln -sf {workspace_path}/.tmuxinator.yml ~/.config/tmuxinator/{session}.yml",
             timeout=10,
         )
+
+    # Canonical workspace ACL, applied last so every entry written above (a
+    # clone, the tmuxinator config) is covered, and future entries inherit via
+    # the default ACL. Shared with workspace repair so the two never drift and
+    # a first repair of this workspace is a no-op.
+    apply_workspace_acls(target, workspace_path)
 
     return workspace_path
 

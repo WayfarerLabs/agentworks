@@ -27,6 +27,7 @@ from agentworks.db import InitStatus, ProvisioningStatus
 from agentworks.env import ResourceContext, vm_stable_identity_env
 from agentworks.ssh import SSHError, SSHLogger
 from agentworks.transports import SSHTransport, Transport
+from agentworks.workspaces.acls import apply_workspace_acls
 
 from .credentials import _configure_git_credentials
 from .mise import (
@@ -691,18 +692,10 @@ def _phase_b_setup(
                 f'sh -c \'p={workspaces_dir}; while [ "$p" != "/" ]; do chmod a+x "$p"; p=$(dirname "$p"); done\'',
                 sudo=True,
             )
-            # Default ACLs on directories only (setfacl -R -d warns on files)
-            ts_target.run(
-                f"find {workspaces_dir} -type d -exec setfacl -d -m g::rwx -m m::rwx {{}} +",
-                sudo=True,
-                timeout=120,
-            )
-            # Access ACLs on all existing files and dirs
-            ts_target.run(
-                f"setfacl -R -m g::rwx -m m::rwx {workspaces_dir}",
-                sudo=True,
-                timeout=120,
-            )
+            # The canonical group ACL on the workspaces parent, the same spec
+            # (and shared helper) workspace create and repair apply per
+            # workspace, so the three never drift.
+            apply_workspace_acls(ts_target, workspaces_dir)
         except SSHError as e:
             msg = f"workspaces directory setup failed: {e}"
             logger.warning(msg)
