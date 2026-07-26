@@ -29,9 +29,12 @@ def apply_workspace_acls(target: Transport, path: str) -> None:
     - an **access** ACL over the whole tree, so entries that already exist are
       group ``rwx``.
 
-    The workspace group already owns the tree (mode ``2770`` + SGID), so the
-    recursive ``g::rwx`` grants nothing new; it just makes the ACL match the
-    ownership. ``other`` is deliberately left untouched here (see #254).
+    Recursive ``g::rwx`` only opens access to the owning group, never to
+    ``other`` (which is deliberately left untouched here, see #254). At the
+    per-workspace call sites the owning group is the workspace group that
+    already owns the tree (mode ``2770`` + SGID), so this grants nothing new;
+    at the VM-init call site the same helper runs over the shared workspaces
+    parent, seeding the default ACL that per-workspace trees inherit.
     """
     quoted = shlex.quote(path)
     # Default ACLs on directories only; find avoids setfacl's warning on files.

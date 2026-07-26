@@ -399,11 +399,13 @@ class _RepairProbeTarget(_FakeAdminTarget):
         *,
         damaged: frozenset[str] = frozenset(),
         acl_churn: bool = False,
+        getfacl_ok: bool = True,
         group: str = "ws-ws1",
     ) -> None:
         super().__init__()
         self._damaged = damaged
         self._acl_churn = acl_churn
+        self._getfacl_ok = getfacl_ok
         self._group = group
         self._getfacl_calls = 0
 
@@ -423,6 +425,10 @@ class _RepairProbeTarget(_FakeAdminTarget):
     def run(self, cmd: str, **kwargs: object) -> SimpleNamespace:
         self.commands.append(cmd)
         stdout = ""
+        if "getfacl" in cmd and not self._getfacl_ok:
+            # Simulate a transient getfacl failure: the snapshot is missing,
+            # so the ACL step has no change data to compare.
+            return SimpleNamespace(ok=False, returncode=1, stdout="", stderr="getfacl: error")
         if "chown -R -c" in cmd and "owner" in self._damaged:
             stdout = "changed ownership of '/srv/ws1/f'\n"
         elif "chmod -c 2770" in cmd and "mode" in self._damaged:
@@ -563,6 +569,28 @@ def test_repair_mode_only_damage_reports_permissions_fixed(
     assert "\nRepaired 1 issue(s)" in captured_output.info
 
 
+def test_repair_owner_only_damage_reports_permissions_fixed(
+    db: Database,
+    make_config,  # noqa: ANN001
+    monkeypatch: pytest.MonkeyPatch,
+    captured_output: CapturedOutput,
+) -> None:
+    """Owner diverged while mode and SGID are already correct: the third
+    isolated case, pinning the last member of the owner/mode/sgid `or`
+    collapse (fails under an AND collapse, where mode/sgid silence forces
+    OK). Together the three isolated tests pin every sub-signal."""
+    fake = _RepairProbeTarget(damaged=frozenset({"owner"}))
+    _wire_target(monkeypatch, fake)
+    config = make_config()
+    _seed(db)
+    _reachable(monkeypatch, True)
+
+    workspace_manager.repair_workspace(db, config, "ws1")
+
+    assert "Fixed: directory ownership and permissions" in captured_output.detail
+    assert "\nRepaired 1 issue(s)" in captured_output.info
+
+
 def test_repair_acl_churn_does_not_report_false_fixed(
     db: Database,
     make_config,  # noqa: ANN001
@@ -585,6 +613,73 @@ def test_repair_acl_churn_does_not_report_false_fixed(
     assert "OK: ACLs" in captured_output.detail
     assert not any(line.startswith("Fixed:") for line in captured_output.detail)
     assert "\nNo issues found" in captured_output.info
+
+
+def test_repair_acls_indeterminate_when_getfacl_fails(
+    db: Database,
+    make_config,  # noqa: ANN001
+    monkeypatch: pytest.MonkeyPatch,
+    captured_output: CapturedOutput,
+) -> None:
+    """Both getfacl snapshots fail (transient SSH error): the ACL step has no
+    change data, so it must NOT claim OK (or count a fix), it must warn that
+    the state is indeterminate. Convergence still ran (apply_workspace_acls),
+    only the verification is missing. Fails before the fix, where empty-vs-empty
+    snapshots compared equal and printed a confirmed OK: ACLs."""
+    fake = _RepairProbeTarget(getfacl_ok=False)
+    _wire_target(monkeypatch, fake)
+    config = make_config()
+    _seed(db)
+    _reachable(monkeypatch, True)
+
+    workspace_manager.repair_workspace(db, config, "ws1")
+
+    assert "OK: ACLs" not in captured_output.detail
+    assert not any(line.startswith("Fixed: ACLs") for line in captured_output.detail)
+    assert any("indeterminate" in w and "could not run" in w for w in captured_output.warnings)
+    # apply_workspace_acls still ran: convergence is unaffected by the probe.
+    assert any("setfacl -R -m g::rwx" in c for c in fake.commands)
+
+
+def test_repair_parent_traversal_quotes_a_spaced_path(
+    db: Database,
+    make_config,  # noqa: ANN001
+    monkeypatch: pytest.MonkeyPatch,
+    captured_output: CapturedOutput,
+) -> None:
+    """Regression for the traversal quoting fix: a workspace_path with a space
+    and a shell metacharacter is passed as the positional `$1` (shlex-quoted),
+    never interpolated raw into the sh -c script. Guards against a re-introduced
+    raw interpolation, which would split the path on the space and execute the
+    metacharacter."""
+    import shlex
+
+    from agentworks.db import InitStatus
+
+    spaced_path = "/srv/my ws;danger"
+    db.insert_vm("box", site="proxmox", hostname="box")
+    db.update_vm_tailscale("box", "100.64.0.9")
+    db.update_vm_init_status("box", InitStatus.COMPLETE)
+    db.insert_workspace(
+        "ws1",
+        vm_name="box",
+        workspace_path=spaced_path,
+        template="default",
+        linux_group="ws-ws1",
+    )
+    fake = _RepairProbeTarget()
+    _wire_target(monkeypatch, fake)
+    config = make_config()
+    _reachable(monkeypatch, True)
+
+    workspace_manager.repair_workspace(db, config, "ws1")
+
+    traversal = next(c for c in fake.commands if "chmod -c a+x" in c)
+    # The path rides in as the shlex-quoted positional arg after `_`, and the
+    # loop reads it from "$1", so the raw path never touches the script body.
+    assert traversal.endswith(f"_ {shlex.quote(spaced_path)}")
+    assert 'p="$1"' in traversal
+    assert f"p={spaced_path}" not in traversal
 
 
 # -- the ACL intersect-compare helper (churn-robust change detection) ---------

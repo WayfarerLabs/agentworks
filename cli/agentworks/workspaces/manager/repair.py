@@ -194,12 +194,19 @@ def repair_workspace(
         # still detected. Comparing actual before/after state, rather than
         # reconstructing the desired ACL, keeps this correct as the applied
         # spec evolves. getfacl uses check=False because a getfacl hiccup must
-        # not mask the real SSHError a failing setfacl would surface.
+        # not mask the real SSHError a failing setfacl would surface; but if a
+        # snapshot did fail we have no change data, so we report the check as
+        # indeterminate rather than claiming a confirmed OK.
         try:
             before = target.run(f"getfacl -R -n {quoted_ws}", sudo=True, check=False, timeout=120)
             apply_workspace_acls(target, ws.workspace_path)
             after = target.run(f"getfacl -R -n {quoted_ws}", sudo=True, check=False, timeout=120)
-            if _acls_changed(before.stdout, after.stdout):
+            if not before.ok or not after.ok:
+                # Convergence still ran (apply_workspace_acls above), but the
+                # before/after probe did not, so we cannot tell OK from Fixed.
+                # Warn rather than report a no-op we did not verify.
+                output.warn("ACLs applied, but the before/after check could not run (state indeterminate)")
+            elif _acls_changed(before.stdout, after.stdout):
                 output.detail("Fixed: ACLs")
                 fixes += 1
             else:
