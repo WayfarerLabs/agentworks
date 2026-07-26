@@ -48,9 +48,11 @@ def normalize_exec_command(
       separator, that ``--`` is consumed and everything after it is
       returned verbatim (a dash-led first token included, a later
       ``--`` preserved). An empty remainder is a missing command.
-    - Otherwise, if the first token starts with ``-`` it is almost
-      certainly a misplaced agentworks flag; we reject it with a hint
-      naming the ``--`` separator (and the ``sh -c`` fallback).
+    - Otherwise, if the first token starts with ``-`` the guard cannot
+      tell a misplaced agentworks flag from a dash-led remote command
+      that forgot its ``--``; we reject it with a hint naming both
+      recoveries (flag before the positional, or the ``--`` separator /
+      ``sh -c`` fallback).
     - Otherwise ``command`` is returned unchanged.
     """
     if command and command[0] == "--":
@@ -69,9 +71,11 @@ def normalize_exec_command(
             entity_kind=kind,
             entity_name=name,
             hint=(
-                f"put '--' before the command so agentworks stops reading options "
-                f"(e.g. agw {kind} exec {name} -- {command[0]} ...), or wrap it in a "
-                f"shell (e.g. agw {kind} exec {name} sh -c '...')."
+                f"if {command[0]!r} is an agentworks option, put it before the name "
+                f"(e.g. agw {kind} exec {command[0]} ... {name} <cmd>); if it is part "
+                f"of the remote command, put '--' before the command so agentworks "
+                f"stops reading options (e.g. agw {kind} exec {name} -- {command[0]} ...), "
+                f"or wrap it in a shell (e.g. agw {kind} exec {name} sh -c '...')."
             ),
         )
 

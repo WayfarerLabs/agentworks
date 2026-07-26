@@ -488,9 +488,10 @@ def test_exec_vm_rejects_dash_prefixed_command(
 ) -> None:
     """Any ``vm exec`` whose remote-command argv starts with ``-`` and
     was NOT introduced by a ``--`` separator is rejected before any SSH
-    work. The hint names the real workaround (the ``--`` separator, plus
-    the ``sh -c`` fallback) regardless of whether the leading token is an
-    agw flag or some other ``-``-prefixed token."""
+    work. The guard cannot tell a misplaced agw flag from a dash-led
+    remote command, so the hint must name both recoveries: the flag
+    before the positional, and the ``--`` separator / ``sh -c``
+    fallback."""
     from agentworks.vms import manager as vm_manager
 
     db = _seed_db(tmp_path)
@@ -500,6 +501,7 @@ def test_exec_vm_rejects_dash_prefixed_command(
     with pytest.raises(ValidationError, match="cannot start with '-'") as exc_info:
         vm_manager.exec_vm(db, config, "vm1", command)  # type: ignore[arg-type]
     hint = exc_info.value.hint or ""
+    assert "put it before the name" in hint
     assert "put '--' before" in hint
     assert "sh -c" in hint
 

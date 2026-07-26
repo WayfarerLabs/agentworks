@@ -285,6 +285,28 @@ def test_exec_double_dash_separator_strips_only_the_first(
     assert cmd == "$SHELL -lc 'git log -- path'"
 
 
+def test_exec_double_dash_separator_preserves_an_adjacent_second(
+    db: Database,
+    make_config,  # noqa: ANN001
+    resolve_counter: list[list[str]],
+    target: _FakeAgentTarget,
+    monkeypatch: pytest.MonkeyPatch,
+    captured_output,  # noqa: ANN001
+) -> None:
+    """Back-to-back separators: only the FIRST `--` is consumed, so an
+    immediately-adjacent second `--` survives as the remote command's
+    own first token (mirror of the vm exec sibling case)."""
+    config = make_config(AGENT_ENV_SECTION)
+    _seed(db)
+    _reachable(monkeypatch, True)
+
+    rc = agent_manager.exec_agent(db, config, name="a1", command=["--", "--", "x"])
+
+    assert rc == 0
+    ((cmd, _env),) = target.streaming_calls
+    assert cmd == "$SHELL -lc '-- x'"
+
+
 def test_exec_bare_flag_after_command_word_still_works(
     db: Database,
     make_config,  # noqa: ANN001
