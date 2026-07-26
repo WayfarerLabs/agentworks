@@ -57,7 +57,10 @@ def _setup_workspaces_directory(target: Transport, config: Config, logger: SSHLo
         target.run(f"mkdir -p {workspaces_dir}", sudo=True)
         # The canonical workspace ACL on the workspaces parent, the same spec
         # (and shared helper) workspace create and repair apply per workspace,
-        # so the three never drift.
+        # so those three never drift. Workspace copy and rehome still apply
+        # ACLs inline with the OLD spec (no other-denial), so a copied or
+        # rehomed workspace is NOT hardened until issue #263 routes them
+        # through this helper.
         apply_workspace_acls(target, workspaces_dir)
         # Re-grant agent traversal on workspaces_dir and its ancestors, AFTER
         # the ACL apply (see the ordering rationale above).
