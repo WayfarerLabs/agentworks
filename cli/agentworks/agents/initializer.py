@@ -71,7 +71,6 @@ def create_agent_on_vm(
 
     admin_target = transport(vm, config, logger=logger)
 
-    output.info(f"Creating user '{linux_user}' on VM '{vm.name}'...")
     home = f"/home/{linux_user}"
 
     agent_cfg = agent_tmpl
@@ -79,7 +78,18 @@ def create_agent_on_vm(
 
     # -- Phase 1: bootstrap (admin) ---------------------------------------
 
-    # Create user with the template's shell (idempotent: skip if exists).
+    # Create-or-converge the agent's Linux user, reporting the TRUE
+    # outcome rather than announcing a create every time. This body is
+    # shared by ``agent create`` (user usually absent) and ``agent
+    # reinit`` (user usually present), so the message is driven by the
+    # DETECTED state, not by which command called us: the case that must
+    # not be hidden is a truly-gone agent user being recreated on reinit,
+    # which the old unconditional "Creating user..." line silently masked
+    # as a converging no-op (issue #252). A single ``getent passwd`` probe
+    # yields both existence (exit status) and the current login shell
+    # (field 7), the one attribute the ``usermod`` convergence below
+    # touches, so the three reported outcomes (created / already-exists /
+    # shell-corrected) each reflect what actually happened on the VM.
     shell_path = f"/bin/{agent_shell}" if "/" not in agent_shell else agent_shell
     # ``-U`` (``--user-group``) forces a per-user private primary group
     # regardless of the base image's ``USERGROUPS_ENAB`` setting. This is
@@ -89,11 +99,21 @@ def create_agent_on_vm(
     # GID 100), a bare ``useradd`` plus 0750 would GRANT every other agent
     # group read+execute on this home, an inversion of the goal. We do
     # not assume a clean Debian image (see capabilities/vm_platform/README).
-    user_exists = admin_target.run(f"id {linux_user}", sudo=True, check=False)
-    if not user_exists.ok:
+    passwd_entry = admin_target.run(f"getent passwd {linux_user}", sudo=True, check=False)
+    if not passwd_entry.ok:
         admin_target.run(f"useradd -m -U -s {shell_path} {linux_user}", sudo=True)
+        output.info(f"Created agent user '{linux_user}' on VM '{vm.name}'")
     else:
-        admin_target.run(f"usermod -s {shell_path} {linux_user}", sudo=True)
+        # ``getent passwd`` line is colon-delimited with the login shell
+        # last; the leading fields (name, gecos, home) never contain a
+        # colon, so the final field is the shell. Take the first line in
+        # case NSS ever returns more than one entry for the name.
+        current_shell = passwd_entry.stdout.strip().splitlines()[0].rsplit(":", 1)[-1]
+        if current_shell != shell_path:
+            admin_target.run(f"usermod -s {shell_path} {linux_user}", sudo=True)
+            output.info(f"Fixed agent user '{linux_user}' on VM '{vm.name}': shell {current_shell} -> {shell_path}")
+        else:
+            output.info(f"Agent user '{linux_user}' already exists on VM '{vm.name}'")
 
     # Tighten the agent's home to 0750. ``useradd -m`` honors the system
     # umask (022), leaving home world-readable (0755), which lets any
