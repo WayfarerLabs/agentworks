@@ -36,6 +36,7 @@ from agentworks.errors import (
     UserAbort,
     ValidationError,
 )
+from agentworks.transports import SSHTransport
 from agentworks.vms import manager as vm_manager
 from agentworks.workspaces import manager as workspace_manager
 
@@ -1539,3 +1540,164 @@ def test_copy_refusals_fail_with_zero_resolves_and_zero_gate(
         workspace_manager.copy_workspace(db, config, "ws1", dest_name="ws2", vm_name="box")
 
     assert resolve_counter == []
+
+
+# -- #263: copy and rehome route through the shared canonical ACL helper -------
+
+
+def test_copy_applies_canonical_acl_after_unpack_and_chown(
+    db: Database,
+    make_config,  # noqa: ANN001
+    monkeypatch: pytest.MonkeyPatch,
+    captured_output,  # noqa: ANN001
+) -> None:
+    """Copy now routes its ACL through ``apply_workspace_acls`` (issue #263):
+    the canonical recursive pair (a per-directory default ACL AND a recursive
+    access ACL, both carrying ``o::---``) is applied AFTER the tar unpack and
+    the recursive chown/SGID, so every unpacked entry is covered and future
+    entries inherit. The old weaker top-dir-only ``setfacl -d`` (no ``find``,
+    no ``other`` denial, applied BEFORE the unpack) is gone."""
+    config = make_config()
+    _seed(db)
+    _reachable(monkeypatch, True)
+    events: list[str] = []
+    fake = _wire_copy_fakes(monkeypatch, events)
+
+    workspace_manager.copy_workspace(db, config, "ws1", dest_name="ws2", vm_name="box")
+
+    cmds = fake.commands
+    # The canonical pair, both carrying other-denial (path-agnostic shape).
+    assert any(c.startswith("find ") and "setfacl -d -m g::rwx -m m::rwx -m o::---" in c for c in cmds)
+    assert any(c.startswith("setfacl -R -m g::rwx -m m::rwx -m o::---") for c in cmds)
+    # The old top-dir-only default (a bare `setfacl -d ...`, not via `find`) is gone.
+    assert not any(c.startswith("setfacl -d") for c in cmds)
+    # Applied AFTER the unpack AND the recursive chown, so it covers the
+    # unpacked, correctly-owned content.
+    access = next(i for i, c in enumerate(cmds) if c.startswith("setfacl -R -m g::rwx"))
+    unpack = next(i for i, c in enumerate(cmds) if "tar xzf" in c)
+    chown_r = next(i for i, c in enumerate(cmds) if c.startswith("chown -R"))
+    sgid = next(i for i, c in enumerate(cmds) if "chmod g+s" in c)
+    assert access > unpack
+    assert access > chown_r
+    # And after the SGID pass, locking the full unpack -> chown -> SGID -> apply order.
+    assert access > sgid
+
+
+class _RehomeTarget(_FakeAdminTarget):
+    """Admin target for the rehome happy path: ``test -d`` of the target path
+    reports absent until the rsync copy has run, then present, so rehome's
+    pre-copy 'target must not exist' check and its post-copy verify both pass.
+    Every other command answers ok."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._copied = False
+
+    def run(self, cmd: str, **kwargs: object) -> SimpleNamespace:
+        self.commands.append(cmd)
+        if cmd.startswith("rsync") or cmd.startswith("cp -a"):
+            self._copied = True
+        if cmd == "test -d /dst/ws1":
+            ok = self._copied
+            return SimpleNamespace(ok=ok, returncode=0 if ok else 1, stdout="", stderr="")
+        return SimpleNamespace(ok=True, returncode=0, stdout="", stderr="")
+
+
+def test_rehome_routes_through_the_canonical_acl_helper(
+    db: Database,
+    make_config,  # noqa: ANN001
+    monkeypatch: pytest.MonkeyPatch,
+    captured_output,  # noqa: ANN001
+) -> None:
+    """Rehome now applies the ACL through ``apply_workspace_acls`` (issue #263)
+    rather than the hand-rolled inline block: the same canonical pair
+    (per-directory default + recursive access) and, per #254, both now deny
+    ``other`` (``o::---``), which rehome's old inline block did not."""
+    config = make_config()
+    _seed(db)
+    _reachable(monkeypatch, True)
+    fake = _RehomeTarget()
+    monkeypatch.setattr("agentworks.transports.transport", lambda vm, config_, **kwargs: fake)
+
+    workspace_manager.rehome_workspace(db, config, "ws1", target_path="/dst/ws1", yes=True)
+
+    cmds = fake.commands
+    assert any(c.startswith("find ") and "setfacl -d -m g::rwx -m m::rwx -m o::---" in c for c in cmds)
+    assert any(c.startswith("setfacl -R -m g::rwx -m m::rwx -m o::---") for c in cmds)
+    # The DB moved, confirming the rehome ran to completion (the ACL step is
+    # non-fatal but here it succeeded).
+    row = db.get_workspace("ws1")
+    assert row is not None and row.workspace_path == "/dst/ws1"
+
+
+class _CopyThenRepairTarget(_FakeAdminTarget, SSHTransport):  # type: ignore[misc]  # the fake's recording run deliberately shadows the real signature
+    """Stateful SSHTransport-typed fake spanning a copy then a repair on one
+    workspace. The canonical ACL that copy applies (via ``apply_workspace_acls``)
+    persists as ``_acl_canonical``, so the subsequent repair's before/after
+    getfacl snapshots both reflect it and the ACL step is a true no-op. Every
+    other repair probe reports already-converged, so the first repair of a
+    freshly copied workspace finds nothing to fix."""
+
+    def __init__(self) -> None:
+        SSHTransport.__init__(self, "100.64.0.9", user="admin")
+        _FakeAdminTarget.__init__(self)
+        self._acl_canonical = False
+        # Same workspace-mode state the repair steps drive (see
+        # _self_inclusive_traversal_line): repair's step 3 stamps 2770, so a
+        # self-inclusive a+x walk would surface as a spurious Fixed here too.
+        self._ws_mode: int | None = None
+
+    def run(self, cmd: str, **kwargs: object) -> SimpleNamespace:  # type: ignore[override]  # recording run deliberately shadows SSHTransport.run
+        self.commands.append(cmd)
+        stdout = ""
+        if "chmod -c 2770" in cmd:
+            self._ws_mode = 0o2770  # repair step 3 stamps the canonical mode
+        elif "chmod -c a+x" in cmd:
+            stdout, self._ws_mode = _self_inclusive_traversal_line(cmd, self._ws_mode)
+        elif "setfacl -R -m g::rwx" in cmd:
+            self._acl_canonical = True  # the recursive access apply converges the tree
+        elif "getfacl" in cmd:
+            entries = _HEALTHY_ACL if self._acl_canonical else _DAMAGED_ACL
+            stdout = _acl_block("srv/ws2", entries)
+        elif "id -nG" in cmd:
+            stdout = "admin ws-ws2"  # admin already in the group
+        return SimpleNamespace(ok=True, returncode=0, stdout=stdout, stderr="")
+
+
+def test_first_repair_after_copy_is_a_noop(
+    db: Database,
+    make_config,  # noqa: ANN001
+    monkeypatch: pytest.MonkeyPatch,
+    captured_output: CapturedOutput,
+) -> None:
+    """A copied workspace lands in the canonical ACL state because copy now
+    applies the IDENTICAL spec through the shared ``apply_workspace_acls``
+    helper (issue #263), so its first ``workspace repair`` is a true ACL no-op:
+    OK: ACLs and No issues found, exactly like a freshly created workspace.
+    Copy applies the recursive spec (default ACL on dirs + recursive access with
+    ``o::---``), not the old top-dir-only default. Composes the copy path with
+    the #247/#254 repair detection."""
+    import subprocess as subprocess_mod
+
+    fake = _CopyThenRepairTarget()
+    monkeypatch.setattr("agentworks.transports.transport", lambda vm, config, **kwargs: fake)
+    monkeypatch.setattr(subprocess_mod, "run", lambda args, **kwargs: SimpleNamespace(returncode=0, stderr=b""))
+
+    config = make_config()
+    _seed(db)
+    _reachable(monkeypatch, True)
+
+    workspace_manager.copy_workspace(db, config, "ws1", dest_name="ws2", vm_name="box")
+
+    # Copy applied the recursive canonical ACL (the same spec repair uses),
+    # not a top-dir-only default.
+    copy_acls = [c for c in fake.commands if "setfacl" in c]
+    assert any(c.startswith("find ") and "setfacl -d -m g::rwx -m m::rwx -m o::---" in c for c in copy_acls)
+    assert any("setfacl -R -m g::rwx -m m::rwx -m o::---" in c for c in copy_acls)
+    assert fake._acl_canonical
+
+    workspace_manager.repair_workspace(db, config, "ws2")
+
+    assert "OK: ACLs" in captured_output.detail
+    assert not any(line.startswith("Fixed:") for line in captured_output.detail)
+    assert "\nNo issues found" in captured_output.info

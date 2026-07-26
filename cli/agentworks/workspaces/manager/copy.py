@@ -50,6 +50,7 @@ def copy_workspace(
     from agentworks.bootstrap import build_registry
     from agentworks.ssh import SSHLogger
     from agentworks.transports import SSHTransport, transport
+    from agentworks.workspaces.acls import apply_workspace_acls
 
     validate_name(dest_name)
 
@@ -162,7 +163,6 @@ def copy_workspace(
             dest_target.run(f"mkdir -p {workspace_path}", sudo=True, timeout=10)
             dest_target.run(f"chown {dest_vm.admin_username}:{ws_group} {workspace_path}", sudo=True)
             dest_target.run(f"chmod 2770 {workspace_path}", sudo=True)
-            dest_target.run(f"setfacl -d -m g::rwx -m m::rwx {workspace_path}", sudo=True)
 
             # Unpack archive and fix ownership
             remote_tmp = f"/tmp/{dest_name}-copy.tgz"
@@ -179,6 +179,15 @@ def copy_workspace(
                 sudo=True,
                 timeout=120,
             )
+
+            # Canonical workspace ACL, applied AFTER the unpack and the recursive
+            # chown/SGID so the recursive access ACL covers every unpacked entry
+            # and the per-directory default ACL is seeded for future entries.
+            # The same shared spec workspace create and repair apply, so a copied
+            # workspace lands in the canonical state (its first repair is an ACL
+            # no-op) and, per #254, denies `other` on both the access and default
+            # ACLs, which the old inline top-dir-only default did not.
+            apply_workspace_acls(dest_target, workspace_path)
 
             db.insert_workspace(
                 dest_name,

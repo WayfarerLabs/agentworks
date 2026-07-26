@@ -363,15 +363,18 @@ def _repair_git_identity(
 
     Returns the number of identity fields it actually changed.
     """
-    from agentworks.errors import ConfigError
+    from agentworks.errors import ConfigError, NotFoundError
     from agentworks.ssh import SSHError
     from agentworks.workspaces.templates import resolve_template
 
     try:
         tmpl = resolve_template(registry, ws.template)
-    except (ValueError, ConfigError):
-        # The workspace's template is gone from config; nothing to converge
-        # toward. Ownership/permission convergence above does not need it.
+    except (ValueError, ConfigError, NotFoundError):
+        # The workspace's template cannot be resolved: it is gone from config,
+        # or it is a synthetic marker (a copied workspace records
+        # ``template="copied"``, which is not a real template). Either way there
+        # is nothing to converge git identity toward, so this is a quiet no-op.
+        # Ownership/permission/ACL convergence above does not need the template.
         return 0
 
     declared = [
