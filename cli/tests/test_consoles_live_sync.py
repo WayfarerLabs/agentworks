@@ -551,6 +551,245 @@ def test_delete_session_skips_kill_when_no_member_consoles(
     assert called is False
 
 
+# -- Issue #248: operator signal for the session -> console cascade ----------
+
+
+def test_delete_session_reports_affected_consoles(
+    db: Database,
+    fake_target: _FakeTarget,
+    monkeypatch: pytest.MonkeyPatch,
+    captured_output: CapturedOutput,
+) -> None:
+    """Deleting a session names every console that referenced it, so the
+    cascade is no longer silent (issue #248)."""
+    from agentworks.db import PID_STOPPED
+    from agentworks.sessions import manager as manager_mod
+
+    _seed_vm(db, with_tailscale=True)
+    _seed_sessions(db, ["s", "other"])
+    db.update_session_pid("s", PID_STOPPED)
+    # alpha keeps 'other' after the cascade; beta is emptied.
+    create_console(db, name="alpha", vm_name="vm1", session_specs=["s", "other"])
+    create_console(db, name="beta", vm_name="vm1", session_specs=["s"])
+    create_console(db, name="gamma", vm_name="vm1", session_specs=["other"])
+
+    monkeypatch.setattr(manager_mod, "_regenerate_tmuxinator", lambda *a, **k: None)
+    monkeypatch.setattr("agentworks.sessions.multi_console.kill_session_windows", lambda *a, **k: None)
+
+    manager_mod.delete_session(db, _StubConfig(), name="s", yes=True)
+
+    # The affected consoles (alpha, beta) are named in c.name order; the
+    # unrelated console (gamma) is not. Two consoles -> plural noun.
+    report = [m for m in captured_output.info if m.startswith("Removed 's' from console")]
+    assert report == ["Removed 's' from consoles: alpha, beta"]
+
+
+def test_delete_session_offers_and_deletes_now_empty_console(
+    db: Database,
+    fake_target: _FakeTarget,
+    monkeypatch: pytest.MonkeyPatch,
+    captured_output: CapturedOutput,
+) -> None:
+    """A console emptied by the cascade is offered for deletion; an accepted
+    offer deletes it, while a console that still has members survives."""
+    from agentworks.db import PID_STOPPED
+    from agentworks.sessions import manager as manager_mod
+
+    _seed_vm(db, with_tailscale=True)
+    _seed_sessions(db, ["s", "other"])
+    db.update_session_pid("s", PID_STOPPED)
+    create_console(db, name="alpha", vm_name="vm1", session_specs=["s", "other"])
+    create_console(db, name="beta", vm_name="vm1", session_specs=["s"])
+
+    monkeypatch.setattr(manager_mod, "_regenerate_tmuxinator", lambda *a, **k: None)
+    monkeypatch.setattr("agentworks.sessions.multi_console.kill_session_windows", lambda *a, **k: None)
+
+    # Route the two interactive confirms (the session delete itself, then the
+    # empty-console offer): accept both. Recording the messages lets us prove
+    # the empty-console offer was actually presented.
+    prompts: list[str] = []
+
+    def _confirm(message: str, default: bool = False) -> bool:
+        prompts.append(message)
+        return True
+
+    monkeypatch.setattr("agentworks.output.confirm", _confirm)
+
+    manager_mod.delete_session(db, _StubConfig(), name="s", yes=False)
+
+    assert any("beta" in p and "no configured sessions left" in p for p in prompts)
+    # Accepted offer: the emptied console is gone; the still-populated one stays.
+    assert db.get_console("beta") is None
+    assert db.get_console("alpha") is not None
+    assert [m.session_name for m in db.list_console_sessions("alpha")] == ["other"]
+
+
+def test_delete_session_declined_offer_keeps_empty_console(
+    db: Database,
+    fake_target: _FakeTarget,
+    monkeypatch: pytest.MonkeyPatch,
+    captured_output: CapturedOutput,
+) -> None:
+    """Declining the empty-console offer leaves the console in place (empty)."""
+    from agentworks.db import PID_STOPPED
+    from agentworks.sessions import manager as manager_mod
+
+    _seed_vm(db, with_tailscale=True)
+    _seed_sessions(db, ["s"])
+    db.update_session_pid("s", PID_STOPPED)
+    create_console(db, name="beta", vm_name="vm1", session_specs=["s"])
+
+    monkeypatch.setattr(manager_mod, "_regenerate_tmuxinator", lambda *a, **k: None)
+    monkeypatch.setattr("agentworks.sessions.multi_console.kill_session_windows", lambda *a, **k: None)
+
+    # Accept the session-delete confirm, decline the empty-console offer.
+    def _confirm(message: str, default: bool = False) -> bool:
+        return "no configured sessions left" not in message
+
+    monkeypatch.setattr("agentworks.output.confirm", _confirm)
+
+    manager_mod.delete_session(db, _StubConfig(), name="s", yes=False)
+
+    assert db.get_session("s") is None
+    assert db.get_console("beta") is not None
+    assert db.list_console_sessions("beta") == []
+
+
+def test_delete_session_does_not_offer_console_with_remaining_sessions(
+    db: Database,
+    fake_target: _FakeTarget,
+    monkeypatch: pytest.MonkeyPatch,
+    captured_output: CapturedOutput,
+) -> None:
+    """A console that still has other members after the cascade is neither
+    offered for deletion nor removed."""
+    from agentworks.db import PID_STOPPED
+    from agentworks.sessions import manager as manager_mod
+
+    _seed_vm(db, with_tailscale=True)
+    _seed_sessions(db, ["s", "other"])
+    db.update_session_pid("s", PID_STOPPED)
+    create_console(db, name="alpha", vm_name="vm1", session_specs=["s", "other"])
+
+    monkeypatch.setattr(manager_mod, "_regenerate_tmuxinator", lambda *a, **k: None)
+    monkeypatch.setattr("agentworks.sessions.multi_console.kill_session_windows", lambda *a, **k: None)
+
+    prompts: list[str] = []
+
+    def _confirm(message: str, default: bool = False) -> bool:
+        prompts.append(message)
+        return True
+
+    monkeypatch.setattr("agentworks.output.confirm", _confirm)
+
+    manager_mod.delete_session(db, _StubConfig(), name="s", yes=False)
+
+    # No empty-console offer was presented, and alpha still holds 'other'.
+    assert not any("no configured sessions left" in p for p in prompts)
+    assert db.get_console("alpha") is not None
+    assert [m.session_name for m in db.list_console_sessions("alpha")] == ["other"]
+
+
+def test_delete_session_leaves_no_dangling_console_reference(
+    db: Database,
+    fake_target: _FakeTarget,
+    monkeypatch: pytest.MonkeyPatch,
+    captured_output: CapturedOutput,
+) -> None:
+    """The FK cascade still holds: no console lists the deleted session after
+    ``session delete`` (the guarantee this change must not regress)."""
+    from agentworks.db import PID_STOPPED
+    from agentworks.sessions import manager as manager_mod
+
+    _seed_vm(db, with_tailscale=True)
+    _seed_sessions(db, ["s", "other"])
+    db.update_session_pid("s", PID_STOPPED)
+    create_console(db, name="alpha", vm_name="vm1", session_specs=["s", "other"])
+
+    monkeypatch.setattr(manager_mod, "_regenerate_tmuxinator", lambda *a, **k: None)
+    monkeypatch.setattr("agentworks.sessions.multi_console.kill_session_windows", lambda *a, **k: None)
+
+    manager_mod.delete_session(db, _StubConfig(), name="s", yes=True)
+
+    assert db.list_consoles_for_session("s") == []
+    dangling = db._conn.execute("SELECT COUNT(*) FROM console_sessions WHERE session_name = 's'").fetchone()[0]
+    assert dangling == 0
+
+
+def test_delete_session_yes_reports_but_keeps_empty_console(
+    db: Database,
+    fake_target: _FakeTarget,
+    monkeypatch: pytest.MonkeyPatch,
+    captured_output: CapturedOutput,
+) -> None:
+    """Under --yes, a now-empty console is reported (a warning naming the
+    console-delete command) but NOT auto-deleted: unlike a
+    session-created workspace/agent, a console is an operator-authored view
+    this session never owned."""
+    from agentworks.db import PID_STOPPED
+    from agentworks.sessions import manager as manager_mod
+
+    _seed_vm(db, with_tailscale=True)
+    _seed_sessions(db, ["s"])
+    db.update_session_pid("s", PID_STOPPED)
+    create_console(db, name="beta", vm_name="vm1", session_specs=["s"])
+
+    monkeypatch.setattr(manager_mod, "_regenerate_tmuxinator", lambda *a, **k: None)
+    monkeypatch.setattr("agentworks.sessions.multi_console.kill_session_windows", lambda *a, **k: None)
+
+    manager_mod.delete_session(db, _StubConfig(), name="s", yes=True)
+
+    # A single affected console uses the singular noun.
+    assert "Removed 's' from console: beta" in captured_output.info
+    # Left in place but empty, with a warning that points at the manual delete.
+    assert db.get_console("beta") is not None
+    assert db.list_console_sessions("beta") == []
+    assert any(
+        "beta" in w and "no configured sessions" in w and "agw console delete beta" in w
+        for w in captured_output.warnings
+    )
+
+
+def test_delete_session_warns_when_offered_console_delete_raises(
+    db: Database,
+    fake_target: _FakeTarget,
+    monkeypatch: pytest.MonkeyPatch,
+    captured_output: CapturedOutput,
+) -> None:
+    """If the confirmed empty-console delete raises an AgentworksError (e.g. VM
+    unreachable in its teardown), the session is still reported deleted, a
+    warning names the console, and the command completes without propagating."""
+    from agentworks.db import PID_STOPPED
+    from agentworks.sessions import manager as manager_mod
+
+    _seed_vm(db, with_tailscale=True)
+    _seed_sessions(db, ["s"])
+    db.update_session_pid("s", PID_STOPPED)
+    create_console(db, name="beta", vm_name="vm1", session_specs=["s"])
+
+    monkeypatch.setattr(manager_mod, "_regenerate_tmuxinator", lambda *a, **k: None)
+    monkeypatch.setattr("agentworks.sessions.multi_console.kill_session_windows", lambda *a, **k: None)
+
+    def _boom(*a: object, **k: object) -> None:
+        raise ConnectivityError("vm unreachable", entity_kind="vm", entity_name="vm1")
+
+    monkeypatch.setattr("agentworks.sessions.multi_console.delete_console", _boom)
+
+    # Accept both confirms (the session delete and the empty-console offer).
+    monkeypatch.setattr("agentworks.output.confirm", lambda *a, **k: True)
+
+    # The AgentworksError from the console teardown is swallowed with a warning;
+    # it must not propagate out of delete_session.
+    manager_mod.delete_session(db, _StubConfig(), name="s", yes=False)
+
+    assert db.get_session("s") is None
+    assert "Session 's' deleted" in captured_output.info
+    assert any(
+        "Could not delete empty console 'beta'" in w and "agw console delete beta" in w
+        for w in captured_output.warnings
+    )
+
+
 def test_delete_workspace_kills_console_windows(
     db: Database,
     fake_target: _FakeTarget,
