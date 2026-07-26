@@ -51,6 +51,12 @@ agw session create s1 --vm my-vm --new-workspace --new-agent
 agw session create s2 --vm my-vm --new-workspace --new-agent
 agw console create my-console s1 s2+1      # The + syntax gives you extra shells as that agent
 agw console attach my-console
+
+# Deleting a session drops it from any console that referenced it (no dangling
+# references are left behind). The delete lists the affected consoles, and for
+# any console left with no sessions it offers to delete the now-empty console
+# (interactively). Under --yes it reports the empty console but leaves it for
+# you to remove with `agw console delete <name>`.
 agw console delete my-console              # Extra shells are lost but sessions are preserved
 ```
 
