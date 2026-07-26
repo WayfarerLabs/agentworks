@@ -76,8 +76,17 @@ def realize_workspace(
     ssh_logger = SSHLogger(vm.name, "workspace-create")
 
     def _cleanup() -> None:
+        # The on-VM teardown (directory + the workspace's fresh Linux group)
+        # is gated on workspace_path, which is set only once
+        # create_vm_workspace RETURNS. So it covers failures AFTER a
+        # successful create (the VS Code stub, the row insert), the same
+        # window the directory cleanup already covered; the group teardown
+        # rides along on exactly that window. A failure mid-create (e.g. the
+        # git clone) still leaves workspace_path unset, so neither the
+        # directory nor the group is reclaimed here. That partial-progress
+        # gap predates this change and is tracked separately.
         if workspace_path:
-            delete_vm_workspace(vm, config, name, workspace_path, logger=ssh_logger)
+            delete_vm_workspace(vm, config, name, workspace_path, workspace_group(name), logger=ssh_logger)
         if vscode_path:
             from pathlib import Path
 
