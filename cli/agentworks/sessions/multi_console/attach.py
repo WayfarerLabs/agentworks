@@ -448,13 +448,13 @@ def offer_delete_if_empty_consoles(
     yes: bool,
 ) -> None:
     """For each named console now left with no configured sessions, offer to
-    delete it (interactive, no ``--yes``) or report-but-keep it (otherwise).
+    delete it (interactive) or report-but-keep it (--yes / non-interactive).
 
     An empty console is an operator dead end: ``console attach`` warns "has no
     members; skipping tmux build". This is the shared "console is now empty"
     treatment both ``session delete`` (via the FK cascade, issue #248/#261) and
     ``console remove-sessions`` (issue #265) reach after removing a session's
-    console membership; keep the two paths byte-identical by routing both here.
+    console membership; both route here so the two paths stay byte-identical.
 
     ``console_names`` is the set of candidate consoles (each caller passes the
     consoles it just touched); a console is only acted on when
@@ -463,45 +463,29 @@ def offer_delete_if_empty_consoles(
     read live from the DB here, so callers may pass consoles that still have
     members and they are skipped.
 
-    The prompt is presented only when we can actually read the answer:
-    interactive AND no ``--yes``. Under ``--yes``, or in any non-interactive
-    (scripted / no-TTY) context, report-but-keep instead of prompting. That
-    keeps a scripted ``console remove-sessions`` that empties a console exiting
-    0 as it did before issue #265, rather than aborting on an EOF at the prompt
-    after the removal has already committed.
+    The offer/auto-delete/report policy (including the TTY gate that keeps a
+    scripted caller at exit 0 instead of EOF-aborting) is owned by
+    ``cleanup_now_empty_resource``; this wrapper only carries the console
+    parametrization. A console is operator-authored and never created by the
+    calling command, so ``created=False``: it is never auto-deleted under
+    ``--yes``.
     """
-    # One interactivity read for the whole batch (stdin-TTY state and the
-    # --non-interactive flag don't change mid-command).
-    prompt_allowed = not yes and output.is_interactive()
+    from functools import partial
+
+    from agentworks.sessions._resource_cleanup import cleanup_now_empty_resource
+
     for console_name in console_names:
         if db.list_console_sessions(console_name):
             continue
-        # A console is an operator-authored view, not a resource the caller
-        # created, so this deliberately does NOT auto-delete the way a
-        # session's created_workspace / created_agent do: deleting it is a
-        # separate destructive act on a resource the operator never named on
-        # this command line. Offer it interactively; otherwise report it and
-        # leave it for the operator to remove by hand.
-        if prompt_allowed and output.confirm(
-            f"Console '{console_name}' has no configured sessions left. Delete it?",
-        ):
-            # The membership is already gone; deleting the now-empty console is
-            # a secondary convenience the operator just confirmed. If its
-            # (best-effort) teardown still raises an AgentworksError (e.g. VM
-            # unreachable, or a NotFound race), warn and continue rather than
-            # aborting the whole command after the removal has already been
-            # reported. A non-AgentworksError is an unexpected bug and still
-            # propagates. Route through the package object so tests that
-            # monkeypatch ``multi_console.delete_console`` intercept this call.
-            try:
-                _mc.delete_console(db, config, name=console_name, yes=True)
-            except AgentworksError as exc:
-                output.warn(
-                    f"Could not delete empty console '{console_name}': {exc}. "
-                    f"Remove it with 'agw console delete {console_name}'."
-                )
-        elif not prompt_allowed:
-            output.warn(
-                f"Console '{console_name}' now has no configured sessions; delete it with "
-                f"'agw console delete {console_name}' if it is no longer needed."
-            )
+        cleanup_now_empty_resource(
+            kind="console",
+            name=console_name,
+            created=False,
+            # Route through the package object so tests that monkeypatch
+            # ``multi_console.delete_console`` intercept the confirmed delete.
+            delete=partial(_mc.delete_console, db, config, name=console_name, yes=True),
+            manual_command=f"agw console delete {console_name}",
+            yes=yes,
+            empty_clause="has no configured sessions left",
+            report_clause="now has no configured sessions",
+        )
