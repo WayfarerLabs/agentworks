@@ -113,9 +113,16 @@ def _validated_kinds(kind: str | None, all_kinds: bool) -> tuple[str, ...]:
             # the declarable set that does have samples, matching --all.
             raise ValidationError(
                 f"{kind!r} is a capability kind; it has no sample manifest",
+                entity_kind="resource",
+                entity_name=kind,
                 hint=f"declarable kinds: {known}",
             )
-        raise ValidationError(f"unknown kind {kind!r}", hint=f"known kinds: {known}")
+        raise ValidationError(
+            f"unknown kind {kind!r}",
+            entity_kind="resource",
+            entity_name=kind,
+            hint=f"known kinds: {known}",
+        )
     return (kind,)
 
 
