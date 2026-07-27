@@ -9,12 +9,12 @@ import agentworks.sessions.manager as _mgr
 from agentworks import output
 from agentworks.db import PID_STOPPED, SessionStatus
 from agentworks.errors import (
-    AgentworksError,
     BrokenStateError,
     ExternalError,
     StateError,
     UserAbort,
 )
+from agentworks.sessions._resource_cleanup import cleanup_now_empty_resource
 from agentworks.sessions.tmux import AGENT_SOCKET_ROOT
 
 if TYPE_CHECKING:
@@ -149,38 +149,32 @@ def delete_session(
             noun = "console" if len(member_consoles) == 1 else "consoles"
             output.info(f"Removed '{name}' from {noun}: {', '.join(member_consoles)}")
             emptied = [c for c in member_consoles if not db.list_console_sessions(c)]
-            for empty_console in emptied:
-                # A console is an operator-authored view, not a resource this
-                # session created, so this deliberately does NOT mirror the
-                # created_workspace / created_agent auto-delete-on-yes paths
-                # below: deleting it is a separate destructive act on a
-                # resource the operator never named on this command line.
-                # Offer it interactively; under --yes report it and leave it
-                # for the operator to remove by hand.
-                if not yes and output.confirm(
-                    f"Console '{empty_console}' has no configured sessions left. Delete it?",
-                ):
-                    from agentworks.sessions.multi_console import delete_console
+            if emptied:
+                from functools import partial
 
-                    # The session is already gone; deleting the now-empty
-                    # console is a secondary convenience the operator just
-                    # confirmed. If its (best-effort) teardown still raises an
-                    # AgentworksError (e.g. VM unreachable, or a NotFound race),
-                    # warn and continue rather than aborting the whole command
-                    # after "Session '<name>' deleted" already printed. A
-                    # non-AgentworksError is an unexpected bug and still
-                    # propagates.
-                    try:
-                        delete_console(db, config, name=empty_console, yes=True)
-                    except AgentworksError as exc:
-                        output.warn(
-                            f"Could not delete empty console '{empty_console}': {exc}. "
-                            f"Remove it with 'agw console delete {empty_console}'."
-                        )
-                elif yes:
-                    output.warn(
-                        f"Console '{empty_console}' now has no configured sessions; delete it with "
-                        f"'agw console delete {empty_console}' if it is no longer needed."
+                from agentworks.sessions.multi_console import delete_console
+
+                for empty_console in emptied:
+                    # A console is an operator-authored view, never a resource
+                    # THIS session created, so created=False: it is offered
+                    # interactively but, under --yes, reported and left for the
+                    # operator to remove by hand rather than auto-deleted. (The
+                    # workspace / agent cleanups below auto-delete a
+                    # session-created resource under --yes; a console has no such
+                    # provenance, so it is modeled as never-created, not as a
+                    # special case.) If the confirmed delete raises an
+                    # AgentworksError (VM unreachable, a NotFound race), the
+                    # helper warns and continues rather than aborting the whole
+                    # command after "Session '<name>' deleted" already printed.
+                    cleanup_now_empty_resource(
+                        kind="console",
+                        name=empty_console,
+                        created=False,
+                        delete=partial(delete_console, db, config, name=empty_console, yes=True),
+                        manual_command=f"agw console delete {empty_console}",
+                        yes=yes,
+                        empty_clause="has no configured sessions left",
+                        report_clause="now has no configured sessions",
                     )
 
         # Generalized workspace/agent cleanup (issue #266). The session row is
@@ -223,10 +217,12 @@ def _cleanup_now_empty_workspace(
     """Handle the deleted session's workspace when it now has no sessions.
 
     Call AFTER ``db.delete_session`` so the emptiness check is accurate. The
-    session is already gone, so a follow-on ``delete_workspace`` failure warns
-    and names the manual command rather than aborting the command after the
-    "Session deleted" line has printed (matching the console offer hardening
-    from issue #261).
+    offer / auto-delete / report-but-keep decision and the warn-on-failure
+    guard are the shared :func:`cleanup_now_empty_resource` shape: offer
+    interactively regardless of provenance, auto-delete a session-created
+    workspace under --yes, otherwise report the empty workspace and name the
+    manual command rather than aborting after the "Session deleted" line has
+    printed (matching the console offer hardening from issue #261).
     """
     from agentworks.workspaces.manager import delete_workspace, workspace_has_sessions
 
@@ -234,25 +230,16 @@ def _cleanup_now_empty_workspace(
     if workspace_has_sessions(db, name):
         return
 
-    def _delete() -> None:
-        try:
-            delete_workspace(db, config, name, yes=True)
-        except AgentworksError as exc:
-            output.warn(
-                f"Could not delete empty workspace '{name}': {exc}. Remove it with 'agw workspace delete {name}'."
-            )
-
-    if not yes:
-        if output.confirm(f"Workspace '{name}' now has no sessions. Delete it?"):
-            _delete()
-    elif session.created_workspace:
-        output.detail(f"Deleting workspace '{name}' (created with this session)...")
-        _delete()
-    else:
-        output.warn(
-            f"Workspace '{name}' now has no sessions; delete it with "
-            f"'agw workspace delete {name}' if it is no longer needed."
-        )
+    cleanup_now_empty_resource(
+        kind="workspace",
+        name=name,
+        created=session.created_workspace,
+        delete=lambda: delete_workspace(db, config, name, yes=True),
+        manual_command=f"agw workspace delete {name}",
+        yes=yes,
+        empty_clause="now has no sessions",
+        report_clause="now has no sessions",
+    )
 
 
 def _cleanup_now_empty_agent(
@@ -270,7 +257,8 @@ def _cleanup_now_empty_agent(
     agent is left alone rather than torn down (and its grants revoked) as a
     side effect of a session delete. Admin sessions (``agent_name is None``)
     have no agent to clean up and are skipped. Otherwise mirrors
-    ``_cleanup_now_empty_workspace``: offer interactively regardless of
+    ``_cleanup_now_empty_workspace`` through the shared
+    :func:`cleanup_now_empty_resource` shape: offer interactively regardless of
     provenance, auto-delete only a session-created agent under --yes, and
     report-but-keep any other candidate agent. A follow-on ``delete_agent``
     failure warns rather than aborts.
@@ -282,29 +270,20 @@ def _cleanup_now_empty_agent(
         return
     if not agent_is_unused(db, name):
         return
-    # Bind a non-optional local so the nested closure (which mypy widens
+    # Bind a non-optional local so the delete closure (which mypy widens
     # narrowed names back inside) still sees a plain str.
     agent_name: str = name
 
-    def _delete() -> None:
-        try:
-            delete_agent(db, config, name=agent_name, yes=True)
-        except AgentworksError as exc:
-            output.warn(
-                f"Could not delete empty agent '{agent_name}': {exc}. Remove it with 'agw agent delete {agent_name}'."
-            )
-
-    if not yes:
-        if output.confirm(f"Agent '{agent_name}' now has no sessions. Delete it?"):
-            _delete()
-    elif session.created_agent:
-        output.detail(f"Deleting agent '{agent_name}' (created with this session)...")
-        _delete()
-    else:
-        output.warn(
-            f"Agent '{agent_name}' now has no sessions; delete it with "
-            f"'agw agent delete {agent_name}' if it is no longer needed."
-        )
+    cleanup_now_empty_resource(
+        kind="agent",
+        name=agent_name,
+        created=session.created_agent,
+        delete=lambda: delete_agent(db, config, name=agent_name, yes=True),
+        manual_command=f"agw agent delete {agent_name}",
+        yes=yes,
+        empty_clause="now has no sessions",
+        report_clause="now has no sessions",
+    )
 
 
 def describe_session(

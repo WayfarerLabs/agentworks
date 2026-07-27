@@ -192,6 +192,22 @@ def test_now_empty_workspace_offered_and_deleted_interactive(
     assert db.get_workspace("ws-vm1") is None
 
 
+def test_now_empty_workspace_created_interactive_offer_notes_provenance(
+    db: Database, monkeypatch: pytest.MonkeyPatch, captured_output: CapturedOutput
+) -> None:
+    """A workspace this session created carries a provenance cue in the
+    interactive offer, so the operator recognizes what they made."""
+    _seed_vm(db)
+    calls = _spy_delete_workspace(db, monkeypatch)
+    prompts = _record_confirm(monkeypatch, answer=True)
+
+    session = _session_snapshot("s", "ws-vm1", created_workspace=True)
+    _cleanup_now_empty_workspace(db, _StubConfig(), session, yes=False)
+
+    assert any("Workspace 'ws-vm1' (created with this session) now has no sessions" in p for p in prompts)
+    assert calls == ["ws-vm1"]
+
+
 def test_now_empty_workspace_declined_interactive_keeps(
     db: Database, monkeypatch: pytest.MonkeyPatch, captured_output: CapturedOutput
 ) -> None:
@@ -320,6 +336,24 @@ def test_now_empty_agent_offered_and_deleted_interactive(
     _cleanup_now_empty_agent(db, _StubConfig(), session, yes=False)
 
     assert any("bot" in p and "now has no sessions" in p for p in prompts)
+    assert calls == ["bot"]
+    assert db.get_agent("bot") is None
+
+
+def test_now_empty_agent_created_interactive_offer_notes_provenance(
+    db: Database, monkeypatch: pytest.MonkeyPatch, captured_output: CapturedOutput
+) -> None:
+    """An agent this session created carries a provenance cue in the
+    interactive offer."""
+    _seed_vm(db)
+    _seed_agent(db)
+    calls = _spy_delete_agent(db, monkeypatch)
+    prompts = _record_confirm(monkeypatch, answer=True)
+
+    session = _session_snapshot("s", "ws-vm1", agent_name="bot", created_agent=True)
+    _cleanup_now_empty_agent(db, _StubConfig(), session, yes=False)
+
+    assert any("Agent 'bot' (created with this session) now has no sessions" in p for p in prompts)
     assert calls == ["bot"]
     assert db.get_agent("bot") is None
 
