@@ -202,7 +202,7 @@ def console_remove_sessions(
         typer.Option(
             "--yes",
             "-y",
-            help="Non-interactive: if this empties the console, report it instead of offering to delete it",
+            help="Skip confirmation prompt",
         ),
     ] = False,
 ) -> None:
