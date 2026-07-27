@@ -142,11 +142,16 @@ is not ready; the dependency is not "disabled", it is simply not there.
 
 ## Functional requirements
 
-- **R1 Graph construction is total and config-validity-independent.** The pass that builds the
-  structural graph never raises on a malformed config block. A resource emits every edge it can
-  derive best-effort and omits only edges whose identity depends on a field that is itself
-  malformed. After this pass the registry holds the complete dependency graph regardless of any
-  resource's config health.
+- **R1 The registry produces and retains a first-class dependency graph.** Construction is total and
+  config-validity-independent: the pass that builds the graph never raises on a malformed config
+  block, and a resource emits every edge it can derive best-effort, omitting only edges whose
+  identity depends on a field that is itself malformed. The graph it produces is **retained as the
+  registry's product** (frozen with it), not a transient computation discarded after finalize: its
+  nodes are the resources, its edges are their dependencies (queryable in both directions), and the
+  derived structural facts live on it (readiness per R4, and usage). Today the registry keeps only a
+  resource map (`_resources`), attaches each node's incoming references onto the resource dataclass,
+  and discards the aggregate edge map when finalize returns; this makes the graph a real, retained,
+  inspectable object instead.
 
 - **R2 The capability contract splits into `dependencies` and `validate`.** Each capability kind's
   contract replaces the single `validate_config` with two methods: `dependencies(config)` (total,
@@ -165,12 +170,14 @@ is not ready; the dependency is not "disabled", it is simply not there.
   resource's config block is not validated (there is nothing to run, and its capability may be
   unavailable).
 
-- **R4 Disablement becomes a dependency-ordered readiness fold.** Readiness is computed by walking
-  the graph in reverse-topological (dependencies-first) order; the framework hands each node its
-  dependencies' readiness verdicts, and a node's readiness answer is a pure function of its own
-  (best-effort-parsed) config and those verdicts. A node does not reach into global registry state
-  to learn a dependency's readiness. A leaf's readiness is self-contained (host and tool checks); a
-  non-leaf's readiness folds in its dependencies'.
+- **R4 Disablement becomes a dependency-ordered readiness fold, computed once and stored on the
+  graph.** Readiness is computed during finalize by walking the graph in reverse-topological
+  (dependencies-first) order; the framework hands each node its dependencies' readiness verdicts,
+  and a node's readiness answer is a pure function of its own (best-effort-parsed) config and those
+  verdicts (the per-kind `not_ready` hook). A node never reaches into global registry state to learn
+  a dependency's readiness. Each node's verdict is **recorded on the graph as first-class state**;
+  nothing recomputes it lazily thereafter. A leaf's readiness is self-contained (host and tool
+  checks); a non-leaf's folds in its dependencies'.
 
 - **R5 Readiness is not validity.** These are independent verdicts and both surface. A resource may
   be ready (its dependencies are present and ready, its host supports it) and still have an invalid
@@ -208,17 +215,30 @@ is not ready; the dependency is not "disabled", it is simply not there.
 - **R10 Readiness stays projectable and cheap.** `not_ready` remains offline and cheap (no network,
   secrets, or prompting; deeper checks stay in the capability lifecycle's preflight) and remains
   projectable to `resource list`, `describe`, and `doctor` exactly as `disabled_reason` is today,
-  now including the dependency-following reasons the fold produces.
+  now by **reading the stored verdict off the graph** rather than recomputing, and including the
+  dependency-following reasons the fold produces.
+
+- **R11 The graph is the single access path for structural and derived facts.** The refactor does
+  not merely make the graph available; it **forces the rest of the system onto it** and removes the
+  bypass paths. No consumer recomputes a resource's edges by calling `dependencies()` ad hoc,
+  queries a capability's live registry to decide availability, computes readiness lazily, or reads
+  usage spliced onto a resource dataclass. Every structural or readiness query ("what does X depend
+  on", "what uses X", "is X ready, and why") is answered by the graph. Closing these doors is a
+  first-class goal, not a side effect: the effort inventories and migrates every such caller, and a
+  guard (test/audit) confirms the ad-hoc-recomputation and global-availability-query patterns are
+  gone, so they cannot quietly return.
 
 ## Scope
 
-In scope: decoupling graph construction from config validation (R1, R3); the `dependencies` /
-`validate` split across all four capability kinds (R2); the dependency-ordered readiness fold (R4);
-readiness-is-not-validity (R5); renaming the readiness hook and freeing "enabled/disabled" (R6); the
-absent-vs-not-ready distinction and the reference-resolution seam (R7); the single-graph pass
-ordering (R8); preservation of all existing registry outcomes for valid configs (R9); keeping
-readiness cheap and projectable (R10); the migration of every current caller of `validate_config`,
-`disabled_reason`, and `referenced_resources` to the new shapes.
+In scope: making the registry produce and retain a first-class dependency graph as its product (R1);
+decoupling graph construction from config validation (R1, R3); the `dependencies` / `validate` split
+across all four capability kinds (R2); the dependency-ordered readiness fold, computed once and
+stored on the graph (R4); readiness-is-not-validity (R5); renaming the readiness hook and freeing
+"enabled/disabled" (R6); the absent-vs-not-ready distinction and the reference-resolution seam (R7);
+the single-graph pass ordering (R8); preservation of all existing registry outcomes for valid
+configs (R9); keeping readiness cheap and projectable off the graph (R10); forcing all consumers
+onto the graph and removing the bypass paths (R11); and the migration of every current caller of
+`validate_config`, `disabled_reason`, and `referenced_resources` to the new shapes.
 
 Out of scope: the system-plugin work itself (its rebuild consumes this refactor and is a separate,
 already-parked SDD); the plugin-specific "not enabled, here is how to enable it" diagnosis _content_
