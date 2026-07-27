@@ -15,7 +15,14 @@ import typer
 
 from agentworks.cli._app import app
 from agentworks.cli._helpers import get_db
-from agentworks.manifests.samples import SAMPLE_KINDS
+
+# Module-level so the sample-kind Choice below can be built at decoration
+# time. This is intentional and adds no startup cost over the pre-fix
+# code: that imported SAMPLE_KINDS from `agentworks.manifests.samples`,
+# which already pulls the full `agentworks.resources` capability chain
+# transitively, so `agw`, `agw --help`, and completion loaded the same
+# modules before this fix.
+from agentworks.resources import KIND_REGISTRY
 
 if TYPE_CHECKING:
     from agentworks.resources.inspect import OriginFilter
@@ -29,7 +36,13 @@ app.add_typer(resource_app)
 
 _LAYOUT_CHOICES = click.Choice(["per-kind", "single", "per-resource"])
 _TOML_CHOICES = click.Choice(["comment", "delete"])
-_SAMPLE_KIND_CHOICES = click.Choice(list(SAMPLE_KINDS))
+# The sample-kind argument is deliberately a plain string, not a
+# click.Choice: ANY kind the operator types (a capability kind, a typo,
+# anything) must reach the service layer, which rejects with a clean,
+# kind-aware domain error either way (see
+# manifests.samples._validated_kinds). A Choice would intercept
+# out-of-set strings at parse time, the raw-traceback escape #276 is
+# about. Completions still steer via the completion spec.
 
 
 @resource_app.command("list")
@@ -131,11 +144,10 @@ def resource_kinds(
     kind.
     """
     from agentworks import output
-    from agentworks.resources import KIND_REGISTRY
 
     # The names-only path needs no config and no registry: kinds are
     # static code. Keeps completion fast and working even with a broken
-    # or absent config.
+    # or absent config. KIND_REGISTRY is imported at module level.
     if names_only:
         for name in sorted(KIND_REGISTRY):
             output.info(name)
@@ -405,7 +417,6 @@ def resource_sample(
     kind: Annotated[
         str | None,
         typer.Argument(
-            click_type=_SAMPLE_KIND_CHOICES,
             help=("Kind to print a sample manifest for (e.g. secret, vm-template). Required unless --all is passed."),
         ),
     ] = None,
