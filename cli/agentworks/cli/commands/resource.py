@@ -36,13 +36,13 @@ app.add_typer(resource_app)
 
 _LAYOUT_CHOICES = click.Choice(["per-kind", "single", "per-resource"])
 _TOML_CHOICES = click.Choice(["comment", "delete"])
-# The sample-kind argument accepts every kind `resource kinds` lists, not
-# just the declarable ones with bundled samples. Narrowing the Choice to
-# the declarable set would make a capability kind (harness, ...) fail as
-# a raw click.Choice parse error; keeping it permissive lets the request
-# reach the service layer, which rejects capability kinds with a clean,
-# kind-aware domain error (see manifests.samples._validated_kinds).
-_SAMPLE_KIND_CHOICES = click.Choice(list(KIND_REGISTRY))
+# The sample-kind argument is deliberately a plain string, not a
+# click.Choice: ANY kind the operator types (a capability kind, a typo,
+# anything) must reach the service layer, which rejects with a clean,
+# kind-aware domain error either way (see
+# manifests.samples._validated_kinds). A Choice would intercept
+# out-of-set strings at parse time, the raw-traceback escape #276 is
+# about. Completions still steer via the completion spec.
 
 
 @resource_app.command("list")
@@ -417,7 +417,6 @@ def resource_sample(
     kind: Annotated[
         str | None,
         typer.Argument(
-            click_type=_SAMPLE_KIND_CHOICES,
             help=("Kind to print a sample manifest for (e.g. secret, vm-template). Required unless --all is passed."),
         ),
     ] = None,

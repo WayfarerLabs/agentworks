@@ -240,11 +240,13 @@ DYNAMIC_COMPLETIONS: dict[tuple[str, str], str] = {
     ("resource.list", "kind"): "resource_kinds",
     ("resource.describe", "ref"): "resource_refs",
     ("resource.edit", "ref"): "resource_refs",
-    # Resource migration + authoring. `resource sample`'s kind
-    # argument is a static click.Choice over every registered kind, so it
-    # completes via ParamSpec.choices rather than a dynamic completer.
-    # Capability kinds complete too, then fail with a kind-aware domain
-    # error (they have no bundled sample); see resource.py.
+    # Resource migration + authoring. `resource sample`'s kind argument
+    # is a plain string (no click.Choice: any typed kind must reach the
+    # service layer for a clean domain error, issue #276), so it
+    # completes via the same config-free kinds completer `resource list
+    # --kind` uses. Capability kinds complete too, then fail with a
+    # kind-aware domain error (they have no bundled sample).
+    ("resource.sample", "kind"): "resource_kinds",
     ("resource.migrate", "selectors"): "migrate_selectors",
 }
 
