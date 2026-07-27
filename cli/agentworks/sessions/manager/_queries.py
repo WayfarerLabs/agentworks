@@ -225,8 +225,10 @@ def _cleanup_now_empty_workspace(
     printed (matching the console offer hardening from issue #261).
 
     One guard sits on top of that shape. Deleting the workspace cascades
-    ``agent_workspace_grants``, silently revoking any OTHER agent's explicit,
-    operator-authored standing grant on it (``grant-workspaces``). So when such
+    ``agent_workspace_grants``, silently revoking any agent's explicit,
+    operator-authored standing grant on it (``grant-workspaces``; the deleted
+    session's own agent counts too, while grant-all agents' materialized rows
+    are blanket policy, not per-workspace intent, and do not). So when such
     a grant exists we refuse the --yes auto-delete even for a session-created
     workspace, downgrading it to report-but-keep and naming the granting
     agent(s); and the interactive offer discloses whose grants a delete would
