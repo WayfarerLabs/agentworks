@@ -36,7 +36,7 @@ from ._helpers import _require_console, _shell_summary, tmux_session_name
 from .tmux_build import _build_console_tmux
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator
+    from collections.abc import Iterable, Iterator
 
     from agentworks.config import Config
     from agentworks.db import Database, SessionRow, VMRow
@@ -438,3 +438,54 @@ def delete_console(
         )
     else:
         output.result(f"Console '{name}' deleted.")
+
+
+def offer_delete_if_empty_consoles(
+    db: Database,
+    config: Config,
+    console_names: Iterable[str],
+    *,
+    yes: bool,
+) -> None:
+    """For each named console now left with no configured sessions, offer to
+    delete it (interactive) or report-but-keep it (--yes / non-interactive).
+
+    An empty console is an operator dead end: ``console attach`` warns "has no
+    members; skipping tmux build". This is the shared "console is now empty"
+    treatment both ``session delete`` (via the FK cascade, issue #248/#261) and
+    ``console remove-sessions`` (issue #265) reach after removing a session's
+    console membership; both route here so the two paths stay byte-identical.
+
+    ``console_names`` is the set of candidate consoles (each caller passes the
+    consoles it just touched); a console is only acted on when
+    ``list_console_sessions`` reports it empty, the same predicate
+    ``console describe`` uses for its "Configured sessions" count. Emptiness is
+    read live from the DB here, so callers may pass consoles that still have
+    members and they are skipped.
+
+    The offer/auto-delete/report policy (including the TTY gate that keeps a
+    scripted caller at exit 0 instead of EOF-aborting) is owned by
+    ``cleanup_now_empty_resource``; this wrapper only carries the console
+    parametrization. A console is operator-authored and never created by the
+    calling command, so ``created=False``: it is never auto-deleted under
+    ``--yes``.
+    """
+    from functools import partial
+
+    from agentworks.sessions._resource_cleanup import cleanup_now_empty_resource
+
+    for console_name in console_names:
+        if db.list_console_sessions(console_name):
+            continue
+        cleanup_now_empty_resource(
+            kind="console",
+            name=console_name,
+            created=False,
+            # Route through the package object so tests that monkeypatch
+            # ``multi_console.delete_console`` intercept the confirmed delete.
+            delete=partial(_mc.delete_console, db, config, name=console_name, yes=True),
+            manual_command=f"agw console delete {console_name}",
+            yes=yes,
+            empty_clause="has no configured sessions left",
+            report_clause="now has no configured sessions",
+        )

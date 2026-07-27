@@ -73,7 +73,8 @@ agw console attach my-console
 # references are left behind). session delete lists the affected consoles, and
 # for any console left with no sessions it offers to delete the now-empty
 # console (interactively). Under --yes it reports the empty console but leaves
-# it for you to remove with `agw console delete <name>`.
+# it for you to remove with `agw console delete <name>`. `console remove-sessions`
+# gets the same now-empty treatment when it drops a console's last session.
 agw session delete s1                      # Reports that my-console still referenced s1
 
 agw console delete my-console              # Extra shells are lost but sessions are preserved
@@ -398,7 +399,7 @@ panes you want preloaded into a session's window.
 | `agw console attach <name>`                         | Attach (builds tmux state on first attach)                        |
 | `agw console delete <name>`                         | Tear down and remove the console                                  |
 | `agw console add-sessions <name> <sessions...>`     | Add session windows                                               |
-| `agw console remove-sessions <name> <sessions...>`  | Remove session windows                                            |
+| `agw console remove-sessions <name> <sessions...>`  | Remove session windows (accepts `-y`/`--yes`)                     |
 | `agw console reorder-sessions <name> <sessions...>` | Bump member sessions to the front in the order given              |
 | `agw console add-shell <name> <session>`            | Add a shell pane to a session window (accepts `--cwd`, `--admin`) |
 | `agw console restore-session <name> <session>`      | Repair one session window against its configured shell list       |
@@ -460,6 +461,12 @@ on first attach (or with `--recreate`); subsequent attaches reuse the running tm
 or removing sessions/shells while a console is attached updates the live tmux state immediately
 (best-effort); when the console isn't running on the VM, only the DB is updated and changes appear
 on next attach.
+
+When `console remove-sessions` (or the session-delete cascade) leaves a console with no configured
+sessions, the console is a dead end (`console attach` would just warn "has no members"). It offers
+to delete the now-empty console; pass `-y`/`--yes` to run non-interactively, which reports the
+emptied console and leaves it in place (delete it yourself with `agw console delete <name>`). The
+removed sessions themselves are untouched; only their membership in the console is removed.
 
 <!-- Linked from the top-level README; rename only if you also update README.md. -->
 

@@ -148,34 +148,15 @@ def delete_session(
         if member_consoles:
             noun = "console" if len(member_consoles) == 1 else "consoles"
             output.info(f"Removed '{name}' from {noun}: {', '.join(member_consoles)}")
-            emptied = [c for c in member_consoles if not db.list_console_sessions(c)]
-            if emptied:
-                from functools import partial
+            # Any member left with no configured sessions gets the shared
+            # empty-console treatment (offer / report-but-keep, issue
+            # #248/#261/#265): the wrapper owns the console parametrization,
+            # cleanup_now_empty_resource owns the policy, and console
+            # remove-sessions routes through the same wrapper so the two
+            # paths stay byte-identical.
+            from agentworks.sessions.multi_console import offer_delete_if_empty_consoles
 
-                from agentworks.sessions.multi_console import delete_console
-
-                for empty_console in emptied:
-                    # A console is an operator-authored view, never a resource
-                    # THIS session created, so created=False: it is offered
-                    # interactively but, under --yes, reported and left for the
-                    # operator to remove by hand rather than auto-deleted. (The
-                    # workspace / agent cleanups below auto-delete a
-                    # session-created resource under --yes; a console has no such
-                    # provenance, so it is modeled as never-created, not as a
-                    # special case.) If the confirmed delete raises an
-                    # AgentworksError (VM unreachable, a NotFound race), the
-                    # helper warns and continues rather than aborting the whole
-                    # command after "Session '<name>' deleted" already printed.
-                    cleanup_now_empty_resource(
-                        kind="console",
-                        name=empty_console,
-                        created=False,
-                        delete=partial(delete_console, db, config, name=empty_console, yes=True),
-                        manual_command=f"agw console delete {empty_console}",
-                        yes=yes,
-                        empty_clause="has no configured sessions left",
-                        report_clause="now has no configured sessions",
-                    )
+            offer_delete_if_empty_consoles(db, config, member_consoles, yes=yes)
 
         # Generalized workspace/agent cleanup (issue #266). The session row is
         # already gone, so the "now has no sessions" checks below reflect the
