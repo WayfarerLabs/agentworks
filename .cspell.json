@@ -114,6 +114,7 @@
     "qcow",
     "regen",
     "rehome",
+    "rehomed",
     "reinit",
     "reprovisioning",
     "reqs",

@@ -117,6 +117,7 @@ def _rehome_vm(
     from agentworks.bootstrap import build_registry
     from agentworks.ssh import SSHError, SSHLogger
     from agentworks.transports import transport
+    from agentworks.workspaces.acls import apply_workspace_acls
     from agentworks.workspaces.backends.vm import generate_vscode_workspace
 
     ws_name = ws.name
@@ -212,17 +213,15 @@ def _rehome_vm(
                 target.run(f"chown {vm.admin_username}:{ws_group} {np}", sudo=True)
                 target.run(f"chmod 2770 {np}", sudo=True)
                 target.run(f"find {np} -type d -exec chmod g+s {{}} +", sudo=True, timeout=120)
+                # Canonical workspace ACL, the same shared spec workspace create
+                # and repair apply, so a rehomed workspace lands in the canonical
+                # state (its first repair is an ACL no-op). Per #254 this now also
+                # denies `other` on both the access and default ACLs, which the
+                # old hand-rolled block here did not. ACL failure stays non-fatal
+                # (warn and continue, exactly as before): the rsync copy already
+                # succeeded, so a later repair converges the tree.
                 try:
-                    target.run(
-                        f"find {np} -type d -exec setfacl -d -m g::rwx -m m::rwx {{}} +",
-                        sudo=True,
-                        timeout=120,
-                    )
-                    target.run(
-                        f"setfacl -R -m g::rwx -m m::rwx {np}",
-                        sudo=True,
-                        timeout=120,
-                    )
+                    apply_workspace_acls(target, new_path)
                 except SSHError as e:
                     output.warn(f"ACL setup failed: {e}")
 
