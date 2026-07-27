@@ -13,6 +13,11 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, NamedTuple
 
+# Importing the Linux username ceiling from the config layer (never the
+# reverse) keeps the dependency direction safe: config.validation depends on
+# nothing in the agents package, so this cannot cycle. It backs the derived
+# MAX_AGENT_NAME_LENGTH co-located with AGENT_PREFIX below.
+from agentworks.config.validation import LINUX_USERNAME_MAX_LENGTH
 from agentworks.errors import (
     AuthorizationError,
     NotFoundError,
@@ -29,6 +34,13 @@ if TYPE_CHECKING:
     from agentworks.transports import Transport
 
 AGENT_PREFIX = "agt-"
+
+# Derived FROM the prefix so a prefix change cannot reintroduce an over-limit
+# Linux username. ``derive_linux_user`` builds ``agt-<name>`` and ``useradd -U``
+# creates a same-named group, so the derived string must fit the 32-char Linux
+# username/group limit: 32 - len("agt-") = 28.
+MAX_AGENT_NAME_LENGTH = LINUX_USERNAME_MAX_LENGTH - len(AGENT_PREFIX)
+
 MAX_GRANTS_DISPLAY = 60
 
 

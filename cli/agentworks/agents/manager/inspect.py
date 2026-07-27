@@ -10,10 +10,15 @@ from typing import TYPE_CHECKING
 from agentworks import output
 from agentworks.errors import NotFoundError
 
-from ._common import MAX_GRANTS_DISPLAY
+from ._common import MAX_AGENT_NAME_LENGTH, MAX_GRANTS_DISPLAY
 
 if TYPE_CHECKING:
     from agentworks.db import Database
+
+# NAME-column truncation cap for ``agent list``, derived from the agent-name
+# cap so the two cannot drift: a valid name (<= 28) never truncates, and the
+# column stays aligned even against an over-cap legacy row.
+_NAME_CELL_WIDTH = MAX_AGENT_NAME_LENGTH
 
 
 def _format_grants(db: Database, agent_name: str, grant_all: bool) -> str:
@@ -59,11 +64,15 @@ def list_agents(
         output.info("No agents found.")
         return
 
-    output.info(f"{'NAME':<20} {'VM':<15} {'TEMPLATE':<12} {'WORKSPACE GRANTS'}")
-    output.info("-" * 80)
-    for agent in agents:
+    names = [output.truncate(agent.name, _NAME_CELL_WIDTH) for agent in agents]
+    name_w = max(len("NAME"), *(len(n) for n in names))
+
+    header = f"{'NAME':<{name_w}} {'VM':<15} {'TEMPLATE':<12} {'WORKSPACE GRANTS'}"
+    output.info(header)
+    output.info("-" * len(header))
+    for agent, name in zip(agents, names, strict=True):
         grants = _format_grants(db, agent.name, agent.grant_all)
-        output.info(f"{agent.name:<20} {agent.vm_name:<15} {agent.template or '-':<12} {grants}")
+        output.info(f"{name:<{name_w}} {agent.vm_name:<15} {agent.template or '-':<12} {grants}")
 
 
 def describe_agent(

@@ -20,27 +20,68 @@ VM_USER_RE = re.compile(r"^[a-z_][a-z0-9_-]{0,31}$")
 # SSH host prefix: alphanumeric, hyphens, underscores, dots
 SSH_HOST_PREFIX_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9._-]*$")
 
-MAX_NAME_LENGTH = 30
+# Hard OS limits the name-derived identifiers must fit inside. util-linux
+# ``useradd`` / ``groupadd`` cap the login name at 32 characters (the historic
+# utmp ``ut_user`` field width; ``LOGIN_NAME_MAX`` is 256 in glibc but useradd
+# enforces the smaller value, and ``useradd -U`` creates a same-named group, so
+# the group name is bounded identically). These are the ceilings the derived
+# ``agt-<agent>`` username and ``ws-<workspace>`` group name must satisfy; the
+# per-kind caps below are derived FROM them at the prefix's module so a prefix
+# change cannot reintroduce an over-limit identifier.
+LINUX_USERNAME_MAX_LENGTH = 32
+LINUX_GROUPNAME_MAX_LENGTH = 32
+
+# VM names become the OS hostname / Tailscale MagicDNS label via
+# ``{slug}-{vm}`` (hostnamectl). A DNS label is capped at 63 characters; the
+# system slug is capped at 20 (``validate_slug``) and one character goes to the
+# separating dash, leaving 63 - 1 - 20 = 42 characters for the VM name.
+MAX_VM_NAME_LENGTH = 42
+
+# Session / console / vm-site names hit no OS-level identifier limit: they land
+# in tmux window/session labels, a registry key, and display strings / paths
+# only. They still get a bound (not unbounded) so a pathological name cannot
+# blow out list tables; 64 is generous while staying table-friendly.
+MAX_FREEFORM_NAME_LENGTH = 64
+
 # Secret names are never derived into Linux usernames, so the username-driven
-# 30-char cap does not apply to them. We keep a bound (not unbounded) and adopt
-# the k8s DNS-subdomain ceiling as a well-understood, non-arbitrary limit: it is
+# caps do not apply to them. We keep a bound (not unbounded) and adopt the k8s
+# DNS-subdomain ceiling as a well-understood, non-arbitrary limit: it is
 # generous enough for the ``git-token-<credential-name>`` default token secret
 # (the case that motivated lifting the cap, issue #275) and everything else.
 MAX_SECRET_NAME_LENGTH = 253
 
 
-def validate_name(name: str, *, allow_double_hyphen: bool = False, max_length: int = MAX_NAME_LENGTH) -> None:
+def validate_name(name: str, *, allow_double_hyphen: bool = False, max_length: int = MAX_FREEFORM_NAME_LENGTH) -> None:
     """Validate a resource name, raising ValidationError on failure.
 
     Rules: lowercase alphanumeric, hyphens, underscores. Must start and end
-    with alphanumeric.
+    with alphanumeric. All character rules stay identical regardless of
+    ``max_length``; only the length cap varies by kind.
 
-    The default length cap is ``MAX_NAME_LENGTH`` (30). That cap is
-    username-derived: VM / workspace / session / agent names get turned into
-    Linux usernames on the VM (hard 32-char limit) and 30 leaves room for the
-    agent-username suffix. Kinds that are NOT turned into usernames should pass
-    a larger ``max_length``; secrets do this via ``MAX_SECRET_NAME_LENGTH``.
-    All character rules stay identical regardless of ``max_length``.
+    There is no single correct name-length cap: each resource kind has its own
+    downstream sink, so each caller MUST pass the cap derived for its kind. The
+    caps and their derivations are:
+
+    - **agent** -> ``MAX_AGENT_NAME_LENGTH`` (28). The name is derived into the
+      Linux username ``agt-<name>`` (and, via ``useradd -U``, a same-named
+      group), which must fit the 32-char Linux limit: 32 - len("agt-") = 28.
+    - **workspace** -> ``MAX_WORKSPACE_NAME_LENGTH`` (29). The name is derived
+      into the Linux group ``ws-<name>``, bounded by the same 32-char limit:
+      32 - len("ws-") = 29.
+    - **vm** -> ``MAX_VM_NAME_LENGTH`` (42). The name becomes the OS hostname /
+      Tailscale DNS label ``{slug}-{vm}``: 63 (DNS label) - 1 (dash) - 20
+      (max slug) = 42.
+    - **session / console / vm-site** -> ``MAX_FREEFORM_NAME_LENGTH`` (64).
+      These hit no OS identifier limit (tmux labels, a registry key, display
+      strings / paths only); 64 is a table-friendly bound, not an OS ceiling.
+    - **secret** -> ``MAX_SECRET_NAME_LENGTH`` (253). Never derived into a
+      username; bounded by the k8s DNS-subdomain ceiling (issue #275).
+
+    The default is ``MAX_FREEFORM_NAME_LENGTH`` (64): a caller that forgets to
+    pass a cap gets the generous freeform bound, never a silently-wrong OS cap.
+    Username / group / hostname-derived callers (agent, workspace, vm) MUST
+    pass their derived cap so an over-limit identifier is rejected at the CLI
+    boundary rather than failing opaquely on the VM.
 
     Consecutive hyphens (``--``) are rejected by default because they are
     reserved for the ``<workspace>--<agent>`` separator used by the legacy

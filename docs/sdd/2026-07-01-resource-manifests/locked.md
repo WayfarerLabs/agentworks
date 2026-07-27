@@ -143,3 +143,41 @@ leading/trailing hyphen, no `--`) are unchanged. The username-bearing kinds (and
 follows the VM-name rules) keep the 30-char cap. `_load_secrets` is the single validation point for
 the secret kind, and the manifest decoder's `_decode_secret` delegates to it, so no other kind is
 affected.
+
+## 2026-07-27: name-length caps rationalized per kind (issue #278)
+
+Post-lock follow-up completing the name-length work #275 began. #275 fixed only the secret kind and
+left the blanket `MAX_NAME_LENGTH = 30` in place for everything else; that 30 was derived from
+nothing and was in fact WRONG for the username / group-bearing kinds (`agt-` + 30 = 34 and `ws-` +
+30 = 33 both overflow the 32-char Linux username/group limit). This change removes `MAX_NAME_LENGTH`
+entirely and gives every kind a cap derived from its REAL downstream sink. The locked LLDs are not
+edited in place (they are point-in-time records); this entry, together with the #275 entry above, is
+the authoritative note. The "Name validation parity (max 30)" line in `manifest-schema-lld.md` and
+the "vm-site names follow the VM-name rules ... they appear in hostnames and SSH aliases" claim in
+the vm-sites FRD are both superseded here.
+
+As-built per-kind caps (all still share the identical `NAME_RE` character rules; only the length
+bound varies, via the existing `validate_name(max_length=...)` parameter):
+
+- **agent -> 28**, derived as `LINUX_USERNAME_MAX_LENGTH (32) - len(AGENT_PREFIX)`. Co-located with
+  `AGENT_PREFIX` in `agents/manager/_common.py` as `MAX_AGENT_NAME_LENGTH`.
+- **workspace -> 29**, derived as `LINUX_GROUPNAME_MAX_LENGTH (32) - len(WS_GROUP_PREFIX)`.
+  Co-located with `WS_GROUP_PREFIX` in `agents/grants.py` as `MAX_WORKSPACE_NAME_LENGTH`. Deriving
+  the agent/workspace caps FROM the prefixes (rather than hard-coding 28 / 29) means a future prefix
+  change cannot silently reintroduce an over-limit identifier; a pinned test asserts the derived
+  username/group is exactly 32 at the cap.
+- **vm -> 42** (`MAX_VM_NAME_LENGTH`), derived as `63 (DNS label) - 1 (dash) - 20 (max slug)`: the
+  name becomes the OS hostname / Tailscale MagicDNS label `{slug}-{vm}`.
+- **session / console / vm-site -> 64** (`MAX_FREEFORM_NAME_LENGTH`): these hit no OS identifier
+  limit (tmux labels, a registry key, display strings / paths only). The vm-site comment claiming
+  site names feed hostnames / SSH aliases was incorrect and is fixed (VM names, not site names, feed
+  hostnames).
+- **secret -> 253** (`MAX_SECRET_NAME_LENGTH`, unchanged from #275).
+
+The `validate_name` default `max_length` moved from 30 to `MAX_FREEFORM_NAME_LENGTH` (64) so a
+caller that forgets to pass a cap gets the generous freeform bound, never a silently-wrong OS cap;
+the four OS/DNS-bearing kinds (agent, workspace, vm) pass their derived cap explicitly. Tightening
+agent 30 -> 28 and workspace 30 -> 29 is intended: the old 30 already produced over-limit usernames
+and groups. Separately, the `vm` / `agent` / `workspace` / `console` list tables gained NAME-cell
+display truncation (via `output.truncate`) so a long or legacy over-cap name cannot misalign the
+table; `--names-only` output is untouched and still emits full names for shell completion.

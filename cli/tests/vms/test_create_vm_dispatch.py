@@ -305,16 +305,17 @@ def test_slug_resolution_precedes_secrets_and_insert(
 
 
 def test_r11_hostname_bound_by_construction() -> None:
-    """Slug max 20 + dash + name max 30 = 51 chars, inside the 63-char
-    hostname-label and Azure 64-char computer-name limits."""
-    from agentworks.config import MAX_NAME_LENGTH, validate_name
+    """Slug max 20 + dash + name max 42 (MAX_VM_NAME_LENGTH, derived as
+    63 - 1 - 20) = 63 chars, exactly the DNS-label limit and inside Azure's
+    64-char computer-name limit."""
+    from agentworks.config import MAX_VM_NAME_LENGTH, validate_name
 
     slug = "a" * 20
     vm_manager.validate_slug(slug)
-    name = "b" * MAX_NAME_LENGTH
-    validate_name(name)
+    name = "b" * MAX_VM_NAME_LENGTH
+    validate_name(name, max_length=MAX_VM_NAME_LENGTH)
     hostname = f"{slug}-{name}"
-    assert len(hostname) == 51
+    assert len(hostname) == 63
     assert len(hostname) <= 63
 
 

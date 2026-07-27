@@ -451,16 +451,41 @@ def test_secret_over_username_cap_decodes_and_registers(tmp_path: Path) -> None:
     assert registry.lookup("secret", long_name).name == long_name
 
 
-def test_vm_site_still_capped_at_username_length(tmp_path: Path) -> None:
-    """The raised cap is secret-only: vm-site names follow the VM-name rules
-    (they appear in hostnames / SSH aliases) and keep the 30-char cap."""
+def test_vm_site_uses_freeform_cap(tmp_path: Path) -> None:
+    """vm-site names hit no OS identifier limit (registry key + display only;
+    they are NOT derived into hostnames or SSH aliases, VM names are), so they
+    use the freeform cap (64), not the tighter VM-name cap. A 40-char name that
+    the old 30-char cap rejected now decodes and registers."""
+    from agentworks.config import MAX_FREEFORM_NAME_LENGTH
+
+    name = "a" * 40
+    assert MAX_FREEFORM_NAME_LENGTH == 64 and len(name) > 30
     _manifest(
         tmp_path,
         f"""
         apiVersion: agentworks/v1
         kind: vm-site
         metadata:
-          name: {"a" * 31}
+          name: {name}
+        spec:
+          platform: lima
+        """,
+    )
+    manifests = load_manifests(tmp_path / "resources")
+    assert [e.name for e in manifests.entries] == [name]
+
+
+def test_vm_site_over_freeform_cap_rejected(tmp_path: Path) -> None:
+    """A vm-site name past the freeform cap (64) is still rejected."""
+    from agentworks.config import MAX_FREEFORM_NAME_LENGTH
+
+    _manifest(
+        tmp_path,
+        f"""
+        apiVersion: agentworks/v1
+        kind: vm-site
+        metadata:
+          name: {"a" * (MAX_FREEFORM_NAME_LENGTH + 1)}
         spec:
           platform: lima
         """,
@@ -468,7 +493,7 @@ def test_vm_site_still_capped_at_username_length(tmp_path: Path) -> None:
     with pytest.raises(ConfigError) as exc:
         load_manifests(tmp_path / "resources")
     assert "is too long" in str(exc.value)
-    assert "max 30" in str(exc.value)
+    assert f"max {MAX_FREEFORM_NAME_LENGTH}" in str(exc.value)
 
 
 def test_description_stored_for_template_kind_without_warning(tmp_path: Path) -> None:

@@ -4,14 +4,24 @@ from __future__ import annotations
 
 import pytest
 
-from agentworks.config import MAX_NAME_LENGTH, MAX_SECRET_NAME_LENGTH, validate_name
+from agentworks.agents.grants import MAX_WORKSPACE_NAME_LENGTH, WS_GROUP_PREFIX, workspace_group
+from agentworks.agents.manager import AGENT_PREFIX, MAX_AGENT_NAME_LENGTH
+from agentworks.agents.manager._common import derive_linux_user
+from agentworks.config import (
+    LINUX_GROUPNAME_MAX_LENGTH,
+    LINUX_USERNAME_MAX_LENGTH,
+    MAX_FREEFORM_NAME_LENGTH,
+    MAX_SECRET_NAME_LENGTH,
+    MAX_VM_NAME_LENGTH,
+    validate_name,
+)
 from agentworks.output import ValidationError
 
 
-def _is_valid(name: str, *, allow_double_hyphen: bool = False) -> bool:
-    """Return True if validate_name accepts the name."""
+def _is_valid(name: str, *, allow_double_hyphen: bool = False, max_length: int = MAX_FREEFORM_NAME_LENGTH) -> bool:
+    """Return True if validate_name accepts the name at ``max_length``."""
     try:
-        validate_name(name, allow_double_hyphen=allow_double_hyphen)
+        validate_name(name, allow_double_hyphen=allow_double_hyphen, max_length=max_length)
         return True
     except ValidationError:
         return False
@@ -19,11 +29,7 @@ def _is_valid(name: str, *, allow_double_hyphen: bool = False) -> bool:
 
 def _is_valid_secret(name: str) -> bool:
     """Return True if validate_name accepts the name at the secret cap."""
-    try:
-        validate_name(name, max_length=MAX_SECRET_NAME_LENGTH)
-        return True
-    except ValidationError:
-        return False
+    return _is_valid(name, max_length=MAX_SECRET_NAME_LENGTH)
 
 
 # -- Valid names -----------------------------------------------------------
@@ -131,7 +137,7 @@ def test_double_hyphen_allowed_when_flag_set(name: str) -> None:
         ("a/b", "contains slash"),
         ("a b", "contains space"),
         ("my@vm", "contains special character"),
-        ("a" * 31, "too long"),
+        ("a" * (MAX_FREEFORM_NAME_LENGTH + 1), "too long"),
     ],
 )
 def test_double_hyphen_flag_does_not_relax_other_rules(name: str, reason: str) -> None:
@@ -140,29 +146,72 @@ def test_double_hyphen_flag_does_not_relax_other_rules(name: str, reason: str) -
     )
 
 
+# -- Per-kind length boundaries --------------------------------------------
+#
+# Each resource kind has its own cap, derived from its real downstream sink
+# (Linux username/group, DNS label, or a table-friendly freeform bound). The
+# boundary tests pin ok-at-cap / rejected-over-cap for every kind.
+
+
+@pytest.mark.parametrize(
+    "cap",
+    [
+        MAX_AGENT_NAME_LENGTH,
+        MAX_WORKSPACE_NAME_LENGTH,
+        MAX_VM_NAME_LENGTH,
+        MAX_FREEFORM_NAME_LENGTH,
+        MAX_SECRET_NAME_LENGTH,
+    ],
+)
+def test_name_at_cap_ok_over_cap_rejected(cap: int) -> None:
+    assert _is_valid("a" * cap, max_length=cap), f"a name of exactly {cap} chars must pass at cap {cap}"
+    assert not _is_valid("a" * (cap + 1), max_length=cap), f"a name of {cap + 1} chars must fail at cap {cap}"
+
+
+def test_kind_caps_have_expected_values() -> None:
+    # Pin the concrete caps so an accidental edit to a derivation is caught.
+    assert MAX_AGENT_NAME_LENGTH == 28
+    assert MAX_WORKSPACE_NAME_LENGTH == 29
+    assert MAX_VM_NAME_LENGTH == 42
+    assert MAX_FREEFORM_NAME_LENGTH == 64
+    assert MAX_SECRET_NAME_LENGTH == 253
+
+
+# -- Derivation invariants (prefix change that would overflow fails here) ---
+#
+# The agent / workspace caps exist so the DERIVED Linux username / group fits
+# the 32-char OS limit. Pin the derived length at the cap so a prefix change
+# (or a cap bump) that would push the identifier over 32 fails a test rather
+# than producing over-limit usernames on the VM.
+
+
+def test_agent_cap_yields_max_length_username() -> None:
+    username = derive_linux_user("a" * MAX_AGENT_NAME_LENGTH)
+    assert username == AGENT_PREFIX + "a" * MAX_AGENT_NAME_LENGTH
+    assert len(username) == LINUX_USERNAME_MAX_LENGTH == 32
+
+
+def test_workspace_cap_yields_max_length_group() -> None:
+    group = workspace_group("a" * MAX_WORKSPACE_NAME_LENGTH)
+    assert group == WS_GROUP_PREFIX + "a" * MAX_WORKSPACE_NAME_LENGTH
+    assert len(group) == LINUX_GROUPNAME_MAX_LENGTH == 32
+
+
 # -- Secret-name length cap (issue #275) -----------------------------------
 #
 # Secret names are never derived into Linux usernames, so they use the larger
-# MAX_SECRET_NAME_LENGTH cap rather than the username-driven MAX_NAME_LENGTH.
+# MAX_SECRET_NAME_LENGTH cap rather than the username-driven caps.
 
 
-def test_secret_cap_is_larger_than_default() -> None:
-    assert MAX_SECRET_NAME_LENGTH > MAX_NAME_LENGTH
+def test_secret_cap_is_larger_than_agent_cap() -> None:
+    assert MAX_SECRET_NAME_LENGTH > MAX_AGENT_NAME_LENGTH
 
 
-def test_secret_name_over_default_cap_passes() -> None:
-    # A name longer than the 30-char username cap but within the secret cap.
-    name = "s" * (MAX_NAME_LENGTH + 10)
-    assert len(name) > MAX_NAME_LENGTH
-    assert _is_valid_secret(name), "Expected a >30 name within the secret cap to be valid for secrets"
-
-
-def test_secret_name_at_secret_cap_passes() -> None:
-    assert _is_valid_secret("s" * MAX_SECRET_NAME_LENGTH)
-
-
-def test_secret_name_over_secret_cap_fails() -> None:
-    assert not _is_valid_secret("s" * (MAX_SECRET_NAME_LENGTH + 1))
+def test_secret_name_over_agent_cap_passes() -> None:
+    # A name longer than the agent username cap but within the secret cap.
+    name = "s" * (MAX_AGENT_NAME_LENGTH + 10)
+    assert len(name) > MAX_AGENT_NAME_LENGTH
+    assert _is_valid_secret(name), "Expected a name over the agent cap but within the secret cap to be valid"
 
 
 def test_secret_cap_error_message_reports_secret_max() -> None:
@@ -170,7 +219,6 @@ def test_secret_cap_error_message_reports_secret_max() -> None:
         validate_name("s" * (MAX_SECRET_NAME_LENGTH + 1), max_length=MAX_SECRET_NAME_LENGTH)
     message = str(excinfo.value)
     assert f"max {MAX_SECRET_NAME_LENGTH}" in message
-    assert f"max {MAX_NAME_LENGTH}" not in message
 
 
 def test_secret_cap_does_not_relax_character_rules() -> None:
@@ -181,21 +229,20 @@ def test_secret_cap_does_not_relax_character_rules() -> None:
     assert not _is_valid_secret("s" * 20 + "." + "s" * 20)  # dot
 
 
-def test_username_bearing_kinds_still_cap_at_default() -> None:
-    # The default (username-bearing) cap is unchanged: a >30 name is rejected.
-    over = "a" * (MAX_NAME_LENGTH + 1)
-    assert not _is_valid(over), "Expected a >30 name to remain invalid at the default cap"
-    with pytest.raises(ValidationError) as excinfo:
-        validate_name(over)
-    assert f"max {MAX_NAME_LENGTH}" in str(excinfo.value)
-
-
 def test_git_token_secret_from_realistic_credential_name_passes() -> None:
     # Regression for issue #275: git-token-<credential-name> for a reasonable
     # 23-char credential name is a 33-char secret name that must now pass.
     secret_name = "git-token-github-fg-wf-agw-tester"
     assert len(secret_name) == 33
-    assert len(secret_name) > MAX_NAME_LENGTH
     assert _is_valid_secret(secret_name)
-    # And it is still rejected under the default username-bearing cap.
-    assert not _is_valid(secret_name)
+    # And it is still rejected under the tighter agent (username-bearing) cap.
+    assert not _is_valid(secret_name, max_length=MAX_AGENT_NAME_LENGTH)
+
+
+def test_forgotten_cap_defaults_to_freeform_not_a_username_cap() -> None:
+    # A caller that forgets to pass max_length gets the generous freeform
+    # bound (64), never a silently-wrong OS-derived cap. A 40-char name (over
+    # every username/group cap, under freeform) must pass the default.
+    name = "a" * 40
+    assert MAX_AGENT_NAME_LENGTH < len(name) < MAX_FREEFORM_NAME_LENGTH
+    assert _is_valid(name)  # uses the default cap

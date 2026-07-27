@@ -21,7 +21,7 @@ from agentworks.errors import (
 )
 from agentworks.vms.manager import gated_vm_boundary
 
-from ._common import _require_vm, agent_scope
+from ._common import MAX_AGENT_NAME_LENGTH, _require_vm, agent_scope
 
 if TYPE_CHECKING:
     from contextlib import AbstractContextManager
@@ -75,7 +75,7 @@ def create_agent(
 
     agent_tmpl = resolve_template(registry, template)
 
-    validate_name(name)
+    validate_name(name, max_length=MAX_AGENT_NAME_LENGTH)
 
     if db.get_agent(name) is not None:
         raise AlreadyExistsError(

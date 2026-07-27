@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING
 
 from agentworks import output
 from agentworks.capabilities.base import RunContext
+from agentworks.config import MAX_VM_NAME_LENGTH
 from agentworks.db import SYSTEM_SLUG_KEY, VMStatus
 from agentworks.errors import (
     AgentworksError,
@@ -30,6 +31,11 @@ if TYPE_CHECKING:
     from agentworks.config import Config
     from agentworks.db import Database
     from agentworks.vms.nodes import LiveVMNode
+
+# NAME-column truncation cap for ``vm list``, derived from the VM-name cap so
+# the two cannot drift: a valid name (<= 42) never truncates, and the column
+# stays aligned even against an over-cap legacy row.
+_NAME_CELL_WIDTH = MAX_VM_NAME_LENGTH
 
 # NOTE on ``_ensure_tailscale`` (start_vm), ``_tailscale_logout``
 # (delete_vm), and ``_query_live_resources`` (describe_vm): all three are
@@ -64,19 +70,25 @@ def list_vms(db: Database, *, names_only: bool = False) -> None:
         output.info("No VMs registered.")
         return
 
+    # Cap the NAME column at the VM-name cap (42) so a legacy / manually
+    # inserted over-cap row cannot push the other columns out of alignment;
+    # the column then sizes dynamically to the longest (truncated) name.
+    names = [output.truncate(vm.name, _NAME_CELL_WIDTH) for vm in vms]
+    name_w = max(len("NAME"), *(len(n) for n in names))
+
     header = (
-        f"{'NAME':<20} {'SITE':<12} {'TEMPLATE':<12} {'PROV':<12} {'INIT':<12} "
+        f"{'NAME':<{name_w}} {'SITE':<12} {'TEMPLATE':<12} {'PROV':<12} {'INIT':<12} "
         f"{'WS/AG/SE':<10} {'TAILSCALE':<20} {'CREATED'}"
     )
     output.info(header)
     output.info("-" * len(header))
-    for vm in vms:
+    for vm, name in zip(vms, names, strict=True):
         ws = db.count_workspaces_on_vm(vm.name)
         ag = db.count_agents_on_vm(vm.name)
         se = db.count_sessions_on_vm(vm.name)
         counts = f"{ws}/{ag}/{se}"
         output.info(
-            f"{vm.name:<20} {vm.site:<12} {vm.template or '-':<12} "
+            f"{name:<{name_w}} {vm.site:<12} {vm.template or '-':<12} "
             f"{vm.provisioning_status:<12} {vm.init_status:<12} "
             f"{counts:<10} {vm.tailscale_host or '-':<20} {vm.created_at}"
         )
