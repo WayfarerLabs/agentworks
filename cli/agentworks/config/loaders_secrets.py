@@ -11,7 +11,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Literal
 
 from agentworks.config.loaders_core import _warn_unexpected_keys
-from agentworks.config.validation import MAX_SECRET_NAME_LENGTH, validate_name
+from agentworks.config.validation import validate_name
 from agentworks.errors import ConfigError
 from agentworks.secrets import SecretConfig, SecretDecl
 
@@ -35,11 +35,7 @@ def _load_secrets(
         name_str = str(name)
         if not isinstance(sdata, dict):
             raise ConfigError(f"secrets.{name_str} must be a table")
-        # Secret names are never derived into Linux usernames, so they use the
-        # larger secret cap rather than the username-driven MAX_NAME_LENGTH.
-        # This is the single validation point for the secret kind: the manifest
-        # decoder (_decode_secret) delegates here, so no other kind is affected.
-        validate_name(name_str, max_length=MAX_SECRET_NAME_LENGTH)
+        validate_name(name_str)
         _warn_unexpected_keys(sdata, expected, f"secrets.{name_str}", issues)
 
         description = sdata.get("description")

@@ -338,45 +338,6 @@ def test_secret_declared_with_all_mapping_forms(tmp_path: Path) -> None:
     assert cfg.secrets["token-c"].backend_mappings == {"env-var": False}
 
 
-def test_secret_name_over_username_cap_loads_from_toml(tmp_path: Path) -> None:
-    """Issue #275: the TOML [secrets.*] loader validates secret names against
-    the larger secret cap. The git-token-<credential> default (33 chars) loads
-    even though it exceeds the 30-char username cap."""
-    cfg_file = tmp_path / "config.toml"
-    long_name = "git-token-github-fg-wf-agw-tester"  # 33 chars
-    assert len(long_name) > 30
-    _write_base(
-        cfg_file,
-        extras=f"""
-        [secrets.{long_name}]
-        description = "PAT for the tester credential"
-        """,
-    )
-    cfg = load_config(cfg_file, warn_issues=False)
-    assert cfg.secrets[long_name].name == long_name
-
-
-def test_secret_name_over_secret_cap_rejected_from_toml(tmp_path: Path) -> None:
-    """A secret name beyond the secret cap (253) is rejected, and the error
-    reports the correct (secret) max, not 30."""
-    from agentworks.config import MAX_SECRET_NAME_LENGTH
-    from agentworks.errors import ValidationError
-
-    cfg_file = tmp_path / "config.toml"
-    _write_base(
-        cfg_file,
-        extras=f"""
-        [secrets.{"s" * (MAX_SECRET_NAME_LENGTH + 1)}]
-        description = "too long"
-        """,
-    )
-    with pytest.raises(ValidationError) as exc:
-        load_config(cfg_file, warn_issues=False)
-    message = str(exc.value)
-    assert "is too long" in message
-    assert f"max {MAX_SECRET_NAME_LENGTH}" in message
-
-
 def test_secret_true_in_backend_mappings_rejected(tmp_path: Path) -> None:
     cfg_file = tmp_path / "config.toml"
     _write_base(

@@ -39,12 +39,23 @@ agw session stop my-session      # Sessions can be stopped (or can exit on their
 agw session list
 agw session restart my-session
 agw session attach my-session
-agw session delete my-session    # When you're done with it. Agent and workspace are preserved.
+agw session delete my-session    # When you're done with it. Agent and workspace are preserved unless this was their last session (see below).
 
 # Alternatively, you can create ephemeral workspaces and agents along with your sessions
 agw session create my-ephemeral-session --vm my-vm --new-workspace --new-agent
 agw session attach my-ephemeral-session
 agw session delete my-ephemeral-session    # This will prompt you to delete the associated workspace and agent, too
+
+# Deleting a session also checks whether its workspace and agent are now unused
+# (whether or not this session created them). A workspace is unused once it has
+# no sessions; an agent is unused only once it has no sessions AND no standing
+# workspace grant (no explicit grant and grant-all unset; a standing grant
+# means you still intend to use the agent, so it is left alone). For each
+# resource now unused, session delete offers to delete it interactively.
+# Under --yes it auto-deletes only a workspace/agent
+# this session created; anything else now unused is reported (naming
+# `agw workspace delete <name>` / `agw agent delete <name>`) and left in place
+# for you to remove by hand.
 
 # Finally, create two sessions and a named console
 agw session create s1 --vm my-vm --new-workspace --new-agent

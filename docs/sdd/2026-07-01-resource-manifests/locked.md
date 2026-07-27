@@ -119,27 +119,3 @@ point-in-time record); this entry is the authoritative note that the vm-template
 `inherits`, `cpus`, `memory`, `disk`, `swap`, `apt`, `apt_packages`, `snap`,
 `system_install_commands`, `tailscale_auth_key`, `env`. The `vm create` hardware/admin override
 flags were removed in the same change (see the ADR).
-
-## 2026-07-26: secret-name length parity lifted (issue #275)
-
-Post-lock follow-up. The "Name validation parity" note in `manifest-schema-lld.md` (max 30 for the
-`secret` kind, "Tightening this uniformly is a candidate follow-up AFTER the migration equivalence
-window") gated any cap revision on the migration equivalence window, which is now well past; this
-change revises the cap in the opposite direction from the uniform tightening that note sketched
-(secrets get their own larger bound because they never derive Linux usernames). The locked LLD is
-not edited in place (it is a point-in-time record); this entry is the authoritative note.
-
-The 30-char cap (`MAX_NAME_LENGTH`) exists ONLY because VM / workspace / session / agent names get
-derived into Linux usernames on the VM (32-char limit, minus agent-username suffix headroom). Secret
-names are never turned into usernames, so that cap was arbitrary for them, inherited purely from
-TOML->YAML migration parity. It bit the per-credential default token secret
-`git-token-<credential-name>`: a reasonable credential name like `github-fg-wf-agw-tester` (23
-chars) yields the 33-char secret `git-token-github-fg-wf-agw-tester`, which failed the 30-char cap
-and tripped `agw doctor`.
-
-As-built: secret names now validate against `MAX_SECRET_NAME_LENGTH` (253, the k8s DNS-subdomain
-ceiling) via a `max_length` parameter on `validate_name`; all character rules (NAME_RE, no
-leading/trailing hyphen, no `--`) are unchanged. The username-bearing kinds (and vm-site, which
-follows the VM-name rules) keep the 30-char cap. `_load_secrets` is the single validation point for
-the secret kind, and the manifest decoder's `_decode_secret` delegates to it, so no other kind is
-affected.

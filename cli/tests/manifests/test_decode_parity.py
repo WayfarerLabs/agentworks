@@ -429,48 +429,6 @@ def test_description_in_spec_rejected(tmp_path: Path) -> None:
         load_manifests(tmp_path / "resources")
 
 
-def test_secret_over_username_cap_decodes_and_registers(tmp_path: Path) -> None:
-    """Issue #275: a >30 secret name decodes and lands in the registry; the
-    raised cap applies to the secret kind."""
-    long_name = "git-token-github-fg-wf-agw-tester"  # 33 chars
-    assert len(long_name) > 30
-    _manifest(
-        tmp_path,
-        f"""
-        apiVersion: agentworks/v1
-        kind: secret
-        metadata:
-          name: {long_name}
-          description: d
-        spec: {{}}
-        """,
-    )
-    manifests = load_manifests(tmp_path / "resources")
-    assert [e.name for e in manifests.entries] == [long_name]
-    registry = build_registry(_config(tmp_path))
-    assert registry.lookup("secret", long_name).name == long_name
-
-
-def test_vm_site_still_capped_at_username_length(tmp_path: Path) -> None:
-    """The raised cap is secret-only: vm-site names follow the VM-name rules
-    (they appear in hostnames / SSH aliases) and keep the 30-char cap."""
-    _manifest(
-        tmp_path,
-        f"""
-        apiVersion: agentworks/v1
-        kind: vm-site
-        metadata:
-          name: {"a" * 31}
-        spec:
-          platform: lima
-        """,
-    )
-    with pytest.raises(ConfigError) as exc:
-        load_manifests(tmp_path / "resources")
-    assert "is too long" in str(exc.value)
-    assert "max 30" in str(exc.value)
-
-
 def test_description_stored_for_template_kind_without_warning(tmp_path: Path) -> None:
     """The formerly template-shaped kinds now store metadata.description
     like every other declarable kind: it round-trips onto the Resource

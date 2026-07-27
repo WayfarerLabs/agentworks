@@ -183,62 +183,128 @@ def delete_session(
                         f"'agw console delete {empty_console}' if it is no longer needed."
                     )
 
-        # If this session created its workspace, offer to delete it
-        if session.created_workspace:
-            remaining = db.list_sessions(workspace_name=session.workspace_name)
-            if remaining:
-                output.detail(
-                    f"Workspace '{session.workspace_name}' was created with this session but has "
-                    f"{len(remaining)} other session(s), not offering to delete."
-                )
-            elif not yes:
-                if output.confirm(
-                    f"Workspace '{session.workspace_name}' was created with this session "
-                    f"and has no other sessions. Delete it?",
-                ):
-                    from agentworks.workspaces.manager import delete_workspace
+        # Generalized workspace/agent cleanup (issue #266). The session row is
+        # already gone, so the "now has no sessions" checks below reflect the
+        # post-delete state. This is the single unified path for both the
+        # session-created case (the old provenance-only offer) and every other
+        # case where deleting this session happens to empty the resource:
+        #   - interactive (no --yes): if the workspace / agent now has no
+        #     sessions, OFFER to delete it, regardless of provenance.
+        #   - --yes: auto-delete only what THIS session created (the
+        #     created_workspace / created_agent provenance flags); otherwise
+        #     report the resource is now empty and name the manual delete
+        #     command, mirroring the console report-but-keep treatment above.
+        # Workspace first, then agent; the order is load-bearing, not
+        # arbitrary. Deleting the now-unused workspace tears down its grants:
+        # the FK cascade on ``agent_workspace_grants`` removes every agent's
+        # explicit grant rows for that workspace (and ``revoke_workspace_grants``
+        # drops the matching Linux group membership). So if this session's
+        # workspace was the agent's LAST standing grant, deleting it makes the
+        # agent (checked next) a cleanup candidate in the same run. That
+        # cascade is intended and desirable, and it is contingent on the
+        # workspace ACTUALLY being deleted: the operator confirmed the offer,
+        # or it auto-deleted under --yes because this session created it. If
+        # the workspace is kept, the grant remains and the still-granted agent
+        # stays guarded. Both run after the console cleanup so the "Session
+        # deleted" line has already printed. ``session`` was snapshotted before
+        # ``db.delete_session``, so its workspace_name / agent_name / created_*
+        # fields are still readable here.
+        _cleanup_now_empty_workspace(db, config, session, yes=yes)
+        _cleanup_now_empty_agent(db, config, session, yes=yes)
 
-                    delete_workspace(db, config, session.workspace_name, yes=True)
-            else:
-                from agentworks.workspaces.manager import delete_workspace
 
-                output.detail(f"Deleting workspace '{session.workspace_name}' (created with this session)...")
-                delete_workspace(db, config, session.workspace_name, yes=True)
+def _cleanup_now_empty_workspace(
+    db: Database,
+    config: Config,
+    session: SessionRow,
+    *,
+    yes: bool,
+) -> None:
+    """Handle the deleted session's workspace when it now has no sessions.
 
-        # If this session created its agent, offer to delete it unless the agent
-        # is still in use elsewhere (other sessions on the agent, or any explicit
-        # workspace grants). Implicit grants are tied to sessions and were cleaned
-        # up above, so they don't count.
-        if session.created_agent and session.agent_name:
-            other_sessions = [s for s in db.list_sessions() if s.agent_name == session.agent_name]
-            explicit_grants = [
-                ws
-                for (ws, has_explicit, _) in db.list_granted_workspaces_with_types(session.agent_name)
-                if has_explicit
-            ]
-            if other_sessions or explicit_grants:
-                reasons: list[str] = []
-                if other_sessions:
-                    reasons.append(f"{len(other_sessions)} other session(s)")
-                if explicit_grants:
-                    reasons.append(f"{len(explicit_grants)} explicit grant(s)")
-                output.detail(
-                    f"Agent '{session.agent_name}' was created with this session but still has "
-                    f"{' and '.join(reasons)}, not offering to delete."
-                )
-            elif not yes:
-                if output.confirm(
-                    f"Agent '{session.agent_name}' was created with this session "
-                    f"and is not in use elsewhere. Delete it?",
-                ):
-                    from agentworks.agents.manager import delete_agent
+    Call AFTER ``db.delete_session`` so the emptiness check is accurate. The
+    session is already gone, so a follow-on ``delete_workspace`` failure warns
+    and names the manual command rather than aborting the command after the
+    "Session deleted" line has printed (matching the console offer hardening
+    from issue #261).
+    """
+    from agentworks.workspaces.manager import delete_workspace, workspace_has_sessions
 
-                    delete_agent(db, config, name=session.agent_name, yes=True)
-            else:
-                from agentworks.agents.manager import delete_agent
+    name = session.workspace_name
+    if workspace_has_sessions(db, name):
+        return
 
-                output.detail(f"Deleting agent '{session.agent_name}' (created with this session)...")
-                delete_agent(db, config, name=session.agent_name, yes=True)
+    def _delete() -> None:
+        try:
+            delete_workspace(db, config, name, yes=True)
+        except AgentworksError as exc:
+            output.warn(
+                f"Could not delete empty workspace '{name}': {exc}. Remove it with 'agw workspace delete {name}'."
+            )
+
+    if not yes:
+        if output.confirm(f"Workspace '{name}' now has no sessions. Delete it?"):
+            _delete()
+    elif session.created_workspace:
+        output.detail(f"Deleting workspace '{name}' (created with this session)...")
+        _delete()
+    else:
+        output.warn(
+            f"Workspace '{name}' now has no sessions; delete it with "
+            f"'agw workspace delete {name}' if it is no longer needed."
+        )
+
+
+def _cleanup_now_empty_agent(
+    db: Database,
+    config: Config,
+    session: SessionRow,
+    *,
+    yes: bool,
+) -> None:
+    """Handle the deleted session's agent when it becomes a cleanup candidate.
+
+    An agent is a candidate only when it has NO remaining sessions AND NO
+    explicit workspace grants (``agent_is_unused``): a standing explicit
+    grant is operator intent to use the agent, so a granted-but-sessionless
+    agent is left alone rather than torn down (and its grants revoked) as a
+    side effect of a session delete. Admin sessions (``agent_name is None``)
+    have no agent to clean up and are skipped. Otherwise mirrors
+    ``_cleanup_now_empty_workspace``: offer interactively regardless of
+    provenance, auto-delete only a session-created agent under --yes, and
+    report-but-keep any other candidate agent. A follow-on ``delete_agent``
+    failure warns rather than aborts.
+    """
+    from agentworks.agents.manager import agent_is_unused, delete_agent
+
+    name = session.agent_name
+    if name is None:
+        return
+    if not agent_is_unused(db, name):
+        return
+    # Bind a non-optional local so the nested closure (which mypy widens
+    # narrowed names back inside) still sees a plain str.
+    agent_name: str = name
+
+    def _delete() -> None:
+        try:
+            delete_agent(db, config, name=agent_name, yes=True)
+        except AgentworksError as exc:
+            output.warn(
+                f"Could not delete empty agent '{agent_name}': {exc}. Remove it with 'agw agent delete {agent_name}'."
+            )
+
+    if not yes:
+        if output.confirm(f"Agent '{agent_name}' now has no sessions. Delete it?"):
+            _delete()
+    elif session.created_agent:
+        output.detail(f"Deleting agent '{agent_name}' (created with this session)...")
+        _delete()
+    else:
+        output.warn(
+            f"Agent '{agent_name}' now has no sessions; delete it with "
+            f"'agw agent delete {agent_name}' if it is no longer needed."
+        )
 
 
 def describe_session(

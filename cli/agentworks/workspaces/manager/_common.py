@@ -35,6 +35,18 @@ def _workspace_scope(db: Database, vm: VMRow, ws_name: str) -> OperationScope:
     )
 
 
+def workspace_has_sessions(db: Database, name: str) -> bool:
+    """Whether any session is still attached to this workspace.
+
+    The "is this workspace still in use" predicate, shared by session
+    delete's now-empty cleanup (issue #266) and, going forward, the prune
+    command (issue #268). It reads live DB state, so a caller that wants
+    the count AFTER a session row is removed must call it once the delete
+    has committed.
+    """
+    return bool(db.list_sessions(workspace_name=name))
+
+
 def _guard_vm_status(vm: VMRow) -> None:
     """Block operations on VMs that are not usable (failed or in-progress)."""
     usable = {InitStatus.COMPLETE.value, InitStatus.PARTIAL.value}
