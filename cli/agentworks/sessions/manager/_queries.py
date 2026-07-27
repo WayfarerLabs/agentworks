@@ -9,7 +9,6 @@ import agentworks.sessions.manager as _mgr
 from agentworks import output
 from agentworks.db import PID_STOPPED, SessionStatus
 from agentworks.errors import (
-    AgentworksError,
     BrokenStateError,
     ExternalError,
     StateError,
@@ -128,8 +127,8 @@ def delete_session(
         # Best-effort console cleanup runs after all DB / tmuxinator state has
         # settled. Stale tmux windows are recoverable cosmetic noise; if the
         # helper raises AgentworksError we skip the success message and any
-        # created_workspace / created_agent cleanup below -- those would re-use
-        # the same broken transport and just compound errors.
+        # created_workspace / created_agent cleanup below (those would re-use
+        # the same broken transport and just compound errors).
         if member_consoles:
             from agentworks.sessions.multi_console import kill_session_windows
 
@@ -148,40 +147,13 @@ def delete_session(
         if member_consoles:
             noun = "console" if len(member_consoles) == 1 else "consoles"
             output.info(f"Removed '{name}' from {noun}: {', '.join(member_consoles)}")
-            emptied = [c for c in member_consoles if not db.list_console_sessions(c)]
-            for empty_console in emptied:
-                # A console is an operator-authored view, not a resource this
-                # session created, so this deliberately does NOT mirror the
-                # created_workspace / created_agent auto-delete-on-yes paths
-                # below: deleting it is a separate destructive act on a
-                # resource the operator never named on this command line.
-                # Offer it interactively; under --yes report it and leave it
-                # for the operator to remove by hand.
-                if not yes and output.confirm(
-                    f"Console '{empty_console}' has no configured sessions left. Delete it?",
-                ):
-                    from agentworks.sessions.multi_console import delete_console
+            # ``member_consoles`` is the pre-delete snapshot; the shared helper
+            # re-reads each one's membership and acts only on those the cascade
+            # actually emptied. Same "console is now empty" treatment
+            # ``console remove-sessions`` uses (issue #265).
+            from agentworks.sessions.multi_console import offer_delete_if_empty_consoles
 
-                    # The session is already gone; deleting the now-empty
-                    # console is a secondary convenience the operator just
-                    # confirmed. If its (best-effort) teardown still raises an
-                    # AgentworksError (e.g. VM unreachable, or a NotFound race),
-                    # warn and continue rather than aborting the whole command
-                    # after "Session '<name>' deleted" already printed. A
-                    # non-AgentworksError is an unexpected bug and still
-                    # propagates.
-                    try:
-                        delete_console(db, config, name=empty_console, yes=True)
-                    except AgentworksError as exc:
-                        output.warn(
-                            f"Could not delete empty console '{empty_console}': {exc}. "
-                            f"Remove it with 'agw console delete {empty_console}'."
-                        )
-                elif yes:
-                    output.warn(
-                        f"Console '{empty_console}' now has no configured sessions; delete it with "
-                        f"'agw console delete {empty_console}' if it is no longer needed."
-                    )
+            offer_delete_if_empty_consoles(db, config, member_consoles, yes=yes)
 
         # If this session created its workspace, offer to delete it
         if session.created_workspace:

@@ -36,7 +36,7 @@ from ._helpers import _require_console, _shell_summary, tmux_session_name
 from .tmux_build import _build_console_tmux
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator
+    from collections.abc import Iterable, Iterator
 
     from agentworks.config import Config
     from agentworks.db import Database, SessionRow, VMRow
@@ -438,3 +438,70 @@ def delete_console(
         )
     else:
         output.result(f"Console '{name}' deleted.")
+
+
+def offer_delete_if_empty_consoles(
+    db: Database,
+    config: Config,
+    console_names: Iterable[str],
+    *,
+    yes: bool,
+) -> None:
+    """For each named console now left with no configured sessions, offer to
+    delete it (interactive, no ``--yes``) or report-but-keep it (otherwise).
+
+    An empty console is an operator dead end: ``console attach`` warns "has no
+    members; skipping tmux build". This is the shared "console is now empty"
+    treatment both ``session delete`` (via the FK cascade, issue #248/#261) and
+    ``console remove-sessions`` (issue #265) reach after removing a session's
+    console membership; keep the two paths byte-identical by routing both here.
+
+    ``console_names`` is the set of candidate consoles (each caller passes the
+    consoles it just touched); a console is only acted on when
+    ``list_console_sessions`` reports it empty, the same predicate
+    ``console describe`` uses for its "Configured sessions" count. Emptiness is
+    read live from the DB here, so callers may pass consoles that still have
+    members and they are skipped.
+
+    The prompt is presented only when we can actually read the answer:
+    interactive AND no ``--yes``. Under ``--yes``, or in any non-interactive
+    (scripted / no-TTY) context, report-but-keep instead of prompting. That
+    keeps a scripted ``console remove-sessions`` that empties a console exiting
+    0 as it did before issue #265, rather than aborting on an EOF at the prompt
+    after the removal has already committed.
+    """
+    # One interactivity read for the whole batch (stdin-TTY state and the
+    # --non-interactive flag don't change mid-command).
+    prompt_allowed = not yes and output.is_interactive()
+    for console_name in console_names:
+        if db.list_console_sessions(console_name):
+            continue
+        # A console is an operator-authored view, not a resource the caller
+        # created, so this deliberately does NOT auto-delete the way a
+        # session's created_workspace / created_agent do: deleting it is a
+        # separate destructive act on a resource the operator never named on
+        # this command line. Offer it interactively; otherwise report it and
+        # leave it for the operator to remove by hand.
+        if prompt_allowed and output.confirm(
+            f"Console '{console_name}' has no configured sessions left. Delete it?",
+        ):
+            # The membership is already gone; deleting the now-empty console is
+            # a secondary convenience the operator just confirmed. If its
+            # (best-effort) teardown still raises an AgentworksError (e.g. VM
+            # unreachable, or a NotFound race), warn and continue rather than
+            # aborting the whole command after the removal has already been
+            # reported. A non-AgentworksError is an unexpected bug and still
+            # propagates. Route through the package object so tests that
+            # monkeypatch ``multi_console.delete_console`` intercept this call.
+            try:
+                _mc.delete_console(db, config, name=console_name, yes=True)
+            except AgentworksError as exc:
+                output.warn(
+                    f"Could not delete empty console '{console_name}': {exc}. "
+                    f"Remove it with 'agw console delete {console_name}'."
+                )
+        elif not prompt_allowed:
+            output.warn(
+                f"Console '{console_name}' now has no configured sessions; delete it with "
+                f"'agw console delete {console_name}' if it is no longer needed."
+            )

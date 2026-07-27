@@ -197,12 +197,20 @@ def console_add_sessions(
 def console_remove_sessions(
     name: Annotated[str, typer.Argument(help="Console name")],
     sessions: Annotated[list[str], typer.Argument(help="Session names to remove")],
+    yes: Annotated[
+        bool,
+        typer.Option(
+            "--yes",
+            "-y",
+            help="Non-interactive: if this empties the console, report it instead of offering to delete it",
+        ),
+    ] = False,
 ) -> None:
     """Remove sessions from a console."""
     from agentworks.config import load_config
     from agentworks.sessions.multi_console import remove_sessions
 
-    remove_sessions(get_db(), load_config(), console_name=name, session_names=sessions)
+    remove_sessions(get_db(), load_config(), console_name=name, session_names=sessions, yes=yes)
 
 
 @console_app.command("reorder-sessions")
