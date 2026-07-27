@@ -166,12 +166,28 @@ bound varies, via the existing `validate_name(max_length=...)` parameter):
   the agent/workspace caps FROM the prefixes (rather than hard-coding 28 / 29) means a future prefix
   change cannot silently reintroduce an over-limit identifier; a pinned test asserts the derived
   username/group is exactly 32 at the cap.
-- **vm -> 42** (`MAX_VM_NAME_LENGTH`), derived as `63 (DNS label) - 1 (dash) - 20 (max slug)`: the
-  name becomes the OS hostname / Tailscale MagicDNS label `{slug}-{vm}`.
-- **session / console / vm-site -> 64** (`MAX_FREEFORM_NAME_LENGTH`): these hit no OS identifier
-  limit (tmux labels, a registry key, display strings / paths only). The vm-site comment claiming
-  site names feed hostnames / SSH aliases was incorrect and is fixed (VM names, not site names, feed
-  hostnames).
+- **vm -> 38** (`MAX_VM_NAME_LENGTH`), the MIN over two composed sinks: the OS hostname / Tailscale
+  MagicDNS label `{slug}-{vm}` (`63 (DNS label) - 1 (dash) - 20 (max slug) = 42`) and the Azure
+  virtual-network name `{slug}-{vm}-vnet`
+  (`64 (vnet name) - 20 (max slug) - 1 (dash) - 5 (-vnet) = 38`). The vnet sink binds, so the cap is
+  38, not the 63-char hostname and not Azure's 64-char computer-name. The MIN is expressed in code
+  (constants for each sink's ceiling in `config/validation.py`; a pinned test asserts the worst-case
+  vnet name is exactly 64 at the cap), so a slug-length or `-vnet` suffix change reshapes the cap
+  rather than overflowing on Azure.
+- **session -> 34** (`MAX_SESSION_NAME_LENGTH`, co-located with `AGENT_SOCKET_ROOT` in
+  `sessions/tmux.py`): session names embed in the per-agent tmux AF_UNIX socket path
+  `{AGENT_SOCKET_ROOT}/{linux_user}/{name}.sock`, and `sun_path` caps at 108 (107 usable). Under the
+  longest possible agent username (`agt-` + a max agent name = the 32-char Linux ceiling) the fixed
+  overhead is 73, leaving `107 - 73 = 34`. The prior blanket 64 was unreachable on every user (the
+  admin ceiling is 56), so the "no OS-level identifier limit" rationale was wrong for sessions;
+  live-measured (107-char path binds, 108 fails). The cap is derived from `len(AGENT_SOCKET_ROOT)`
+  in the same module and a pinned test asserts the worst-case path is exactly 107 at the cap, so a
+  socket-root change reshapes the cap automatically. (34 is still a loosening from main's blanket
+  30, so there is no compatibility concern.)
+- **console / vm-site -> 64** (`MAX_FREEFORM_NAME_LENGTH`): these hit no OS identifier limit (tmux
+  labels, a registry key, display strings / paths only; a 64-char console name was verified to build
+  fine, live). The vm-site comment claiming site names feed hostnames / SSH aliases was incorrect
+  and is fixed (VM names, not site names, feed hostnames).
 - **secret -> 253** (`MAX_SECRET_NAME_LENGTH`, unchanged from #275).
 
 The `validate_name` default `max_length` moved from 30 to `MAX_FREEFORM_NAME_LENGTH` (64) so a

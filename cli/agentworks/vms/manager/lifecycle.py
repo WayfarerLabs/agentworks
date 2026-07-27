@@ -288,9 +288,12 @@ def create_vm(
 
             # The VM's OS hostname, computed once at create time and recorded on the
             # row: {slug}-{name} with a slug, the bare name without. Bounded by
-            # construction: slug max 20 + dash + name max 42 (MAX_VM_NAME_LENGTH,
-            # derived as 63 - 1 - 20) = 63 characters, exactly the DNS-label limit
-            # and inside Azure's 64-char computer-name limit.
+            # construction: slug max 20 + dash + name max 38 (MAX_VM_NAME_LENGTH)
+            # = 59 characters, inside the 63-char DNS-label limit. The cap is 38
+            # (not 42) because the tighter sink is Azure's virtual-network name
+            # {slug}-{name}-vnet, capped at 64: 20 + 1 + 38 + 5 = 64. See
+            # config/validation.py MAX_VM_NAME_LENGTH for the MIN-over-sinks
+            # derivation.
             hostname = f"{slug}-{vm_name}" if slug else vm_name
 
             # Create DB record with as-provisioned resource values. This is the

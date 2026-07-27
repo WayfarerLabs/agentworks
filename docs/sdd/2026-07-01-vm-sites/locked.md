@@ -144,8 +144,9 @@ is not edited in place; this addendum is authoritative):
   incorrect; VM names, not site names, feed `{slug}-{vm}` hostnames). They now use the freeform cap,
   `MAX_FREEFORM_NAME_LENGTH` (64).
 - **The hostname bound** in the FRD's Tailscale section ("slug max 20 plus dash plus name max 30 is
-  51 characters") is updated: the VM-name cap is now `MAX_VM_NAME_LENGTH` (42), derived precisely as
-  `63 (DNS label) - 1 (dash) - 20 (max slug)`, so the composite `{slug}-{vm}` is bounded by
-  construction at exactly 63 characters, the DNS-label limit, and stays inside Azure's 64-char
-  computer-name limit. See the resource-manifests lockfile's 2026-07-27 entry for the full per-kind
-  cap rationale.
+  51 characters") is updated: the VM-name cap is now `MAX_VM_NAME_LENGTH` (38). The VM name feeds
+  two composed sinks and the cap is the MIN over both: the `{slug}-{vm}` hostname / DNS label
+  (`63 - 1 - 20 = 42`) and the `{slug}-{vm}-vnet` Azure virtual-network name
+  (`64 - 20 - 1 - 5 = 38`). The vnet sink binds (its `-vnet` suffix costs 5 more characters than the
+  bare hostname), so the cap is 38, NOT the 63-char hostname and NOT Azure's 64-char computer-name.
+  See the resource-manifests lockfile's 2026-07-27 entry for the full per-kind cap rationale.

@@ -26,7 +26,7 @@ from agentworks.db import Database
 
 _ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
 
-# A name longer than every per-view NAME cap (vm 42, agent 28, workspace 29,
+# A name longer than every per-view NAME cap (vm 38, agent 28, workspace 29,
 # console 50), so it truncates in all four tables.
 _LONG = "z" * 70
 _SHORT = "aa"
@@ -87,7 +87,7 @@ def _seed_vm_rows(db: Database) -> None:
 
 
 # ---------------------------------------------------------------------------
-# vm list (NAME cap 42, truncate keeps 39 + "...")
+# vm list (NAME cap 38, truncate keeps 35 + "...")
 # ---------------------------------------------------------------------------
 
 
@@ -96,7 +96,7 @@ def test_vm_list_truncates_long_name_and_stays_aligned(tmp_path: Path) -> None:
     _seed_vm_rows(db)
     code, lines = _invoke(db, ["vm", "list"])
     assert code == 0, lines
-    _assert_truncated_and_aligned(lines, second_col="lima", cap=42, truncated_prefix_len=39)
+    _assert_truncated_and_aligned(lines, second_col="lima", cap=38, truncated_prefix_len=35)
     db.close()
 
 

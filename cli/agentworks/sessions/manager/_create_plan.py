@@ -31,12 +31,13 @@ import agentworks.sessions.manager as _mgr
 # so there is no sessions <-> agents module-load cycle.
 from agentworks.agents.grants import MAX_WORKSPACE_NAME_LENGTH
 from agentworks.agents.manager import MAX_AGENT_NAME_LENGTH
-from agentworks.config import MAX_FREEFORM_NAME_LENGTH, validate_name
+from agentworks.config import validate_name
 from agentworks.errors import (
     AlreadyExistsError,
     NotFoundError,
     ValidationError,
 )
+from agentworks.sessions.tmux import MAX_SESSION_NAME_LENGTH
 
 from ._create_types import SessionPlan
 
@@ -190,13 +191,14 @@ def _validate_ephemeral_name(
     session-name default.
 
     The ephemeral name defaults to the session name when the operator does not
-    pass ``--workspace-name`` / ``--agent-name``. Since the session cap (64) is
-    larger than the group/username-derived caps (29 / 28), a session name that
-    is fine on its own can overflow once it becomes a Linux group / username. On
-    that DEFAULTED path we point the operator at the override flag; an
-    explicitly-passed too-long name gets the plain error (the operator already
-    named it directly). Character rules are identical across kinds and the
-    session name has already passed the freeform check by this point, so a
+    pass ``--workspace-name`` / ``--agent-name``. Since the session cap
+    (``MAX_SESSION_NAME_LENGTH``) is larger than the group/username-derived caps
+    (``MAX_WORKSPACE_NAME_LENGTH`` / ``MAX_AGENT_NAME_LENGTH``), a session name
+    that is fine on its own can overflow once it becomes a Linux group /
+    username. On that DEFAULTED path we point the operator at the override flag;
+    an explicitly-passed too-long name gets the plain error (the operator
+    already named it directly). Character rules are identical across kinds and
+    the session name has already passed its own check by this point, so a
     defaulted failure here is always a length overflow.
     """
     try:
@@ -233,10 +235,11 @@ def _validate_names_and_existence(db: Database, draft: _PlanDraft, name: str) ->
     assert draft.workspace_name is not None  # invariant after canonicalize + prompt
 
     # Each referenced name is validated against ITS OWN kind's cap, not the
-    # session cap: the session name is freeform (tmux/display only), but an
-    # ephemeral workspace becomes a Linux group and an ephemeral agent a Linux
-    # username, so those must satisfy the tighter group/username-derived caps.
-    validate_name(name, max_length=MAX_FREEFORM_NAME_LENGTH)
+    # session cap: the session name is bounded by the per-agent tmux socket path
+    # it embeds in (MAX_SESSION_NAME_LENGTH), while an ephemeral workspace
+    # becomes a Linux group and an ephemeral agent a Linux username, so those
+    # must satisfy the still-tighter group/username-derived caps.
+    validate_name(name, max_length=MAX_SESSION_NAME_LENGTH)
     if draft.new_workspace:
         _validate_ephemeral_name(
             draft.workspace_name,

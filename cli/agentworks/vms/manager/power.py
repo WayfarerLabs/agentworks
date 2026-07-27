@@ -33,8 +33,8 @@ if TYPE_CHECKING:
     from agentworks.vms.nodes import LiveVMNode
 
 # NAME-column truncation cap for ``vm list``, derived from the VM-name cap so
-# the two cannot drift: a valid name (<= 42) never truncates, and the column
-# stays aligned even against an over-cap legacy row.
+# the two cannot drift: a valid name (<= MAX_VM_NAME_LENGTH) never truncates,
+# and the column stays aligned even against an over-cap legacy row.
 _NAME_CELL_WIDTH = MAX_VM_NAME_LENGTH
 
 # NOTE on ``_ensure_tailscale`` (start_vm), ``_tailscale_logout``

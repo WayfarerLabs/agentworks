@@ -37,7 +37,7 @@ __all__ = ["_non_interactive", "_stub_build_registry"]
 
 def test_ephemeral_workspace_name_uses_workspace_cap(tmp_path: Path) -> None:
     """An ephemeral (``--new-workspace``) name is validated against the
-    WORKSPACE cap (29, the Linux-group budget), NOT the freeform session cap:
+    WORKSPACE cap (29, the Linux-group budget), NOT the looser session cap:
     a 30-char name that fits a session name is rejected because it would
     overflow the ``ws-<name>`` group."""
     from agentworks.agents.grants import MAX_WORKSPACE_NAME_LENGTH
@@ -64,7 +64,7 @@ def test_ephemeral_workspace_name_uses_workspace_cap(tmp_path: Path) -> None:
 
 def test_ephemeral_agent_name_uses_agent_cap(tmp_path: Path) -> None:
     """An ephemeral (``--new-agent``) name is validated against the AGENT cap
-    (28, the Linux-username budget), NOT the freeform session cap: a 29-char
+    (28, the Linux-username budget), NOT the looser session cap: a 29-char
     name that fits a session name is rejected because it would overflow the
     ``agt-<name>`` username."""
     from agentworks.agents.manager import MAX_AGENT_NAME_LENGTH
@@ -90,19 +90,20 @@ def test_ephemeral_agent_name_uses_agent_cap(tmp_path: Path) -> None:
 
 def test_defaulted_ephemeral_agent_name_overflow_hints_override_flag(tmp_path: Path) -> None:
     """When ``--new-agent`` is given with NO ``--agent-name``, the agent name
-    defaults to the session name. A session name that is itself valid (<= 64)
-    but overflows the 28-char agent cap must be rejected WITH a hint that names
-    the derived default and points at ``--agent-name`` to override it."""
+    defaults to the session name. A session name that is itself valid (within
+    the session cap) but overflows the 28-char agent cap must be rejected WITH a
+    hint that names the derived default and points at ``--agent-name`` to
+    override it."""
     from agentworks.agents.manager import MAX_AGENT_NAME_LENGTH
-    from agentworks.config import MAX_FREEFORM_NAME_LENGTH
     from agentworks.sessions.manager import create_session
+    from agentworks.sessions.tmux import MAX_SESSION_NAME_LENGTH
 
     db = _seed_one_vm(tmp_path)
     config = SimpleNamespace(session=SimpleNamespace(history_limit=50000))
 
-    # 40 chars: a valid session name, but over the agent cap.
-    long_session = "s" * 40
-    assert MAX_AGENT_NAME_LENGTH < len(long_session) <= MAX_FREEFORM_NAME_LENGTH
+    # A max-length session name: valid as a session, but over the agent cap.
+    long_session = "s" * MAX_SESSION_NAME_LENGTH
+    assert MAX_AGENT_NAME_LENGTH < len(long_session) == MAX_SESSION_NAME_LENGTH
 
     with pytest.raises(ValidationError, match=f"max {MAX_AGENT_NAME_LENGTH}") as excinfo:
         create_session(
@@ -126,14 +127,14 @@ def test_defaulted_ephemeral_workspace_name_overflow_hints_override_flag(tmp_pat
     the 29-char workspace cap is rejected WITH a hint pointing at
     ``--workspace-name``."""
     from agentworks.agents.grants import MAX_WORKSPACE_NAME_LENGTH
-    from agentworks.config import MAX_FREEFORM_NAME_LENGTH
     from agentworks.sessions.manager import create_session
+    from agentworks.sessions.tmux import MAX_SESSION_NAME_LENGTH
 
     db = _seed_one_vm(tmp_path)
     config = SimpleNamespace(session=SimpleNamespace(history_limit=50000))
 
-    long_session = "s" * 40
-    assert MAX_WORKSPACE_NAME_LENGTH < len(long_session) <= MAX_FREEFORM_NAME_LENGTH
+    long_session = "s" * MAX_SESSION_NAME_LENGTH
+    assert MAX_WORKSPACE_NAME_LENGTH < len(long_session) == MAX_SESSION_NAME_LENGTH
 
     with pytest.raises(ValidationError, match=f"max {MAX_WORKSPACE_NAME_LENGTH}") as excinfo:
         create_session(
@@ -151,26 +152,25 @@ def test_defaulted_ephemeral_workspace_name_overflow_hints_override_flag(tmp_pat
     db.close()
 
 
-def test_session_name_uses_freeform_cap(tmp_path: Path) -> None:
-    """The SESSION name itself is freeform (tmux/display only), so it takes the
-    generous freeform cap (64), not a username/group-derived one: a 40-char
-    session name that would be rejected as an agent/workspace name is accepted
-    (it fails later only on the freeform boundary)."""
-    from agentworks.config import MAX_FREEFORM_NAME_LENGTH
+def test_session_name_uses_socket_derived_cap(tmp_path: Path) -> None:
+    """The SESSION name is bounded by the per-agent tmux AF_UNIX socket path it
+    embeds in, so it takes ``MAX_SESSION_NAME_LENGTH`` (34), NOT the freeform 64:
+    a name one over that cap is rejected at the session boundary."""
     from agentworks.sessions.manager import create_session
+    from agentworks.sessions.tmux import MAX_SESSION_NAME_LENGTH
 
     db = _seed_one_vm(tmp_path)
     config = SimpleNamespace(session=SimpleNamespace(history_limit=50000))
 
-    with pytest.raises(ValidationError, match=f"max {MAX_FREEFORM_NAME_LENGTH}"):
+    with pytest.raises(ValidationError, match=f"max {MAX_SESSION_NAME_LENGTH}"):
         create_session(
             db,
             config,  # type: ignore[arg-type]
-            name="s" * (MAX_FREEFORM_NAME_LENGTH + 1),
+            name="s" * (MAX_SESSION_NAME_LENGTH + 1),
             workspace="ws1",
             admin=True,
         )
-    assert db.get_session("s" * (MAX_FREEFORM_NAME_LENGTH + 1)) is None
+    assert db.get_session("s" * (MAX_SESSION_NAME_LENGTH + 1)) is None
     db.close()
 
 
