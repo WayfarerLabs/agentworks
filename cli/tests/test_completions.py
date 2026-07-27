@@ -575,13 +575,18 @@ class TestStaticChoiceCompletion:
         assert by_name["toml"] == ["comment", "delete"]
 
     def test_sample_kind_choices_extracted(self) -> None:
+        # The sample-kind argument completes to every registered kind (the
+        # same set `resource kinds` lists), not just the declarable ones.
+        # The arg stays permissive so a capability kind reaches the service
+        # layer for a clean, kind-aware domain error (issue #276) instead of
+        # failing as a raw click.Choice parse error.
         from agentworks.cli import app
         from agentworks.completions.spec import build_spec
-        from agentworks.manifests.samples import SAMPLE_KINDS
+        from agentworks.resources import KIND_REGISTRY
 
         sample = build_spec(app).subcommands["resource"].subcommands["sample"]
         (kind,) = [p for p in sample.params if p.name == "kind"]
-        assert kind.choices == list(SAMPLE_KINDS)
+        assert kind.choices == list(KIND_REGISTRY)
 
     def test_all_shells_emit_toml_choices(self) -> None:
         from agentworks.cli import app
