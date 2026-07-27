@@ -645,9 +645,11 @@ def test_delete_session_declined_offer_keeps_empty_console(
     monkeypatch.setattr(manager_mod, "_regenerate_tmuxinator", lambda *a, **k: None)
     monkeypatch.setattr("agentworks.sessions.multi_console.kill_session_windows", lambda *a, **k: None)
 
-    # Accept the session-delete confirm, decline the empty-console offer.
+    # Accept only the session-delete confirm; decline the empty-console offer
+    # (the behavior under test) and the now-empty-workspace offer (issue #266,
+    # out of scope here: deleting 's' empties ws-vm1).
     def _confirm(message: str, default: bool = False) -> bool:
-        return "no configured sessions left" not in message
+        return message.startswith("Delete session")
 
     monkeypatch.setattr("agentworks.output.is_interactive", lambda: True)
     monkeypatch.setattr("agentworks.output.confirm", _confirm)
@@ -783,10 +785,14 @@ def test_delete_session_warns_when_offered_console_delete_raises(
 
     monkeypatch.setattr("agentworks.sessions.multi_console.delete_console", _boom)
 
-    # Accept both confirms (the session delete and the empty-console offer);
-    # declare interactivity so the empty-console offer is actually presented.
+    # Accept the session delete and the empty-console offer (whose delete is
+    # stubbed to raise); decline the now-empty-workspace offer (issue #266,
+    # out of scope here: deleting 's' empties ws-vm1).
+    def _confirm(message: str, default: bool = False) -> bool:
+        return "now has no sessions" not in message
+
     monkeypatch.setattr("agentworks.output.is_interactive", lambda: True)
-    monkeypatch.setattr("agentworks.output.confirm", lambda *a, **k: True)
+    monkeypatch.setattr("agentworks.output.confirm", _confirm)
 
     # The AgentworksError from the console teardown is swallowed with a warning;
     # it must not propagate out of delete_session.
