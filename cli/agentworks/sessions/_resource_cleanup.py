@@ -84,13 +84,18 @@ def cleanup_now_empty_resource(
         except AgentworksError as exc:
             output.warn(f"Could not delete empty {kind} '{name}': {exc}. Remove it with '{manual_command}'.")
 
-    if not yes:
+    # The offer only fires when a prompt can actually be answered: without a
+    # TTY (and without --yes) confirm() would EOF into UserAbort AFTER the
+    # primary command already mutated state, so a scripted caller degrades to
+    # the report-but-keep path instead. Auto-delete strictly requires --yes,
+    # even for created resources: non-interactive without --yes never deletes.
+    if not yes and output.is_interactive():
         # Interactive: offer regardless of provenance. Created resources carry
         # a short provenance cue so the operator recognizes what they made.
         provenance = "(created with this session) " if created else ""
         if output.confirm(f"{noun} '{name}' {provenance}{empty_clause}. Delete it?"):
             _run_delete()
-    elif created:
+    elif yes and created:
         output.detail(f"Deleting {kind} '{name}' (created with this session)...")
         _run_delete()
     else:

@@ -613,6 +613,7 @@ def test_delete_session_offers_and_deletes_now_empty_console(
         prompts.append(message)
         return True
 
+    monkeypatch.setattr("agentworks.output.is_interactive", lambda: True)
     monkeypatch.setattr("agentworks.output.confirm", _confirm)
 
     manager_mod.delete_session(db, _StubConfig(), name="s", yes=False)
@@ -648,6 +649,7 @@ def test_delete_session_declined_offer_keeps_empty_console(
     def _confirm(message: str, default: bool = False) -> bool:
         return message.startswith("Delete session")
 
+    monkeypatch.setattr("agentworks.output.is_interactive", lambda: True)
     monkeypatch.setattr("agentworks.output.confirm", _confirm)
 
     manager_mod.delete_session(db, _StubConfig(), name="s", yes=False)
@@ -682,6 +684,7 @@ def test_delete_session_does_not_offer_console_with_remaining_sessions(
         prompts.append(message)
         return True
 
+    monkeypatch.setattr("agentworks.output.is_interactive", lambda: True)
     monkeypatch.setattr("agentworks.output.confirm", _confirm)
 
     manager_mod.delete_session(db, _StubConfig(), name="s", yes=False)
@@ -783,6 +786,7 @@ def test_delete_session_warns_when_offered_console_delete_raises(
     def _confirm(message: str, default: bool = False) -> bool:
         return "now has no sessions" not in message
 
+    monkeypatch.setattr("agentworks.output.is_interactive", lambda: True)
     monkeypatch.setattr("agentworks.output.confirm", _confirm)
 
     # The AgentworksError from the console teardown is swallowed with a warning;

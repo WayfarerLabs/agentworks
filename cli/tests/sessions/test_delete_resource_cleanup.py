@@ -22,6 +22,7 @@ unit-tested on their own.
 
 from __future__ import annotations
 
+import functools
 from typing import TYPE_CHECKING
 
 from agentworks.agents.manager import agent_has_grants, agent_has_sessions, agent_is_unused
@@ -171,6 +172,9 @@ def _record_confirm(monkeypatch: pytest.MonkeyPatch, *, answer: bool) -> list[st
         prompts.append(message)
         return answer
 
+    # A stubbed confirm models an interactive operator; the helper's TTY gate
+    # (report-but-keep without one) is pinned by its own dedicated test.
+    monkeypatch.setattr("agentworks.output.is_interactive", lambda: True)
     monkeypatch.setattr("agentworks.output.confirm", _confirm)
     return prompts
 
@@ -697,3 +701,40 @@ def test_delete_session_warns_when_now_empty_workspace_delete_raises(
     assert db.get_session("s") is None
     assert "Session 's' deleted" in captured_output.info
     assert any("Could not delete empty workspace 'ws-vm1'" in w for w in captured_output.warnings)
+
+
+def test_non_interactive_without_yes_reports_and_never_prompts_or_deletes(
+    monkeypatch: pytest.MonkeyPatch,
+    captured_output: CapturedOutput,
+) -> None:
+    """Without a TTY and without --yes, the helper degrades to the
+    report-but-keep path for created and non-created resources alike:
+    confirm() would EOF into UserAbort after the primary command already
+    mutated state, and auto-delete strictly requires --yes. Pinned for the
+    shared helper so every consumer (session delete's workspace/agent/console
+    cascade, and #287's remove-sessions) inherits the scripted-caller safety."""
+    from agentworks import output as output_mod
+    from agentworks.sessions._resource_cleanup import cleanup_now_empty_resource
+
+    monkeypatch.setattr(output_mod, "is_interactive", lambda: False)
+    confirms: list[str] = []
+    monkeypatch.setattr(output_mod, "confirm", lambda msg: confirms.append(msg) or True)
+    deletes: list[str] = []
+
+    for created in (False, True):
+        cleanup_now_empty_resource(
+            kind="workspace",
+            name=f"ws-{created}",
+            created=created,
+            delete=functools.partial(deletes.append, f"ws-{created}"),
+            manual_command=f"agw workspace delete ws-{created}",
+            yes=False,
+            empty_clause="now has no sessions",
+            report_clause="now has no sessions",
+        )
+
+    assert confirms == []
+    assert deletes == []
+    warnings = "\n".join(captured_output.warnings)
+    assert "ws-False" in warnings and "ws-True" in warnings
+    assert "delete it with" in warnings
