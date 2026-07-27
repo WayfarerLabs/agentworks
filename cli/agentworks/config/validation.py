@@ -21,14 +21,26 @@ VM_USER_RE = re.compile(r"^[a-z_][a-z0-9_-]{0,31}$")
 SSH_HOST_PREFIX_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9._-]*$")
 
 MAX_NAME_LENGTH = 30
+# Secret names are never derived into Linux usernames, so the username-driven
+# 30-char cap does not apply to them. We keep a bound (not unbounded) and adopt
+# the k8s DNS-subdomain ceiling as a well-understood, non-arbitrary limit: it is
+# generous enough for the ``git-token-<credential-name>`` default token secret
+# (the case that motivated lifting the cap, issue #275) and everything else.
+MAX_SECRET_NAME_LENGTH = 253
 
 
-def validate_name(name: str, *, allow_double_hyphen: bool = False) -> None:
+def validate_name(name: str, *, allow_double_hyphen: bool = False, max_length: int = MAX_NAME_LENGTH) -> None:
     """Validate a resource name, raising ValidationError on failure.
 
     Rules: lowercase alphanumeric, hyphens, underscores. Must start and end
-    with alphanumeric. Max 30 characters (leaves room for agent username
-    derivation within the 32-character Linux username limit).
+    with alphanumeric.
+
+    The default length cap is ``MAX_NAME_LENGTH`` (30). That cap is
+    username-derived: VM / workspace / session / agent names get turned into
+    Linux usernames on the VM (hard 32-char limit) and 30 leaves room for the
+    agent-username suffix. Kinds that are NOT turned into usernames should pass
+    a larger ``max_length``; secrets do this via ``MAX_SECRET_NAME_LENGTH``.
+    All character rules stay identical regardless of ``max_length``.
 
     Consecutive hyphens (``--``) are rejected by default because they are
     reserved for the ``<workspace>--<agent>`` separator used by the legacy
@@ -41,8 +53,8 @@ def validate_name(name: str, *, allow_double_hyphen: bool = False) -> None:
     """
     from agentworks.output import ValidationError
 
-    if len(name) > MAX_NAME_LENGTH:
-        raise ValidationError(f"name '{name}' is too long ({len(name)} chars, max {MAX_NAME_LENGTH})")
+    if len(name) > max_length:
+        raise ValidationError(f"name '{name}' is too long ({len(name)} chars, max {max_length})")
     if not NAME_RE.match(name) or (not allow_double_hyphen and "--" in name):
         suffix = "" if allow_double_hyphen else ", and cannot contain consecutive hyphens (--)"
         raise ValidationError(

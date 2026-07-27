@@ -101,6 +101,32 @@ def test_duplicate_within_one_file_errors(tmp_path: Path) -> None:
         load_manifests(root)
 
 
+def test_long_secret_name_over_username_cap_loads(tmp_path: Path) -> None:
+    """Issue #275: secret names use the larger secret cap, not the 30-char
+    username cap. A >30 name (e.g. the git-token-<credential> default) loads."""
+    root = tmp_path / "resources"
+    long_name = "git-token-github-fg-wf-agw-tester"  # 33 chars
+    assert len(long_name) > 30
+    _write(root, "a.yaml", _secret_doc(long_name))
+    manifests = load_manifests(root)
+    assert [e.name for e in manifests.entries] == [long_name]
+
+
+def test_secret_name_over_secret_cap_errors(tmp_path: Path) -> None:
+    """A secret name beyond the secret cap (253) is still rejected, with the
+    document location and the correct (secret) max in the message."""
+    from agentworks.config import MAX_SECRET_NAME_LENGTH
+
+    root = tmp_path / "resources"
+    _write(root, "a.yaml", _secret_doc("s" * (MAX_SECRET_NAME_LENGTH + 1)))
+    with pytest.raises(ConfigError) as exc:
+        load_manifests(root)
+    message = str(exc.value)
+    assert "is too long" in message
+    assert f"max {MAX_SECRET_NAME_LENGTH}" in message
+    assert "a.yaml:2" in message
+
+
 def test_invalid_yaml_reports_location(tmp_path: Path) -> None:
     root = tmp_path / "resources"
     _write(root, "bad.yaml", "apiVersion: [unclosed\n")

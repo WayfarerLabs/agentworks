@@ -133,6 +133,10 @@ def build_secret_table(config: Config, registry: Registry) -> SecretTable:
 
 
 _BACKEND_CELL_WIDTH = 40
+# Wide enough for every practical name (the auto-declared git-token-* family
+# included) while keeping the list view scannable when a name approaches the
+# 253-char secret cap.
+_NAME_CELL_WIDTH = 50
 """Cap for the per-backend identifier columns in the LIST view, so a long
 ``op://`` reference (optionally account-prefixed) or env-var name does not
 blow the table width out. The single-secret DETAIL view is left uncapped."""
@@ -179,7 +183,11 @@ def render_secret_table(table: SecretTable) -> None:
     # Render cells to strings up front so column widths can be measured.
     rendered: list[tuple[str, ...]] = []
     for row in table.rows:
-        cells: list[str] = [row.name, row.description]
+        # Cap the name column too: secret names may run to
+        # MAX_SECRET_NAME_LENGTH (253) since #275, and an uncapped name
+        # would blow the table out exactly like a long op:// ref. The
+        # DETAIL view (secret describe) keeps the full name.
+        cells: list[str] = [output.truncate(row.name, _NAME_CELL_WIDTH), row.description]
         for cell in row.cells:
             if not cell.would_attempt:
                 cells.append("disabled")
