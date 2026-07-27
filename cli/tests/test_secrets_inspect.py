@@ -11,6 +11,7 @@ from agentworks.bootstrap import build_registry
 from agentworks.config import load_config
 from agentworks.secrets.inspect import (
     _BACKEND_CELL_WIDTH,
+    _NAME_CELL_WIDTH,
     SecretCell,
     SecretRow,
     SecretTable,
@@ -303,3 +304,38 @@ def test_render_secret_table_caps_long_backend_identifier(
     assert long_ident not in joined
     data_line = next(line for line in captured_output.info if line.startswith("reg "))
     assert truncated in data_line
+
+
+def test_render_secret_table_caps_long_name(
+    captured_output: CapturedOutput,
+) -> None:
+    """The LIST view truncates a long secret name to ``_NAME_CELL_WIDTH``
+    with a trailing ``...`` so a name approaching the 253-char secret cap
+    (#275) cannot blow the table width out. The DETAIL view keeps the
+    full name."""
+    long_name = "rse-" + "x" * 80
+    assert len(long_name) > _NAME_CELL_WIDTH
+    table = SecretTable(
+        backends=("env-var",),
+        rows=(
+            SecretRow(
+                name=long_name,
+                description="long-named secret",
+                cells=(
+                    SecretCell(
+                        backend="env-var",
+                        would_attempt=True,
+                        identifier=None,
+                    ),
+                ),
+            ),
+        ),
+        operator_count=1,
+        auto_count=0,
+    )
+    render_secret_table(table)
+
+    truncated = long_name[: _NAME_CELL_WIDTH - 3] + "..."
+    joined = "\n".join(captured_output.info)
+    assert truncated in joined
+    assert long_name not in joined
