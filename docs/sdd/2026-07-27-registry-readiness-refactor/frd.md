@@ -212,7 +212,7 @@ is not ready; the dependency is not "disabled", it is simply not there.
 
 ## Scope
 
-In scope: decoupling graph construction from config validation (R1, R3); the `implied_references` /
+In scope: decoupling graph construction from config validation (R1, R3); the `dependencies` /
 `validate` split across all four capability kinds (R2); the dependency-ordered readiness fold (R4);
 readiness-is-not-validity (R5); renaming the readiness hook and freeing "enabled/disabled" (R6); the
 absent-vs-not-ready distinction and the reference-resolution seam (R7); the single-graph pass
