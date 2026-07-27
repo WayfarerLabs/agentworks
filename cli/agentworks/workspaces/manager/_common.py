@@ -47,6 +47,26 @@ def workspace_has_sessions(db: Database, name: str) -> bool:
     return bool(db.list_sessions(workspace_name=name))
 
 
+def workspace_external_explicit_granters(db: Database, name: str) -> list[str]:
+    """Non-grant-all agents holding an explicit standing grant on this workspace, sorted.
+
+    Deleting a workspace cascades ``agent_workspace_grants`` (FK ``ON DELETE
+    CASCADE``), silently revoking every agent's explicit grant on it. This is
+    the "who would lose an operator-authored grant" predicate: session delete's
+    now-empty cleanup (issue #266) uses it to guard the ``--yes`` auto-delete
+    and to disclose the affected agents in its interactive offer, and the prune
+    command (issue #268) will reuse it for the same reason.
+
+    Grant-all agents are excluded by their flag rather than per row: grant_all
+    materializes an explicit row for every workspace (see
+    :mod:`agentworks.agents.grants`), so those rows are blanket policy, not
+    per-workspace intent, and are indistinguishable from a deliberate grant at
+    the row level. Implicit (session-tied) grants never count. Reads live DB
+    state, so call it once the deleted session's row has been removed.
+    """
+    return db.list_workspace_explicit_granters(name)
+
+
 def _guard_vm_status(vm: VMRow) -> None:
     """Block operations on VMs that are not usable (failed or in-progress)."""
     usable = {InitStatus.COMPLETE.value, InitStatus.PARTIAL.value}

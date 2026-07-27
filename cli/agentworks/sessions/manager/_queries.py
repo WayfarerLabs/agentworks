@@ -223,22 +223,49 @@ def _cleanup_now_empty_workspace(
     workspace under --yes, otherwise report the empty workspace and name the
     manual command rather than aborting after the "Session deleted" line has
     printed (matching the console offer hardening from issue #261).
+
+    One guard sits on top of that shape. Deleting the workspace cascades
+    ``agent_workspace_grants``, silently revoking any OTHER agent's explicit,
+    operator-authored standing grant on it (``grant-workspaces``). So when such
+    a grant exists we refuse the --yes auto-delete even for a session-created
+    workspace, downgrading it to report-but-keep and naming the granting
+    agent(s); and the interactive offer discloses whose grants a delete would
+    revoke. Grant-all agents are excluded by their flag (their materialized
+    rows are blanket policy, not per-workspace intent); implicit grants never
+    count. See :func:`workspace_external_explicit_granters`.
     """
-    from agentworks.workspaces.manager import delete_workspace, workspace_has_sessions
+    from agentworks.workspaces.manager import (
+        delete_workspace,
+        workspace_external_explicit_granters,
+        workspace_has_sessions,
+    )
 
     name = session.workspace_name
     if workspace_has_sessions(db, name):
         return
 
+    granters = workspace_external_explicit_granters(db, name)
+    if granters:
+        granter_list = ", ".join(granters)
+        empty_clause = f"now has no sessions (deleting revokes explicit grant(s) held by: {granter_list})"
+        report_clause = f"now has no sessions but agent(s) {granter_list} hold explicit grants"
+    else:
+        empty_clause = "now has no sessions"
+        report_clause = "now has no sessions"
+
     cleanup_now_empty_resource(
         kind="workspace",
         name=name,
-        created=session.created_workspace,
+        # A standing external grant vetoes auto-delete even for a session-created
+        # workspace: passing created=False here routes --yes to report-but-keep
+        # (the grant is preserved) while the interactive offer still fires with
+        # the disclosing empty_clause above.
+        created=session.created_workspace and not granters,
         delete=lambda: delete_workspace(db, config, name, yes=True),
         manual_command=f"agw workspace delete {name}",
         yes=yes,
-        empty_clause="now has no sessions",
-        report_clause="now has no sessions",
+        empty_clause=empty_clause,
+        report_clause=report_clause,
     )
 
 

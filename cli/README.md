@@ -56,6 +56,11 @@ agw session delete my-ephemeral-session    # This will prompt you to delete the 
 # this session created; anything else now unused is reported (naming
 # `agw workspace delete <name>` / `agw agent delete <name>`) and left in place
 # for you to remove by hand.
+# One guard applies: if another agent holds an explicit grant on the now-unused
+# workspace (deleting it would silently revoke that grant), the --yes
+# auto-delete is refused and the workspace is reported (naming the granting
+# agents) instead, while the interactive offer discloses whose grants a delete
+# would revoke.
 
 # Finally, create two sessions and a named console
 agw session create s1 --vm my-vm --new-workspace --new-agent

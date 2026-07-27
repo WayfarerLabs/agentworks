@@ -32,7 +32,7 @@ from agentworks.sessions.manager._queries import (
     _cleanup_now_empty_agent,
     _cleanup_now_empty_workspace,
 )
-from agentworks.workspaces.manager import workspace_has_sessions
+from agentworks.workspaces.manager import workspace_external_explicit_granters, workspace_has_sessions
 from tests._consoles_support import _seed_sessions, _seed_vm, _stub_build_registry, _StubConfig  # noqa: F401
 
 if TYPE_CHECKING:
@@ -79,6 +79,28 @@ def test_workspace_has_sessions_predicate(db: Database) -> None:
     assert workspace_has_sessions(db, "ws-vm1") is False
     _seed_sessions(db, ["a"])
     assert workspace_has_sessions(db, "ws-vm1") is True
+
+
+def test_workspace_external_explicit_granters_predicate(db: Database) -> None:
+    """Non-grant-all agents with an explicit grant on the workspace, sorted;
+    implicit rows and grant-all agents' materialized rows are excluded."""
+    _seed_vm(db)
+    assert workspace_external_explicit_granters(db, "ws-vm1") == []
+    # An implicit (session-tied) grant never counts.
+    db.insert_agent("a", "vm1", "a-user")
+    db.insert_agent_grant("a", "ws-vm1", "implicit", session_name="s")
+    assert workspace_external_explicit_granters(db, "ws-vm1") == []
+    # An explicit grant from a non-grant-all agent counts.
+    db.insert_agent_grant("a", "ws-vm1", "explicit")
+    assert workspace_external_explicit_granters(db, "ws-vm1") == ["a"]
+    # A grant-all agent's materialized explicit row is excluded by its flag.
+    db.insert_agent("z", "vm1", "z-user", grant_all=True)
+    db.insert_agent_grant("z", "ws-vm1", "explicit")
+    assert workspace_external_explicit_granters(db, "ws-vm1") == ["a"]
+    # Multiple granters come back sorted by agent name.
+    db.insert_agent("b", "vm1", "b-user")
+    db.insert_agent_grant("b", "ws-vm1", "explicit")
+    assert workspace_external_explicit_granters(db, "ws-vm1") == ["a", "b"]
 
 
 def test_agent_has_sessions_predicate(db: Database) -> None:
@@ -264,6 +286,99 @@ def test_now_empty_workspace_yes_created_auto_deletes(
 
     assert calls == ["ws-vm1"]
     assert db.get_workspace("ws-vm1") is None
+
+
+def test_now_empty_workspace_yes_created_kept_when_external_explicit_grant(
+    db: Database, monkeypatch: pytest.MonkeyPatch, captured_output: CapturedOutput
+) -> None:
+    """The grant guard: under --yes, a workspace this session CREATED is NOT
+    auto-deleted when another agent holds an explicit grant on it (deleting
+    would silently revoke that grant via the FK cascade). It is reported and
+    kept, and the report names the granting agent."""
+    _seed_vm(db)
+    _seed_agent(db)
+    db.insert_agent_grant("bot", "ws-vm1", "explicit")
+    calls = _spy_delete_workspace(db, monkeypatch)
+
+    def _no_confirm(message: str, default: bool = False) -> bool:
+        raise AssertionError(f"unexpected confirm under --yes: {message}")
+
+    monkeypatch.setattr("agentworks.output.confirm", _no_confirm)
+
+    session = _session_snapshot("s", "ws-vm1", created_workspace=True)
+    _cleanup_now_empty_workspace(db, _StubConfig(), session, yes=True)
+
+    assert calls == []
+    assert db.get_workspace("ws-vm1") is not None
+    assert any(
+        "ws-vm1" in w and "agent(s) bot hold explicit grants" in w and "agw workspace delete ws-vm1" in w
+        for w in captured_output.warnings
+    )
+
+
+def test_now_empty_workspace_yes_created_auto_deletes_with_only_grant_all_row(
+    db: Database, monkeypatch: pytest.MonkeyPatch, captured_output: CapturedOutput
+) -> None:
+    """The maintainer's scenario: a grant-all agent's materialized explicit row
+    is blanket policy, not per-workspace intent, so it is excluded by the flag
+    and does NOT block the --yes auto-delete of a session-created workspace."""
+    _seed_vm(db)
+    db.insert_agent("botall", "vm1", "botall-user", grant_all=True)
+    db.insert_agent_grant("botall", "ws-vm1", "explicit")  # materialized by grant_all
+    calls = _spy_delete_workspace(db, monkeypatch)
+
+    def _no_confirm(message: str, default: bool = False) -> bool:
+        raise AssertionError(f"unexpected confirm under --yes: {message}")
+
+    monkeypatch.setattr("agentworks.output.confirm", _no_confirm)
+
+    session = _session_snapshot("s", "ws-vm1", created_workspace=True)
+    _cleanup_now_empty_workspace(db, _StubConfig(), session, yes=True)
+
+    assert calls == ["ws-vm1"]
+    assert db.get_workspace("ws-vm1") is None
+    assert not captured_output.warnings
+
+
+def test_now_empty_workspace_interactive_offer_discloses_grants(
+    db: Database, monkeypatch: pytest.MonkeyPatch, captured_output: CapturedOutput
+) -> None:
+    """Transparency: the interactive offer for a workspace carrying external
+    explicit grants discloses whose grants a delete would revoke."""
+    _seed_vm(db)
+    _seed_agent(db)
+    db.insert_agent_grant("bot", "ws-vm1", "explicit")
+    calls = _spy_delete_workspace(db, monkeypatch)
+    prompts = _record_confirm(monkeypatch, answer=True)
+
+    session = _session_snapshot("s", "ws-vm1", created_workspace=False)
+    _cleanup_now_empty_workspace(db, _StubConfig(), session, yes=False)
+
+    assert any(
+        "Workspace 'ws-vm1' now has no sessions (deleting revokes explicit grant(s) held by: bot). Delete it?" in p
+        for p in prompts
+    )
+    # An accepted offer still deletes the workspace (and its grants cascade).
+    assert calls == ["ws-vm1"]
+    assert db.get_workspace("ws-vm1") is None
+
+
+def test_now_empty_workspace_interactive_offer_plain_with_only_grant_all_row(
+    db: Database, monkeypatch: pytest.MonkeyPatch, captured_output: CapturedOutput
+) -> None:
+    """A grant-all agent's materialized row is excluded, so the interactive
+    offer stays plain: no grant-disclosure noise."""
+    _seed_vm(db)
+    db.insert_agent("botall", "vm1", "botall-user", grant_all=True)
+    db.insert_agent_grant("botall", "ws-vm1", "explicit")  # materialized by grant_all
+    _spy_delete_workspace(db, monkeypatch)
+    prompts = _record_confirm(monkeypatch, answer=True)
+
+    session = _session_snapshot("s", "ws-vm1", created_workspace=False)
+    _cleanup_now_empty_workspace(db, _StubConfig(), session, yes=False)
+
+    assert any("Workspace 'ws-vm1' now has no sessions. Delete it?" in p for p in prompts)
+    assert all("revokes explicit grant" not in p for p in prompts)
 
 
 def test_workspace_with_remaining_sessions_not_touched(
