@@ -124,9 +124,11 @@ is not ready; the dependency is not "disabled", it is simply not there.
 
 - **Structural graph:** the resource dependency graph built from declared references, independent of
   whether any resource's config block is _valid_. The registry's primary product.
-- **`implied_references`:** the total, non-throwing extraction of the references a config block
-  implies, "what edges are derivable without assuming the block is valid." One half of today's
-  `validate_config`.
+- **`dependencies`:** a node's out-edges in the dependency graph, derived from its config, total and
+  non-throwing, "what this declares as dependencies, as far as they are derivable without assuming
+  the config is valid." This is the graph itself. It is the extraction half of today's
+  `validate_config`, and (renamed from `referenced_resources`) the resource-level method too, so
+  resource and capability share one word for their graph edges.
 - **`validate`:** the throwing correctness check for a config block. The other half of today's
   `validate_config`.
 - **Readiness / `not_ready`:** the signal that a **present** resource can or cannot serve on this
@@ -146,12 +148,15 @@ is not ready; the dependency is not "disabled", it is simply not there.
   malformed. After this pass the registry holds the complete dependency graph regardless of any
   resource's config health.
 
-- **R2 The capability contract splits into extraction and validation.** Each capability kind's
-  contract replaces the single `validate_config` with two methods: `implied_references(config)`
-  (total, never throws, returns the references the block implies as far as they are structurally
-  derivable) and `validate(config)` (the throwing correctness check). This lands for **all four**
-  capability kinds (`vm-platform`, `harness`, `secret-backend`, `git-credential-provider`) in this
-  effort; the split is not staged.
+- **R2 The capability contract splits into `dependencies` and `validate`.** Each capability kind's
+  contract replaces the single `validate_config` with two methods: `dependencies(config)` (total,
+  never throws, returns the node's graph out-edges as far as they are structurally derivable) and
+  `validate(config)` (the throwing correctness check). This lands for **all four** capability kinds
+  (`vm-platform`, `harness`, `secret-backend`, `git-credential-provider`) in this effort; the split
+  is not staged. The resource-level `referenced_resources()` (which composes a resource's bare edge
+  with its capabilities' `dependencies`) is renamed to `dependencies()` in the same pass, so
+  resource and capability share one graph vocabulary, with `validate()` as its correctness
+  counterpart.
 
 - **R3 Config validation is a separate pass over the ready set.** Config blocks are validated in a
   dedicated pass, distinct from graph construction, that runs only for resources that are actually
