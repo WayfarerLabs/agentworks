@@ -1624,10 +1624,83 @@ def test_rehome_routes_through_the_canonical_acl_helper(
     cmds = fake.commands
     assert any(c.startswith("find ") and "setfacl -d -m g::rwx -m m::rwx -m o::---" in c for c in cmds)
     assert any(c.startswith("setfacl -R -m g::rwx -m m::rwx -m o::---") for c in cmds)
+    # Ordering: the canonical ACL lands after the rsync move and before the
+    # ancestor-traversal re-grant, mirroring the copy test's ordering pin so
+    # a future resequencing regression is caught here too.
+    rsync_idx = next(i for i, c in enumerate(cmds) if c.startswith(("rsync", "cp -a")))
+    acl_idx = next(i for i, c in enumerate(cmds) if c.startswith("setfacl -R -m g::rwx"))
+    walk_idx = next(i for i, c in enumerate(cmds) if "chmod a+x" in c and "dirname" in c)
+    assert rsync_idx < acl_idx < walk_idx
     # The DB moved, confirming the rehome ran to completion (the ACL step is
     # non-fatal but here it succeeded).
     row = db.get_workspace("ws1")
     assert row is not None and row.workspace_path == "/dst/ws1"
+
+
+class _RehomeThenRepairTarget(_FakeAdminTarget, SSHTransport):  # type: ignore[misc]  # the fake's recording run deliberately shadows the real signature
+    """Stateful SSHTransport-typed fake spanning a rehome then a repair of the
+    same workspace, mirroring ``_CopyThenRepairTarget``: the canonical ACL the
+    rehome applies (via ``apply_workspace_acls``) persists as
+    ``_acl_canonical``, so the follow-up repair's getfacl snapshots agree and
+    the ACL step is a true no-op; every other probe reports already-converged."""
+
+    def __init__(self) -> None:
+        SSHTransport.__init__(self, "100.64.0.9", user="admin")
+        _FakeAdminTarget.__init__(self)
+        self._copied = False
+        self._acl_canonical = False
+        self._ws_mode: int | None = None
+
+    def run(self, cmd: str, **kwargs: object) -> SimpleNamespace:  # type: ignore[override]  # recording run deliberately shadows SSHTransport.run
+        self.commands.append(cmd)
+        stdout = ""
+        if cmd.startswith(("rsync", "cp -a")):
+            self._copied = True
+        elif cmd == "test -d /dst/ws1":
+            ok = self._copied
+            return SimpleNamespace(ok=ok, returncode=0 if ok else 1, stdout="", stderr="")
+        elif "chmod -c 2770" in cmd:
+            self._ws_mode = 0o2770
+        elif "chmod -c a+x" in cmd:
+            stdout, self._ws_mode = _self_inclusive_traversal_line(cmd, self._ws_mode)
+        elif "setfacl -R -m g::rwx" in cmd:
+            self._acl_canonical = True
+        elif "getfacl" in cmd:
+            entries = _HEALTHY_ACL if self._acl_canonical else _DAMAGED_ACL
+            stdout = _acl_block("dst/ws1", entries)
+        elif "id -nG" in cmd:
+            stdout = "admin ws-ws1"
+        return SimpleNamespace(ok=True, returncode=0, stdout=stdout, stderr="")
+
+
+def test_first_repair_after_rehome_is_a_noop(
+    db: Database,
+    make_config,  # noqa: ANN001
+    monkeypatch: pytest.MonkeyPatch,
+    captured_output: CapturedOutput,
+) -> None:
+    """A rehomed workspace lands in the canonical ACL state because rehome now
+    applies the IDENTICAL spec through the shared ``apply_workspace_acls``
+    helper (issue #263), so its first ``workspace repair`` is a true ACL no-op:
+    OK: ACLs and No issues found. Symmetric with
+    ``test_first_repair_after_copy_is_a_noop``; the guarantee is claimed by
+    ``acls.py``, ``rehome.py``, and the idempotency guide, so it is pinned for
+    both paths."""
+    fake = _RehomeThenRepairTarget()
+    monkeypatch.setattr("agentworks.transports.transport", lambda vm, config, **kwargs: fake)
+
+    config = make_config()
+    _seed(db)
+    _reachable(monkeypatch, True)
+
+    workspace_manager.rehome_workspace(db, config, "ws1", target_path="/dst/ws1", yes=True)
+    assert fake._acl_canonical
+
+    workspace_manager.repair_workspace(db, config, "ws1")
+
+    assert "OK: ACLs" in captured_output.detail
+    assert not any(line.startswith("Fixed:") for line in captured_output.detail)
+    assert "\nNo issues found" in captured_output.info
 
 
 class _CopyThenRepairTarget(_FakeAdminTarget, SSHTransport):  # type: ignore[misc]  # the fake's recording run deliberately shadows the real signature
