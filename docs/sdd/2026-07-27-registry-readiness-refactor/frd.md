@@ -273,8 +273,9 @@ outcome holds.
   attachment, description polish, and freeze keep their current behavior for such configs. The
   intended, acceptance-pinned deltas are:
   1. **Rendered vocabulary.** The readiness rename (R6) changes surface strings (`resource list`'s
-     `(disabled)` marker, `describe`'s `Disabled:` line, doctor's disabled wording) to the readiness
-     vocabulary.
+     `(disabled)` marker, `describe`'s `Disabled:` line, doctor's disabled wording, and the
+     site-selection / use-time strings), i.e. all readiness strings per the caller inventory, to the
+     readiness vocabulary.
   2. **A typo'd capability reference is now a hard error, not a silent self-disable** (R7).
   3. **Which-error-wins can reorder.** With capability-block validation moved out of decode/load
      into a post-graph pass (R3, R8) (construction still validates, per R3), a config with both a
@@ -321,7 +322,11 @@ outcome holds.
       `validate_chain` only iterates active-chain backends, so a `backend_mappings.<typo>` for a
       name not in the registry lies dormant; under the `secret -> secret-backend` edge it is an
       absent target and a hard error at build (the R9.9 classification, restated here because it is
-      a behavior change, not just a rule).
+      a behavior change, not just a rule). Consequence for **doctor**: such a typo now fails
+      `build_registry` inside doctor, collapsing its whole registry-dependent tail to one "Resource
+      registry: FAIL" row, where today `_check_secrets` tolerates it and pinpoints the exact secret.
+      (Cosmetic: `resource describe secret-backend/env-var` and `/prompt` now list every secret
+      under "Referenced by," since every secret emits default-backend edges.)
 
   Reachability itself is **preserved, not moved to lazy time**: the "every operator-declared secret
   is resolvable" check stays an eager post-finalize boundary check (fail-fast at `build_registry`),

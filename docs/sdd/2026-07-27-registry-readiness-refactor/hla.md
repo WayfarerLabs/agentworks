@@ -131,23 +131,30 @@ any backend that would attempt it, and whether a backend requires a mapping is a
 property** (onepassword requires one; env-var / prompt are mapping-optional and attempt any secret).
 So the `secret`'s own `dependencies()` is handed the **available-backend list** by the graph builder
 (a controlled builder input, not an ad-hoc registry probe, component 7) and emits a
-`secret -> secret-backend` edge for **every present backend that would attempt it** (has a mapping,
-or is mapping-optional), minus an explicit `false` opt-out. `edges_of(secret)` is therefore the full
-candidate set, and `edges_of` for an auto-declared secret (`tailscale-auth-key`) correctly yields
-the default backends. Resolution (component 6a) then only filters this set by `ready ∧ opted-in` and
-walks it in chain order; the would-attempt logic lives here in edge-building, where the secret
-orchestrates it via the backends. The `secret` implements no `not_ready` (opts out; always ready).
+`secret -> secret-backend` edge for the union of (a) **every present backend that would attempt it**
+(has a mapping, or is mapping-optional), minus an explicit `false` opt-out, and (b) **every explicit
+non-`false` mapping key the secret names**, even a name with no present backend. Clause (b) is what
+makes a typo'd key (`backend_mappings.onepasword`) a `secret -> secret-backend` edge to an
+**absent** target, which the `"error"` miss policy then hard-errors (R9.11); without it a typo'd key
+would emit no edge and lie dormant. `edges_of(secret)` is therefore the full candidate set (plus any
+dangling typo edge), and `edges_of` for an auto-declared secret (`tailscale-auth-key`) correctly
+yields the default backends. Resolution (component 6a) filters the present candidates by
+`enabled ∧ ready ∧ opted-in` and walks them in chain order; the would-attempt logic lives here in
+edge-building, where the secret orchestrates it via the backends. The `secret` implements no
+`not_ready` (opts out; always ready). (`would_attempt` must stay a **pure function of
+`(secret, mapping)`** with no host probing, so that freezing it into edges at finalize is safe; this
+is a constraint on the `SecretBackend` contract.)
 
 **Mapping validation.** The `secret` is always-ready, so its `validate()` runs in the finalize
 validate pass and validates each mapping addressed to a **present, enabled** backend via that
 backend's `validate(mapping)` (a pure offline shape check, so it runs regardless of that backend's
 readiness). This is **every declared mapping, not just the opted-in ones** (FRD R9.9). The
-loop-owned `false` opt-out is never passed to `validate`. A mapping to an **absent** backend is the
-hard-error `secret -> secret-backend` edge under the `"error"` miss policy (a typo, so no edge is
-emitted for it at all until fixed). A mapping to a present-but-**disabled** backend is **not
-validated** (inert until enabled, so a disabled plugin's validate is never invoked). In this effort
-all backends are present, enabled, and ready, so `validate` runs over every mapping; the disabled
-case is latent until the plugin work.
+loop-owned `false` opt-out is never passed to `validate`. A mapping key naming an **absent** backend
+emits the edge (clause (b) above) that the `"error"` miss policy hard-errors (a typo); it is never
+validated, because there is no backend to validate it. A mapping to a present-but-**disabled**
+backend is **not validated** either (inert until enabled, so a disabled plugin's validate is never
+invoked). In this effort all backends are present, enabled, and ready, so `validate` runs over every
+mapping; the absent case is a typo and the disabled case is latent until the plugin work.
 
 The sourceless→sourced conversion (`ConfigReference` → `SecretReference` when `kind == "secret"`,
 else `ResourceReference`, attaching `source`) that is triplicated across the `referenced_resources`
@@ -414,8 +421,11 @@ exactly which it means.
 - Graph: `edges_of`, `dependents_of`, `reachable_from`, `readiness_of`, `is_ready`.
 - Capability: `dependencies(config) -> tuple[ConfigReference, ...]`; `validate(config) -> None`;
   `not_ready(config) -> Readiness` (offline, non-constructing).
-- Resource: `dependencies()` (renamed from `referenced_resources`); a resource that needs build
-  context (the `secret`'s available-backend list) receives it from the builder.
+- Resource: **`dependencies(context)`** (renamed from `referenced_resources`), where `context` is a
+  small build-context object the builder passes to **every** resource uniformly (carrying the
+  available-backend list, and the read-only graph-in-progress); most resources ignore it, the
+  `secret` reads the backend list. The uniform signature (over special-casing `secret` in the
+  builder loop) keeps R2's one-shape rule and keeps the builder walk (`registry.py:321`) uniform.
 - Readiness hook (resource): `not_ready(config, {dependency -> DependencyState}) -> Readiness`,
   where `DependencyState` carries the dependency's enablement and (if enabled) readiness.
 
