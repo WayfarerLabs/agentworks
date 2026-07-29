@@ -100,30 +100,40 @@ factories, cycle detection, reachability), inbound usage (both inspect surfaces)
 
 ### 2. The capability-contract split (R2)
 
-Replace `validate_config(owner, config) -> tuple[ConfigReference, ...]` with two classmethods on the
-three `Capability`-based kinds (`vm_platform`, `harness`, `git_credential`):
+Replace `validate_config(owner, config) -> tuple[ConfigReference, ...]` with two methods on **all
+four** capability kinds:
 
 - **`dependencies(config) -> tuple[ConfigReference, ...]`**: total, never raises, returns the
   config-implied references as far as they are structurally derivable (omitting only an edge whose
   identity depends on a malformed field).
 - **`validate(config) -> None`**: the throwing correctness check.
 
-**`secret-backend` is not a `Capability`** and is orthogonal to this split. Its `validate_mapping`
-(`secrets/backends.py`) is a per-secret, resolve-time check over a secret's `backend_mappings`
-entry, invoked from `secrets.validate_chain`, not a capability config block at finalize; it is
-**left untouched**. A secret-backend node simply has no config block, so its contract shape is the
-trivial one (`dependencies -> ()`, `validate -> None`, mirroring the base `Capability`'s no-config
-default), and `validate_mapping` does not participate in R3's ready-set validation pass.
+**The consuming resource owns its config and orchestrates.** Config lives on the consuming resource
+(a `vm-site` owns `platform_config`, a `secret` owns `backend_mappings`), never on the capability
+(the capability model's core tenet). The resource's own `dependencies()` / `validate()` /
+`not_ready()` are where the business logic lives: they pull the relevant config sub-block(s) and
+call the capabilities to validate them and extract their implied refs. That the config "belongs to"
+a capability is just that resource's own impl detail.
+
+`secret-backend` is a **full participant**, not a special case. A `secret`'s `backend_mappings` is
+capability config (one mapping per backend) owned by the secret. Today's `validate_mapping`
+(`secrets/backends.py`) is exactly the backend's `validate(mapping)` and its future
+reference-deriving counterpart is `dependencies(mapping)` (the `SecretBackend` docstring already
+anticipates this). The change: these run at **finalize**, over **every declared mapping** (not only
+the resolve-time active-chain ones, an R9-style delta), driven by the `secret`'s own
+`dependencies()` / `validate()`, which iterate its `backend_mappings` and emit a
+`secret -> secret-backend` edge per mapping (plus built-in defaults). The `secret` itself implements
+no `not_ready` (opts out; always ready). What stays a **resolution** concern (component 6a) is only
+the chain walk (which backends, in what order) and the reachability check.
 
 The sourceless→sourced conversion (`ConfigReference` → `SecretReference` when `kind == "secret"`,
-else `ResourceReference`, attaching `source`) that is triplicated across the three
-`referenced_resources` bodies today is centralized into one helper. The resource-level method
-`referenced_resources()` is renamed to **`dependencies()`** and becomes: emit the bare capability
-edge, then append the capability's `dependencies(config)` mapped through that helper. No validation,
-no throwing, and **no host-conditional suppression** (component 5 makes the platform node always
-present, so the vm-site always emits its platform edge). `EnvEntry.referenced_resources(source)`
-(the one arg-taking variant, `env/entry.py:38`) stays an internal aggregation and is not called by
-the graph builder.
+else `ResourceReference`, attaching `source`) that is triplicated across the `referenced_resources`
+bodies today is centralized into one helper. The resource-level method `referenced_resources()` is
+renamed to **`dependencies()`** and becomes: emit the bare capability edge(s), then append the
+capability's `dependencies(config)` mapped through that helper. No validation, no throwing, and **no
+host-conditional suppression** (component 5 makes the platform node always present, so the vm-site
+always emits its platform edge). `EnvEntry.referenced_resources(source)` (the one arg-taking
+variant, `env/entry.py:38`) stays an internal aggregation and is not called by the graph builder.
 
 ### 3. `finalize` as ordered passes producing the graph (R8, R12)
 
@@ -175,7 +185,12 @@ The kind/instance `disabled_reason` hook is renamed **`not_ready`** and re-shape
 
 `Readiness` is a small verdict object (ready, or not-ready with a reason), stored on the graph node;
 consumers read it via `readiness_of` (R10), sparing them the `str | None` double negative.
-Propagation: a node is not-ready if any dependency is not-ready **or disabled** (R4).
+**Readiness is self-determined (R4): the fold distributes verdicts and imposes no propagation
+rule.** A `vm-site` chooses to propagate (not-ready if its single platform is not-ready or
+disabled); a `secret` implements no `not_ready` at all, so it is always ready regardless of its
+backends (resolvability is a resolution-time question, component 6a). A resource is free to combine
+its dependencies' verdicts however its impl dictates (a vm-site's single-platform AND is not a
+secret's many-backend OR).
 
 **Where today's `site_disabled_reason` three-step chain lands** (the fold LLD's central question):
 platform-missing collapses to the resolve-time hard error (a typo; a supported platform is always
@@ -203,6 +218,32 @@ host-independent** (same edges on every host; only readiness verdicts differ), a
 `wsl2` site becomes not-ready on non-Windows hosts instead of a hard error. The other three kinds
 already publish unconditionally, so this is a vm-platform-only change. Surface delta: an unsupported
 platform now appears as a not-ready row (FRD R9.5).
+
+### 6a. Secret resolution as a distinct layer over the graph (R11)
+
+Secret resolution stops recomputing and becomes a pure consumer of the graph, sitting **on top of**
+the registry (never folded into the finalize passes). At resolution time, for each secret:
+
+1. Read its candidate backends off the graph (`edges_of` the secret's `secret-backend` edges), each
+   with its node's **stored** readiness (computed once at finalize) and its impl (component 1).
+2. Apply the operator's **opt-in resolution chain** (`secret_config.backends`: which backends
+   participate, in what order). This is the one resolution-layer config input; it never touches
+   finalize.
+3. Walk the candidates that are **present ∧ ready ∧ opted-in**, in opt-in order, calling each
+   backend's resolution op (`batch_get`) with the mapping read from the secret's own
+   `backend_mappings` (config on the resource, option (a)). Batching is preserved: read candidates
+   per secret, group by backend, one `batch_get` per backend.
+
+This deletes three current recompute / registry-probe paths at once: `validate_chain` re-deriving
+the chain, the resolver reaching into `SECRET_BACKEND_REGISTRY`, and the construct-time
+`_secret_refs` cache. Readiness is read, never re-checked. The chain **reachability** check (today
+`validate_chain`'s "every secret reaches an active backend") relocates here, since it needs the
+opt-in chain.
+
+**Vocabulary, kept distinct throughout.** A backend is **present** (built-in, or its plugin is
+enabled, the plugin / three-tier axis where "enabled" lives), **ready** (host-usable, its own
+`not_ready`), and **opted-in** (named in `secret_config.backends`, a resolution-layer selection and
+order). Resolution uses present ∧ ready ∧ opted-in; "enabled/disabled" is never reused for opt-in.
 
 ### 6. Consumer migration onto the graph (R11)
 
@@ -257,16 +298,18 @@ and removal of the vm-site edge-suppression. These are one step by necessity: th
 two jobs (avoid the platform error-miss; keep a can't-run site's secrets from materializing), R13
 replaces job 1 and R12 replaces job 2, and splitting them opens a non-green window where the
 suppression is gone but materialization is still ungated, regressing R12. (4) migrate consumers onto
-the graph one at a time (cycle detection, walk, node factories, inspect, doctor, op-time refs); (5)
-land the guard once the bypasses are gone.
+the graph one at a time (cycle detection, walk, node factories, inspect, doctor, op-time refs, and
+secret resolution per component 6a); (5) land the guard once the bypasses are gone.
 
 LLDs: (a) the graph data structure + query semantics (including capability nodes carrying their
 impl); (b) the finalize pass ordering, which owns the auto-declare hard sub-branch, the
 suppression-and-gating co-location, the materialization fixpoint premise, and the partial-readiness
 secret-`describe` question; (c) the readiness-fold contract, which owns the
 platform-node-vs-site-node check split, the limactl construct-for-tool-check seam off the graph
-impl, and the minimal `RunContext`. The guard's banned-pattern definition + construct-time exemption
-is specified as a section of (b) or (c), sharpened enough to be a real test.
+impl, and the minimal `RunContext`; (d) the secret-resolution layer (component 6a), owning the graph
+read, the present/ready/opted-in walk, the relocated reachability check, and batching. The guard's
+banned-pattern definition + construct-time exemption is specified as a section of (b) or (c),
+sharpened enough to be a real test.
 
 ## Risks and mitigations
 
@@ -292,7 +335,12 @@ is specified as a section of (b) or (c), sharpened enough to be a real test.
 ## What does not change
 
 The capability _kinds_ and `KIND_REGISTRY`; the manifest loader and envelope; operator TOML/YAML
-surfaces; the collision policy (`_check_collision`); reserved-default always-materialization; the
-post-finalize boundary checks (`secrets.validate_chain`, `vm_sites.validate_sites`); and the
-capability op lifecycle (`preflight`/`runup`), which stays the deeper, live readiness boundary
+surfaces; the collision policy (`_check_collision`); reserved-default always-materialization; and
+the capability op lifecycle (`preflight`/`runup`), which stays the deeper, live readiness boundary
 distinct from the offline `not_ready`.
+
+Changing (called out so the list above stays honest): `secrets.validate_chain` splits, its
+per-mapping spec validation moving into the finalize `validate` pass (component 2) and its chain
+reachability check relocating to the resolution layer (component 6a); `vm_sites.validate_sites`
+becomes a graph read (readiness off the graph) rather than a re-derivation, but stays a
+post-finalize boundary check.

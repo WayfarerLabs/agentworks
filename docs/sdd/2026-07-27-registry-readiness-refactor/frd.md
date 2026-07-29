@@ -203,13 +203,17 @@ outcome holds.
 
 - **R4 Disablement becomes a dependency-ordered readiness fold, computed once and stored on the
   graph.** Readiness is computed during finalize by walking the graph in reverse-topological
-  (dependencies-first) order; the framework hands each node its dependencies' verdicts, and a node's
-  readiness answer is a pure function of its own (best-effort-parsed) config and those verdicts (the
-  per-kind `not_ready` hook). A node never reaches into global registry state to learn a
-  dependency's readiness. A node is not-ready if any dependency is **not-ready or disabled** (an
-  enabled dependency that can't run, or a switched-off one). Each node's verdict is **recorded on
-  the graph as first-class state**; nothing recomputes it lazily. A leaf's readiness is
-  self-contained (host and tool checks); a non-leaf's folds in its dependencies'.
+  (dependencies-first) order. The framework **hands each node its dependencies' verdicts**; the
+  node's own `not_ready` then decides its verdict from its (best-effort-parsed) config and those
+  verdicts. A node never reaches into global registry state to learn a dependency's readiness.
+  **Readiness is self-determined per resource: the fold distributes verdicts and imposes no
+  propagation rule.** A resource may propagate (a `vm-site` is not-ready if its single platform is
+  not-ready or disabled), combine its dependencies however it likes, or **opt out entirely** (a
+  `secret` implements no readiness, so it is always ready; whether it can actually be resolved from
+  one of its many backends is a resolution-time question, not a readiness one, so **ready does not
+  mean resolvable**). Each node's verdict is **recorded on the graph as first-class state**; nothing
+  recomputes it lazily. A leaf's readiness is self-contained (host and tool checks); a non-leaf's is
+  whatever its `not_ready` makes of its dependencies' verdicts.
 
 - **R5 Readiness is not validity.** These are independent verdicts and both surface. A resource may
   be ready (dependencies present and ready, host supports it) and still have an invalid config
@@ -345,7 +349,11 @@ materialization (R8, R12); unconditional capability publication so host-support 
 absence (R13); the enumerated behavior deltas (R9); readiness projected off the graph (R10); forcing
 all consumers onto the graph, the caller inventory, and the anti-bypass guard (R11); and the
 migration of every current caller of `validate_config`, `disabled_reason`, and
-`referenced_resources` to the new shapes.
+`referenced_resources` to the new shapes. `secret-backend` is a full participant in the split like
+the other three capability kinds (its per-secret `backend_mappings` is capability config owned by
+the `secret`, validated and dependency-extracted at finalize); secret **resolution** is refactored
+into a distinct operation that consumes the graph (edges, stored backend readiness, backend impls)
+and applies the operator's opt-in resolution chain, kept out of the core finalize passes.
 
 Out of scope: the system-plugin work itself (its rebuild consumes this refactor and is a separate,
 already-parked SDD), including any real **producer** of present-but-disabled nodes; any new
