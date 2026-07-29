@@ -238,13 +238,16 @@ outcome holds.
     enable its unit"), and the "enable it" reason comes from the disabled node itself, so no
     diagnosis at the miss point is needed.
   - **Present and enabled**: a normal node, then ready or not-ready per the fold (R4).
+    Host-unsupported (an installed platform whose `unsupported_reason` is non-None on this host,
+    e.g. `wsl2` off Windows) is a not-ready case of this tier, **not** an absent node; making that
+    true requires unconditional capability publication (R13).
 
   This SDD builds on `main` with the plugin system parked, so nothing yet **produces** disabled
-  nodes (today the only absent case is a typo, and host-unsupported is readiness, not absence). The
-  refactor therefore **designs the node-state model to carry the enablement axis** and proves it
-  with a test fixture that produces a disabled node (exercising the axis and the not-ready
-  propagation), but ships **no producer**. The system-plugin rebuild is the first real producer and
-  slots onto this model without re-touching the core. This supersedes an earlier plan's
+  nodes (today the only absent case is a typo; host-unsupported becomes readiness rather than
+  absence via R13). The refactor therefore **designs the node-state model to carry the enablement
+  axis** and proves it with a test fixture that produces a disabled node (exercising the axis and
+  the not-ready propagation), but ships **no producer**. The system-plugin rebuild is the first real
+  producer and slots onto this model without re-touching the core. This supersedes an earlier plan's
   absent-plus-diagnosis seam: because a disabled unit is a present node rather than an absent one,
   there is nothing to diagnose at a miss.
 
@@ -271,6 +274,11 @@ outcome holds.
   4. **A not-ready resource's malformed block is deferred, not silenced.** It is validated when the
      resource becomes ready, not at every build (R3); today decode/load validate it eagerly
      regardless of readiness.
+  5. **An installed-but-host-unsupported capability now appears as a not-ready row.** With
+     unconditional publication (R13), an installed platform whose `unsupported_reason` is non-None
+     on this host (e.g. `wsl2` on macOS/Linux) publishes a present, not-ready `vm-platform` row
+     visible in `resource list` and `doctor`, where today `publish_to` skips it and it appears
+     nowhere.
 
   The test suite pins both the preservation and this delta list; the list is the HLA's acceptance
   contract.
@@ -308,6 +316,21 @@ outcome holds.
   during construction, this requires readiness to gate materialization; the ordering is the HLA's to
   resolve (R8), but the required behavior is fixed here.
 
+- **R13 Installed capability rows publish unconditionally; host-support is readiness, not absence.**
+  Today `vm_platform.publish_to` skips any platform whose `unsupported_reason()` is non-None, so an
+  installed-but-host-unsupported platform publishes **no** node, i.e. it is an _absent_ node. The
+  bundled `wsl2` vm-site references `wsl2`, which is absent on every non-Windows host; today only
+  the vm-site edge-suppression (which R7/R12 remove) keeps that from being a dangling edge. With the
+  graph total and absent = hard error (R7), leaving publication as-is would make the bundled `wsl2`
+  site abort every command on every non-Windows host. So installed capability rows **publish
+  unconditionally**: `unsupported_reason` stops gating publication and instead becomes an input to
+  the capability node's `not_ready` verdict, so a host-unsupported capability is a
+  **present-but-not-ready node** and its dependents are not-ready rather than hard-erroring. This is
+  the deliberate replacement for "job 1" of the vm-site suppression (R12 is job 2), and it is what
+  makes "host- unsupported is readiness, not absence" (R7) actually true rather than asserted. The
+  surface change is the R9.5 delta. (Kinds with no host-support concept already publish
+  unconditionally, so this is a no-op for them.)
+
 ## Scope
 
 In scope: making the registry produce and retain a first-class dependency graph, with a reachability
@@ -318,9 +341,10 @@ the dependency-ordered readiness fold, computed once and stored on the graph (R4
 validity (R5); the `not_ready` rename and freeing "enabled/disabled," including operator-facing
 strings and function names (R6); the three availability tiers with the enablement axis modeled and
 fixture-tested but not produced (R7); the single-graph pass ordering including readiness-gated
-materialization (R8, R12); the enumerated behavior deltas (R9); readiness projected off the graph
-(R10); forcing all consumers onto the graph, the caller inventory, and the anti-bypass guard (R11);
-and the migration of every current caller of `validate_config`, `disabled_reason`, and
+materialization (R8, R12); unconditional capability publication so host-support is readiness, not
+absence (R13); the enumerated behavior deltas (R9); readiness projected off the graph (R10); forcing
+all consumers onto the graph, the caller inventory, and the anti-bypass guard (R11); and the
+migration of every current caller of `validate_config`, `disabled_reason`, and
 `referenced_resources` to the new shapes.
 
 Out of scope: the system-plugin work itself (its rebuild consumes this refactor and is a separate,
