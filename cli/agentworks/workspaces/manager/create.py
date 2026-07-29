@@ -6,6 +6,7 @@ import subprocess
 from typing import TYPE_CHECKING
 
 from agentworks import output
+from agentworks.agents.grants import MAX_WORKSPACE_NAME_LENGTH
 from agentworks.config import validate_name
 from agentworks.errors import AlreadyExistsError, NotFoundError
 from agentworks.workspaces.manager._common import _guard_vm_status, _resolve_vm, _workspace_scope
@@ -13,6 +14,11 @@ from agentworks.workspaces.manager._common import _guard_vm_status, _resolve_vm,
 if TYPE_CHECKING:
     from agentworks.config import Config
     from agentworks.db import Database
+
+# NAME-column truncation cap for ``workspace list``, derived from the
+# workspace-name cap so the two cannot drift: a valid name (<= 29) never
+# truncates, and the dynamically-sized column stays bounded.
+_NAME_CELL_WIDTH = MAX_WORKSPACE_NAME_LENGTH
 
 
 def create_workspace(
@@ -46,7 +52,7 @@ def create_workspace(
     registry = build_registry(config)
 
     ws_name = name
-    validate_name(ws_name)
+    validate_name(ws_name, max_length=MAX_WORKSPACE_NAME_LENGTH)
 
     if db.get_workspace(ws_name) is not None:
         raise AlreadyExistsError(
@@ -210,7 +216,13 @@ def list_workspaces(
             return "default"
         return t
 
-    rows = [(ws.name, ws.vm_name, _tpl_name(ws.template), ws.created_at) for ws in workspaces]
+    # Cap the NAME column at the workspace-name cap (29) so an over-cap legacy
+    # row cannot balloon the dynamically-sized column; a valid name never
+    # truncates.
+    rows = [
+        (output.truncate(ws.name, _NAME_CELL_WIDTH), ws.vm_name, _tpl_name(ws.template), ws.created_at)
+        for ws in workspaces
+    ]
 
     name_w = max(len("NAME"), max(len(r[0]) for r in rows))
     vm_w = max(len("VM"), max(len(r[1]) for r in rows))

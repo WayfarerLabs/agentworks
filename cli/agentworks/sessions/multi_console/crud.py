@@ -19,7 +19,7 @@ from typing import TYPE_CHECKING
 
 import agentworks.sessions.multi_console as _mc
 from agentworks import output
-from agentworks.config import validate_name
+from agentworks.config import MAX_FREEFORM_NAME_LENGTH, validate_name
 from agentworks.errors import AlreadyExistsError, NotFoundError, ValidationError
 from agentworks.resources.access import named_console_template
 from agentworks.sessions.multi_console_layout import (
@@ -69,7 +69,7 @@ def create_console(
     resolved by the CLI layer into an explicit list of session names before
     calling create_console.
     """
-    validate_name(name)
+    validate_name(name, max_length=MAX_FREEFORM_NAME_LENGTH)
 
     if db.get_console(name) is not None:
         raise AlreadyExistsError(

@@ -43,6 +43,12 @@ if TYPE_CHECKING:
     from agentworks.resources.registry import Registry
     from agentworks.transports import Transport
 
+# NAME-column truncation cap for ``console list``. Console names are freeform
+# (validated at cap 64) and display-only, so this is a deliberately tighter,
+# table-friendly bound rather than a mirror of the validation cap; a name
+# beyond it truncates with an ellipsis in the list view only.
+_NAME_CELL_WIDTH = 50
+
 
 def _session_linux_user(db: Database, session: SessionRow, vm: VMRow) -> str:
     """Resolve the Linux user that owns a session's tmux server."""
@@ -281,7 +287,10 @@ def list_consoles(
         output.info("No consoles found.")
         return
 
-    rows = [(c.name, c.vm_name, str(n)) for c, n in consoles]
+    # Console names are freeform (cap 64) and display-only, but a very long one
+    # would balloon this dynamically-sized column, so cap the NAME cell at a
+    # bounded, table-friendly width and let short names size the column down.
+    rows = [(output.truncate(c.name, _NAME_CELL_WIDTH), c.vm_name, str(n)) for c, n in consoles]
     name_w = max(len("NAME"), max(len(r[0]) for r in rows))
     vm_w = max(len("VM"), max(len(r[1]) for r in rows))
 

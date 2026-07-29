@@ -29,6 +29,14 @@ if TYPE_CHECKING:
     from agentworks.transports import Transport
 
 
+# Suffix appended to the VM hostname to name its virtual-network subresource:
+# {slug}-{vm}-vnet. This is the tightest sink bounding MAX_VM_NAME_LENGTH (the
+# vnet name limit is 64), so the length derivation in config/validation.py
+# mirrors this literal and a pinned test asserts the worst-case name is exactly
+# 64 at the cap. Keep the two in sync (the test fails if this suffix grows).
+VNET_NAME_SUFFIX = "-vnet"
+
+
 class _HasSubscriptionId(Protocol):
     """Structural protocol for anything with subscription_id (AzureConfig or _MinimalAzureConfig)."""
 
@@ -489,7 +497,7 @@ class AzureVMPlatform(VMPlatform):
             output.detail("Creating network interface...")
 
             # Need a subnet: use default VNet or create one
-            vnet_name = f"{vm_name}-vnet"
+            vnet_name = f"{vm_name}{VNET_NAME_SUFFIX}"
             subnet_name = "default"
             vnet_poller = network.virtual_networks.begin_create_or_update(  # type: ignore[call-overload]
                 az.resource_group,
@@ -890,7 +898,7 @@ def _cleanup_vm_resources(
         lambda: network.network_interfaces.begin_delete(rg, f"{name}-nic").result(),
         lambda: network.public_ip_addresses.begin_delete(rg, f"{name}-ip").result(),
         lambda: network.network_security_groups.begin_delete(rg, f"{name}-nsg").result(),
-        lambda: network.virtual_networks.begin_delete(rg, f"{name}-vnet").result(),
+        lambda: network.virtual_networks.begin_delete(rg, f"{name}{VNET_NAME_SUFFIX}").result(),
     ]:
         with contextlib.suppress(Exception):
             cleanup()  # type: ignore[no-untyped-call]

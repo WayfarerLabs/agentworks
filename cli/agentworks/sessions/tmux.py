@@ -11,6 +11,8 @@ from __future__ import annotations
 import shlex
 from typing import TYPE_CHECKING, Protocol
 
+from agentworks.config.validation import LINUX_USERNAME_MAX_LENGTH
+
 if TYPE_CHECKING:
     from collections.abc import Callable
 
@@ -22,6 +24,29 @@ DEFAULT_HISTORY_LIMIT = 50_000
 # Agent tmux socket infrastructure
 AGENT_SOCKET_ROOT = "/run/agentworks/agent-tmux-sockets"
 AGENT_SOCKET_GROUP = "tmux-agent-access"
+
+# AF_UNIX socket paths are capped by ``sizeof(sun_path)`` (Linux <sys/un.h>):
+# 108 bytes. A pathname socket needs a trailing NUL, so the usable path length
+# is 107. (Live-measured on Linux: a 107-char bind succeeds, 108 fails with
+# "File name too long".)
+SUN_PATH_MAX = 108
+
+# Session names embed into the per-agent tmux socket path
+# ``agent_socket_path`` builds: f"{AGENT_SOCKET_ROOT}/{linux_user}/{name}.sock".
+# The tightest case is the longest possible agent username: ``agt-`` plus a
+# max-length agent name is exactly LINUX_USERNAME_MAX_LENGTH (32), the Linux
+# username ceiling. The fixed socket-path overhead under that username is the
+# socket root, two separators, the username, and the ".sock" suffix; whatever
+# remains under the usable path length (SUN_PATH_MAX - 1) is the session-name
+# budget. Deriving the cap from ``AGENT_SOCKET_ROOT`` in this same module ties
+# it to the real prefix: a socket-root change shifts the cap automatically
+# rather than silently reintroducing an unbindable path (and a pinned test
+# asserts the worst-case path is exactly 107 at the cap). Admin sessions embed
+# into an equal-length root under an equal-capped username, so this cap is safe
+# for them too. At 34 this stays well clear of the freeform 64 that console /
+# vm-site names use, so it is NOT redundant with MAX_FREEFORM_NAME_LENGTH.
+_SESSION_SOCKET_OVERHEAD = len(AGENT_SOCKET_ROOT) + len("/") + LINUX_USERNAME_MAX_LENGTH + len("/") + len(".sock")
+MAX_SESSION_NAME_LENGTH = (SUN_PATH_MAX - 1) - _SESSION_SOCKET_OVERHEAD  # 107 - 73 = 34
 
 # Admin tmux socket infrastructure (mirrors the agent pattern; per-session
 # sockets so each admin session creates a fresh tmux server that inherits the

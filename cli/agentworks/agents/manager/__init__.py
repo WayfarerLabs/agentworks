@@ -35,6 +35,7 @@ from agentworks.transports import transport
 
 from ._common import (
     AGENT_PREFIX,
+    MAX_AGENT_NAME_LENGTH,
     MAX_GRANTS_DISPLAY,
     _agent_direct_secret_target,
     _AgentDirectEnvScopes,
@@ -56,6 +57,7 @@ from .lifecycle import create_agent, delete_agent, reinit_agent
 
 __all__ = [
     "AGENT_PREFIX",
+    "MAX_AGENT_NAME_LENGTH",
     "MAX_GRANTS_DISPLAY",
     "_AgentDirectEnvScopes",
     "_agent_direct_secret_target",

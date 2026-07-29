@@ -304,18 +304,24 @@ def test_slug_resolution_precedes_secrets_and_insert(
     assert db.get_vm("ovm") is None  # insert happens after the resolve
 
 
-def test_r11_hostname_bound_by_construction() -> None:
-    """Slug max 20 + dash + name max 30 = 51 chars, inside the 63-char
-    hostname-label and Azure 64-char computer-name limits."""
-    from agentworks.config import MAX_NAME_LENGTH, validate_name
+def test_r11_hostname_and_vnet_bound_by_construction() -> None:
+    """The VM-name cap is the MIN over two composed sinks. At slug max 20 and
+    name max 38 (MAX_VM_NAME_LENGTH): the {slug}-{name} hostname is 59 chars
+    (inside the 63-char DNS-label limit), and the tighter {slug}-{name}-vnet
+    Azure virtual-network name is exactly 64 (its cap). The vnet sink is what
+    binds the cap at 38."""
+    from agentworks.capabilities.vm_platform.azure_vm import VNET_NAME_SUFFIX
+    from agentworks.config import AZURE_VNET_NAME_MAX_LENGTH, DNS_LABEL_MAX_LENGTH, MAX_VM_NAME_LENGTH, validate_name
 
     slug = "a" * 20
     vm_manager.validate_slug(slug)
-    name = "b" * MAX_NAME_LENGTH
-    validate_name(name)
+    name = "b" * MAX_VM_NAME_LENGTH
+    validate_name(name, max_length=MAX_VM_NAME_LENGTH)
     hostname = f"{slug}-{name}"
-    assert len(hostname) == 51
-    assert len(hostname) <= 63
+    assert len(hostname) == 59
+    assert len(hostname) <= DNS_LABEL_MAX_LENGTH == 63
+    vnet_name = f"{slug}-{name}{VNET_NAME_SUFFIX}"
+    assert len(vnet_name) == AZURE_VNET_NAME_MAX_LENGTH == 64
 
 
 def test_proxmox_token_resolves_end_to_end(
