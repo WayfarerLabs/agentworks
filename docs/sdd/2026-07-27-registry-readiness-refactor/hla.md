@@ -280,6 +280,44 @@ The dated **caller inventory** (already scouted: the `validate_config` / `disabl
 `referenced_resources` / `unsupported_reason` / `references`-field sites) is the guard's baseline
 and the migration checklist; it lands as a feature artifact.
 
+### 8. Operator surfaces: secret CLI and doctor (R6, R9, R10)
+
+The secret/backend surfaces already show most of this picture (`secret describe` has "Backend
+mappings" and a "Resolution preview"; `secret list` is a per-backend grid; `doctor` reports one row
+per secret); the refactor makes them **readiness-aware** and disambiguates the overloaded "disabled"
+vocabulary. Exact output formats are the operator-surfaces LLD; the architecture-level changes:
+
+- **Secret backends gain an offline readiness check.** A backend's host tool check (is `op` on
+  `PATH` for onepassword, analogous to `limactl` for lima) becomes its `not_ready` verdict, computed
+  once and stored on its graph node. It is cheap and offline: it does **not** probe the store (no
+  biometric). Interactivity (the prompt / biometric) stays previewed **optimistically** as today, so
+  readiness (offline, honest) and interactivity (the interaction, optimistically assumed) are
+  orthogonal dimensions.
+- **`secret list` grid.** Cells distinguish the states "disabled" used to conflate: the lookup
+  identifier when the backend **would attempt** (has a mapping), an explicit **not-ready** cell with
+  reason when the backend can't run here (`not ready: op not installed`), and "enabled/disabled"
+  reserved for plugin presence. Columns stay the **opted-in** backends (`secret_config.backends`).
+- **`secret describe`.** "Backend mappings" and "Resolution preview" become readiness-aware: a
+  not-ready backend is shown as such and does not count toward "would resolve via X"; the preview
+  walks **present ∧ ready ∧ opted-in** candidates. The interactive-optimism is preserved (describe
+  reports configured capability, not this run's TTY); readiness is the new honest offline layer
+  under it.
+- **Resolution and `env show`.** A not-ready backend is skipped up front (not tried-and-failed), and
+  the "no backend could resolve" error names readiness reasons. `env show --reveal-secrets` is
+  renamed **`--resolve`** (R9.8).
+- **Doctor.** `_check_vm_platforms` / `_check_vm_sites` read the **stored** offline readiness off
+  the graph instead of recomputing `unsupported_reason` / `site_disabled_reason` ad hoc, while the
+  live `preflight` (network) stays the deeper op-boundary check, now cleanly separated from the
+  offline verdict. A **new secret-backends group** parallel to `_check_vm_platforms` reports one
+  readiness row per backend (`[ok]` / `[not ready]: <reason>`) — backends are capabilities now.
+  `_check_secrets` stays one row per secret but becomes readiness-aware. The rename retires
+  "disabled" for host readiness in every doctor string (R6).
+
+Vocabulary these surfaces must keep straight (the hotspot): a backend is **present** (built-in or
+plugin-enabled, where "enabled/disabled" lives), **ready** (offline host check, "not ready" +
+reason), **opted-in** (`secret_config.backends`, the resolution chain), and **would-attempt** (has a
+mapping for this secret). Each surface says exactly which it means.
+
 ## Interfaces (summary)
 
 - Graph: `edges_of`, `dependents_of`, `reachable_from`, `readiness_of`, `is_ready`.
@@ -299,7 +337,11 @@ two jobs (avoid the platform error-miss; keep a can't-run site's secrets from ma
 replaces job 1 and R12 replaces job 2, and splitting them opens a non-green window where the
 suppression is gone but materialization is still ungated, regressing R12. (4) migrate consumers onto
 the graph one at a time (cycle detection, walk, node factories, inspect, doctor, op-time refs, and
-secret resolution per component 6a); (5) land the guard once the bypasses are gone.
+secret resolution per component 6a); (5) land the operator surfaces (component 8: the
+readiness-aware secret CLI + the new doctor backend group + the `--resolve` rename) together with
+the docs and help-text updates that make them true (`docs/guides/resources.md`'s "Secrets: backends
+and the chain", `sample-config.toml`, and the command/section help strings); (6) land the guard once
+the bypasses are gone.
 
 LLDs: (a) the graph data structure + query semantics (including capability nodes carrying their
 impl); (b) the finalize pass ordering, which owns the auto-declare hard sub-branch, the
@@ -307,9 +349,11 @@ suppression-and-gating co-location, the materialization fixpoint premise, and th
 secret-`describe` question; (c) the readiness-fold contract, which owns the
 platform-node-vs-site-node check split, the limactl construct-for-tool-check seam off the graph
 impl, and the minimal `RunContext`; (d) the secret-resolution layer (component 6a), owning the graph
-read, the present/ready/opted-in walk, the relocated reachability check, and batching. The guard's
-banned-pattern definition + construct-time exemption is specified as a section of (b) or (c),
-sharpened enough to be a real test.
+read, the present/ready/opted-in walk, the relocated reachability check, and batching; (e) the
+operator surfaces (component 8), owning the `secret list`/`describe` output, the new doctor
+secret-backends group and the readiness-aware secret rows, and the exact operator strings + docs.
+The guard's banned-pattern definition + construct-time exemption is specified as a section of (b) or
+(c), sharpened enough to be a real test.
 
 ## Risks and mitigations
 

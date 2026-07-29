@@ -265,9 +265,8 @@ outcome holds.
 
 - **R9 Behavior is preserved for a valid, enabled, ready config, except for an enumerated set of
   intended changes.** Auto-declare/synthesize, reserved-default materialization, incoming-reference
-  attachment, description polish, freeze, and the post-finalize boundary checks
-  (`secrets.validate_chain`, the vm-site validation) keep their current behavior for such configs.
-  The intended, acceptance-pinned deltas are:
+  attachment, description polish, and freeze keep their current behavior for such configs. The
+  intended, acceptance-pinned deltas are:
   1. **Rendered vocabulary.** The readiness rename (R6) changes surface strings (`resource list`'s
      `(disabled)` marker, `describe`'s `Disabled:` line, doctor's disabled wording) to the readiness
      vocabulary.
@@ -283,9 +282,22 @@ outcome holds.
      on this host (e.g. `wsl2` on macOS/Linux) publishes a present, not-ready `vm-platform` row
      visible in `resource list` and `doctor`, where today `publish_to` skips it and it appears
      nowhere.
+  6. **Secret backends now report offline readiness, and it is honest.** A configured backend whose
+     host tool is missing (e.g. `onepassword` with no `op` on `PATH`) now shows as **not-ready** in
+     `secret list` / `secret describe` / `doctor` and is skipped up front during resolution, where
+     today it is previewed optimistically as available and only fails at resolution time. The
+     readiness check stays offline (no store probe, no biometric); interactivity is still previewed
+     optimistically.
+  7. **Doctor gains a secret-backends group** (one readiness row per backend, parallel to
+     vm-platforms), and the `secret list` grid disambiguates the states "disabled" used to conflate
+     (would-attempt / not-ready / not-opted-in / not-enabled).
+  8. **`agw env show --reveal-secrets` is renamed `--resolve`**, aligning the flag with the defined
+     resolution vocabulary.
 
-  The test suite pins both the preservation and this delta list; the list is the HLA's acceptance
-  contract.
+  Secret-chain validation is not in this list because it is not preserved: `secrets.validate_chain`
+  splits (per-mapping spec validation into the finalize `validate` pass, reachability into the
+  resolution layer). The test suite pins both the preservation and this delta list; the list is the
+  HLA's acceptance contract.
 
 - **R10 Readiness stays projectable and cheap.** `not_ready` remains offline and cheap (no network,
   secrets, or prompting; deeper checks stay in the capability lifecycle's preflight) and remains
