@@ -172,14 +172,16 @@ node" in R4) encode settled design intent; the HLA may refine the mechanism as l
 outcome holds.
 
 - **R1 The registry produces and retains a first-class dependency graph.** Construction is total and
-  config-validity-independent: the pass that builds the graph never raises on a malformed config
-  block, and a resource emits every edge it can derive best-effort, omitting only edges whose
-  identity depends on a field that is itself malformed. The graph it produces is **retained as the
-  registry's product** (frozen with it): its nodes are the resources, its edges are their
-  dependencies (queryable in both directions and transitively, per R11), and the derived facts
-  (readiness per R4, incoming references) live on it. Today the registry keeps only a resource map
-  and discards the aggregate edge map when finalize returns; this makes the graph a real, retained,
-  inspectable object instead.
+  config-validity-independent: the pass that builds the graph never raises on a malformed
+  **capability config block**, and a resource emits every edge it can derive best-effort, omitting
+  only edges whose identity depends on a field that is itself malformed. (This is scoped to
+  capability config blocks; kind-owned structural decode errors, e.g. "spec.harness_config must be a
+  mapping," still raise at load before a node exists, unchanged.) The graph it produces is
+  **retained as the registry's product** (frozen with it): its nodes are the resources, its edges
+  are their dependencies (queryable in both directions and transitively, per R11), and the derived
+  facts (readiness per R4, incoming references) live on it. Today the registry keeps only a resource
+  map and discards the aggregate edge map when finalize returns; this makes the graph a real,
+  retained, inspectable object instead.
 
 - **R2 The capability contract splits into `dependencies` and `validate`.** Each capability kind's
   contract replaces the single `validate_config` with two methods: `dependencies(config)` (total,
@@ -274,9 +276,10 @@ outcome holds.
      `(disabled)` marker, `describe`'s `Disabled:` line, doctor's disabled wording) to the readiness
      vocabulary.
   2. **A typo'd capability reference is now a hard error, not a silent self-disable** (R7).
-  3. **Which-error-wins can reorder.** With validation moved out of decode/construction into a
-     post-graph pass (R3, R8), a config with both a malformed block and (say) a cycle now reports
-     the cycle first, where today the malformed block failed at decode before finalize ran.
+  3. **Which-error-wins can reorder.** With capability-block validation moved out of decode/load
+     into a post-graph pass (R3, R8) (construction still validates, per R3), a config with both a
+     malformed block and (say) a cycle now reports the cycle first, where today the malformed block
+     failed at decode before finalize ran.
   4. **A not-ready resource's malformed block is deferred, not silenced.** It is validated when the
      resource becomes ready, not at every build (R3); today decode/load validate it eagerly
      regardless of readiness.
@@ -285,15 +288,20 @@ outcome holds.
      on this host (e.g. `wsl2` on macOS/Linux) publishes a present, not-ready `vm-platform` row
      visible in `resource list` and `doctor`, where today `publish_to` skips it and it appears
      nowhere.
-  6. **Secret backends now report offline readiness, and it is honest.** A configured backend whose
-     host tool is missing (e.g. `onepassword` with no `op` on `PATH`) now shows as **not-ready** in
-     `secret list` / `secret describe` / `doctor` and is skipped up front during resolution, where
-     today it is previewed optimistically as available and only fails at resolution time. The
-     readiness check stays offline (no store probe, no biometric); interactivity is still previewed
-     optimistically.
+  6. **Secret backends now report offline readiness, and a not-ready mapped backend warns and falls
+     through instead of halting.** A configured backend whose host tool is missing (e.g.
+     `onepassword` with no `op` on `PATH`) now shows as **not-ready** in `secret list` /
+     `secret describe` / `doctor`, and during resolution it is **skipped with a warning** and the
+     chain falls through to the next candidate. Today that same case raises `ConnectivityError` and
+     **halts** the chain; the change is deliberate (the warning keeps it from being silent). The
+     anti-masking **halt is kept** for a ready store's hard miss (available but definitively no
+     value). The readiness check stays offline (no store probe, no biometric); interactivity is
+     still previewed optimistically.
   7. **Doctor gains a secret-backends group** (one readiness row per backend, parallel to
-     vm-platforms), and the `secret list` grid disambiguates the states "disabled" used to conflate
-     (would-attempt / not-ready / not-opted-in / not-enabled).
+     vm-platforms), and the `secret list` grid replaces its overloaded "disabled" cell with the
+     states an opted-in backend can be in: would-attempt (the identifier), not-ready (with reason),
+     or won't-attempt (a `false` opt-out or a mapping-required backend with no mapping). Enablement
+     and not-opted-in are shown in `secret describe` and the doctor backend group, not the grid.
   8. **`agw env show --reveal-secrets` is renamed `--resolve`**, aligning the flag with the defined
      resolution vocabulary.
   9. **Every declared backend mapping is validated at build, not just the opted-in ones.** A
@@ -303,6 +311,17 @@ outcome holds.
      configured-but-not-opted-in backend now fails at build instead of lying dormant. (A mapping to
      an **absent** backend is the hard-error edge per R7; a mapping to a present-but-**disabled**
      backend is not validated, staying inert until enabled.)
+  10. **Secret-backend rows gain inbound references.** Because a secret now emits
+      `secret -> secret-backend` edges (to every candidate backend), each backend row is referenced
+      by the secrets that could resolve through it, so `resource list`'s REFS count and
+      `resource describe secret-backend/<name>`'s "Referenced by" gain entries, where those rows are
+      referenced by nothing today. (Analogously, previously-suppressed vm-sites now reference their
+      platforms.)
+  11. **A well-formed mapping to an unknown backend name is now a hard error.** Today
+      `validate_chain` only iterates active-chain backends, so a `backend_mappings.<typo>` for a
+      name not in the registry lies dormant; under the `secret -> secret-backend` edge it is an
+      absent target and a hard error at build (the R9.9 classification, restated here because it is
+      a behavior change, not just a rule).
 
   Reachability itself is **preserved, not moved to lazy time**: the "every operator-declared secret
   is resolvable" check stays an eager post-finalize boundary check (fail-fast at `build_registry`),
@@ -361,7 +380,7 @@ outcome holds.
   the capability node's `not_ready` verdict, so a host-unsupported capability is a
   **present-but-not-ready node** and its dependents are not-ready rather than hard-erroring. This is
   the deliberate replacement for "job 1" of the vm-site suppression (R12 is job 2), and it is what
-  makes "host- unsupported is readiness, not absence" (R7) actually true rather than asserted. The
+  makes "host-unsupported is readiness, not absence" (R7) actually true rather than asserted. The
   surface change is the R9.5 delta. (Kinds with no host-support concept already publish
   unconditionally, so this is a no-op for them.)
 
