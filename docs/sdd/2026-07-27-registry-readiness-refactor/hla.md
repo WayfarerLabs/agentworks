@@ -78,6 +78,9 @@ row store). For each node keyed `(kind, name)` it records:
   `disabled` in this effort).
 - **inbound references**: the `ReferenceEntry(source, usage)` set (today's per-row `references`),
   moved off the resource dataclass onto the graph.
+- **impl (capability nodes only)**: a reference to the capability's implementation, so a dependent's
+  readiness can construct a configured instance for a per-config tool check by reading the impl off
+  the graph node rather than the live capability registry (component 4).
 
 Query API (the single access path, R11):
 
@@ -87,21 +90,30 @@ Query API (the single access path, R11):
   `collect_secrets_for`'s hand-rolled DFS).
 - `readiness_of(kind, name) -> Readiness` and `is_ready(kind, name) -> bool`.
 
-The `references` field is removed from the resource dataclasses; `inspect` and any usage reader move
-to `dependents_of`. The graph is the one home for outbound edges (node factories, cycle detection,
-reachability), inbound usage (inspect), and readiness (inspect, doctor).
+The `references` field is removed from the resource dataclasses (the `DeclaredResource` base and
+each capability `Entry`, `harness/kinds.py`, `git_credential/kinds.py`, `vm_platform/__init__.py`);
+every reader moves to `dependents_of`. That is more than one site: `resources/inspect.py` **and**
+`secrets/inspect.py` (`agw secret describe` reads `getattr(decl, "references", ())`) both consume
+it, so both are on the caller inventory. The graph is the one home for outbound edges (node
+factories, cycle detection, reachability), inbound usage (both inspect surfaces), and readiness
+(inspect, doctor).
 
 ### 2. The capability-contract split (R2)
 
-Replace `validate_config(owner, config) -> tuple[ConfigReference, ...]` with two classmethods on
-every capability base (`vm_platform`, `harness`, `git_credential`; and the `SecretBackend` protocol,
-whose throwing `validate_mapping` becomes `validate` and whose `dependencies` returns `()` since a
-backend mapping implies no resources):
+Replace `validate_config(owner, config) -> tuple[ConfigReference, ...]` with two classmethods on the
+three `Capability`-based kinds (`vm_platform`, `harness`, `git_credential`):
 
 - **`dependencies(config) -> tuple[ConfigReference, ...]`**: total, never raises, returns the
   config-implied references as far as they are structurally derivable (omitting only an edge whose
   identity depends on a malformed field).
 - **`validate(config) -> None`**: the throwing correctness check.
+
+**`secret-backend` is not a `Capability`** and is orthogonal to this split. Its `validate_mapping`
+(`secrets/backends.py`) is a per-secret, resolve-time check over a secret's `backend_mappings`
+entry, invoked from `secrets.validate_chain`, not a capability config block at finalize; it is
+**left untouched**. A secret-backend node simply has no config block, so its contract shape is the
+trivial one (`dependencies -> ()`, `validate -> None`, mirroring the base `Capability`'s no-config
+default), and `validate_mapping` does not participate in R3's ready-set validation pass.
 
 The sourceless→sourced conversion (`ConfigReference` → `SecretReference` when `kind == "secret"`,
 else `ResourceReference`, attaching `source`) that is triplicated across the three
@@ -118,47 +130,67 @@ the graph builder.
 ```text
 build:        walk every row's dependencies() (total, non-throwing) -> outbound edge map
 resolve:      for each edge whose target has no node:
-                - miss_policy "error"      -> hard error now (R7: absent = loud typo)
-                - miss_policy "auto-declare" -> defer to materialize (below)
+                - miss_policy "error"                          -> hard error now (R7: absent = typo)
+                - "auto-declare", name NOT in auto_declare_names -> hard error now (ungated, as today)
+                - "auto-declare", allowed name                  -> defer to materialize (below)
               (reserved-default names are always-materialized up front, as today)
 cycle-detect: three-coloring over the BUILT edge map (no re-derivation; fixes today's re-walk)
 readiness-fold: reverse-topological; hand each node its deps' verdicts; store Readiness per node.
-                auto-declarable-but-not-yet-materialized targets count as satisfied (not "absent")
-materialize:  synthesize each auto-declare target that a READY, ENABLED node references (R12);
-              a target referenced only by not-ready/disabled nodes does not materialize.
-              (secrets are leaves, so no second fold is needed; a small fixpoint covers any
-              synthesized node that itself references)
+                a deferred (allowed-name) auto-declare target counts as satisfied, not "absent"
+materialize:  synthesize each deferred auto-declare target that a READY, ENABLED node references
+              (R12); a target referenced only by not-ready/disabled nodes does not materialize
 attach:       inbound references + description polish, onto the graph
 validate:     validate(config) over the ready+enabled set only (throwing, precise file:line)
 freeze
 ```
 
-The one ordering subtlety the FRD flagged (R8): materialization must know readiness, so it follows
-the fold rather than happening during build. This is why `dependencies` is separated from
-materialization: the build produces edges (including to-be-materialized targets) without
-synthesizing, the fold runs, then materialization is gated on the referrer's readiness. Error-policy
-misses (R7 hard errors) are _not_ readiness-gated; only auto-declare materialization is.
+Two subtleties this ordering pins:
+
+- **The miss policies do not partition into "hard vs gated" cleanly; auto-declare is itself split.**
+  Today an auto-declare miss for a name NOT in `auto_declare_names` is an eager hard error
+  (`registry.py:337-343`, e.g. a typo'd `inherits = ["defualt"]`). That hard error must stay
+  ungated, or a typo referenced only by a not-ready node would be silently dropped (a delta not in
+  R9). Only an _allowed-name_ auto-declare miss is deferred and readiness-gated.
+- **Materialization follows the fold** (the FRD R8 wrinkle): the build produces edges without
+  synthesizing, the fold runs, then materialization is gated on the referrer's readiness. The single
+  fold suffices only because `secret` is the **only** deferred (allowed-name-any, gated) kind today
+  and a secret is a leaf (no outbound edges), so a materialized node never needs its own fold. The
+  "small fixpoint" is a hedge; if a future kind auto-declares nodes that themselves have edges, the
+  fixpoint (or a re-fold) becomes load-bearing. The finalize-ordering LLD owns this premise, the
+  ungated auto-declare sub-branch, and whether a not-ready referrer's edge still contributes to a
+  (separately-materialized) secret's inbound `dependents_of` / `describe` output.
 
 ### 4. The readiness fold and the `Readiness` verdict (R4, R5, R6, R10)
 
 The kind/instance `disabled_reason` hook is renamed **`not_ready`** and re-shaped from
 `(registry, resource)` to a pure local function the fold feeds:
 
-- capability node (a leaf, e.g. `vm-platform/wsl2`): `not_ready(config) -> Readiness` (host/tool
-  checks; `unsupported_reason` and the instance `disabled_reason` fold in here).
+- capability node (a leaf, e.g. `vm-platform/wsl2`): `not_ready() -> Readiness`, the
+  **config-independent** host check only (`unsupported_reason`). A capability row is shared and
+  carries no per-consumer config (`VMPlatformEntry` has none), so it cannot run a config-dependent
+  check here.
 - consuming resource: `not_ready(config, {dependency -> Readiness}) -> Readiness`, a pure function
   of its own best-effort-parsed config and its dependencies' verdicts, never querying a live
   registry.
 
 `Readiness` is a small verdict object (ready, or not-ready with a reason), stored on the graph node;
 consumers read it via `readiness_of` (R10), sparing them the `str | None` double negative.
-Propagation: a node is not-ready if any dependency is not-ready **or disabled** (R4). This absorbs
-`site_disabled_reason`'s three-step chain: platform-missing collapses (a typo is now a hard error at
-resolve; a supported platform is always present), platform-unsupported becomes the platform node's
-own not-ready verdict folded into the site, and the instance requirement (limactl) becomes the
-site's own `not_ready`. `not_ready` stays offline and cheap; where a capability's check needs a
+Propagation: a node is not-ready if any dependency is not-ready **or disabled** (R4).
+
+**Where today's `site_disabled_reason` three-step chain lands** (the fold LLD's central question):
+platform-missing collapses to the resolve-time hard error (a typo; a supported platform is always
+present under R13); platform-**unsupported** becomes the platform node's own config-independent
+not-ready verdict, folded into the site; but the **instance tool check** (a local-Lima site needs
+local `limactl`) is inherently **per-site-config** and so must live on the **site's** `not_ready`,
+not the shared platform node. That site check needs the platform's bound tool logic, which today is
+`VM_PLATFORM_REGISTRY[name](site_config).disabled_reason()` — a live-registry construction the guard
+(component 7) bans. The resolution: the capability graph node carries a reference to its **impl**
+(component 1), so the site's `not_ready` constructs a configured instance from the impl read **off
+the graph node** (not the live registry) to run the offline tool check. This is a
+construct-for-tool-check that reads the graph, not an availability probe, so it stays within the
+guard; the fold LLD pins the exact seam. `not_ready` stays offline and cheap; where a check needs a
 minimal context, the fold constructs a fresh one (`RunContext` cannot be `dataclasses.replace`d,
-`base.py:206-212`).
+`base.py:206-212`) and the LLD confirms that minimal context carries no transport or secrets.
 
 ### 5. Unconditional capability publication (R13)
 
@@ -194,12 +226,18 @@ platform now appears as a not-ready row (FRD R9.5).
 
 ### 7. The anti-bypass guard (R11)
 
-A guard test pins the banned patterns so they cannot return: no call of the renamed `dependencies()`
-outside the graph build; no `*_REGISTRY.get(...)` availability probe in edge production or
-readiness; no lazy readiness recompute; no reading edges/usage off resource dataclasses. The dated
-**caller inventory** (already scouted: the `validate_config` / `disabled_reason` /
-`referenced_resources` / `unsupported_reason` sites) is the guard's baseline and the migration
-checklist; it lands as a feature artifact.
+A guard test pins the banned patterns so they cannot return. The banned pattern is **re-deriving the
+graph's structure or readiness outside the build**: re-walking resources' `dependencies()` to
+reconstruct the edge set (cycle detection, `walk`, node factories), a `*_REGISTRY.get(...)`
+availability probe in edge production or readiness, a lazy readiness recompute, or reading
+edges/usage off a resource dataclass. It is **not** a ban on the word `dependencies` everywhere: a
+capability instance computing **its own** config-implied refs from **its own** config via
+`dependencies(config)` at construct (for `_secret_refs`, component 6) is the single sanctioned
+derivation and is explicitly exempt (it derives one node's refs, it does not re-walk the graph). The
+guard test must encode that exemption, or the honest path and the banned pattern are the same call.
+The dated **caller inventory** (already scouted: the `validate_config` / `disabled_reason` /
+`referenced_resources` / `unsupported_reason` / `references`-field sites) is the guard's baseline
+and the migration checklist; it lands as a feature artifact.
 
 ## Interfaces (summary)
 
@@ -213,12 +251,22 @@ checklist; it lands as a feature artifact.
 Ordered so each step ends green: (1) split the capability contract (`dependencies` + `validate`) and
 centralize the sourceless→sourced mapping, with resources still calling both to preserve behavior;
 (2) introduce the retained `DependencyGraph` and have `finalize` populate it from the built edge
-map, with consumers still on their old paths; (3) unconditional publication (R13) and the readiness
-fold, moving readiness onto the graph; (4) readiness-gated materialization (R12); (5) migrate
-consumers onto the graph one at a time (cycle detection, walk, node factories, inspect, doctor,
-op-time refs); (6) land the guard once the bypasses are gone. LLDs are warranted for the graph data
-structure + query semantics, the finalize pass ordering + materialization fixpoint, and the
-readiness-fold contract.
+map, with consumers still on their old paths; (3) land **together, atomically**: R13 unconditional
+publication, the readiness fold (readiness onto the graph), readiness-gated materialization (R12),
+and removal of the vm-site edge-suppression. These are one step by necessity: the suppression does
+two jobs (avoid the platform error-miss; keep a can't-run site's secrets from materializing), R13
+replaces job 1 and R12 replaces job 2, and splitting them opens a non-green window where the
+suppression is gone but materialization is still ungated, regressing R12. (4) migrate consumers onto
+the graph one at a time (cycle detection, walk, node factories, inspect, doctor, op-time refs); (5)
+land the guard once the bypasses are gone.
+
+LLDs: (a) the graph data structure + query semantics (including capability nodes carrying their
+impl); (b) the finalize pass ordering, which owns the auto-declare hard sub-branch, the
+suppression-and-gating co-location, the materialization fixpoint premise, and the partial-readiness
+secret-`describe` question; (c) the readiness-fold contract, which owns the
+platform-node-vs-site-node check split, the limactl construct-for-tool-check seam off the graph
+impl, and the minimal `RunContext`. The guard's banned-pattern definition + construct-time exemption
+is specified as a section of (b) or (c), sharpened enough to be a real test.
 
 ## Risks and mitigations
 
@@ -235,9 +283,11 @@ readiness-fold contract.
 - **Op-time secret refs** (component 6) are the one path not naturally graph-fed; the LLD confirms
   single-derivation vs graph-threading before implementation.
 - **Host-conditional edges today** (`VMSite` suppression) become host-independent only because of
-  R13; if R13 regressed, absent platforms would hard-error. Mitigation: the fold + unconditional
-  publication are landed together (sequencing step 3), with a non-Windows test asserting the bundled
-  `wsl2` site is not-ready, not an error.
+  R13; if R13 regressed, absent platforms would hard-error. Mitigation: R13, the fold, R12 gating,
+  and suppression removal land together in one atomic step (sequencing step 3), so there is no
+  window where the suppression is gone but materialization is ungated (an R12 regression) or the
+  platform edge dangles; a non-Windows test asserts the bundled `wsl2` site is not-ready, not an
+  error, and a host-disabled site's secrets stay absent.
 
 ## What does not change
 
