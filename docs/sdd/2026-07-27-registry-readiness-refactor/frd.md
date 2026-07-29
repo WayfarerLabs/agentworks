@@ -238,9 +238,12 @@ outcome holds.
   - **Present-but-disabled** (a node, marked not-enabled): a unit the system ships and knows about
     but the operator has not turned on. Enablement is a **distinct axis from readiness**: a disabled
     capability is not "unable to run," it is switched off, and it could run if enabled. A resource
-    that depends on a disabled capability is itself **not-ready** ("depends on X, which is disabled;
-    enable its unit"), and the "enable it" reason comes from the disabled node itself, so no
-    diagnosis at the miss point is needed.
+    that depends on a disabled capability **may** be not-ready as a result (readiness is
+    self-determined per R4): a propagating kind like `vm-site` reports "depends on X, which is
+    disabled; enable its unit," with the "enable it" reason read off the disabled node itself, so no
+    diagnosis at the miss point is needed; a kind that opts out (a `secret`, whose many-backend
+    resolvability is a resolution-time question) stays ready and lets resolution skip the disabled
+    path.
   - **Present and enabled**: a normal node, then ready or not-ready per the fold (R4).
     Host-unsupported (an installed platform whose `unsupported_reason` is non-None on this host,
     e.g. `wsl2` off Windows) is a not-ready case of this tier, **not** an absent node; making that
@@ -293,11 +296,26 @@ outcome holds.
      (would-attempt / not-ready / not-opted-in / not-enabled).
   8. **`agw env show --reveal-secrets` is renamed `--resolve`**, aligning the flag with the defined
      resolution vocabulary.
+  9. **Every declared backend mapping is validated at build, not just the opted-in ones.** A
+     secret's `validate()` checks its mapping for every **present, enabled** backend it addresses
+     (via that backend's `validate(mapping)`), where today `validate_chain` validates only mappings
+     for backends in the active chain. So a stale or malformed mapping for a
+     configured-but-not-opted-in backend now fails at build instead of lying dormant. (A mapping to
+     an **absent** backend is the hard-error edge per R7; a mapping to a present-but-**disabled**
+     backend is not validated, staying inert until enabled.)
 
-  Secret-chain validation is not in this list because it is not preserved: `secrets.validate_chain`
-  splits (per-mapping spec validation into the finalize `validate` pass, reachability into the
-  resolution layer). The test suite pins both the preservation and this delta list; the list is the
-  HLA's acceptance contract.
+  Reachability itself is **preserved, not moved to lazy time**: the "every operator-declared secret
+  is resolvable" check stays an eager post-finalize boundary check (fail-fast at `build_registry`),
+  now reading the graph rather than re-deriving, still scoped to operator-declared secrets only (an
+  auto-declared secret cannot invalidate a deliberate `backends = []` opt-out; it surfaces at
+  use-time), and still keyed on would-attempt (not readiness), so a secret whose only opted-in
+  backend is not-ready is still reachable and fails only at resolution, exactly as today. So no
+  reachability behavior changes; only its implementation (graph read) does.
+
+  Secret-chain validation is otherwise not preserved as a single unit: `secrets.validate_chain`
+  splits (per-mapping spec validation into the finalize `validate` pass; reachability stays an eager
+  post-finalize boundary check, now graph-reading). The test suite pins both the preservation and
+  this delta list; the list is the HLA's acceptance contract.
 
 - **R10 Readiness stays projectable and cheap.** `not_ready` remains offline and cheap (no network,
   secrets, or prompting; deeper checks stay in the capability lifecycle's preflight) and remains

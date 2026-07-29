@@ -119,12 +119,21 @@ a capability is just that resource's own impl detail.
 capability config (one mapping per backend) owned by the secret. Today's `validate_mapping`
 (`secrets/backends.py`) is exactly the backend's `validate(mapping)` and its future
 reference-deriving counterpart is `dependencies(mapping)` (the `SecretBackend` docstring already
-anticipates this). The change: these run at **finalize**, over **every declared mapping** (not only
-the resolve-time active-chain ones, an R9-style delta), driven by the `secret`'s own
+anticipates this). The change: these run at **finalize**, driven by the `secret`'s own
 `dependencies()` / `validate()`, which iterate its `backend_mappings` and emit a
 `secret -> secret-backend` edge per mapping (plus built-in defaults). The `secret` itself implements
 no `not_ready` (opts out; always ready). What stays a **resolution** concern (component 6a) is only
-the chain walk (which backends, in what order) and the reachability check.
+the chain walk (which backends, in what order).
+
+**Mapping-validation boundary** (reconciles with the three-tier R7 and component 3's "validate over
+the ready+enabled set"): the `secret` is always-ready, so its `validate()` runs in the finalize
+validate pass and validates each mapping addressed to a **present, enabled** backend (via that
+backend's `validate(mapping)`, whose impl is available off the graph node). This is **every declared
+mapping, not just the opted-in ones** (FRD R9.9). A mapping to an **absent** backend is the
+hard-error `secret -> secret-backend` edge under the `"error"` miss policy (a typo). A mapping to a
+present-but-**disabled** backend is **not validated** (inert until enabled, so a disabled plugin's
+validate is never invoked). In this effort all backends are present, enabled, and ready, so
+`validate` runs over every mapping; the disabled case is latent until the plugin work.
 
 The sourceless→sourced conversion (`ConfigReference` → `SecretReference` when `kind == "secret"`,
 else `ResourceReference`, attaching `source`) that is triplicated across the `referenced_resources`
@@ -232,13 +241,28 @@ the registry (never folded into the finalize passes). At resolution time, for ea
 3. Walk the candidates that are **present ∧ ready ∧ opted-in**, in opt-in order, calling each
    backend's resolution op (`batch_get`) with the mapping read from the secret's own
    `backend_mappings` (config on the resource, option (a)). Batching is preserved: read candidates
-   per secret, group by backend, one `batch_get` per backend.
+   per secret, group by backend, one `batch_get` per backend. The **result** semantics are unchanged
+   and orthogonal to candidate selection: a soft miss (backend returns without the value) falls
+   through to the next candidate; a hard miss (`SecretMappingError` from a persistent store) or a
+   transport/auth failure (`ConnectivityError` / `ExternalError`) halts the chain, exactly as today.
 
-This deletes three current recompute / registry-probe paths at once: `validate_chain` re-deriving
-the chain, the resolver reaching into `SECRET_BACKEND_REGISTRY`, and the construct-time
-`_secret_refs` cache. Readiness is read, never re-checked. The chain **reachability** check (today
-`validate_chain`'s "every secret reaches an active backend") relocates here, since it needs the
-opt-in chain.
+This deletes two current recompute / registry-probe paths: `validate_chain` re-deriving the chain,
+and the resolver reaching into `SECRET_BACKEND_REGISTRY`. Readiness is read, never re-checked.
+(**Not** the construct-time `_secret_refs` path: that is the `Capability`-base cache for
+`Harness.secret_refs` / `GitCredentialProvider.secret_name`, unrelated to secret resolution; it is
+kept and repurposed to `dependencies(config)` as the single sanctioned derivation, guard-exempt, per
+components 6 and 7.)
+
+**Reachability stays an eager, fail-fast, build-time check** (not moved to lazy resolution time).
+The "every operator-declared secret is resolvable" check that `validate_chain` runs post-finalize at
+`build_registry` stays there, preserving today's property that any resource-touching command
+fails-fast with config vocabulary. What changes is only its implementation: it **reads the graph**
+(candidate backends off `edges_of`) plus the opt-in chain, instead of re-deriving. Two invariants it
+must keep, easy to drop in a rewrite: it is scoped to **operator-declared secrets only** (an
+auto-declared secret cannot invalidate a deliberate `backends = []` opt-out; it surfaces at use-time
+as `SecretUnavailableError`), and it is keyed on **would-attempt, not readiness** (a secret whose
+only opted-in backend is not-ready is still reachable and fails only at resolution, as today, so
+readiness introduces no new build-time hard failure).
 
 **Vocabulary, kept distinct throughout.** A backend is **present** (built-in, or its plugin is
 enabled, the plugin / three-tier axis where "enabled" lives), **ready** (host-usable, its own
@@ -349,11 +373,14 @@ suppression-and-gating co-location, the materialization fixpoint premise, and th
 secret-`describe` question; (c) the readiness-fold contract, which owns the
 platform-node-vs-site-node check split, the limactl construct-for-tool-check seam off the graph
 impl, and the minimal `RunContext`; (d) the secret-resolution layer (component 6a), owning the graph
-read, the present/ready/opted-in walk, the relocated reachability check, and batching; (e) the
+read, the present/ready/opted-in walk, the eager fail-fast reachability check, and batching, and
+carrying an explicit acceptance line that it **preserves the operator-declared-only reachability
+scope, the would-attempt (not readiness) keying, and the soft/hard miss semantics**; (e) the
 operator surfaces (component 8), owning the `secret list`/`describe` output, the new doctor
-secret-backends group and the readiness-aware secret rows, and the exact operator strings + docs.
-The guard's banned-pattern definition + construct-time exemption is specified as a section of (b) or
-(c), sharpened enough to be a real test.
+secret-backends group and the readiness-aware secret rows, and the exact operator strings + docs,
+with an acceptance line that the interactive-optimism preview is unchanged. The guard's
+banned-pattern definition + construct-time exemption is specified as a section of (b) or (c),
+sharpened enough to be a real test.
 
 ## Risks and mitigations
 
@@ -384,7 +411,8 @@ the capability op lifecycle (`preflight`/`runup`), which stays the deeper, live 
 distinct from the offline `not_ready`.
 
 Changing (called out so the list above stays honest): `secrets.validate_chain` splits, its
-per-mapping spec validation moving into the finalize `validate` pass (component 2) and its chain
-reachability check relocating to the resolution layer (component 6a); `vm_sites.validate_sites`
-becomes a graph read (readiness off the graph) rather than a re-derivation, but stays a
-post-finalize boundary check.
+per-mapping spec validation moving into the finalize `validate` pass (component 2) while its chain
+reachability check stays an eager post-finalize boundary check (fail-fast preserved), now reading
+the graph instead of re-deriving (component 6a); `vm_sites.validate_sites` likewise becomes a graph
+read (readiness off the graph) rather than a re-derivation, but stays a post-finalize boundary
+check.
