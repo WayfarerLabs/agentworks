@@ -256,7 +256,6 @@ def _check_vm_sites(config: Config, registry: Registry) -> HealthGroup:
     from agentworks.db import Database
     from agentworks.vms.sites import (
         VMSiteDecl,
-        site_disabled_reason,
         site_manifest_hint,
     )
 
@@ -269,7 +268,10 @@ def _check_vm_sites(config: Config, registry: Registry) -> HealthGroup:
     disabled: dict[str, str] = {}
     for name in sorted(sites):
         decl = sites[name]
-        reason = site_disabled_reason(decl)
+        # Read the site's stored readiness verdict off the graph (R11), no
+        # recompute. The fold produced today's operator strings (renamed in
+        # Phase 5); a disabled-platform site now reads not-usable too.
+        reason = registry.graph.readiness_of("vm-site", name).reason
         if reason is not None:
             disabled[name] = reason
             g.info(name, f"disabled ({reason})")

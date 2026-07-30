@@ -148,7 +148,7 @@ def create_vm(
 
     site = select_site(site, config.defaults.site, registry)
     site_decl = lookup_site(site, registry)
-    ensure_site_enabled(site_decl)
+    ensure_site_enabled(site_decl, registry)
 
     vm_name = name
     validate_name(vm_name)

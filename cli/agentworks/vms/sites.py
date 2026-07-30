@@ -193,12 +193,13 @@ def select_site(
         return flag
     if default_site:
         return default_site
+    graph = registry.graph
     sites = sorted(registry.iter_kind_items("vm-site"), key=lambda item: item[0])
-    names = [name for name, decl in sites if site_disabled_reason(decl) is None]
+    names = [name for name, _decl in sites if graph.is_ready("vm-site", name)]
     if len(names) == 1:
         return names[0]
     if not names:
-        disabled = [f"{name} ({site_disabled_reason(decl)})" for name, decl in sites]
+        disabled = [f"{name} ({graph.readiness_of('vm-site', name).reason})" for name, _decl in sites]
         detail = f" (disabled: {'; '.join(disabled)})" if disabled else ""
         raise ValidationError(
             f"no vm-sites are enabled on this host{detail}",
@@ -296,22 +297,27 @@ def resolve_site(
     from agentworks.capabilities.vm_platform import VM_PLATFORM_REGISTRY
 
     decl = lookup_site(name, registry)
-    ensure_site_enabled(decl)
+    ensure_site_enabled(decl, registry)
     # Enabled implies the platform is installed and supported here.
     platform_cls = VM_PLATFORM_REGISTRY[decl.platform]
     return platform_cls(decl.name, decl.platform_config)
 
 
-def ensure_site_enabled(decl: VMSiteDecl) -> None:
+def ensure_site_enabled(decl: VMSiteDecl, registry: Registry) -> None:
     """The typed using-a-disabled-site error. ``resolve_site`` (the
     chokepoint every op passes through) always applies it; roots with
     operator interaction BEFORE their resolve (``create_vm``'s system
     slug prompt) call it up front too, so a disabled explicit choice
     errors before the operator answers anything.
+
+    Reads the site's stored readiness verdict off the graph (R11: the fold
+    computed it, this does not recompute). The verdict, unlike the retired
+    ``site_disabled_reason`` recompute, folds in the platform's enablement
+    too, so a site whose platform is disabled is correctly unusable.
     """
     from agentworks.errors import StateError
 
-    reason = site_disabled_reason(decl)
+    reason = registry.graph.readiness_of("vm-site", decl.name).reason
     if reason is not None:
         raise StateError(
             f"vm-site '{decl.name}' is disabled on this host: {reason}",

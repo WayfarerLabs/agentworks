@@ -238,8 +238,8 @@ sub-step.
       backend edges exist and resolve; the no-loop regression is pinned here); R9.11 (a typo'd
       `backend_mappings` key is a dangling edge that hard-errors).
 - [x] **Cycle detection** reads `edges_of` (removes the second
-      `validate_config`/`referenced_resources` pass at `registry.py:542`). (Already landed in Phase 2:
-      `_detect_cycles` three-colors over the built `all_outbound` edge map, no re-walk.)
+      `validate_config`/`referenced_resources` pass at `registry.py:542`). Landed in Phase 2:
+      `_detect_cycles` three-colors over the built `all_outbound` map, no re-walk.
 - [x] **`walk.collect_secrets_for`** becomes a thin filter over `reachable_from`; its caller
       (`secrets/kinds.py:188`) is unaffected.
 - [x] **Node factories** `vm_site_node` (`vms/nodes.py:412`) and `git_credential_node`
@@ -252,7 +252,7 @@ sub-step.
       to: pin the rendered-row assertion, swap the remaining inspect projections (vm-site and the
       other kinds) onto `readiness_of`, and retire the phase-3 shim projection in favor of the
       unified `readiness_of` read. The vocabulary rename itself is phase 5.
-- [ ] **Site selection and the use-time gate**: `select_site` / `resolve_site` /
+- [x] **Site selection and the use-time gate**: `select_site` / `resolve_site` /
       `ensure_site_enabled` (`sites.py:146,150,243,258`), doctor's `defaults.site` warning
       (`doctor.py:294-297`), and `resource.py:111` stop calling `site_disabled_reason` (a lazy
       recompute reaching into `VM_PLATFORM_REGISTRY`, an R11-banned pattern) and read `readiness_of`
