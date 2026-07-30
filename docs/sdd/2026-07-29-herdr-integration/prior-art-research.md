@@ -125,9 +125,24 @@ Established by reading the repository rather than from research, and load-bearin
   (`cli/agentworks/sessions/multi_console/attach.py:67`). Nesting is therefore the established
   model, not a new risk this effort introduces. An outer herdr additionally avoids the prefix
   collision inherent to tmux-inside-tmux, since its keybindings are not tmux's.
-- The same wrapper already implements the resilience R4 requires as parity: wait for a session that
+- The same wrapper already implements the resilience R5 requires as parity: wait for a session that
   is not yet up, re-attach silently on detach, and report a genuine session end in place while
   preserving scrollback.
+- Console mutations already best-effort sync a live view: `add_sessions`, `remove_sessions`, and
+  `reorder_sessions` update the database and then, through `_live_best_effort` / `_live_target`,
+  adjust a running tmux console when one exists (`cli/agentworks/sessions/multi_console/crud.py`).
+  This is the precedent for R2's live-operation contract, and it is why a rendering that only
+  materialized on open would have been a fidelity regression rather than a simplification.
+- Companion shell panes are richer than they look, which is what forces R4's new command. A console
+  shell pane is a login shell as the session's user (or the admin, with automatic promotion for
+  admin-mode sessions), working directory at the workspace path or a configured subdirectory of it,
+  carrying the session's fully resolved pane environment including secrets, delivered through tmux
+  environment flags plus the sudoers `env_keep` fragment and `sudo --preserve-env` with a documented
+  fallback (`cli/agentworks/sessions/multi_console/tmux_build.py`, ADR 0017), and tagged with its
+  index in the configured shell list so `restore-session` can repair the right pane. The closest
+  existing command, `agent shell --workspace` (`cli/agentworks/cli/commands/agent.py:167`), gets the
+  right user into the right workspace but is not session-scoped, so it carries none of the session's
+  resolved environment or secrets, cannot target a subdirectory, and lacks the admin-promotion rule.
 - The console runs as the VM admin and enters agent users via `sudo --login` for agent-scoped shell
   panes (`cli/agentworks/sessions/multi_console/tmux_build.py`), which is why a VM-side herdr server
   would not have violated the isolation model. The ruling against it rests on control-plane

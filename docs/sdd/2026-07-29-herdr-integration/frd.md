@@ -66,20 +66,31 @@ lets a workstation pane self-heal after a sleep or a network blip.
 Agentworks continues to own consoles: their membership, their shell layout, their lifecycle, their
 persistence. Rendering becomes pluggable. The existing tmux rendering is unchanged and remains the
 default. A herdr rendering materializes the same console on the operator's workstation by driving
-herdr's local control surface, with one pane per member session, each pane running an ordinary
-`agw session attach`. Nothing is installed on the VM, no Agentworks state moves into herdr, and an
-operator with no herdr installed sees no change whatsoever.
+herdr's local control surface, with one pane per member session and one pane per companion shell,
+each pane running an ordinary `agw` command. Nothing is installed on the VM, no Agentworks state
+moves into herdr, and an operator with no herdr installed sees no change whatsoever.
+
+Rendering is a live relationship, not a one-shot export. This follows the existing model rather than
+inventing one: today's console mutations (`add-sessions`, `remove-sessions`, `reorder-sessions`,
+`add-shell`) update the database and then best-effort sync a running tmux console if one exists
+(`_live_best_effort` / `_live_target` in `sessions/multi_console/crud.py`), with `restore-session`
+as the explicit repair path when a view has drifted. A herdr rendering is held to the same contract,
+so the console command surface drives whichever rendering is live and neither backend is
+second-class.
 
 ### Scope
 
-In scope (functionally): a herdr rendering of named consoles, the pane-per-session contract and its
-in-model requirement, resilient attach behavior, state visibility, what Agentworks does and does not
-delegate to herdr, graceful degradation when herdr is absent or incompatible, and the operator
-surface for choosing a rendering.
+In scope (functionally): a herdr rendering of named consoles; the operation set a rendering must
+support and its best-effort live-sync semantics; the pane contract and its in-model requirement for
+both session panes and companion shells; the first-class companion-shell command that contract
+requires; resilient attach behavior; state visibility; what Agentworks does and does not delegate to
+herdr; graceful degradation when herdr is absent or incompatible; and the operator surface for
+choosing a rendering.
 
-Deferred to the HLA and later artifacts: whether rendering becomes a formal capability kind, the
-control-surface mechanics (socket protocol versus CLI invocation), layout-mapping detail, version
-detection and pinning specifics, and resolution of the open question below.
+Deferred to the HLA and later artifacts: whether the rendering seam becomes a formal capability kind
+in the registry sense, the control-surface mechanics (socket protocol versus CLI invocation), layout
+and tab mapping detail, version detection and pinning specifics, the companion-shell command's exact
+name and option spelling, and resolution of the open question below.
 
 ### Open question the HLA must resolve by spike
 
@@ -117,41 +128,88 @@ herdr avoids tmux-in-tmux prefix collisions entirely), but detection accuracy th
 - An operator can open an existing named console as a herdr view on their workstation, as an
   alternative to attaching its tmux rendering.
 - The herdr view contains one pane per member session, ordered by the console's configured order,
-  plus the console's extra shells, so the rendered view is recognizably the same console the tmux
-  rendering produces.
+  plus one pane per configured companion shell (R4), so the rendered view is recognizably the same
+  console the tmux rendering produces.
 - Rendering choice is per-invocation, not a property of the console: the same console can be
   attached as tmux now and opened in herdr later, with no migration and no state conversion.
 - The tmux rendering's behavior is unchanged in every respect. It remains the default, and no
   existing command changes its meaning.
 
-### R2: Agentworks owns the console; herdr owns only pixels
+### R2: Agentworks owns the console; a rendering owns only pixels
 
 - Console membership, shell layout, ordering, and lifecycle remain database-owned and are never read
-  back from herdr. Herdr holds no authoritative Agentworks state.
-- The herdr view is materialized from the console, not synchronized with it. Divergence introduced
-  by the operator inside herdr (closing a pane, adding their own pane, rearranging tabs) is theirs
-  to keep and is never written back to the console.
-- Re-opening a console in herdr reconciles the view toward the console's current membership. What
-  reconciliation does with operator-introduced divergence is an HLA decision, but it must be
-  predictable and must never silently discard operator work in a pane that is still running.
-- Console commands (`create`, `add-sessions`, `remove-sessions`, `reorder-sessions`, `add-shell`,
-  `restore-session`, `delete`) keep operating on the console, not on any rendering. A herdr view
-  open at the time is stale until reconciled, and that is acceptable and documented.
+  back from a rendering. Herdr holds no authoritative Agentworks state.
+- The view is materialized from the console and reconciled toward it; it is never a source of truth.
+  Divergence the operator introduces inside herdr (closing a pane, adding their own pane,
+  rearranging tabs) is theirs to keep and is never written back to the console.
+- **The console command surface drives the live rendering, whichever it is.** The mutations that
+  already best-effort sync a running tmux console (`add-sessions`, `remove-sessions`,
+  `reorder-sessions`, `add-shell`) do the same for a live herdr view, so an operator's normal
+  workflow keeps working without reopening anything. The rendering operations a backend must
+  therefore support are: build or rebuild a console's view, add and remove session panes, reorder
+  them, add a companion shell pane, restore a session's configured panes, and tear the view down.
+- **Live sync is best-effort and the database is authoritative**, exactly as today. A rendering that
+  cannot be reached, has been closed, or has drifted is not an error: the mutation still lands in
+  the database, the operator is told the sync did not apply, and reconciliation happens on the next
+  build or on explicit repair. This is the answer to operators going off script, and it is the
+  existing idiom rather than a new one.
+- `restore-session` remains the explicit repair path for a view whose panes the operator killed, and
+  behaves equivalently in either rendering.
+- Whether this operation set is expressed as a formal capability kind in the registry (alongside
+  `harness`, `vm-platform`, and the others) or as a narrower internal seam is an HLA decision. The
+  functional requirement is that both renderings implement the same operations with the same
+  best-effort semantics, so neither is second-class.
 
 ### R3: Every pane is an Agentworks command
 
-- Session panes run an ordinary Agentworks session attach. They do not run raw SSH, do not address
-  tmux sockets directly, and do not encode VM users, socket paths, or transport detail.
+- Session panes run an ordinary Agentworks session attach. Companion shell panes run the
+  companion-shell command of R4. Neither runs raw SSH, addresses tmux sockets directly, nor encodes
+  VM users, socket paths, or transport detail.
 - This is what keeps the integration in-model, and it is a requirement rather than an implementation
   preference: it makes the rendering transport-independent (Lima, WSL2, Azure, and Proxmox sessions
   render identically), keeps the database authoritative for where a session actually lives, gives
   every pane Agentworks's own preflight diagnostics instead of an opaque multiplexer failure, and
   ensures a rehomed or copied session keeps rendering correctly with no view to update.
-- Extra shells render through the equivalent in-model command for the console's shell entries,
-  preserving the existing agent-versus-admin distinction those entries carry.
 - No requirement here is satisfied by a pane that reaches a VM by any route other than Agentworks.
 
-### R4: Panes are resilient
+### R4: Companion shells are first-class
+
+Companion shells (the extra shell panes a console attaches to a session's window, whether requested
+with the `+N` shorthand at console creation or added later with `console add-shell`) are a core part
+of the console workflow, not a garnish. Rendering them outside tmux requires promoting them from a
+console-internal pane construction to a real command.
+
+- **A companion shell is a specific thing, and the definition is load-bearing.** Today
+  `_split_shell_pane` builds a login shell that runs as the session's own Linux user (or as the
+  admin for an admin-mode session or an explicitly admin-flagged shell), with its working directory
+  at the session's workspace path or a configured subdirectory of it, carrying the session's fully
+  resolved pane environment including secrets. The environment reaches the pane through
+  console-internal, VM-side machinery: tmux environment flags, the sudoers `env_keep` fragment, and
+  `sudo --preserve-env` with the documented fallback when a VM's sudoers does not permit it (ADR
+  0017).
+- **No existing command is equivalent, so the effort must add one.** `agent shell --workspace` gets
+  the right user into the right workspace, which covers part of the need, but it is not
+  session-scoped: it carries none of the session's resolved environment or secrets, has no notion of
+  a working directory below the workspace root, and does not implement the automatic admin promotion
+  that an admin-mode session's panes get. The effort therefore adds a first-class companion-shell
+  command that takes a session, an optional relative working directory, and an optional admin flag,
+  and delivers a login shell with the same user, directory, and resolved environment a console shell
+  pane gets today. Its exact name and options are an HLA and LLD concern; its semantics are this
+  requirement, and reusing or extending the existing agent-shell path to get there is a legitimate
+  implementation answer.
+- **Parity with the tmux rendering is the acceptance bar**, including the admin-versus-agent
+  distinction, the automatic admin promotion for admin-mode sessions, working directories, and the
+  environment and secret delivery. A companion shell that loses the session's environment is a
+  regression, not a simplification.
+- The command is independently valuable and is not scaffolding for this effort alone: it gives an
+  operator a correctly scoped shell against a session without involving a console at all.
+- **Secret handling is unchanged.** Secrets continue to be resolved CLI-side on the operator's
+  workstation and delivered to the pane over the transport, exactly as today. This effort adds no
+  new secret path, no secret storage, and nothing secret-bearing inside herdr's own state (see R9).
+- Where a companion shell cannot be rendered faithfully in a given rendering, the rendering reports
+  it rather than silently substituting a lesser shell.
+
+### R5: Panes are resilient
 
 - A pane whose session is not yet running waits for it and attaches when it appears, rather than
   failing and leaving a dead pane. A pane whose attachment drops (detach, network loss, laptop
@@ -164,7 +222,7 @@ herdr avoids tmux-in-tmux prefix collisions entirely), but detection accuracy th
   a rendering-side wrapper is an HLA decision; extending the command is preferred, because the
   resilience is independently useful to any operator attaching a session by hand.
 
-### R5: Session state is visible, and its provenance is honest
+### R6: Session state is visible, and its provenance is honest
 
 - The rendered view surfaces each session's state so an operator can see at a glance which sessions
   need attention. Where herdr's own detection provides this, the integration uses it rather than
@@ -182,7 +240,7 @@ herdr avoids tmux-in-tmux prefix collisions entirely), but detection accuracy th
   from the harness rather than from inference, is the natural convergence of the two efforts and is
   recorded here so neither design forecloses it.
 
-### R6: Nothing on the VM changes
+### R7: Nothing on the VM changes
 
 - No component is installed on, provisioned into, or run on any VM by this effort. Herdr is a
   workstation-side tool only.
@@ -192,7 +250,7 @@ herdr avoids tmux-in-tmux prefix collisions entirely), but detection accuracy th
 - Sessions remain tmux-hosted, as the harness model requires. This effort does not touch the session
   substrate, session lifecycle, or the isolation model.
 
-### R7: Herdr is optional and its absence is uneventful
+### R8: Herdr is optional and its absence is uneventful
 
 - Agentworks remains fully functional with herdr absent. No command's default behavior depends on
   it, and no health check treats its absence as a problem.
@@ -208,7 +266,7 @@ herdr avoids tmux-in-tmux prefix collisions entirely), but detection accuracy th
   interface, or being abandoned by the operator costs one rendering and nothing else. The tmux
   rendering must remain a complete, first-class path indefinitely, never a legacy fallback.
 
-### R8: Secrets and captured output
+### R9: Secrets and captured output
 
 - No credential material flows through the integration. Herdr has no secret management, and this
   effort gives it none: panes inherit whatever environment an ordinary interactive Agentworks attach
@@ -220,7 +278,7 @@ herdr avoids tmux-in-tmux prefix collisions entirely), but detection accuracy th
   Nothing in a herdr view is treated as a record, and no view content is collected or retained by
   Agentworks.
 
-### R9: Operator surface
+### R10: Operator surface
 
 - The herdr rendering is reachable through the console command surface, consistent with existing
   conventions and with shell completions covering any new names or options, per the completions
@@ -231,11 +289,11 @@ herdr avoids tmux-in-tmux prefix collisions entirely), but detection accuracy th
 - Operators are never required to interact with herdr's own CLI or socket to use the feature, though
   nothing prevents them from doing so on their own machine.
 
-### R10: Documentation and decision record
+### R11: Documentation and decision record
 
 - `cli/README.md` documents the herdr rendering alongside the console command reference, including
-  the prerequisite, the supported version range, the state-provenance caveat from R5, and the
-  scrollback caveat from R8.
+  the prerequisite, the supported version range, the state-provenance caveat from R6, and the
+  scrollback caveat from R9.
 - The top-level `README.md` console material notes that consoles can be rendered by more than one
   multiplexer, without turning herdr into a required part of the model narrative.
 - The decision to treat rendering as pluggable, and specifically the workstation-versus-VM ruling
@@ -268,7 +326,7 @@ herdr avoids tmux-in-tmux prefix collisions entirely), but detection accuracy th
   not use it.
 - **Agentworks-side state detection.** Surfacing per-session harness state in `session list` and
   `session describe` is independently valuable and does not need herdr, but it belongs with the
-  harness and transcript work (R5's future direction), not here.
+  harness and transcript work (R6's future direction), not here.
 - **Rendering anything other than consoles.** Ad-hoc herdr views over arbitrary session selections,
   workspaces, or VMs are out of scope; the console is the membership model this effort renders.
 - **Any hosted, multi-user, or team-facing capability.** Herdr is single-operator and local, and so
