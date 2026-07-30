@@ -158,11 +158,11 @@ the companion-shell command and resilient attach as a small standalone change; u
 against real work for a few weeks; and only then decide whether the rendering backend earns its
 keep, informed by what actually proved annoying.
 
-**One factor could bring this forward.** The zeroconf-agents direction makes sessions far more
-churny, created and destroyed continuously rather than living for weeks. Hand-maintaining a herdr
-layout against that churn would get painful quickly, which is precisely what the rendering backend
-solves. That argues for revisiting this FRD once that direction lands and the real churn pattern is
-visible, rather than for building ahead of it now.
+**One factor could bring this forward.** The ephemeral-agents direction makes sessions much
+shorter-lived, created and destroyed continuously rather than persisting for weeks. Hand-maintaining
+a herdr layout against that rate of change would get painful quickly, which is precisely what the
+rendering backend solves. That argues for revisiting this FRD once that direction lands and the real
+churn pattern is visible, rather than for building ahead of it now.
 
 ## Terminology
 
