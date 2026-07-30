@@ -29,14 +29,15 @@ phase is considered done.
       re-review).
 - [x] HLA reviewed and stable (same).
 - [x] Dated caller inventory produced ([caller-inventory.md](./caller-inventory.md)).
-- [ ] Five LLDs authored and reviewed:
-  - [ ] (a) [graph structure + query semantics](./graph-lld.md)
-  - [ ] (b) [finalize pass ordering](./finalize-ordering-lld.md) (owns the guard's banned-pattern
+- [x] Five LLDs authored and reviewed:
+  - [x] (a) [graph structure + query semantics](./graph-lld.md)
+  - [x] (b) [finalize pass ordering](./finalize-ordering-lld.md) (owns the guard's banned-pattern
         definition + exemptions)
-  - [ ] (c) [readiness-fold contract](./readiness-fold-lld.md)
-  - [ ] (d) [secret-resolution layer](./secret-resolution-lld.md)
-  - [ ] (e) [operator surfaces](./operator-surfaces-lld.md)
-- [ ] Plan + LLDs pass `agentworks-reviewer`.
+  - [x] (c) [readiness-fold contract](./readiness-fold-lld.md)
+  - [x] (d) [secret-resolution layer](./secret-resolution-lld.md)
+  - [x] (e) [operator surfaces](./operator-surfaces-lld.md)
+- [x] Plan + LLDs pass `agentworks-reviewer` (two review rounds: all findings closed, greenness
+      scaffold pinned).
 
 ## Phase 1: split the capability contract (`dependencies` + `validate`)
 
@@ -214,11 +215,19 @@ sub-step.
       ignore it. The **secret's** `dependencies(context)` now emits the `secret -> secret-backend`
       edges (the union of present would-attempt backends and every explicit non-`false` mapping key,
       LLD d / HLA component 2). This is the deliberate landing point for R9.9/R9.10/R9.11 and makes
-      the materialize loop load-bearing (a materialized secret now has backend edges). Update
-      `walk.py`'s duck-typed mirror (`walk.py:79-83`) accordingly. Tests: the materialize-fixpoint
-      VM-create acceptance (an auto-declared `tailscale-auth-key`'s backend edges exist and resolve;
-      the no-loop regression is pinned here); R9.11 (a typo'd `backend_mappings` key is a dangling
-      edge that hard-errors).
+      the materialize loop load-bearing (a materialized secret now has backend edges). **Greenness
+      scaffold:** the rename breaks callers that invoke `referenced_resources()` by name, the two
+      node factories (`vms/nodes.py:412`, `git_credentials/nodes.py:93`, direct
+      `decl.referenced_resources()` calls) and, via the `registry.py:397` getattr helper, cycle
+      detection, which each migrate to graph reads in their **own** later sub-steps. So this step
+      retains a thin `referenced_resources()` alias delegating to `dependencies(<empty context>)`
+      (context is unused by every non-secret caller) so those sub-steps stay independently green;
+      the alias is removed when its last caller migrates, before the phase-6 guard (which would flag
+      a consumer re-walking `dependencies`). The builder walk itself is pointed at
+      `dependencies(context)` in this step (it is the one caller that needs the real context).
+      Tests: the materialize-fixpoint VM-create acceptance (an auto-declared `tailscale-auth-key`'s
+      backend edges exist and resolve; the no-loop regression is pinned here); R9.11 (a typo'd
+      `backend_mappings` key is a dangling edge that hard-errors).
 - [ ] **Cycle detection** reads `edges_of` (removes the second
       `validate_config`/`referenced_resources` pass at `registry.py:542`).
 - [ ] **`walk.collect_secrets_for`** becomes a thin filter over `reachable_from`; its caller
