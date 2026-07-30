@@ -218,18 +218,18 @@ def test_select_site_errors_when_none_declared() -> None:
     registry = Registry.empty()
     publish_all_platforms(registry)
     registry.finalize()
-    with pytest.raises(ValidationError, match="no vm-sites are enabled"):
+    with pytest.raises(ValidationError, match="no vm-sites are ready"):
         select_site(None, None, registry)
 
 
-# -- Disabled sites at the resolve chokepoint --------------------------------
+# -- Not-ready sites at the resolve chokepoint -------------------------------
 
 
-def test_resolving_a_disabled_site_names_the_requirement(
+def test_resolving_a_not_ready_site_names_the_requirement(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A VM on a bundled site whose requirement went away (limactl
-    uninstalled after VMs existed) gets the site's disabled reason at
+    uninstalled after VMs existed) gets the site's not-ready reason at
     resolve time: the site still EXISTS (lookup succeeds; the
     stranded paste-a-manifest error is only for undeclared names)."""
     from agentworks.resources.graph import Readiness
@@ -241,7 +241,7 @@ def test_resolving_a_disabled_site_names_the_requirement(
     registry = _registry()
 
     assert lookup_site("lima-local", registry).platform == "lima"
-    with pytest.raises(StateError, match="disabled on this host") as exc:
+    with pytest.raises(StateError, match="not ready on this host") as exc:
         resolve_site("lima-local", registry)
     assert "limactl" in str(exc.value)
     assert "kind: vm-site" not in (exc.value.hint or "")

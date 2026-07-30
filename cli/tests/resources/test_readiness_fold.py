@@ -62,18 +62,21 @@ def test_disabled_platform_dependency_propagates_enable_its_unit() -> None:
 
 
 def test_not_ready_platform_dependency_propagates_its_reason() -> None:
-    """An enabled-but-not-ready platform propagates its reason into the
-    site's verdict (the self-determined single-platform AND)."""
+    """An enabled-but-not-ready platform propagates its verdict verbatim into
+    the site's verdict (the self-determined single-platform AND). The platform's
+    readiness reason already names it ("platform 'wsl2' is unsupported here:
+    ..."), so the site passes it through rather than re-wrapping (which would
+    double the naming); the surface adds the "Not ready:" framing (R9.1)."""
     site = VMSiteDecl(name="x", platform="wsl2", platform_config={})
     deps: dict[tuple[str, str], DependencyState] = {
         ("vm-platform", "wsl2"): DependencyState(
             enablement=Enablement.enabled,
-            readiness=Readiness.blocked("Windows only"),
+            readiness=Readiness.blocked("platform 'wsl2' is unsupported here: Windows only"),
             impl=None,
         )
     }
     verdict = site.not_ready(deps)
-    assert verdict.reason == "platform 'wsl2' is disabled: Windows only"
+    assert verdict.reason == "platform 'wsl2' is unsupported here: Windows only"
 
 
 def test_disabled_platform_node_folds_end_to_end_to_enable_its_unit(monkeypatch: pytest.MonkeyPatch) -> None:

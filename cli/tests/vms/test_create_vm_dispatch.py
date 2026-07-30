@@ -194,13 +194,13 @@ def test_unknown_admin_template_errors_before_any_work(
     assert db.get_vm("nvm") is None
 
 
-def test_disabled_site_errors_before_tailscale_and_slug_prompt(
+def test_not_ready_site_errors_before_tailscale_and_slug_prompt(
     db: Database,
     make_config,
     monkeypatch: pytest.MonkeyPatch,
     captured_output: object,
 ) -> None:
-    """An explicit --site naming a disabled site errors UP FRONT: the
+    """An explicit --site naming a not-ready site errors UP FRONT: the
     operator never answers the system-slug prompt (and no Tailscale
     probe runs) for an op the site already sank, the same
     no-work-before-the-fatal-check discipline as the preflight
@@ -216,15 +216,15 @@ def test_disabled_site_errors_before_tailscale_and_slug_prompt(
     )
 
     def _no_tailscale() -> None:
-        raise AssertionError("tailscale probed for a disabled site")
+        raise AssertionError("tailscale probed for a not-ready site")
 
     def _no_slug(db_: object) -> None:
-        raise AssertionError("slug prompt reached for a disabled site")
+        raise AssertionError("slug prompt reached for a not-ready site")
 
     monkeypatch.setattr(vm_manager, "verify_tailscale_available", _no_tailscale)
     monkeypatch.setattr(vm_manager, "_resolve_system_slug", _no_slug)
 
-    with pytest.raises(StateError, match="disabled on this host") as exc:
+    with pytest.raises(StateError, match="not ready on this host") as exc:
         vm_manager.create_vm(db, config, name="dvm", site="lima-local")
     assert "limactl" in str(exc.value)
 

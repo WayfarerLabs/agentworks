@@ -39,8 +39,8 @@ def vm_create(
             "--site",
             help=(
                 "vm-site to create the VM at (a declared vm-site resource; "
-                "falls back to defaults.site, else the single enabled "
-                "site is inferred; when several are enabled, prompts for "
+                "falls back to defaults.site, else the single ready "
+                "site is inferred; when several are ready, prompts for "
                 "a choice)"
             ),
         ),

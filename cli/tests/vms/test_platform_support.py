@@ -94,14 +94,15 @@ def test_every_site_registers_regardless_of_host(make_config, monkeypatch: pytes
     assert platforms == {"lima", "wsl2", "azure-vm", "proxmox"}
 
 
-def test_disabled_reasons_chain(make_config, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_not_ready_reasons_chain(make_config, monkeypatch: pytest.MonkeyPatch) -> None:
     """A site's reason names the failing link: the platform gate for
-    wsl2, the instance requirement for lima-local."""
+    wsl2, the instance requirement for lima-local. The wsl2 site propagates
+    the platform's own readiness verdict verbatim (no re-wrap, R9.1)."""
     _support(monkeypatch, wsl2="Windows only", lima_local="limactl not installed")
     registry = build_registry(make_config())
     graph = registry.graph
     assert graph.readiness_of("vm-site", "lima-local").reason == "limactl not installed"
-    assert graph.readiness_of("vm-site", "wsl2").reason == "platform 'wsl2' is disabled: Windows only"
+    assert graph.readiness_of("vm-site", "wsl2").reason == "platform 'wsl2' is unsupported here: Windows only"
 
 
 def test_r9_5_host_unsupported_platform_is_present_and_not_ready_on_the_graph(
@@ -115,29 +116,29 @@ def test_r9_5_host_unsupported_platform_is_present_and_not_ready_on_the_graph(
     _support(monkeypatch, wsl2="Windows only", lima_local=None)
     registry = build_registry(make_config())  # no raise: wsl2 site is not-ready, not absent
 
-    # The platform node is present and not-ready (the bare host-support reason).
+    # The platform node is present and not-ready (readiness-vocabulary reason).
     assert ("vm-platform", "wsl2") in {(k, n) for k in registry.iter_kinds() for n, _ in registry.iter_kind_items(k)}
     platform_verdict = registry.graph.readiness_of("vm-platform", "wsl2")
-    assert platform_verdict.reason == "Windows only"
+    assert platform_verdict.reason == "platform 'wsl2' is unsupported here: Windows only"
 
-    # The bundled wsl2 SITE folds to not-ready, propagating the platform reason.
+    # The bundled wsl2 SITE folds to not-ready, propagating the platform verdict.
     site_verdict = registry.graph.readiness_of("vm-site", "wsl2")
-    assert site_verdict.reason == "platform 'wsl2' is disabled: Windows only"
+    assert site_verdict.reason == "platform 'wsl2' is unsupported here: Windows only"
 
 
 def test_r9_5_host_unsupported_platform_renders_not_ready_row(make_config, monkeypatch: pytest.MonkeyPatch) -> None:
-    """R9.5 at the RENDERED level (Phase 4): the present, host-unsupported wsl2
-    ``vm-platform`` row now marks not-ready in ``resource list``, projected
-    through the unified ``disabled_reason_for`` reading ``graph.readiness_of``
-    (the Phase-3 ``_VMPlatformKind`` shim is retired). Bare host-support
-    vocabulary here; the readiness rename is Phase 5."""
+    """R9.5 at the RENDERED level: the present, host-unsupported wsl2
+    ``vm-platform`` row marks not-ready in ``resource list``, projected
+    through the unified ``not_ready_reason_for`` reading ``graph.readiness_of``
+    (the Phase-3 ``_VMPlatformKind`` shim is retired). Readiness-vocabulary
+    reason (R9.1)."""
     from agentworks.resources.inspect import list_resources
 
     _support(monkeypatch, wsl2="Windows only", lima_local=None)
     registry = build_registry(make_config())
     rows = {r.name: r for r in list_resources(registry, kinds=("vm-platform",)).rows}
-    assert rows["wsl2"].disabled_reason == "Windows only"
-    assert rows["lima"].disabled_reason is None
+    assert rows["wsl2"].not_ready_reason == "platform 'wsl2' is unsupported here: Windows only"
+    assert rows["lima"].not_ready_reason is None
 
 
 def test_supported_host_has_everything_enabled(make_config, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -159,18 +160,21 @@ def test_remote_lima_site_enabled_without_local_limactl(make_config, monkeypatch
     assert graph.readiness_of("vm-site", "lima-local").reason is not None
 
 
-def test_declared_site_on_disabled_platform_registers_disabled(make_config, monkeypatch: pytest.MonkeyPatch) -> None:
-    """A declared site whose platform is host-disabled no longer breaks
+def test_declared_site_on_unsupported_platform_registers_not_ready(
+    make_config, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A declared site whose platform is host-unsupported no longer breaks
     every command (a resources dir shared across hosts degrades
-    gracefully on the wrong host): it registers, disabled with the
+    gracefully on the wrong host): it registers, not-ready with the
     platform's reason, and only USING it errors."""
     _support(monkeypatch, wsl2="Windows only", lima_local=None)
     config = make_config(
         resources=("apiVersion: agentworks/v1\nkind: vm-site\nmetadata:\n  name: my-wsl\nspec:\n  platform: wsl2\n")
     )
     registry = build_registry(config)
-    assert registry.graph.readiness_of("vm-site", "my-wsl").reason == "platform 'wsl2' is disabled: Windows only"
-    with pytest.raises(StateError, match="disabled on this host") as exc:
+    reason = registry.graph.readiness_of("vm-site", "my-wsl").reason
+    assert reason == "platform 'wsl2' is unsupported here: Windows only"
+    with pytest.raises(StateError, match="not ready on this host") as exc:
         resolve_site("my-wsl", registry)
     assert "Windows only" in str(exc.value)
 
@@ -221,44 +225,46 @@ def test_select_site_infers_over_enabled_sites_only(make_config, monkeypatch: py
     assert select_site(None, None, registry) == "gpu-box"
 
 
-def test_select_site_errors_with_reasons_when_all_disabled(make_config, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_select_site_errors_with_reasons_when_none_ready(make_config, monkeypatch: pytest.MonkeyPatch) -> None:
     _support(monkeypatch, wsl2="Windows only", lima_local="limactl not installed")
     registry = build_registry(make_config())
-    with pytest.raises(ValidationError, match="no vm-sites are enabled") as exc:
+    with pytest.raises(ValidationError, match="no vm-sites are ready") as exc:
         select_site(None, None, registry)
     assert "limactl not installed" in str(exc.value)
     assert "Windows only" in str(exc.value)
 
 
-def test_resource_layer_surfaces_disabled_state(make_config, monkeypatch: pytest.MonkeyPatch) -> None:
-    """`agw resource list` marks disabled rows and describe carries the
-    reason: a disabled resource is still a resource."""
+def test_resource_layer_surfaces_not_ready_state(make_config, monkeypatch: pytest.MonkeyPatch) -> None:
+    """`agw resource list` marks not-ready rows and describe carries the
+    reason: a not-ready resource is still a resource."""
     from agentworks.resources.inspect import describe_resource, list_resources
 
     _support(monkeypatch, wsl2="Windows only", lima_local="limactl not installed")
     registry = build_registry(make_config())
     listing = list_resources(registry, kinds=("vm-site",))
     rows = {r.name: r for r in listing.rows}
-    assert rows["lima-local"].disabled_reason == "limactl not installed"
-    assert rows["wsl2"].disabled_reason == "platform 'wsl2' is disabled: Windows only"
+    assert rows["lima-local"].not_ready_reason == "limactl not installed"
+    assert rows["wsl2"].not_ready_reason == "platform 'wsl2' is unsupported here: Windows only"
     desc = describe_resource(registry, "vm-site", "wsl2")
-    assert desc.disabled_reason == "platform 'wsl2' is disabled: Windows only"
-    # Kinds without a disabled concept stay None (the no-op default).
+    assert desc.not_ready_reason == "platform 'wsl2' is unsupported here: Windows only"
+    # Kinds without a readiness concept stay None (the no-op default).
     tmpl = describe_resource(registry, "vm-template", "default")
-    assert tmpl.disabled_reason is None
+    assert tmpl.not_ready_reason is None
 
 
-def test_doctor_lists_platforms_and_disabled_sites(make_config, monkeypatch: pytest.MonkeyPatch) -> None:
-    """Platform rows carry only the platform-level state; per-site
-    availability (lima-local without limactl) reports in the sites
+def test_doctor_lists_platforms_and_not_ready_sites(make_config, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Platform rows carry only the platform-level state, read off the graph;
+    per-site availability (lima-local without limactl) reports in the sites
     group where the site lives."""
     from agentworks import doctor
 
     _support(monkeypatch, wsl2="Windows only", lima_local="limactl not installed")
+    registry = build_registry(make_config())
 
-    group = doctor._check_vm_platforms()
+    group = doctor._check_vm_platforms(registry)
     by_name = {c.name: c for c in group.checks}
     assert by_name["wsl2"].status is doctor.Status.INFO
+    assert "not ready" in (by_name["wsl2"].message or "")
     assert "Windows only" in (by_name["wsl2"].message or "")
     lima_row = by_name["lima"]
     assert lima_row.status is doctor.Status.OK

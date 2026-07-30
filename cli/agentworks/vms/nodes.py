@@ -401,7 +401,7 @@ class PendingVMNode:
 def vm_site_node(registry: Registry, name: str) -> VMSiteNode:
     """Build the ``vm-site/<name>`` node from its DECLARED resource:
     the platform capability reference becomes the held bound instance
-    (via ``resolve_site``, the disabled-site chokepoint), and the
+    (via ``resolve_site``, the not-ready-site chokepoint), and the
     config-implied ``secret`` references become the node's
     ``secret_refs``.
     """

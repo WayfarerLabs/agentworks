@@ -170,7 +170,7 @@ class ResourceKind(Protocol):
     # finalize (from its capability impl or its own ``not_ready``) and stored on
     # the graph node. Projection surfaces read it uniformly via
     # ``graph.readiness_of`` (through
-    # ``agentworks.resources.inspect.disabled_reason_for``), the single access
+    # ``agentworks.resources.inspect.not_ready_reason_for``), the single access
     # path (R11); a kind with no readiness concept folds to ready. A not-ready
     # resource still registers, lists, describes, and holds references; USING it
     # is the owning domain's typed error, and existing references degrade to

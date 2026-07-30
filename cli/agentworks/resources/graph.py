@@ -392,11 +392,14 @@ def _capability_node_readiness(kind: str, name: str) -> Readiness:
     impl = _impl_for(kind, name)
     if kind == "vm-platform":
         reason = cast("type[VMPlatform]", impl).unsupported_reason()
-        # Store the BARE host-support reason (e.g. "Windows only"); the vm-site
-        # that depends on it wraps it into its own operator string, and the
-        # platform row's own projection renders it directly. The readiness
-        # vocabulary rename (R9.1) is a later phase; today's strings hold.
-        return Readiness.ready() if reason is None else Readiness.blocked(reason)
+        # Store the readiness-vocabulary host-support sentence (R9.1/R6): the
+        # platform row's own projection renders it directly, and the vm-site
+        # that depends on it propagates this same verdict (LLD c target string).
+        # "unsupported here" is the readiness phrasing; "disabled" is reserved
+        # for the opt-in axis and never used for host support.
+        if reason is None:
+            return Readiness.ready()
+        return Readiness.blocked(f"platform '{name}' is unsupported here: {reason}")
     if kind == "secret-backend":
         return cast("SecretBackend", impl).not_ready()
     # harness, git-credential-provider: no host-support, no override.

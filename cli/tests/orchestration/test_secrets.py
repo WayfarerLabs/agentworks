@@ -115,11 +115,17 @@ class _FakeBackend:
         name: str,
         values: dict[str, str] | None = None,
         interactive: bool = False,
+        not_ready_reason: str | None = None,
     ) -> None:
+        from agentworks.resources.graph import Readiness
+
         self.name = name
         self.interactive = interactive
         self._values = values or {}
         self.resolve_calls: list[list[str]] = []
+        # ActiveBackend carries its stored readiness verdict; preview_resolution
+        # skips a not-ready backend (R9.6). Ready by default.
+        self.readiness = Readiness.ready() if not_ready_reason is None else Readiness.blocked(not_ready_reason)
 
     def would_attempt(self, secret: SecretDecl) -> bool:
         return secret.backend_mappings.get(self.name) is not False
@@ -146,6 +152,17 @@ def test_prediction_reports_the_first_producing_backend() -> None:
         _FakeBackend("op", values={"a": "1"}),
     )
     assert predict_resolution([_decl("a")], chain) == {"a": "op"}
+
+
+def test_prediction_skips_a_not_ready_backend() -> None:
+    """R9.6/R9.7 lockstep: a not-ready backend is skipped by the predictor even
+    though it WOULD produce a value, so it never names a backend resolution will
+    skip; the chain falls through to the next ready backend."""
+    chain = _chain(
+        _FakeBackend("op", values={"a": "1"}, not_ready_reason="op CLI not installed"),
+        _FakeBackend("env-var", values={"a": "2"}),
+    )
+    assert predict_resolution([_decl("a")], chain) == {"a": "env-var"}
 
 
 def test_prediction_none_when_nothing_would_resolve() -> None:

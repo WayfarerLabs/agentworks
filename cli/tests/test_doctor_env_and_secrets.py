@@ -144,6 +144,59 @@ backends = ["env-var", "prompt"]
     ]
 
 
+# ---------------------------------------------------------------------------
+# _check_secret_backends (the new R9.7 backend-readiness group)
+# ---------------------------------------------------------------------------
+
+
+def test_secret_backends_group_reports_readiness(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The new secret-backends group lists one readiness row per backend off
+    the stored graph verdict (R11), parallel to VM platforms: env-var / prompt
+    are ready (``ok``); onepassword with no ``op`` on PATH is INFO with
+    ``not ready: op CLI not installed``."""
+    from agentworks.doctor import _check_secret_backends
+
+    monkeypatch.setattr("shutil.which", lambda name: None)  # op absent
+    config = load_config(_write_config(tmp_path), warn_issues=False)
+    g = _check_secret_backends(build_registry(config))
+
+    assert g.name == "Secret backends"
+    by_name = {c.name: c for c in g.checks}
+    assert by_name["env-var"].status is Status.OK
+    assert by_name["prompt"].status is Status.OK
+    assert by_name["onepassword"].status is Status.INFO
+    assert by_name["onepassword"].message == "not ready: op CLI not installed"
+
+
+def test_check_secrets_flags_a_not_ready_only_backend(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """R9.6: a secret whose only attempting backend is not-ready is at-risk;
+    ``_check_secrets`` warns and names the not-ready backend rather than
+    falsely predicting resolution via it (lockstep with the resolution skip)."""
+    monkeypatch.setattr("shutil.which", lambda name: None)  # op absent
+    cfg = _write_config(
+        tmp_path,
+        extras="""
+[admin.env]
+TOKEN = { secret = "op-only" }
+
+[secrets.op-only]
+description = "resolves only via onepassword"
+backend_mappings.onepassword = "op://Vault/item/field"
+backend_mappings.env-var = false
+
+[secret_config]
+backends = ["onepassword"]
+""",
+    )
+    config = load_config(cfg, warn_issues=False)
+    g = _check_secrets(config, build_registry(config))
+    warns = [c for c in g.checks if c.status == Status.WARN]
+    assert any(
+        "op-only" in c.name and "not ready" in (c.message or "") and "op CLI not installed" in (c.message or "")
+        for c in warns
+    ), [(c.name, c.message) for c in warns]
+
+
 def test_mapping_to_undeclared_kind_hard_errors_at_build(tmp_path: Path) -> None:
     """R9.11: a ``backend_mappings`` entry naming a backend that is not a
     registered ``secret-backend`` capability is a DANGLING ``secret ->

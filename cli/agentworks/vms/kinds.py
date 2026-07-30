@@ -161,8 +161,8 @@ class _VMPlatformKind:
             "first)"
         )
 
-    # No ``disabled_reason`` hook: readiness projection is unified on
-    # ``inspect.disabled_reason_for`` reading ``graph.readiness_of`` directly
+    # No per-kind readiness hook: readiness projection is unified on
+    # ``inspect.not_ready_reason_for`` reading ``graph.readiness_of`` directly
     # (Phase 4 retired the per-kind shim, including the Phase-3 vm-platform
     # projection pulled forward to render the now-published not-ready row).
 
@@ -199,9 +199,9 @@ class _VMSiteKind:
             if vm.site == name:
                 yield InstanceRef(instance_kind="vm", instance_name=vm.name)
 
-    # No ``disabled_reason`` hook: a site's readiness verdict is folded at
+    # No per-kind readiness hook: a site's readiness verdict is folded at
     # finalize and read via ``graph.readiness_of`` (through
-    # ``inspect.disabled_reason_for``), retiring the ``site_disabled_reason``
+    # ``inspect.not_ready_reason_for``), retiring the ``site_disabled_reason``
     # recompute (R11).
 
 

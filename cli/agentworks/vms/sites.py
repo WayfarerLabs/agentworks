@@ -22,7 +22,7 @@ using it (:func:`resolve_site`) is a typed error with the reason, and
 existing references (VMs, ``defaults.site``) degrade to doctor warnings
 rather than breaking every command. Readiness is folded once at finalize and
 read off the graph (``graph.readiness_of``); :func:`select_site` /
-:func:`ensure_site_enabled` and the inspect / doctor projections all read that
+:func:`ensure_site_ready` and the inspect / doctor projections all read that
 stored verdict rather than recomputing it.
 """
 
@@ -106,9 +106,13 @@ class VMSiteDecl(DeclaredResource):
         The chain, by owner: a DISABLED platform yields the "enable its unit"
         hint read off its own state (R7; exercised only by the fixture, since
         nothing produces a disabled node this effort); a not-ready platform
-        (host-unsupported) propagates its reason; otherwise the site re-asks
-        with its OWN config (a remote-Lima site needs no local ``limactl``, so
-        it does not blindly inherit the platform verdict, R4).
+        (host-unsupported) propagates its verdict verbatim (the platform's own
+        readiness reason already names it, e.g. "platform 'wsl2' is unsupported
+        here: Windows only", so re-wrapping would double the naming); otherwise
+        the site re-asks with its OWN config (a remote-Lima site needs no local
+        ``limactl``, so it does not blindly inherit the platform verdict, R4).
+        The "disabled" branch is the opt-in axis (enablement), not host
+        readiness; readiness reasons never say "disabled" (R6/R9.1).
         """
         from typing import cast
 
@@ -118,7 +122,7 @@ class VMSiteDecl(DeclaredResource):
         if platform.enablement is Enablement.disabled:
             return Readiness.blocked(f"depends on vm-platform '{self.platform}', which is disabled; enable its unit")
         if platform.readiness is not None and not platform.readiness.is_ready:
-            return Readiness.blocked(f"platform '{self.platform}' is disabled: {platform.readiness.reason}")
+            return platform.readiness
         if platform.impl is None:
             return Readiness.ready()
         # The impl is the platform CLASS the graph stamped (``_impl_for`` fails
@@ -175,16 +179,16 @@ def select_site(
     registry: Registry,
 ) -> str:
     """Site selection for ``vm create``: the explicit flag, then
-    ``defaults.site``, then the house model over the ENABLED sites:
+    ``defaults.site``, then the house model over the READY sites:
     infer when exactly one exists, prompt interactively when several
-    do, error otherwise. Disabled sites are never a choice (using one
+    do, error otherwise. Not-ready sites are never a choice (using one
     is an error), but their existence never breaks inference.
 
     Placement is deliberately host/operator-scoped only: templates
     describe WHAT a VM is and carry no site (a shared template must not
     smuggle a per-host placement decision), and there is no hardcoded
-    fallback site (sites disabled on this host drop out, so "exactly
-    one enabled" IS the zero-config case).
+    fallback site (sites not ready on this host drop out, so "exactly
+    one ready" IS the zero-config case).
     """
     from agentworks import output
     from agentworks.errors import ValidationError
@@ -199,12 +203,12 @@ def select_site(
     if len(names) == 1:
         return names[0]
     if not names:
-        disabled = [f"{name} ({graph.readiness_of('vm-site', name).reason})" for name, _decl in sites]
-        detail = f" (disabled: {'; '.join(disabled)})" if disabled else ""
+        not_ready = [f"{name} ({graph.readiness_of('vm-site', name).reason})" for name, _decl in sites]
+        detail = f" (not ready: {'; '.join(not_ready)})" if not_ready else ""
         raise ValidationError(
-            f"no vm-sites are enabled on this host{detail}",
+            f"no vm-sites are ready on this host{detail}",
             hint=(
-                "meet a disabled site's requirement, or declare a site "
+                "meet a not-ready site's requirement, or declare a site "
                 "under ~/.config/agentworks/resources/ "
                 "(`agw resource sample vm-site`)"
             ),
@@ -213,13 +217,13 @@ def select_site(
         choice = output.choose("Select a site:", names)
         return names[choice]
     raise ValidationError(
-        f"multiple sites are enabled ({', '.join(names)})",
+        f"multiple sites are ready ({', '.join(names)})",
         hint="pass --site <name> or set defaults.site in config.toml",
     )
 
 
 def lookup_site(name: str, registry: Registry) -> VMSiteDecl:
-    """The site's declaration (enabled or disabled), or a
+    """The site's declaration (ready or not-ready), or a
     ``ConfigError`` with the ready-to-paste manifest on a miss (the
     stranded-site case, e.g. a migrated remote-Lima row whose site
     manifest the operator has not added yet). Bundled sites register
@@ -258,37 +262,37 @@ def resolve_site(
     or platform classes.
 
     This is the one chokepoint every operation passes through, so the
-    disabled guard lives here: using a disabled site is a typed error
+    readiness guard lives here: using a not-ready site is a typed error
     naming the reason chain.
     """
     from agentworks.capabilities.vm_platform import VM_PLATFORM_REGISTRY
 
     decl = lookup_site(name, registry)
-    ensure_site_enabled(decl, registry)
-    # Enabled implies the platform is installed and supported here.
+    ensure_site_ready(decl, registry)
+    # Ready implies the platform is installed and supported here.
     platform_cls = VM_PLATFORM_REGISTRY[decl.platform]
     return platform_cls(decl.name, decl.platform_config)
 
 
-def ensure_site_enabled(decl: VMSiteDecl, registry: Registry) -> None:
-    """The typed using-a-disabled-site error. ``resolve_site`` (the
+def ensure_site_ready(decl: VMSiteDecl, registry: Registry) -> None:
+    """The typed using-a-not-ready-site error. ``resolve_site`` (the
     chokepoint every op passes through) always applies it; roots with
     operator interaction BEFORE their resolve (``create_vm``'s system
-    slug prompt) call it up front too, so a disabled explicit choice
+    slug prompt) call it up front too, so a not-ready explicit choice
     errors before the operator answers anything.
 
     Reads the site's stored readiness verdict off the graph (R11: the fold
-    computed it, this does not recompute). The verdict, unlike the retired
-    ``site_disabled_reason`` recompute, folds in the platform's enablement
-    too, so a site whose platform is disabled is correctly unusable.
+    computed it, this does not recompute). The verdict folds in the platform's
+    enablement too, so a site whose platform is disabled (the opt-in axis) is
+    correctly unusable, reported with the "enable its unit" hint.
     """
     from agentworks.errors import StateError
 
     reason = registry.graph.readiness_of("vm-site", decl.name).reason
     if reason is not None:
         raise StateError(
-            f"vm-site '{decl.name}' is disabled on this host: {reason}",
-            hint=("`agw doctor` lists each site's state; meet the requirement or use an enabled site"),
+            f"vm-site '{decl.name}' is not ready on this host: {reason}",
+            hint=("`agw doctor` lists each site's state; meet the requirement or use a ready site"),
         )
 
 

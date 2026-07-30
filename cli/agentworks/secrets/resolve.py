@@ -379,9 +379,13 @@ def preview_resolution(
     ``None`` if nothing in the chain would.
 
     Walks the chain in precedence order. ``would_attempt`` gates each
-    backend; an interactive backend (prompt) is reported without probing
-    (probing would BE the operator interaction); every other backend
-    must actually produce a value to be reported.
+    backend; a NOT-READY backend is skipped (in lockstep with the
+    resolution loop's readiness skip, R9.6/R9.7: it never resolves here, so
+    the predictor never names a backend resolution will skip); an interactive
+    backend (prompt) is reported without probing (probing would BE the operator
+    interaction); every other ready backend must actually produce a value to be
+    reported. Readiness is the offline layer UNDER interactive-optimism: a ready
+    ``prompt`` is still previewed optimistically on ``would_attempt`` alone.
 
     ``interactive_available`` is the caller's policy for whether an
     interactive backend counts as resolving (issue #202): the preflight
@@ -397,6 +401,12 @@ def preview_resolution(
     """
     for backend in backends:
         if not backend.would_attempt(secret):
+            continue
+        if not backend.readiness.is_ready:
+            # Not-ready: resolution will skip this backend with a warning
+            # (R9.6), so it never resolves the secret here either. Skipping it
+            # keeps the predictor honest (no "would resolve via onepassword" for
+            # a backend a real run would skip) without probing an unusable tool.
             continue
         if backend.interactive:
             if interactive_available:

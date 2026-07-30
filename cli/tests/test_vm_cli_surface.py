@@ -270,11 +270,11 @@ def test_doctor_vm_sites_group(db: Database, monkeypatch: pytest.MonkeyPatch, tm
     assert "VM 'good'" not in by_name
 
 
-def test_doctor_vm_sites_disabled_and_preflight_rows(
+def test_doctor_vm_sites_not_ready_and_preflight_rows(
     db: Database, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    """A DISABLED site is informational with its reason and skips
-    preflight (normal for the host; the site still exists); an ENABLED
+    """A NOT-READY site is informational with its reason and skips
+    preflight (normal for the host; the site still exists); a READY
     site whose preflight fails is the error the operator's next command
     hits and warns."""
     from pathlib import Path as _Path
@@ -334,17 +334,17 @@ def test_doctor_vm_sites_disabled_and_preflight_rows(
     by_name = {c.name: c for c in group.checks}
     lima_row = by_name["lima-local"]
     assert lima_row.status is doctor.Status.INFO
-    assert lima_row.message == "disabled (limactl not installed)"
+    assert lima_row.message == "not ready: limactl not installed"
     assert by_name["wsl2"].status is doctor.Status.OK
     operator_row = by_name["mybox"]
     assert operator_row.status is doctor.Status.WARN
     assert "preflight" in (operator_row.message or "")
 
 
-def test_doctor_warns_on_references_to_disabled_sites(
+def test_doctor_warns_on_references_to_not_ready_sites(
     db: Database, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    """Existing references to a disabled site are warnings, not
+    """Existing references to a not-ready site are warnings, not
     failures: the VM row and defaults.site each get one, with the
     reason. An undeclared site stays the stranded FAIL."""
     from agentworks import doctor

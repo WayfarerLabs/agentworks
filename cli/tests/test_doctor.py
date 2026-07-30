@@ -153,13 +153,15 @@ def test_run_checks_group_order_and_config_failure_placeholder(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Group order is a presentation choice decoupled from which checks
-    need config: with config unavailable, the report keeps its shape;
-    the config-dependent groups (VM sites, Secrets) each render a skipped
-    pointer (they precede the Configuration group that explains the
-    failure, so silent absence would read as "no sites"/"no secrets") and
-    every config-free group renders in presentation order. Integration for
-    the same reason as the smoke test above: the config-free groups probe
-    the real environment.
+    need config: with config/registry unavailable, the report keeps its shape;
+    the registry-dependent groups (VM platforms, VM sites, Secret backends,
+    Secrets) each render a skipped pointer (they precede the Configuration
+    group that explains the failure, so silent absence would read as "no
+    sites"/"no secrets") and every config-free group renders in presentation
+    order. VM platforms and Secret backends now read stored readiness off the
+    graph (R11), so they too need the registry and skip cleanly in degraded
+    mode. Integration for the same reason as the smoke test above: the
+    config-free groups probe the real environment.
     """
     from agentworks import doctor
 
@@ -177,10 +179,11 @@ def test_run_checks_group_order_and_config_failure_placeholder(
         "VM platforms",
         "VM sites",
         "Configuration",
+        "Secret backends",
         "Secrets",
         "Database",
     ]
-    for group_name in ("VM sites", "Secrets"):
+    for group_name in ("VM platforms", "VM sites", "Secret backends", "Secrets"):
         placeholder = next(g for g in report.groups if g.name == group_name).checks
         assert len(placeholder) == 1, group_name
         assert placeholder[0].status is doctor.Status.INFO, group_name
