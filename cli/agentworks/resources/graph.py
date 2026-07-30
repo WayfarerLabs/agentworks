@@ -3,7 +3,7 @@
 ``Registry.finalize`` builds one of these from the reference walk it already
 runs and hands it to the ``Registry`` to retain (``Registry.graph``). The graph
 is the single access path for structural questions the codebase previously
-answered by re-walking ``referenced_resources()`` or reading a ``references``
+answered by re-walking ``dependencies(context)`` or reading a ``references``
 field off each resource dataclass:
 
 - ``edges_of``: a node's outbound reference edges (who it points at).
@@ -11,11 +11,12 @@ field off each resource dataclass:
   replacement for the removed per-resource ``references`` field.
 - ``reachable_from``: the transitive closure of ``edges_of`` from a node.
 - ``readiness_of`` / ``is_ready``: the node's stored readiness verdict.
+- ``impl_of``: a capability node's stamped implementation (for secret
+  resolution to reach a backend off the graph, not the live registry).
 
-Every method is a pure read over the frozen node map; none recomputes. The
-readiness fold (a later phase) fills real verdicts; until then every node is
-constructed ``ready`` / ``enabled``, which is correct because nothing computes
-readiness yet.
+Every method is a pure read over the frozen node map; none recomputes: the
+finalize fold stores each node's readiness verdict, and the projection surfaces,
+site selection, and secret resolution all read it here rather than recomputing.
 
 See ``docs/sdd/2026-07-27-registry-readiness-refactor/graph-lld.md`` (LLD a) for
 the full contract.
@@ -118,7 +119,7 @@ class _Node:
 @dataclass(frozen=True)
 class DependencyGraph:
     """The retained, frozen dependency graph. Built by ``build_graph`` inside
-    ``Registry.finalize`` and queried through the five read methods below.
+    ``Registry.finalize`` and queried through the six read methods below.
 
     ``_nodes`` is a read-only mapping (``MappingProxyType``); the graph and its
     tuples are immutable after finalize.

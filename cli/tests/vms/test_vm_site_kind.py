@@ -12,6 +12,7 @@ import pytest
 from agentworks.errors import ConfigError
 from agentworks.manifests.loader import load_manifests
 from agentworks.resources import Origin, Registry
+from agentworks.resources.graph import BuildContext
 from agentworks.vms.sites import VMSiteDecl
 
 SITE_DOC = """\
@@ -128,7 +129,7 @@ def test_unknown_platform_site_hard_errors_at_finalize(tmp_path: Path) -> None:
     site = _load_one(tmp_path, doc)
     assert site.platform == "nope"
     # The platform edge is always emitted now (suppression removed).
-    assert [(r.kind, r.name) for r in site.referenced_resources()] == [("vm-platform", "nope")]
+    assert [(r.kind, r.name) for r in site.dependencies(BuildContext())] == [("vm-platform", "nope")]
 
     registry = Registry.empty()
     registry.add("vm-site", "mystery", site, Origin.built_in(source="test"))
@@ -138,7 +139,7 @@ def test_unknown_platform_site_hard_errors_at_finalize(tmp_path: Path) -> None:
 
 def test_reference_emission(tmp_path: Path) -> None:
     site = _load_one(tmp_path, SITE_DOC)
-    refs = site.referenced_resources()
+    refs = site.dependencies(BuildContext())
     assert [(r.kind, r.name) for r in refs] == [("vm-platform", "azure-vm")]
     assert refs[0].source == ("vm-site", "azure-dev")
 
@@ -154,7 +155,7 @@ def test_proxmox_site_emits_the_token_secret_reference() -> None:
             "template_vmid": 9000,
         },
     )
-    refs = site.referenced_resources()
+    refs = site.dependencies(BuildContext())
     assert [(r.kind, r.name) for r in refs] == [
         ("vm-platform", "proxmox"),
         ("secret", "proxmox-token"),
@@ -184,7 +185,7 @@ def test_host_unsupported_site_still_emits_its_edges(
             "template_vmid": 9000,
         },
     )
-    assert [(r.kind, r.name) for r in site.referenced_resources()] == [
+    assert [(r.kind, r.name) for r in site.dependencies(BuildContext())] == [
         ("vm-platform", "proxmox"),
         ("secret", "proxmox-token"),
     ]

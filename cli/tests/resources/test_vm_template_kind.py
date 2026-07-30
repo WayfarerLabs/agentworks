@@ -33,6 +33,7 @@ from agentworks.resources import (
     KIND_REGISTRY,
     TemplateReference,
 )
+from agentworks.resources.graph import BuildContext
 from agentworks.vms.template import VMTemplate
 
 
@@ -109,7 +110,7 @@ def test_vm_template_required_resources_emits_template_requirement_for_inherits(
     requirements (env secrets, tailscale auth key) are unchanged.
     """
     tmpl = VMTemplate(name="child", inherits=["base", "extras"])
-    reqs = tmpl.referenced_resources()
+    reqs = tmpl.dependencies(BuildContext())
     template_reqs = [r for r in reqs if isinstance(r, TemplateReference)]
     assert len(template_reqs) == 2
     by_name = {r.name: r for r in template_reqs}
@@ -121,7 +122,7 @@ def test_vm_template_required_resources_emits_template_requirement_for_inherits(
 
 def test_vm_template_no_inherits_produces_no_template_requirements() -> None:
     tmpl = VMTemplate(name="alone")
-    reqs = tmpl.referenced_resources()
+    reqs = tmpl.dependencies(BuildContext())
     template_reqs = [r for r in reqs if isinstance(r, TemplateReference)]
     assert template_reqs == []
 

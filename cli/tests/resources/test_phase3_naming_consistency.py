@@ -92,18 +92,24 @@ def test_resource_reference_carries_usage_field_not_text() -> None:
     assert "text" not in entry_fields
 
 
-def test_producer_method_is_referenced_resources_not_required_resources() -> None:
-    """Producers expose ``referenced_resources()``, not the old
-    ``required_resources()``. Phase 3a renamed both the method and every
-    call site (including the framework's ``getattr`` lookups in
-    ``Registry._referenced_resources`` and ``walk._referenced_resources``).
+def test_graph_node_producers_expose_dependencies_not_referenced_resources() -> None:
+    """Graph-node producers expose the uniform ``dependencies(context)`` (the
+    Phase 4 rename); the greenness-scaffold ``referenced_resources`` alias is
+    gone. ``EnvEntry.referenced_resources(source)`` is deliberately RETAINED:
+    it is an internal env-table aggregation each template's ``dependencies``
+    composes, not a graph-node method the builder calls.
     """
+    from agentworks.vms.sites import VMSiteDecl
+
+    site = VMSiteDecl(name="s", platform="lima")
+    assert hasattr(site, "dependencies")
+    assert not hasattr(site, "referenced_resources")
+    assert not hasattr(site, "required_resources")
+
+    # EnvEntry keeps its arg-taking aggregation variant, not the graph-node one.
     entry = EnvEntry(key="K", secret="s")
     assert hasattr(entry, "referenced_resources")
-    assert not hasattr(entry, "required_resources")
-    # Inspect that the method exists as a real method, not via getattr
-    # fallback. The kinds/* modules' Resource types all expose this name
-    # (those with no references override to an empty list).
+    assert not hasattr(entry, "dependencies")
     sig = inspect.signature(entry.referenced_resources)
     assert "source" in sig.parameters
 

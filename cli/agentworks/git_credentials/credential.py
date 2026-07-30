@@ -26,8 +26,8 @@ def credential_references(
     source: tuple[str, str],
 ) -> list[ResourceReference]:
     """Emit a ``ResourceReference`` of kind ``"git-credential"`` per
-    name in ``git_credentials``. Used by ``AdminConfig.referenced_resources``
-    and ``AgentTemplate.referenced_resources`` to feed the
+    name in ``git_credentials``. Used by ``AdminConfig.dependencies``
+    and ``AgentTemplate.dependencies`` to feed the
     ``GitCredentialKind``'s error miss policy: a typo'd or undeclared
     name errors at finalize with the reference source pointing at the
     declaring Resource.
@@ -107,7 +107,7 @@ class GitCredentialConfig(DeclaredResource):
 
     def validate(self) -> None:
         """Throwing shape check for the ``provider_config`` blob, run by
-        the finalize ``validate`` pass. Mirrors ``referenced_resources``:
+        the finalize ``validate`` pass. Mirrors ``dependencies``:
         the named provider capability validates the blob it owns. An
         unknown provider is tolerated here (the framework miss policy
         reports it); a seated provider validates the blob.

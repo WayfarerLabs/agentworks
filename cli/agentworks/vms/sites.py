@@ -128,7 +128,7 @@ class VMSiteDecl(DeclaredResource):
 
     def validate(self) -> None:
         """Throwing shape check for the ``platform_config`` blob, run by
-        the finalize ``validate`` pass. Mirrors ``referenced_resources``:
+        the finalize ``validate`` pass. Mirrors ``dependencies``:
         the named platform capability validates the blob it owns. An
         unknown platform is a no-op HERE (the platform capability is absent,
         so there is no blob owner to validate against); the site's dangling

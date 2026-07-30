@@ -65,25 +65,6 @@ class DeclaredResource:
         """
         return []
 
-    def referenced_resources(self) -> list[ResourceReference]:
-        """GREENNESS SCAFFOLD (Phase 4 head step): a thin alias for
-        :meth:`dependencies` under an empty build context.
-
-        The Phase 4 rename to the uniform ``dependencies(context)`` breaks the
-        callers that still invoke edge-extraction by the old name
-        (``walk.collect_secrets_for`` and the vm-site / git-credential node
-        factories); each migrates to a graph read in its own later sub-step.
-        This alias keeps them green in the meantime and is REMOVED at the end
-        of Phase 4, once the last caller has moved, before the phase-6 guard
-        (which would flag a consumer re-walking ``dependencies``). Non-secret
-        resources ignore the context, so the empty context is faithful; a
-        secret under an empty context emits only its explicit mapping-key
-        edges, which none of the alias callers consume.
-        """
-        from agentworks.resources.graph import BuildContext
-
-        return self.dependencies(BuildContext())
-
     def validate(self) -> None:
         """Throwing correctness check for the resource's own capability
         config sub-block(s): the resource-level counterpart of

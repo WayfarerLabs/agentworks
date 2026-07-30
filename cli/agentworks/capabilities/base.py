@@ -327,7 +327,7 @@ class Capability(ABC):
         emits every edge it can derive best-effort, omitting only an edge
         whose identity depends on a field that is itself malformed (the
         throwing correctness check is :meth:`validate`). Invoked by the
-        consuming resource's ``referenced_resources()`` at finalize and,
+        consuming resource's ``dependencies(context)`` at finalize and,
         for the secret sub-refs, at construct. MUST be pure. ``owner`` is
         display context (host-agnostic, never dispatched on); most kinds
         that imply an edge derive its default name from it.

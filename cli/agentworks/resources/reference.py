@@ -3,7 +3,7 @@
 Two types model the two directions of the same edge between Resources:
 
 - ``ResourceReference`` is **outbound**: a Resource saying "I need this other
-  Resource by name." Producers (each Resource type's ``referenced_resources()``
+  Resource by name." Producers (each Resource type's ``dependencies(context)``
   method) emit concrete subclasses (``SecretReference``, ``TemplateReference``,
   ...); the framework consumes them through the base class.
 - ``ReferenceEntry`` is **inbound**: a record stored on the target's
@@ -120,7 +120,7 @@ class TemplateReference(ResourceReference):
     """Outbound reference targeting a template-kind Resource (``vm-template``,
     ``workspace-template``, ``agent-template``, ``session-template``).
 
-    Emitted by each template type's ``referenced_resources()`` for every
+    Emitted by each template type's ``dependencies(context)`` for every
     name in its ``inherits = [...]`` list. The framework's miss policy
     resolves the name (auto-declaring ``default`` when reserved, erroring
     on other typos) and cycle detection catches inheritance loops.

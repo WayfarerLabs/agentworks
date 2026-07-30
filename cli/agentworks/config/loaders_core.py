@@ -309,7 +309,7 @@ def _load_git_credentials(
             raise ConfigError(f"git_credentials.{name} must be a table")
         # The ``type`` field's reference-existence check
         # lives in the framework via
-        # ``GitCredentialConfig.referenced_resources`` emitting a
+        # ``GitCredentialConfig.dependencies`` emitting a
         # ``ResourceReference(kind="git-credential-provider", ...)``;
         # ``_GitCredentialProviderKind``'s error miss policy fires at
         # build_registry time with the framework's consistent error

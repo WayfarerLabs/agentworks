@@ -16,6 +16,7 @@ from agentworks.capabilities.harness import HARNESS_REGISTRY, Harness
 from agentworks.config import load_config
 from agentworks.errors import ConfigError
 from agentworks.manifests import load_manifests
+from agentworks.resources.graph import BuildContext
 from agentworks.resources.inspect import describe_resource
 from agentworks.sessions.template import SessionTemplate
 from agentworks.sessions.templates import resolve_from_dict
@@ -331,7 +332,7 @@ def test_undeclared_default_resolves_to_shell_empty() -> None:
 
 def test_declared_harness_emits_a_reference() -> None:
     tmpl = SessionTemplate(name="claude", harness="shell", harness_config={"command": "claude"})
-    refs = tmpl.referenced_resources()
+    refs = tmpl.dependencies(BuildContext())
     harness_refs = [r for r in refs if r.kind == "harness"]
     assert len(harness_refs) == 1
     assert harness_refs[0].name == "shell"
@@ -340,7 +341,7 @@ def test_declared_harness_emits_a_reference() -> None:
 
 def test_undeclared_harness_emits_no_reference() -> None:
     tmpl = SessionTemplate(name="plain")
-    assert [r for r in tmpl.referenced_resources() if r.kind == "harness"] == []
+    assert [r for r in tmpl.dependencies(BuildContext()) if r.kind == "harness"] == []
 
 
 def test_harness_row_lists_its_declaring_template(tmp_path: Path) -> None:

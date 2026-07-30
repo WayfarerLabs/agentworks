@@ -24,6 +24,7 @@ from agentworks.install_commands import (
     SystemInstallCommandEntry,
     UserInstallCommandEntry,
 )
+from agentworks.resources.graph import BuildContext
 from agentworks.secrets.base import SecretDecl
 from agentworks.sessions.template import NamedConsoleConfig, SessionTemplate
 from agentworks.source_location import synthesized
@@ -39,7 +40,7 @@ def test_base_carries_metadata_fields_with_defaults() -> None:
     assert resource.description is None
     assert resource.declared_at == synthesized()
     assert resource.origin is None
-    assert resource.referenced_resources() == []
+    assert resource.dependencies(BuildContext()) == []
 
 
 def test_plain_subclass_inherits_empty_referenced_resources() -> None:
@@ -47,7 +48,7 @@ def test_plain_subclass_inherits_empty_referenced_resources() -> None:
     class _NoOverride(DeclaredResource):
         pass
 
-    assert _NoOverride(name="x").referenced_resources() == []
+    assert _NoOverride(name="x").dependencies(BuildContext()) == []
 
 
 # Every concrete declared-resource dataclass (all carrying name + description +

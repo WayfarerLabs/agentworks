@@ -21,6 +21,7 @@ from agentworks.agents.template import AgentTemplate
 from agentworks.bootstrap import build_registry
 from agentworks.config import load_config
 from agentworks.env.entry import EnvEntry
+from agentworks.resources.graph import BuildContext
 from agentworks.sessions.template import SessionTemplate
 from agentworks.vms.admin import AdminConfig
 from agentworks.vms.template import VMTemplate
@@ -83,7 +84,7 @@ def test_admin_config_required_resources_aggregates_env() -> None:
             "C": EnvEntry(key="C", secret="sec-c"),
         }
     )
-    reqs = admin.referenced_resources()
+    reqs = admin.dependencies(BuildContext())
     assert {r.name for r in reqs} == {"sec-a", "sec-c"}
     assert all(r.source == ("admin-template", "default") for r in reqs)
 
@@ -96,7 +97,7 @@ def test_vm_template_required_resources_uses_template_name_in_source() -> None:
         name="azure-prod",
         env={"KEY": EnvEntry(key="KEY", secret="ts-key")},
     )
-    reqs = tmpl.referenced_resources()
+    reqs = tmpl.dependencies(BuildContext())
     # 1 env-block + 1 tailscale (Phase 1c)
     assert len(reqs) == 2
     # All requirements carry the template's source.
@@ -116,7 +117,7 @@ def test_workspace_template_required_resources() -> None:
         name="default",
         env={"K": EnvEntry(key="K", secret="ws-secret")},
     )
-    reqs = tmpl.referenced_resources()
+    reqs = tmpl.dependencies(BuildContext())
     assert reqs[0].source == ("workspace-template", "default")
 
 
@@ -125,7 +126,7 @@ def test_agent_template_required_resources() -> None:
         name="claude",
         env={"K": EnvEntry(key="K", secret="claude-key")},
     )
-    reqs = tmpl.referenced_resources()
+    reqs = tmpl.dependencies(BuildContext())
     assert reqs[0].source == ("agent-template", "claude")
 
 
@@ -135,7 +136,7 @@ def test_session_template_required_resources_with_none_env() -> None:
     without erroring.
     """
     tmpl = SessionTemplate(name="t", env=None)
-    assert tmpl.referenced_resources() == []
+    assert tmpl.dependencies(BuildContext()) == []
 
 
 def test_session_template_required_resources_with_secrets() -> None:
@@ -143,7 +144,7 @@ def test_session_template_required_resources_with_secrets() -> None:
         name="claude-coder",
         env={"K": EnvEntry(key="K", secret="cc-secret")},
     )
-    reqs = tmpl.referenced_resources()
+    reqs = tmpl.dependencies(BuildContext())
     assert reqs[0].source == ("session-template", "claude-coder")
 
 
