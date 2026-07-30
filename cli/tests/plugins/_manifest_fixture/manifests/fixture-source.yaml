@@ -1,0 +1,14 @@
+# A clean, self-contained resource bundled by the publish-test fixture
+# plugin. An apt-source needs no cross-references, so it lands enabled and
+# ready when its plugin is opted in, which is all the "manifest resource
+# present and consumable" acceptance needs.
+apiVersion: agentworks/v1
+kind: apt-source
+metadata:
+  name: fixture-apt-source
+  description: A fixture apt source shipped by a system plugin
+spec:
+  key_url: https://example.invalid/keys/fixture.gpg
+  key_path: /etc/apt/keyrings/fixture.gpg
+  source: "deb [arch={arch} signed-by=/etc/apt/keyrings/fixture.gpg] https://example.invalid/apt stable main"
+  source_file: fixture.list

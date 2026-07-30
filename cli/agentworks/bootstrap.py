@@ -34,13 +34,19 @@ if TYPE_CHECKING:
 def build_registry(config: Config, manifests: ManifestSet | None = None) -> Registry:
     """Build a finalized ``Registry`` from the standard set of publishers.
 
-    Publisher order: the bundled manifests and the built-in capability
-    rows first (``builtin_manifests``, ``git_credentials``, ``harness``,
-    ``secrets``, ``vm_platforms``), then the ``apt`` / ``install_commands``
-    operator publishers (the deprecated TOML surface for those two
-    kinds), then the operator sources (``Config.publish_to`` for TOML,
-    then the YAML ``ManifestSet``). Operator rows may replace built-in
-    rows only where the kind's ``builtin_override`` allows;
+    Publisher order: the bundled built-in manifests first
+    (``builtin_manifests``), then the ``apt`` / ``install_commands``
+    operator publishers (the deprecated TOML surface for those two kinds;
+    they follow the bundled manifests, which now supply the built-in
+    apt/install-command entries), then the built-in capability rows
+    (``git_credential``, ``harness``, ``secrets``, ``vm_platforms``), then
+    the system plugins (``plugins.publish_plugins``: every shipped plugin's
+    capability rows plus the enabled plugins' bundled manifests), then the
+    operator sources (``Config.publish_to`` for TOML, then the YAML
+    ``ManifestSet``). Plugin capability rows publish unconditionally and are
+    marked disabled at finalize when not opted in (the injected
+    ``plugin_enablement_source``). Operator rows may replace built-in rows
+    only where the kind's ``builtin_override`` allows;
     operator-vs-operator collisions (a resource declared in both TOML and
     a manifest) error at ``Registry.add``.
 
@@ -50,7 +56,7 @@ def build_registry(config: Config, manifests: ManifestSet | None = None) -> Regi
     ``load_config``'s ``config_issues`` behavior). Pass an explicit
     ``ManifestSet`` (e.g. ``ManifestSet.empty()``) to skip the auto-load.
     """
-    from agentworks import apt, install_commands, output, secrets
+    from agentworks import apt, install_commands, output, plugins, secrets
     from agentworks.capabilities import git_credential, harness
     from agentworks.capabilities import vm_platform as vm_platforms
     from agentworks.errors import StateError
@@ -93,9 +99,15 @@ def build_registry(config: Config, manifests: ManifestSet | None = None) -> Regi
     harness.publish_to(registry)
     secrets.publish_to(registry)
     vm_platforms.publish_to(registry)
+    # System plugins publish here, after the built-in capability rows and
+    # before the operator sources: every shipped plugin's capability rows
+    # unconditionally (present-but-disabled when not opted in, via the
+    # enablement source below), and the enabled plugins' bundled manifests.
+    # Publication-only (impls were seated at import), so purity holds.
+    plugins.publish_plugins(registry, config)
     config.publish_to(registry)
     manifests.publish_to(registry)
-    registry.finalize()
+    registry.finalize(enablement_sources=[plugins.plugin_enablement_source(config)])
     # Config consistency against the finalized graph: subsystems whose
     # SETTINGS name resources validate them here, at the boundary that
     # holds both worlds. The chain ([secret_config].backends) and

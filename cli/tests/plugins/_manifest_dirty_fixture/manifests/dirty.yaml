@@ -1,0 +1,11 @@
+# A DIRTY bundle: the unexpected spec key `bogus` on a warn-mode kind
+# (secret) makes `load_manifests` collect a spec-level issue rather than
+# raise, so it exercises `publish_manifest_package`'s issues-to-ConfigError
+# path (the assert-to-raise migration), not the loader's own hard errors.
+apiVersion: agentworks/v1
+kind: secret
+metadata:
+  name: fixture-dirty-secret
+  description: triggers a warn-level issue via an unexpected spec key
+spec:
+  bogus: 1

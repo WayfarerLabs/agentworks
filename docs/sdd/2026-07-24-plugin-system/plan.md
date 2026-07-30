@@ -156,14 +156,14 @@ not-opted-in plugin contributions disabled.
 Governs: R5's publication half, R9's manifest gating. LLD: (c). First phase where a real `[plugins]`
 config changes behavior.
 
-- [ ] `plugins.publish_plugins(registry, config)`: publish a capability row for **every shipped
+- [x] `plugins.publish_plugins(registry, config)`: publish a capability row for **every shipped
       plugin's** impl unconditionally (`system-plugin` origin); load **enabled plugins'** manifests
       via the shared loader body (which now raises a typed error instead of
       `assert not manifests.issues`). Resolve enabled names up front; an unknown name is a single
       typed config error before any publish (not a `KeyError`, not in the post-finalize block).
-- [ ] Wire `publish_plugins` into `build_registry` between the built-in capability rows and
+- [x] Wire `publish_plugins` into `build_registry` between the built-in capability rows and
       `config.publish_to`; publication-only, so `build_registry` stays pure.
-- [ ] Tests (DoD-behavior): enabled plugin, capability row + manifest resource present, enabled, and
+- [x] Tests (DoD-behavior): enabled plugin, capability row + manifest resource present, enabled, and
       consumable at their site with `system-plugin` origin; not-enabled plugin, capability row
       **present-but-disabled** (a reference is not-ready with the enable hint, NOT unknown-name),
       its manifest resources absent; unknown enabled name, typed config error precedes any publish;

@@ -21,6 +21,8 @@ from typing import TYPE_CHECKING, Protocol
 
 from agentworks.plugins.adapters import CAPABILITY_ADAPTERS, CapabilityAdapter
 from agentworks.plugins.base import Plugin, PluginCommand, PluginError
+from agentworks.plugins.enablement import plugin_enablement_source
+from agentworks.plugins.publish import publish_plugins
 from agentworks.plugins.registration import register_plugin, seated_plugin
 
 if TYPE_CHECKING:
@@ -33,6 +35,8 @@ __all__ = [
     "Plugin",
     "PluginCommand",
     "PluginError",
+    "plugin_enablement_source",
+    "publish_plugins",
     "register_plugin",
     "seated_plugin",
 ]
