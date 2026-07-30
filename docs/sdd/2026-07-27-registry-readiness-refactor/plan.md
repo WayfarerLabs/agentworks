@@ -237,11 +237,12 @@ sub-step.
       Tests: the materialize-fixpoint VM-create acceptance (an auto-declared `tailscale-auth-key`'s
       backend edges exist and resolve; the no-loop regression is pinned here); R9.11 (a typo'd
       `backend_mappings` key is a dangling edge that hard-errors).
-- [ ] **Cycle detection** reads `edges_of` (removes the second
-      `validate_config`/`referenced_resources` pass at `registry.py:542`).
-- [ ] **`walk.collect_secrets_for`** becomes a thin filter over `reachable_from`; its caller
+- [x] **Cycle detection** reads `edges_of` (removes the second
+      `validate_config`/`referenced_resources` pass at `registry.py:542`). (Already landed in Phase 2:
+      `_detect_cycles` three-colors over the built `all_outbound` edge map, no re-walk.)
+- [x] **`walk.collect_secrets_for`** becomes a thin filter over `reachable_from`; its caller
       (`secrets/kinds.py:188`) is unaffected.
-- [ ] **Node factories** `vm_site_node` (`vms/nodes.py:412`) and `git_credential_node`
+- [x] **Node factories** `vm_site_node` (`vms/nodes.py:412`) and `git_credential_node`
       (`git_credentials/nodes.py:93`) read secret edges off `edges_of`.
 - [ ] **`inspect`** reads readiness via `readiness_of` and usage via `dependents_of` (R10); the list
       cell and describe line adopt the readiness vocabulary (folded into phase 5's surface work, but
