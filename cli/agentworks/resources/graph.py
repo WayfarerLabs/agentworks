@@ -49,13 +49,71 @@ class Enablement(Enum):
     """Whether a node is opted in (``enabled``) or opted out (``disabled``).
 
     Distinct from readiness: enablement is the operator's opt-in decision,
-    readiness is whether the node can run on this host. Every node this effort
-    produces is ``enabled``; the axis is modeled so the plugin rebuild can
-    produce ``disabled`` without re-touching the core.
+    readiness is whether the node can run on this host. Enablement is now
+    PRODUCIBLE: ``finalize`` composes injected :data:`EnablementSource` callables
+    (:func:`compose_enablement`) into a disabled-node mark map and derives this
+    binary axis as its pure projection (a node is ``disabled`` iff a source marks
+    it). The plugin opt-in source is the first such producer; a build with no
+    sources yields all-``enabled``, exactly as before. The binary axis remains
+    the sole authority for the fold's enabled/disabled branch; a mark only
+    carries the disabling reason alongside it.
     """
 
     enabled = "enabled"
     disabled = "disabled"
+
+
+@dataclass(frozen=True)
+class DisabledMark:
+    """One source's verdict that a node is disabled, carrying WHY and WHO.
+
+    ``reason`` is the remediation clause a dependent's hint appends
+    verbatim (e.g. ``"enable plugin `azure`"``), NOT the state phrasing;
+    ``source`` is the source identity (e.g. ``"plugin-opt-in"``), retained
+    for precedence and future "why is this disabled" surfaces. Transient:
+    a mark rides the fold's :class:`DependencyState` and the binary
+    projection ``finalize`` derives from it, and is never persisted on the
+    frozen node (LLD b). A node ABSENT from a source's output is enabled as
+    far as that source is concerned.
+    """
+
+    reason: str
+    source: str
+
+
+# An enablement source: a pure function from the present rows to the subset
+# of ``(kind, name)`` nodes it disables, each with its :class:`DisabledMark`.
+# This is the R13 multi-source seam: sources compose (see
+# :func:`compose_enablement`), and each disabled verdict carries which source
+# fired and its own reason. The ``Registry`` folds opaque source callables and
+# never imports ``Config`` or ``plugins``; a config-bound source (the plugin
+# opt-in source, LLD b) is constructed by ``build_registry`` and injected at
+# ``finalize``.
+type EnablementSource = Callable[
+    [Mapping[str, Mapping[str, object]]],
+    Mapping[tuple[str, str], DisabledMark],
+]
+
+
+def compose_enablement(
+    sources: Sequence[EnablementSource],
+    resources: Mapping[str, Mapping[str, object]],
+) -> dict[tuple[str, str], DisabledMark]:
+    """Fold a list of enablement sources into the disabled-node mark map.
+
+    A node is disabled if ANY source disables it. When more than one source
+    disables the same node, the FIRST source in the list wins its reason
+    (``setdefault``); the list order is the assembly point's choice
+    (``build_registry``, LLD c), so a future operator-explicit-disable source
+    can be ordered ahead of the plugin source if operator intent should own the
+    reason. No sources (the default) yields no marks, hence all-enabled: the
+    exact behavior the landed refactor's ``_node_enablement()`` had.
+    """
+    marks: dict[tuple[str, str], DisabledMark] = {}
+    for source in sources:
+        for key, mark in source(resources).items():
+            marks.setdefault(key, mark)  # first source in the list wins
+    return marks
 
 
 @dataclass(frozen=True)
@@ -101,6 +159,11 @@ class DependencyState:
     enablement: Enablement
     readiness: Readiness | None
     impl: object | None
+    # The disabling source's remediation reason when this dep is disabled;
+    # ``None`` otherwise. Defaulted, so every existing construction (tests
+    # that build a ``DependencyState`` directly) still type-checks: the field
+    # is purely additive, read only by a propagating ``not_ready`` hook.
+    disabled_reason: str | None = None
 
 
 @dataclass(frozen=True)
@@ -263,9 +326,12 @@ def build_graph(
     keyed by node; a node absent from it is stored ``ready`` (a node the fold
     did not reach, e.g. in a test that builds a graph without folding).
     ``enablement`` is the per-node opt-in map; a node absent from it is stored
-    ``enabled``. Every node this effort produces is ``enabled`` (no producer of
-    disabled nodes ships, R7); the map is the seam the plugin rebuild fills, and
-    the finalize fold already distributes a disabled dependency's state.
+    ``enabled``. ``finalize`` derives it as a pure projection of the composed
+    enablement-source marks (a node is ``disabled`` iff some injected source
+    marks it), so a disabled node is producible now; a build with no sources
+    yields all-``enabled``. This builder only STORES the projected axis (it
+    never recomputes it); the finalize fold distributes a disabled dependency's
+    state and its carried reason.
     """
     from agentworks.resources.reference import ReferenceEntry
 
@@ -307,9 +373,9 @@ _CAPABILITY_KINDS = frozenset(
 @runtime_checkable
 class _ReadinessResource(Protocol):
     """A consuming resource that self-determines its readiness from its
-    dependencies' states (today only ``vm-site``). The fold dispatches on this
-    structural shape, so a resource that opts out (implements no ``not_ready``)
-    is simply always ready."""
+    dependencies' states (``vm-site`` and ``git-credential``). The fold
+    dispatches on this structural shape, so a resource that opts out
+    (implements no ``not_ready``) is simply always ready."""
 
     def not_ready(self, deps: Mapping[tuple[str, str], DependencyState]) -> Readiness: ...
 
@@ -318,6 +384,7 @@ def fold_readiness(
     resources: Mapping[str, Mapping[str, object]],
     all_outbound: Mapping[tuple[str, str], Sequence[ResourceReference]],
     enablement: Mapping[tuple[str, str], Enablement] | None = None,
+    disabled_marks: Mapping[tuple[str, str], DisabledMark] | None = None,
 ) -> dict[tuple[str, str], Readiness]:
     """Compute each present node's readiness verdict, dependency-first.
 
@@ -333,15 +400,20 @@ def fold_readiness(
     ``enabled``): the seam the plugin rebuild fills. A DISABLED dependency is
     handed to its dependents with ``readiness=None`` (enablement is the axis
     that answers for it, LLD c), so a propagating dependent (``vm-site``) reports
-    the "enable its unit" hint. The fold imposes NO propagation rule (R4): it
-    only distributes states; each node's hook decides its own verdict. Returns
-    the verdict map, which finalize hands to :func:`build_graph` and grows for
-    late-materialized nodes.
+    the disabled hint. ``disabled_marks`` (defaulted to ``None``, treated empty)
+    supplies the disabling reason for a disabled dependency, threaded onto its
+    :class:`DependencyState.disabled_reason` so the propagating hint reads the
+    remediation clause (e.g. "enable plugin `<name>`") rather than the generic
+    "enable its unit" fallback; it never changes which node is disabled (that is
+    ``enablement``'s job), so it is purely additive. The fold imposes NO
+    propagation rule (R4): it only distributes states; each node's hook decides
+    its own verdict. Returns the verdict map, which finalize hands to
+    :func:`build_graph` and grows for late-materialized nodes.
     """
     present = {(kind, name) for kind, kind_dict in resources.items() for name in kind_dict}
     readiness: dict[tuple[str, str], Readiness] = {}
     for key in _reverse_topo_order(present, all_outbound):
-        readiness[key] = node_readiness(key, resources, all_outbound, readiness, enablement)
+        readiness[key] = node_readiness(key, resources, all_outbound, readiness, enablement, disabled_marks)
     return readiness
 
 
@@ -351,6 +423,7 @@ def node_readiness(
     all_outbound: Mapping[tuple[str, str], Sequence[ResourceReference]],
     readiness: Mapping[tuple[str, str], Readiness],
     enablement: Mapping[tuple[str, str], Enablement] | None = None,
+    disabled_marks: Mapping[tuple[str, str], DisabledMark] | None = None,
 ) -> Readiness:
     """One node's readiness verdict, given the verdicts of its dependencies.
 
@@ -358,11 +431,15 @@ def node_readiness(
     c); a ready placeholder is stored, and the node is instead handed to its
     dependents with ``readiness=None``. An enabled capability node computes from
     its impl (config-independent host support, LLD c's table). An enabled
-    consuming resource with a ``not_ready(deps)`` hook (today only ``vm-site``)
-    is handed its dependencies' ``DependencyState``s and decides for itself. Any
-    other node (a secret, a template, a resource that opts out) is ready.
-    Exposed (not just the fold's inner loop) so finalize's materialize pass can
-    fold a single late-materialized node the same way.
+    consuming resource with a ``not_ready(deps)`` hook (``vm-site`` and
+    ``git-credential``) is handed its dependencies' ``DependencyState``s and
+    decides for itself. Any other node (a secret, a template, a resource that
+    opts out) is ready. Exposed (not just the fold's inner loop) so finalize's
+    materialize pass can fold a single late-materialized node the same way.
+    ``disabled_marks`` (defaulted, treated empty) supplies the disabling reason
+    threaded onto a disabled dependency's ``DependencyState.disabled_reason``;
+    omitting it (a direct test call) leaves the reason ``None`` and a
+    propagating hook reads its generic fallback, so the parameter is additive.
     """
     opt_in = enablement or {}
     if opt_in.get(key, Enablement.enabled) is Enablement.disabled:
@@ -382,10 +459,12 @@ def node_readiness(
             # does not consult never becomes a missing key (LLD c).
             continue
         dep_enabled = opt_in.get(target, Enablement.enabled) is Enablement.enabled
+        mark = None if dep_enabled else (disabled_marks or {}).get(target)
         deps[target] = DependencyState(
             enablement=Enablement.enabled if dep_enabled else Enablement.disabled,
             readiness=readiness[target] if dep_enabled else None,
             impl=_impl_for(*target),
+            disabled_reason=mark.reason if mark is not None else None,
         )
     return resource.not_ready(deps)
 

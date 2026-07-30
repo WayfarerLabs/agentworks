@@ -103,9 +103,11 @@ class VMSiteDecl(DeclaredResource):
         ``not_ready`` classmethod off the graph-carried impl, never building an
         instance (which would re-run the throwing validator: the B1 loop).
 
-        The chain, by owner: a DISABLED platform yields the "enable its unit"
-        hint read off its own state (R7; exercised only by the fixture, since
-        nothing produces a disabled node this effort); a not-ready platform
+        The chain, by owner: a DISABLED platform yields a disabled hint whose
+        remediation tail is the carried ``disabled_reason`` (e.g. "enable plugin
+        `<name>`" from the plugin source), falling back to "enable its unit" when
+        no source supplied a reason (a direct test that disables without a
+        source); a not-ready platform
         (host-unsupported) propagates its verdict verbatim (the platform's own
         readiness reason already names it, e.g. "platform 'wsl2' is unsupported
         here: Windows only", so re-wrapping would double the naming); otherwise
@@ -120,7 +122,8 @@ class VMSiteDecl(DeclaredResource):
 
         platform = deps[("vm-platform", self.platform)]
         if platform.enablement is Enablement.disabled:
-            return Readiness.blocked(f"depends on vm-platform '{self.platform}', which is disabled; enable its unit")
+            tail = platform.disabled_reason or "enable its unit"
+            return Readiness.blocked(f"depends on vm-platform '{self.platform}', which is disabled; {tail}")
         if platform.readiness is not None and not platform.readiness.is_ready:
             return platform.readiness
         if platform.impl is None:

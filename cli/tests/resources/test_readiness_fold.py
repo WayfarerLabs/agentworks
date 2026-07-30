@@ -4,22 +4,56 @@ Pins the fold's verdicts (LLD c), the B1 property (the fold is total over a
 malformed ``platform_config`` because ``not_ready`` never constructs), the
 readiness gating of the finalize ``validate`` pass (R9.4) and of
 materialization (R12, for both the not-ready and the disabled referrer), the
-enablement-axis DISTRIBUTION through the fold end to end via the
-``_node_enablement`` seam (R7), and that readiness is independent of validity
+enablement-axis DISTRIBUTION through the fold end to end via the injected
+enablement-source seam (R7/R13), and that readiness is independent of validity
 (R5).
+
+The disabled-node cases inject a stub :func:`_source_disabling` through the
+shipped ``finalize(enablement_sources=...)`` seam (the refactor's original cases
+monkeypatched the removed ``_node_enablement`` method; the fold behavior they
+pin is unchanged, only the mechanism migrated). The plugin source's specific
+"enable plugin `<name>`" reason and the multi-source composition are pinned in
+``tests/plugins/test_enablement_producer.py``.
 """
 
 from __future__ import annotations
 
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 
 from agentworks.errors import ConfigError
-from agentworks.resources.graph import DependencyState, Enablement, Readiness
+from agentworks.resources.graph import DependencyState, DisabledMark, Enablement, Readiness
 from agentworks.resources.origin import Origin
 from agentworks.resources.registry import Registry
 from agentworks.vms.sites import VMSiteDecl
+
+if TYPE_CHECKING:
+    from collections.abc import Mapping
+
+    from agentworks.resources.graph import EnablementSource
+
+
+def _source_disabling(*keys: tuple[str, str], reason: str = "enable its unit") -> EnablementSource:
+    """A stub enablement source disabling ``keys`` with a generic ``reason``.
+
+    Injected via ``finalize(enablement_sources=[...])`` to drive the fold's
+    distribution of a disabled dependency through the REAL shipped seam. The
+    default ``reason`` reproduces the pre-migration verdicts byte-for-byte (the
+    old hardcoded "enable its unit" tail); a specific reason is exercised by the
+    plugin-source tests. Reads the present rows like a real source, so it marks
+    only nodes that exist.
+    """
+
+    def _source(resources: Mapping[str, Mapping[str, object]]) -> dict[tuple[str, str], DisabledMark]:
+        return {
+            (kind, name): DisabledMark(reason=reason, source="test-stub")
+            for kind, name in keys
+            if name in resources.get(kind, {})
+        }
+
+    return _source
 
 
 def _finalized(*sites: VMSiteDecl) -> Registry:
@@ -79,16 +113,16 @@ def test_not_ready_platform_dependency_propagates_its_reason() -> None:
     assert verdict.reason == "platform 'wsl2' is unsupported here: Windows only"
 
 
-def test_disabled_platform_node_folds_end_to_end_to_enable_its_unit(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_disabled_platform_node_folds_end_to_end_to_enable_its_unit() -> None:
     """R7 end-to-end: the FOLD distributes a disabled dependency's state, not
     just the leaf ``not_ready`` logic. A registry is finalized with the lima
-    platform node injected DISABLED via the ``_node_enablement`` seam; the
-    fold then hands the (remote-ready) site a disabled platform
-    ``DependencyState``, and the site's stored ``readiness_of`` verdict, the
-    graph's source of truth, is the "enable its unit" hint. vm_host is set so
-    the site would be ready if the platform were enabled, isolating the
-    enablement propagation from the tool check. This is the exact seam the
-    plugin rebuild fills."""
+    platform node injected DISABLED via a stub enablement source; the fold then
+    hands the (remote-ready) site a disabled platform ``DependencyState``, and
+    the site's stored ``readiness_of`` verdict, the graph's source of truth, is
+    the disabled hint. vm_host is set so the site would be ready if the platform
+    were enabled, isolating the enablement propagation from the tool check. The
+    stub's default reason reproduces the original "enable its unit" verdict; the
+    plugin source's specific reason is pinned in the producer tests."""
     from agentworks.capabilities import vm_platform as vp
 
     registry = Registry.empty()
@@ -99,29 +133,21 @@ def test_disabled_platform_node_folds_end_to_end_to_enable_its_unit(monkeypatch:
         VMSiteDecl(name="s", platform="lima", platform_config={"vm_host": "me@box"}),
         Origin.operator_declared(file=Path("sites.yaml"), line=1),
     )
-    base = registry._node_enablement
-
-    def _with_disabled_lima() -> dict[tuple[str, str], Enablement]:
-        m = base()
-        m[("vm-platform", "lima")] = Enablement.disabled
-        return m
-
-    monkeypatch.setattr(registry, "_node_enablement", _with_disabled_lima)
-    registry.finalize()
+    registry.finalize(enablement_sources=[_source_disabling(("vm-platform", "lima"))])
 
     verdict = registry.graph.readiness_of("vm-site", "s")
     assert verdict.reason == "depends on vm-platform 'lima', which is disabled; enable its unit"
 
 
-def test_disabled_secret_backend_is_excluded_from_the_active_chain(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_disabled_secret_backend_is_excluded_from_the_active_chain() -> None:
     """R7 / LLD d: the enablement seam reaches secret resolution too. A
-    present-but-DISABLED ``secret-backend`` (onepassword injected disabled via
-    the ``_node_enablement`` seam) is dormant: ``active_backends`` excludes it
-    from the chain it builds, so resolution never attempts it, exactly as an
+    present-but-DISABLED ``secret-backend`` (onepassword injected disabled via a
+    stub enablement source) is dormant: ``active_backends`` excludes it from the
+    chain it builds, so resolution never attempts it, exactly as an
     absent-from-chain backend is excluded, and WITHOUT a readiness warning (it
     is an opt-out, not a can't-run-here). ``enablement_of`` reports it disabled
-    while its fold readiness stays a ready placeholder. Inert today (no producer
-    ships), this is the axis the plugin rebuild fills."""
+    while its fold readiness stays a ready placeholder. This is the axis the
+    plugin source fills."""
     from types import SimpleNamespace
     from typing import cast
 
@@ -131,15 +157,7 @@ def test_disabled_secret_backend_is_excluded_from_the_active_chain(monkeypatch: 
 
     registry = Registry.empty()
     secret_backends.publish_to(registry)
-    base = registry._node_enablement
-
-    def _with_disabled_onepassword() -> dict[tuple[str, str], Enablement]:
-        m = base()
-        m[("secret-backend", "onepassword")] = Enablement.disabled
-        return m
-
-    monkeypatch.setattr(registry, "_node_enablement", _with_disabled_onepassword)
-    registry.finalize()
+    registry.finalize(enablement_sources=[_source_disabling(("secret-backend", "onepassword"))])
 
     # The enablement axis reads disabled; the fold still stored a ready
     # placeholder (enablement, not readiness, answers for a disabled node).
@@ -151,14 +169,14 @@ def test_disabled_secret_backend_is_excluded_from_the_active_chain(monkeypatch: 
     assert chain == ["prompt"]  # onepassword excluded (disabled), never built into an ActiveBackend
 
 
-def test_r9_9_mapping_to_disabled_backend_is_inert_until_enabled(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_r9_9_mapping_to_disabled_backend_is_inert_until_enabled() -> None:
     """R9.9 disabled sub-clause: the finalize ``validate`` pass validates a
     secret's mapping only for a present AND ENABLED backend. A malformed
     onepassword mapping is INERT while onepassword is disabled (the build
     succeeds) and FAILS once it is enabled. onepassword is injected disabled via
-    the ``_node_enablement`` seam, the same axis materialization-gating and
+    a stub enablement source, the same axis materialization-gating and
     resolution consult, so validation no longer needs re-touching for the
-    plugin rebuild's disabled units."""
+    plugin source's disabled units."""
     from agentworks.secrets import backends as secret_backends
     from agentworks.secrets.base import SecretDecl
 
@@ -171,16 +189,8 @@ def test_r9_9_mapping_to_disabled_backend_is_inert_until_enabled(monkeypatch: py
             SecretDecl(name="vaulted", description="a vaulted key", backend_mappings={"onepassword": "not-an-op-uri"}),
             Origin.operator_declared(file=Path("c.toml"), line=1),
         )
-        if disable_onepassword:
-            base = registry._node_enablement
-
-            def _seam() -> dict[tuple[str, str], Enablement]:
-                m = base()
-                m[("secret-backend", "onepassword")] = Enablement.disabled
-                return m
-
-            monkeypatch.setattr(registry, "_node_enablement", _seam)
-        registry.finalize()
+        sources = [_source_disabling(("secret-backend", "onepassword"))] if disable_onepassword else []
+        registry.finalize(enablement_sources=sources)
         return registry
 
     # Disabled onepassword: its malformed mapping is inert, the build succeeds.
@@ -320,9 +330,9 @@ def test_r12_disabled_referrer_does_not_materialize_its_secret(monkeypatch: pyte
     """R12 for the DISABLED case: a disabled node's config-implied secret does
     not materialize either, even when the node's own readiness would be ready.
     ``has_ready_referrer`` must not count a disabled referrer (its readiness is
-    a placeholder / not computed). The site is injected disabled via the
-    ``_node_enablement`` seam; its proxmox platform ``not_ready`` is ready, so
-    only enablement keeps the token out of the registry."""
+    a placeholder / not computed). The site is injected disabled via a stub
+    enablement source; its proxmox platform ``not_ready`` is ready, so only
+    enablement keeps the token out of the registry."""
     from agentworks.capabilities import vm_platform as vp
     from agentworks.capabilities.vm_platform.proxmox import ProxmoxPlatform
 
@@ -345,14 +355,6 @@ def test_r12_disabled_referrer_does_not_materialize_its_secret(monkeypatch: pyte
         ),
         Origin.operator_declared(file=Path("sites.yaml"), line=1),
     )
-    base = registry._node_enablement
-
-    def _with_disabled_site() -> dict[tuple[str, str], Enablement]:
-        m = base()
-        m[("vm-site", "off-px")] = Enablement.disabled
-        return m
-
-    monkeypatch.setattr(registry, "_node_enablement", _with_disabled_site)
-    registry.finalize()
+    registry.finalize(enablement_sources=[_source_disabling(("vm-site", "off-px"))])
 
     assert not _present(registry, "secret", "tok-off")

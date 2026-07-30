@@ -78,6 +78,19 @@ def resolve_git_credential_providers(
                 entity_kind="git-credential",
                 entity_name=name,
             )
+        # A disabled provider cannot be constructed even if a resource names it
+        # (R14): read the credential's stored propagated verdict off the graph
+        # (the ``not_ready`` hook already folded the provider's disabled state,
+        # so the "enable plugin `<name>`" reason is in hand), mirroring
+        # ``ensure_site_ready``. No separate origin lookup needed.
+        readiness = registry.graph.readiness_of("git-credential", name)
+        if not readiness.is_ready:
+            raise StateError(
+                f"git-credential '{name}' is not ready: {readiness.reason}",
+                entity_kind="git-credential",
+                entity_name=name,
+                hint="`agw doctor` lists each git-credential's state; enable the required plugin or use a ready one",
+            )
         provider_cls = GIT_CREDENTIAL_PROVIDER_REGISTRY.get(cred_config.provider)
         if provider_cls is None:
             # Unknown provider names are caught by the framework's

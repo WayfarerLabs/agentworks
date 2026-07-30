@@ -109,22 +109,22 @@ contributions first become present-but-disabled, exercised via a fixture whose r
 a test (Phase 5 wires it into `build_registry`), and where the two un-wired kinds' consumers start
 honoring enablement.
 
-- [ ] Reason-carrying enablement: extend the refactor's `Enablement`/disabled state with an optional
+- [x] Reason-carrying enablement: extend the refactor's `Enablement`/disabled state with an optional
       **reason** + **source identity** (additive; the fold/gate/consumers are untouched except where
       a dependent reads the hint). The vm-site's "enable its unit" hint reads the carried reason, so
       it renders "enable plugin `<name>`".
-- [ ] Enablement becomes a **composition over sources**:
+- [x] Enablement becomes a **composition over sources**:
       `(rows) -> Mapping[(kind,name),     DisabledMark]` per source; a node is disabled if any
       source disables it (first-source-wins the reason, deterministic per the LLD); all-enabled when
       no source fires. **Layering:** the `Registry` stays config-agnostic; `build_registry`
       constructs the sources bound to config and injects them at finalize (a defaulted
       `enablement_sources` input replacing the no-arg `_node_enablement()`; the refactor's 4
       monkeypatch tests migrate to a stub source).
-- [ ] The **plugin source**: a `system-plugin`-origin row whose `plugin` is not in
+- [x] The **plugin source**: a `system-plugin`-origin row whose `plugin` is not in
       `config.plugins_enabled` is disabled with the remediation reason "enable plugin `<name>`" (the
       doctor roster, not this mark, renders the "not enabled in [plugins]" state). Reads frozen row
       origins + the bound enabled set; no new probe.
-- [ ] **Close the consumer-gating gap for the two un-wired kinds (R14), per self-determined
+- [x] **Close the consumer-gating gap for the two un-wired kinds (R14), per self-determined
       readiness:** `git-credential` gains a `not_ready(deps)` hook that propagates its single
       provider's disabled state (mirroring `vm-site`) plus a use-time refusal at the provider
       resolution sites (`vms/initializer/credentials.py`, `git_credentials/__init__.py`);
@@ -138,7 +138,7 @@ honoring enablement.
       `pending_session_node` / `live_session_node` cannot silently bypass it: a comment on both
       factories pointing at `ensure_harness_enabled`, plus a test asserting those factories' only
       callers gate (analogous to the `CAPABILITY_ADAPTERS.keys()` adapter-drift guard).
-- [ ] Tests: a not-opted-in plugin capability node reads `enablement_of == disabled` with the plugin
+- [x] Tests: a not-opted-in plugin capability node reads `enablement_of == disabled` with the plugin
       reason; **each of the four kinds is proven through its actual consumer**, a `vm-site` is
       not-ready with "enable plugin `<name>`" (existing fold); a disabled plugin backend is excluded
       from resolution/validation; a `git-credential` on a disabled plugin provider is not-ready and

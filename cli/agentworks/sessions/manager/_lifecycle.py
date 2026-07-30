@@ -302,6 +302,14 @@ def restart_session(
                 entity_name=session.agent_name,
             )
         agent_node = live_agent_node(agent_row, vm_node)
+    # Gate a disabled plugin harness at USE (R14, the secret model): a live
+    # session on a disabled harness refuses to restart / reattach with the
+    # enable-plugin error. The gate lives at this call site (not inside
+    # ``live_session_node``, which threads no registry); a drift guard pins that
+    # every caller of the node factory gates.
+    from agentworks.capabilities.harness import ensure_harness_enabled
+
+    ensure_harness_enabled(registry, template.harness)
     session_node = live_session_node(
         session,
         template,

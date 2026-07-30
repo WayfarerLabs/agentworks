@@ -69,6 +69,12 @@ def remote_advisories(registry: Registry, url: str) -> list[str]:
     seen: set[str] = set()
     advisories: list[str] = []
     for name, cred in registry.iter_kind_items("git-credential"):
+        # A disabled-provider credential does not advise (R14): its provider is
+        # opted out, so this best-effort preflight skips it, exactly as it skips
+        # a provider with no seated impl below. Reads the stored verdict off the
+        # graph (the propagate hook folded the provider's disabled state).
+        if not registry.graph.is_ready("git-credential", name):
+            continue
         provider_cls = GIT_CREDENTIAL_PROVIDER_REGISTRY.get(cred.provider)
         if provider_cls is None:
             continue

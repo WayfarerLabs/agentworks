@@ -28,7 +28,14 @@ from agentworks.resources.kind import KIND_REGISTRY
 if TYPE_CHECKING:
     from collections.abc import Iterator, Mapping, Sequence
 
-    from agentworks.resources.graph import BuildContext, DependencyGraph, Enablement, Readiness
+    from agentworks.resources.graph import (
+        BuildContext,
+        DependencyGraph,
+        DisabledMark,
+        Enablement,
+        EnablementSource,
+        Readiness,
+    )
     from agentworks.resources.origin import Origin
     from agentworks.resources.reference import ReferenceEntry, ResourceReference
 
@@ -231,8 +238,18 @@ class Registry:
 
     # -- Finalize phase ------------------------------------------------
 
-    def finalize(self) -> None:
+    def finalize(self, enablement_sources: Sequence[EnablementSource] = ()) -> None:
         """Run the framework pass over published Resources, then freeze.
+
+        ``enablement_sources`` is the injected list of enablement sources
+        (LLD b): each is an opaque ``(rows) -> {(kind, name): DisabledMark}``
+        callable, composed (first-source-wins the reason) into the disabled-node
+        mark map, of which the binary per-node ``enablement`` map is a pure
+        projection (disabled iff a mark exists). Defaulted to empty, so every
+        existing ``finalize()`` call yields all-enabled, exactly as the landed
+        refactor did. The ``Registry`` stays config-agnostic: a config-bound
+        source (the plugin opt-in source) is constructed by ``build_registry``
+        and passed in, never imported here.
 
         The passes over the single retained graph (LLD b), in order:
 
@@ -290,7 +307,13 @@ class Registry:
         """
         if self._frozen:
             raise RuntimeError("registry has already been finalized")
-        from agentworks.resources.graph import build_context, build_graph, fold_readiness
+        from agentworks.resources.graph import (
+            Enablement,
+            build_context,
+            build_graph,
+            compose_enablement,
+            fold_readiness,
+        )
 
         # 0: reserved-defaults. Seed always-materialize rows so the build
         # walk sees them alongside operator-published ones.
@@ -323,15 +346,24 @@ class Registry:
         # 3: cycle-detect over the built edge map (no re-walk).
         _detect_cycles(all_outbound, self._present_keys())
 
-        # 4: fold readiness for the present nodes (LLD c). ``enablement`` is
-        # the opt-in seam: all-enabled today (no producer, R7), overridable so
-        # the fold's distribution of a disabled dependency is exercisable and
-        # the plugin rebuild has a single place to fill.
-        enablement = self._node_enablement()
-        readiness = fold_readiness(self._resources, all_outbound, enablement)
+        # 4: fold readiness for the present nodes (LLD c). ``marks`` is the
+        # single source of truth: compose the injected enablement sources over
+        # the present rows (all-enabled when none fire). The binary
+        # ``enablement`` map the fold / materialization gate / ``build_graph`` /
+        # ``_validate_resources`` consume is a PURE PROJECTION of ``marks``
+        # (disabled iff a mark exists), so "which nodes are disabled" and "why"
+        # never drift; ``marks`` also flows to the fold as ``disabled_marks`` so
+        # a propagating dependent's hint reads the carried reason.
+        marks = compose_enablement(enablement_sources, self._resources)
+        enablement = {
+            key: (Enablement.disabled if key in marks else Enablement.enabled)
+            for kind, kind_dict in self._resources.items()
+            for key in ((kind, name) for name in kind_dict)
+        }
+        readiness = fold_readiness(self._resources, all_outbound, enablement, marks)
 
         # 5: readiness-gated materialization (R12), looping to a fixpoint.
-        self._materialize_deferred(deferred, all_refs, all_outbound, readiness, enablement, context)
+        self._materialize_deferred(deferred, all_refs, all_outbound, readiness, enablement, marks, context)
 
         # 6: attach. Build the retained graph (inbound + readiness + enablement
         # on the node), then polish auto-declared descriptions off its inbound
@@ -410,20 +442,6 @@ class Registry:
     def _present_keys(self) -> set[tuple[str, str]]:
         """The ``(kind, name)`` of every currently-published Resource."""
         return {(kind, name) for kind, kind_dict in self._resources.items() for name in kind_dict}
-
-    def _node_enablement(self) -> dict[tuple[str, str], Enablement]:
-        """Each present node's enablement (opt-in) axis, the seam the fold and
-        graph consume.
-
-        Every node is ``enabled`` this effort: no producer of ``disabled`` nodes
-        ships (R7). This is the single, minimal extension point the plugin
-        rebuild fills to mark an opted-out unit ``disabled`` (and a test
-        overrides to exercise the fold's distribution of a disabled dependency's
-        state); nodes materialized after this pass default to ``enabled``.
-        """
-        from agentworks.resources.graph import Enablement
-
-        return {(kind, name): Enablement.enabled for kind, kind_dict in self._resources.items() for name in kind_dict}
 
     def _materialize_reserved_defaults(self) -> None:
         """Seed the registry with reserved-default rows for every kind
@@ -518,6 +536,7 @@ class Registry:
         all_outbound: dict[tuple[str, str], list[ResourceReference]],
         readiness: dict[tuple[str, str], Readiness],
         enablement: Mapping[tuple[str, str], Enablement],
+        disabled_marks: Mapping[tuple[str, str], DisabledMark],
         context: BuildContext,
     ) -> None:
         """Materialize deferred auto-declare targets, readiness-gated (R12),
@@ -533,6 +552,10 @@ class Registry:
         a late-materialized node's out-edges point only back into the settled
         set; a hard cap on iterations guards against a framework bug rather than
         truncating silently.
+
+        ``disabled_marks`` is forwarded to each late node's ``node_readiness``
+        call so a late-materialized dependent of a disabled node gets the carried
+        reason on the same additive path finalize's fold used (LLD b 4b).
         """
         from agentworks.resources.graph import Enablement, node_readiness
 
@@ -576,7 +599,9 @@ class Registry:
                 # emits its backend edges (the loop is load-bearing, LLD b).
                 self._walk_into(target, all_refs, all_outbound, context)
                 self._resolve_misses(all_refs, deferred)
-                readiness[target] = node_readiness(target, self._resources, all_outbound, readiness, enablement)
+                readiness[target] = node_readiness(
+                    target, self._resources, all_outbound, readiness, enablement, disabled_marks
+                )
             if not progressed:
                 # Every remaining deferred target lacks a ready referrer (R12):
                 # leave it unmaterialized.

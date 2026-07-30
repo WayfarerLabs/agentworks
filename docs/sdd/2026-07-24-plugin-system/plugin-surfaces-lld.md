@@ -111,7 +111,14 @@ Order inside the function:
    actually-seated impl. Note the refactor's R13 already made every built-in capability publish
    unconditionally, so there is no publish gate to honor and no `_BUILTIN_*`-vs-full-registry split
    (the earlier "host-support publish gate for plugin rows" review finding is **superseded**; there
-   is no gate).
+   is no gate). **Seating is likewise unconditional** and happens at import (the index calls
+   `register_plugin` for every shipped plugin, LLD a), independent of `[plugins]`, so a not-opted-in
+   plugin's impls are still seated in the four code registries. That is what keeps the R14 harness
+   use-gate (LLD b) reachable for a disabled plugin: `_resolve_template` -> `harness_for(name)`
+   finds the seated impl and reaches `ensure_harness_enabled` (which raises the enable-plugin
+   error), rather than hitting an unknown-harness `ConfigError` or `_impl_for`'s fail-fast. Phase
+   5's tests pin this: a disabled plugin's harness resolves through `_resolve_template` far enough
+   to hit the use-gate.
 
 3. **Bundled manifests for enabled plugins only** (R9). For each **enabled** `plugin` whose
    `plugin.manifests` is set, load and publish via the shared body (section 4), stamping each entry

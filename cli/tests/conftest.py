@@ -556,6 +556,16 @@ class _StubGraph:
     def is_ready(self, kind: str, name: str) -> bool:
         return True
 
+    def enablement_of(self, kind: str, name: str):  # noqa: ANN201 - mirrors DependencyGraph
+        # Every node is enabled in the stub (no plugin opt-out producer here),
+        # matching the real graph's every-node-is-enabled default. The session
+        # harness gate (``ensure_harness_enabled``) reads this at the build
+        # sites; a built-in harness (``shell``) stays enabled, so the gate is a
+        # no-op under the stub.
+        from agentworks.resources.graph import Enablement
+
+        return Enablement.enabled
+
 
 def stub_build_registry(monkeypatch: pytest.MonkeyPatch) -> None:
     """Stub ``agentworks.bootstrap.build_registry`` with ``_StubRegistry``.

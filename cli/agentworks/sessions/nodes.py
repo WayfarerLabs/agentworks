@@ -281,7 +281,13 @@ def pending_session_node(
     object is wired as the session's dependency edge AND as the held
     harness's ``target``, by construction, so the harness observes the
     orchestrator's ``mark_realized`` flip. Exactly one of ``agent`` /
-    ``admin`` must be given (the session-scope invariant)."""
+    ``admin`` must be given (the session-scope invariant).
+
+    HARNESS ENABLEMENT GATE (R14): this factory threads no registry, so it
+    cannot check whether the template's harness is a disabled plugin. Every
+    caller MUST call ``ensure_harness_enabled(registry, template.harness)``
+    first; the drift guard ``test_session_factory_callers_gate_the_harness``
+    pins that a future caller cannot silently bypass it."""
     if (agent is not None) == admin:
         raise StateError(
             f"session '{name}': exactly one of an agent node or "
@@ -315,7 +321,13 @@ def live_session_node(
     missing argument would structurally disable the fork's loud branch
     (an agent-mode row handed no agent node would silently probe the
     admin user instead of raising). The factory cross-checks both
-    directions and raises on mismatch."""
+    directions and raises on mismatch.
+
+    HARNESS ENABLEMENT GATE (R14): this factory threads no registry, so it
+    cannot check whether the template's harness is a disabled plugin. Every
+    caller MUST call ``ensure_harness_enabled(registry, template.harness)``
+    first; the drift guard ``test_session_factory_callers_gate_the_harness``
+    pins that a future caller cannot silently bypass it."""
     if row.agent_name is not None:
         if agent is None:
             raise StateError(

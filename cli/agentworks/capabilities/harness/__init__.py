@@ -28,6 +28,7 @@ __all__ = [
     "ClaudeCodeHarness",
     "Harness",
     "ShellHarness",
+    "ensure_harness_enabled",
     "harness_for",
     "publish_to",
     "require_commands",
@@ -62,6 +63,42 @@ def harness_for(name: str) -> type[Harness]:
     except KeyError:
         known = ", ".join(sorted(HARNESS_REGISTRY)) or "(none)"
         raise ConfigError(f"unknown harness {name!r}; known harnesses: {known}") from None
+
+
+def ensure_harness_enabled(registry: Registry, name: str) -> None:
+    """The typed using-a-disabled-harness error (R14, the secret model).
+
+    A ``session-template`` that names a disabled plugin harness STAYS ready
+    (it does not propagate, mirroring how a ``secret`` stays ready while its
+    backends are gated at resolution); the harness is instead gated at USE.
+    This reads the harness's opt-in axis off the graph
+    (``enablement_of("harness", name)``) and, when disabled, raises naming the
+    plugin to enable. The plugin name is derived from the harness row's
+    ``system-plugin`` origin (``registry.lookup(...).origin.plugin``), since the
+    mark's reason is not persisted on the frozen node; a disabled harness with a
+    non-plugin origin (a direct test) falls back to a generic tail.
+
+    Called at the two session-build call sites that hold the registry and the
+    resolved template (``_create_build.py`` create, ``_lifecycle.py`` restart /
+    reattach), NOT inside the node factories (which thread no registry) and NOT
+    on the read-only ``_display_harness`` listing path (an enabled template that
+    references a disabled harness still shows the harness name; only its use
+    fails).
+    """
+    from agentworks.errors import StateError
+    from agentworks.resources.graph import Enablement
+
+    if registry.graph.enablement_of("harness", name) is not Enablement.disabled:
+        return
+    origin = getattr(registry.lookup("harness", name), "origin", None)
+    plugin = getattr(origin, "plugin", None)
+    tail = f"enable plugin `{plugin}`" if plugin else "enable its unit"
+    raise StateError(
+        f"harness '{name}' is disabled; {tail}",
+        entity_kind="harness",
+        entity_name=name,
+        hint="`agw doctor` lists each plugin's state; enable the plugin providing this harness",
+    )
 
 
 def publish_to(registry: Registry) -> None:
