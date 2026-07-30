@@ -328,9 +328,13 @@ def test_prompt_false_opt_out_still_loads(tmp_path: Path) -> None:
     build_registry(config)  # no error
 
 
-def test_dormant_backend_mappings_not_validated(tmp_path: Path) -> None:
-    """Mappings addressed to backends outside the active chain stay
-    dormant and unvalidated, exactly as they stay unused."""
+def test_declared_mapping_for_non_opted_in_backend_is_validated_at_build(tmp_path: Path) -> None:
+    """R9.9: a declared mapping addressed to a PRESENT backend is validated at
+    build even when that backend is not in the active chain (the secret's own
+    ``validate``, run by the finalize pass, checks every present backend's
+    mapping, not just the opted-in ones). Here env-var is not opted in (chain
+    is prompt-only) but its structured mapping is malformed for env-var, so the
+    build now fails, where the old ``validate_chain`` left it dormant."""
     config = _config(
         tmp_path,
         """
@@ -342,7 +346,8 @@ def test_dormant_backend_mappings_not_validated(tmp_path: Path) -> None:
         backend_mappings.env-var = { vault = "Work" }
         """,
     )
-    build_registry(config)  # env-var not in chain -> not validated
+    with pytest.raises(ConfigError, match="env-var backend must be a non-empty string"):
+        build_registry(config)
 
 
 def test_prompt_rejects_structured_mapping_too(tmp_path: Path) -> None:

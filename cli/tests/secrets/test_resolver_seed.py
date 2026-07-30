@@ -32,8 +32,11 @@ class _EmptyRegistry:
 
 class _FakeBackend:
     def __init__(self, name: str, values: dict[str, str]) -> None:
+        from agentworks.resources.graph import Readiness
+
         self.name = name
         self.interactive = False
+        self.readiness = Readiness.ready()
         self._values = values
         self.resolve_calls: list[list[str]] = []
 

@@ -164,6 +164,15 @@ class DependencyGraph:
                     stack.append(target)
         return ordered
 
+    def impl_of(self, kind: str, name: str) -> object | None:
+        """The capability implementation stamped on this node (a class for
+        vm-platform/harness/git-credential-provider, an instance for
+        secret-backend), or ``None`` for a non-capability node. The sanctioned
+        way for a consumer (secret resolution, LLD d) to reach a capability's
+        code off the graph rather than probing the live registry (R11). Raises
+        ``KeyError`` on an unknown key."""
+        return self._nodes[(kind, name)].impl
+
     def readiness_of(self, kind: str, name: str) -> Readiness:
         """The node's stored readiness verdict. Tolerates a missing node
         (returns a default-ready verdict), matching the projection surfaces'

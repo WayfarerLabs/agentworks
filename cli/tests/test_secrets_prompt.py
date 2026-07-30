@@ -7,6 +7,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from agentworks.resources.graph import Readiness
 from agentworks.secrets import ActiveBackend, SecretDecl
 from agentworks.secrets.prompt import PromptBackend
 
@@ -15,7 +16,7 @@ if TYPE_CHECKING:
 
 
 def _backend() -> ActiveBackend:
-    return ActiveBackend(capability=PromptBackend())
+    return ActiveBackend(capability=PromptBackend(), readiness=Readiness.ready())
 
 
 def _set_interactive(monkeypatch: pytest.MonkeyPatch, value: bool) -> None:

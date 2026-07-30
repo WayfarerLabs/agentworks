@@ -112,6 +112,29 @@ class SecretDecl(DeclaredResource):
             emit(backend_name)
         return refs
 
+    def validate(self) -> None:
+        """Throwing per-mapping spec check, run by the finalize ``validate``
+        pass: every declared ``backend_mappings`` entry addressed to a PRESENT
+        backend is validated via that backend's ``validate_mapping`` (R9.9:
+        every declared mapping, not just the opted-in ones, so a stale mapping
+        for a configured-but-not-opted-in backend now fails at build).
+
+        Mirrors the other resources' ``validate`` (it reads the named
+        capability's impl to validate the blob it owns). The generic ``False``
+        opt-out is loop-owned and never validated; a mapping to an ABSENT
+        backend is the dangling edge the resolve pass already hard-errored
+        (R9.11), so it never reaches here. A present-but-disabled backend is
+        inert (no disabled producer ships, R7).
+        """
+        from agentworks.secrets.backends import SECRET_BACKEND_REGISTRY
+
+        for backend_name, mapping in self.backend_mappings.items():
+            if mapping is False:
+                continue
+            backend = SECRET_BACKEND_REGISTRY.get(backend_name)
+            if backend is not None:
+                backend.validate_mapping(f"secret {self.name!r}", mapping)
+
 
 DEFAULT_BACKEND_CHAIN: tuple[str, ...] = ("env-var", "prompt")
 """Default backend chain when ``[secret_config].backends`` is absent.

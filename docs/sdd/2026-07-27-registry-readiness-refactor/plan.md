@@ -261,22 +261,22 @@ sub-step.
       `site_disabled_reason` is deleted or it survives only as a thin `readiness_of` wrapper that
       takes the graph; the guard (phase 6) rejects the old recompute either way. Operator strings
       adopt the readiness vocabulary in phase 5.
-- [ ] **Op-time held-capability secret refs** (`Harness.secret_refs`,
+- [x] **Op-time held-capability secret refs** (`Harness.secret_refs`,
       `GitCredentialProvider.secret_name`): the single shared derivation is `dependencies(config)`;
       LLD (d) confirms single-derivation vs graph-threading before implementation.
-- [ ] **Secret resolution as a distinct layer** (component 6a, LLD d): resolution reads candidate
+- [x] **Secret resolution as a distinct layer** (component 6a, LLD d): resolution reads candidate
       backends off `edges_of`, applies the opt-in chain (`secret_config.backends`), walks
       `present ∧ enabled ∧ ready ∧ opted-in` candidates, and `batch_get`s per backend. Deletes the
       `validate_chain` chain re-derivation and the `SECRET_BACKEND_REGISTRY` probe. Skip semantics
       (R9.6): a not-ready opted-in backend is **skipped with a warning** and the chain falls
       through; the anti-masking **halt is kept** for a ready store's hard miss.
-- [ ] **`validate_chain` splits**: per-mapping spec validation moves into the finalize `validate`
+- [x] **`validate_chain` splits**: per-mapping spec validation moves into the finalize `validate`
       pass (every declared mapping to a present+enabled backend, R9.9); reachability stays an
       **eager post-finalize boundary check** reading the graph, scoped to operator-declared secrets,
       keyed on **would-attempt** (not readiness). R9.10 (backend rows gain inbound refs) and R9.11
       (a mapping to an unknown backend is now a hard error, with the noted doctor-granularity
       regression) fall out of the `secret -> secret-backend` edges.
-- [ ] Tests (DoD-behavior): R9.6 skip-with-warning + fall-through, halt-on-hard-miss preserved; R9.9
+- [x] Tests (DoD-behavior): R9.6 skip-with-warning + fall-through, halt-on-hard-miss preserved; R9.9
       (a stale mapping for a configured-but-not-opted-in backend now fails at build); R9.10 (backend
       "Referenced by" gains entries); R9.11 (unknown-backend mapping hard-errors; the doctor
       collapse); reachability invariants preserved (operator-declared-only scope, would-attempt

@@ -466,6 +466,53 @@ def test_unreachable_secret_raises(tmp_path: Path) -> None:
         build_registry(cfg)
 
 
+def test_reachability_scope_is_operator_declared_only(tmp_path: Path) -> None:
+    """Reachability preservation invariant (LLD d): the check covers
+    OPERATOR-declared secrets only. With ``backends = []`` every secret is
+    unreachable, but the only secrets present are auto-declared (the
+    ever-present tailscale-auth-key), so the build SUCCEEDS; an auto-declared
+    secret cannot invalidate a deliberate empty-chain opt-out (it surfaces at
+    use time instead)."""
+    cfg_file = tmp_path / "config.toml"
+    _write_base(
+        cfg_file,
+        extras="""
+        [secret_config]
+        backends = []
+        """,
+    )
+    cfg = load_config(cfg_file, warn_issues=False)
+    registry = build_registry(cfg)  # no raise: no operator-declared secret is unreachable
+    assert any(name == "tailscale-auth-key" for name, _ in registry.iter_kind_items("secret"))
+
+
+def test_reachability_keying_is_would_attempt_readiness_blind(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Reachability preservation invariant (LLD d): the build-time check is
+    keyed on WOULD-ATTEMPT (the frozen edges), READINESS-BLIND. A secret whose
+    only opted-in backend is onepassword, forced NOT-READY, is still reachable
+    (the build succeeds); it would fail only at resolution, exactly as today."""
+    from agentworks.resources.graph import Readiness
+    from agentworks.secrets.onepassword import OnePasswordBackend
+
+    monkeypatch.setattr(OnePasswordBackend, "not_ready", lambda self: Readiness.blocked("op CLI not installed"))
+    cfg_file = tmp_path / "config.toml"
+    _write_base(
+        cfg_file,
+        extras="""
+        [secrets.vaulted]
+        description = "only resolvable via onepassword"
+        backend_mappings.onepassword = "op://Work/item/field"
+
+        [secret_config]
+        backends = ["onepassword"]
+        """,
+    )
+    cfg = load_config(cfg_file, warn_issues=False)
+    registry = build_registry(cfg)  # no raise: not-ready does not make it unreachable
+    assert registry.graph.readiness_of("secret-backend", "onepassword").reason == "op CLI not installed"
+    assert any(name == "vaulted" for name, _ in registry.iter_kind_items("secret"))
+
+
 def test_unreachable_secret_error_message_and_hint(tmp_path: Path) -> None:
     """The unreachable-secret error keeps its message short (just the
     affected secret names) and surfaces remediation via the typed hint,

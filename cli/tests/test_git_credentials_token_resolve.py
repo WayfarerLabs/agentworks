@@ -240,3 +240,40 @@ def test_collect_git_tokens_credential_lines_use_resolved_value(
     provider = GitHubCredentialProvider("github")
     lines = provider.credential_lines(tokens["github"])
     assert lines == ["https://x-access-token:ghp_xyz@github.com"]
+
+
+def test_secret_name_equals_graph_secret_edge_single_derivation(
+    tmp_path: Path,
+    ssh_keys: tuple[Path, Path],
+) -> None:
+    """LLD d single-derivation invariant: a git-credential provider's op-time
+    ``secret_name`` (read from the construct-time ``_secret_refs`` cache, itself
+    sourced from ``dependencies(config)``) equals the secret edge the graph
+    froze for the same resource. Build-time edges and op-time refs agree by
+    construction (one derivation, not two), so no graph-threading to op time is
+    needed."""
+    cfg = _write_cfg(
+        tmp_path,
+        """\
+        [git_credentials.github]
+        type = "github"
+        token = "custom-tok"
+
+        [secret_config]
+        backends = ["env-var"]
+        """,
+        ssh_keys,
+    )
+    config = load_config(cfg, warn_issues=False)
+
+    from agentworks.bootstrap import build_registry
+    from agentworks.git_credentials.nodes import git_credential_node
+
+    registry = build_registry(config)
+    node = git_credential_node(registry, "github")
+    graph_secret_edges = tuple(
+        ref.name for ref in registry.graph.edges_of("git-credential", "github") if ref.kind == "secret"
+    )
+    assert node.provider.secret_name == "custom-tok"
+    assert graph_secret_edges == ("custom-tok",)
+    assert node.provider.secret_name in graph_secret_edges

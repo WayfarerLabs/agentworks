@@ -125,10 +125,12 @@ class SecretBackend(Protocol):
     ) -> None:
         """Validate one ``backend_mappings`` value addressed to this
         backend -- capability-owned config in its per-secret host.
-        Invoked by ``validate_chain`` for active-chain backends so a
-        malformed mapping fails at ``build_registry`` with config
-        vocabulary instead of at first resolution. The generic ``False``
-        opt-out never reaches this. ``owner`` is display context.
+        Invoked by the secret's own ``validate`` (run by the finalize
+        ``validate`` pass) for every PRESENT backend it addresses, so a
+        malformed mapping fails at ``build_registry`` with config vocabulary
+        instead of at first resolution (R9.9: every declared mapping, not just
+        the opted-in ones). The generic ``False`` opt-out never reaches this.
+        ``owner`` is display context.
 
         REQUIRED, not defaulted: Protocol bodies are not inherited by
         structural implementers, so every registered backend must
