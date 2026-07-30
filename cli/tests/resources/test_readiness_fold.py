@@ -162,7 +162,13 @@ def test_disabled_secret_backend_is_excluded_from_the_active_chain() -> None:
     # publish its capability row through the plugin path; the stub source below
     # then disables it, exactly as the plugin opt-in source would.
     publish_plugins(registry, cast("Config", SimpleNamespace(plugins_enabled=())))
-    registry.finalize(enablement_sources=[_source_disabling(("secret-backend", "onepassword"))])
+    # ``publish_plugins`` also emits the claude plugin's weak install-command
+    # row; disable it too so no weak row survives finalize unmarked (the
+    # weak-implies-disabled guard). The stub stands in for the real plugin
+    # source, which would disable every not-enabled plugin's rows.
+    registry.finalize(
+        enablement_sources=[_source_disabling(("secret-backend", "onepassword"), ("user-install-command", "claude"))]
+    )
 
     # The enablement axis reads disabled; the fold still stored a ready
     # placeholder (enablement, not readiness, answers for a disabled node).
@@ -201,8 +207,13 @@ def test_r9_9_mapping_to_disabled_backend_is_inert_until_enabled() -> None:
             SecretDecl(name="vaulted", description="a vaulted key", backend_mappings={"onepassword": "not-an-op-uri"}),
             Origin.operator_declared(file=Path("c.toml"), line=1),
         )
-        sources = [_source_disabling(("secret-backend", "onepassword"))] if disable_onepassword else []
-        registry.finalize(enablement_sources=sources)
+        # Always disable the claude plugin's weak install-command row (emitted
+        # by publish_plugins) so no weak row survives finalize unmarked;
+        # onepassword is disabled only on the disabled branch.
+        disabled = [("user-install-command", "claude")]
+        if disable_onepassword:
+            disabled.append(("secret-backend", "onepassword"))
+        registry.finalize(enablement_sources=[_source_disabling(*disabled)])
         return registry
 
     # Disabled onepassword: its malformed mapping is inert, the build succeeds.

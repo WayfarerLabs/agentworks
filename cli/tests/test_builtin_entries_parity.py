@@ -1,6 +1,6 @@
 """Parity oracle for the built-in apt / install-command entries (dissolve-catalog SDD).
 
-This module pins the resolved payloads of all 18 built-in apt /
+This module pins the resolved payloads of the built-in apt /
 install-command entries as constants, captured from the pre-migration
 built-in definition path. It is the permanent no-drift reference: the
 built-in entries now ship as bundled YAML manifests, and the parity test
@@ -31,7 +31,7 @@ if TYPE_CHECKING:
         UserInstallCommandEntry,
     )
 
-# -- The oracle: resolved payloads of the 18 built-in entries ------------------
+# -- The oracle: resolved payloads of the built-in entries ---------------------
 
 EXPECTED_APT_SOURCES: dict[str, dict[str, Any]] = {
     "github-cli": {
@@ -181,15 +181,11 @@ EXPECTED_USER_INSTALL_COMMANDS: dict[str, dict[str, Any]] = {
         "test_file": "~/.nvm/nvm.sh",
         "test_dir": None,
     },
-    "claude": {
-        "name": "claude",
-        "description": "Claude Code CLI",
-        "command": "curl -fsSL https://claude.ai/install.sh | bash",
-        "path": ["~/.local/bin"],
-        "test_exec": "claude",
-        "test_file": None,
-        "test_dir": None,
-    },
+    # NOTE: `claude` (the Claude Code CLI) is deliberately absent: it migrated
+    # out of the built-in bundle into the `claude` system plugin (Phase 9), so
+    # it now publishes a `system-plugin` row, present-but-disabled by default.
+    # `test_bundled_builtin_rows_match_oracle` pins that it is gone from the
+    # built-in bundle and now carries a system-plugin origin.
     "starship": {
         "name": "starship",
         "description": "Starship cross-shell prompt",
@@ -302,7 +298,10 @@ def test_bundled_builtin_rows_match_oracle(tmp_path: Path) -> None:
     srcs = kind_dict(registry, "apt-source")
     pkgs = kind_dict(registry, "apt-package")
     sys_cmds = kind_dict(registry, "system-install-command")
-    usr_cmds = kind_dict(registry, "user-install-command")
+    # The `claude` user-install-command now ships (present-but-disabled) from
+    # the `claude` system plugin, so it appears here with a system-plugin
+    # origin; scope the built-in oracle to the built-in-origin rows.
+    usr_cmds = {n: e for n, e in kind_dict(registry, "user-install-command").items() if e.origin.variant == "built-in"}
 
     assert {name: apt_source_payload(entry) for name, entry in srcs.items()} == EXPECTED_APT_SOURCES
     assert {name: apt_package_payload(entry) for name, entry in pkgs.items()} == EXPECTED_APT_PACKAGES
@@ -310,6 +309,14 @@ def test_bundled_builtin_rows_match_oracle(tmp_path: Path) -> None:
         name: install_command_payload(entry) for name, entry in sys_cmds.items()
     } == EXPECTED_SYSTEM_INSTALL_COMMANDS
     assert {name: install_command_payload(entry) for name, entry in usr_cmds.items()} == EXPECTED_USER_INSTALL_COMMANDS
+
+    # The migrated `claude` install-command is gone from the built-in bundle and
+    # now carries the `claude` system-plugin origin (Phase 9).
+    assert "claude" not in usr_cmds  # not a built-in row anymore
+    claude = kind_dict(registry, "user-install-command")["claude"]
+    assert claude.origin is not None
+    assert claude.origin.variant == "system-plugin"
+    assert claude.origin.plugin == "claude"
 
     # Provenance: every built-in row is a built-in origin pointed at the
     # bundled file for its kind (not the former agentworks.catalog source).

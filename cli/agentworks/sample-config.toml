@@ -209,14 +209,15 @@ ssh_private_key = "~/.ssh/id_ed25519"        # required: used for SSH connection
 # git-credential providers, secret backends) and optional resource manifests
 # that ship with agentworks but are separable and opt-in. List the plugins you
 # want enabled by name. A plugin NOT listed here still publishes its capability
-# rows, but they are disabled: a resource referencing one is not-ready with an
-# "enable plugin <name>" hint, and its bundled manifests are not loaded. Only
-# installed plugin names are valid here (an unknown name is a hard error). The
-# shipped build installs `onepassword` (the 1Password secret backend); more
-# bundles migrate to plugins over time. `agw doctor` shows a System plugins
-# roster with each plugin's state.
+# rows AND its bundled manifests, but they are disabled: a resource referencing
+# one is not-ready (or refused at use) with an "enable plugin <name>" hint,
+# never an unknown-name error. Only installed plugin names are valid here (an
+# unknown name is a hard error). The shipped build installs `onepassword` (the
+# 1Password secret backend) and `claude` (the Claude Code session harness and
+# its `claude` CLI install-command); more bundles migrate to plugins over time.
+# `agw doctor` shows a System plugins roster with each plugin's state.
 #[plugins]
-#enabled = ["onepassword"]                  # names of installed system plugins to enable
+#enabled = ["onepassword", "claude"]        # names of installed system plugins to enable
 
 # --- VM sites (azure, proxmox, remote Lima, ...) ---
 # Places to create VMs are declared as vm-site RESOURCES (YAML manifests
@@ -321,7 +322,9 @@ ssh_private_key = "~/.ssh/id_ed25519"        # required: used for SSH connection
 #mise_prune_on_reinit = true                # remove stale tool versions on reinit
 # -- Git --
 #git_force_safe_directory = true              # set safe.directory '*' for admin and agents
-# -- Claude Code (requires claude CLI on PATH, e.g. via user_install_commands) --
+# -- Claude Code (requires the claude CLI on PATH; the `claude` install-command
+#    ships with the opt-in `claude` system plugin, so `user_install_commands =
+#    ["claude"]` needs `[plugins] enabled = ["claude"]`) --
 #claude_marketplaces = ["https://github.com/WayfarerLabs/nerftools#4.1.0"]
 #claude_plugins = ["nerftools-default@nerftools"]
 
@@ -348,7 +351,9 @@ ssh_private_key = "~/.ssh/id_ed25519"        # required: used for SSH connection
 #mise_allow_unlocked = false
 #mise_install_before = "7d"
 #mise_prune_on_reinit = true
-# -- Claude Code (requires claude CLI on PATH, e.g. via user_install_commands) --
+# -- Claude Code (requires the claude CLI on PATH; the `claude` install-command
+#    ships with the opt-in `claude` system plugin, so `user_install_commands =
+#    ["claude"]` needs `[plugins] enabled = ["claude"]`) --
 #claude_marketplaces = ["https://github.com/WayfarerLabs/nerftools#4.1.0"]
 #claude_plugins = ["nerftools-default@nerftools"]
 
@@ -433,6 +438,9 @@ ssh_private_key = "~/.ssh/id_ed25519"        # required: used for SSH connection
 # `claude-code` harness runs Claude Code, resuming the session's previous
 # conversation on `agw session restart`. Its config is three optional fields:
 # permission_mode / model (forwarded to `claude`) and extra_args (raw tokens).
+# `claude-code` ships as the opt-in `claude` system plugin: enable it with
+# `[plugins] enabled = ["claude"]` (see System plugins above), otherwise
+# creating a session on this template is refused with the enable hint.
 #[session_templates.claude]
 #harness = "claude-code"
 #description = "Claude Code session"

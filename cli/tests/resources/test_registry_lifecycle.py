@@ -299,14 +299,15 @@ def test_build_registry_publishes_builtin_apt_and_install_entries(
         "system-install-command",
         "user-install-command",
     ):
-        rows = list(r.iter_kind(kind))
-        assert rows, f"expected at least one {kind} row from the bundled built-in manifests"
-        # The built-in rows are built-in. Operator overrides (if any)
-        # would re-publish the same name with operator-declared origin;
-        # the test's example_config doesn't exercise that path.
+        # The built-in rows are built-in. Operator overrides (if any) would
+        # re-publish the same name with operator-declared origin, and a migrated
+        # bundle (the ``claude`` user-install-command) publishes a system-plugin
+        # row; the test's example_config exercises neither, so scope the oracle
+        # to the built-in-origin rows.
+        rows = [row for row in r.iter_kind(kind) if row.origin is not None and row.origin.variant == "built-in"]
+        assert rows, f"expected at least one built-in {kind} row from the bundled built-in manifests"
         for row in rows:
             assert row.origin is not None
-            assert row.origin.variant == "built-in"
             assert row.origin.source is not None
             assert row.origin.source.startswith("agentworks.manifests.builtin/")
             assert row.origin.source.endswith(".yaml")

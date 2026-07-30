@@ -188,10 +188,13 @@ spec:
   (hoisted onto `harness = "shell"`); YAML manifests spell them under `harness_config`.
   `agw resource describe harness/shell` shows the harness row and the templates that reference it.
 
-The `claude-code` harness runs Claude Code as the session. It selects the launch-and-resume
-conventions in one line instead of restating command strings: `session create` starts a new Claude
-session, and `session restart` resumes the same conversation when its transcript still exists (and
-launches fresh when Claude never wrote one), so a restart continues where the session left off:
+The `claude-code` harness runs Claude Code as the session. It ships as the opt-in `claude` system
+plugin (see "System plugins" below), so a `session-template` naming it still lists ready, but
+creating a session on it is refused with an "enable plugin `claude`" hint until you set
+`[plugins] enabled = ["claude"]`. It selects the launch-and-resume conventions in one line instead
+of restating command strings: `session create` starts a new Claude session, and `session restart`
+resumes the same conversation when its transcript still exists (and launches fresh when Claude never
+wrote one), so a restart continues where the session left off:
 
 ```yaml
 apiVersion: agentworks/v1
@@ -215,11 +218,12 @@ spec:
 - The only requirement checked on the launch target is that `claude` is installed. The chosen action
   (resume vs new session) is announced in the pane on start, so it is never silent.
 
-`shell` and `claude-code` are the built-in harnesses, not the whole set the platform is built
-around. The `harness` kind is extensible: another tool or agent runtime, whatever the provider, is
-added as its own harness with its own `harness_config` vocabulary. `claude-code` above (and its
-Claude-specific `model` / `permission_mode` fields) is one worked example; the core assumes no
-particular runtime, and a session runs whatever harness its template selects.
+`shell` is the built-in default harness; `claude-code` ships as the opt-in `claude` system plugin.
+Neither is the whole set the platform is built around. The `harness` kind is extensible: another
+tool or agent runtime, whatever the provider, is added as its own harness with its own
+`harness_config` vocabulary. `claude-code` above (and its Claude-specific `model` /
+`permission_mode` fields) is one worked example; the core assumes no particular runtime, and a
+session runs whatever harness its template selects.
 
 ## Built-ins and overrides
 
@@ -236,13 +240,13 @@ policy is per kind:
   UNKNOWN platform (a typo, or an uninstalled plugin) is a hard error at load, not a self-disable.
 - **Secret backends** (`env-var`, `prompt`; `onepassword` ships as an opt-in system plugin, see
   below), **VM platforms** (`lima`, `wsl2`, `azure-vm`, `proxmox`), and **session harnesses**
-  (`shell`, `claude-code`): registered capabilities, shown as read-only rows. You cannot declare or
-  override them; secrets customize per secret via `backend_mappings`, platforms configure per site
-  via `platform_config`, and harnesses configure per session-template via `harness_config`. Every
-  installed platform publishes a row regardless of host support: a platform whose host requirements
-  are not met (e.g. `wsl2` off Windows) publishes a present, not-ready row (`agw resource list` and
-  `agw doctor` show it with the reason), and a site referencing it is not-ready rather than
-  erroring.
+  (`shell`; `claude-code` ships as the opt-in `claude` system plugin, see below): registered
+  capabilities, shown as read-only rows. You cannot declare or override them; secrets customize per
+  secret via `backend_mappings`, platforms configure per site via `platform_config`, and harnesses
+  configure per session-template via `harness_config`. Every installed platform publishes a row
+  regardless of host support: a platform whose host requirements are not met (e.g. `wsl2` off
+  Windows) publishes a present, not-ready row (`agw resource list` and `agw doctor` show it with the
+  reason), and a site referencing it is not-ready rather than erroring.
 
 ## System plugins
 

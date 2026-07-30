@@ -1,15 +1,21 @@
 """The ``harness`` capability: code-side handles for each
 ``session-template`` ``spec.harness`` value.
 
-Each harness implementation (``ShellHarness``, ``ClaudeCodeHarness``) is
-a ``Capability`` (see ``capabilities/README.md``): it validates its
-``harness_config``, owns the session's launch-target readiness, and
-produces the tmux pane command as its op (``start`` / ``restart``). The
-consuming resource is the ``session`` node, which HOLDS a harness
-instance and composes its readiness; that node lives in the ``sessions``
-domain, not here. Capabilities depend only on the framework, never on
-their consuming domain (FRD R1): this package imports neither
+Each harness implementation is a ``Capability`` (see
+``capabilities/README.md``): it validates its ``harness_config``, owns the
+session's launch-target readiness, and produces the tmux pane command as its
+op (``start`` / ``restart``). The consuming resource is the ``session`` node,
+which HOLDS a harness instance and composes its readiness; that node lives in
+the ``sessions`` domain, not here. Capabilities depend only on the framework,
+never on their consuming domain (FRD R1): this package imports neither
 ``sessions`` nor ``orchestration``.
+
+``ShellHarness`` is the sole core built-in (and the default). The
+``ClaudeCodeHarness`` (name ``claude-code``) now ships in the opt-in
+``claude`` system plugin (``agentworks.plugins.claude``); its adapter re-seats
+it into ``HARNESS_REGISTRY`` at import, so ``harness_for`` /
+``ensure_harness_enabled`` (which key by registry NAME, not the concrete
+class) still find it, while its ROW publishes with a ``system-plugin`` origin.
 """
 
 from __future__ import annotations
@@ -17,7 +23,6 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from agentworks.capabilities.harness.base import Harness, require_commands
-from agentworks.capabilities.harness.claude_code import ClaudeCodeHarness
 from agentworks.capabilities.harness.shell import ShellHarness
 
 if TYPE_CHECKING:
@@ -25,7 +30,6 @@ if TYPE_CHECKING:
 
 __all__ = [
     "HARNESS_REGISTRY",
-    "ClaudeCodeHarness",
     "Harness",
     "ShellHarness",
     "ensure_harness_enabled",
@@ -40,9 +44,14 @@ __all__ = [
 # ``dependencies`` (implied references) are invoked through this dict at
 # each source's blob boundary, and ``merge_config`` through it at
 # resolve; descriptor rows publish from it.
+#
+# ``shell`` is the sole core built-in (and the default harness). The
+# ``claude-code`` harness now ships as the ``claude`` system plugin
+# (``agentworks.plugins.claude``), whose adapter re-seats it here at import;
+# its ROW is published by ``plugins.publish_plugins`` with a ``system-plugin``
+# origin, so ``publish_to`` below skips it.
 HARNESS_REGISTRY: dict[str, type[Harness]] = {
     ShellHarness.name: ShellHarness,
-    ClaudeCodeHarness.name: ClaudeCodeHarness,
 }
 
 
@@ -102,19 +111,30 @@ def ensure_harness_enabled(registry: Registry, name: str) -> None:
 
 
 def publish_to(registry: Registry) -> None:
-    """Publish the known harness types into the registry.
+    """Publish the core built-in harness types into the registry.
 
     Each entry lands as a ``HarnessEntry`` row, built-in with source
     ``"agentworks.capabilities.harness"``. Read-only rows: a
     ``session-template`` ``spec.harness`` reference validates against
     them uniformly, and the harnesses list/describe like every other
     resource.
+
+    A harness seated by a system plugin (``claude-code`` via the ``claude``
+    plugin) keeps its impl in ``HARNESS_REGISTRY`` so the resolver can stamp it
+    onto the graph node, but its row is published by ``plugins.publish_plugins``
+    with a ``system-plugin`` origin. Skip those names here so the plugin is the
+    sole publisher of the row; publishing it here too would collide (built-in vs
+    system-plugin) at ``Registry.add``.
     """
     from agentworks.capabilities.harness.kinds import HarnessEntry
+    from agentworks.plugins.registration import plugin_seated_names
     from agentworks.resources import Origin
 
+    seated_by_plugin = plugin_seated_names("harness")
     code_origin = Origin.built_in(source="agentworks.capabilities.harness")
     for type_name in sorted(HARNESS_REGISTRY):
+        if type_name in seated_by_plugin:
+            continue
         registry.add(
             "harness",
             type_name,

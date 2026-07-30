@@ -244,11 +244,12 @@ declarable, so it exercises the origin flip, the harness use-gate, and the Phase
 one bundle. (Phase 8, onepassword, is the same minus the manifest and minus the Phase 7 dependency:
 a capability-only migration.) Shown once so the other three read as deltas:
 
-1. `git mv cli/agentworks/capabilities/harness/claude_code.py cli/agentworks/plugins/claude/claude_code.py`
+1. `git mv cli/agentworks/capabilities/harness/claude_code.py cli/agentworks/plugins/claude/harness.py`
    (plus a new `plugins/claude/__init__.py` and a `plugins/claude/manifests/` directory in the same
-   commit). `claude_code.py`'s imports
+   commit). `harness.py`'s imports
    (`from agentworks.capabilities.harness.base import Harness, require_commands`) already point at
-   the core base module that stays; no content change.
+   the core base module that stays; no content change. (The moved file is renamed to the role name
+   `harness.py`, matching `onepassword/backend.py`.)
 2. Move the manifest: extract the `claude` `user-install-command` document from
    `manifests/builtin/install-commands.yaml:60-69` into
    `plugins/claude/manifests/install-commands.yaml` (delete from the builtin bundle, add to the
@@ -257,7 +258,7 @@ a capability-only migration.) Shown once so the other three read as deltas:
 
    ```python
    from agentworks.plugins.base import Plugin
-   from agentworks.plugins.claude.claude_code import ClaudeCodeHarness
+   from agentworks.plugins.claude.harness import ClaudeCodeHarness
 
    PLUGIN = Plugin(
        name="claude",

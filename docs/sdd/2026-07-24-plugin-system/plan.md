@@ -308,7 +308,7 @@ Phase 7.
       the secret-backend enable-plugin hint, LLD b, and the one-line `plugin_seated_names` skip in
       the core `secret-backend` `publish_to` so the plugin-seated impl is not double-published; see
       migration-strategy section 2.)
-- [ ] **Phase 9: claude** (`claude-code` harness + the `claude` install-command manifest; needs
+- [x] **Phase 9: claude** (`claude-code` harness + the `claude` install-command manifest; needs
       Phase 7). First manifest-carrying migration, small (~6 harness test files + one manifest
       entry): the harness impl moves, core `HARNESS_REGISTRY` drops it, origin `system-plugin`;
       `shell` stays the default harness so the common path is unaffected; a `session-template` with

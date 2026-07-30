@@ -113,10 +113,17 @@ def test_shell_row_carries_the_builtin_origin(tmp_path: Path) -> None:
 
 
 def test_resource_list_surfaces_the_shell_row(tmp_path: Path) -> None:
+    """``shell`` is the only harness listed by default: ``claude-code`` now
+    ships as the opt-in ``claude`` system plugin, so its row is
+    present-but-disabled and hidden from the default list until enabled
+    (``--include-disabled`` surfaces it)."""
     cfg = load_config(_write_cfg(tmp_path / "config.toml"), warn_issues=False)
     registry = build_registry(cfg)
     listing = list_resources(registry, kinds=("harness",))
-    assert [(r.kind, r.name) for r in listing.rows] == [
+    assert [(r.kind, r.name) for r in listing.rows] == [("harness", "shell")]
+
+    with_disabled = list_resources(registry, kinds=("harness",), include_disabled=True)
+    assert [(r.kind, r.name) for r in with_disabled.rows] == [
         ("harness", "claude-code"),
         ("harness", "shell"),
     ]

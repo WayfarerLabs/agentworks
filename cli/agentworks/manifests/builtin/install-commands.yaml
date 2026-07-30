@@ -60,17 +60,6 @@ spec:
 apiVersion: agentworks/v1
 kind: user-install-command
 metadata:
-  name: claude
-  description: Claude Code CLI
-spec:
-  command: "curl -fsSL https://claude.ai/install.sh | bash"
-  path:
-    - ~/.local/bin
-  test_exec: claude
----
-apiVersion: agentworks/v1
-kind: user-install-command
-metadata:
   name: starship
   description: Starship cross-shell prompt
 spec:
