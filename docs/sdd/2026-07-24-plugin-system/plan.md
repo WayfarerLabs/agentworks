@@ -114,12 +114,12 @@ honoring enablement.
       a dependent reads the hint). The vm-site's "enable its unit" hint reads the carried reason, so
       it renders "enable plugin `<name>`".
 - [x] Enablement becomes a **composition over sources**:
-      `(rows) -> Mapping[(kind,name),     DisabledMark]` per source; a node is disabled if any
-      source disables it (first-source-wins the reason, deterministic per the LLD); all-enabled when
-      no source fires. **Layering:** the `Registry` stays config-agnostic; `build_registry`
-      constructs the sources bound to config and injects them at finalize (a defaulted
-      `enablement_sources` input replacing the no-arg `_node_enablement()`; the refactor's 4
-      monkeypatch tests migrate to a stub source).
+      `(rows) -> Mapping[(kind,name), DisabledMark]` per source; a node is disabled if any source
+      disables it (first-source-wins the reason, deterministic per the LLD); all-enabled when no
+      source fires. **Layering:** the `Registry` stays config-agnostic; `build_registry` constructs
+      the sources bound to config and injects them at finalize (a defaulted `enablement_sources`
+      input replacing the no-arg `_node_enablement()`; the refactor's 4 monkeypatch tests migrate to
+      a stub source).
 - [x] The **plugin source**: a `system-plugin`-origin row whose `plugin` is not in
       `config.plugins_enabled` is disabled with the remediation reason "enable plugin `<name>`" (the
       doctor roster, not this mark, renders the "not enabled in [plugins]" state). Reads frozen row
@@ -202,13 +202,17 @@ land; the fixture proves the whole path; no demo plugin ships.
 
 ## Closeout
 
-- [ ] All FRD requirements satisfied and test-pinned; the registry consumers verified under a real
-      disabled producer.
-- [ ] Load-bearing content promoted to permanent homes (`plugins/README.md`, the ADR); nothing
-      operator/contributor-facing depends on `docs/sdd/`.
-- [ ] `locked.md` written; the door for operator-explicit disable (R13) recorded for the follow-on.
+- [x] All FRD requirements satisfied and test-pinned; the registry consumers verified under a real
+      disabled producer. (Capstone verification pass: R1-R14 each satisfied with a named pinning
+      test, all four kinds gated through their real consumer, additive-ness intact.)
+- [x] Load-bearing content promoted to permanent homes (`plugins/README.md`, the ADR); nothing
+      operator/contributor-facing depends on `docs/sdd/`. (The R9 manifest known-limitation +
+      follow-on, previously only in the FRD, is now in ADR 0021 and the README per the capstone.)
+- [x] `locked.md` written; the door for operator-explicit disable (R13) recorded for the follow-on.
 - [x] The registry refactor's `locked.md` seam note reconciled (supersession addendum recorded:
       `_node_enablement()` -> injected `finalize(enablement_sources=...)`), per the PR design
       review.
-- [ ] When Phase 4 removes `_node_enablement()`, confirm the registry `locked.md` supersession note
-      (added at design time) still matches the shipped seam.
+- [x] When Phase 4 removes `_node_enablement()`, confirm the registry `locked.md` supersession note
+      (added at design time) still matches the shipped seam. (Confirmed: the method is removed and
+      `build_registry` injects `finalize(enablement_sources=[plugin_enablement_source(config)])`,
+      matching the addendum verbatim.)

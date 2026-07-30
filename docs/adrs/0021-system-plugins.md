@@ -55,9 +55,9 @@ not-opted-in plugin's rows are therefore **present-but-disabled**, not absent. T
 reference to one (an operator `vm-site` naming a not-enabled plugin's platform) resolve to
 **not-ready with a remediation hint, "enable plugin `<name>`"**, rather than an unknown-name hard
 error. An absent row could only produce the unhelpful unknown-name failure. Manifests, by contrast,
-publish for enabled plugins only: a not-opted-in plugin offers no resources an operator references
-by name, so gating publication is simpler than publish-then-disable and keeps its resources out of
-collision checks.
+publish for enabled plugins only (a scoped v1 limitation recorded under Negative consequences
+below): gating publication is simpler than publish-then-disable and keeps a not-opted-in plugin's
+resources out of collision checks.
 
 The disabled-hides / not-ready-shows default surface rule follows from the axis distinction:
 `agw resource list` hides `disabled` rows by default (off by opt-in) while still showing `not-ready`
@@ -111,6 +111,18 @@ raised up front, before anything publishes, never a `KeyError` from deep in publ
 - `[plugins]` now diverges from the soft-warn convention, so the codebase carries two
   config-strictness policies. The in-code comment and this ADR are the cost of keeping that
   divergence legible.
+- Capabilities and bundled manifests are treated asymmetrically for a not-opted-in plugin, and the
+  asymmetry is a known, scoped limitation. A capability publishes unconditionally (present-but-
+  disabled), so an operator resource referencing it gets the "enable plugin `<name>`" hint; a
+  bundled _declarable_ resource, by contrast, publishes only when the plugin is enabled. A
+  declarable resource is also referenceable by name (for example an operator `vm-template` with
+  `extends = <plugin-template>`), so referencing a not-enabled plugin's bundled resource yields the
+  registry's unknown-name hard error rather than the enable hint, the two sides are inconsistent for
+  a plugin that ships referenceable bundled resources. This is inert in the initial structure (the
+  shipped index is empty; no plugin ships bundled resources), so it is deferred: the follow-on that
+  ships the first plugin with referenceable bundled resources should move manifests to present-but-
+  disabled with enablement-aware collision (so a disabled plugin's resource never blocks an
+  operator's name), for symmetry with the capability side.
 
 ## Alternatives Considered
 
@@ -120,7 +132,9 @@ raised up front, before anything publishes, never a `KeyError` from deep in publ
 - **Gate publication on enablement (don't publish a not-opted-in plugin's capability rows).**
   Rejected: an absent row makes a reference to it an unknown-name hard error, losing the
   `enable plugin <name>` remediation. Present-but-disabled is what makes the friendly hint possible.
-  (Manifests are the deliberate exception, since they are named only by the plugin itself.)
+  (Manifests are the deliberate v1 exception, a known, scoped limitation recorded under Negative
+  consequences: a bundled declarable resource is also referenceable by name, so the follow-on should
+  bring manifests to present-but-disabled for symmetry.)
 - **Hard-code the plugin opt-in check instead of a composed source.** Rejected: it would make the
   operator-explicit-disable follow-on a fold rewrite rather than an added source, for no v1 saving.
 - **Follow the soft-warn convention for `[plugins]` unknown keys, for consistency.** Rejected: a

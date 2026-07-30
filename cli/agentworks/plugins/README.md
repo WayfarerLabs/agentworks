@@ -89,9 +89,14 @@ host). What "opted in" versus "not opted in" changes:
   plugin's platform) is **not-ready with the remediation "enable plugin `<name>`"**, never an
   unknown-name hard error. Publishing rows unconditionally is what makes that friendly hint
   possible: an absent row could only produce an unknown-name error.
-- **Manifests publish for enabled plugins only.** A not-opted-in plugin offers no resources an
-  operator references by name, so its manifest resources are simply absent (kept out of collision
-  checks against operator resources) until the plugin is enabled.
+- **Manifests publish for enabled plugins only.** A not-opted-in plugin's bundled resources are
+  simply absent (kept out of collision checks against operator resources) until the plugin is
+  enabled. This is a known, scoped asymmetry with the capability side: a bundled _declarable_
+  resource is also referenceable by name (for example a `vm-template` with
+  `extends = <plugin-template>`), so referencing a not-enabled plugin's bundled resource currently
+  yields an unknown-name error rather than the "enable plugin `<name>`" hint a capability gives. It
+  is inert until a plugin ships referenceable bundled resources; the follow-on that does should move
+  manifests to present-but-disabled for symmetry (see ADR 0021).
 
 An `[plugins] enabled` entry that is not an installed plugin (a typo, or an uninstalled plugin) is a
 config error raised up front, before anything publishes. Unknown keys in the `[plugins]` table are
