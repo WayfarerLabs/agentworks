@@ -110,6 +110,44 @@ def test_disabled_platform_node_folds_end_to_end_to_enable_its_unit(monkeypatch:
     assert verdict.reason == "depends on vm-platform 'lima', which is disabled; enable its unit"
 
 
+def test_disabled_secret_backend_is_excluded_from_the_active_chain(monkeypatch: pytest.MonkeyPatch) -> None:
+    """R7 / LLD d: the enablement seam reaches secret resolution too. A
+    present-but-DISABLED ``secret-backend`` (onepassword injected disabled via
+    the ``_node_enablement`` seam) is dormant: ``active_backends`` excludes it
+    from the chain it builds, so resolution never attempts it, exactly as an
+    absent-from-chain backend is excluded, and WITHOUT a readiness warning (it
+    is an opt-out, not a can't-run-here). ``enablement_of`` reports it disabled
+    while its fold readiness stays a ready placeholder. Inert today (no producer
+    ships), this is the axis the plugin rebuild fills."""
+    from types import SimpleNamespace
+    from typing import cast
+
+    from agentworks.config import Config
+    from agentworks.secrets import backends as secret_backends
+    from agentworks.secrets.resolve import active_backends
+
+    registry = Registry.empty()
+    secret_backends.publish_to(registry)
+    base = registry._node_enablement
+
+    def _with_disabled_onepassword() -> dict[tuple[str, str], Enablement]:
+        m = base()
+        m[("secret-backend", "onepassword")] = Enablement.disabled
+        return m
+
+    monkeypatch.setattr(registry, "_node_enablement", _with_disabled_onepassword)
+    registry.finalize()
+
+    # The enablement axis reads disabled; the fold still stored a ready
+    # placeholder (enablement, not readiness, answers for a disabled node).
+    assert registry.graph.enablement_of("secret-backend", "onepassword") is Enablement.disabled
+    assert registry.graph.readiness_of("secret-backend", "onepassword").is_ready
+
+    config = cast("Config", SimpleNamespace(secret_config_data=SimpleNamespace(backends=("onepassword", "prompt"))))
+    chain = [b.name for b in active_backends(config, registry)]
+    assert chain == ["prompt"]  # onepassword excluded (disabled), never built into an ActiveBackend
+
+
 # -- B1: the fold is total over a malformed block ------------------------------
 
 

@@ -42,6 +42,10 @@ def collect_secrets_for(
     """
     registry.lookup(*root)  # preserve the "unknown root raises KeyError" contract
     secret_decls: list[SecretDecl] = []
+    # ``reachable_from`` excludes the start node, so a secret-typed ``root`` is
+    # not in its own result. The old hand-rolled DFS included such a root; the
+    # divergence is deliberate and unobservable (no caller passes a secret root)
+    # and matches this function's contract that "the root itself isn't included".
     for kind, name in registry.graph.reachable_from(*root):
         if kind != "secret":
             continue

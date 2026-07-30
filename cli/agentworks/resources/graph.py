@@ -181,6 +181,16 @@ class DependencyGraph:
         node = self._nodes.get((kind, name))
         return node.readiness if node is not None else Readiness.ready()
 
+    def enablement_of(self, kind: str, name: str) -> Enablement:
+        """The node's opt-in axis (``enabled`` | ``disabled``). Distinct from
+        readiness: a disabled node folds to a READY placeholder (enablement is
+        the axis that answers for it, LLD c), so a consumer that must exclude a
+        disabled unit (secret resolution's active chain, LLD d) reads this, not
+        ``readiness_of``. Tolerates a missing node (returns ``enabled``, the
+        every-node-is-enabled default this effort produces, R7)."""
+        node = self._nodes.get((kind, name))
+        return node.enablement if node is not None else Enablement.enabled
+
     def is_ready(self, kind: str, name: str) -> bool:
         """``readiness_of(...).is_ready``, for the many call sites that only
         branch on the boolean."""

@@ -11,7 +11,7 @@ feature with different security properties.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 from agentworks import output
 from agentworks.errors import AgentworksError, ConfigError, SecretUnavailableError
@@ -28,9 +28,9 @@ if TYPE_CHECKING:
 class ActiveBackend:
     """One chain entry at runtime: a registered capability, its stored
     readiness verdict, plus the loop-side orchestration (mapping lookup and the
-    generic ``False`` opt-out). Not a resource -- a thin wrapper the resolution
-    loop and inspection surfaces share so the opt-out is enforced structurally
-    in one place (a ``False`` mapping never reaches the capability).
+    generic ``False`` opt-out). Not a resource, just a thin wrapper the
+    resolution loop and inspection surfaces share so the opt-out is enforced
+    structurally in one place (a ``False`` mapping never reaches the capability).
 
     ``readiness`` is the verdict the fold stored on the backend's graph node
     (read by :func:`active_backends`, never recomputed, R11). Resolution gates
@@ -82,18 +82,22 @@ def active_backends(config: Config, registry: Registry) -> list[ActiveBackend]:
     """The active chain as runtime backends, in precedence order.
 
     Each layer in its natural role: the chain comes from CONFIG
-    (``[secret_config].backends`` -- a setting), and each opted-in name is
+    (``[secret_config].backends``, a setting), and each opted-in name is
     resolved to its ``secret-backend`` graph node, off which this reads the
     backend IMPL and its stored readiness verdict (LLD d; no
     ``SECRET_BACKEND_REGISTRY`` probe, R11). An unknown chain name gets the
-    operator's vocabulary -- the chain is config, so the error is a config
-    error -- and the hint enumerates the registered backends.
+    operator's vocabulary (the chain is config, so the error is a config
+    error), and the hint enumerates the registered backends.
 
-    Every backend node this effort produces is enabled (no disabled producer
-    ships, R7), so the chain is filtered only to PRESENT + opted-in here;
-    readiness gates later, at resolution (R9.6).
+    The chain is filtered to ``present`` (a node exists) and ``enabled`` (its
+    opt-in axis, LLD d): a present-but-DISABLED opted-in backend is dormant,
+    excluded here exactly as an absent-from-chain backend is, so resolution
+    never attempts it. This is inert today (no disabled-backend producer ships,
+    R7) but is the enablement seam the plugin rebuild fills; a disabled node
+    folds to a ready placeholder, so this reads ``enablement_of``, not
+    ``readiness_of``. Readiness gates later, at resolution (R9.6).
     """
-    from typing import cast
+    from agentworks.resources.graph import Enablement
 
     graph = registry.graph
     backends: list[ActiveBackend] = []
@@ -106,11 +110,15 @@ def active_backends(config: Config, registry: Registry) -> list[ActiveBackend]:
                 f"[secret_config].backends names unknown backend {name!r}",
                 hint=f"registered backends: {registered}",
             ) from None
-        if impl is None:
-            # The capability nodes mirror the code registry; a row without an
-            # implementation means a publisher bug (or a hand-built registry
-            # that skipped the secrets publisher).
-            raise ConfigError(f"secret backend {name!r} has a registry row but no registered implementation")
+        if graph.enablement_of("secret-backend", name) is Enablement.disabled:
+            # A disabled opted-in backend is dormant (never consulted), the same
+            # as a backend absent from the chain. Not a readiness skip, so no
+            # warning: it is an opt-out, not a can't-run-here.
+            continue
+        # ``impl`` is never ``None`` here: a published capability row with no
+        # registered impl already fails fast at ``build_graph`` (``_impl_for``
+        # raises ``StateError``), so post-finalize every present backend node
+        # carries its instance. The cast reflects that invariant.
         backends.append(
             ActiveBackend(
                 capability=cast("SecretBackend", impl),
