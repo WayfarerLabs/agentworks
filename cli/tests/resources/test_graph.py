@@ -107,6 +107,24 @@ def test_diamond_reachability_dedupes_and_records_both_inbound_edges() -> None:
     assert len(graph.dependents_of("node", "d")) == 2
 
 
+def test_edges_of_preserves_source_emission_order_across_sources() -> None:
+    """A source's ``outbound`` is ordered by its own emission order, even when
+    an earlier source already inserted a later target first. Regression against
+    re-deriving outbound from the target-keyed reference map (which would
+    reorder a source's edges to match global target-first-encounter order).
+
+    ``early`` emits ``-> m_a`` and is walked first (sorted publish order), so
+    target ``m_a`` is inserted before ``m_b``. ``src`` then emits
+    ``[-> m_b, -> m_a]``. A target-keyed re-key would yield ``[src->m_a,
+    src->m_b]``; the source-keyed walk preserves ``src``'s emission order.
+    """
+    graph = _graph_from({"early": ["m_a"], "src": ["m_b", "m_a"]}).graph
+    assert [(r.kind, r.name) for r in graph.edges_of("node", "src")] == [
+        ("node", "m_b"),
+        ("node", "m_a"),
+    ]
+
+
 def test_reachable_from_is_cycle_safe() -> None:
     """``reachable_from`` tolerates a cycle via its visited set (it may be
     called on a graph built before finalize's cycle pass in tests). The
@@ -114,14 +132,15 @@ def test_reachable_from_is_cycle_safe() -> None:
     directly from the graph builder to exercise the query in isolation."""
     from agentworks.resources.graph import build_graph
 
-    # a -> b -> a, plus b -> c.
-    all_refs = {
-        ("node", "a"): [_edge("b", "a")],
-        ("node", "b"): [_edge("a", "b")],
-        ("node", "c"): [_edge("b", "c")],
-    }
+    # a -> b, b -> a (the cycle), b -> c.
+    edges = [_edge("a", "b"), _edge("b", "a"), _edge("b", "c")]
+    all_refs: dict[tuple[str, str], list[ResourceReference]] = {}
+    all_outbound: dict[tuple[str, str], list[ResourceReference]] = {}
+    for e in edges:
+        all_refs.setdefault((e.kind, e.name), []).append(e)
+        all_outbound.setdefault(e.source, []).append(e)
     resources = {"node": {"a": object(), "b": object(), "c": object()}}
-    graph = build_graph(resources, all_refs)
+    graph = build_graph(resources, all_refs, all_outbound)
 
     # Does not loop; visits every other node once.
     assert set(graph.reachable_from("node", "a")) == {("node", "b"), ("node", "c")}
@@ -221,6 +240,14 @@ def test_dependents_of_reproduces_old_references_field(tmp_path: Path) -> None:
         ("vm-template", "azure-prod"),
     }
     assert {e.source for e in graph.dependents_of("secret", "auto-key")} == {("admin-template", "default")}
+
+    # Inbound ORDER (not just the set) reproduces the walk order the removed
+    # field held: a multi-source target lists its referrers first-encountered.
+    # The first-source is what the description-polish rule reads, so order is
+    # load-bearing. ``shared-key`` is reached by two sources.
+    assert [(e.source, e.usage) for e in graph.dependents_of("secret", "shared-key")] == [
+        (e.source, e.usage) for e in expected[("secret", "shared-key")]
+    ]
 
     # Exhaustive golden across every published node.
     for kind in registry.iter_kinds():

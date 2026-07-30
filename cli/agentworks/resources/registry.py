@@ -235,11 +235,17 @@ class Registry:
 
         # 1: worklist loop. ``walked`` tracks which Resources have had
         # their referenced_resources() walked so we don't double-count.
+        # ``all_refs`` accumulates edges keyed by target (for inbound and
+        # miss dispatch); ``all_outbound`` accumulates the same edges keyed
+        # by source, in each source's own emission order, so the graph's
+        # outbound preserves first-encountered order (LLD a). The two are
+        # filled in the same walk rather than re-derived from each other.
         all_refs: dict[tuple[str, str], list[ResourceReference]] = {}
+        all_outbound: dict[tuple[str, str], list[ResourceReference]] = {}
         walked: set[tuple[str, str]] = set()
 
         while True:
-            new_walks = self._collect_new_references(all_refs, walked)
+            new_walks = self._collect_new_references(all_refs, all_outbound, walked)
             if not new_walks:
                 # No new Resources to walk. We're stable.
                 break
@@ -258,7 +264,7 @@ class Registry:
         # source the description-polish pass reads from below.
         from agentworks.resources.graph import build_graph
 
-        self._graph = build_graph(self._resources, all_refs)
+        self._graph = build_graph(self._resources, all_refs, all_outbound)
 
         # 3: description polish for every Resource. Iterate all
         # currently-published Resources (not just those with incoming
@@ -311,12 +317,16 @@ class Registry:
     def _collect_new_references(
         self,
         all_refs: dict[tuple[str, str], list[ResourceReference]],
+        all_outbound: dict[tuple[str, str], list[ResourceReference]],
         walked: set[tuple[str, str]],
     ) -> bool:
         """Walk ``referenced_resources()`` on every Resource not yet in
         ``walked``, appending discovered references into ``all_refs``
-        (in first-encountered order). Returns True if any Resource was
-        walked this pass; False means the worklist has stabilized.
+        (keyed by target) and ``all_outbound`` (keyed by the reference's
+        source), both in first-encountered order. Each resource's edges are
+        emitted contiguously, so ``all_outbound[source]`` holds that
+        source's edges in its own emission order. Returns True if any
+        Resource was walked this pass; False means the worklist stabilized.
         """
         any_walked = False
         # Snapshot the current per-kind dicts so iteration is safe
@@ -333,6 +343,7 @@ class Registry:
             any_walked = True
             for req in _referenced_resources(resource):
                 all_refs.setdefault((req.kind, req.name), []).append(req)
+                all_outbound.setdefault(req.source, []).append(req)
         return any_walked
 
     def _handle_miss(
@@ -406,9 +417,9 @@ class Registry:
     @property
     def graph(self) -> DependencyGraph:
         """The retained ``DependencyGraph``, available only after
-        ``finalize``. Raises ``RuntimeError`` if accessed before then --
-        the graph is built from the complete reference walk, so there is
-        no meaningful pre-finalize graph to return.
+        ``finalize``. Raises ``RuntimeError`` if accessed before then
+        (the graph is built from the complete reference walk, so there is
+        no meaningful pre-finalize graph to return).
         """
         if self._graph is None:
             raise RuntimeError("registry graph is available only after finalize")

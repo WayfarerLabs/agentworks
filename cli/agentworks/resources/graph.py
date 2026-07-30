@@ -6,11 +6,11 @@ is the single access path for structural questions the codebase previously
 answered by re-walking ``referenced_resources()`` or reading a ``references``
 field off each resource dataclass:
 
-- ``edges_of`` -- a node's outbound reference edges (who it points at).
-- ``dependents_of`` -- a node's inbound references (who points at it), the
+- ``edges_of``: a node's outbound reference edges (who it points at).
+- ``dependents_of``: a node's inbound references (who points at it), the
   replacement for the removed per-resource ``references`` field.
-- ``reachable_from`` -- the transitive closure of ``edges_of`` from a node.
-- ``readiness_of`` / ``is_ready`` -- the node's stored readiness verdict.
+- ``reachable_from``: the transitive closure of ``edges_of`` from a node.
+- ``readiness_of`` / ``is_ready``: the node's stored readiness verdict.
 
 Every method is a pure read over the frozen node map; none recomputes. The
 readiness fold (a later phase) fills real verdicts; until then every node is
@@ -29,7 +29,7 @@ from types import MappingProxyType
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping, Sequence
+    from collections.abc import Callable, Mapping, Sequence
 
     from agentworks.resources.reference import ReferenceEntry, ResourceReference
 
@@ -159,23 +159,25 @@ class DependencyGraph:
 def build_graph(
     resources: Mapping[str, Mapping[str, object]],
     all_refs: Mapping[tuple[str, str], Sequence[ResourceReference]],
+    all_outbound: Mapping[tuple[str, str], Sequence[ResourceReference]],
 ) -> DependencyGraph:
     """Build the frozen ``DependencyGraph`` from the finalized resource map and
-    the accumulated reference map.
+    the two accumulated edge maps.
 
-    ``all_refs`` is keyed by target (as ``Registry.finalize`` accumulates it);
-    ``outbound`` re-keys it by source and ``inbound`` projects each edge to the
-    inbound ``ReferenceEntry`` on its target (the logic that lived in
-    ``registry._references_tuple``). Every node is constructed ``enabled`` /
-    ``ready`` this effort; the readiness fold fills real verdicts later.
+    ``all_outbound`` is keyed by source in source-emission order (each
+    resource's ``referenced_resources()`` appended contiguously during the
+    finalize walk), so a node's ``outbound`` preserves first-encountered order
+    per LLD (a). ``all_refs`` is keyed by target; ``inbound`` projects each edge
+    to the inbound ``ReferenceEntry`` on its target (the logic that lived in
+    ``registry._references_tuple``), preserving that target's incoming order.
+    Every node is constructed ``enabled`` / ``ready`` this effort; the readiness
+    fold fills real verdicts later.
     """
     from agentworks.resources.reference import ReferenceEntry
 
-    outbound: dict[tuple[str, str], list[ResourceReference]] = {}
     inbound: dict[tuple[str, str], list[ReferenceEntry]] = {}
     for target, refs in all_refs.items():
         for ref in refs:
-            outbound.setdefault(ref.source, []).append(ref)
             inbound.setdefault(target, []).append(ReferenceEntry(source=ref.source, usage=ref.usage))
 
     nodes: dict[tuple[str, str], _Node] = {}
@@ -184,7 +186,7 @@ def build_graph(
             key = (kind, name)
             nodes[key] = _Node(
                 key=key,
-                outbound=tuple(outbound.get(key, ())),
+                outbound=tuple(all_outbound.get(key, ())),
                 inbound=tuple(inbound.get(key, ())),
                 enablement=Enablement.enabled,
                 readiness=Readiness.ready(),
@@ -205,24 +207,56 @@ def _impl_for(kind: str, name: str) -> object | None:
     *consumer* probing the live registry at op time, which the guard bans. The
     impl is heterogeneous by design (a class for platform/harness/provider, an
     instance for secret-backend); the node just stores whatever the kind's
-    registry holds. ``.get`` (not ``[name]``) keeps the builder total: a
-    capability row with no registry entry gets ``impl=None`` rather than
-    crashing the build.
+    registry holds.
+
+    A published capability row whose name has no registered implementation is a
+    framework/publisher invariant violation (the capability resources mirror the
+    code registry), not a config error, so this fails fast with ``StateError``
+    rather than storing ``None`` and deferring a confusing ``AttributeError`` to
+    the phase-3 fold or phase-4 resolution. The build stays total for malformed
+    *config* (R1); this is a different failure class.
     """
-    if kind == "vm-platform":
-        from agentworks.capabilities.vm_platform import VM_PLATFORM_REGISTRY
+    registry = _CAPABILITY_REGISTRY_LOADERS.get(kind)
+    if registry is None:
+        return None
+    impl = registry().get(name)
+    if impl is None:
+        from agentworks.errors import StateError
 
-        return VM_PLATFORM_REGISTRY.get(name)
-    if kind == "harness":
-        from agentworks.capabilities.harness import HARNESS_REGISTRY
+        raise StateError(f"{kind} row {name!r} has a registry row but no registered implementation")
+    return impl
 
-        return HARNESS_REGISTRY.get(name)
-    if kind == "git-credential-provider":
-        from agentworks.capabilities.git_credential import GIT_CREDENTIAL_PROVIDER_REGISTRY
 
-        return GIT_CREDENTIAL_PROVIDER_REGISTRY.get(name)
-    if kind == "secret-backend":
-        from agentworks.secrets.backends import SECRET_BACKEND_REGISTRY
+def _load_vm_platform_registry() -> Mapping[str, object]:
+    from agentworks.capabilities.vm_platform import VM_PLATFORM_REGISTRY
 
-        return SECRET_BACKEND_REGISTRY.get(name)
-    return None
+    return VM_PLATFORM_REGISTRY
+
+
+def _load_harness_registry() -> Mapping[str, object]:
+    from agentworks.capabilities.harness import HARNESS_REGISTRY
+
+    return HARNESS_REGISTRY
+
+
+def _load_git_credential_provider_registry() -> Mapping[str, object]:
+    from agentworks.capabilities.git_credential import GIT_CREDENTIAL_PROVIDER_REGISTRY
+
+    return GIT_CREDENTIAL_PROVIDER_REGISTRY
+
+
+def _load_secret_backend_registry() -> Mapping[str, object]:
+    from agentworks.secrets.backends import SECRET_BACKEND_REGISTRY
+
+    return SECRET_BACKEND_REGISTRY
+
+
+# The four capability kinds and the (lazily-imported) code registry each reads
+# its impl from. Lazy loaders avoid an import cycle at module load: this module
+# is imported by ``agentworks.resources`` before the capability packages.
+_CAPABILITY_REGISTRY_LOADERS: dict[str, Callable[[], Mapping[str, object]]] = {
+    "vm-platform": _load_vm_platform_registry,
+    "harness": _load_harness_registry,
+    "git-credential-provider": _load_git_credential_provider_registry,
+    "secret-backend": _load_secret_backend_registry,
+}

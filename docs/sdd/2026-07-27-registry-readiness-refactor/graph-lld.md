@@ -91,25 +91,32 @@ graph a pure structural object that does not need to hold or age row references 
 
 ## Construction
 
-The graph is built inside `finalize`, from the edge map the worklist loop already accumulates. LLD
+The graph is built inside `finalize`, from the edge maps the worklist loop already accumulates. LLD
 (b) owns the pass ordering; this LLD owns the resulting structure. Construction is a pure function
-of (the final `_resources`, the accumulated `all_refs`, the fold's readiness verdicts, the
-enablement per node): build `_nodes` with `outbound` from `all_refs` re-keyed by source, `inbound`
-from the same edges keyed by target, `enablement` and `readiness` from the fold.
+of (the final `_resources`, the accumulated edge maps, the fold's readiness verdicts, the enablement
+per node): build `_nodes` with `outbound` from the source-keyed edge map, `inbound` from the same
+edges keyed by target, `enablement` and `readiness` from the fold. The finalize walk fills a
+source-keyed `all_outbound` alongside the target-keyed `all_refs` in the same pass (rather than
+re-deriving one from the other), so each map is in the natural order its key implies.
 
 **Populating `impl`.** The capability `Entry` rows do **not** carry their implementation today
-(`VMPlatformEntry` holds `name`/`description`/`origin`/`references` only,
-`vm_platform/__init__.py:75-79`), so the builder must obtain each capability node's impl from the
-code registry (`VM_PLATFORM_REGISTRY[name]` and the three peers). This is the **whitelisted builder
-exemption** (LLD b's guard grep #2 must not flag it): the graph builder reading `*_REGISTRY` to
-stamp impls onto nodes during the build is the sanctioned path, distinct from a **consumer** probing
-the live registry at op time. Equivalently, the capability publisher could stamp the impl onto the
-`Entry` at publish time; either is acceptable, but the LLD picks **builder-reads-registry** (fewer
-touched publishers, one clearly-exempt call site). The graph is frozen when `finalize` freezes.
+(`VMPlatformEntry` holds `name`/`description`/`origin` only, `vm_platform/__init__.py`), so the
+builder must obtain each capability node's impl from the code registry (`VM_PLATFORM_REGISTRY` and
+the three peers, read through per-kind lazy loaders to avoid an import cycle). This is the
+**whitelisted builder exemption** (LLD b's guard grep #2 must not flag it): the graph builder
+reading `*_REGISTRY` to stamp impls onto nodes during the build is the sanctioned path, distinct
+from a **consumer** probing the live registry at op time. Equivalently, the capability publisher
+could stamp the impl onto the `Entry` at publish time; either is acceptable, but the LLD picks
+**builder-reads-registry** (fewer touched publishers, one clearly-exempt call site). A published
+capability row whose name has no registered impl is a publisher-invariant violation, not a config
+error, so the builder **fails fast** with a descriptive `StateError` rather than storing `None` and
+deferring an `AttributeError` to the phase-3 fold or phase-4 resolution; the build stays total for
+malformed config, which is a distinct failure class. The graph is frozen when `finalize` freezes.
 
 **Outbound-edge ordering** preserves first-encountered order (the `Origin.auto_declared(source=...)`
-rule depends on it, `registry.py:211-216`); the builder appends edges in walk order exactly as
-`all_refs` does today.
+rule depends on it): each source's edges are appended contiguously during its own
+`referenced_resources()` walk, so `all_outbound[source]` holds that source's edges in its emission
+order regardless of what other sources emitted first.
 
 ## What moves onto the graph (and off the dataclasses)
 
