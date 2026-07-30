@@ -613,6 +613,9 @@ def test_delete_session_offers_and_deletes_now_empty_console(
         prompts.append(message)
         return True
 
+    # The empty-console offer only prompts in an interactive context; declare
+    # one so this exercises the offer path rather than report-but-keep.
+    monkeypatch.setattr("agentworks.output.is_interactive", lambda: True)
     monkeypatch.setattr("agentworks.output.confirm", _confirm)
 
     manager_mod.delete_session(db, _StubConfig(), name="s", yes=False)
@@ -642,10 +645,13 @@ def test_delete_session_declined_offer_keeps_empty_console(
     monkeypatch.setattr(manager_mod, "_regenerate_tmuxinator", lambda *a, **k: None)
     monkeypatch.setattr("agentworks.sessions.multi_console.kill_session_windows", lambda *a, **k: None)
 
-    # Accept the session-delete confirm, decline the empty-console offer.
+    # Accept only the session-delete confirm; decline the empty-console offer
+    # (the behavior under test) and the now-empty-workspace offer (issue #266,
+    # out of scope here: deleting 's' empties ws-vm1).
     def _confirm(message: str, default: bool = False) -> bool:
-        return "no configured sessions left" not in message
+        return message.startswith("Delete session")
 
+    monkeypatch.setattr("agentworks.output.is_interactive", lambda: True)
     monkeypatch.setattr("agentworks.output.confirm", _confirm)
 
     manager_mod.delete_session(db, _StubConfig(), name="s", yes=False)
@@ -680,6 +686,10 @@ def test_delete_session_does_not_offer_console_with_remaining_sessions(
         prompts.append(message)
         return True
 
+    # Interactive, so a truly empty console WOULD be offered; proving no offer
+    # appears here shows it is the remaining member (not non-interactivity) that
+    # suppresses it.
+    monkeypatch.setattr("agentworks.output.is_interactive", lambda: True)
     monkeypatch.setattr("agentworks.output.confirm", _confirm)
 
     manager_mod.delete_session(db, _StubConfig(), name="s", yes=False)
@@ -775,8 +785,14 @@ def test_delete_session_warns_when_offered_console_delete_raises(
 
     monkeypatch.setattr("agentworks.sessions.multi_console.delete_console", _boom)
 
-    # Accept both confirms (the session delete and the empty-console offer).
-    monkeypatch.setattr("agentworks.output.confirm", lambda *a, **k: True)
+    # Accept the session delete and the empty-console offer (whose delete is
+    # stubbed to raise); decline the now-empty-workspace offer (issue #266,
+    # out of scope here: deleting 's' empties ws-vm1).
+    def _confirm(message: str, default: bool = False) -> bool:
+        return "now has no sessions" not in message
+
+    monkeypatch.setattr("agentworks.output.is_interactive", lambda: True)
+    monkeypatch.setattr("agentworks.output.confirm", _confirm)
 
     # The AgentworksError from the console teardown is swallowed with a warning;
     # it must not propagate out of delete_session.
@@ -787,6 +803,178 @@ def test_delete_session_warns_when_offered_console_delete_raises(
     assert any(
         "Could not delete empty console 'beta'" in w and "agw console delete beta" in w
         for w in captured_output.warnings
+    )
+
+
+# -- Issue #265: remove-sessions offers to delete a now-empty console --------
+#
+# The empty-console offer/report path is the SAME shared helper the
+# session-delete cascade above exercises (#248/#261); these tests prove
+# ``remove_sessions`` wires into it. The VM is seeded without Tailscale so
+# ``_live_target`` returns None and the offer runs with no SSH work; that is
+# also the repro's shape (a console emptied on a non-live VM). The offer only
+# prompts in an interactive context, so tests exercising the prompt declare
+# ``is_interactive`` (the report-but-keep path when non-interactive is covered
+# by its own test below).
+
+
+def test_remove_sessions_empties_console_offers_and_deletes(
+    db: Database,
+    monkeypatch: pytest.MonkeyPatch,
+    captured_output: CapturedOutput,
+) -> None:
+    """Removing the last members offers to delete the emptied console; an
+    accepted offer deletes it. The removed sessions themselves survive."""
+    _seed_vm(db)
+    _seed_sessions(db, ["a", "b"])
+    create_console(db, name="con", vm_name="vm1", session_specs=["a", "b"])
+
+    prompts: list[str] = []
+
+    def _confirm(message: str, default: bool = False) -> bool:
+        prompts.append(message)
+        return True
+
+    monkeypatch.setattr("agentworks.output.is_interactive", lambda: True)
+    monkeypatch.setattr("agentworks.output.confirm", _confirm)
+
+    remove_sessions(db, _StubConfig(), console_name="con", session_names=["a", "b"])
+
+    assert any("con" in p and "no configured sessions left" in p for p in prompts)
+    assert db.get_console("con") is None
+    # Only the console membership was removed; the sessions are untouched.
+    assert db.get_session("a") is not None
+    assert db.get_session("b") is not None
+
+
+def test_remove_sessions_declined_offer_keeps_empty_console(
+    db: Database,
+    monkeypatch: pytest.MonkeyPatch,
+    captured_output: CapturedOutput,
+) -> None:
+    """Declining the offer leaves the console in place, empty."""
+    _seed_vm(db)
+    _seed_sessions(db, ["a"])
+    create_console(db, name="con", vm_name="vm1", session_specs=["a"])
+
+    monkeypatch.setattr("agentworks.output.is_interactive", lambda: True)
+    monkeypatch.setattr("agentworks.output.confirm", lambda *a, **k: False)
+
+    remove_sessions(db, _StubConfig(), console_name="con", session_names=["a"])
+
+    assert db.get_console("con") is not None
+    assert db.list_console_sessions("con") == []
+
+
+def test_remove_sessions_yes_reports_but_keeps_empty_console(
+    db: Database,
+    monkeypatch: pytest.MonkeyPatch,
+    captured_output: CapturedOutput,
+) -> None:
+    """Under --yes the emptied console is reported (a warning naming the
+    manual delete command) but NOT auto-deleted, and no prompt is presented."""
+    _seed_vm(db)
+    _seed_sessions(db, ["a"])
+    create_console(db, name="con", vm_name="vm1", session_specs=["a"])
+
+    def _confirm(message: str, default: bool = False) -> bool:
+        raise AssertionError("no prompt should be presented under --yes")
+
+    monkeypatch.setattr("agentworks.output.confirm", _confirm)
+
+    remove_sessions(db, _StubConfig(), console_name="con", session_names=["a"], yes=True)
+
+    assert db.get_console("con") is not None
+    assert db.list_console_sessions("con") == []
+    assert any(
+        "con" in w and "no configured sessions" in w and "agw console delete con" in w for w in captured_output.warnings
+    )
+
+
+def test_remove_sessions_with_remaining_not_offered(
+    db: Database,
+    monkeypatch: pytest.MonkeyPatch,
+    captured_output: CapturedOutput,
+) -> None:
+    """Removing only some members leaves the console non-empty, so no offer is
+    presented and the console (with its remaining member) is untouched."""
+    _seed_vm(db)
+    _seed_sessions(db, ["a", "b"])
+    create_console(db, name="con", vm_name="vm1", session_specs=["a", "b"])
+
+    prompts: list[str] = []
+
+    def _confirm(message: str, default: bool = False) -> bool:
+        prompts.append(message)
+        return True
+
+    # Interactive, so a truly empty console WOULD be offered; proving no offer
+    # appears here shows it is the remaining member that suppresses it.
+    monkeypatch.setattr("agentworks.output.is_interactive", lambda: True)
+    monkeypatch.setattr("agentworks.output.confirm", _confirm)
+
+    remove_sessions(db, _StubConfig(), console_name="con", session_names=["a"])
+
+    assert not any("no configured sessions left" in p for p in prompts)
+    assert db.get_console("con") is not None
+    assert [m.session_name for m in db.list_console_sessions("con")] == ["b"]
+
+
+def test_remove_sessions_warns_when_offered_console_delete_raises(
+    db: Database,
+    monkeypatch: pytest.MonkeyPatch,
+    captured_output: CapturedOutput,
+) -> None:
+    """If the confirmed empty-console delete raises an AgentworksError, the
+    remove-sessions operation is still reported done, a warning names the
+    console, and the error does not propagate."""
+    _seed_vm(db)
+    _seed_sessions(db, ["a"])
+    create_console(db, name="con", vm_name="vm1", session_specs=["a"])
+
+    def _boom(*a: object, **k: object) -> None:
+        raise ConnectivityError("vm unreachable", entity_kind="vm", entity_name="vm1")
+
+    monkeypatch.setattr("agentworks.sessions.multi_console.delete_console", _boom)
+    monkeypatch.setattr("agentworks.output.is_interactive", lambda: True)
+    monkeypatch.setattr("agentworks.output.confirm", lambda *a, **k: True)
+
+    remove_sessions(db, _StubConfig(), console_name="con", session_names=["a"])
+
+    assert "Removed 1 session(s) from console 'con'." in captured_output.info
+    assert any(
+        "Could not delete empty console 'con'" in w and "agw console delete con" in w for w in captured_output.warnings
+    )
+
+
+def test_remove_sessions_non_interactive_without_yes_reports_but_keeps(
+    db: Database,
+    monkeypatch: pytest.MonkeyPatch,
+    captured_output: CapturedOutput,
+) -> None:
+    """Regression guard: a scripted ``console remove-sessions`` (no TTY) without
+    ``--yes`` that empties a console must NOT prompt (which would EOF into a
+    UserAbort after the removal already committed). It reports-but-keeps and the
+    call returns normally, so the command exits 0 as it did before issue #265."""
+    _seed_vm(db)
+    _seed_sessions(db, ["a"])
+    create_console(db, name="con", vm_name="vm1", session_specs=["a"])
+
+    # Non-interactive: the offer must never reach the prompt.
+    monkeypatch.setattr("agentworks.output.is_interactive", lambda: False)
+
+    def _confirm(message: str, default: bool = False) -> bool:
+        raise AssertionError("must not prompt in a non-interactive context")
+
+    monkeypatch.setattr("agentworks.output.confirm", _confirm)
+
+    # No exception (no UserAbort): the call completes normally.
+    remove_sessions(db, _StubConfig(), console_name="con", session_names=["a"])
+
+    assert db.get_console("con") is not None
+    assert db.list_console_sessions("con") == []
+    assert any(
+        "con" in w and "no configured sessions" in w and "agw console delete con" in w for w in captured_output.warnings
     )
 
 

@@ -35,6 +35,145 @@ __all__ = ["_non_interactive", "_stub_build_registry"]
 # ---------------------------------------------------------------------------
 
 
+def test_ephemeral_workspace_name_uses_workspace_cap(tmp_path: Path) -> None:
+    """An ephemeral (``--new-workspace``) name is validated against the
+    WORKSPACE cap (29, the Linux-group budget), NOT the looser session cap:
+    a 30-char name that fits a session name is rejected because it would
+    overflow the ``ws-<name>`` group."""
+    from agentworks.agents.grants import MAX_WORKSPACE_NAME_LENGTH
+    from agentworks.sessions.manager import create_session
+
+    db = _seed_one_vm(tmp_path)
+    config = SimpleNamespace(session=SimpleNamespace(history_limit=50000))
+
+    with pytest.raises(ValidationError, match=f"max {MAX_WORKSPACE_NAME_LENGTH}") as excinfo:
+        create_session(
+            db,
+            config,  # type: ignore[arg-type]
+            name="s1",
+            new_workspace=True,
+            workspace_name="w" * (MAX_WORKSPACE_NAME_LENGTH + 1),
+            vm_name="vm1",
+        )
+    # Explicitly-passed name: plain error, no override hint (the operator named
+    # it directly, so pointing at --workspace-name would be noise).
+    assert excinfo.value.hint is None
+    assert db.get_session("s1") is None
+    db.close()
+
+
+def test_ephemeral_agent_name_uses_agent_cap(tmp_path: Path) -> None:
+    """An ephemeral (``--new-agent``) name is validated against the AGENT cap
+    (28, the Linux-username budget), NOT the looser session cap: a 29-char
+    name that fits a session name is rejected because it would overflow the
+    ``agt-<name>`` username."""
+    from agentworks.agents.manager import MAX_AGENT_NAME_LENGTH
+    from agentworks.sessions.manager import create_session
+
+    db = _seed_one_vm(tmp_path)
+    config = SimpleNamespace(session=SimpleNamespace(history_limit=50000))
+
+    with pytest.raises(ValidationError, match=f"max {MAX_AGENT_NAME_LENGTH}") as excinfo:
+        create_session(
+            db,
+            config,  # type: ignore[arg-type]
+            name="s1",
+            workspace="ws1",
+            new_agent=True,
+            agent_name="a" * (MAX_AGENT_NAME_LENGTH + 1),
+        )
+    # Explicitly-passed name: plain error, no override hint.
+    assert excinfo.value.hint is None
+    assert db.get_session("s1") is None
+    db.close()
+
+
+def test_defaulted_ephemeral_agent_name_overflow_hints_override_flag(tmp_path: Path) -> None:
+    """When ``--new-agent`` is given with NO ``--agent-name``, the agent name
+    defaults to the session name. A session name that is itself valid (within
+    the session cap) but overflows the 28-char agent cap must be rejected WITH a
+    hint that names the derived default and points at ``--agent-name`` to
+    override it."""
+    from agentworks.agents.manager import MAX_AGENT_NAME_LENGTH
+    from agentworks.sessions.manager import create_session
+    from agentworks.sessions.tmux import MAX_SESSION_NAME_LENGTH
+
+    db = _seed_one_vm(tmp_path)
+    config = SimpleNamespace(session=SimpleNamespace(history_limit=50000))
+
+    # A max-length session name: valid as a session, but over the agent cap.
+    long_session = "s" * MAX_SESSION_NAME_LENGTH
+    assert MAX_AGENT_NAME_LENGTH < len(long_session) == MAX_SESSION_NAME_LENGTH
+
+    with pytest.raises(ValidationError, match=f"max {MAX_AGENT_NAME_LENGTH}") as excinfo:
+        create_session(
+            db,
+            config,  # type: ignore[arg-type]
+            name=long_session,
+            workspace="ws1",
+            new_agent=True,
+        )
+    hint = excinfo.value.hint
+    assert hint is not None, "defaulted-overflow must carry a hint"
+    assert "--agent-name" in hint
+    assert "defaulted to the session name" in hint
+    assert db.get_session(long_session) is None
+    db.close()
+
+
+def test_defaulted_ephemeral_workspace_name_overflow_hints_override_flag(tmp_path: Path) -> None:
+    """When ``--new-workspace`` is given with NO ``--workspace-name``, the
+    workspace name defaults to the session name. A session name that overflows
+    the 29-char workspace cap is rejected WITH a hint pointing at
+    ``--workspace-name``."""
+    from agentworks.agents.grants import MAX_WORKSPACE_NAME_LENGTH
+    from agentworks.sessions.manager import create_session
+    from agentworks.sessions.tmux import MAX_SESSION_NAME_LENGTH
+
+    db = _seed_one_vm(tmp_path)
+    config = SimpleNamespace(session=SimpleNamespace(history_limit=50000))
+
+    long_session = "s" * MAX_SESSION_NAME_LENGTH
+    assert MAX_WORKSPACE_NAME_LENGTH < len(long_session) == MAX_SESSION_NAME_LENGTH
+
+    with pytest.raises(ValidationError, match=f"max {MAX_WORKSPACE_NAME_LENGTH}") as excinfo:
+        create_session(
+            db,
+            config,  # type: ignore[arg-type]
+            name=long_session,
+            new_workspace=True,
+            vm_name="vm1",
+        )
+    hint = excinfo.value.hint
+    assert hint is not None, "defaulted-overflow must carry a hint"
+    assert "--workspace-name" in hint
+    assert "defaulted to the session name" in hint
+    assert db.get_session(long_session) is None
+    db.close()
+
+
+def test_session_name_uses_socket_derived_cap(tmp_path: Path) -> None:
+    """The SESSION name is bounded by the per-agent tmux AF_UNIX socket path it
+    embeds in, so it takes ``MAX_SESSION_NAME_LENGTH`` (34), NOT the freeform 64:
+    a name one over that cap is rejected at the session boundary."""
+    from agentworks.sessions.manager import create_session
+    from agentworks.sessions.tmux import MAX_SESSION_NAME_LENGTH
+
+    db = _seed_one_vm(tmp_path)
+    config = SimpleNamespace(session=SimpleNamespace(history_limit=50000))
+
+    with pytest.raises(ValidationError, match=f"max {MAX_SESSION_NAME_LENGTH}"):
+        create_session(
+            db,
+            config,  # type: ignore[arg-type]
+            name="s" * (MAX_SESSION_NAME_LENGTH + 1),
+            workspace="ws1",
+            admin=True,
+        )
+    assert db.get_session("s" * (MAX_SESSION_NAME_LENGTH + 1)) is None
+    db.close()
+
+
 def test_cross_vm_existing_workspace_and_agent_fails_upfront(tmp_path: Path) -> None:
     """Existing workspace on vm-A + existing agent on vm-B raises
     ValidationError before any state mutation. The pre-#124 behavior was

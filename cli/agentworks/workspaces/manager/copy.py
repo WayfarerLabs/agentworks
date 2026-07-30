@@ -7,6 +7,7 @@ import subprocess
 from typing import TYPE_CHECKING
 
 from agentworks import output
+from agentworks.agents.grants import MAX_WORKSPACE_NAME_LENGTH
 from agentworks.config import validate_name
 from agentworks.errors import AlreadyExistsError, ExternalError, NotFoundError, StateError
 from agentworks.vms.manager import gated_vm_boundary
@@ -52,7 +53,7 @@ def copy_workspace(
     from agentworks.transports import SSHTransport, transport
     from agentworks.workspaces.acls import apply_workspace_acls
 
-    validate_name(dest_name)
+    validate_name(dest_name, max_length=MAX_WORKSPACE_NAME_LENGTH)
 
     src_ws = db.get_workspace(source_name)
     if src_ws is None:

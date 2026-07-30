@@ -24,12 +24,20 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 import agentworks.sessions.manager as _mgr
+
+# The ephemeral workspace / agent caps live at their prefix modules in the
+# agents package. Importing them at module scope is safe: agents.manager /
+# agents.grants reference sessions.manager only through function-local imports,
+# so there is no sessions <-> agents module-load cycle.
+from agentworks.agents.grants import MAX_WORKSPACE_NAME_LENGTH
+from agentworks.agents.manager import MAX_AGENT_NAME_LENGTH
 from agentworks.config import validate_name
 from agentworks.errors import (
     AlreadyExistsError,
     NotFoundError,
     ValidationError,
 )
+from agentworks.sessions.tmux import MAX_SESSION_NAME_LENGTH
 
 from ._create_types import SessionPlan
 
@@ -169,22 +177,88 @@ def _narrow_and_prompt_workspace(db: Database, draft: _PlanDraft, name: str) -> 
             draft.workspace_name = chosen_existing
 
 
+def _validate_ephemeral_name(
+    value: str,
+    *,
+    kind: str,
+    derived: str,
+    max_length: int,
+    override_flag: str,
+    defaulted_from_session: bool,
+) -> None:
+    """Validate an ephemeral workspace / agent name against its (tighter than
+    session) cap, adding an actionable hint when the overflow came from the
+    session-name default.
+
+    The ephemeral name defaults to the session name when the operator does not
+    pass ``--workspace-name`` / ``--agent-name``. Since the session cap
+    (``MAX_SESSION_NAME_LENGTH``) is larger than the group/username-derived caps
+    (``MAX_WORKSPACE_NAME_LENGTH`` / ``MAX_AGENT_NAME_LENGTH``), a session name
+    that is fine on its own can overflow once it becomes a Linux group /
+    username. On that DEFAULTED path we point the operator at the override flag;
+    an explicitly-passed too-long name gets the plain error (the operator
+    already named it directly). Character rules are identical across kinds and
+    the session name has already passed its own check by this point, so a
+    defaulted failure here is always a length overflow.
+    """
+    try:
+        validate_name(value, max_length=max_length)
+    except ValidationError as exc:
+        if defaulted_from_session and len(value) > max_length:
+            raise ValidationError(
+                str(exc),
+                entity_kind=kind,
+                entity_name=value,
+                hint=(
+                    f"The {kind} name defaulted to the session name, which exceeds the "
+                    f"{max_length}-char {kind} cap ({kind} names become a Linux {derived}). "
+                    f"Pass {override_flag} <name> to set a shorter one."
+                ),
+            ) from exc
+        raise
+
+
 def _validate_names_and_existence(db: Database, draft: _PlanDraft, name: str) -> None:
     """S5: default ephemeral names, validate every name, and run the pure
     DB existence checks (no SSH, no mutations)."""
+    # Capture whether each ephemeral name will be defaulted from the session
+    # name BEFORE the default assignment, so the validation below can tailor
+    # the too-long hint to the defaulted path.
+    ws_defaulted = draft.new_workspace and draft.workspace_name is None
+    agent_defaulted = draft.new_agent and draft.agent_name is None
+
     # Default ephemeral resource names to the session name when omitted.
-    if draft.new_workspace and draft.workspace_name is None:
+    if ws_defaulted:
         draft.workspace_name = name
-    if draft.new_agent and draft.agent_name is None:
+    if agent_defaulted:
         draft.agent_name = name
     assert draft.workspace_name is not None  # invariant after canonicalize + prompt
 
-    validate_name(name)
+    # Each referenced name is validated against ITS OWN kind's cap, not the
+    # session cap: the session name is bounded by the per-agent tmux socket path
+    # it embeds in (MAX_SESSION_NAME_LENGTH), while an ephemeral workspace
+    # becomes a Linux group and an ephemeral agent a Linux username, so those
+    # must satisfy the still-tighter group/username-derived caps.
+    validate_name(name, max_length=MAX_SESSION_NAME_LENGTH)
     if draft.new_workspace:
-        validate_name(draft.workspace_name)
+        _validate_ephemeral_name(
+            draft.workspace_name,
+            kind="workspace",
+            derived="group",
+            max_length=MAX_WORKSPACE_NAME_LENGTH,
+            override_flag="--workspace-name",
+            defaulted_from_session=ws_defaulted,
+        )
     if draft.new_agent:
         assert draft.agent_name is not None
-        validate_name(draft.agent_name)
+        _validate_ephemeral_name(
+            draft.agent_name,
+            kind="agent",
+            derived="username",
+            max_length=MAX_AGENT_NAME_LENGTH,
+            override_flag="--agent-name",
+            defaulted_from_session=agent_defaulted,
+        )
 
     # DB existence checks. Session must not exist. Ephemeral workspace /
     # agent must not exist; existing workspace / agent must exist.
@@ -277,9 +351,19 @@ def _lookup_workspace_and_prompt_mode(db: Database, draft: _PlanDraft, name: str
         # (wrong scope) and asserts ``agent_name is not None``
         # inside the ephemeral-create block.
         if draft.new_agent:
+            # This block is only reached via the interactive "[Create new
+            # agent]" mode pick, which carries no explicit name, so the name
+            # here is always defaulted from the session name.
             if draft.agent_name is None:
                 draft.agent_name = name
-            validate_name(draft.agent_name)
+            _validate_ephemeral_name(
+                draft.agent_name,
+                kind="agent",
+                derived="username",
+                max_length=MAX_AGENT_NAME_LENGTH,
+                override_flag="--agent-name",
+                defaulted_from_session=True,
+            )
             if db.get_agent(draft.agent_name) is not None:
                 raise AlreadyExistsError(
                     f"agent '{draft.agent_name}' already exists",

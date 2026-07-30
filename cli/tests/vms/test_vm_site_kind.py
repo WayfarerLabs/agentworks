@@ -53,18 +53,35 @@ def test_decode_nests_platform_config(tmp_path: Path) -> None:
     assert site.description == "Dev subscription"
 
 
-def test_site_names_follow_the_vm_name_rules(tmp_path: Path) -> None:
-    """Site names appear in hostnames and SSH aliases, so they
-    obey validate_name (lowercase, length cap, no double hyphen)."""
-    doc = SITE_DOC.replace("name: azure-dev", "name: MY_Site_With_A_Very_Long_Name_Indeed")
+def test_site_names_obey_the_freeform_name_rules(tmp_path: Path) -> None:
+    """Site names hit no OS identifier limit (registry key + display only, NOT
+    derived into hostnames or SSH aliases: VM names are), so they use the
+    freeform cap (64). They still obey validate_name's character rules
+    (lowercase, no double hyphen) and reject a name past the freeform cap."""
+    from agentworks.config import MAX_FREEFORM_NAME_LENGTH
+
+    # Character rules still hold: uppercase is rejected regardless of length.
+    doc = SITE_DOC.replace("name: azure-dev", "name: MY_Site")
     (tmp_path / "site.yaml").write_text(doc)
-    with pytest.raises(ConfigError, match="too long"):
+    with pytest.raises(ConfigError, match="lowercase"):
         load_manifests(tmp_path)
 
+    # Consecutive hyphens are still rejected.
     doc = SITE_DOC.replace("name: azure-dev", "name: azure--dev")
     (tmp_path / "site.yaml").write_text(doc)
     with pytest.raises(ConfigError, match="consecutive hyphens"):
         load_manifests(tmp_path)
+
+    # A name past the freeform cap is rejected as too long.
+    doc = SITE_DOC.replace("name: azure-dev", f"name: {'a' * (MAX_FREEFORM_NAME_LENGTH + 1)}")
+    (tmp_path / "site.yaml").write_text(doc)
+    with pytest.raises(ConfigError, match="too long"):
+        load_manifests(tmp_path)
+
+    # A name that the old 30-char cap rejected but the freeform cap allows now
+    # decodes cleanly (40 chars, lowercase, no double hyphen).
+    site = _load_one(tmp_path, SITE_DOC.replace("name: azure-dev", f"name: {'a' * 40}"))
+    assert site.name == "a" * 40
 
 
 def test_platform_named_site_must_declare_that_platform(tmp_path: Path) -> None:

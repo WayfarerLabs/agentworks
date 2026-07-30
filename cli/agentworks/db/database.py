@@ -496,6 +496,32 @@ class Database:
             ws_map[ws] = (has_explicit, has_implicit)
         return [(ws, e, i) for ws, (e, i) in sorted(ws_map.items())]
 
+    def list_workspace_explicit_granters(self, workspace_name: str) -> list[str]:
+        """Agent names holding an explicit grant on this workspace, excluding
+        grant-all agents, sorted.
+
+        Grant-all agents are excluded BY THEIR FLAG, not per row: enabling
+        grant_all materializes an explicit grant row for every workspace
+        (see agents/grants.py), so those rows are blanket policy rather than
+        per-workspace operator intent and are indistinguishable from a
+        deliberate single-workspace grant at the row level. Filtering on the
+        agent's grant_all flag is the only faithful way to tell the two apart.
+        Implicit (session-tied) rows never appear here.
+
+        Backs :func:`workspaces.manager.workspace_external_explicit_granters`,
+        the guard the session-delete cleanup (issue #266) and the #268 prune
+        command use to avoid silently revoking a standing grant via the
+        workspace FK cascade.
+        """
+        rows = self._conn.execute(
+            "SELECT DISTINCT g.agent_name FROM agent_workspace_grants g "
+            "JOIN agents a ON a.name = g.agent_name "
+            "WHERE g.workspace_name = ? AND g.grant_type = 'explicit' AND a.grant_all = 0 "
+            "ORDER BY g.agent_name",
+            (workspace_name,),
+        ).fetchall()
+        return [row[0] for row in rows]
+
     def count_agent_grants(self, agent_name: str) -> int:
         row = self._conn.execute(
             "SELECT COUNT(DISTINCT workspace_name) FROM agent_workspace_grants WHERE agent_name = ?",
