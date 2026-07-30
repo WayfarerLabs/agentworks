@@ -279,9 +279,9 @@ The existing tests under `cli/tests/vms/` are the templates to copy from:
   extraction across all platforms, plus a registry-name/class parity check. A good template for a
   new platform's registration test.
 - `test_platform_support.py`: `unsupported_reason` (host-wide) vs. `not_ready` (per-site config) vs.
-  the composed `site_disabled_reason` shim and the graph's `readiness_of` verdict. Uses the
-  `stub_platform_support` fixture to pin platforms ready regardless of host, so dispatch-shape tests
-  do not depend on local tooling.
+  the graph's stored `readiness_of` verdict (the fold composes the first two into the last). Uses
+  the `stub_platform_support` fixture to pin platforms ready regardless of host, so dispatch-shape
+  tests do not depend on local tooling.
 - `test_platform_idempotency_guards.py`: patches `status` to an already-in-state value and asserts
   the backend verb is never called, proving the `@idempotent_op` contract.
 - `test_platform_runup.py`: Proxmox's authenticated pre-check, distinguishing a definitive 401/403

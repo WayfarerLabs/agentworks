@@ -69,12 +69,34 @@ Each detection function (``find_*``) is unit-proven non-vacuous by
 ``test_detectors_are_not_vacuous``: fed a synthetic banned snippet it flags it,
 and fed an exempt/benign snippet it stays silent. So a guard that passes is
 actually watching, not trivially green.
+
+WHAT THE DETECTORS CATCH, AND THE ACCEPTED RESIDUALS:
+
+- Pattern 2 catches the bare (``VM_PLATFORM_REGISTRY``), qualified
+  (``vm_platform.VM_PLATFORM_REGISTRY``), and aliased-import
+  (``... import VM_PLATFORM_REGISTRY as R``) read idioms.
+- Pattern 4's declaration check catches a ``references`` member declared as an
+  annotated field, a plain class attribute, or a method/property; this is the
+  real defense, because the read side can only catch the literal
+  ``getattr(x, "references")`` form (a plain ``.references`` read is
+  indistinguishable from the exempt describe views without type inference).
+- Allow-list scoping is whole-FILE, not whole-function: a banned pattern
+  reintroduced INSIDE an exempt module is not caught by the module scan. The
+  softest such module is ``vms/sites.py`` (exempt for patterns 1, 2, and 3 at
+  once); ``test_vms_sites_exempt_reads_are_function_scoped`` pins its sanctioned
+  reads to the functions that own them to close that one gap.
+- Patterns 1 and 3 match direct attribute calls, not deep indirection
+  (``fn = decl.dependencies; fn(ctx)``). That is a deliberate two-line form no
+  accidental regression takes and is not currently exploitable, so it is an
+  ACCEPTED RESIDUAL, not a hole to chase.
 """
 
 from __future__ import annotations
 
 import ast
+from collections.abc import Callable
 from pathlib import Path
+from typing import TypeGuard
 
 import agentworks
 
@@ -108,19 +130,51 @@ def find_dependencies_calls(source: str) -> list[int]:
     )
 
 
-def find_registry_reads(source: str) -> list[int]:
-    """Line numbers where one of the four capability registries is read by name.
-
-    A bare ``VM_PLATFORM_REGISTRY`` (and peers) reference (banned pattern 2). An
-    ``import`` binds an alias and ``__all__`` holds string literals, so neither
-    is an ``ast.Name`` read; docstring mentions are strings. Only real reads
-    match.
+def _registry_aliases(tree: ast.AST) -> frozenset[str]:
+    """Local names bound to a capability registry by an aliased import
+    (``from ... import VM_PLATFORM_REGISTRY as R``). A plain
+    ``from ... import VM_PLATFORM_REGISTRY`` binds the registry's own name, which
+    the read matcher already catches, so only ``asname`` aliases need tracking.
     """
-    return sorted(
-        node.lineno
-        for node in ast.walk(ast.parse(source))
-        if isinstance(node, ast.Name) and node.id in _CAPABILITY_REGISTRIES
-    )
+    aliases: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom):
+            for alias in node.names:
+                if alias.name in _CAPABILITY_REGISTRIES and alias.asname:
+                    aliases.add(alias.asname)
+    return frozenset(aliases)
+
+
+def _is_registry_read(node: ast.AST, aliases: frozenset[str]) -> TypeGuard[ast.expr]:
+    """Whether ``node`` reads one of the four capability registries in any of the
+    three idioms an accidental reintroduction would use: a bare name
+    (``VM_PLATFORM_REGISTRY``), a qualified attribute
+    (``vm_platform.VM_PLATFORM_REGISTRY``), or an aliased import's local name.
+    """
+    if isinstance(node, ast.Name):
+        return node.id in _CAPABILITY_REGISTRIES or node.id in aliases
+    if isinstance(node, ast.Attribute):
+        return node.attr in _CAPABILITY_REGISTRIES
+    return False
+
+
+def find_registry_reads(source: str) -> list[int]:
+    """Line numbers where one of the four capability registries is read (banned
+    pattern 2), in bare, qualified, or aliased-import form (:func:`_is_registry_read`).
+
+    An ``import`` statement binds a name via an ``alias`` node (not an
+    ``ast.Name`` read) and ``__all__`` holds string literals, so neither the
+    import line nor the export list matches; docstring mentions are strings. Only
+    real reads match.
+    """
+    tree = ast.parse(source)
+    aliases = _registry_aliases(tree)
+    return sorted({node.lineno for node in ast.walk(tree) if _is_registry_read(node, aliases)})
+
+
+def _is_not_ready_call(node: ast.AST) -> TypeGuard[ast.Call]:
+    """Whether ``node`` is a ``<expr>.not_ready(...)`` attribute call."""
+    return isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and node.func.attr == "not_ready"
 
 
 def find_not_ready_calls(source: str) -> list[int]:
@@ -130,11 +184,7 @@ def find_not_ready_calls(source: str) -> list[int]:
     ``not_ready`` accessed by subscript / ``in`` is not an attribute call, so
     ``doctor``'s ``not_ready`` bookkeeping map does not match.
     """
-    return sorted(
-        node.lineno
-        for node in ast.walk(ast.parse(source))
-        if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and node.func.attr == "not_ready"
-    )
+    return sorted(node.lineno for node in ast.walk(ast.parse(source)) if _is_not_ready_call(node))
 
 
 def find_getattr_references(source: str) -> list[int]:
@@ -156,16 +206,30 @@ def find_getattr_references(source: str) -> list[int]:
 
 
 def find_references_fields(source: str) -> list[int]:
-    """Line numbers of a ``references: <type>`` annotated field declared in a
-    class body (banned pattern 4's structural form: a dataclass carrying its own
-    inbound-reference field instead of the graph holding it).
+    """Line numbers of a class-scope ``references`` DECLARATION (banned pattern
+    4's structural form: a resource carrying its own inbound-reference member
+    instead of the graph holding it).
+
+    The read side can only catch the literal ``getattr(x, "references")`` form (a
+    plain ``.references`` attribute read is indistinguishable from the exempt
+    describe views without type inference), so the declaration check is the real
+    defense and must cover every way the member is reintroduced: an annotated
+    field (``references: T``), a plain class attribute (``references = ()``), or a
+    method / property named ``references``.
     """
     found: list[int] = []
     for node in ast.walk(ast.parse(source)):
         if not isinstance(node, ast.ClassDef):
             continue
         for stmt in node.body:
-            if isinstance(stmt, ast.AnnAssign) and isinstance(stmt.target, ast.Name) and stmt.target.id == "references":
+            annotated = (
+                isinstance(stmt, ast.AnnAssign) and isinstance(stmt.target, ast.Name) and stmt.target.id == "references"
+            )
+            assigned = isinstance(stmt, ast.Assign) and any(
+                isinstance(target, ast.Name) and target.id == "references" for target in stmt.targets
+            )
+            defined = isinstance(stmt, ast.FunctionDef | ast.AsyncFunctionDef) and stmt.name == "references"
+            if annotated or assigned or defined:
                 found.append(stmt.lineno)
     return sorted(found)
 
@@ -308,6 +372,23 @@ def _function_source(rel: str, name: str) -> str:
     raise AssertionError(f"{rel}: function {name!r} not found (guard baseline drifted from HEAD)")
 
 
+def _enclosing_functions(source: str, predicate: Callable[[ast.AST], bool]) -> list[tuple[str | None, int]]:
+    """For every node matching ``predicate``, the name of the innermost enclosing
+    function (``None`` at module scope) and the node's line number. Used to pin an
+    exempt module's sanctioned reads to the specific functions that own them."""
+    hits: list[tuple[str | None, int]] = []
+
+    def walk(node: ast.AST, stack: list[str]) -> None:
+        if predicate(node):
+            hits.append((stack[-1] if stack else None, getattr(node, "lineno", 0)))
+        inner = [*stack, node.name] if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef) else stack
+        for child in ast.iter_child_nodes(node):
+            walk(child, inner)
+
+    walk(ast.parse(source), [])
+    return hits
+
+
 def test_collect_secrets_for_reads_reachable_from() -> None:
     source = _function_source("resources/walk.py", "collect_secrets_for")
     assert "reachable_from" in source
@@ -338,6 +419,41 @@ def test_readiness_projections_read_readiness_of() -> None:
     assert "impl_of" in _read("secrets/resolve.py")
 
 
+def test_vms_sites_exempt_reads_are_function_scoped() -> None:
+    """``vms/sites.py`` is the one module exempt for patterns 1, 2, AND 3 at
+    once, so whole-file scoping is at its softest here: a regression re-inlining
+    the old ``site_disabled_reason`` readiness recompute would evade all three
+    scans. Pin the sanctioned reads to the functions that own them (mirroring the
+    ``vms/kinds.py`` zero-read pin) so a stray read in any new function trips.
+
+    Registry reads belong to edge production (``dependencies``), the finalize
+    ``validate`` pass, and op-time construction (``resolve_site``). The only
+    ``not_ready`` call is ``VMSite.not_ready`` delegating to the graph-stamped
+    platform impl.
+    """
+    source = _read("vms/sites.py")
+    aliases = _registry_aliases(ast.parse(source))
+    reg_offenders = [
+        f"{func}:{lineno}"
+        for func, lineno in _enclosing_functions(source, lambda node: _is_registry_read(node, aliases))
+        if func not in {"dependencies", "validate", "resolve_site"}
+    ]
+    not_ready_offenders = [
+        f"{func}:{lineno}"
+        for func, lineno in _enclosing_functions(source, _is_not_ready_call)
+        if func not in {"not_ready"}
+    ]
+    assert not reg_offenders, (
+        "vms/sites.py reads a capability registry outside its edge-production / "
+        "validate / construction functions (a readiness recompute would land "
+        "here and evade the module-scoped scans):\n" + "\n".join(reg_offenders)
+    )
+    assert not not_ready_offenders, (
+        "vms/sites.py calls not_ready outside VMSite.not_ready (read the stored "
+        "verdict via readiness_of instead):\n" + "\n".join(not_ready_offenders)
+    )
+
+
 # -- Non-vacuity self-check: each detector actually flags its banned shape and
 #    stays quiet on the honest / benign shape.
 
@@ -349,9 +465,11 @@ def test_detectors_are_not_vacuous() -> None:
     assert find_dependencies_calls("edges = _dependencies(resource, context)") == []
     assert find_dependencies_calls("def dependencies(self, context):\n    return []") == []
 
-    # Pattern 2: a bare registry read is caught; an import / __all__ / docstring
-    # mention is not.
+    # Pattern 2: the bare, qualified, and aliased-import reads are all caught; an
+    # import / __all__ / docstring mention is not.
     assert find_registry_reads("cap = VM_PLATFORM_REGISTRY.get(name)") == [1]
+    assert find_registry_reads("cap = vm_platform.VM_PLATFORM_REGISTRY.get(x)") == [1]
+    assert find_registry_reads("from x import VM_PLATFORM_REGISTRY as R\ncap = R.get(x)") == [2]
     assert find_registry_reads("from agentworks.x import SECRET_BACKEND_REGISTRY") == []
     assert find_registry_reads('__all__ = ["HARNESS_REGISTRY"]') == []
     assert find_registry_reads('"""mentions GIT_CREDENTIAL_PROVIDER_REGISTRY in prose."""') == []
@@ -360,9 +478,12 @@ def test_detectors_are_not_vacuous() -> None:
     assert find_not_ready_calls("verdict = platform.not_ready(config)") == [1]
     assert find_not_ready_calls("not_ready = {}\nnot_ready[name] = reason\nif name in not_ready:\n    pass") == []
 
-    # Pattern 4: both the getattr form and the dataclass-field form are caught;
-    # reading a describe view's own field is not.
+    # Pattern 4: the getattr form plus every declaration form (annotated field,
+    # plain attribute, method/property) are caught; reading a describe view's own
+    # field and a benign field are not.
     assert find_getattr_references('refs = getattr(decl, "references", ())') == [1]
     assert find_getattr_references("refs = desc.references") == []
     assert find_references_fields("class R:\n    references: tuple = ()") == [2]
+    assert find_references_fields("class R:\n    references = ()") == [2]
+    assert find_references_fields("class R:\n    @property\n    def references(self):\n        return ()") == [3]
     assert find_references_fields("class R:\n    inbound: tuple = ()") == []
