@@ -219,24 +219,26 @@ sub-step.
       every resource (caller inventory section C: `vms/sites.py`, `vms/templates.py`,
       `vms/template.py`, `vms/admin.py`, `git_credentials/credential.py`, `sessions/template.py`,
       `agents/template.py`, `apt.py`, `workspaces/template.py`, `declared_resource.py`; **not**
-      `env/entry.py`'s arg-taking variant). Thread the build `context` (available-backend list +
-      read-only graph-in-progress) from the builder walk (`registry.py:321`) to every resource; most
-      ignore it. The **secret's** `dependencies(context)` now emits the `secret -> secret-backend`
-      edges (the union of present would-attempt backends and every explicit non-`false` mapping key,
-      LLD d / HLA component 2). This is the deliberate landing point for R9.9/R9.10/R9.11 and makes
-      the materialize loop load-bearing (a materialized secret now has backend edges). **Greenness
-      scaffold:** the rename breaks callers that invoke `referenced_resources()` by name, the two
-      node factories (`vms/nodes.py:412`, `git_credentials/nodes.py:93`, direct
-      `decl.referenced_resources()` calls) and, via the `registry.py:397` getattr helper, cycle
-      detection, which each migrate to graph reads in their **own** later sub-steps. So this step
-      retains a thin `referenced_resources()` alias delegating to `dependencies(<empty context>)`
-      (context is unused by every non-secret caller) so those sub-steps stay independently green;
-      the alias is removed when its last caller migrates, before the phase-6 guard (which would flag
-      a consumer re-walking `dependencies`). The builder walk itself is pointed at
-      `dependencies(context)` in this step (it is the one caller that needs the real context).
-      Tests: the materialize-fixpoint VM-create acceptance (an auto-declared `tailscale-auth-key`'s
-      backend edges exist and resolve; the no-loop regression is pinned here); R9.11 (a typo'd
-      `backend_mappings` key is a dangling edge that hard-errors).
+      `env/entry.py`'s arg-taking variant). Thread the build `context` (a `BuildContext` carrying
+      the available-backend list; the "read-only graph-in-progress" field the earlier draft
+      mentioned was deliberately not built, no resource consumes it) from the builder walk
+      (`registry.py:321`) to every resource; most ignore it. The **secret's**
+      `dependencies(context)` now emits the `secret -> secret-backend` edges (the union of present
+      would-attempt backends and every explicit non-`false` mapping key, LLD d / HLA component 2).
+      This is the deliberate landing point for R9.9/R9.10/R9.11 and makes the materialize loop
+      load-bearing (a materialized secret now has backend edges). **Greenness scaffold:** the rename
+      breaks callers that invoke `referenced_resources()` by name, the two node factories
+      (`vms/nodes.py:412`, `git_credentials/nodes.py:93`, direct `decl.referenced_resources()`
+      calls) and, via the `registry.py:397` getattr helper, cycle detection, which each migrate to
+      graph reads in their **own** later sub-steps. So this step retains a thin
+      `referenced_resources()` alias delegating to `dependencies(<empty context>)` (context is
+      unused by every non-secret caller) so those sub-steps stay independently green; the alias is
+      removed when its last caller migrates, before the phase-6 guard (which would flag a consumer
+      re-walking `dependencies`). The builder walk itself is pointed at `dependencies(context)` in
+      this step (it is the one caller that needs the real context). Tests: the materialize-fixpoint
+      VM-create acceptance (an auto-declared `tailscale-auth-key`'s backend edges exist and resolve;
+      the no-loop regression is pinned here); R9.11 (a typo'd `backend_mappings` key is a dangling
+      edge that hard-errors).
 - [x] **Cycle detection** reads `edges_of` (removes the second
       `validate_config`/`referenced_resources` pass at `registry.py:542`). Landed in Phase 2:
       `_detect_cycles` three-colors over the built `all_outbound` map, no re-walk.

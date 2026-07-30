@@ -422,10 +422,13 @@ exactly which it means.
 - Capability: `dependencies(config) -> tuple[ConfigReference, ...]`; `validate(config) -> None`;
   `not_ready(config) -> Readiness` (offline, non-constructing).
 - Resource: **`dependencies(context)`** (renamed from `referenced_resources`), where `context` is a
-  small build-context object the builder passes to **every** resource uniformly (carrying the
-  available-backend list, and the read-only graph-in-progress); most resources ignore it, the
-  `secret` reads the backend list. The uniform signature (over special-casing `secret` in the
-  builder loop) keeps R2's one-shape rule and keeps the builder walk (`registry.py:321`) uniform.
+  small build-context object the builder passes to **every** resource uniformly; most resources
+  ignore it, the `secret` reads the available-backend list off it. (As shipped, `BuildContext`
+  carries only `available_backends`, the one load-bearing field: the sole consumer is the secret's
+  edge emission, and `would_attempt` is pure over `(secret, mapping)`, so the earlier "read-only
+  graph-in-progress" field was deliberately not built, no resource needs it. Add it only if a future
+  consumer does.) The uniform signature (over special-casing `secret` in the builder loop) keeps
+  R2's one-shape rule and keeps the builder walk (`registry.py:321`) uniform.
 - Readiness hook (resource): `not_ready(config, {dependency -> DependencyState}) -> Readiness`,
   where `DependencyState` carries the dependency's enablement and (if enabled) readiness.
 
