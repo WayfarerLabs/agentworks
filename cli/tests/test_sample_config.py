@@ -81,6 +81,7 @@ def test_sample_config_examples_uncomment_cleanly() -> None:
         "git_credentials",
         "secrets",
         "secret_config",
+        "plugins",
         "vm_templates",
         "admin",
         "agent_templates",

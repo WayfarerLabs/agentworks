@@ -195,6 +195,19 @@ ssh_private_key = "~/.ssh/id_ed25519"        # required: used for SSH connection
 # and the chain falls through to the next one. An explicit empty list
 # `backends = []` disables resolution entirely.
 
+# --- System plugins ---
+# System plugins bundle capability implementations (VM platforms, harnesses,
+# git-credential providers, secret backends) and optional resource manifests
+# that ship with agentworks but are separable and opt-in. List the plugins you
+# want enabled by name. A plugin NOT listed here still publishes its capability
+# rows, but they are disabled: a resource referencing one is not-ready with an
+# "enable plugin <name>" hint, and its bundled manifests are not loaded. Only
+# installed plugin names are valid here (an unknown name is a hard error), and
+# the shipped build installs none, so leave this empty unless you have added a
+# plugin. `agw doctor` shows a System plugins roster with each plugin's state.
+#[plugins]
+#enabled = ["azure"]                        # names of installed system plugins to enable
+
 # --- VM sites (azure, proxmox, remote Lima, ...) ---
 # Places to create VMs are declared as vm-site RESOURCES (YAML manifests
 # under ~/.config/agentworks/resources/), not config sections. Run

@@ -20,11 +20,12 @@ agw resource describe vm-template/dev   # one resource, with references and usag
 agw resource kinds                      # every kind: category, counts, purpose
 ```
 
-Resources come from three origins: **operator-declared** (you wrote them, in YAML or TOML),
+Resources come from four origins: **operator-declared** (you wrote them, in YAML or TOML),
 **built-in** (shipped with agentworks, e.g. the `env-var` and `prompt` secret backends and the
-built-in apt / install-command entries), and **auto-declared** (the framework filled in a
+built-in apt / install-command entries), **auto-declared** (the framework filled in a
 referenced-but-undeclared resource, e.g. the `tailscale-auth-key` secret or `git-token-<name>`
-secrets).
+secrets), and **system-plugin** (contributed by an installed, opted-in system plugin; see "System
+plugins" below). Filter by origin with `agw resource list --origin operator|auto|builtin|plugin`.
 
 ## Declaring resources: YAML manifests
 
@@ -241,6 +242,40 @@ policy is per kind:
   regardless of host support: a platform whose host requirements are not met (e.g. `wsl2` off
   Windows) publishes a present, not-ready row (`agw resource list` and `agw doctor` show it with the
   reason), and a site referencing it is not-ready rather than erroring.
+
+## System plugins
+
+A **system plugin** bundles capability implementations (VM platforms, harnesses, git-credential
+providers, secret backends) and optional resource manifests that ship with agentworks but are
+separable and opt-in. Its contributed resources carry the fourth origin, **system-plugin**, and are
+attributed on the surfaces as `from plugin <name>`. A plugin is not a resource kind of its own: it
+publishes resources of the existing kinds.
+
+Plugins are off by default. Opt in by name in `config.toml`:
+
+```toml
+[plugins]
+enabled = ["azure"]
+```
+
+- An unknown name here (a typo, or a plugin that is not installed) is a hard error, and so is an
+  unknown key in the `[plugins]` table: the section is an opt-in gate, so a mistake fails loudly
+  rather than silently leaving plugins off.
+- A plugin you have **not** enabled still publishes its capability rows, but they are **disabled**:
+  a resource referencing one is not-ready with an `enable plugin <name>` hint (not an unknown-name
+  error), and the plugin's bundled manifest resources are simply absent until you enable it.
+
+**Disabled resources are hidden by default.** `agw resource list` omits disabled rows; pass
+`--include-disabled` to reveal them. `--origin plugin` narrows the listing to plugin-contributed
+rows but still honors the disabled default, so combine it with `--include-disabled` to see a
+not-enabled plugin's rows. `agw resource describe <kind>/<name>` always renders a named resource,
+disabled or not, with a `Disabled:` line. `agw doctor` has a **System plugins** roster: each
+installed plugin, its description, and whether it is enabled. Note the axis distinction: "disabled"
+is the opt-in state and hides the row, while a **not-ready** resource (enabled but unable to run on
+this host) still lists with its reason.
+
+The shipped build installs no plugins. Authoring a system plugin is documented in the plugins
+package README (`cli/agentworks/plugins/README.md`).
 
 ## Secrets: backends and the chain
 

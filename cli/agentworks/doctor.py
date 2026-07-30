@@ -117,6 +117,13 @@ def run_checks(*, completion_version: str | None = None) -> HealthReport:
         report.groups.append(_check_vm_platforms(registry))
     else:
         report.groups.append(_skipped_group("VM platforms", "Installed platforms"))
+    # The plugin roster reads config.plugins_enabled against SYSTEM_PLUGINS; it
+    # needs no registry (a plugin is an origin, not a resource kind, R12), so it
+    # sits beside VM platforms and skips only when config is unavailable.
+    if config is not None:
+        report.groups.append(_check_plugins(config))
+    else:
+        report.groups.append(_skipped_group("System plugins", "Installed plugins"))
     if config is not None and registry is not None:
         report.groups.append(_check_vm_sites(config, registry))
     else:
@@ -241,6 +248,46 @@ def _check_vm_platforms(registry: Registry) -> HealthGroup:
             g.info(name, f"not ready: {reason}")
         else:
             g.ok(name)
+    return g
+
+
+def _check_plugins(config: Config) -> HealthGroup:
+    """The system-plugin roster (R9, R10, R12): every installed plugin, its
+    description, and its opt-in state, read from ``SYSTEM_PLUGINS`` against
+    ``config.plugins_enabled``.
+
+    A BESPOKE surface, not a ``KIND_REGISTRY``-dispatched hook: a plugin is an
+    origin, not a resource kind (R12). Roster only (existence, description,
+    enable-state); it never enumerates a disabled plugin's contributed
+    capabilities or resources (that is what the enablement axis and the
+    reference hint are for). The reserved ``required_scopes`` (R10) render as an
+    informational least-privilege line when populated, unenforced; empty (the
+    v1 default) renders nothing. The shipped build ships an empty index, so the
+    group renders empty-but-present, so the surface exists and is testable
+    before any plugin ships.
+    """
+    from agentworks.plugins import SYSTEM_PLUGINS
+
+    g = HealthGroup("System plugins")
+    if not SYSTEM_PLUGINS:
+        g.info("No system plugins installed.")
+        return g
+
+    enabled = set(config.plugins_enabled)
+    for name, plugin in sorted(SYSTEM_PLUGINS.items()):
+        if name in enabled:
+            g.ok(f"plugin {name}", plugin.description or None)
+        else:
+            # The doctor renders the "not enabled in [plugins]" STATE phrasing
+            # (the enablement mark carries only the "enable plugin <name>"
+            # remediation clause, never this state string).
+            message = "disabled (not enabled in [plugins])"
+            if plugin.description:
+                message = f"{message}; {plugin.description}"
+            g.info(f"plugin {name}", message)
+        if plugin.required_scopes:
+            levels = ", ".join(level.value for level in plugin.required_scopes)
+            g.info(f"plugin {name} least privilege", levels)
     return g
 
 

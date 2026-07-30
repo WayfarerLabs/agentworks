@@ -176,15 +176,15 @@ enablement gates manifests and (via Phase 4) overlays capabilities.
 
 Governs: R9 (disabled-hides + roster), R10, R11. LLD: (c).
 
-- [ ] **Disabled hides, not-ready shows**: `resource list` / `describe` hide `disabled` rows by
+- [x] **Disabled hides, not-ready shows**: `resource list` / `describe` hide `disabled` rows by
       default (reading `enablement_of`) while still showing `not-ready` rows; an
       `--include-disabled` opt-in reveals them; provenance annotates "from plugin `<name>`" off the
       `system-plugin` origin.
-- [ ] **Doctor plugin roster**: iterate `SYSTEM_PLUGINS` vs `config.plugins_enabled`;
+- [x] **Doctor plugin roster**: iterate `SYSTEM_PLUGINS` vs `config.plugins_enabled`;
       `plugin <name>: <description>` tagged enabled or `disabled (not enabled in [plugins])`; roster
       only; reserved `required_scopes` render informationally (R10); a bespoke doctor surface, not a
       `KIND_REGISTRY` hook (R12).
-- [ ] **Docs (DoD-docs)**: `agentworks/plugins/README.md` (authoring a system plugin, the
+- [x] **Docs (DoD-docs)**: `agentworks/plugins/README.md` (authoring a system plugin, the
       descriptor, the enablement model), `sample-config.toml` (`[plugins]`),
       `docs/guides/resources.md` (the "three origins" operator-facing sentence becomes four:
       document the `system-plugin` origin, which is first observable once Phase 5 publishes plugin
@@ -193,7 +193,7 @@ Governs: R9 (disabled-hides + roster), R10, R11. LLD: (c).
       deliberate `[plugins]` strict-unknown-key stance vs the soft-warn convention, so future
       config-section authors know which precedent to follow). Regenerate completions if any CLI
       surface changed (`--include-disabled`).
-- [ ] Tests (DoD-behavior, R11): the full fixture end-to-end (descriptor to index to registration to
+- [x] Tests (DoD-behavior, R11): the full fixture end-to-end (descriptor to index to registration to
       unconditional publication to enablement-overlay to consumption + hidden-when-disabled +
       roster); the shipped index is empty; the reserved fields are inert.
 

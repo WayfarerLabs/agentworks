@@ -149,6 +149,16 @@ class TestOptionFlagsInSpec:
         # hidden alias, so it appears nowhere in the completion spec.
         assert "--reveal-secrets" not in self._env_show_option_flags()
 
+    def test_include_disabled_flag_reaches_the_completion_spec(self) -> None:
+        # `resource list --include-disabled` is a plain boolean flag, captured
+        # by the Typer introspection with no merge-tree change (it is not a
+        # dynamic path element). The always-consider-completions rule: a new CLI
+        # flag must reach the tree.
+        spec = build_spec(app)
+        resource_list = _walk_commands(spec)["agentworks.resource.list"]
+        opts = [opt for param in resource_list.params for opt in param.opts]
+        assert "--include-disabled" in opts
+
 
 class TestGeneration:
     """Smoke tests for completion script generation."""

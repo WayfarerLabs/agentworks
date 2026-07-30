@@ -33,6 +33,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Literal
 
 from agentworks import output
+from agentworks.resources.graph import Enablement
 from agentworks.resources.render import format_file_path, format_origin_line
 
 if TYPE_CHECKING:
@@ -45,7 +46,7 @@ if TYPE_CHECKING:
     from agentworks.resources.reference import ReferenceEntry
 
 
-OriginFilter = Literal["operator", "auto", "builtin"]
+OriginFilter = Literal["operator", "auto", "builtin", "plugin"]
 
 
 @dataclass(frozen=True)
@@ -85,6 +86,7 @@ class ResourceListing:
     operator_count: int
     auto_count: int
     code_count: int
+    plugin_count: int
 
 
 @dataclass(frozen=True)
@@ -108,6 +110,14 @@ class ResourceDescription:
     references: tuple[ReferenceEntry, ...]
     used_by: tuple[InstanceRef, ...] | None
     not_ready_reason: str | None = None
+    disabled_reason: str | None = None
+    """The text of the ``Disabled:`` line, or ``None`` when the resource is
+    enabled. Derived from the row's ``system-plugin`` origin plus the opt-in
+    axis (``enablement_of``), NOT from a per-node reason (the frozen graph node
+    carries none; the disabling reason lives only on the transient
+    ``DisabledMark``). ``describe`` renders the named row even when disabled and
+    annotates it with this line, exactly as the doctor roster phrases the
+    state."""
 
 
 # -- Filter parsing ---------------------------------------------------------
@@ -121,6 +131,7 @@ _ORIGIN_FILTER_MAP: dict[str, str] = {
     "operator": "operator-declared",
     "auto": "auto-declared",
     "builtin": "built-in",
+    "plugin": "system-plugin",
 }
 
 
@@ -142,14 +153,24 @@ def list_resources(
     *,
     kinds: tuple[str, ...] | None = None,
     origin_filter: OriginFilter | None = None,
+    include_disabled: bool = False,
 ) -> ResourceListing:
     """Build a ``ResourceListing`` for ``agw resource list``.
 
     Filters narrow the rows; the summary counts are computed AFTER
     filtering so the header reflects what the operator actually sees.
-    Raises ``ValidationError`` when ``origin_filter`` isn't one of
-    ``operator`` / ``auto`` / ``code`` (the keys of ``_ORIGIN_FILTER_MAP``).
-    The CLI layer stays thin per the service-layer-is-the-authority rule.
+    Raises ``ValidationError`` when ``origin_filter`` isn't one of the
+    keys of ``_ORIGIN_FILTER_MAP`` (``operator`` / ``auto`` / ``builtin`` /
+    ``plugin``). The CLI layer stays thin per the
+    service-layer-is-the-authority rule.
+
+    ``include_disabled`` sets the default-surface rule (the plugin work is the
+    first producer of ``disabled`` rows): a row whose opt-in axis reads
+    ``Enablement.disabled`` is hidden by default and revealed only when this is
+    ``True``. The filter is on the ENABLEMENT axis (``enablement_of``), never on
+    readiness: a host-unsupported built-in (present, enabled, blocked) still
+    lists with its ``(not ready)`` marker. "Off by opt-in" hides; "on but
+    blocked" shows.
 
     ``db`` is optional: when provided, each row's ``used_by_count`` is
     populated via the kind's ``instances`` hook. When ``None`` (e.g.
@@ -175,6 +196,7 @@ def list_resources(
     operator_count = 0
     auto_count = 0
     code_count = 0
+    plugin_count = 0
 
     for kind in target_kinds:
         # Sort by name within each kind so the output is stable across
@@ -184,6 +206,11 @@ def list_resources(
         for name, resource in items:
             origin = getattr(resource, "origin", None)
             if not _matches_origin(origin, origin_filter):
+                continue
+            # Disabled hides, not-ready shows: skip a row that is off by
+            # opt-in unless the operator asked for it. Reads the ENABLEMENT
+            # axis, never readiness, so a not-ready-but-enabled row survives.
+            if not include_disabled and registry.graph.enablement_of(kind, name) is Enablement.disabled:
                 continue
             references: tuple[ReferenceEntry, ...] = registry.graph.dependents_of(kind, name)
             description = getattr(resource, "description", "") or ""
@@ -206,12 +233,15 @@ def list_resources(
                 auto_count += 1
             elif variant == "built-in":
                 code_count += 1
+            elif variant == "system-plugin":
+                plugin_count += 1
 
     return ResourceListing(
         rows=tuple(rows),
         operator_count=operator_count,
         auto_count=auto_count,
         code_count=code_count,
+        plugin_count=plugin_count,
     )
 
 
@@ -263,6 +293,37 @@ def _count_used_by(db: Database | None, registry: Registry, kind: str, resource:
     return None if refs is None else len(refs)
 
 
+def _plugin_provenance(origin: Origin | None) -> str | None:
+    """``"from plugin <name>"`` for a ``system-plugin`` row, else ``None``.
+
+    Reads ``origin.plugin`` already on the row (no separate lookup), so a
+    plugin's contributed resources are attributable in the list DESCRIPTION
+    cell and the describe header without the plugin being a resource (R12).
+    """
+    if origin is not None and origin.variant == "system-plugin" and origin.plugin:
+        return f"from plugin {origin.plugin}"
+    return None
+
+
+def _disabled_line_text(origin: Origin | None) -> str:
+    """The ``Disabled:`` line's text for a disabled row, derived from the row's
+    origin plus config the same way the doctor roster derives its state phrase
+    (from provenance, not a node reason): ``"not enabled in [plugins] (plugin
+    <name>)"`` for a ``system-plugin`` row. The exact wording differs from the
+    roster's line because describe carries the plugin name inline while the
+    roster row already labels its plugin.
+
+    The disabling reason is NOT read off the frozen graph node (it carries
+    none; the reason lives only on the transient ``DisabledMark``), so the text
+    is reconstructed from provenance. A disabled row of any other origin (none
+    exists today: the plugin opt-in source is the sole producer) renders the
+    bare state word rather than a plugin phrase it cannot substantiate.
+    """
+    if origin is not None and origin.variant == "system-plugin" and origin.plugin:
+        return f"not enabled in [plugins] (plugin {origin.plugin})"
+    return "disabled"
+
+
 def describe_resource(
     registry: Registry,
     kind: str,
@@ -312,14 +373,20 @@ def describe_resource(
             hint=hint,
         ) from None
 
+    origin = getattr(resource, "origin", None)
+    # describe is an EXPLICIT lookup by name, so it always renders the named row
+    # even when disabled (an operator debugging a specific disabled resource
+    # asked for it by name), annotating its state off the binary opt-in axis.
+    disabled = registry.graph.enablement_of(kind, name) is Enablement.disabled
     return ResourceDescription(
         kind=kind,
         name=name,
-        origin=getattr(resource, "origin", None),
+        origin=origin,
         description=getattr(resource, "description", "") or "",
         references=registry.graph.dependents_of(kind, name),
         used_by=used_by_for(db, registry, kind, resource),
         not_ready_reason=not_ready_reason_for(registry, kind, name),
+        disabled_reason=_disabled_line_text(origin) if disabled else None,
     )
 
 
@@ -444,6 +511,8 @@ def render_resource_table(listing: ResourceListing) -> None:
         parts.append(f"{listing.auto_count} auto-declared")
     if listing.code_count:
         parts.append(f"{listing.code_count} built-in")
+    if listing.plugin_count:
+        parts.append(f"{listing.plugin_count} system-plugin")
     breakdown = f" ({', '.join(parts)})" if parts else ""
     output.info(f"{total} resource{'s' if total != 1 else ''}{breakdown}")
     output.info("")
@@ -459,10 +528,14 @@ def render_resource_table(listing: ResourceListing) -> None:
         # Not-ready rows are marked in the DESCRIPTION cell, never the
         # NAME cell: the rendered name must stay the exact selector an
         # operator copies into `agw resource describe KIND/NAME`.
-        # `describe` carries the full reason.
-        description_cell = (
-            row.description if row.not_ready_reason is None else f"(not ready) {row.description}".rstrip()
-        )
+        # `describe` carries the full reason. A system-plugin row also
+        # carries a `from plugin <name>` provenance annotation here.
+        description_cell = row.description
+        provenance = _plugin_provenance(row.origin)
+        if provenance is not None:
+            description_cell = f"{description_cell} ({provenance})" if description_cell else provenance
+        if row.not_ready_reason is not None:
+            description_cell = f"(not ready) {description_cell}".rstrip()
         rendered.append(
             (
                 row.kind,
@@ -491,11 +564,18 @@ def render_resource_description(desc: ResourceDescription) -> None:
     secret-specific sections (backend mappings, resolution preview).
     """
     output.info(f"Resource: {desc.kind}/{desc.name}")
+    # A system-plugin resource carries a `from plugin <name>` provenance
+    # annotation in the header (read off the origin), so a plugin's contributed
+    # resources are attributable without the plugin being a resource (R12).
+    provenance = _plugin_provenance(desc.origin)
     if desc.description:
-        output.detail(f"Description: {desc.description}")
+        description_line = f"{desc.description} ({provenance})" if provenance is not None else desc.description
+        output.detail(f"Description: {description_line}")
     else:
-        output.detail("Description: (none)")
+        output.detail(f"Description: {provenance}" if provenance is not None else "Description: (none)")
     output.detail(f"Origin: {format_origin_line(desc.origin)}")
+    if desc.disabled_reason is not None:
+        output.detail(f"Disabled: {desc.disabled_reason}")
     if desc.not_ready_reason is not None:
         output.detail(f"Not ready: {desc.not_ready_reason}")
 
