@@ -244,7 +244,7 @@ sub-step.
       (`secrets/kinds.py:188`) is unaffected.
 - [x] **Node factories** `vm_site_node` (`vms/nodes.py:412`) and `git_credential_node`
       (`git_credentials/nodes.py:93`) read secret edges off `edges_of`.
-- [ ] **`inspect`** reads readiness via `readiness_of` and usage via `dependents_of` (R10); the list
+- [x] **`inspect`** reads readiness via `readiness_of` and usage via `dependents_of` (R10); the list
       cell and describe line adopt the readiness vocabulary (folded into phase 5's surface work, but
       the projection swap is here). NOTE (reconciled after phase 3): the **rendered** R9.5 not-ready
       `vm-platform` row already appears in `resource list` from phase 3 (old vocabulary), via a thin

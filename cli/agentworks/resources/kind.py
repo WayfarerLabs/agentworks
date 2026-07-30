@@ -166,19 +166,17 @@ class ResourceKind(Protocol):
     # the same ``InstanceRef`` shape from manifests; today's
     # ``instances`` is the config-projected dimension.
     #
-    # The optional ``disabled_reason(registry, resource) -> str | None``
-    # method follows the same structural pattern: a kind whose
-    # resources can lack what they need to run on this host implements
-    # it (vm-site: platform missing/host-disabled/instance
-    # requirement); absent-on-class means the kind's resources are
-    # never disabled (a vm-template always has what it needs). The
-    # contract is cheap, offline host-introspection only: never
-    # network, secrets, or prompting (deeper readiness is the
-    # capability lifecycle's preflight). A disabled resource still
-    # registers, lists, describes, and holds references; USING it is
-    # the owning domain's typed error, and existing references degrade
-    # to doctor warnings. Consumers go through
-    # ``agentworks.resources.inspect.disabled_reason_for``.
+    # Readiness is NOT a per-kind hook: a resource's verdict is folded once at
+    # finalize (from its capability impl or its own ``not_ready``) and stored on
+    # the graph node. Projection surfaces read it uniformly via
+    # ``graph.readiness_of`` (through
+    # ``agentworks.resources.inspect.disabled_reason_for``), the single access
+    # path (R11); a kind with no readiness concept folds to ready. A not-ready
+    # resource still registers, lists, describes, and holds references; USING it
+    # is the owning domain's typed error, and existing references degrade to
+    # doctor warnings. The fold's ``not_ready`` inputs stay cheap and offline
+    # (never network, secrets, or prompting; deeper readiness is the capability
+    # lifecycle's preflight).
     #
     # Deliberately ABSENT: a kind-level semantic-validation hook.
     # Checks that need config alongside the finalized graph (the secret

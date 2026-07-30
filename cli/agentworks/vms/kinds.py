@@ -161,17 +161,10 @@ class _VMPlatformKind:
             "first)"
         )
 
-    def disabled_reason(self, registry: Registry, resource: Any) -> str | None:
-        """The generic disabled hook for ``vm-platform`` rows, reading the
-        STORED readiness verdict off the graph (``readiness_of``), not
-        recomputing. Under R13 an installed-but-host-unsupported platform
-        (wsl2 off Windows) now publishes a present, not-ready row, so this
-        projection lets ``resource list`` / ``describe`` render its state
-        with today's vocabulary (the fold stores the bare host-support reason,
-        e.g. ``"Windows only"``). This is the sanctioned graph-read path, not
-        a live-registry probe.
-        """
-        return registry.graph.readiness_of("vm-platform", resource.name).reason
+    # No ``disabled_reason`` hook: readiness projection is unified on
+    # ``inspect.disabled_reason_for`` reading ``graph.readiness_of`` directly
+    # (Phase 4 retired the per-kind shim, including the Phase-3 vm-platform
+    # projection pulled forward to render the now-published not-ready row).
 
 
 KIND_REGISTRY["vm-platform"] = _VMPlatformKind()
@@ -206,16 +199,10 @@ class _VMSiteKind:
             if vm.site == name:
                 yield InstanceRef(instance_kind="vm", instance_name=vm.name)
 
-    def disabled_reason(self, registry: Registry, resource: Any) -> str | None:
-        """The generic disabled hook (structural, like ``instances``):
-        a site registers on every host and self-disables when its
-        platform is missing, host-disabled, or the bound instance
-        reports a missing requirement. Domain logic lives with the
-        sites module; this is the framework-facing delegation.
-        """
-        from agentworks.vms.sites import site_disabled_reason
-
-        return site_disabled_reason(resource)
+    # No ``disabled_reason`` hook: a site's readiness verdict is folded at
+    # finalize and read via ``graph.readiness_of`` (through
+    # ``inspect.disabled_reason_for``), retiring the ``site_disabled_reason``
+    # recompute (R11).
 
 
 KIND_REGISTRY["vm-site"] = _VMSiteKind()

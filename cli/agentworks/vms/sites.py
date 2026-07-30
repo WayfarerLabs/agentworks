@@ -20,10 +20,10 @@ platform edge unconditionally and the absent capability row is a loud
 miss. A not-ready site still lists, describes, and holds references;
 using it (:func:`resolve_site`) is a typed error with the reason, and
 existing references (VMs, ``defaults.site``) degrade to doctor warnings
-rather than breaking every command. :func:`site_disabled_reason` is the
-phase-3 compatibility shim reproducing today's operator strings without
-constructing the platform; phase 4 moves its callers onto
-``graph.readiness_of``.
+rather than breaking every command. Readiness is folded once at finalize and
+read off the graph (``graph.readiness_of``); :func:`select_site` /
+:func:`ensure_site_enabled` and the inspect / doctor projections all read that
+stored verdict rather than recomputing it.
 """
 
 from __future__ import annotations
@@ -216,39 +216,6 @@ def select_site(
         f"multiple sites are enabled ({', '.join(names)})",
         hint="pass --site <name> or set defaults.site in config.toml",
     )
-
-
-def site_disabled_reason(decl: VMSiteDecl) -> str | None:
-    """Why this site cannot be used on this host, or ``None`` when it
-    can (the vm-site kind's generic disabled hook delegates here).
-
-    PHASE-3 COMPATIBILITY SHIM. The site's readiness verdict now lives on
-    the graph (the fold stores it; ``readiness_of`` reads it), and the
-    consumers that still call this function (``select_site`` /
-    ``ensure_site_enabled`` / the kind hook / doctor) migrate to the graph
-    in phase 4, where they gain graph access. Until then this reproduces
-    today's operator strings WITHOUT constructing the platform (fixing B1:
-    construction re-runs the throwing validator, which a readiness check must
-    never do). It composes the same two non-constructing sources the fold
-    does: the platform's config-independent ``unsupported_reason`` and its
-    config-dependent ``not_ready(platform_config)`` classmethod.
-
-    The chain, cheapest first: the platform is missing entirely (only
-    reachable for a directly-built decl, since an unknown platform is now a
-    hard finalize miss, R9.2), the platform is host-unsupported
-    (``unsupported_reason``), or the bound config reports a missing
-    requirement (``not_ready``: a local-Lima site without ``limactl``).
-    """
-    from agentworks.capabilities.vm_platform import VM_PLATFORM_REGISTRY
-
-    platform_cls = VM_PLATFORM_REGISTRY.get(decl.platform)
-    if platform_cls is None:
-        return f"platform '{decl.platform}' is not installed"
-    if (reason := platform_cls.unsupported_reason()) is not None:
-        return f"platform '{decl.platform}' is disabled: {reason}"
-    # Config-dependent tool check, non-constructing: reads the site's
-    # platform_config directly, never builds an instance.
-    return platform_cls.not_ready(decl.platform_config).reason
 
 
 def lookup_site(name: str, registry: Registry) -> VMSiteDecl:

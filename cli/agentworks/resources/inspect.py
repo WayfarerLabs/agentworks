@@ -63,9 +63,10 @@ class ResourceSummary:
       with no instance concept (apt / install-commands, providers,
       backends); the list view renders ``None`` as ``-`` in the USED BY
       column.
-    - ``disabled_reason`` is the kind's generic disabled hook's answer
-      (``None`` = enabled, or the kind has no disabled concept). The
-      list view marks disabled rows; describe shows the reason.
+    - ``disabled_reason`` is the resource's stored readiness verdict's reason,
+      read off the graph (``None`` = ready, or the kind has no readiness
+      concept). The list view marks not-ready rows; describe shows the reason.
+      (Field + operator vocabulary rename to ``not_ready`` is Phase 5.)
     """
 
     kind: str
@@ -196,7 +197,7 @@ def list_resources(
                     reference_count=len(references),
                     used_by_count=used_by_count,
                     description=description,
-                    disabled_reason=disabled_reason_for(registry, kind, resource),
+                    disabled_reason=disabled_reason_for(registry, kind, name),
                 )
             )
             variant = origin.variant if origin is not None else None
@@ -215,26 +216,18 @@ def list_resources(
     )
 
 
-def disabled_reason_for(registry: Registry, kind: str, resource: object) -> str | None:
-    """Project the kind's generic disabled hook: why ``resource``
-    cannot run on this host, or ``None`` when it can (or the kind has
-    no disabled concept). Same structural-duck-typing gate as
-    ``used_by_for``: absent-on-class IS the "never disabled" signal.
+def disabled_reason_for(registry: Registry, kind: str, name: str) -> str | None:
+    """Project ``(kind, name)``'s stored readiness verdict: why it cannot run
+    on this host, or ``None`` when it can (a kind with no readiness concept
+    folds to ready, so its reason is ``None``).
+
+    Reads the fold's verdict off the graph (``readiness_of``), the single
+    unified read (R10/R11): no recompute, no per-kind ``disabled_reason`` hook
+    dispatch, no live-registry probe. The ``(disabled)`` / ``Disabled:``
+    operator vocabulary this feeds is renamed to the readiness vocabulary in
+    Phase 5; the projection is graph-read now.
     """
-    from agentworks.resources import KIND_REGISTRY
-
-    handler = KIND_REGISTRY.get(kind)
-    if handler is None:
-        return None
-    method = getattr(handler, "disabled_reason", None)
-    if method is None:
-        return None
-    reason = method(registry, resource)
-    if reason is not None and not isinstance(reason, str):
-        from agentworks.errors import StateError
-
-        raise StateError(f"{kind}.disabled_reason returned {type(reason).__name__}, expected str | None")
-    return reason
+    return registry.graph.readiness_of(kind, name).reason
 
 
 def used_by_for(db: Database | None, registry: Registry, kind: str, resource: object) -> tuple[InstanceRef, ...] | None:
@@ -327,7 +320,7 @@ def describe_resource(
         description=getattr(resource, "description", "") or "",
         references=registry.graph.dependents_of(kind, name),
         used_by=used_by_for(db, registry, kind, resource),
-        disabled_reason=disabled_reason_for(registry, kind, resource),
+        disabled_reason=disabled_reason_for(registry, kind, name),
     )
 
 
