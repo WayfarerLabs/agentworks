@@ -216,3 +216,100 @@ land; the fixture proves the whole path; no demo plugin ships.
       (added at design time) still matches the shipped seam. (Confirmed: the method is removed and
       `build_registry` injects `finalize(enablement_sources=[plugin_enablement_source(config)])`,
       matching the addendum verbatim.)
+
+> **Note (2026-07-30): the framework closeout above completed and `locked.md` was written
+> (`07abe235`), but the SDD was then REOPENED (owner: Scot) to make the migration the true test of
+> the model. `locked.md` was removed (an active SDD has no lockfile); the boxes above stay checked
+> as the immutable record of the framework's completion. The scope-expansion phases below (7-11 + a
+> new closeout) are the reopened work, in the same PR (#237).**
+
+## Scope expansion (2026-07-30): migrate real plugins + manifest parity
+
+Per operator direction, the empty-index framework is not the end state: **azure**, **claude**,
+**proxmox**, and **1password** move out of the core into shipped system plugins, the ultimate test
+of the model across all four capability kinds and the bundled-manifest path (R11, R11.1). Because
+these ship name-referenced bundled manifests (`az-cli`, `claude` install-commands), the R9 manifest
+asymmetry an earlier draft deferred becomes operator-reachable and is **closed here** as
+present-but-disabled parity. Same phasing principle (every phase ends green), same one PR (#237),
+same delegated-dev + two-review cadence. The new LLD work (manifest parity + the migration
+mechanics) and the `migration-strategy.md` are authored before implementation and reviewed.
+
+### Phase 7: manifest present-but-disabled parity (R9 resolution). LLD: (b) + (c) extension
+
+Governs: R9 (manifest side). Makes bundled declarable resources behave like capabilities under
+enablement, so a reference to a not-enabled plugin's install-command / template is not-ready with
+the enable hint, not an unknown-name error. No plugin migrates yet; proven by the fixture (given a
+bundled manifest) + a stub.
+
+- [ ] `publish_plugins` publishes bundled manifests **unconditionally** (drop the enabled-only
+      gate), stamped `system-plugin` origin, so the existing `plugin_enablement_source` disables a
+      not-opted-in plugin's manifest rows by the same overlay it uses for capability rows (no new
+      gate, no per-manifest enablement logic).
+- [ ] **Enablement-aware collision**: a `disabled` `system-plugin` declarable row must not block an
+      operator's identically-named resource, the operator wins as if the disabled row were absent
+      (extend `_check_collision` / the finalize collision pass to consult `enablement_of`). A
+      `disabled`-vs-`disabled` or `disabled`-vs-operator case resolves so operator/enabled always
+      wins; two enabled system-plugin rows still collide (curation bug).
+- [ ] **Reference-to-disabled-declarable path**: a reference to a present-but-disabled declarable
+      resource (an agent template's `user_install_commands` naming a disabled plugin's install-
+      command; an `extends` naming a disabled plugin's template) resolves to **not-ready with the
+      enable hint**, not unknown-name and not silent use. Determine and pin the exact consumer gate
+      (analogous to R14, but for declarable-kind references) from the scouted reference-resolution
+      path.
+- [ ] Tests: a fixture plugin shipping a bundled manifest, not enabled, its manifest resource is
+      present-but-disabled, hidden from `list`, shown by `describe`, and a reference to it is
+      not-ready with "enable plugin `<name>`"; enabling the plugin makes it consumable; an operator
+      resource with the same name as a disabled plugin's manifest resource wins with no collision
+      error; two enabled plugins colliding still error.
+
+**DoD:** DoD-green; DoD-behavior for R9 manifest parity; the capability/manifest asymmetry is
+closed; no migration yet.
+
+### Phases 8-11: migrate the four bundles. Migration LLD + `migration-strategy.md`
+
+Governs: R11, R11.1. Each phase moves one bundle's impl(s) (and, for azure, its manifest) out of the
+core into a shipped plugin package `agentworks/plugins/<name>/` (the package `__init__.py` carries
+`PLUGIN`; impl submodules move in via git rename to preserve history), appends the package to
+`_INSTALLED_MODULES`, drops the impl from the core `*_REGISTRY` + `publish_to` + `__all__`, flips
+its origin `built-in` -> `system-plugin`, makes it opt-in, and lands the lockstep docs. Shared
+helpers stay in core (`vm_platform/base.py`, `bootstrap_script.py`, `cloud_init.py` (shared by azure
+AND proxmox), the four capability `base.py`s, `secrets/base.py`); `harness_for` /
+`ensure_harness_enabled` stay in core (they key by registry name, not the concrete class). Ordered
+least-test-invasive first. Each: the breaking-change (opt-in, guided enable hint) behavior pinned;
+every test / help / sample-config / guide reference updated.
+
+- [ ] **Phase 8: claude** (`claude-code` harness; NO manifest, the `claude` install-command does not
+      exist). The simplest migration (~6 test files): the harness impl moves, core
+      `HARNESS_REGISTRY` drops it, the plugin seats it, origin `system-plugin`; `shell` stays the
+      default harness so the common path is unaffected; a `session-template` with
+      `harness = "claude-code"` stays ready but the existing `ensure_harness_enabled` use-gate
+      refuses it until `[plugins] enabled = ["claude"]`.
+- [ ] **Phase 9: 1password** (`onepassword` secret-backend; no manifest). The instance-seated kind
+      (exercises the adapter `prepare` instance path): a `secret` mapping `onepassword` is excluded
+      from resolution until enabled; the resolver gates on the published row before the seated impl.
+- [ ] **Phase 10: proxmox** (`proxmox` vm-platform + its `proxmox_api.py` sibling; no manifest). The
+      **test-invasive** migration: proxmox is the shared orchestrated-test fixture platform (~40
+      files). Repoint incidental fixtures to a core platform (`lima`) and enable the proxmox plugin
+      only where proxmox-specific behavior is tested. A `vm-site` on `proxmox` is not-ready with the
+      enable hint until enabled.
+- [ ] **Phase 11: azure** (`azure-vm` platform + `azdo` git-credential + the `az-cli`
+      install-command manifest; needs Phase 7). One plugin contributing **three kinds + a bundled
+      manifest**, the fullest exercise and the only manifest-carrying plugin (so it validates the
+      Phase 7 parity end-to-end). `azdo` is part of the azure plugin, not a standalone plugin
+      (matches prior art). The largest impl (~954 lines).
+
+**DoD (each):** DoD-green; the bundle is gone from the core (registry + imports + `__all__`), lives
+in its plugin package, is opt-in with the guided enable hint through its real consumer, and its
+docs/sample-config/help are lockstep-updated.
+
+### Migration closeout
+
+- [ ] `migration-strategy.md` authored and kept accurate (current-state inventory, per-bundle
+      before/after, the opt-in breaking change, the re-enable path).
+- [ ] Operator-facing: `sample-config.toml` shows an example `[plugins] enabled`;
+      `docs/guides/     resources.md` (or a migration note) documents the opt-in change and how to
+      re-enable; the doctor roster lists the four shipped plugins; completions still correct.
+- [ ] ADR 0021 updated: the R9 manifest limitation is now RESOLVED (present-but-disabled parity),
+      not deferred; the migration + breaking change recorded.
+- [ ] Capstone verification pass (R1-R14 + R11.1, all four migrated bundles gated through their real
+      consumer, the default local path unaffected); then `locked.md` re-written.

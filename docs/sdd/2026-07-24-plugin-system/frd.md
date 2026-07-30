@@ -32,11 +32,14 @@ unconditionally (as the refactor's R13 already does for built-ins), and **produc
 marking a not-opted-in plugin's contributions disabled. It builds no bespoke publish-gate, no
 bespoke disabled-roster dispatch, and no reference-time diagnosis; the registry does that work.
 
-This is the _initial structure_ only. It ships the plugin unit, the enablement producer, the
-`system-plugin` origin, and the `build_registry` wiring, proven end to end by a test-fixture plugin.
-It deliberately leaves the door open for external plugins, the broader feature/trust model, and, per
-operator direction, **operator-explicit disable of individual units** (R13) without building any of
-them. No real system plugin is migrated in this effort; the first one is a follow-on.
+This is the _initial structure_ plus the **first real migration**. It ships the plugin unit, the
+enablement producer, the `system-plugin` origin, and the `build_registry` wiring, proven end to end
+by a test-fixture plugin AND by moving four world-specific bundles out of the core into shipped
+system plugins (**azure**, **claude**, **proxmox**, **1password**), the ultimate test of the model
+across all four capability kinds and the bundled-manifest path (R11). Migration makes those bundles
+opt-in, a deliberate, guided breaking change (R11.1). It deliberately leaves the door open for
+external plugins, the broader feature/trust model, and, per operator direction, **operator-explicit
+disable of individual units** (R13) without building any of them.
 
 ## Motivation
 
@@ -233,20 +236,21 @@ Three reasons drive this first step, in priority order.
     the disabled node, not a reference-time index probe). This is why capabilities publish
     unconditionally (R5): an operator-declared `vm-site` naming a not-yet-enabled plugin's platform
     gets a helpful enable hint, not an unknown-name hard error.
-  - **Bundled manifests: enabled-only (a scoped v1 limitation).** A plugin's own declarable
-    resources publish only when the plugin is enabled: a not-enabled plugin contributes no
-    resources, which keeps a disabled plugin's resources out of collision checks against operator
-    resources and is simpler than publishing-then-disabling them. **Known limitation, stated
-    honestly:** unlike a capability (referenced by name from an operator resource, so
-    present-but-disabled buys the clean enable-hint), a bundled _declarable_ resource **is** also
-    referenceable by name, e.g. an operator `vm-template` with `extends = <plugin-template>`. Under
-    enabled-only publication, referencing a not-enabled plugin's bundled resource yields the
-    registry's unknown-name hard error, not the "enable plugin X" hint the capability side gives, so
-    the two are inconsistent for a plugin that ships referenceable bundled resources. This is inert
-    in v1 (the shipped index is empty; no real plugin ships bundled resources), so it is deferred:
-    the **follow-on** that ships the first plugin with referenceable bundled resources should move
-    manifests to present-but-disabled (with enablement-aware collision so a disabled plugin's
-    resource never blocks an operator's name), for symmetry with the capability side.
+  - **Bundled manifests: present-but-disabled, at parity with capabilities.** A plugin's bundled
+    declarable resources publish **unconditionally** with the `system-plugin` origin, exactly like
+    its capability rows, so the enablement source marks a not-opted-in plugin's manifest resources
+    `disabled` (the same overlay, no separate manifest gate). A bundled _declarable_ resource is
+    referenceable by name (an agent template's `user_install_commands: ["claude"]`, an operator
+    `vm-template` with `extends = <plugin-template>`), so present-but-disabled buys the same clean
+    outcome the capability side gets: a reference to a not-enabled plugin's bundled resource is
+    **not-ready with the "enable plugin `<name>`" hint**, never an unknown-name hard error. Two
+    consequences the parity requires and this SDD builds: **enablement-aware collision** (a disabled
+    plugin's declarable row must never block an operator's identically-named resource, the operator
+    wins as if the disabled plugin row were absent), and a **reference-to-disabled-declarable path**
+    that surfaces the enable hint rather than silently consuming or hard-erroring. This resolves the
+    capability/manifest asymmetry an earlier draft deferred: because this SDD now ships real plugins
+    with name-referenced bundled manifests (the `az-cli` and `claude` install-commands), the
+    asymmetry would be operator-reachable, so it is closed here, not deferred.
   - **Default-surface rule: disabled hides, not-ready shows.** Disabled (enablement-axis)
     contributions are **hidden from the default `resource list`**, realizing the signal-not-noise
     motivation, while a not-ready (present, enabled, blocked) node such as a host-unsupported
@@ -271,10 +275,27 @@ Three reasons drive this first step, in priority order.
   future trust model is distribution trust plus explicit enablement, expressed through the origin
   tiers, not runtime sandboxing.
 
-- **R11 The mechanism is proven, the product ships no demo.** The end-to-end path (descriptor to
-  index to registration to unconditional publication to enablement-overlay to consumption) is proven
-  by a test-fixture plugin. The shipped `agentworks/plugins/` starts with the framework and an empty
-  installed set; no inert example plugin ships. The first real system plugin is a follow-on.
+- **R11 The mechanism is proven by a fixture AND by migrating real functionality out of the core.**
+  The end-to-end path (descriptor to index to registration to unconditional publication to
+  enablement-overlay to consumption) is proven by a test-fixture plugin, and, as the ultimate test
+  of the model, by migrating four world-specific bundles out of the core into shipped system
+  plugins: **azure** (`azure-vm` platform, `azdo` git-credential, `az-cli` install-command),
+  **claude** (`claude-code` harness, `claude` install-command), **proxmox** (`proxmox` platform),
+  and **1password** (`onepassword` secret-backend). Together they exercise all four capability kinds
+  and the bundled-manifest path against their real consumers. The core keeps only the universal path
+  (`lima`/`wsl2` local platforms and their sites, the `shell` default harness, `env-var`/`prompt`
+  secret backends, the `github` provider, and generic dev-tool install-commands). No inert
+  example/demo plugin ships; the shipped plugins are real, and the framework's fixture proves the
+  path in isolation. **This is a deliberate, guided breaking change** (R11.1).
+
+- **R11.1 Migrating a capability to a plugin makes it opt-in; the change is guided, not silent.**
+  Once migrated, `azure-vm`, `azdo`, `proxmox`, `onepassword`, `claude-code`, and the `az-cli` /
+  `claude` install-commands are **disabled by default**: an existing operator config that references
+  one gets the not-ready "enable plugin `<name>`" hint (never an unknown-name error, per R9's
+  manifest parity) until the operator adds the plugin to `[plugins] enabled`. The default local path
+  (`lima`/`wsl2` + `shell` + `env-var`/`prompt`/`github`) is unaffected, so a user not touching
+  these vendors sees no change. The migration ships a sample-config example, a migration note in the
+  operator guide, and per-plugin doctor roster entries so the path to re-enable is discoverable.
 
 - **R12 A system plugin is an origin, not a resource.** A plugin is a _source_ of resources, not a
   referenced node in the resource graph; the plugin taxonomy lives on `Origin` (the `system-plugin`
@@ -350,16 +371,22 @@ the `_node_enablement` producer that marks a not-opted-in plugin's contributions
 over sources with per-source reasons (R9, R13); **closing the enablement-consumer gap for the two
 kinds the refactor left un-wired**, a `not_ready` hook + use-time gate on `git-credential`
 (propagates), and a use-time enablement gate at the harness-construction sites for
-`session-template` (errors at use) (R14); the "disabled hides, not-ready shows" default-surface rule
-and the `doctor` plugin roster (R9); the reserved (unenforced) least-privilege-scope and
-command-declaration descriptor fields (R10); a test-fixture plugin proving the path (R11); author
-docs (`agentworks/plugins/README.md`) and an ADR.
+`session-template` (errors at use) (R14); **manifest present-but-disabled parity** (unconditional
+manifest publication, enablement-aware collision, the reference-to-disabled-declarable enable-hint
+path) so bundled resources behave like capabilities under enablement (R9); the "disabled hides,
+not-ready shows" default-surface rule and the `doctor` plugin roster (R9); the reserved (unenforced)
+least-privilege-scope and command-declaration descriptor fields (R10); a test-fixture plugin proving
+the path plus **migrating four world-specific bundles (azure, claude, proxmox, 1password) out of the
+core into shipped system plugins**, exercising all four kinds and the manifest path against real
+consumers (R11, R11.1); author docs (`agentworks/plugins/README.md`, a migration note in the
+operator guide) and an ADR.
 
 Out of scope: external plugins and any external loading/installation/discovery; the trust model and
 its enforcement; plugin-owned CLI commands; new capability or declarable kinds from plugins;
 per-plugin runtime config beyond enablement; resource-name namespacing; plugin versioning; **the
-operator-explicit-disable surface itself** (R13 shapes the seam only); migrating any existing
-built-in into a plugin (an optional follow-on).
+operator-explicit-disable surface itself** (R13 shapes the seam only). Migrating the four
+world-specific bundles listed above is now **in** scope (R11); migrating any _other_ built-in (the
+universal `lima`/`wsl2`/`shell`/`env-var`/`prompt`/`github` set stays core by design) is not.
 
 ## Future direction (the broader plugin vision)
 
