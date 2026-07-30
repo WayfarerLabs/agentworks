@@ -47,12 +47,12 @@ and reviewed by `agentworks-reviewer` (tier >= dev) plus a fresh-eyes pass.
 
 Governs: R1. LLD: (c). Pure vocabulary; mergeable alone.
 
-- [ ] Add `"system-plugin"` to `Origin.variant`, a `plugin: str | None` field, and
+- [x] Add `"system-plugin"` to `Origin.variant`, a `plugin: str | None` field, and
       `Origin.system_plugin(*, plugin, source)` (`file`/`line` `None`). Extend the variant-contract
       docstring; `external-plugin` stays documented-only.
-- [ ] Rendering: `resources/render.py` + the doctor/list/describe surfaces render
+- [x] Rendering: `resources/render.py` + the doctor/list/describe surfaces render
       `system-plugin <plugin> (<source>)`.
-- [ ] Tests: origin construction + rendering; `external-plugin` still not constructible.
+- [x] Tests: origin construction + rendering; `external-plugin` still not constructible.
 
 **DoD:** DoD-green; the origin is constructible and renders; nothing yet produces one.
 
@@ -185,11 +185,14 @@ Governs: R9 (disabled-hides + roster), R10, R11. LLD: (c).
       only; reserved `required_scopes` render informationally (R10); a bespoke doctor surface, not a
       `KIND_REGISTRY` hook (R12).
 - [ ] **Docs (DoD-docs)**: `agentworks/plugins/README.md` (authoring a system plugin, the
-      descriptor, the enablement model), `sample-config.toml` (`[plugins]`), and an ADR recording
-      the decisions (plugin-as-origin, enablement-as-first-class-multi-source-axis, the door for
-      operator-explicit disable, and the deliberate `[plugins]` strict-unknown-key stance vs the
-      soft-warn convention, so future config-section authors know which precedent to follow).
-      Regenerate completions if any CLI surface changed (`--include-disabled`).
+      descriptor, the enablement model), `sample-config.toml` (`[plugins]`),
+      `docs/guides/resources.md` (the "three origins" operator-facing sentence becomes four:
+      document the `system-plugin` origin, which is first observable once Phase 5 publishes plugin
+      rows and Phase 6 presents them), and an ADR recording the decisions (plugin-as-origin,
+      enablement-as-first-class-multi-source-axis, the door for operator-explicit disable, and the
+      deliberate `[plugins]` strict-unknown-key stance vs the soft-warn convention, so future
+      config-section authors know which precedent to follow). Regenerate completions if any CLI
+      surface changed (`--include-disabled`).
 - [ ] Tests (DoD-behavior, R11): the full fixture end-to-end (descriptor to index to registration to
       unconditional publication to enablement-overlay to consumption + hidden-when-disabled +
       roster); the shipped index is empty; the reserved fields are inert.
