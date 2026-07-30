@@ -87,20 +87,27 @@ the platform's verdict, it re-asks with its own config.
 def not_ready(self, deps) -> Readiness:  # config is self.platform_config
     platform = deps[("vm-platform", self.platform)]
     if platform.enablement is Enablement.disabled:
+        # disabled deps carry readiness=None, so there is no verdict to pass through:
+        # the site synthesizes the enablement hint.
         return Readiness.blocked(f"depends on vm-platform '{self.platform}', which is disabled; enable its unit")
     if not platform.readiness.is_ready:
-        return Readiness.blocked(f"platform '{self.platform}' is not ready: {platform.readiness.reason}")
+        # PASS THROUGH the platform's verdict verbatim (do NOT re-wrap): the platform reason is
+        # already the fully-framed "platform '<name>' is unsupported here: <reason>", so re-wrapping
+        # would double it. The platform name lives in the reason; the "not ready:" framing is added
+        # by the renderers.
+        return platform.readiness
     # config-dependent tool check, off the graph impl, NON-constructing (no validate re-run):
     return platform.impl.not_ready(self.platform_config)
 ```
 
-The strings shown here (`"... is not ready: ..."`, `"... is unsupported here: ..."`) are the
-**phase-5 target vocabulary**. In phase 3 the fold deliberately stores today's **old-vocabulary**
-strings (`"platform '<x>' is disabled: <reason>"` on the site, the bare host-support reason on the
-platform node) so the shims that keep `resource list` / `select_site` / doctor green render
-byte-identically until R9.1's rename. **Phase 5's vocabulary sweep must reach the fold-stored
-strings (`vms/sites.py`) and the new `_VMPlatformKind.disabled_reason` projection (`vms/kinds.py`),
-not only the surface renderers**, or the not-ready reasons will keep the old wording.
+**Vocabulary (as shipped, phase 5).** The platform node's reason is
+`platform '<name>' is unsupported here: <reason>` (`resources/graph.py`); the site passes it through
+verbatim (above). Phase 3 originally stored old-vocabulary strings so the projection shims stayed
+green byte-for-byte; phase 4 retired those shims onto a unified `readiness_of` read, and phase 5's
+R9.1 sweep renamed the fold-stored strings themselves (in `resources/graph.py` and `vms/sites.py`)
+plus every renderer, so no operator-facing "disabled" denotes host readiness. The two-branch
+asymmetry above (pass-through on not-ready, synthesize on disabled) is intentional and necessary: a
+disabled node has no computed readiness to forward.
 
 The "enable its unit" hint is read off the disabled dependency's own `DependencyState` (R7), no
 diagnosis at a miss point. In this effort no node is ever disabled, so the first branch is exercised
