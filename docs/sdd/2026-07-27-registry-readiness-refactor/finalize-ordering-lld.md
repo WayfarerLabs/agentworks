@@ -140,10 +140,24 @@ precisely enough to be a real test:
    `resources/registry.py` (the builder) calls `dependencies(` on a resource for edge
    reconstruction, plus a behavioral assertion that cycle detection, `collect_secrets_for`, and the
    node factories read the graph query API.
-2. A `*_REGISTRY.get(...)` availability probe in edge production or readiness (was:
+2. A `*_REGISTRY.get(...)` **availability probe** in edge production or readiness (was:
    `VM_PLATFORM_REGISTRY` in `site_disabled_reason`, `SECRET_BACKEND_REGISTRY` in the resolver).
-   Detection: grep guard that `VM_PLATFORM_REGISTRY` / `SECRET_BACKEND_REGISTRY` / the other
-   capability registries are not read outside their publisher and the graph builder.
+   Detection: an AST guard that the four capability registries are not read outside the **sanctioned
+   reader set** (below). The banned pattern is a _consumer probing the live registry to decide
+   availability_; a registry read is honest when it is one of these classes, each verified during
+   the Phase 6 review as a class lookup or pre-graph validation, not an availability probe: (a) the
+   **publishers** (own/iterate the registry to publish rows); (b) the **graph builder + fold**
+   (`resources/graph.py`, stamping impls via `_impl_for` and calling the non-constructing
+   `not_ready`); (c) **edge production and the finalize `validate` pass** fetching the capability
+   _class_ to extract config-implied edges or validate the owned blob (`vms/sites.py`,
+   `git_credentials/credential.py`, `sessions/template.py`, `secrets/base.py`), a host-agnostic type
+   lookup, and during the pass that _produces_ the graph there is no node to read from yet; (d)
+   **op-time capability construction** to run an operation (`git_credentials/__init__.py`,
+   `vms/initializer/credentials.py`, and `resolve_site` after `ensure_site_ready` already read
+   `readiness_of`); (e) **pre-graph decode/load/migrate validation** (`manifests/decode.py`'s
+   shadow-name membership test, `config/loaders_secrets.py`'s deprecated `[secret_backends]` shape
+   check, `migrate/planning.py`'s dry-run). The earlier "publisher + builder only" phrasing did not
+   describe this final state; the guard's unit is the documented per-module allow-list.
 3. A lazy readiness recompute instead of reading `readiness_of` (was: `inspect.disabled_reason_for`,
    `site_disabled_reason` callers, `doctor`). Detection: `not_ready` is called **only** by the fold
    and the graph builder; every projection surface reads `readiness_of`.
@@ -169,8 +183,12 @@ precisely enough to be a real test:
   sanctioned builder-reads-registry path (Phase 3 landed the fail-fast `_impl_for`); LLD a/c phrase
   the fold as reading the impl "off the graph node," which is the same object by construction. The
   guard whitelists `resources/graph.py`'s builder + fold functions (by module) so its
-  banned-pattern-2 grep (no `*_REGISTRY` read outside publisher + builder) and banned-pattern-3
-  (`not_ready` called only by the fold + builder) do not trip on the honest path.
+  banned-pattern-2 scan (no `*_REGISTRY` read outside the sanctioned reader set in pattern 2 above)
+  and banned-pattern-3 (`not_ready` called only by the fold + the vm-site's fold hook) do not trip
+  on the honest path. The AST detectors match qualified (`mod.REGISTRY`) and aliased-import reads,
+  not only bare names, and the `references`-field detector matches annotated, plain, and property
+  declarations; the residual limits (whole-file allow-list scoping; deep call-through-a-variable
+  indirection) are documented in the guard test itself.
 
 The guard must encode **all** these exemptions, or the sanctioned single-derivation and the banned
 re-walk are indistinguishable calls. The guard lands in phase 6, after every bypass is migrated
