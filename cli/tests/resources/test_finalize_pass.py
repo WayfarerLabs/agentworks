@@ -30,7 +30,7 @@ class _PublisherStub:
     origin: Origin | None = None
     references: tuple = ()
 
-    def referenced_resources(self) -> tuple[ResourceReference, ...]:
+    def dependencies(self, context: object) -> tuple[ResourceReference, ...]:
         return self.reqs
 
 
@@ -223,7 +223,7 @@ class _ChainPublisher:
     origin: Origin | None = None
     references: tuple = ()
 
-    def referenced_resources(self) -> tuple[SecretReference, ...]:
+    def dependencies(self, context: object) -> tuple[SecretReference, ...]:
         return (
             SecretReference(
                 name=self.target_name,

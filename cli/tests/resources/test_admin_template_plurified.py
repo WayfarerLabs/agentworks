@@ -162,7 +162,7 @@ def test_admin_template_kind_errors_on_unreserved_name_reference(
         origin: Origin | None = None
         references: tuple = ()
 
-        def referenced_resources(self) -> list[ResourceReference]:
+        def dependencies(self, context: object) -> list[ResourceReference]:
             return [
                 ResourceReference(
                     name="custom",

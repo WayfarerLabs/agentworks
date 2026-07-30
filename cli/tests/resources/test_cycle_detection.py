@@ -30,7 +30,7 @@ class _NodeWithReq:
     origin: Origin | None = None
     references: tuple = ()
 
-    def referenced_resources(self) -> tuple[ResourceReference, ...]:
+    def dependencies(self, context: object) -> tuple[ResourceReference, ...]:
         if self.target_name is None:
             return ()
         return (

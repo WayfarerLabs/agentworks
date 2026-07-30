@@ -9,6 +9,7 @@ import pytest
 from agentworks.bootstrap import build_registry
 from agentworks.config import load_config
 from agentworks.doctor import Status, _check_config, _check_secrets
+from agentworks.errors import ConfigError
 
 
 def _write_config(tmp_path: Path, *, extras: str = "") -> Path:
@@ -143,12 +144,17 @@ backends = ["env-var", "prompt"]
     ]
 
 
-def test_mapping_to_undeclared_kind_fails(tmp_path: Path) -> None:
-    """A backend_mappings entry referencing a kind that has no
-    [secret_backends.<kind>] section AND is not a built-in (env-var /
-    prompt) fails the single per-secret row (FRD R6). Exactly one row
-    per secret, and FAIL takes precedence over the would-resolve preview
-    that env-var/prompt would otherwise emit."""
+def test_mapping_to_undeclared_kind_hard_errors_at_build(tmp_path: Path) -> None:
+    """R9.11: a ``backend_mappings`` entry naming a backend that is not a
+    registered ``secret-backend`` capability is a DANGLING ``secret ->
+    secret-backend`` edge, which the ``secret-backend`` kind's ``"error"``
+    miss policy turns into a hard ``build_registry`` failure (where the old
+    tolerant ``_check_secrets`` pinpointed it as one per-secret FAIL row).
+
+    Doctor-granularity regression (acknowledged, R9.11): because the build
+    now raises, a doctor run collapses its whole registry-dependent tail to
+    one "Resource registry: FAIL" row rather than pinpointing the secret.
+    """
     cfg = _write_config(
         tmp_path,
         extras="""
@@ -164,17 +170,15 @@ backends = ["env-var", "prompt"]
 """,
     )
     config = load_config(cfg, warn_issues=False)
-    g = _check_secrets(config, build_registry(config))
-    shared_rows = [c for c in g.checks if "shared" in c.name]
-    assert len(shared_rows) == 1, shared_rows
-    assert shared_rows[0].status == Status.FAIL
-    assert shared_rows[0].message == "references unknown backend: bogusvault"
+    with pytest.raises(ConfigError, match="unknown secret-backend 'bogusvault'"):
+        build_registry(config)
 
 
-def test_mapping_to_multiple_undeclared_kinds_pluralizes(tmp_path: Path) -> None:
-    """When two or more backend_mappings entries reference unknown kinds,
-    the single per-secret row lists them sorted and uses the plural
-    'backends' in the message."""
+def test_mapping_to_multiple_undeclared_kinds_hard_errors_at_build(tmp_path: Path) -> None:
+    """R9.11: with two unknown-backend mappings, the first dangling edge the
+    resolve pass reaches hard-errors at ``build_registry`` (naming that
+    backend); the build never gets far enough to enumerate both, unlike the
+    old tolerant per-secret doctor row that listed them sorted."""
     cfg = _write_config(
         tmp_path,
         extras="""
@@ -191,11 +195,8 @@ backends = ["env-var", "prompt"]
 """,
     )
     config = load_config(cfg, warn_issues=False)
-    g = _check_secrets(config, build_registry(config))
-    shared_rows = [c for c in g.checks if "shared" in c.name]
-    assert len(shared_rows) == 1, shared_rows
-    assert shared_rows[0].status == Status.FAIL
-    assert shared_rows[0].message == "references unknown backends: alpha-vault, zeta-vault"
+    with pytest.raises(ConfigError, match="unknown secret-backend '(alpha-vault|zeta-vault)'"):
+        build_registry(config)
 
 
 # ---------------------------------------------------------------------------

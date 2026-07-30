@@ -214,7 +214,7 @@ Governs: R10, R11, and the R9 secret deltas (R9.6, R9.9, R9.10, R9.11). LLDs: (d
 (a)/(b) queries. Caller inventory sections B, C, F. Each consumer is an independently-green
 sub-step.
 
-- [ ] **Head step: the uniform `dependencies(context)` rename + build context + secret backend
+- [x] **Head step: the uniform `dependencies(context)` rename + build context + secret backend
       edges.** Rename the resource-level `referenced_resources()` to `dependencies(context)` across
       every resource (caller inventory section C: `vms/sites.py`, `vms/templates.py`,
       `vms/template.py`, `vms/admin.py`, `git_credentials/credential.py`, `sessions/template.py`,

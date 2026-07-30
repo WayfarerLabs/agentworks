@@ -28,7 +28,7 @@ from agentworks.resources.kind import KIND_REGISTRY
 if TYPE_CHECKING:
     from collections.abc import Iterator, Mapping, Sequence
 
-    from agentworks.resources.graph import DependencyGraph, Enablement, Readiness
+    from agentworks.resources.graph import BuildContext, DependencyGraph, Enablement, Readiness
     from agentworks.resources.origin import Origin
     from agentworks.resources.reference import ReferenceEntry, ResourceReference
 
@@ -176,7 +176,7 @@ class Registry:
            so they are present before the walk. Kinds with
            ``auto_declare_names = None`` (secrets) stay reference-driven.
         1. **build**: walk every present Resource's
-           ``referenced_resources()`` (total, non-throwing) into the
+           ``dependencies(context)`` (total, non-throwing) into the
            outbound edge map. No validation, no throwing on a bad block.
         2. **resolve**: for each edge whose target has no node, dispatch
            the miss policy: ``"error"`` and a disallowed-name
@@ -225,11 +225,18 @@ class Registry:
         """
         if self._frozen:
             raise RuntimeError("registry has already been finalized")
-        from agentworks.resources.graph import build_graph, fold_readiness
+        from agentworks.resources.graph import build_context, build_graph, fold_readiness
 
         # 0: reserved-defaults. Seed always-materialize rows so the build
         # walk sees them alongside operator-published ones.
         self._materialize_reserved_defaults()
+
+        # The build context the walk threads to every resource's
+        # ``dependencies``: today the available-backend list a ``secret`` reads
+        # to emit its ``secret -> secret-backend`` edges. Assembled once (the
+        # ``secret-backend`` rows are published before finalize and never
+        # materialize later).
+        context = build_context(self._resources)
 
         # ``all_refs`` accumulates edges keyed by target (for inbound and
         # miss dispatch); ``all_outbound`` keyed by source, each source's
@@ -242,7 +249,7 @@ class Registry:
         # not present yet, so this is operator + reserved-default rows).
         for kind in list(self._resources.keys()):
             for name in list(self._resources[kind].keys()):
-                self._walk_into((kind, name), all_refs, all_outbound)
+                self._walk_into((kind, name), all_refs, all_outbound, context)
 
         # 2: resolve. Classify misses; allowed auto-declares defer to pass 5.
         deferred: set[tuple[str, str]] = set()
@@ -259,7 +266,7 @@ class Registry:
         readiness = fold_readiness(self._resources, all_outbound, enablement)
 
         # 5: readiness-gated materialization (R12), looping to a fixpoint.
-        self._materialize_deferred(deferred, all_refs, all_outbound, readiness, enablement)
+        self._materialize_deferred(deferred, all_refs, all_outbound, readiness, enablement, context)
 
         # 6: attach. Build the retained graph (inbound + readiness + enablement
         # on the node), then polish auto-declared descriptions off its inbound
@@ -381,16 +388,19 @@ class Registry:
         key: tuple[str, str],
         all_refs: dict[tuple[str, str], list[ResourceReference]],
         all_outbound: dict[tuple[str, str], list[ResourceReference]],
+        context: BuildContext,
     ) -> None:
-        """Walk one Resource's ``referenced_resources()``, appending its
+        """Walk one Resource's ``dependencies(context)``, appending its
         edges into ``all_refs`` (keyed by target) and ``all_outbound``
         (keyed by source). The source of every edge is ``key``, so
         ``all_outbound[key]`` holds this Resource's edges contiguously in
-        emission order (LLD a's first-encountered guarantee).
+        emission order (LLD a's first-encountered guarantee). ``context`` is
+        the builder's threaded :class:`BuildContext` (the secret's
+        backend-list read; every other resource ignores it).
         """
         kind, name = key
         resource = self._resources[kind][name]
-        for req in _referenced_resources(resource):
+        for req in _dependencies(resource, context):
             all_refs.setdefault((req.kind, req.name), []).append(req)
             all_outbound.setdefault(req.source, []).append(req)
 
@@ -435,6 +445,7 @@ class Registry:
         all_outbound: dict[tuple[str, str], list[ResourceReference]],
         readiness: dict[tuple[str, str], Readiness],
         enablement: Mapping[tuple[str, str], Enablement],
+        context: BuildContext,
     ) -> None:
         """Materialize deferred auto-declare targets, readiness-gated (R12),
         looping to a fixpoint (LLD b subtlety 3).
@@ -488,7 +499,9 @@ class Registry:
                 progressed = True
                 # Walk the new node, resolve its misses, then fold it (its
                 # deps are already folded, so the reverse-topo invariant holds).
-                self._walk_into(target, all_refs, all_outbound)
+                # The newly-materialized secret's ``dependencies(context)`` now
+                # emits its backend edges (the loop is load-bearing, LLD b).
+                self._walk_into(target, all_refs, all_outbound, context)
                 self._resolve_misses(all_refs, deferred)
                 readiness[target] = node_readiness(target, self._resources, all_outbound, readiness, enablement)
             if not progressed:
@@ -556,15 +569,18 @@ class Registry:
 # -- Internal helpers --------------------------------------------------
 
 
-def _referenced_resources(resource: Any) -> Sequence[ResourceReference]:
-    """Return the Resource's ``referenced_resources()`` or an empty
-    sequence if it doesn't define one. Not every Resource type defines
-    the method, so the ``getattr`` fallback keeps the walk safe.
+def _dependencies(resource: Any, context: BuildContext) -> Sequence[ResourceReference]:
+    """Return the Resource's ``dependencies(context)`` edges or an empty
+    sequence if it doesn't define the method. The capability marker rows
+    (``SecretBackendEntry`` and friends) carry no ``dependencies``, so the
+    ``getattr`` fallback keeps the walk safe. ``context`` is the builder's
+    threaded :class:`~agentworks.resources.graph.BuildContext` (the secret
+    reads its available-backend list; every other resource ignores it).
     """
-    method = getattr(resource, "referenced_resources", None)
+    method = getattr(resource, "dependencies", None)
     if method is None:
         return ()
-    return tuple(method())
+    return tuple(method(context))
 
 
 def _lookup_kind(kind: str, req: ResourceReference) -> Any:
@@ -632,7 +648,7 @@ def _detect_cycles(
     present: set[tuple[str, str]],
 ) -> None:
     """Detect cycles over the BUILT edge map via iterative DFS
-    three-coloring (no re-walk of ``referenced_resources()``; the finalize
+    three-coloring (no re-walk of ``dependencies(context)``; the finalize
     build pass already accumulated the edges).
 
     Only edges to present nodes can close a cycle (a deferred / absent target

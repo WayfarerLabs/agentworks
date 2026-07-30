@@ -39,7 +39,7 @@ if TYPE_CHECKING:
 
     from agentworks.capabilities.vm_platform import VMPlatform
     from agentworks.config import Config
-    from agentworks.resources.graph import DependencyState, Readiness
+    from agentworks.resources.graph import BuildContext, DependencyState, Readiness
     from agentworks.resources.reference import ResourceReference
     from agentworks.resources.registry import Registry
 
@@ -58,7 +58,7 @@ class VMSiteDecl(DeclaredResource):
     platform: str
     platform_config: dict[str, object] = field(default_factory=dict)
 
-    def referenced_resources(self) -> list[ResourceReference]:
+    def dependencies(self, context: BuildContext) -> list[ResourceReference]:
         from agentworks.resources.reference import (
             ResourceReference as _ResourceRef,
         )

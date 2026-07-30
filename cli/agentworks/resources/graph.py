@@ -177,6 +177,43 @@ class DependencyGraph:
         return self.readiness_of(kind, name).is_ready
 
 
+@dataclass(frozen=True)
+class BuildContext:
+    """The controlled context the graph builder threads to each resource's
+    :meth:`~agentworks.declared_resource.DeclaredResource.dependencies` during
+    the finalize walk.
+
+    Today its one load-bearing field is ``available_backends``: the present
+    ``secret-backend`` nodes (name + impl), which a ``secret`` reads to decide
+    (via each backend's pure ``would_attempt``) which ``secret -> secret-backend``
+    edges to emit. Every other resource ignores the context. This is a BUILDER
+    INPUT supplied during the build, not a consumer reaching into a live
+    registry, so the R11 guard whitelists the builder's own call (LLD b). A
+    default-empty context (the greenness-scaffold alias passes one) yields no
+    present backends, so a secret under it emits only its explicit mapping-key
+    edges.
+    """
+
+    available_backends: tuple[tuple[str, SecretBackend], ...] = ()
+
+
+def build_context(resources: Mapping[str, Mapping[str, object]]) -> BuildContext:
+    """Assemble the :class:`BuildContext` the finalize walk threads to every
+    resource's ``dependencies``.
+
+    Reads each present ``secret-backend`` node's impl off the code registry via
+    :func:`_impl_for` (the whitelisted builder-reads-registry path, R11 / LLD
+    b), so a ``secret`` can ask ``would_attempt`` without a consumer-side
+    registry probe. The backend nodes are published before finalize and never
+    materialize later, so the context is assembled once at the start of the
+    build.
+    """
+    backends = tuple(
+        (name, cast("SecretBackend", _impl_for("secret-backend", name))) for name in resources.get("secret-backend", {})
+    )
+    return BuildContext(available_backends=backends)
+
+
 def build_graph(
     resources: Mapping[str, Mapping[str, object]],
     all_refs: Mapping[tuple[str, str], Sequence[ResourceReference]],

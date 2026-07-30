@@ -21,6 +21,7 @@ from agentworks.sessions.layouts import AW_SESSION_VERTICAL_LAYOUT
 
 if TYPE_CHECKING:
     from agentworks.env import EnvEntry
+    from agentworks.resources.graph import BuildContext
     from agentworks.resources.reference import ResourceReference
 
 
@@ -63,7 +64,7 @@ class SessionTemplate(DeclaredResource):
     harness_config: dict[str, object] | None = None
     env: dict[str, EnvEntry] | None = None
 
-    def referenced_resources(self) -> list[ResourceReference]:
+    def dependencies(self, context: BuildContext) -> list[ResourceReference]:
         from agentworks.resources.reference import (
             ResourceReference as _ResourceRef,
         )

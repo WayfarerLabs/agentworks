@@ -134,7 +134,7 @@ class _RefEmitter:
     origin: object = None
     references: tuple = ()  # type: ignore[type-arg]
 
-    def referenced_resources(self) -> list[object]:
+    def dependencies(self, context: object) -> list[object]:
         from agentworks.resources.reference import ResourceReference
 
         return [
@@ -324,7 +324,7 @@ def test_unknown_kind_in_requirement_errors_clearly(tmp_path: Path) -> None:
         origin = None
         usage = ()
 
-        def referenced_resources(self) -> list[ResourceReference]:
+        def dependencies(self, context: object) -> list[ResourceReference]:
             return [
                 ResourceReference(
                     name="anything",

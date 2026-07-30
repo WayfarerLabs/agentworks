@@ -18,6 +18,7 @@ from agentworks.env.entry import env_references
 
 if TYPE_CHECKING:
     from agentworks.env import EnvEntry
+    from agentworks.resources.graph import BuildContext
     from agentworks.resources.reference import (
         ResourceReference,
         SecretReference,
@@ -81,7 +82,7 @@ class VMTemplate(DeclaredResource):
     # SDD; the field IS the secret reference.
     tailscale_auth_key: str | None = None
 
-    def referenced_resources(self) -> list[ResourceReference]:
+    def dependencies(self, context: BuildContext) -> list[ResourceReference]:
         from agentworks.resources.reference import (
             ResourceReference as _ResourceReq,
         )

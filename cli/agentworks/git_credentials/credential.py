@@ -17,6 +17,7 @@ from typing import TYPE_CHECKING
 from agentworks.declared_resource import DeclaredResource
 
 if TYPE_CHECKING:
+    from agentworks.resources.graph import BuildContext
     from agentworks.resources.reference import ResourceReference
 
 
@@ -68,7 +69,7 @@ class GitCredentialConfig(DeclaredResource):
     # matches the YAML manifest shape.
     provider_config: dict[str, object] = field(default_factory=dict)
 
-    def referenced_resources(self) -> list[ResourceReference]:
+    def dependencies(self, context: BuildContext) -> list[ResourceReference]:
         from agentworks.resources.reference import (
             ResourceReference as _ResourceReq,
         )
