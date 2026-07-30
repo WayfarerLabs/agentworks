@@ -291,7 +291,7 @@ class Registry:
         # 5: validate capability config blocks. Distinct from graph
         # construction (R3): the build passes above are total and never
         # throw on a malformed block, so a config with both a malformed
-        # block and (say) a cycle reports the CYCLE first (R9.3) -- the
+        # block and (say) a cycle reports the CYCLE first (R9.3); the
         # bad block no longer fails earlier at decode/load. Runs over
         # every present resource this effort; the readiness gating that
         # scopes it to the ready + enabled set arrives with the fold.
@@ -309,15 +309,19 @@ class Registry:
         owner label (``kind/name``); the source location that decode/load
         used to supply (the manifest ``file:line``, the TOML section) is
         gone once validation runs here, so this pass re-attaches it from
-        the Resource's ``origin`` -- the same provenance operators see in
-        ``describe`` / ``doctor``. That keeps the error as source-located
-        as before the move (and adds ``file:line`` on the TOML path, which
-        never framed it). Resources without a capability config have a
-        no-op ``validate`` (``DeclaredResource`` default); rows that are
-        not ``DeclaredResource`` (capability marker rows, apt /
-        install-command entries) have no ``validate`` and are skipped.
+        the Resource's ``origin`` (the same provenance operators see in
+        ``describe`` / ``doctor``, rendered location-only for the inline
+        message). That keeps the error as source-located as before the
+        move, and adds ``file:line`` on the TOML path, which never framed
+        it.
+
+        The ``getattr(resource, "validate", None)`` guard skips the
+        capability marker rows (``VMPlatformEntry`` and friends), which
+        carry no ``validate`` attribute; a ``DeclaredResource`` subclass
+        with no capability config (a secret, an apt entry) validates via
+        the no-op base ``validate`` and passes.
         """
-        from agentworks.resources.render import format_origin_line
+        from agentworks.resources.render import format_origin_location
 
         for kind in list(self._resources.keys()):
             for name in list(self._resources[kind].keys()):
@@ -330,7 +334,7 @@ class Registry:
                 except ConfigError as exc:
                     origin = getattr(resource, "origin", None)
                     raise ConfigError(
-                        f"{exc} ({format_origin_line(origin)})",
+                        f"{exc} ({format_origin_location(origin)})",
                         hint=exc.hint,
                     ) from exc
 

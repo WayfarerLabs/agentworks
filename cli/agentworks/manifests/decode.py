@@ -237,7 +237,7 @@ def _decode_git_credential(doc: Document, spec: dict[str, object], issues: list[
     # The loader flatten only carries the blob columns the legacy TOML
     # shape knows (org); re-attach the full blob so manifest rows keep
     # every capability field (reference derivation and the finalize
-    # ``validate`` pass both read it). TOML rows keep the loader's blob --
+    # ``validate`` pass both read it). TOML rows keep the loader's blob:
     # the flat domain cannot express richer capability config.
     if raw_config:
         import dataclasses
