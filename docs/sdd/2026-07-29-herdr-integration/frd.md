@@ -209,6 +209,14 @@ console-internal pane construction to a real command.
   automatically). "Companion shell" stays the prose term in documentation rather than becoming
   command vocabulary, since the code and CLI reference call these shell panes today. Final naming is
   an HLA confirmation, but the primary-noun constraint above is a requirement, not a preference.
+- **The command must read as adjacent to the workload, not as the workload.** A companion shell is
+  for looking around, running a build, or checking git state beside a running agent; it is never how
+  an operator reaches the session's actual work. `session attach` carries that, and the contrast
+  between the two commands is what teaches the distinction. Because a bare `shell` does not say so
+  on its own, the framing is a documentation requirement rather than a naming one: the command's
+  help text states that it opens a shell alongside a session's workload, and the CLI reference and
+  top-level docs keep calling these companion shells, so the vocabulary that conveys "not the main
+  workload" survives even though the command name stays inside the `<noun> shell` family.
 - **Parity with the tmux rendering is the acceptance bar**, including the admin-versus-agent
   distinction, the automatic admin promotion for admin-mode sessions, working directories, and the
   environment and secret delivery. A companion shell that loses the session's environment is a
