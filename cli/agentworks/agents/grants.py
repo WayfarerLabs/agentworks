@@ -17,6 +17,7 @@ from typing import TYPE_CHECKING
 
 from agentworks import output
 from agentworks.agents.manager import agent_scope
+from agentworks.config.validation import LINUX_GROUPNAME_MAX_LENGTH
 from agentworks.errors import NotFoundError, ValidationError
 from agentworks.transports import transport
 from agentworks.vms.manager import gated_vm_boundary
@@ -27,6 +28,13 @@ if TYPE_CHECKING:
     from agentworks.ssh import SSHLogger
 
 WS_GROUP_PREFIX = "ws-"
+
+# Derived FROM the prefix so a prefix change cannot reintroduce an over-limit
+# Linux group. ``workspace_group`` builds ``ws-<name>``, which must fit the
+# 32-char Linux group limit: 32 - len("ws-") = 29. The ceiling is imported from
+# the config layer (never the reverse); config.validation depends on nothing in
+# the agents package, so this cannot cycle.
+MAX_WORKSPACE_NAME_LENGTH = LINUX_GROUPNAME_MAX_LENGTH - len(WS_GROUP_PREFIX)
 
 
 def workspace_group(workspace_name: str) -> str:

@@ -35,6 +35,7 @@ from agentworks.transports import transport
 
 from ._common import (
     AGENT_PREFIX,
+    MAX_AGENT_NAME_LENGTH,
     MAX_GRANTS_DISPLAY,
     _agent_direct_secret_target,
     _AgentDirectEnvScopes,
@@ -44,6 +45,9 @@ from ._common import (
     _require_workspace,
     _resolve_agent_direct_env_scopes,
     _resolve_workspace_for_agent,
+    agent_has_grants,
+    agent_has_sessions,
+    agent_is_unused,
     agent_scope,
     derive_linux_user,
 )
@@ -53,6 +57,7 @@ from .lifecycle import create_agent, delete_agent, reinit_agent
 
 __all__ = [
     "AGENT_PREFIX",
+    "MAX_AGENT_NAME_LENGTH",
     "MAX_GRANTS_DISPLAY",
     "_AgentDirectEnvScopes",
     "_agent_direct_secret_target",
@@ -63,6 +68,9 @@ __all__ = [
     "_require_workspace",
     "_resolve_agent_direct_env_scopes",
     "_resolve_workspace_for_agent",
+    "agent_has_grants",
+    "agent_has_sessions",
+    "agent_is_unused",
     "agent_scope",
     "create_agent",
     "delete_agent",

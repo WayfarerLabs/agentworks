@@ -11,7 +11,11 @@ import path callers use.
 
 from __future__ import annotations
 
-from agentworks.workspaces.manager._common import _guard_vm_status
+from agentworks.workspaces.manager._common import (
+    _guard_vm_status,
+    workspace_external_explicit_granters,
+    workspace_has_sessions,
+)
 from agentworks.workspaces.manager.copy import copy_workspace
 from agentworks.workspaces.manager.create import create_workspace, describe_workspace, list_workspaces
 from agentworks.workspaces.manager.delete import delete_workspace
@@ -28,4 +32,6 @@ __all__ = [
     "list_workspaces",
     "rehome_workspace",
     "repair_workspace",
+    "workspace_external_explicit_granters",
+    "workspace_has_sessions",
 ]

@@ -13,6 +13,11 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, NamedTuple
 
+# Importing the Linux username ceiling from the config layer (never the
+# reverse) keeps the dependency direction safe: config.validation depends on
+# nothing in the agents package, so this cannot cycle. It backs the derived
+# MAX_AGENT_NAME_LENGTH co-located with AGENT_PREFIX below.
+from agentworks.config.validation import LINUX_USERNAME_MAX_LENGTH
 from agentworks.errors import (
     AuthorizationError,
     NotFoundError,
@@ -29,6 +34,13 @@ if TYPE_CHECKING:
     from agentworks.transports import Transport
 
 AGENT_PREFIX = "agt-"
+
+# Derived FROM the prefix so a prefix change cannot reintroduce an over-limit
+# Linux username. ``derive_linux_user`` builds ``agt-<name>`` and ``useradd -U``
+# creates a same-named group, so the derived string must fit the 32-char Linux
+# username/group limit: 32 - len("agt-") = 28.
+MAX_AGENT_NAME_LENGTH = LINUX_USERNAME_MAX_LENGTH - len(AGENT_PREFIX)
+
 MAX_GRANTS_DISPLAY = 60
 
 
@@ -50,6 +62,54 @@ def agent_scope(db: Database, vm_name: str, agent_name: str) -> OperationScope:
         vm=vm_name,
         agent=agent_name,
     )
+
+
+def agent_has_sessions(db: Database, name: str) -> bool:
+    """Whether any session still runs under this agent.
+
+    ``list_sessions(agent_name=...)`` matches the agent_name column directly
+    and excludes admin sessions, which is exactly the set that keeps an agent
+    alive. It reads live DB state, so a caller that wants the count AFTER a
+    session row is removed must call it once the delete has committed.
+    """
+    return bool(db.list_sessions(agent_name=name))
+
+
+def agent_has_grants(db: Database, name: str) -> bool:
+    """Whether the agent holds any standing workspace grant.
+
+    Standing grant intent takes two forms, both of which count:
+
+    - The persisted ``grant_all`` flag on the agent row ("may access every
+      workspace"). This is the strongest form and can hold with ZERO
+      explicit rows (``grant_all`` only materializes explicit rows for
+      workspaces that exist at grant time, and those rows cascade away when
+      a workspace is deleted), so it must be read directly from the agent
+      row, never inferred from the grant table.
+    - An explicit grant row in ``agent_workspace_grants``.
+
+    Implicit grants are tied to individual sessions (removed as those
+    sessions are deleted), so they deliberately do not count here.
+    """
+    agent = db.get_agent(name)
+    if agent is not None and agent.grant_all:
+        return True
+    return any(has_explicit for (_ws, has_explicit, _implicit) in db.list_granted_workspaces_with_types(name))
+
+
+def agent_is_unused(db: Database, name: str) -> bool:
+    """Whether the agent is a cleanup candidate: no sessions AND no standing
+    workspace grant (no explicit grant row and ``grant_all`` unset).
+
+    This is the shared "agent unused" definition for session delete's
+    now-empty cleanup (issue #266) and, going forward, the prune command
+    (issue #268). Requiring no grants (not just no sessions) preserves the
+    pre-#266 behavior: a granted-but-sessionless agent is left alone rather
+    than torn down (and its grants revoked) as a side effect of a session
+    delete. It reads live DB state, so a caller that wants the post-delete
+    answer must call it once the session delete has committed.
+    """
+    return not agent_has_sessions(db, name) and not agent_has_grants(db, name)
 
 
 def derive_linux_user(agent_name: str) -> str:

@@ -143,3 +143,57 @@ leading/trailing hyphen, no `--`) are unchanged. The username-bearing kinds (and
 follows the VM-name rules) keep the 30-char cap. `_load_secrets` is the single validation point for
 the secret kind, and the manifest decoder's `_decode_secret` delegates to it, so no other kind is
 affected.
+
+## 2026-07-27: name-length caps rationalized per kind (issue #278)
+
+Post-lock follow-up completing the name-length work #275 began. #275 fixed only the secret kind and
+left the blanket `MAX_NAME_LENGTH = 30` in place for everything else; that 30 was derived from
+nothing and was in fact WRONG for the username / group-bearing kinds (`agt-` + 30 = 34 and `ws-` +
+30 = 33 both overflow the 32-char Linux username/group limit). This change removes `MAX_NAME_LENGTH`
+entirely and gives every kind a cap derived from its REAL downstream sink. The locked LLDs are not
+edited in place (they are point-in-time records); this entry, together with the #275 entry above, is
+the authoritative note. The "Name validation parity (max 30)" line in `manifest-schema-lld.md` and
+the "vm-site names follow the VM-name rules ... they appear in hostnames and SSH aliases" claim in
+the vm-sites FRD are both superseded here.
+
+As-built per-kind caps (all still share the identical `NAME_RE` character rules; only the length
+bound varies, via the existing `validate_name(max_length=...)` parameter):
+
+- **agent -> 28**, derived as `LINUX_USERNAME_MAX_LENGTH (32) - len(AGENT_PREFIX)`. Co-located with
+  `AGENT_PREFIX` in `agents/manager/_common.py` as `MAX_AGENT_NAME_LENGTH`.
+- **workspace -> 29**, derived as `LINUX_GROUPNAME_MAX_LENGTH (32) - len(WS_GROUP_PREFIX)`.
+  Co-located with `WS_GROUP_PREFIX` in `agents/grants.py` as `MAX_WORKSPACE_NAME_LENGTH`. Deriving
+  the agent/workspace caps FROM the prefixes (rather than hard-coding 28 / 29) means a future prefix
+  change cannot silently reintroduce an over-limit identifier; a pinned test asserts the derived
+  username/group is exactly 32 at the cap.
+- **vm -> 38** (`MAX_VM_NAME_LENGTH`), the MIN over two composed sinks: the OS hostname / Tailscale
+  MagicDNS label `{slug}-{vm}` (`63 (DNS label) - 1 (dash) - 20 (max slug) = 42`) and the Azure
+  virtual-network name `{slug}-{vm}-vnet`
+  (`64 (vnet name) - 20 (max slug) - 1 (dash) - 5 (-vnet) = 38`). The vnet sink binds, so the cap is
+  38, not the 63-char hostname and not Azure's 64-char computer-name. The MIN is expressed in code
+  (constants for each sink's ceiling in `config/validation.py`; a pinned test asserts the worst-case
+  vnet name is exactly 64 at the cap), so a slug-length or `-vnet` suffix change reshapes the cap
+  rather than overflowing on Azure.
+- **session -> 34** (`MAX_SESSION_NAME_LENGTH`, co-located with `AGENT_SOCKET_ROOT` in
+  `sessions/tmux.py`): session names embed in the per-agent tmux AF_UNIX socket path
+  `{AGENT_SOCKET_ROOT}/{linux_user}/{name}.sock`, and `sun_path` caps at 108 (107 usable). Under the
+  longest possible agent username (`agt-` + a max agent name = the 32-char Linux ceiling) the fixed
+  overhead is 73, leaving `107 - 73 = 34`. The prior blanket 64 was unreachable on every user (the
+  admin ceiling is 56), so the "no OS-level identifier limit" rationale was wrong for sessions;
+  live-measured (107-char path binds, 108 fails). The cap is derived from `len(AGENT_SOCKET_ROOT)`
+  in the same module and a pinned test asserts the worst-case path is exactly 107 at the cap, so a
+  socket-root change reshapes the cap automatically. (34 is still a loosening from main's blanket
+  30, so there is no compatibility concern.)
+- **console / vm-site -> 64** (`MAX_FREEFORM_NAME_LENGTH`): these hit no OS identifier limit (tmux
+  labels, a registry key, display strings / paths only; a 64-char console name was verified to build
+  fine, live). The vm-site comment claiming site names feed hostnames / SSH aliases was incorrect
+  and is fixed (VM names, not site names, feed hostnames).
+- **secret -> 253** (`MAX_SECRET_NAME_LENGTH`, unchanged from #275).
+
+The `validate_name` default `max_length` moved from 30 to `MAX_FREEFORM_NAME_LENGTH` (64) so a
+caller that forgets to pass a cap gets the generous freeform bound, never a silently-wrong OS cap;
+the four OS/DNS-bearing kinds (agent, workspace, vm) pass their derived cap explicitly. Tightening
+agent 30 -> 28 and workspace 30 -> 29 is intended: the old 30 already produced over-limit usernames
+and groups. Separately, the `vm` / `agent` / `workspace` / `console` list tables gained NAME-cell
+display truncation (via `output.truncate`) so a long or legacy over-cap name cannot misalign the
+table; `--names-only` output is untouched and still emits full names for shell completion.

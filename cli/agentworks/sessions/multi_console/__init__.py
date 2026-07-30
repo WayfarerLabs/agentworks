@@ -54,6 +54,7 @@ from .attach import (
     describe_console,
     kill_session_windows,
     list_consoles,
+    offer_delete_if_empty_consoles,
 )
 from .crud import (
     _validate_cwd,
@@ -119,6 +120,7 @@ __all__ = [
     "infer_vm_from_session_specs",
     "kill_session_windows",
     "list_consoles",
+    "offer_delete_if_empty_consoles",
     "parse_session_spec",
     "remove_sessions",
     "reorder_sessions",

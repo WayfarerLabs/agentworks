@@ -36,9 +36,10 @@ def _load_secrets(
         if not isinstance(sdata, dict):
             raise ConfigError(f"secrets.{name_str} must be a table")
         # Secret names are never derived into Linux usernames, so they use the
-        # larger secret cap rather than the username-driven MAX_NAME_LENGTH.
-        # This is the single validation point for the secret kind: the manifest
-        # decoder (_decode_secret) delegates here, so no other kind is affected.
+        # larger MAX_SECRET_NAME_LENGTH cap rather than a username/group-derived
+        # one. This is the single validation point for the secret kind: the
+        # manifest decoder (_decode_secret) delegates here, so no other kind is
+        # affected.
         validate_name(name_str, max_length=MAX_SECRET_NAME_LENGTH)
         _warn_unexpected_keys(sdata, expected, f"secrets.{name_str}", issues)
 

@@ -11,7 +11,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from agentworks.config import validate_name
+from agentworks.config import MAX_FREEFORM_NAME_LENGTH, validate_name
 from agentworks.errors import ConnectivityError, NotFoundError, ValidationError
 
 if TYPE_CHECKING:
@@ -68,7 +68,7 @@ def parse_session_spec(spec: str) -> SessionSpec:
     else:
         raise ValidationError(f"invalid session spec '{spec}': use 'name' or 'name+N'")
     try:
-        validate_name(name, allow_double_hyphen=True)
+        validate_name(name, allow_double_hyphen=True, max_length=MAX_FREEFORM_NAME_LENGTH)
     except ValidationError as exc:
         raise ValidationError(f"invalid session spec '{spec}': {exc}") from None
     return SessionSpec(name=name, shells=shells)

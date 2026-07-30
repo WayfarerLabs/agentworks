@@ -39,12 +39,29 @@ agw session stop my-session      # Sessions can be stopped (or can exit on their
 agw session list
 agw session restart my-session
 agw session attach my-session
-agw session delete my-session    # When you're done with it. Agent and workspace are preserved.
+agw session delete my-session    # When you're done with it. Agent and workspace are preserved unless this was their last session (see below).
 
 # Alternatively, you can create ephemeral workspaces and agents along with your sessions
 agw session create my-ephemeral-session --vm my-vm --new-workspace --new-agent
 agw session attach my-ephemeral-session
 agw session delete my-ephemeral-session    # This will prompt you to delete the associated workspace and agent, too
+
+# Deleting a session also checks whether its workspace and agent are now unused
+# (whether or not this session created them). A workspace is unused once it has
+# no sessions; an agent is unused only once it has no sessions AND no standing
+# workspace grant (no explicit grant and grant-all unset; a standing grant
+# means you still intend to use the agent, so it is left alone). For each
+# resource now unused, session delete offers to delete it interactively.
+# Under --yes it auto-deletes only a workspace/agent
+# this session created; anything else now unused is reported (naming
+# `agw workspace delete <name>` / `agw agent delete <name>`) and left in place
+# for you to remove by hand.
+# One guard applies: if any agent holds an explicit per-workspace grant on the
+# now-unused workspace (deleting it would silently revoke that grant), the
+# --yes auto-delete is refused and the workspace is reported (naming the
+# granting agents) instead, while the interactive offer discloses whose grants
+# a delete would revoke. Grant-all agents don't trigger the guard: blanket
+# access is policy, not per-workspace intent.
 
 # Finally, create two sessions and a named console
 agw session create s1 --vm my-vm --new-workspace --new-agent
@@ -56,7 +73,8 @@ agw console attach my-console
 # references are left behind). session delete lists the affected consoles, and
 # for any console left with no sessions it offers to delete the now-empty
 # console (interactively). Under --yes it reports the empty console but leaves
-# it for you to remove with `agw console delete <name>`.
+# it for you to remove with `agw console delete <name>`. `console remove-sessions`
+# gets the same now-empty treatment when it drops a console's last session.
 agw session delete s1                      # Reports that my-console still referenced s1
 
 agw console delete my-console              # Extra shells are lost but sessions are preserved
@@ -381,7 +399,7 @@ panes you want preloaded into a session's window.
 | `agw console attach <name>`                         | Attach (builds tmux state on first attach)                        |
 | `agw console delete <name>`                         | Tear down and remove the console                                  |
 | `agw console add-sessions <name> <sessions...>`     | Add session windows                                               |
-| `agw console remove-sessions <name> <sessions...>`  | Remove session windows                                            |
+| `agw console remove-sessions <name> <sessions...>`  | Remove session windows (accepts `-y`/`--yes`)                     |
 | `agw console reorder-sessions <name> <sessions...>` | Bump member sessions to the front in the order given              |
 | `agw console add-shell <name> <session>`            | Add a shell pane to a session window (accepts `--cwd`, `--admin`) |
 | `agw console restore-session <name> <session>`      | Repair one session window against its configured shell list       |
@@ -443,6 +461,12 @@ on first attach (or with `--recreate`); subsequent attaches reuse the running tm
 or removing sessions/shells while a console is attached updates the live tmux state immediately
 (best-effort); when the console isn't running on the VM, only the DB is updated and changes appear
 on next attach.
+
+When `console remove-sessions` (or the session-delete cascade) leaves a console with no configured
+sessions, the console is a dead end (`console attach` would just warn "has no members"). It offers
+to delete the now-empty console; pass `-y`/`--yes` to run non-interactively, which reports the
+emptied console and leaves it in place (delete it yourself with `agw console delete <name>`). The
+removed sessions themselves are untouched; only their membership in the console is removed.
 
 <!-- Linked from the top-level README; rename only if you also update README.md. -->
 

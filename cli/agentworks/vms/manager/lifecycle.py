@@ -22,7 +22,7 @@ from typing import TYPE_CHECKING
 
 from agentworks import output
 from agentworks.capabilities.base import RunContext
-from agentworks.config import validate_admin_username, validate_name
+from agentworks.config import MAX_VM_NAME_LENGTH, validate_admin_username, validate_name
 from agentworks.db import SYSTEM_SLUG_KEY, InitStatus, ProvisioningStatus
 from agentworks.errors import (
     AlreadyExistsError,
@@ -151,7 +151,7 @@ def create_vm(
     ensure_site_ready(site_decl, registry)
 
     vm_name = name
-    validate_name(vm_name)
+    validate_name(vm_name, max_length=MAX_VM_NAME_LENGTH)
 
     if db.get_vm(vm_name) is not None:
         raise AlreadyExistsError(
@@ -288,8 +288,12 @@ def create_vm(
 
             # The VM's OS hostname, computed once at create time and recorded on the
             # row: {slug}-{name} with a slug, the bare name without. Bounded by
-            # construction: slug max 20 + dash + name max 30 = 51 characters,
-            # inside the 63-char hostname-label and Azure 64-char limits.
+            # construction: slug max 20 + dash + name max 38 (MAX_VM_NAME_LENGTH)
+            # = 59 characters, inside the 63-char DNS-label limit. The cap is 38
+            # (not 42) because the tighter sink is Azure's virtual-network name
+            # {slug}-{name}-vnet, capped at 64: 20 + 1 + 38 + 5 = 64. See
+            # config/validation.py MAX_VM_NAME_LENGTH for the MIN-over-sinks
+            # derivation.
             hostname = f"{slug}-{vm_name}" if slug else vm_name
 
             # Create DB record with as-provisioned resource values. This is the

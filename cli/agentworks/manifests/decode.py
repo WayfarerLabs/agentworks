@@ -247,12 +247,14 @@ def _decode_git_credential(doc: Document, spec: dict[str, object], issues: list[
 
 
 def _decode_vm_site(doc: Document, spec: dict[str, object], issues: list[str]) -> Any:
-    from agentworks.config import validate_name
+    from agentworks.config import MAX_FREEFORM_NAME_LENGTH, validate_name
     from agentworks.vms.sites import VMSiteDecl
 
-    # Site names follow the VM-name rules (they appear in
-    # hostnames and SSH host aliases).
-    validate_name(doc.name)
+    # Site names hit no OS-level identifier limit: they are a registry key and
+    # display/config surface only, never derived into a hostname or SSH host
+    # alias (VM names, not site names, feed {slug}-{vm} hostnames). So they take
+    # the freeform cap, not the tighter VM-name cap.
+    validate_name(doc.name, max_length=MAX_FREEFORM_NAME_LENGTH)
     platform = spec.pop("platform", None)
     if not isinstance(platform, str) or not platform:
         raise ConfigError(

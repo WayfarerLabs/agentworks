@@ -19,7 +19,7 @@ from typing import TYPE_CHECKING
 
 import agentworks.sessions.multi_console as _mc
 from agentworks import output
-from agentworks.config import validate_name
+from agentworks.config import MAX_FREEFORM_NAME_LENGTH, validate_name
 from agentworks.errors import AlreadyExistsError, NotFoundError, ValidationError
 from agentworks.resources.access import named_console_template
 from agentworks.sessions.multi_console_layout import (
@@ -69,7 +69,7 @@ def create_console(
     resolved by the CLI layer into an explicit list of session names before
     calling create_console.
     """
-    validate_name(name)
+    validate_name(name, max_length=MAX_FREEFORM_NAME_LENGTH)
 
     if db.get_console(name) is not None:
         raise AlreadyExistsError(
@@ -247,10 +247,18 @@ def remove_sessions(
     *,
     console_name: str,
     session_names: list[str],
+    yes: bool = False,
 ) -> None:
     """Remove sessions from a console. Raises if any are not members. Atomic
     at the DB layer; if the console is live, also kills the corresponding
-    windows (best-effort)."""
+    windows (best-effort).
+
+    The named sessions themselves are untouched: only their membership in this
+    console is removed. If that leaves the console with no configured sessions,
+    offer to delete it (interactive) or report-but-keep it (``yes=True``), the
+    same "console is now empty" treatment ``session delete`` gives a console
+    its cascade empties (issue #265).
+    """
     console = _require_console(db, console_name)
     for n in session_names:
         if db.get_console_session(console_name, n) is None:
@@ -266,14 +274,19 @@ def remove_sessions(
 
     with _live_best_effort(f"remove-sessions from '{console_name}'", console_name=console_name):
         live = _mc._live_target(db, config, console.vm_name)
-        if live is None:
-            return
-        _vm, target = live
-        # kill_session_windows lives in .attach but is called through the
-        # package object here (not `from .attach import kill_session_windows`)
-        # so that tests monkeypatching `multi_console.kill_session_windows`
-        # intercept this call path.
-        _mc.kill_session_windows(target, pairs=[(console_name, n) for n in session_names])
+        if live is not None:
+            _vm, target = live
+            # kill_session_windows lives in .attach but is called through the
+            # package object here (not `from .attach import kill_session_windows`)
+            # so that tests monkeypatching `multi_console.kill_session_windows`
+            # intercept this call path.
+            _mc.kill_session_windows(target, pairs=[(console_name, n) for n in session_names])
+
+    # Offer/report AFTER the removal (and its best-effort live sync) settle.
+    # Routed through the package object so this shares the exact offer/report
+    # path ``session delete`` uses, and so tests monkeypatching
+    # ``multi_console.delete_console`` intercept the confirmed delete.
+    _mc.offer_delete_if_empty_consoles(db, config, [console_name], yes=yes)
 
 
 def reorder_sessions(
