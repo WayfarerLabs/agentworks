@@ -151,7 +151,8 @@ def _parse_size_catalog(config: Mapping[str, object], owner: str) -> tuple[_VMSi
     """The site's VM-size catalog: the operator override
     (``platform_config.vm_sizes``) when present, else the built-in
     B-series ladder. Raises ``ConfigError`` on a malformed override so
-    the shape is validated at config-load time, not first ``vm create``.
+    the shape is validated at registry build time (the finalize
+    ``validate`` pass), not first ``vm create``.
     """
     raw = config.get("vm_sizes")
     if raw is None:

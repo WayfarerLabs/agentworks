@@ -23,7 +23,6 @@ from agentworks.capabilities.git_credential import GIT_CREDENTIAL_PROVIDER_REGIS
 from agentworks.capabilities.git_credential.base import GitCredentialProvider
 from agentworks.config import load_config
 from agentworks.errors import ConfigError
-from agentworks.manifests import load_manifests
 from agentworks.resources.reference import ConfigReference
 
 
@@ -54,20 +53,28 @@ def _manifest(tmp_path: Path, text: str) -> None:
 
 
 def test_azdo_org_required_toml(tmp_path: Path) -> None:
-    with pytest.raises(ConfigError, match="org is required for the azdo provider"):
-        _config(
-            tmp_path,
-            """
-            [git_credentials.ado]
-            provider = "azdo"
-            """,
-        )
+    """A malformed provider_config fails at build_registry now, not at
+    load: capability validation moved out of the TOML loader into the
+    finalize ``validate`` pass (R3). The source location is re-attached
+    from the resource origin, so the TOML path gains a file:line it never
+    framed before."""
+    config = _config(
+        tmp_path,
+        """
+        [git_credentials.ado]
+        provider = "azdo"
+        """,
+    )
+    with pytest.raises(ConfigError, match="org is required for the azdo provider") as exc:
+        build_registry(config)
+    assert "config.toml" in str(exc.value)
 
 
 def test_azdo_rejects_unknown_blob_fields_yaml(tmp_path: Path) -> None:
-    """The decoder invokes the capability on the TRUE blob, so stray
-    blob fields error with file:line (the loader flatten would silently
-    drop them)."""
+    """Stray blob fields on the TRUE blob fail at build_registry: the
+    capability validate moved to the finalize pass (R3), and the error
+    keeps the manifest file:line (now re-attached from the resource
+    origin, not the decode prefix)."""
     _manifest(
         tmp_path,
         """
@@ -82,8 +89,9 @@ def test_azdo_rejects_unknown_blob_fields_yaml(tmp_path: Path) -> None:
             bogus: 1
         """,
     )
+    config = _config(tmp_path)
     with pytest.raises(ConfigError, match="unknown azdo provider field") as exc:
-        load_manifests(tmp_path / "resources")
+        build_registry(config)
     assert "res.yaml" in str(exc.value)
 
 
@@ -103,7 +111,8 @@ def test_base_class_accepts_no_configuration() -> None:
 
 
 def test_github_rejects_unknown_blob_fields(tmp_path: Path) -> None:
-    """github validates its own vocabulary (scope fields only)."""
+    """github validates its own vocabulary (scope fields only), now at
+    build_registry (the finalize ``validate`` pass, R3)."""
     _manifest(
         tmp_path,
         """
@@ -117,8 +126,9 @@ def test_github_rejects_unknown_blob_fields(tmp_path: Path) -> None:
             org: nope
         """,
     )
+    config = _config(tmp_path)
     with pytest.raises(ConfigError, match="unknown github provider field"):
-        load_manifests(tmp_path / "resources")
+        build_registry(config)
 
 
 def test_unknown_provider_defers_to_miss_policy(tmp_path: Path) -> None:
@@ -133,6 +143,46 @@ def test_unknown_provider_defers_to_miss_policy(tmp_path: Path) -> None:
     )
     with pytest.raises(ConfigError, match="sourcehut"):
         build_registry(config)
+
+
+# -- The finalize validate pass: timing + ordering (R3, R9.3) ----------------
+
+
+def test_cycle_reported_before_malformed_block(tmp_path: Path) -> None:
+    """R9.3: capability-block validation moved out of decode/load into
+    the finalize ``validate`` pass, which runs AFTER cycle detection. So
+    a config carrying BOTH a malformed block and a cycle now reports the
+    cycle first, where the malformed block used to fail earlier at
+    decode/load, before finalize ever ran."""
+    config = _config(
+        tmp_path,
+        """
+        [session_templates.a]
+        inherits = ["b"]
+        harness = "shell"
+        [session_templates.a.harness_config]
+        nope = "x"
+
+        [session_templates.b]
+        inherits = ["a"]
+        """,
+    )
+    with pytest.raises(ConfigError, match="cycle detected") as exc:
+        build_registry(config)
+    # The malformed shell block is deferred behind the cycle, not raised.
+    assert "unknown shell harness field" not in str(exc.value)
+
+
+def test_construct_time_validation_survives_the_move(tmp_path: Path) -> None:
+    """R3 invariant: moving validation into the finalize pass does not
+    relax the construct-time check. Constructing a capability directly
+    still re-runs ``validate`` and rejects a malformed blob (a provider
+    that reasons "validate ran at construct, so ``org`` is a valid str"
+    still holds)."""
+    from agentworks.capabilities.git_credential.azdo import AzDOCredentialProvider
+
+    with pytest.raises(ConfigError, match="org is required for the azdo provider"):
+        AzDOCredentialProvider("ado", {})
 
 
 # -- The dependencies half ---------------------------------------------------

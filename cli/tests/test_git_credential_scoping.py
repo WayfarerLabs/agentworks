@@ -22,7 +22,6 @@ from agentworks.capabilities.git_credential.github import GitHubCredentialProvid
 from agentworks.config import load_config
 from agentworks.errors import ConfigError
 from agentworks.git_credentials import CredentialMaterials, build_credential_materials
-from agentworks.manifests import load_manifests
 from agentworks.vms.initializer import resolve_git_credential_providers
 
 if TYPE_CHECKING:
@@ -342,6 +341,22 @@ def test_resolve_threads_scope_from_manifest(tmp_path: Path) -> None:
 
 
 def test_manifest_scope_validation_has_file_line(tmp_path: Path) -> None:
+    """The scope-shape check moved into the finalize ``validate`` pass
+    (R3), so a malformed provider_config fails at build_registry, and the
+    manifest file:line survives the move (re-attached from the resource
+    origin rather than the decode prefix)."""
+    pub = tmp_path / "k.pub"
+    priv = tmp_path / "k"
+    pub.write_text("ssh-ed25519 AAAA test")
+    priv.write_text("key")
+    cfg = tmp_path / "config.toml"
+    cfg.write_text(
+        dedent(f"""\
+        [operator]
+        ssh_public_key = "{pub.as_posix()}"
+        ssh_private_key = "{priv.as_posix()}"
+        """)
+    )
     resources = tmp_path / "resources"
     resources.mkdir()
     (resources / "creds.yaml").write_text(
@@ -357,7 +372,7 @@ def test_manifest_scope_validation_has_file_line(tmp_path: Path) -> None:
         """)
     )
     with pytest.raises(ConfigError, match='"owner/name"') as exc:
-        load_manifests(resources)
+        build_registry(load_config(cfg, warn_issues=False))
     assert "creds.yaml" in str(exc.value)
 
 

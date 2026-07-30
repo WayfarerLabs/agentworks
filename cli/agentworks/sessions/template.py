@@ -111,3 +111,18 @@ class SessionTemplate(DeclaredResource):
                     )
                 )
         return refs
+
+    def validate(self) -> None:
+        """Throwing shape check for the ``harness_config`` blob, run by
+        the finalize ``validate`` pass. Mirrors ``referenced_resources``:
+        only a declared harness has a blob to validate, and its named
+        capability validates it. An undeclared harness (``None``) or an
+        unknown name is a no-op here (the miss policy reports the latter).
+        """
+        if self.harness is None:
+            return
+        from agentworks.capabilities.harness import HARNESS_REGISTRY
+
+        capability = HARNESS_REGISTRY.get(self.harness)
+        if capability is not None:
+            capability.validate(f"session-template/{self.name}", self.harness_config or {})

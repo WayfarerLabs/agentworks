@@ -54,3 +54,17 @@ class DeclaredResource:
 
     def referenced_resources(self) -> list[ResourceReference]:
         return []
+
+    def validate(self) -> None:
+        """Throwing correctness check for the resource's own capability
+        config sub-block(s): the resource-level counterpart of
+        ``referenced_resources`` (the edge-extraction half). Mirrors that
+        method's shape, reading ``self``'s fields and delegating to the
+        named capability's ``validate``. The finalize ``validate`` pass
+        (``Registry.finalize``) invokes it per present node.
+
+        Base behavior: no-op. A resource with no capability config block
+        has nothing to validate. Resources that host a capability config
+        (``VMSiteDecl``, ``GitCredentialConfig``, ``SessionTemplate``)
+        override it.
+        """

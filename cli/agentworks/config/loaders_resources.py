@@ -411,11 +411,10 @@ def _load_vm_sites_legacy(
     Flat TOML is the one place platform-owned fields sit outside the
     ``platform_config`` blob; this loader nests at the boundary
     (section name becomes the site name, ``platform`` is synthesized),
-    exactly as the git-credential loader nests ``org``. The platform
-    capability validates the assembled blob so errors carry config
-    vocabulary and the implied secret references derive at finalize.
+    exactly as the git-credential loader nests ``org``. The assembled
+    blob's shape is validated by the finalize ``validate`` pass (R3), so
+    a malformed legacy section fails at ``build_registry``, not here.
     """
-    from agentworks.capabilities.vm_platform import VM_PLATFORM_REGISTRY
     from agentworks.vms.sites import VMSiteDecl
 
     sites: dict[str, VMSiteDecl] = {}
@@ -426,8 +425,9 @@ def _load_vm_sites_legacy(
         if not isinstance(raw, dict):
             raise ConfigError(f"[{section}] must be a table")
         platform_config: dict[str, object] = {key: raw[key] for key in known_keys if key in raw}
-        capability = VM_PLATFORM_REGISTRY[platform_name]
-        capability.validate(f"[{section}]", platform_config)
+        # The assembled platform_config blob's shape is validated by the
+        # finalize ``validate`` pass (VMSiteDecl.validate), not here:
+        # capability validation is decoupled from load (R3).
         sites[section] = VMSiteDecl(
             name=section,
             platform=platform_name,

@@ -295,7 +295,8 @@ def test_extra_ssh_public_keys_defaults_empty(config_dir: Path) -> None:
 # -- Legacy [proxmox] vm-site tests (table-driven) ----------------------------
 # The section loads as the vm-site/proxmox resource (dual-path, vm-sites
 # semantics); the flat keys nest into platform_config at the boundary, and
-# the proxmox platform capability validates the assembled blob.
+# the proxmox platform capability validates the assembled blob at
+# build_registry (the finalize ``validate`` pass, R3).
 
 _PROXMOX_TEST_CASES: list[dict[str, Any]] = [
     {
@@ -353,7 +354,7 @@ _PROXMOX_TEST_CASES: list[dict[str, Any]] = [
             template_vmid = 9000
 
         """,
-        "expect_error": r"\[proxmox\].api_url is required",
+        "expect_error": r"vm-site/proxmox\.api_url is required",
         "check": None,
     },
     {
@@ -365,7 +366,7 @@ _PROXMOX_TEST_CASES: list[dict[str, Any]] = [
             template_vmid = 9000
 
         """,
-        "expect_error": r"\[proxmox\].node is required",
+        "expect_error": r"vm-site/proxmox\.node is required",
         "check": None,
     },
     {
@@ -377,7 +378,7 @@ _PROXMOX_TEST_CASES: list[dict[str, Any]] = [
             template_vmid = 9000
 
         """,
-        "expect_error": r"\[proxmox\].token_id is required",
+        "expect_error": r"vm-site/proxmox\.token_id is required",
         "check": None,
     },
     {
@@ -389,7 +390,7 @@ _PROXMOX_TEST_CASES: list[dict[str, Any]] = [
             token_id = "u@p!t"
 
         """,
-        "expect_error": r"\[proxmox\].template_vmid is required",
+        "expect_error": r"vm-site/proxmox\.template_vmid is required",
         "check": None,
     },
 ]
@@ -418,8 +419,16 @@ def test_proxmox_config(tmp_path: Path, case: dict) -> None:
     )
 
     if case["expect_error"]:
+        # The platform_config blob's shape check moved out of the TOML
+        # loader into the finalize ``validate`` pass (R3): a malformed
+        # legacy [proxmox] section loads fine and fails at build_registry,
+        # framed by the vm-site name with the source location re-attached.
+        from agentworks.bootstrap import build_registry
+        from agentworks.manifests import ManifestSet
+
+        config = load_config(config_file)
         with pytest.raises(ConfigError, match=case["expect_error"]):
-            load_config(config_file)
+            build_registry(config, ManifestSet.empty())
     else:
         cfg = load_config(config_file)
         assert case["check"](cfg), f"Check failed for {case['id']}"

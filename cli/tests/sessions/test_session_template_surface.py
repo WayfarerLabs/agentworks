@@ -168,18 +168,23 @@ def test_harness_config_without_harness_is_an_error(tmp_path: Path) -> None:
         )
 
 
-def test_unknown_shell_field_errors_at_load(tmp_path: Path) -> None:
-    """The declared blob is shape-validated at load in TOML vocabulary."""
-    with pytest.raises(ConfigError, match="unknown shell harness field"):
-        _config(
-            tmp_path,
-            """
-            [session_templates.bad]
-            harness = "shell"
-            [session_templates.bad.harness_config]
-            nope = "x"
-            """,
-        )
+def test_unknown_shell_field_errors_at_build(tmp_path: Path) -> None:
+    """The declared blob is shape-validated by the finalize ``validate``
+    pass (R3), so a malformed shell block fails at build_registry, not at
+    load. The error keeps the harness vocabulary and gains the source
+    location (re-attached from the resource origin)."""
+    config = _config(
+        tmp_path,
+        """
+        [session_templates.bad]
+        harness = "shell"
+        [session_templates.bad.harness_config]
+        nope = "x"
+        """,
+    )
+    with pytest.raises(ConfigError, match="unknown shell harness field") as exc:
+        build_registry(config)
+    assert "config.toml" in str(exc.value)
 
 
 # -- manifest flat-field rejection + unknown-name miss policy (FRD R2) -------

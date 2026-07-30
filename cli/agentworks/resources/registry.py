@@ -206,7 +206,15 @@ class Registry:
         4. **Cycle detection** in the now-complete reference graph via
            iterative DFS three-coloring; raises ``ConfigError`` on the
            first cycle with the offending path.
-        5. **Freeze**.
+        5. **Validate capability config blocks**: run each present
+           Resource's ``validate()`` (the throwing correctness check for
+           its capability sub-block). Distinct from graph construction
+           (R3): the build passes never throw on a malformed block, so a
+           config with both a malformed block and a cycle reports the
+           cycle first (R9.3). Errors are re-framed with the Resource's
+           ``origin`` so they stay source-located after the move out of
+           decode/load.
+        6. **Freeze**.
 
         Semantic checks that need CONFIG alongside the finalized graph
         (e.g. the secret chain's names and reachability) are not the
@@ -280,8 +288,51 @@ class Registry:
         # 4: cycle detection across the now-complete graph.
         _detect_cycles(self._resources)
 
-        # 5: freeze.
+        # 5: validate capability config blocks. Distinct from graph
+        # construction (R3): the build passes above are total and never
+        # throw on a malformed block, so a config with both a malformed
+        # block and (say) a cycle reports the CYCLE first (R9.3) -- the
+        # bad block no longer fails earlier at decode/load. Runs over
+        # every present resource this effort; the readiness gating that
+        # scopes it to the ready + enabled set arrives with the fold.
+        self._validate_resources()
+
+        # 6: freeze.
         self._frozen = True
+
+    def _validate_resources(self) -> None:
+        """Run each present Resource's ``validate()`` (the throwing
+        correctness check for its capability config sub-block), raising on
+        the first malformed block.
+
+        The capability's ``validate`` frames its message with the logical
+        owner label (``kind/name``); the source location that decode/load
+        used to supply (the manifest ``file:line``, the TOML section) is
+        gone once validation runs here, so this pass re-attaches it from
+        the Resource's ``origin`` -- the same provenance operators see in
+        ``describe`` / ``doctor``. That keeps the error as source-located
+        as before the move (and adds ``file:line`` on the TOML path, which
+        never framed it). Resources without a capability config have a
+        no-op ``validate`` (``DeclaredResource`` default); rows that are
+        not ``DeclaredResource`` (capability marker rows, apt /
+        install-command entries) have no ``validate`` and are skipped.
+        """
+        from agentworks.resources.render import format_origin_line
+
+        for kind in list(self._resources.keys()):
+            for name in list(self._resources[kind].keys()):
+                resource = self._resources[kind][name]
+                validate = getattr(resource, "validate", None)
+                if validate is None:
+                    continue
+                try:
+                    validate()
+                except ConfigError as exc:
+                    origin = getattr(resource, "origin", None)
+                    raise ConfigError(
+                        f"{exc} ({format_origin_line(origin)})",
+                        hint=exc.hint,
+                    ) from exc
 
     def _materialize_reserved_defaults(self) -> None:
         """Seed the registry with reserved-default rows for every kind

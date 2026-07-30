@@ -103,3 +103,18 @@ class GitCredentialConfig(DeclaredResource):
                 )
             )
         return refs
+
+    def validate(self) -> None:
+        """Throwing shape check for the ``provider_config`` blob, run by
+        the finalize ``validate`` pass. Mirrors ``referenced_resources``:
+        the named provider capability validates the blob it owns. An
+        unknown provider is tolerated here (the framework miss policy
+        reports it); a seated provider validates the blob.
+        """
+        from agentworks.capabilities.git_credential import (
+            GIT_CREDENTIAL_PROVIDER_REGISTRY,
+        )
+
+        capability = GIT_CREDENTIAL_PROVIDER_REGISTRY.get(self.provider)
+        if capability is not None:
+            capability.validate(f"git-credential/{self.name}", self.provider_config)

@@ -84,6 +84,21 @@ class VMSiteDecl(DeclaredResource):
         refs.extend(sourced_references(capability.dependencies(f"vm-site/{self.name}", self.platform_config), source))
         return refs
 
+    def validate(self) -> None:
+        """Throwing shape check for the ``platform_config`` blob, run by
+        the finalize ``validate`` pass. Mirrors ``referenced_resources``:
+        the named platform capability validates the blob it owns. An
+        unknown platform is tolerated (the site self-disables today); the
+        blob is validated whenever the platform's implementation is
+        seated, regardless of host support (an unsupported platform still
+        validates an empty or well-formed blob).
+        """
+        from agentworks.capabilities.vm_platform import VM_PLATFORM_REGISTRY
+
+        capability = VM_PLATFORM_REGISTRY.get(self.platform)
+        if capability is not None:
+            capability.validate(f"vm-site/{self.name}", self.platform_config)
+
 
 def site_manifest_hint(name: str, *, vm_host: str | None = None) -> str:
     """A ready-to-paste vm-site manifest document for ``name``.

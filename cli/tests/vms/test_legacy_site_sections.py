@@ -88,9 +88,17 @@ def test_legacy_sections_publish_and_finalize(write_config) -> None:
 
 
 def test_legacy_section_blob_validates(write_config) -> None:
+    """The assembled platform_config blob is shape-validated by the
+    finalize ``validate`` pass (R3), so a malformed legacy section fails
+    at build_registry, not at load. The site name (``azure``) frames the
+    error, with the source location re-attached from the origin."""
+    from agentworks.bootstrap import build_registry
+    from agentworks.manifests import ManifestSet
+
     broken = AZURE_SECTION.replace('subscription_id = "0000"\n', "")
+    config = load_config(write_config(broken), warn_issues=False, warn_deprecations=False)
     with pytest.raises(ConfigError, match="subscription_id"):
-        load_config(write_config(broken), warn_issues=False, warn_deprecations=False)
+        build_registry(config, ManifestSet.empty())
 
 
 def test_settings_only_load_skips_legacy_sites(write_config) -> None:

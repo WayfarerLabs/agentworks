@@ -96,11 +96,26 @@ def test_decode_rejects_stray_spec_keys(tmp_path: Path) -> None:
         load_manifests(tmp_path)
 
 
-def test_decode_validates_the_blob_via_the_capability(tmp_path: Path) -> None:
-    doc = SITE_DOC.replace('    subscription_id: "0000"\n', "")
-    (tmp_path / "site.yaml").write_text(doc)
-    with pytest.raises(ConfigError, match="subscription_id"):
-        load_manifests(tmp_path)
+def test_build_registry_validates_the_blob_via_the_capability(tmp_path: Path) -> None:
+    """The platform_config blob's shape check moved out of decode into
+    the finalize ``validate`` pass (R3): a malformed blob decodes fine
+    and fails at build_registry, framed by the site name (``azure-dev``)
+    with the source location re-attached from the origin."""
+    from agentworks.bootstrap import build_registry
+    from agentworks.config import load_config
+
+    pub = tmp_path / "k.pub"
+    priv = tmp_path / "k"
+    pub.write_text("ssh-ed25519 AAAA test")
+    priv.write_text("key")
+    cfg = tmp_path / "config.toml"
+    cfg.write_text(f'[operator]\nssh_public_key = "{pub.as_posix()}"\nssh_private_key = "{priv.as_posix()}"\n')
+    resources = tmp_path / "resources"
+    resources.mkdir()
+    (resources / "site.yaml").write_text(SITE_DOC.replace('    subscription_id: "0000"\n', ""))
+    with pytest.raises(ConfigError, match="subscription_id") as exc:
+        build_registry(load_config(cfg, warn_issues=False))
+    assert "site.yaml" in str(exc.value)
 
 
 def test_unknown_platform_registers_a_disabled_site(tmp_path: Path) -> None:

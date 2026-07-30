@@ -7,12 +7,14 @@ entry rule, and unknown-key warning is shared verbatim between the TOML
 and manifest sources. When the TOML resource surface is deleted at the
 cutover, these loaders become manifest-only and can be renamed in place.
 
-Capability-owned blobs are the one deliberate exception to shared
-validation: the named capability validates its ``provider_config``
-(invoked here on the TRUE blob, with the loader's flat shape validating
-its own assembled blob), and the two sources diverge on stray blob
-keys by design (the flat domain stays silently loose until the flat
-shape is retired).
+Capability-owned blobs (``provider_config``, ``platform_config``,
+``harness_config``) are NOT validated here: their shape check is the
+finalize ``validate`` pass (R3), which runs once over the built graph
+with the Resource's source location re-attached. Decode still performs
+the kind-owned spec-shape checks (a blob must be a mapping, a field may
+not shadow kind-owned surface) and re-attaches the TRUE blob to the
+decl (the loader's flat shape drops keys it doesn't know), so the
+finalize pass sees every capability field.
 
 ``KIND_SECTIONS`` maps kind identifiers to their legacy TOML section
 names; it is the shared table the manifest migrator consumes so the two
@@ -159,24 +161,13 @@ def _decode_session_template(doc: Document, spec: dict[str, object], issues: lis
     # nested shape) by the general deprecated-field table (FRD R11),
     # consulted in decode_document before this decoder runs, so no
     # bespoke check lives here.
-    harness = spec.get("harness")
     harness_config = spec.get("harness_config")
     if harness_config is not None and not isinstance(harness_config, dict):
         raise ConfigError("spec.harness_config must be a mapping")
-    # Capability validation on the declared blob, with this document's
-    # file:line in the error (decode_document prefixes ``doc.where``).
-    # Unknown harness names defer to the framework's miss policy at
-    # finalize, so they skip invocation here. Mirrors
-    # _decode_git_credential.
-    if isinstance(harness, str):
-        from agentworks.capabilities.harness import HARNESS_REGISTRY
-
-        capability = HARNESS_REGISTRY.get(harness)
-        if capability is not None:
-            capability.validate(
-                f"session-template/{doc.name}",
-                harness_config if isinstance(harness_config, dict) else {},
-            )
+    # The harness_config blob's shape is validated by the finalize
+    # ``validate`` pass (SessionTemplate.validate), not here: capability
+    # validation is decoupled from decode (R3). The mapping-shape check
+    # above is kind-owned decode structure and stays at load.
     result = _load_session_templates({"session_templates": {doc.name: spec}}, issues, _decls(doc.location))
     return result[doc.name]
 
@@ -227,19 +218,13 @@ def _decode_git_credential(doc: Document, spec: dict[str, object], issues: list[
             "provider-specific configuration (e.g. azdo's org) goes under "
             "spec.provider_config"
         )
-    # Capability validation on the TRUE blob (the loader flatten drops
-    # keys it doesn't know, so stray blob fields must be caught here,
-    # where the error carries this document's file:line). Runs after the
-    # spec-shape checks so a misplaced field gets the nesting hint, not
-    # a confusing capability complaint. Unknown provider names defer to
-    # the framework's miss policy.
-    from agentworks.capabilities.git_credential import (
-        GIT_CREDENTIAL_PROVIDER_REGISTRY,
-    )
-
-    capability = GIT_CREDENTIAL_PROVIDER_REGISTRY.get(provider)
-    if capability is not None:
-        capability.validate(f"git-credential/{doc.name}", raw_config)
+    # The TRUE blob's shape is validated by the finalize ``validate``
+    # pass (GitCredentialConfig.validate), not here: capability
+    # validation is decoupled from decode (R3). The full blob is
+    # re-attached to the decl below so the finalize pass sees every
+    # capability field (the loader flatten drops keys it doesn't know).
+    # The spec-shape checks above stay at load (kind-owned decode
+    # structure).
     result = _load_git_credentials(
         {"git_credentials": {doc.name: loader_spec}},
         issues,
@@ -250,10 +235,10 @@ def _decode_git_credential(doc: Document, spec: dict[str, object], issues: list[
         warn_ignored_scope_keys=False,
     )[doc.name]
     # The loader flatten only carries the blob columns the legacy TOML
-    # shape knows (org); re-attach the full validated blob so manifest
-    # rows keep every capability field (reference derivation at finalize
-    # reads it). TOML rows keep the loader's blob -- the flat domain
-    # cannot express richer capability config.
+    # shape knows (org); re-attach the full blob so manifest rows keep
+    # every capability field (reference derivation and the finalize
+    # ``validate`` pass both read it). TOML rows keep the loader's blob --
+    # the flat domain cannot express richer capability config.
     if raw_config:
         import dataclasses
 
@@ -291,10 +276,13 @@ def _decode_vm_site(doc: Document, spec: dict[str, object], issues: list[str]) -
         raise ConfigError(
             f"unknown vm-site spec field(s): {extras}; platform-specific configuration goes under spec.platform_config"
         )
-    # Capability validation on the TRUE blob, with this document's
-    # file:line in the error. Unknown platform names are tolerated: the
-    # site registers and self-disables ("platform 'x' is not
-    # installed"); a plugin's platform may simply not be here.
+    # The platform_config blob's shape is validated by the finalize
+    # ``validate`` pass (VMSiteDecl.validate), not here: capability
+    # validation is decoupled from decode (R3). The shadow check below is
+    # kind-owned decode structure and stays at load. Unknown platform
+    # names are tolerated: the site registers and self-disables
+    # ("platform 'x' is not installed"); a plugin's platform may simply
+    # not be here.
     from agentworks.capabilities.vm_platform import VM_PLATFORM_REGISTRY
 
     # A site named after a known platform must declare that
@@ -305,9 +293,6 @@ def _decode_vm_site(doc: Document, spec: dict[str, object], issues: list[str]) -
             f"a vm-site named '{doc.name}' must declare platform "
             f"'{doc.name}' (it shadows a platform name), not '{platform}'"
         )
-    capability = VM_PLATFORM_REGISTRY.get(platform)
-    if capability is not None:
-        capability.validate("spec.platform_config", raw_config)
     return VMSiteDecl(
         name=doc.name,
         platform=platform,

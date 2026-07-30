@@ -185,8 +185,10 @@ are:
   All the raising lives in `validate`. Together, for a valid blob, they reproduce what the earlier
   fused method did: the same refs from `dependencies`, the same errors from `validate`.
 - **Pure.** No I/O, no secret resolution, no network. They are called repeatedly and in varied
-  contexts (decode, registry finalize, construct), so they have to be cheap and side-effect-free
-  everywhere; finalize in particular is a pure graph-building pass where I/O has no place.
+  contexts (registry finalize, construct), so they have to be cheap and side-effect-free everywhere;
+  finalize in particular is a pure graph-building pass where I/O has no place. (`validate` used to
+  also run at manifest decode / TOML load; it moved into a dedicated finalize pass so graph
+  construction never depends on a block being valid.)
 - **Classmethods.** They have no instance; they read a blob to declare refs (`dependencies`) or
   check its shape (`validate`).
 - **Host-agnostic.** `owner` is a label used only for error framing and reference attribution, never
