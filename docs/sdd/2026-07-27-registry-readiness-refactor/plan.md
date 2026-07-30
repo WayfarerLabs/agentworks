@@ -343,10 +343,10 @@ inventory is fully discharged.
 
 ## Closeout
 
-- [ ] All R1-R13 satisfied; the R9 delta list fully pinned by tests.
-- [ ] SDD load-bearing content promoted out of the SDD where it belongs in permanent docs (the
-      readiness vocabulary and the backend/opt-in model into `docs/guides/resources.md`; any
-      graph-API contract that outlives the SDD into a module README), per the SDD-not-permanent
-      rule.
-- [ ] `locked.md` written summarizing the final state (created on-branch pre-merge; the lock binds
+- [x] All R1-R13 satisfied; the R9 delta list fully pinned by tests (capstone verification review).
+- [x] SDD load-bearing content promoted out of the SDD where it belongs in permanent docs (the
+      readiness vocabulary and the backend/opt-in model into `docs/guides/resources.md`; the
+      graph-API contract inlined into `resources/graph.py`'s module docstring; the capability
+      contract into the capability READMEs), per the SDD-not-permanent rule.
+- [x] `locked.md` written summarizing the final state (created on-branch pre-merge; the lock binds
       when it lands on `main`).
