@@ -61,10 +61,11 @@ owner/origin re-framing; R9.4 not-ready block deferred; R9.5 host-unsupported pl
 not-ready row; R9.6 not-ready backend skips with a warning (hard-miss halt kept); R9.7 grid cell
 states; R9.8 `--reveal-secrets` to `--resolve`; R9.9 every declared mapping validated; R9.10 backend
 rows gain inbound refs; R9.11 unknown-backend mapping is a build-time hard error (with the
-acknowledged doctor-granularity regression). Tests live under `cli/tests/`
-(`test_readiness_fold.py`, `test_capability_config_contract.py`, `test_secrets_resolve.py`,
-`test_secret_describe.py`, `test_secrets_inspect.py`, `test_doctor_env_and_secrets.py`,
-`test_env_show_flag.py`, `test_completions.py`, and the graph/guard suites).
+acknowledged doctor-granularity regression). Tests live under `cli/tests/` and
+`cli/tests/resources/` (`resources/test_readiness_fold.py`, `test_capability_config_contract.py`,
+`test_secrets_resolve.py`, `test_secret_describe.py`, `test_secrets_inspect.py`,
+`test_doctor_env_and_secrets.py`, `test_env_show_flag.py`, `test_completions.py`, and the
+graph/guard suites).
 
 ## Where the load-bearing content lives (SDD is deletable)
 

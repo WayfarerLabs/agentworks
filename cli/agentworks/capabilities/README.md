@@ -198,12 +198,12 @@ are:
   `harness_config` site.
 
 The references `dependencies` returns are sourceless. The consuming resource attaches itself as the
-source when it emits them, in its `referenced_resources()` at finalize ("whoever hosts the config
-that names the secret emits the reference"). The framework consumes those references two ways:
-statically, they feed the registry's reference graph and doctor's resolvability prediction; at
-runtime, their _values_ are fetched only by the framework's one batched resolve pass as soon as
-preflight passes (described under ops), and delivered through the context. References are never
-value-resolved at command entry.
+source when it emits them, in its `dependencies()` at finalize ("whoever hosts the config that names
+the secret emits the reference"). The framework consumes those references two ways: statically, they
+feed the registry's reference graph and doctor's resolvability prediction; at runtime, their
+_values_ are fetched only by the framework's one batched resolve pass as soon as preflight passes
+(described under ops), and delivered through the context. References are never value-resolved at
+command entry.
 
 ### 2. construct (bind; cheap, config-valid by construction)
 

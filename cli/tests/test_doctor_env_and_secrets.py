@@ -41,7 +41,7 @@ shell = "zsh"
 # ---------------------------------------------------------------------------
 
 
-def test_auto_declared_secrets_are_reported(tmp_path: Path) -> None:
+def test_auto_declared_secrets_are_reported(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Doctor reports EVERY registry secret, auto-declared included --
     they are exactly the ones most likely to prompt at command time,
     so hiding them made doctor unable to predict the next command.
@@ -49,6 +49,10 @@ def test_auto_declared_secrets_are_reported(tmp_path: Path) -> None:
     ``tailscale-auth-key`` (vm-template requirement); it shows with an
     ``(auto)`` marker and an honest would-resolve-via-prompt heads-up.
     """
+    # Hosts that operate real VMs export this; clear it so the
+    # would-resolve-via-prompt assertion reflects the bare config, not the
+    # test host's environment (mirrors the sibling tests' delenv discipline).
+    monkeypatch.delenv("AW_SECRET_TAILSCALE_AUTH_KEY", raising=False)
     cfg = _write_config(tmp_path)
     config = load_config(cfg, warn_issues=False)
     g = _check_secrets(config, build_registry(config))
