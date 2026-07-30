@@ -272,7 +272,7 @@ YAML block scalar, remote shell). Two traps that have already occurred:
 
 The existing tests under `cli/tests/vms/` are the templates to copy from:
 
-- `test_platform_validate_config.py`: table-driven `validate` shape and `dependencies` edge
+- `test_platform_config_contract.py`: table-driven `validate` shape and `dependencies` edge
   extraction across all platforms, plus a registry-name/class parity check. A good template for a
   new platform's registration test.
 - `test_platform_support.py`: `unsupported_reason` (host-wide) vs. `disabled_reason` (per-site) vs.
