@@ -194,9 +194,21 @@ console-internal pane construction to a real command.
   that an admin-mode session's panes get. The effort therefore adds a first-class companion-shell
   command that takes a session, an optional relative working directory, and an optional admin flag,
   and delivers a login shell with the same user, directory, and resolved environment a console shell
-  pane gets today. Its exact name and options are an HLA and LLD concern; its semantics are this
-  requirement, and reusing or extending the existing agent-shell path to get there is a legitimate
-  implementation answer.
+  pane gets today. Reusing or extending the existing agent-shell implementation path to get there is
+  a legitimate answer; the command's own surface is not.
+- **The session is the primary argument, and this is functional rather than cosmetic.** Admin-mode
+  sessions have no agent at all (`session list --admin` is documented as "only admin-mode sessions
+  (no agent)"), so any spelling that makes an agent the primary noun and the session a modifier is
+  unusable for exactly the sessions where an operator is most likely to want a companion shell.
+  Everything the command needs (the Linux user, the workspace path, the environment scopes, the
+  secret set) is derived from the session, so the session is the only argument that is always
+  meaningful.
+- The recommended spelling is `agw session shell <session> [--cwd <rel>] [--admin]`, which keeps the
+  established `<noun> shell` family (`vm shell`, `agent shell`) and gives `--admin` the same meaning
+  it has on `console add-shell` (force admin on an agent-mode session; admin-mode sessions promote
+  automatically). "Companion shell" stays the prose term in documentation rather than becoming
+  command vocabulary, since the code and CLI reference call these shell panes today. Final naming is
+  an HLA confirmation, but the primary-noun constraint above is a requirement, not a preference.
 - **Parity with the tmux rendering is the acceptance bar**, including the admin-versus-agent
   distinction, the automatic admin promotion for admin-mode sessions, working directories, and the
   environment and secret delivery. A companion shell that loses the session's environment is a
