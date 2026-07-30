@@ -12,7 +12,7 @@ imports this registry or the concrete classes.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 from agentworks.capabilities.vm_platform.azure_vm import AzureVMPlatform
 from agentworks.capabilities.vm_platform.base import (
@@ -71,12 +71,14 @@ class VMPlatformEntry:
     row is what ``vm-site`` ``spec.platform`` references resolve against
     in the framework. Lives with the capability (not ``vms/kinds.py``)
     so publishing never imports the consuming domain.
+
+    Inbound references live on the dependency graph
+    (``Registry.graph.dependents_of``), not on this row.
     """
 
     name: str
     description: str = ""
     origin: Origin | None = None
-    references: tuple[Any, ...] = ()
 
 
 def publish_to(registry: Registry) -> None:

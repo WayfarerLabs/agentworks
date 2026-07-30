@@ -7,10 +7,10 @@ push composed Resources in via ``Registry.add(kind, name, resource,
 origin)``. After all publishers have contributed, ``Registry.finalize()``
 runs the framework pass: walks the reference graph, dispatches per-kind
 miss policies (auto-declare may
-synthesize new Resources; error raises ``ConfigError``), attaches
-``usage`` lists, detects cycles, and freezes the Registry. After
-``finalize`` returns, the Registry is read-only and queryable via
-``lookup`` / ``iter_kind``.
+synthesize new Resources; error raises ``ConfigError``), builds the
+retained ``DependencyGraph``, detects cycles, and freezes the Registry.
+After ``finalize`` returns, the Registry is read-only and queryable via
+``lookup`` / ``iter_kind`` / ``graph``.
 
 The convenience that orchestrates the standard set of publishers lives in
 ``agentworks.bootstrap.build_registry``. The Registry itself doesn't know
@@ -28,8 +28,9 @@ from agentworks.resources.kind import KIND_REGISTRY
 if TYPE_CHECKING:
     from collections.abc import Iterator, Sequence
 
+    from agentworks.resources.graph import DependencyGraph
     from agentworks.resources.origin import Origin
-    from agentworks.resources.reference import ResourceReference
+    from agentworks.resources.reference import ReferenceEntry, ResourceReference
 
 
 class Registry:
@@ -51,6 +52,9 @@ class Registry:
         # is fine for tests / framework code that wants a stub.
         self._resources: dict[str, dict[str, Any]] = {}
         self._frozen: bool = False
+        # The retained dependency graph, built at the end of ``finalize``.
+        # ``None`` until then; the ``graph`` property enforces the ordering.
+        self._graph: DependencyGraph | None = None
 
     # -- Construction --------------------------------------------------
 
@@ -185,21 +189,24 @@ class Registry:
            synthesized Resources may themselves produce references, so
            a single pass would silently drop their unresolved edges. The
            accumulated reference map is preserved across iterations so
-           the post-loop usage-attachment pass sees the complete graph.
-        2. **Usage attachment + description polish**: every Resource
-           (operator-declared, built-in, auto-declared) gets a
-           ``usage`` tuple attached via ``dataclasses.replace`` -- empty
-           if nothing referenced it. The kind-agnostic
-           description-polish runs in the same pass: for any Resource
-           with a ``description`` field that's empty and an
-           auto-declared origin, the framework synthesizes a
-           description from the reference graph (or, when ``usage``
-           is empty, falls back to ``"(auto) auto-declared default
-           <kind>"``).
-        3. **Cycle detection** in the now-complete reference graph via
+           the post-loop graph build sees the complete edge set.
+        2. **Build the dependency graph**: from the finalized resource
+           map and the accumulated reference map, build the frozen
+           ``DependencyGraph`` (``resources/graph.py``) the Registry
+           retains and exposes via the ``graph`` property. Inbound
+           references live on the graph node (``dependents_of``), not on
+           the resource dataclass; ``edges_of`` re-keys the same edges by
+           source. Every node is constructed ready/enabled this effort
+           (the readiness fold fills real verdicts later).
+        3. **Description polish**: for any Resource with a ``description``
+           field that's empty and an auto-declared origin, the framework
+           synthesizes a description from the graph's inbound references
+           (or, when there are none, falls back to ``"(auto)
+           auto-declared default <kind>"``).
+        4. **Cycle detection** in the now-complete reference graph via
            iterative DFS three-coloring; raises ``ConfigError`` on the
            first cycle with the offending path.
-        4. **Freeze**.
+        5. **Freeze**.
 
         Semantic checks that need CONFIG alongside the finalized graph
         (e.g. the secret chain's names and reachability) are not the
@@ -246,22 +253,28 @@ class Registry:
                 kind_handler = _lookup_kind(target_kind, refs[0])
                 self._handle_miss(target_kind, target_name, kind_handler, refs)
 
-        # 2: references attachment + description polish for every Resource.
-        # Iterate all currently-published Resources (not just those with
-        # incoming references) so always-materialized rows get
-        # ``references=()`` plus the empty-references description fallback too.
+        # 2: build the retained dependency graph. Inbound references live
+        # on the graph node now (caller inventory E), so the graph is the
+        # source the description-polish pass reads from below.
+        from agentworks.resources.graph import build_graph
+
+        self._graph = build_graph(self._resources, all_refs)
+
+        # 3: description polish for every Resource. Iterate all
+        # currently-published Resources (not just those with incoming
+        # references) so always-materialized rows get the empty-references
+        # description fallback too. The inbound references come off the
+        # graph node rather than a dataclass field.
         for kind in list(self._resources.keys()):
             for name in list(self._resources[kind].keys()):
                 existing = self._resources[kind][name]
-                refs = all_refs.get((kind, name), [])
-                polished = dataclasses.replace(existing, references=_references_tuple(refs))
-                polished = _polish_auto_declared_description(polished, kind)
-                self._resources[kind][name] = polished
+                inbound = self._graph.dependents_of(kind, name)
+                self._resources[kind][name] = _polish_auto_declared_description(existing, kind, inbound)
 
-        # 3: cycle detection across the now-complete graph.
+        # 4: cycle detection across the now-complete graph.
         _detect_cycles(self._resources)
 
-        # 4: freeze.
+        # 5: freeze.
         self._frozen = True
 
     def _materialize_reserved_defaults(self) -> None:
@@ -390,6 +403,17 @@ class Registry:
         """True after ``finalize`` has run."""
         return self._frozen
 
+    @property
+    def graph(self) -> DependencyGraph:
+        """The retained ``DependencyGraph``, available only after
+        ``finalize``. Raises ``RuntimeError`` if accessed before then --
+        the graph is built from the complete reference walk, so there is
+        no meaningful pre-finalize graph to return.
+        """
+        if self._graph is None:
+            raise RuntimeError("registry graph is available only after finalize")
+        return self._graph
+
 
 # -- Internal helpers --------------------------------------------------
 
@@ -416,11 +440,18 @@ def _lookup_kind(kind: str, req: ResourceReference) -> Any:
         raise ConfigError(f"{req.source[0]} {req.source[1]!r} references unregistered kind {kind!r}") from None
 
 
-def _polish_auto_declared_description(resource: Any, kind: str) -> Any:
+def _polish_auto_declared_description(
+    resource: Any,
+    kind: str,
+    references: Sequence[ReferenceEntry],
+) -> Any:
     """Synthesize a description for an auto-declared Resource when its
     description is empty. Operators rely on a non-empty Description in
     ``agw resource list`` / ``agw secret list``; the framework derives
     one so the row reads as "what this resource is for and who's asking".
+
+    ``references`` is the resource's inbound reference list, read off the
+    graph node by the caller (they no longer live on the dataclass).
 
     Two cases share this polish step:
 
@@ -445,7 +476,6 @@ def _polish_auto_declared_description(resource: Any, kind: str) -> Any:
     origin = getattr(resource, "origin", None)
     if origin is None or origin.variant != "auto-declared":
         return resource
-    references = getattr(resource, "references", ())
     if not references:
         # Always-materialized default with no static incoming references.
         description = f"(auto) auto-declared default {kind}"
@@ -457,25 +487,6 @@ def _polish_auto_declared_description(resource: Any, kind: str) -> Any:
         suffix = f" (and {len(distinct_other)} more)" if distinct_other else ""
         description = f"(auto) {first.usage} for {first.source[0]}/{first.source[1]}{suffix}"
     return dataclasses.replace(resource, description=description)
-
-
-def _references_tuple(
-    refs: Sequence[ResourceReference],
-) -> tuple[Any, ...]:
-    """Build the ``references`` tuple a Resource carries on it after
-    ``finalize``. Lives here (rather than imported from reference.py
-    at runtime) to keep the import graph minimal; the return tuple
-    holds ``ReferenceEntry`` instances but is typed loosely so this module
-    doesn't need a TYPE_CHECKING import for the static typing.
-
-    Projects each outbound ``ResourceReference`` to an inbound
-    ``ReferenceEntry`` by keeping ``source`` and ``usage`` (the prose);
-    the ``kind``/``name`` fields drop because they're implicit from the
-    container Resource the entry attaches to.
-    """
-    from agentworks.resources.reference import ReferenceEntry
-
-    return tuple(ReferenceEntry(source=r.source, usage=r.usage) for r in refs)
 
 
 def _detect_cycles(resources: dict[str, dict[str, Any]]) -> None:

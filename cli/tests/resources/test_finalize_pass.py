@@ -129,9 +129,10 @@ def test_operator_declared_secret_gets_usage_populated() -> None:
     assert found.origin is not None
     assert found.origin.variant == "operator-declared"
     assert found.origin.line == 5
-    # Usage gets populated from BOTH requirements.
-    assert len(found.references) == 2
-    sources = sorted(u.source for u in found.references)
+    # Usage gets populated from BOTH requirements (now off the graph node).
+    dependents = r.graph.dependents_of("secret", "api-key")
+    assert len(dependents) == 2
+    sources = sorted(u.source for u in dependents)
     assert sources == [("admin-template", "default"), ("agent-template", "claude")]
 
 
@@ -169,7 +170,7 @@ def test_auto_declared_secret_origin_uses_first_matching_requirement() -> None:
     assert found.origin is not None
     assert found.origin.source == ("admin-template", "default")
     # Usage records BOTH requirements.
-    assert len(found.references) == 2
+    assert len(r.graph.dependents_of("secret", "shared-key")) == 2
 
 
 def test_publish_order_determines_first_matching_origin_source() -> None:
@@ -265,10 +266,11 @@ def test_synthesize_path_walked_for_second_level_requirements() -> None:
     )
     r.finalize()
 
-    shared = r.lookup("secret", "shared")
+    r.lookup("secret", "shared")
     # Both incoming requirements attached to usage after finalize.
-    assert len(shared.references) == 2
-    assert {u.source for u in shared.references} == {
+    dependents = r.graph.dependents_of("secret", "shared")
+    assert len(dependents) == 2
+    assert {u.source for u in dependents} == {
         ("publisher_kind", "p1"),
         ("publisher_kind", "p2"),
     }

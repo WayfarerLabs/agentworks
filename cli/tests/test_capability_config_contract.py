@@ -190,7 +190,7 @@ def test_capability_refs_attributed_to_consuming_resource(tmp_path: Path, signin
     decl = registry.lookup("secret", "code-signing-key")
     assert decl.origin.variant == "auto-declared"
     assert "the signing key for git-credential/signer" in decl.description
-    sources = {entry.source for entry in decl.references}
+    sources = {entry.source for entry in registry.graph.dependents_of("secret", "code-signing-key")}
     assert ("git-credential", "signer") in sources
 
 
@@ -223,8 +223,8 @@ def test_capability_ref_default_is_operator_overridable(tmp_path: Path, signing_
         """,
     )
     registry = build_registry(config)
-    decl = registry.lookup("secret", "corp-signing-key")
-    sources = {entry.source for entry in decl.references}
+    registry.lookup("secret", "corp-signing-key")
+    sources = {entry.source for entry in registry.graph.dependents_of("secret", "corp-signing-key")}
     assert ("git-credential", "signer2") in sources
 
 

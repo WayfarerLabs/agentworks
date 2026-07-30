@@ -108,9 +108,12 @@ def test_producer_method_is_referenced_resources_not_required_resources() -> Non
     assert "source" in sig.parameters
 
 
-def test_resource_kinds_have_references_field_not_usage() -> None:
-    """Every Resource type in the framework's kind set carries the
-    collection field as ``references``, not the pre-rename ``usage``.
+def test_resource_kinds_carry_no_inbound_reference_field() -> None:
+    """No Resource type in the framework's kind set carries an inbound
+    reference collection field: not the pre-rename ``usage``, and not the
+    post-rename ``references`` (removed in the readiness refactor, phase 2).
+    Inbound references live on the dependency graph
+    (``Registry.graph.dependents_of``) now, not on the resource dataclass.
     """
     from agentworks.agents.template import AgentTemplate
     from agentworks.apt import AptPackageEntry, AptSourceEntry
@@ -143,7 +146,10 @@ def test_resource_kinds_have_references_field_not_usage() -> None:
 
     for cls in resource_types:
         fields = {f.name for f in dataclasses.fields(cls)}
-        assert "references" in fields, f"{cls.__name__} missing `references` field after Phase 3a rename"
+        assert "references" not in fields, (
+            f"{cls.__name__} still carries an inbound `references` field; "
+            f"inbound references live on the dependency graph now"
+        )
         assert "usage" not in fields, f"{cls.__name__} still carries pre-rename `usage` collection field"
 
 

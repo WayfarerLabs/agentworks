@@ -86,27 +86,27 @@ at decode/load/construct); the `dependencies`/`validate` split is complete acros
 
 Governs: R1, R11 (structure only). LLD: (a). Caller inventory section E (field-to-graph).
 
-- [ ] Add the frozen `DependencyGraph` (component 1): per node `(kind, name)`, outbound edges
+- [x] Add the frozen `DependencyGraph` (component 1): per node `(kind, name)`, outbound edges
       (`ResourceReference`), inbound references (`ReferenceEntry`), a readiness slot (populated in
       phase 3), enablement, and (capability nodes) the impl reference. Query API: `edges_of`,
       `dependents_of`, `reachable_from`, `readiness_of`, `is_ready`.
-- [ ] `finalize` builds and retains the graph from the edge map it already accumulates (`all_refs`),
+- [x] `finalize` builds and retains the graph from the edge map it already accumulates (`all_refs`),
       re-keyed by source for outbound; the `Registry` holds it after finalize alongside
       `_resources`. The builder still walks `referenced_resources()` (no `context` yet); secrets are
       still leaves (they do not emit `secret -> secret-backend` edges until phase 4), so the graph
       is a pure structural retention of today's edge set with no behavior delta.
-- [ ] Populate the capability nodes' `impl` field (LLD a): the publisher stamps each capability's
+- [x] Populate the capability nodes' `impl` field (LLD a): the publisher stamps each capability's
       impl onto its graph node (or the builder reads it from the code registry under the whitelisted
       builder exemption), so the fold (phase 3) and resolution (phase 4) read impls off the graph,
       not the live registry.
-- [ ] Move inbound references off the resource dataclasses onto the graph: remove the `references`
+- [x] Move inbound references off the resource dataclasses onto the graph: remove the `references`
       field from `DeclaredResource` and each capability `Entry` (`harness/kinds.py`,
       `git_credential/kinds.py`, `vm_platform/__init__.py`, `secrets/kinds.py`); route both readers
       (`resources/inspect.py`, `secrets/inspect.py`) to `dependents_of`. This is the phase's one
       observable-internal change; rendered output is identical.
-- [ ] `reachable_from` implements the transitive closure `collect_secrets_for` needs (consumer still
+- [x] `reachable_from` implements the transitive closure `collect_secrets_for` needs (consumer still
       on its old path until phase 4, but the query must exist and be correct now).
-- [ ] Tests: graph query unit tests (`edges_of`/`dependents_of`/`reachable_from` on a fixture with a
+- [x] Tests: graph query unit tests (`edges_of`/`dependents_of`/`reachable_from` on a fixture with a
       multi-hop chain and a diamond); a test that `dependents_of` reproduces exactly what the
       removed `references` field held.
 

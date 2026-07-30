@@ -173,8 +173,9 @@ def test_undeclared_env_secret_auto_declares_through_build_registry(
     assert auto.origin.variant == "auto-declared"
     assert auto.origin.source == ("admin-template", "default")
     # Usage carries the env-var key so operators see what referenced it.
-    assert len(auto.references) == 1
-    assert auto.references[0].usage == "the API_KEY env var"
+    dependents = registry.graph.dependents_of("secret", "anthropic-api-ky")
+    assert len(dependents) == 1
+    assert dependents[0].usage == "the API_KEY env var"
 
 
 def test_operator_declared_secret_referenced_from_env_gets_usage_populated(
@@ -208,9 +209,10 @@ def test_operator_declared_secret_referenced_from_env_gets_usage_populated(
     decl = registry.lookup("secret", "shared-key")
     assert decl.origin is not None
     assert decl.origin.variant == "operator-declared"
-    # Two incoming requirements; both contribute UsageEntries.
-    assert len(decl.references) == 2
-    sources = sorted(u.source for u in decl.references)
+    # Two incoming requirements; both contribute ReferenceEntries.
+    dependents = registry.graph.dependents_of("secret", "shared-key")
+    assert len(dependents) == 2
+    sources = sorted(u.source for u in dependents)
     assert sources == [
         ("admin-template", "default"),
         ("vm-template", "azure-prod"),
@@ -230,8 +232,9 @@ def test_multiple_env_refs_from_one_resource_each_contribute_usage(tmp_path: Pat
     config = load_config(cfg, warn_issues=False)
     registry = build_registry(config)
 
-    auto = registry.lookup("secret", "shared")
+    registry.lookup("secret", "shared")
     # Both env vars contribute one ReferenceEntry each.
-    assert len(auto.references) == 2
-    texts = sorted(u.usage for u in auto.references)
+    dependents = registry.graph.dependents_of("secret", "shared")
+    assert len(dependents) == 2
+    texts = sorted(u.usage for u in dependents)
     assert texts == ["the KEY_A env var", "the KEY_B env var"]

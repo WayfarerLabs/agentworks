@@ -6,9 +6,10 @@ Two types model the two directions of the same edge between Resources:
   Resource by name." Producers (each Resource type's ``referenced_resources()``
   method) emit concrete subclasses (``SecretReference``, ``TemplateReference``,
   ...); the framework consumes them through the base class.
-- ``ReferenceEntry`` is **inbound**: a record attached to the target Resource's
-  ``references`` tuple during ``Registry.finalize()``, projected from every
-  outbound ``ResourceReference`` that resolved to that target.
+- ``ReferenceEntry`` is **inbound**: a record stored on the target's
+  dependency-graph node during ``Registry.finalize()`` (queryable via
+  ``Registry.graph.dependents_of``), projected from every outbound
+  ``ResourceReference`` that resolved to that target.
 
 The two types carry the same prose in their ``usage`` field (e.g., "the
 tailscale auth key for vm_template:default") -- the symmetry is intentional.
@@ -30,10 +31,10 @@ field              outbound    inbound     why
 ``ReferenceEntry`` instances are created exclusively in
 ``Registry.finalize()`` -- producers never construct them. The finalize pass
 walks every published ``ResourceReference``, resolves each one to its target
-(auto-declaring or erroring per the kind's miss policy), and appends a
-``ReferenceEntry(source=ref.source, usage=ref.usage)`` to the target's
-``references`` tuple. After finalize, each Resource can answer "who points
-at me?" by iterating its own ``references``.
+(auto-declaring or erroring per the kind's miss policy), and records a
+``ReferenceEntry(source=ref.source, usage=ref.usage)`` on the target's graph
+node. After finalize, "who points at me?" is answered by
+``Registry.graph.dependents_of(kind, name)``.
 
 Concrete ``ResourceReference`` subclasses exist so producers and the
 framework agree on the target kind via the *type*, not via string-dispatch
@@ -138,8 +139,8 @@ class TemplateReference(ResourceReference):
 @dataclass(frozen=True)
 class ReferenceEntry:
     """Inbound reference record: "I am pointed at by (source), for
-    (usage)." One ``ReferenceEntry`` lands on a Resource's ``references``
-    tuple for every outbound ``ResourceReference`` the framework resolved
+    (usage)." One ``ReferenceEntry`` lands on a Resource's dependency-graph
+    node for every outbound ``ResourceReference`` the framework resolved
     to that Resource during ``Registry.finalize()``.
 
     Fields:
@@ -154,9 +155,9 @@ class ReferenceEntry:
     Producers never construct ``ReferenceEntry`` directly; the framework
     builds them in ``Registry.finalize()`` after every reference has
     been resolved to its target. ``kind`` and ``name`` from the outbound
-    side are dropped here because they are implicit from the container
-    Resource -- there is no ambiguity about which Resource an entry on
-    ``vm-template:default.references`` is attached to.
+    side are dropped here because they are implicit from the graph node
+    the entry is stored on -- there is no ambiguity about which Resource an
+    entry on the ``("vm-template", "default")`` node belongs to.
     """
 
     source: tuple[str, str]

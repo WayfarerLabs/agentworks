@@ -20,6 +20,11 @@ from __future__ import annotations
 # module's self-registration. New kinds slot in by adding new files
 # under kinds/ and importing them from kinds/__init__.py.
 from agentworks.resources import kinds  # noqa: F401
+from agentworks.resources.graph import (
+    DependencyGraph,
+    Enablement,
+    Readiness,
+)
 from agentworks.resources.kind import (
     ALWAYS_MATERIALIZE_SOURCE,
     KIND_REGISTRY,
@@ -39,7 +44,10 @@ from agentworks.resources.walk import collect_secrets_for
 
 __all__ = [
     "ALWAYS_MATERIALIZE_SOURCE",
+    "DependencyGraph",
+    "Enablement",
     "KIND_REGISTRY",
+    "Readiness",
     "InstanceRef",
     "NoUnreferencedDefaultError",
     "Origin",

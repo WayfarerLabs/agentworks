@@ -54,8 +54,9 @@ class ResourceSummary:
     for one Registry-published Resource.
 
     - ``reference_count`` is the number of inbound ``ReferenceEntry``
-      instances on the Resource (how many config points name it). The
-      list view renders this as the REFS column.
+      instances on the Resource's graph node (how many config points name
+      it), from ``Registry.graph.dependents_of``. The list view renders
+      this as the REFS column.
     - ``used_by_count`` is the number of live DB instances that depend
       on this Resource per the current config, computed via the kind's
       ``instances(db, registry, resource)`` hook. ``None`` for kinds
@@ -184,7 +185,7 @@ def list_resources(
             origin = getattr(resource, "origin", None)
             if not _matches_origin(origin, origin_filter):
                 continue
-            references: tuple[ReferenceEntry, ...] = tuple(getattr(resource, "references", ()))
+            references: tuple[ReferenceEntry, ...] = registry.graph.dependents_of(kind, name)
             description = getattr(resource, "description", "") or ""
             used_by_count = _count_used_by(db, registry, kind, resource)
             rows.append(
@@ -324,7 +325,7 @@ def describe_resource(
         name=name,
         origin=getattr(resource, "origin", None),
         description=getattr(resource, "description", "") or "",
-        references=tuple(getattr(resource, "references", ())),
+        references=registry.graph.dependents_of(kind, name),
         used_by=used_by_for(db, registry, kind, resource),
         disabled_reason=disabled_reason_for(registry, kind, resource),
     )

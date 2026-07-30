@@ -321,10 +321,9 @@ def describe_secret(
         ) from None
     origin = getattr(decl, "origin", None)
     description = getattr(decl, "description", "") or ""
-    # References come from the finalize pass's attachment (one entry per
-    # reference that resolved here). Defensive: a Resource constructed
-    # outside the framework path may not have the field.
-    references: tuple[ReferenceEntry, ...] = tuple(getattr(decl, "references", ()))
+    # Inbound references come off the dependency graph (one entry per
+    # reference that resolved here), populated by the finalize pass.
+    references: tuple[ReferenceEntry, ...] = registry.graph.dependents_of(SECRET_KIND_NAME, name)
 
     # Backend mappings: ask each active backend how it would
     # handle this secret.
