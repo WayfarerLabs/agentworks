@@ -258,7 +258,7 @@ def resolve_secrets(
       remaining backend would attempt; in ``--non-interactive`` mode the
       prompt no-ops, so there is nothing to get ahead of and the
       end-of-loop raise stands.
-    - a dict (inspection surfaces, e.g. ``env show --reveal-secrets``):
+    - a dict (inspection surfaces, e.g. ``env show --resolve``):
       partial success. Per-secret failures land in ``errors`` keyed by
       secret name, successfully-resolved values are RETURNED rather
       than discarded (prompt answers are never re-asked), and a

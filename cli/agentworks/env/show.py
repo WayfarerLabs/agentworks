@@ -455,7 +455,7 @@ def _print_table(
         return
 
     if not reveal_secrets and any(r.is_secret for r in rows):
-        output.detail("Secret values redacted. Pass --reveal-secrets to resolve and print.")
+        output.detail("Secret values redacted. Pass --resolve to resolve and print.")
 
     # Sort by (scope-order, key) so the table groups by precedence ladder
     # and keys within each scope are alphabetical.

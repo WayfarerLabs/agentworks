@@ -784,8 +784,11 @@ Inspect the merged result for any context with `agw env show`:
 
 ```bash
 agw env show --session my-session              # secrets redacted as <from secret: name>
-agw env show --vm my-vm --reveal-secrets       # resolves through the active backend chain
+agw env show --vm my-vm --resolve              # resolves through the active backend chain
 ```
+
+(`--reveal-secrets` still works as a deprecated, hidden alias for `--resolve` for one release; it
+prints a deprecation notice.)
 
 Inspect how each active backend would resolve each declared or auto-declared secret (e.g. "which env
 var name does this secret read from?") with `agw secret list`:

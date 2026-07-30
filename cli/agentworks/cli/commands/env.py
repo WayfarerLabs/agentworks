@@ -44,14 +44,25 @@ def env_show(
             help=("Anchor the chain at this session (its workspace, agent, and VM are auto-resolved)."),
         ),
     ] = None,
-    reveal_secrets: Annotated[
+    resolve: Annotated[
         bool,
         typer.Option(
-            "--reveal-secrets",
+            "--resolve",
             help=(
                 "Resolve secret-backed entries through the configured "
                 "backend chain and print their values (default: redacted)."
             ),
+        ),
+    ] = False,
+    reveal_secrets: Annotated[
+        bool,
+        typer.Option(
+            "--reveal-secrets",
+            # Deprecated alias for --resolve, kept for one release so existing
+            # scripts and muscle memory do not hard-break (R9.8). Hidden from
+            # --help and completions; emits a single deprecation warning when
+            # used. Remove at the next major with a proper BREAKING note.
+            hidden=True,
         ),
     ] = False,
 ) -> None:
@@ -59,11 +70,16 @@ def env_show(
 
     At least one of --vm / --workspace / --agent / --session is required.
     Entries are precedence-sorted and scope-annotated. Secret-backed
-    entries are redacted by default; pass --reveal-secrets to resolve
-    them through the active backend chain.
+    entries are redacted by default; pass --resolve to resolve them
+    through the active backend chain.
     """
     from agentworks.config import load_config
     from agentworks.env.show import show_env
+
+    if reveal_secrets:
+        from agentworks import output
+
+        output.warn("--reveal-secrets is deprecated; use --resolve")
 
     show_env(
         get_db(),
@@ -72,5 +88,5 @@ def env_show(
         workspace_name=workspace,
         agent_name=agent,
         session_name=session,
-        reveal_secrets=reveal_secrets,
+        reveal_secrets=resolve or reveal_secrets,
     )
