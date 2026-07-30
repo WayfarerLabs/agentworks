@@ -318,9 +318,19 @@ Phase 7.
       unknown-name.
 - [ ] **Phase 10: proxmox** (`proxmox` vm-platform + its `proxmox_api.py` sibling; no manifest). The
       **test-invasive** migration: proxmox is the shared orchestrated-test fixture platform (~40
-      files). Repoint incidental fixtures to a core platform (`lima`) and enable the proxmox plugin
-      only where proxmox-specific behavior is tested. A `vm-site` on `proxmox` is not-ready with the
-      enable hint until enabled.
+      files). **Corrected during implementation** (an earlier framing said "repoint incidental
+      fixtures to lima"): the shared orchestrated fixture (`make_config` in
+      `tests/orchestrated_fixtures.py`) bakes in proxmox's config secret (`proxmox-token`), and ~17
+      of the 24 orchestrated files assert on that secret-resolution boundary
+      (`secret_union == ("proxmox-token",)`). No core platform (`lima`/`wsl2`) declares a config
+      secret, so repointing to lima would delete the very coverage those tests exist for. Instead
+      the shared fixture keeps `proxmox` but **explicitly enables the plugin**
+      (`[plugins] enabled = ["proxmox"]` in `make_config`), which is honest (the fixture opts in
+      exactly as a real proxmox operator would) and preserves the secret-boundary coverage;
+      proxmox-specific tests enable the plugin too; the genuinely secret-free incidental tests may
+      stay (harmlessly enabled) or move to lima. A `vm-site` on `proxmox` is not-ready with the
+      enable hint until enabled (pinned by dedicated opt-in tests). `db/migrations.py`'s frozen
+      `ProxmoxPlatform` import is repointed to the plugin package.
 - [ ] **Phase 11: azure** (`azure-vm` platform + `azdo` git-credential + the `az-cli`
       install-command manifest; needs Phase 7). One plugin contributing **three kinds + a bundled
       manifest**, the fullest exercise (a multi-kind plugin validating the Phase 7 parity end-to-end

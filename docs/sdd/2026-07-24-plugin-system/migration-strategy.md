@@ -202,16 +202,24 @@ phase green and complete on its own (no bridging aliases, no half-moved bundles)
    files for the harness; the manifest adds the recipe-gate cases). Needs Phase 7. Proves a
    manifest-carrying plugin end to end on the kind whose harness use-gate already exists and whose
    install-command exercises the Phase 7 recipe gate (including the `--new-agent` path).
-3. **proxmox (Phase 10)**: the test-invasive one (43 files). Two-step inside the phase:
-   - **Repoint first, migrate second.** While proxmox is still built-in, repoint every test that
-     uses proxmox merely as "some platform fixture" to `lima` (core, always seated; the orchestrated
-     conftest already stubs every platform's host support to ready, `tests/conftest.py:285-287`, so
-     lima serves as the fixture platform on any host). This is a pure test refactor with no
-     production change, lands green, and shrinks the migration diff to the tests that actually test
-     proxmox behavior.
-   - Then migrate the impl and, in the remaining proxmox-specific tests (the API/bootstrap/site
-     tests), enable the plugin through the shared config fixture (`plugins_enabled = ("proxmox",)`),
-     pinning one test on the disabled default (site not-ready with the hint).
+3. **proxmox (Phase 10)**: the test-invasive one (43 files). **Corrected during implementation.** An
+   earlier framing here said "repoint incidental fixtures to lima, a pure test refactor". That
+   premise does not hold: the shared orchestrated fixture (`make_config` in
+   `tests/orchestrated_fixtures.py`) bakes in proxmox's config secret (`proxmox-token`) via
+   `PROXMOX_SECTION`, and ~17 of the 24 orchestrated files assert on that secret-resolution boundary
+   (`secret_union == ("proxmox-token",)`). No core platform (`lima`/`wsl2`) declares a config secret
+   (`lima.py`, `wsl2.py`: "No config secrets"), so repointing to lima would not refactor those
+   tests, it would delete the secret dimension they exist to verify. The actual approach:
+   - **Keep proxmox in the shared fixture, explicitly enable the plugin.** `make_config` emits
+     `[plugins] enabled = ["proxmox"]` alongside `PROXMOX_SECTION`. This is honest (the fixture opts
+     in exactly as a real proxmox operator would), preserves every `proxmox-token` boundary
+     assertion, and is minimal churn (the fixture change plus the unavoidable `ProxmoxPlatform`
+     import repoints). The orchestrated conftest still stubs every platform's host support to ready
+     (`tests/conftest.py:285-287`).
+   - Proxmox-specific tests (API/bootstrap/site/readiness) enable the plugin too; new dedicated
+     tests pin the disabled-by-default behavior (present-but-disabled row, `vm-site` not-ready with
+     the hint, `resolve_site` refusal). The genuinely secret-free incidental tests may stay
+     (harmlessly enabled) or move to lima.
    - **Repoint the frozen migration import** (below): `_migrate_vm_sites` imports `ProxmoxPlatform`
      directly; move that import to the new plugin package path in the same phase.
 4. **azure (Phase 11)**: the fullest exercise (35 files, three kinds, a bundled manifest),
