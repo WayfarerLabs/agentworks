@@ -286,7 +286,7 @@ def pending_session_node(
     HARNESS ENABLEMENT GATE (R14): this factory threads no registry, so it
     cannot check whether the template's harness is a disabled plugin. Every
     caller MUST call ``ensure_harness_enabled(registry, template.harness)``
-    first; the drift guard ``test_session_factory_callers_gate_the_harness``
+    first; the drift guard ``test_every_session_factory_caller_gates_the_harness``
     pins that a future caller cannot silently bypass it."""
     if (agent is not None) == admin:
         raise StateError(
@@ -326,7 +326,7 @@ def live_session_node(
     HARNESS ENABLEMENT GATE (R14): this factory threads no registry, so it
     cannot check whether the template's harness is a disabled plugin. Every
     caller MUST call ``ensure_harness_enabled(registry, template.harness)``
-    first; the drift guard ``test_session_factory_callers_gate_the_harness``
+    first; the drift guard ``test_every_session_factory_caller_gates_the_harness``
     pins that a future caller cannot silently bypass it."""
     if row.agent_name is not None:
         if agent is None:
