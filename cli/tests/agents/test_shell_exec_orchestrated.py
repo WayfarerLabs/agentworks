@@ -18,9 +18,9 @@ from typing import TYPE_CHECKING
 import pytest
 
 from agentworks.agents import manager as agent_manager
-from agentworks.capabilities.vm_platform.proxmox import ProxmoxPlatform
 from agentworks.db import VMStatus
 from agentworks.errors import AuthorizationError, ValidationError
+from agentworks.plugins.proxmox.platform import ProxmoxPlatform
 from agentworks.vms import manager as vm_manager
 
 if TYPE_CHECKING:

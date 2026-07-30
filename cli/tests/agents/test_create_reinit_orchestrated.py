@@ -18,11 +18,11 @@ from agentworks.agents import grants as agent_grants
 from agentworks.agents import initializer as agent_initializer
 from agentworks.agents import manager as agent_manager
 from agentworks.capabilities.base import RunContext
-from agentworks.capabilities.vm_platform.proxmox import ProxmoxPlatform
 from agentworks.errors import ExternalError
 from agentworks.output import Role
+from agentworks.plugins.proxmox.platform import ProxmoxPlatform
 from agentworks.vms import manager as vm_manager
-from tests.orchestrated_fixtures import PROXMOX_SECTION, write_operator_config
+from tests.orchestrated_fixtures import PLUGINS_ENABLED, PROXMOX_SECTION, write_operator_config
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -50,7 +50,7 @@ def make_config(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):  # noqa: ANN20
     monkeypatch.setenv("AW_SECRET_GIT_TOKEN_GH", "ghtok")
 
     def _make():  # noqa: ANN202
-        return write_operator_config(tmp_path, PROXMOX_SECTION + AGENT_SECTION)
+        return write_operator_config(tmp_path, PLUGINS_ENABLED + PROXMOX_SECTION + AGENT_SECTION)
 
     return _make
 
@@ -425,10 +425,15 @@ _DECLARABLE_ANCHOR = "tests.plugins._manifest_declarable_fixture"
 
 
 def _install_disabled_fixture(monkeypatch: pytest.MonkeyPatch) -> None:
-    from agentworks.plugins import Plugin
+    from agentworks.plugins import SYSTEM_PLUGINS, Plugin
 
     plugin = Plugin(name="decl-plugin", description="a manifest-parity fixture", manifests=_DECLARABLE_ANCHOR)
-    monkeypatch.setattr("agentworks.plugins.SYSTEM_PLUGINS", {plugin.name: plugin})
+    # Merge alongside the real shipped plugins (proxmox, which the shared config
+    # enables and this suite's VM runs on, plus claude / onepassword) rather than
+    # replacing them: replacing would drop proxmox's row and fail the enabled-name
+    # check. decl-plugin ships present-but-disabled (not in [plugins] enabled), so
+    # its bundled recipe refuses with the enable hint.
+    monkeypatch.setattr("agentworks.plugins.SYSTEM_PLUGINS", {**SYSTEM_PLUGINS, plugin.name: plugin})
 
 
 def test_create_agent_on_disabled_plugin_recipe_refuses_before_any_work(

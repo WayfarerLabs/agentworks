@@ -189,7 +189,7 @@ def test_host_unsupported_site_still_emits_its_edges(
     the registry is the readiness-gated MATERIALIZATION pass's job (R12),
     not the edge walk's. Pinned against the first plugin that ships a
     host-gated platform WITH a config secret."""
-    from agentworks.capabilities.vm_platform.proxmox import ProxmoxPlatform
+    from agentworks.plugins.proxmox.platform import ProxmoxPlatform
 
     monkeypatch.setattr(ProxmoxPlatform, "unsupported_reason", classmethod(lambda cls: "no cluster os"))
     site = VMSiteDecl(

@@ -24,7 +24,6 @@ import pytest
 from agentworks.agents import grants as agent_grants
 from agentworks.agents import manager as agent_manager
 from agentworks.capabilities.base import RunContext
-from agentworks.capabilities.vm_platform.proxmox import ProxmoxPlatform
 from agentworks.db import VMStatus
 from agentworks.errors import (
     NotFoundError,
@@ -32,6 +31,7 @@ from agentworks.errors import (
     UserAbort,
     ValidationError,
 )
+from agentworks.plugins.proxmox.platform import ProxmoxPlatform
 from agentworks.vms import manager as vm_manager
 
 if TYPE_CHECKING:

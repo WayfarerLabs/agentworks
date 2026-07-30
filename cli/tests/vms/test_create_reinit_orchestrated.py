@@ -27,7 +27,13 @@ if TYPE_CHECKING:
 
     from agentworks.db import Database
 
+# Proxmox ships in the opt-in ``proxmox`` system plugin since Phase 10 (R11),
+# so a config that uses the proxmox site enables the plugin, exactly as a real
+# proxmox operator would.
 PROXMOX_SECTION = """
+[plugins]
+enabled = ["proxmox"]
+
 [proxmox]
 api_url = "https://pve:8006"
 node = "pve1"

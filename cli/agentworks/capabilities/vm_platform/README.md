@@ -6,8 +6,12 @@
 > specific to running VMs, plus the gotchas that have already bitten real platforms.
 
 Four platforms ship today and are the working references throughout this guide: `lima` (`lima.py`),
-`wsl2` (`wsl2.py`), `azure-vm` (`azure_vm.py`), and `proxmox` (`proxmox.py`). When a rule below has
-a concrete example, it names the platform and file that demonstrates it.
+`wsl2` (`wsl2.py`), and `azure-vm` (`azure_vm.py`) as core built-ins, plus `proxmox`, which now
+ships in the opt-in `proxmox` system plugin (`agentworks/plugins/proxmox/platform.py`, with its REST
+client in `api.py`). The rules below apply to a plugin-shipped platform exactly as to a core one;
+the plugin re-seats its class into `VM_PLATFORM_REGISTRY` at import, so authoring a platform is the
+same either way. When a rule below has a concrete example, it names the platform and file that
+demonstrates it.
 
 ## What a VM platform is
 

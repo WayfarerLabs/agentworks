@@ -213,11 +213,12 @@ ssh_private_key = "~/.ssh/id_ed25519"        # required: used for SSH connection
 # one is not-ready (or refused at use) with an "enable plugin <name>" hint,
 # never an unknown-name error. Only installed plugin names are valid here (an
 # unknown name is a hard error). The shipped build installs `onepassword` (the
-# 1Password secret backend) and `claude` (the Claude Code session harness and
-# its `claude` CLI install-command); more bundles migrate to plugins over time.
-# `agw doctor` shows a System plugins roster with each plugin's state.
+# 1Password secret backend), `claude` (the Claude Code session harness and its
+# `claude` CLI install-command), and `proxmox` (the Proxmox VE VM platform);
+# more bundles migrate to plugins over time. `agw doctor` shows a System plugins
+# roster with each plugin's state.
 #[plugins]
-#enabled = ["onepassword", "claude"]        # names of installed system plugins to enable
+#enabled = ["onepassword", "claude", "proxmox"]        # names of installed system plugins to enable
 
 # --- VM sites (azure, proxmox, remote Lima, ...) ---
 # Places to create VMs are declared as vm-site RESOURCES (YAML manifests
@@ -225,8 +226,10 @@ ssh_private_key = "~/.ssh/id_ed25519"        # required: used for SSH connection
 # `agw resource sample vm-site` for commented, ready-to-edit examples.
 # The legacy [azure] / [proxmox] sections still load as deprecated
 # vm-site declarations; migrate them with `agw resource migrate vm-site`.
-# The proxmox API token is the `proxmox-token` secret (default
-# env-var: AW_SECRET_PROXMOX_TOKEN).
+# proxmox ships as the opt-in `proxmox` system plugin: a proxmox site (declared
+# or legacy) is not-ready with an "enable plugin `proxmox`" hint until you add
+# `[plugins] enabled = ["proxmox"]` above. The proxmox API token is the
+# `proxmox-token` secret (default env-var: AW_SECRET_PROXMOX_TOKEN).
 
 # =============================================================================
 # Templates

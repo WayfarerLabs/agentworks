@@ -264,8 +264,8 @@ def _check_plugins(config: Config) -> HealthGroup:
     informational least-privilege line when populated, unenforced; empty (the
     v1 default) renders nothing. When the shipped index is empty the group
     renders empty-but-present, so the surface exists and is testable even before
-    any plugin ships; the migrated plugins (``onepassword`` so far) now populate
-    it.
+    any plugin ships; the migrated plugins (``onepassword``, ``claude``,
+    ``proxmox`` so far) now populate it.
     """
     from agentworks.plugins import SYSTEM_PLUGINS
 

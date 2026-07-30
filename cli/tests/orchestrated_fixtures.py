@@ -30,6 +30,19 @@ token_id = "agw@pam!agw"
 template_vmid = 9000
 """
 
+# The orchestrated suites use proxmox as their platform fixture: it is the
+# only VM platform that carries a config secret (``proxmox-token``), so it is
+# the natural stand-in for exercising the secret-resolution boundary (the
+# ``secret_union`` / backend-loop assertions these suites are built around).
+# Since Phase 10 (R11) proxmox ships in the opt-in ``proxmox`` system plugin,
+# so the shared config opts in exactly as a real proxmox operator would; the
+# dependency on the plugin is explicit in the fixture, never silent. (Tests of
+# the disabled-by-default behavior live in ``tests/plugins/test_proxmox.py``.)
+PLUGINS_ENABLED = """
+[plugins]
+enabled = ["proxmox"]
+"""
+
 
 def write_operator_config(tmp_path: Path, body: str = "") -> Config:
     """Write an operator config (with a throwaway SSH keypair) plus
@@ -48,12 +61,12 @@ def write_operator_config(tmp_path: Path, body: str = "") -> Config:
 @pytest.fixture
 def make_config(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):  # noqa: ANN201
     """The dominant ``make_config`` shape: the proxmox token in the
-    env, the proxmox section baked in, extra sections appended per
-    test."""
+    env, the proxmox plugin enabled and its section baked in, extra
+    sections appended per test."""
     monkeypatch.setenv("AW_SECRET_PROXMOX_TOKEN", "pve-token")
 
     def _make(extra: str = ""):  # noqa: ANN202
-        return write_operator_config(tmp_path, PROXMOX_SECTION + extra)
+        return write_operator_config(tmp_path, PLUGINS_ENABLED + PROXMOX_SECTION + extra)
 
     return _make
 

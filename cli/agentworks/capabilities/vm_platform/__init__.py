@@ -2,11 +2,17 @@
 
 ``VM_PLATFORM_REGISTRY`` holds the code behind the read-only
 ``vm-platform`` capability resources: one :class:`VMPlatform` subclass
-per backend kind (lima, wsl2, azure-vm, proxmox; plugin-registered
-platforms later). The declarable ``vm-site`` kind exposes a configured
-platform, and site resolution (``agentworks.vms.sites``) is the only
-consumer that constructs platform instances; manager code never
-imports this registry or the concrete classes.
+per backend kind (``lima``, ``wsl2``, ``azure-vm`` as core built-ins).
+The declarable ``vm-site`` kind exposes a configured platform, and site
+resolution (``agentworks.vms.sites``) is the only consumer that
+constructs platform instances; manager code never imports this registry
+or the concrete classes.
+
+The ``proxmox`` platform now ships in the opt-in ``proxmox`` system plugin
+(``agentworks.plugins.proxmox``); its adapter re-seats it into
+``VM_PLATFORM_REGISTRY`` at import, so site resolution still finds it by
+registry name, while its ROW publishes with a ``system-plugin`` origin
+(see ``publish_to``).
 """
 
 from __future__ import annotations
@@ -21,7 +27,6 @@ from agentworks.capabilities.vm_platform.base import (
     VMPlatform,
 )
 from agentworks.capabilities.vm_platform.lima import LimaPlatform
-from agentworks.capabilities.vm_platform.proxmox import ProxmoxPlatform
 from agentworks.capabilities.vm_platform.wsl2 import WSL2Platform
 
 if TYPE_CHECKING:
@@ -34,7 +39,6 @@ __all__ = [
     "LimaPlatform",
     "ProvisionRequest",
     "ProvisionResult",
-    "ProxmoxPlatform",
     "VMPlatform",
     "VMPlatformEntry",
     "WSL2Platform",
@@ -45,7 +49,6 @@ VM_PLATFORM_REGISTRY: dict[str, type[VMPlatform]] = {
     LimaPlatform.name: LimaPlatform,
     WSL2Platform.name: WSL2Platform,
     AzureVMPlatform.name: AzureVMPlatform,
-    ProxmoxPlatform.name: ProxmoxPlatform,
 }
 """Every platform this BUILD ships (INSTALLED, in doctor's vocabulary).
 Which of them are usable on this host is the platform's own call, but
@@ -99,11 +102,22 @@ def publish_to(registry: Registry) -> None:
     node (a present, not-ready ``vm-platform``), so a site referencing it
     is not-ready rather than dangling on an absent row. This replaces the
     old edge-suppression's job of hiding the missing capability row.
+
+    A platform seated by a system plugin (``proxmox`` via the ``proxmox``
+    plugin) keeps its impl in ``VM_PLATFORM_REGISTRY`` so site resolution can
+    construct it, but its row is published by ``plugins.publish_plugins`` with
+    a ``system-plugin`` origin. Skip those names here so the plugin is the sole
+    publisher of the row; publishing it here too would collide (built-in vs
+    system-plugin) at ``Registry.add``.
     """
+    from agentworks.plugins.registration import plugin_seated_names
     from agentworks.resources import Origin
 
+    seated_by_plugin = plugin_seated_names("vm-platform")
     origin = Origin.built_in(source="agentworks.capabilities.vm_platform")
     for name, platform_cls in VM_PLATFORM_REGISTRY.items():
+        if name in seated_by_plugin:
+            continue
         registry.add(
             "vm-platform",
             name,

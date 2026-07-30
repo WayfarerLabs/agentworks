@@ -22,16 +22,21 @@ def test_kind_flags() -> None:
     assert site_kind.builtin_override == "reserved"
 
 
-def test_publisher_adds_one_row_per_installed_platform(
+def test_publisher_adds_one_row_per_core_built_in_platform(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """The core ``publish_to`` publishes one built-in row per core platform.
+    ``proxmox`` is INSTALLED (re-seated into ``VM_PLATFORM_REGISTRY`` by its
+    opt-in plugin) but its row is published by ``plugins.publish_plugins`` with
+    a ``system-plugin`` origin, so the core publisher skips it to avoid a
+    built-in-vs-system-plugin collision at ``Registry.add``."""
     from tests.conftest import stub_platform_support
 
     stub_platform_support(monkeypatch)
     registry = Registry.empty()
     vm_platforms.publish_to(registry)
     names = {entry.name for entry in registry.iter_kind("vm-platform")}
-    assert names == {"lima", "wsl2", "azure-vm", "proxmox"}
+    assert names == {"lima", "wsl2", "azure-vm"}
     row = registry.lookup("vm-platform", "azure-vm")
     assert row.origin is not None
     assert row.origin.variant == "built-in"
@@ -56,7 +61,8 @@ def test_publisher_publishes_unsupported_platform_unconditionally(
     registry = Registry.empty()
     vm_platforms.publish_to(registry)
     names = {entry.name for entry in registry.iter_kind("vm-platform")}
-    assert names == {"lima", "wsl2", "azure-vm", "proxmox"}
+    # Core built-ins only; proxmox's row comes from its plugin (above).
+    assert names == {"lima", "wsl2", "azure-vm"}
 
 
 def test_vm_platform_is_not_manifest_declarable(tmp_path: Path) -> None:

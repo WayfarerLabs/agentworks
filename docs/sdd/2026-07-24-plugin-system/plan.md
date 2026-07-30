@@ -316,7 +316,7 @@ Phase 7.
       the `claude` install-command becomes a bundled manifest, present-but-disabled (Phase 7), so a
       template referencing it while claude is not enabled is gated with the enable hint, not
       unknown-name.
-- [ ] **Phase 10: proxmox** (`proxmox` vm-platform + its `proxmox_api.py` sibling; no manifest). The
+- [x] **Phase 10: proxmox** (`proxmox` vm-platform + its `proxmox_api.py` sibling; no manifest). The
       **test-invasive** migration: proxmox is the shared orchestrated-test fixture platform (~40
       files). **Corrected during implementation** (an earlier framing said "repoint incidental
       fixtures to lima"): the shared orchestrated fixture (`make_config` in

@@ -11,12 +11,12 @@ import pytest
 from agentworks.capabilities.vm_platform import VM_PLATFORM_REGISTRY
 from agentworks.capabilities.vm_platform.azure_vm import AzureVMPlatform
 from agentworks.capabilities.vm_platform.lima import LimaPlatform
-from agentworks.capabilities.vm_platform.proxmox import (
+from agentworks.capabilities.vm_platform.wsl2 import WSL2Platform
+from agentworks.errors import ConfigError
+from agentworks.plugins.proxmox.platform import (
     DEFAULT_TOKEN_SECRET,
     ProxmoxPlatform,
 )
-from agentworks.capabilities.vm_platform.wsl2 import WSL2Platform
-from agentworks.errors import ConfigError
 
 AZURE_CONFIG = {
     "subscription_id": "0000",

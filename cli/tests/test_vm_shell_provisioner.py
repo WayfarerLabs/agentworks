@@ -323,7 +323,7 @@ def test_provisioner_shell_target_proxmox_hint_points_at_web_console(
 
     db = _seed_db(tmp_path, platform="proxmox")
 
-    from agentworks.capabilities.vm_platform.proxmox import ProxmoxPlatform
+    from agentworks.plugins.proxmox.platform import ProxmoxPlatform
 
     class _ProxmoxProvisioner:
         name = "proxmox"

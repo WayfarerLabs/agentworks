@@ -69,6 +69,43 @@ def _finalized(*sites: VMSiteDecl) -> Registry:
     return registry
 
 
+def _finalized_with_proxmox(
+    *sites: VMSiteDecl,
+    extra_disabled: tuple[tuple[str, str], ...] = (),
+) -> Registry:
+    """Like :func:`_finalized`, but with the ``proxmox`` platform published
+    through its opt-in plugin and enabled.
+
+    ``proxmox`` is the only platform that carries a config-implied secret, so
+    the R12 materialization-gating cases below need it. Since Phase 10 (R11)
+    proxmox ships in the ``proxmox`` system plugin, so its ``vm-platform`` row
+    comes from ``publish_plugins`` (with a ``system-plugin`` origin), not the
+    core publisher. The real ``plugin_enablement_source`` bound to
+    ``plugins_enabled=("proxmox",)`` keeps proxmox enabled while disabling the
+    other shipped plugins' rows (including claude's weak install-command row, so
+    no weak row survives finalize unmarked). ``extra_disabled`` layers a stub
+    source on top for a case that disables a specific node directly."""
+    from types import SimpleNamespace
+    from typing import cast
+
+    from agentworks.capabilities import vm_platform as vp
+    from agentworks.config import Config
+    from agentworks.plugins import publish_plugins
+    from agentworks.plugins.enablement import plugin_enablement_source
+
+    registry = Registry.empty()
+    vp.publish_to(registry)
+    config = cast("Config", SimpleNamespace(plugins_enabled=("proxmox",)))
+    publish_plugins(registry, config)
+    for decl in sites:
+        registry.add("vm-site", decl.name, decl, Origin.operator_declared(file=Path("sites.yaml"), line=1))
+    sources: list[EnablementSource] = [plugin_enablement_source(config)]
+    if extra_disabled:
+        sources.append(_source_disabling(*extra_disabled))
+    registry.finalize(enablement_sources=sources)
+    return registry
+
+
 def _present(registry: Registry, kind: str, name: str) -> bool:
     return any(n == name for n, _ in registry.iter_kind_items(kind))
 
@@ -282,7 +319,7 @@ def test_r5_not_ready_site_with_valid_block_stays_not_ready(monkeypatch: pytest.
 
 def test_r12_ready_site_materializes_its_secret(monkeypatch: pytest.MonkeyPatch) -> None:
     """A READY site's config-implied secret materializes (auto-declares)."""
-    from agentworks.capabilities.vm_platform.proxmox import ProxmoxPlatform
+    from agentworks.plugins.proxmox.platform import ProxmoxPlatform
 
     monkeypatch.setattr(ProxmoxPlatform, "not_ready", classmethod(lambda cls, config: Readiness.ready()))
     site = VMSiteDecl(
@@ -296,7 +333,7 @@ def test_r12_ready_site_materializes_its_secret(monkeypatch: pytest.MonkeyPatch)
             "token_secret": "tok-ready",
         },
     )
-    registry = _finalized(site)
+    registry = _finalized_with_proxmox(site)
     assert _present(registry, "secret", "tok-ready")
 
 
@@ -305,7 +342,7 @@ def test_r12_not_ready_site_secret_does_not_materialize(monkeypatch: pytest.Monk
     secret edge is emitted (suppression removed), but readiness gates
     materialization, so the would-be secret never enters the registry, exactly
     the suppression's old behavior by a different mechanism."""
-    from agentworks.capabilities.vm_platform.proxmox import ProxmoxPlatform
+    from agentworks.plugins.proxmox.platform import ProxmoxPlatform
 
     monkeypatch.setattr(ProxmoxPlatform, "not_ready", classmethod(lambda cls, config: Readiness.blocked("sick")))
     site = VMSiteDecl(
@@ -319,7 +356,7 @@ def test_r12_not_ready_site_secret_does_not_materialize(monkeypatch: pytest.Monk
             "token_secret": "tok-sick",
         },
     )
-    registry = _finalized(site)
+    registry = _finalized_with_proxmox(site)
     assert not registry.graph.is_ready("vm-site", "sick-px")
     assert not _present(registry, "secret", "tok-sick")
 
@@ -332,7 +369,7 @@ def test_r12_secret_referenced_by_both_ready_and_not_ready_materializes(
     ``dependents_of`` records BOTH referrers (readiness gates materialization,
     not reference attribution). Readiness keys on the site's config, so one
     proxmox site is ready and one is not, both naming the same token."""
-    from agentworks.capabilities.vm_platform.proxmox import ProxmoxPlatform
+    from agentworks.plugins.proxmox.platform import ProxmoxPlatform
 
     def _readiness(cls: type, config: dict[str, object]) -> Readiness:
         return Readiness.blocked("sick") if config.get("node") == "SICK" else Readiness.ready()
@@ -341,7 +378,7 @@ def test_r12_secret_referenced_by_both_ready_and_not_ready_materializes(
     common = {"api_url": "https://pve:8006", "token_id": "t", "template_vmid": 9000, "token_secret": "shared-token"}
     ready = VMSiteDecl(name="ready-px", platform="proxmox", platform_config={**common, "node": "pve1"})
     sick = VMSiteDecl(name="sick-px", platform="proxmox", platform_config={**common, "node": "SICK"})
-    registry = _finalized(ready, sick)
+    registry = _finalized_with_proxmox(ready, sick)
 
     assert _present(registry, "secret", "shared-token")
     sources = {entry.source for entry in registry.graph.dependents_of("secret", "shared-token")}
@@ -356,15 +393,12 @@ def test_r12_disabled_referrer_does_not_materialize_its_secret(monkeypatch: pyte
     a placeholder / not computed). The site is injected disabled via a stub
     enablement source; its proxmox platform ``not_ready`` is ready, so only
     enablement keeps the token out of the registry."""
-    from agentworks.capabilities import vm_platform as vp
-    from agentworks.capabilities.vm_platform.proxmox import ProxmoxPlatform
+    from agentworks.plugins.proxmox.platform import ProxmoxPlatform
 
     monkeypatch.setattr(ProxmoxPlatform, "not_ready", classmethod(lambda cls, config: Readiness.ready()))
-    registry = Registry.empty()
-    vp.publish_to(registry)
-    registry.add(
-        "vm-site",
-        "off-px",
+    # proxmox is enabled (its platform ready); only the direct disabling of the
+    # off-px SITE keeps its token out of the registry.
+    registry = _finalized_with_proxmox(
         VMSiteDecl(
             name="off-px",
             platform="proxmox",
@@ -376,8 +410,7 @@ def test_r12_disabled_referrer_does_not_materialize_its_secret(monkeypatch: pyte
                 "token_secret": "tok-off",
             },
         ),
-        Origin.operator_declared(file=Path("sites.yaml"), line=1),
+        extra_disabled=(("vm-site", "off-px"),),
     )
-    registry.finalize(enablement_sources=[_source_disabling(("vm-site", "off-px"))])
 
     assert not _present(registry, "secret", "tok-off")

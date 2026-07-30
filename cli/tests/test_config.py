@@ -407,12 +407,19 @@ def test_proxmox_config(tmp_path: Path, case: dict) -> None:
     pub.write_text("key")
     priv.write_text("key")
 
+    # Proxmox ships in the opt-in ``proxmox`` system plugin (Phase 10, R11);
+    # enable it so the legacy [proxmox] section's platform_config validation
+    # runs (a disabled platform's site is not-ready and skips field validation,
+    # so the missing-field ConfigError would never fire).
     config_file = tmp_path / "config.toml"
     config_file.write_text(
         dedent(f"""\
         [operator]
         ssh_public_key = "{pub.as_posix()}"
         ssh_private_key = "{priv.as_posix()}"
+
+        [plugins]
+        enabled = ["proxmox"]
 
         {dedent(case["toml"])}
     """)

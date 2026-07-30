@@ -21,9 +21,9 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from agentworks.capabilities.vm_platform.proxmox import ProxmoxPlatform
 from agentworks.db import VMStatus
 from agentworks.errors import StateError
+from agentworks.plugins.proxmox.platform import ProxmoxPlatform
 from agentworks.sessions import console as vm_console
 from agentworks.sessions import multi_console
 from agentworks.vms import manager as vm_manager
