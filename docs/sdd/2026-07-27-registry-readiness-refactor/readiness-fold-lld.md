@@ -45,9 +45,12 @@ Today there are two `disabled_reason`s. Both are renamed and reshaped:
    reads the config fields it needs (`config.get("vm_host")`), tolerates malformed ones, does
    **not** construct an instance, and does **not** validate. Default (base): `Readiness.ready()`.
 2. **`_VMSiteKind.disabled_reason(registry, resource)`** (`vms/kinds.py:197`, which reached into
-   `VM_PLATFORM_REGISTRY`) becomes the resource-level `not_ready(config, deps) -> Readiness`, pure
-   over its own best-effort config and its dependencies' `DependencyState`s, never querying a live
-   registry.
+   `VM_PLATFORM_REGISTRY`) becomes the resource-level `not_ready(deps) -> Readiness`, pure over its
+   own best-effort config and its dependencies' `DependencyState`s, never querying a live registry.
+   (Shipped signature: `not_ready(self, deps)`, the config is `self`'s own fields, so the separate
+   `config` param the earlier draft showed is dropped, matching the Phase 2b `validate(self)`
+   precedent. The capability-level `not_ready(config)` classmethod keeps its config arg, it has no
+   `self`.)
 
 **`unsupported_reason()` keeps its name** (it is host-support, not "disabled" vocabulary) and stays
 a config-independent classmethod on `VMPlatform`. It is the source for the **platform node's own**
@@ -81,7 +84,7 @@ the platform's verdict, it re-asks with its own config.
 ### The vm-site `not_ready`
 
 ```python
-def not_ready(self, config, deps) -> Readiness:
+def not_ready(self, deps) -> Readiness:  # config is self.platform_config
     platform = deps[("vm-platform", self.platform)]
     if platform.enablement is Enablement.disabled:
         return Readiness.blocked(f"depends on vm-platform '{self.platform}', which is disabled; enable its unit")
@@ -90,6 +93,14 @@ def not_ready(self, config, deps) -> Readiness:
     # config-dependent tool check, off the graph impl, NON-constructing (no validate re-run):
     return platform.impl.not_ready(self.platform_config)
 ```
+
+The strings shown here (`"... is not ready: ..."`, `"... is unsupported here: ..."`) are the
+**phase-5 target vocabulary**. In phase 3 the fold deliberately stores today's **old-vocabulary**
+strings (`"platform '<x>' is disabled: <reason>"` on the site, the bare host-support reason on the
+platform node) so the shims that keep `resource list` / `select_site` / doctor green render
+byte-identically until R9.1's rename. **Phase 5's vocabulary sweep must reach the fold-stored
+strings (`vms/sites.py`) and the new `_VMPlatformKind.disabled_reason` projection (`vms/kinds.py`),
+not only the surface renderers**, or the not-ready reasons will keep the old wording.
 
 The "enable its unit" hint is read off the disabled dependency's own `DependencyState` (R7), no
 diagnosis at a miss point. In this effort no node is ever disabled, so the first branch is exercised
@@ -112,7 +123,7 @@ best-effort and never constructs or validates, so the fold stays total over unva
 | `vm-platform`                        | `unsupported_reason()` wrapped (config-independent)                                                                                                       |
 | `secret-backend`                     | the backend instance's config-independent host-tool check (`op` on PATH, etc.); see below                                                                 |
 | `harness`, `git-credential-provider` | always ready (no host-support, no override)                                                                                                               |
-| `vm-site`                            | the `not_ready(config, deps)` above                                                                                                                       |
+| `vm-site`                            | the `not_ready(deps)` above                                                                                                                               |
 | `secret`                             | **no `not_ready`**: always ready (opts out; resolvability is a resolution-time question, LLD d)                                                           |
 | `git-credential`, `session-template` | no readiness propagation this effort; default ready (they may fold their provider/harness `DependencyState` later, but those deps are always ready today) |
 
@@ -144,7 +155,7 @@ Runs as finalize pass 4 (LLD b), after cycle detection (needs an acyclic graph):
    - Gather its dependencies' `DependencyState`s (already computed, since deps precede it), each
      carrying the dep's enablement, readiness, and impl (impl from the graph node, LLD a).
    - Compute the node's own readiness by calling its readiness hook: a capability node's
-     config-independent source (table above); a consuming resource's `not_ready(config, deps)`.
+     config-independent source (table above); a consuming resource's `not_ready(deps)`.
    - Store the `Readiness` verdict on the graph node (LLD a). Only **enabled** nodes get a computed
      readiness; a **disabled** node's `DependencyState.readiness` is `None` (enablement is the axis
      that answers for it).

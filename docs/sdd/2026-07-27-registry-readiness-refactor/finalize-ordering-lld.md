@@ -81,6 +81,20 @@ it is that the materialization frontier only ever points back into the settled s
 progress (each iteration adds >= 1 node or stops) and has a hard iteration cap equal to the node
 count as a safety net (a cap hit is a framework bug, raised loudly, not silently truncated).
 
+**Two invariants a future late-materialized kind must honor** (recorded after the phase-3 review, so
+they are not rediscovered when a kind beyond `secret` gains `miss_policy = "auto-declare"` with real
+out-edges): (1) **cycle-checking**, cycle detection (pass 3) runs before materialize (pass 5), so
+edges introduced by materialized nodes are **not** cycle-checked; today this is safe because the
+only late-materialized kind (`secret`) has out-edges only to already-present backend nodes (which
+cannot close a cycle back to the secret), but a late-materialized kind whose out-edges could form a
+cycle must re-run cycle detection over the grown graph. (2) **fold ordering within a materialize
+pass**, the pass folds `sorted(deferred)` targets; if a deferred target ever depended on **another
+deferred target** (rather than on already-folded present nodes), the sorted walk could fold the
+first before the second's `DependencyState` exists, and it is never re-folded, producing a stale
+verdict. Today this cannot happen (a materialized secret's deps are present backends, not other
+deferred targets); a future kind that breaks the "frontier points into the settled set" premise must
+topologically order the walk or re-loop until each target's own deps are settled.
+
 ## Subtlety 4: the partial-readiness `secret describe` question
 
 When a **separately-materialized** secret is referenced by both a ready node and a not-ready node,
@@ -148,8 +162,17 @@ precisely enough to be a real test:
   available-backend list a `secret` reads, HLA component 2). This is a builder input during the
   build, not a consumer reaching into the live registry. The guard whitelists the builder's own
   call.
+- The graph builder's **`_impl_for`** helper (`resources/graph.py`) reading the four capability code
+  registries (`VM_PLATFORM_REGISTRY` and peers) to stamp each capability node's impl, and the
+  **fold** (`fold_readiness` / `node_readiness` / `_capability_node_readiness`, same module) reading
+  that impl to call its non-constructing `not_ready`. These run _during the build_ and are the
+  sanctioned builder-reads-registry path (Phase 3 landed the fail-fast `_impl_for`); LLD a/c phrase
+  the fold as reading the impl "off the graph node," which is the same object by construction. The
+  guard whitelists `resources/graph.py`'s builder + fold functions (by module) so its
+  banned-pattern-2 grep (no `*_REGISTRY` read outside publisher + builder) and banned-pattern-3
+  (`not_ready` called only by the fold + builder) do not trip on the honest path.
 
-The guard must encode **both** exemptions, or the sanctioned single-derivation and the banned
+The guard must encode **all** these exemptions, or the sanctioned single-derivation and the banned
 re-walk are indistinguishable calls. The guard lands in phase 6, after every bypass is migrated
 (phases 4-5), so it goes green the moment the last consumer moves.
 

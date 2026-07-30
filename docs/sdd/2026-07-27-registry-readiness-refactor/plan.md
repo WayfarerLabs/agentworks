@@ -156,9 +156,9 @@ a non-green window where the suppression is gone but materialization is ungated 
 - [x] **The `not_ready` reshape** (rename from `disabled_reason`): capability
       `not_ready(config) -> Readiness` is a **non-constructing classmethod** (does not build an
       instance, does not validate; tolerates malformed config); consuming-resource
-      `not_ready(config, {dependency -> DependencyState}) -> Readiness` is pure over its own config
-      and its deps' states. Add the `Readiness` verdict object and the `DependencyState` (carrying a
-      dep's enablement and, when enabled, its readiness).
+      `not_ready(deps) -> Readiness` (an instance method; its config is `self`'s own fields) is pure
+      over its own config and its deps' states. Add the `Readiness` verdict object and the
+      `DependencyState` (carrying a dep's enablement and, when enabled, its readiness).
 - [x] **The readiness fold**: finalize walks the graph reverse-topologically (after cycle
       detection), hands each node its deps' `DependencyState`, calls the node's `not_ready`, and
       stores the `Readiness` verdict on the graph node. Self-determined: the fold imposes no
@@ -179,21 +179,30 @@ a non-green window where the suppression is gone but materialization is ungated 
       acceptance test move to phase 4, where those edges exist.
 - [x] **Remove the vm-site edge-suppression** (`sites.py:60-71`): the vm-site always emits its
       platform edge (the platform node is always present under R13).
-- [x] **Enablement axis, modeled not produced**: the graph node carries `enabled | disabled`; a
-      **test fixture** produces a disabled node to exercise the axis and the not-ready propagation
-      ("depends on X, which is disabled; enable its unit"), but no real producer ships (R7).
+- [x] **Enablement axis, modeled not produced**: the graph node carries `enabled | disabled`, and
+      the fold takes an `enablement` map (all-enabled now, the extension point the plugin rebuild
+      fills) so it **distributes** a disabled dep's `DependencyState` (readiness `None` when
+      disabled). An **end-to-end test** finalizes a registry with an injected disabled `vm-platform`
+      and asserts the dependent site's folded `readiness_of` verdict is the "enable its unit"
+      string, proving the fold's distribution (not just the leaf `not_ready` branch).
+      `has_ready_referrer` excludes a disabled referrer (R12 holds for the disabled case). No real
+      producer ships (R7).
 - [x] **Validate pass gated**: the finalize `validate` pass (phase 2b) now runs over the **ready +
       enabled** set only (R3, R9.4).
 - [x] Tests (DoD-behavior): R9.2 (typo'd platform is now a hard error, not a silent self-disable);
       R9.4 (a not-ready resource's malformed block is deferred, not validated); R9.5 **at the graph
       level** (an installed host-unsupported platform, e.g. `wsl2` on Linux, has a **present**
-      `vm-platform` node whose `readiness_of` is not-ready; the _rendered_ not-ready row in
-      `resource list` is asserted in phase 4 and in doctor in phase 5, once those projections read
-      the graph); R12 (a host-disabled site's secrets stay absent while a ready site's still
-      materialize, via `site -> secret` edges); the bundled `wsl2` site is **not-ready, not a hard
-      error** on a non-Windows host; the fixture disabled-node propagation; R5 (a ready resource
-      with a malformed block still fails validation; a not-ready resource with a valid block is
-      still not-ready).
+      `vm-platform` node whose `readiness_of` is not-ready). NOTE (reconciled after implementation):
+      because R13 publishes the row here, the wsl2 vm-platform row also **renders** in
+      `resource     list` from phase 3 onward (not-ready, **old vocabulary**), via a thin
+      `_VMPlatformKind` readiness projection pulled forward to render the now-published row sanely.
+      Phase 3's tests still assert only the **graph verdict**; phase 4's R9.5 job narrows to the
+      rendered-row test assertion, the `inspect` projection swap for the remaining kinds, and
+      (phase 5) the vocabulary rename. R12 (a host-disabled site's secrets stay absent while a ready
+      site's still materialize, via `site -> secret` edges); the bundled `wsl2` site is **not-ready,
+      not a hard error** on a non-Windows host; the fixture disabled-node propagation; R5 (a ready
+      resource with a malformed block still fails validation; a not-ready resource with a valid
+      block is still not-ready).
 
 **DoD:** DoD-green; DoD-behavior for R9.2, R9.4, R9.5, R12; readiness is stored on the graph;
 suppression is gone; host-unsupported is readiness, not absence; the enablement axis is modeled and
@@ -236,8 +245,12 @@ sub-step.
       (`git_credentials/nodes.py:93`) read secret edges off `edges_of`.
 - [ ] **`inspect`** reads readiness via `readiness_of` and usage via `dependents_of` (R10); the list
       cell and describe line adopt the readiness vocabulary (folded into phase 5's surface work, but
-      the projection swap is here). This is where the **rendered** R9.5 not-ready `vm-platform` row
-      appears in `resource list` (the phase-3 test asserted only the graph verdict).
+      the projection swap is here). NOTE (reconciled after phase 3): the **rendered** R9.5 not-ready
+      `vm-platform` row already appears in `resource list` from phase 3 (old vocabulary), via a thin
+      `_VMPlatformKind` readiness projection pulled forward there. So phase 4's R9.5 work narrows
+      to: pin the rendered-row assertion, swap the remaining inspect projections (vm-site and the
+      other kinds) onto `readiness_of`, and retire the phase-3 shim projection in favor of the
+      unified `readiness_of` read. The vocabulary rename itself is phase 5.
 - [ ] **Site selection and the use-time gate**: `select_site` / `resolve_site` /
       `ensure_site_enabled` (`sites.py:146,150,243,258`), doctor's `defaults.site` warning
       (`doctor.py:294-297`), and `resource.py:111` stop calling `site_disabled_reason` (a lazy
