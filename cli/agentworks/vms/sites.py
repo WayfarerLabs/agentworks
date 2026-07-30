@@ -130,9 +130,10 @@ class VMSiteDecl(DeclaredResource):
         # a construction.
         return cast("type[VMPlatform]", platform.impl).not_ready(self.platform_config)
 
-    def validate(self) -> None:
+    def validate(self, enabled_backends: frozenset[str]) -> None:
         """Throwing shape check for the ``platform_config`` blob, run by
-        the finalize ``validate`` pass. Mirrors ``dependencies``:
+        the finalize ``validate`` pass (``enabled_backends`` is the
+        secret-only R9.9 input, ignored here). Mirrors ``dependencies``:
         the named platform capability validates the blob it owns. An
         unknown platform is a no-op HERE (the platform capability is absent,
         so there is no blob owner to validate against); the site's dangling

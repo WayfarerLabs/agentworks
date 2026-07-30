@@ -71,14 +71,14 @@ def build_registry(config: Config, manifests: ManifestSet | None = None) -> Regi
         for issue in manifests.issues:
             output.warn(f"Manifest: {issue}")
 
-    # Host support is NOT a bootstrap concern: platforms gate their own
-    # capability rows (vm_platforms.publish_to), every vm-site (bundled
-    # and declared alike) registers unconditionally and self-disables
-    # when it lacks what it needs (the vm-site kind's generic
-    # disabled_reason hook), and the registry's reserved-name override
-    # fires on every host because the bundled rows always publish.
-    # Using a disabled site is a typed error at resolve time;
-    # doctor warns on references to one.
+    # Host support is NOT a bootstrap concern: every platform publishes its
+    # capability row unconditionally (R13; host support is the row's folded
+    # readiness, not its absence), every vm-site (bundled and declared alike)
+    # registers unconditionally and is NOT-READY when it lacks what it needs
+    # (its readiness verdict, folded at finalize and read off the graph), and
+    # the registry's reserved-name override fires on every host because the
+    # bundled rows always publish. Using a not-ready site is a typed error at
+    # resolve time; doctor warns on references to one.
     registry = Registry.empty()
     # Built-in publishers first. The bundled manifests now supply the
     # built-in apt/install-command entries too (apt sources/packages and

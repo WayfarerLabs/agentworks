@@ -6,14 +6,14 @@
 # publish on every host, so the registry check always fires): customize
 # by declaring a sibling site, not by redeclaring these.
 #
-# Like every vm-site, a bundled site registers UNCONDITIONALLY and
-# self-disables where it lacks what it needs (the site's generic
-# disabled_reason: lima-local needs a local limactl; wsl2 needs Windows
-# with WSL). Disabled sites list and describe like any resource; using
-# one is a typed error, and `agw doctor` shows each site's state and
-# reason. The lima site is named lima-local, not lima: the bundled site
-# is one CONFIGURATION of the platform (this workstation), and
-# remote-Lima sites are ordinary operator declarations.
+# Like every vm-site, a bundled site registers UNCONDITIONALLY (its
+# platform publishes unconditionally too, R13) and is NOT-READY where it
+# lacks what it needs (its folded readiness verdict: lima-local needs a
+# local limactl; wsl2 needs Windows with WSL). Not-ready sites list and
+# describe like any resource; using one is a typed error, and `agw doctor`
+# shows each site's state and reason. The lima site is named lima-local,
+# not lima: the bundled site is one CONFIGURATION of the platform (this
+# workstation), and remote-Lima sites are ordinary operator declarations.
 apiVersion: agentworks/v1
 kind: vm-site
 metadata:

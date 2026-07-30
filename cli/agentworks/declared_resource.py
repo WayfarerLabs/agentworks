@@ -65,13 +65,20 @@ class DeclaredResource:
         """
         return []
 
-    def validate(self) -> None:
+    def validate(self, enabled_backends: frozenset[str]) -> None:
         """Throwing correctness check for the resource's own capability
         config sub-block(s): the resource-level counterpart of
         ``dependencies`` (the edge-extraction half). Mirrors that
         method's shape, reading ``self``'s fields and delegating to the
         named capability's ``validate``. The finalize ``validate`` pass
         (``Registry.finalize``) invokes it per present node.
+
+        ``enabled_backends`` is the set of enabled ``secret-backend`` names,
+        threaded from the finalize pass (which reads the enablement axis off the
+        graph) so a ``secret`` validates only mappings addressed to a present
+        AND enabled backend (R9.9). Every non-secret resource ignores it; the
+        param is uniform so the pass can call ``validate`` without per-kind
+        dispatch.
 
         Base behavior: no-op. A resource with no capability config block
         has nothing to validate. Resources that host a capability config

@@ -310,11 +310,19 @@ class Registry:
         carry no ``validate`` attribute; a ``DeclaredResource`` subclass
         with no capability config (a secret, an apt entry) validates via
         the no-op base ``validate`` and passes.
+
+        Each ``validate`` is handed the enabled ``secret-backend`` name set so a
+        ``secret`` validates only mappings addressed to a present AND enabled
+        backend (R9.9); a mapping to a disabled backend stays inert until
+        enabled. Every non-secret resource ignores the set.
         """
         from agentworks.resources.graph import Enablement
         from agentworks.resources.render import format_origin_location
 
         assert self._graph is not None  # built in pass 6, before this pass
+        enabled_backends = frozenset(
+            name for (kind, name), axis in enablement.items() if kind == "secret-backend" and axis is Enablement.enabled
+        )
         for kind in list(self._resources.keys()):
             for name in list(self._resources[kind].keys()):
                 if enablement.get((kind, name), Enablement.enabled) is Enablement.disabled:
@@ -326,7 +334,7 @@ class Registry:
                 if validate is None:
                     continue
                 try:
-                    validate()
+                    validate(enabled_backends)
                 except ConfigError as exc:
                     origin = getattr(resource, "origin", None)
                     raise ConfigError(

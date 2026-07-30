@@ -232,7 +232,10 @@ def _check_vm_platforms(registry: Registry) -> HealthGroup:
     ``limactl``) is the SITE's state and reports in the VM sites group.
     """
     g = HealthGroup("VM platforms")
-    for name, _decl in sorted(registry.iter_kind_items("vm-platform"), key=lambda item: item[0]):
+    # Registry-definition order (what ``publish_to`` established from
+    # ``VM_PLATFORM_REGISTRY``), preserved: the pre-refactor group rendered in
+    # this order, and the reordering is not one of the R9 deltas.
+    for name, _decl in registry.iter_kind_items("vm-platform"):
         reason = registry.graph.readiness_of("vm-platform", name).reason
         if reason is not None:
             g.info(name, f"not ready: {reason}")

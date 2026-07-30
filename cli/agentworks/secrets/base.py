@@ -112,24 +112,30 @@ class SecretDecl(DeclaredResource):
             emit(backend_name)
         return refs
 
-    def validate(self) -> None:
+    def validate(self, enabled_backends: frozenset[str]) -> None:
         """Throwing per-mapping spec check, run by the finalize ``validate``
         pass: every declared ``backend_mappings`` entry addressed to a PRESENT
-        backend is validated via that backend's ``validate_mapping`` (R9.9:
-        every declared mapping, not just the opted-in ones, so a stale mapping
-        for a configured-but-not-opted-in backend now fails at build).
+        AND ENABLED backend is validated via that backend's ``validate_mapping``
+        (R9.9: every declared mapping, not just the opted-in ones, so a stale
+        mapping for a configured-but-not-opted-in backend now fails at build).
 
-        Mirrors the other resources' ``validate`` (it reads the named
-        capability's impl to validate the blob it owns). The generic ``False``
-        opt-out is loop-owned and never validated; a mapping to an ABSENT
-        backend is the dangling edge the resolve pass already hard-errored
-        (R9.11), so it never reaches here. A present-but-disabled backend is
-        inert (no disabled producer ships, R7).
+        ``enabled_backends`` is the set of enabled ``secret-backend`` names the
+        finalize pass threads from the graph's enablement axis. A mapping to a
+        present-but-DISABLED backend is INERT (not validated until enabled),
+        the same enablement seam materialization-gating and resolution already
+        consult; inert today (no disabled producer ships, R7). The generic
+        ``False`` opt-out is loop-owned and never validated; a mapping to an
+        ABSENT backend is the dangling edge the resolve pass already
+        hard-errored (R9.11), so it never reaches here.
         """
         from agentworks.secrets.backends import SECRET_BACKEND_REGISTRY
 
         for backend_name, mapping in self.backend_mappings.items():
             if mapping is False:
+                continue
+            if backend_name not in enabled_backends:
+                # Absent (dangling, already hard-errored) or present-but-disabled
+                # (inert until enabled): neither is validated here.
                 continue
             backend = SECRET_BACKEND_REGISTRY.get(backend_name)
             if backend is not None:

@@ -197,6 +197,39 @@ backends = ["onepassword"]
     ), [(c.name, c.message) for c in warns]
 
 
+def test_r9_3_manifest_malformed_block_surfaces_under_resource_registry(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """R9.3 doctor consequence: a malformed capability block in a MANIFEST now
+    surfaces under the "Resource registry" check row, not "Manifest". Capability
+    validation moved out of decode/load into the finalize ``validate`` pass, so
+    ``load_manifests`` accepts the block and ``build_registry`` fails it. Uses a
+    git-credential (always ready, host-independent, so its block always
+    validates)."""
+    cfg = _write_config(tmp_path)
+    resources_dir = tmp_path / "resources"
+    resources_dir.mkdir()
+    (resources_dir / "res.yaml").write_text(
+        "apiVersion: agentworks/v1\n"
+        "kind: git-credential\n"
+        "metadata:\n"
+        "  name: ado\n"
+        "spec:\n"
+        "  provider: azdo\n"
+        "  provider_config:\n"
+        "    org: my-org\n"
+        "    bogus: 1\n"
+    )
+    monkeypatch.setattr("agentworks.config.CONFIG_PATH", cfg)
+    g, _, registry = _check_config()
+
+    fails = {c.name: c for c in g.checks if c.status == Status.FAIL}
+    assert "Resource registry" in fails
+    assert "unknown azdo provider field" in (fails["Resource registry"].message or "")
+    assert "Manifest" not in fails  # the malformed block is no longer a decode/load failure
+    assert registry is None  # the registry-dependent tail is skipped after the failure
+
+
 def test_mapping_to_undeclared_kind_hard_errors_at_build(tmp_path: Path) -> None:
     """R9.11: a ``backend_mappings`` entry naming a backend that is not a
     registered ``secret-backend`` capability is a DANGLING ``secret ->

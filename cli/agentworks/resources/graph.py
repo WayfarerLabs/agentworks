@@ -18,8 +18,16 @@ Every method is a pure read over the frozen node map; none recomputes: the
 finalize fold stores each node's readiness verdict, and the projection surfaces,
 site selection, and secret resolution all read it here rather than recomputing.
 
-See ``docs/sdd/2026-07-27-registry-readiness-refactor/graph-lld.md`` (LLD a) for
-the full contract.
+The contract in brief: the graph is frozen after ``finalize`` and every query
+is a pure read of ``_nodes`` (no recomputation). Nodes are keyed by
+``(kind, name)`` with exactly one node per published resource, including
+capability rows, which carry their implementation in ``impl`` (a class for
+vm-platform / harness / git-credential-provider, an instance for
+secret-backend) so consumers reach a capability's code off the graph rather
+than the live registry. ``readiness_of`` / ``enablement_of`` return stored
+verdicts; ``edges_of`` / ``dependents_of`` are the two edge directions;
+``reachable_from`` is the transitive closure. The retention was introduced by
+the 2026-07 registry-readiness refactor.
 """
 
 from __future__ import annotations

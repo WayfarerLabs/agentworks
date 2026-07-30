@@ -151,6 +151,46 @@ def test_disabled_secret_backend_is_excluded_from_the_active_chain(monkeypatch: 
     assert chain == ["prompt"]  # onepassword excluded (disabled), never built into an ActiveBackend
 
 
+def test_r9_9_mapping_to_disabled_backend_is_inert_until_enabled(monkeypatch: pytest.MonkeyPatch) -> None:
+    """R9.9 disabled sub-clause: the finalize ``validate`` pass validates a
+    secret's mapping only for a present AND ENABLED backend. A malformed
+    onepassword mapping is INERT while onepassword is disabled (the build
+    succeeds) and FAILS once it is enabled. onepassword is injected disabled via
+    the ``_node_enablement`` seam, the same axis materialization-gating and
+    resolution consult, so validation no longer needs re-touching for the
+    plugin rebuild's disabled units."""
+    from agentworks.secrets import backends as secret_backends
+    from agentworks.secrets.base import SecretDecl
+
+    def _build(*, disable_onepassword: bool) -> Registry:
+        registry = Registry.empty()
+        secret_backends.publish_to(registry)
+        registry.add(
+            "secret",
+            "vaulted",
+            SecretDecl(name="vaulted", description="a vaulted key", backend_mappings={"onepassword": "not-an-op-uri"}),
+            Origin.operator_declared(file=Path("c.toml"), line=1),
+        )
+        if disable_onepassword:
+            base = registry._node_enablement
+
+            def _seam() -> dict[tuple[str, str], Enablement]:
+                m = base()
+                m[("secret-backend", "onepassword")] = Enablement.disabled
+                return m
+
+            monkeypatch.setattr(registry, "_node_enablement", _seam)
+        registry.finalize()
+        return registry
+
+    # Disabled onepassword: its malformed mapping is inert, the build succeeds.
+    _build(disable_onepassword=True)
+
+    # Enabled onepassword (default): the same malformed mapping fails validation.
+    with pytest.raises(ConfigError, match="onepassword"):
+        _build(disable_onepassword=False)
+
+
 # -- B1: the fold is total over a malformed block ------------------------------
 
 

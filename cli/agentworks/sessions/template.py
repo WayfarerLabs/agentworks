@@ -113,9 +113,10 @@ class SessionTemplate(DeclaredResource):
                 )
         return refs
 
-    def validate(self) -> None:
+    def validate(self, enabled_backends: frozenset[str]) -> None:
         """Throwing shape check for the ``harness_config`` blob, run by
-        the finalize ``validate`` pass. Mirrors ``dependencies``:
+        the finalize ``validate`` pass (``enabled_backends`` is the
+        secret-only R9.9 input, ignored here). Mirrors ``dependencies``:
         only a declared harness has a blob to validate, and its named
         capability validates it. An undeclared harness (``None``) or an
         unknown name is a no-op here (the miss policy reports the latter).
