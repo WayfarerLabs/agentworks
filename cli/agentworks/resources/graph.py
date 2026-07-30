@@ -217,7 +217,7 @@ class BuildContext:
     edges to emit. Every other resource ignores the context. This is a BUILDER
     INPUT supplied during the build, not a consumer reaching into a live
     registry, so the R11 guard whitelists the builder's own call (LLD b). A
-    default-empty context (the greenness-scaffold alias passes one) yields no
+    default-empty context (tests pass one) yields no
     present backends, so a secret under it emits only its explicit mapping-key
     edges.
     """
@@ -256,8 +256,8 @@ def build_graph(
     resource's ``dependencies()`` appended contiguously during the finalize
     walk), so a node's ``outbound`` preserves first-encountered order per LLD
     (a). ``all_refs`` is keyed by target; ``inbound`` projects each edge to the
-    inbound ``ReferenceEntry`` on its target (the logic that lived in
-    ``registry._references_tuple``), preserving that target's incoming order.
+    inbound ``ReferenceEntry`` on its target, preserving that target's
+    incoming order.
 
     ``readiness`` is the verdict map the fold (:func:`fold_readiness`) produced,
     keyed by node; a node absent from it is stored ``ready`` (a node the fold

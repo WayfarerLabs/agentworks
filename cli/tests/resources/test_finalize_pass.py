@@ -2,7 +2,7 @@
 requirements, dispatching miss policies, attaching usage, detecting cycles.
 
 Phase 1a has no operator-side producers of ``SecretReference``; tests
-synthesize them by attaching ``required_resources()`` to stub Resources or
+synthesize them by attaching ``dependencies()`` to stub Resources or
 directly populating ``Registry._resources``.
 """
 
@@ -22,7 +22,7 @@ from agentworks.secrets.base import SecretDecl
 @dataclass(frozen=True)
 class _PublisherStub:
     """A test-only Resource that publishes a fixed list of requirements
-    via ``required_resources()``. Lives outside any kind in KIND_REGISTRY;
+    via ``dependencies()``. Lives outside any kind in KIND_REGISTRY;
     Registry stores it under whatever kind the test uses.
     """
 
@@ -245,7 +245,7 @@ def test_synthesize_path_walked_for_second_level_requirements() -> None:
     the synthesized secret. The auto-declared secret's usage list
     should end up populated by finalize's post-stabilization pass --
     proving finalize walked the synthesized Resource even though its
-    ``required_resources()`` is empty (and the reverse case is also
+    ``dependencies()`` is empty (and the reverse case is also
     exercised: usage attachment happens after the worklist settles
     rather than at synthesize time).
     """

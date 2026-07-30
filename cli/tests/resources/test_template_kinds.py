@@ -121,11 +121,11 @@ def test_synthesize_with_requirement_uses_first_source(spec: _KindSpec) -> None:
     assert result.origin.source == (spec.kind, "child")
 
 
-# -- required_resources emission -------------------------------------------
+# -- dependencies emission -------------------------------------------
 
 
 @pytest.mark.parametrize("spec", SPECS, ids=lambda s: s.kind)
-def test_template_required_resources_emits_template_requirement(
+def test_template_dependencies_emits_template_requirement(
     spec: _KindSpec,
 ) -> None:
     """Each ``XxxTemplate.dependencies(BuildContext())`` emits a TemplateReference

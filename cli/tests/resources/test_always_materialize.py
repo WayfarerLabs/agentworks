@@ -167,7 +167,7 @@ def test_secret_kind_not_materialized_by_pre_step(tmp_path: Path) -> None:
     secret rows that DO appear in the registry came from the
     requirement-driven path (e.g., Phase 2a.1's always-materialized
     ``vm-template:default`` emits a ``SecretReference`` for
-    ``tailscale-auth-key`` via its existing required_resources, which
+    ``tailscale-auth-key`` via its existing dependencies, which
     is the legitimate auto-declare path -- not always-materialize).
 
     The proof: every secret row in a minimal config has a non-empty
@@ -183,11 +183,11 @@ def test_secret_kind_not_materialized_by_pre_step(tmp_path: Path) -> None:
     secrets = list(registry.iter_kind("secret"))
     # Positive assertion: Phase 2a.1's always-materialized
     # vm-template:default emits a SecretReference for
-    # tailscale-auth-key via its required_resources, so the cascade
+    # tailscale-auth-key via its dependencies, so the cascade
     # produces at least one secret row. Pinning this defends against a
     # future regression where the materialize-then-walk interaction
     # silently breaks (e.g. always-materialize lands rows but their
-    # required_resources doesn't run).
+    # dependencies doesn't run).
     secret_names = {s.name for s in secrets}
     assert "tailscale-auth-key" in secret_names, (
         "expected vm-template:default's tailscale requirement to auto-declare 'tailscale-auth-key' via the cascade"

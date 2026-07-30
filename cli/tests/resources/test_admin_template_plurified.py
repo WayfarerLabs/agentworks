@@ -12,7 +12,7 @@ What we pin:
 
 - ``AdminConfig`` carries its own ``name`` field (default ``"default"``)
   matching the other template kinds' shape.
-- ``AdminConfig.referenced_resources`` uses ``self.name`` as the source
+- ``AdminConfig.dependencies`` uses ``self.name`` as the source
   identity (not a hardcoded ``"default"``), so a hypothetical
   ``admin-template:work`` would emit requirements sourced at
   ``("admin-template", "work")``.
@@ -78,8 +78,8 @@ def test_admin_config_carries_its_own_name_field() -> None:
     assert custom.name == "work"
 
 
-def test_admin_required_resources_sources_from_self_name() -> None:
-    """``AdminConfig.referenced_resources`` emits requirements sourced at
+def test_admin_dependencies_sources_from_self_name() -> None:
+    """``AdminConfig.dependencies`` emits requirements sourced at
     ``("admin-template", self.name)``, not a hardcoded ``"default"``.
     Future-plurified named admin templates inherit the right source
     identity without further changes.
@@ -144,7 +144,7 @@ def test_admin_template_kind_errors_on_unreserved_name_reference(
     tmp_path: Path,
 ) -> None:
     """The reserved-name restriction still applies after plurification:
-    a downstream Resource whose ``required_resources()`` points at
+    a downstream Resource whose ``dependencies()`` points at
     ``admin-template:custom`` (without a matching publisher) errors
     via the framework's miss policy. Proves the plurification doesn't
     loosen the auto-declare guard -- ``"default"`` is still the only
@@ -156,7 +156,7 @@ def test_admin_template_kind_errors_on_unreserved_name_reference(
 
     @dataclass(frozen=True)
     class _Stub:
-        """A test resource whose required_resources points at a non-
+        """A test resource whose dependencies points at a non-
         default admin_template name. Frozen dataclass so the Registry's
         ``dataclasses.replace(resource, origin=...)`` stamp works."""
 

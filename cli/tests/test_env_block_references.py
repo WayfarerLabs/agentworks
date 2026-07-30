@@ -1,5 +1,5 @@
 """Tests for Phase 1b: env-block secret refs emit ``SecretReference``
-via ``required_resources()``, and missing references auto-declare
+via ``dependencies()``, and missing references auto-declare
 through the Resource Registry's miss policy.
 
 Replaces the strict-error behavior the env-and-secrets SDD shipped in
@@ -73,10 +73,10 @@ def test_env_entry_secret_ref_emits_secret_requirement() -> None:
     assert req.source == ("admin-template", "default")
 
 
-# -- Resource-type required_resources() aggregation -------------------------
+# -- Resource-type dependencies() aggregation -------------------------
 
 
-def test_admin_config_required_resources_aggregates_env() -> None:
+def test_admin_config_dependencies_aggregates_env() -> None:
     admin = AdminConfig(
         env={
             "A": EnvEntry(key="A", secret="sec-a"),
@@ -89,7 +89,7 @@ def test_admin_config_required_resources_aggregates_env() -> None:
     assert all(r.source == ("admin-template", "default") for r in reqs)
 
 
-def test_vm_template_required_resources_uses_template_name_in_source() -> None:
+def test_vm_template_dependencies_uses_template_name_in_source() -> None:
     """VMTemplate emits an env-block requirement plus the framework's
     Phase-1c-added Tailscale auth-key requirement (default name).
     """
@@ -112,7 +112,7 @@ def test_vm_template_required_resources_uses_template_name_in_source() -> None:
     assert ts_reqs[0].usage == "the Tailscale auth key"
 
 
-def test_workspace_template_required_resources() -> None:
+def test_workspace_template_dependencies() -> None:
     tmpl = WorkspaceTemplate(
         name="default",
         env={"K": EnvEntry(key="K", secret="ws-secret")},
@@ -121,7 +121,7 @@ def test_workspace_template_required_resources() -> None:
     assert reqs[0].source == ("workspace-template", "default")
 
 
-def test_agent_template_required_resources() -> None:
+def test_agent_template_dependencies() -> None:
     tmpl = AgentTemplate(
         name="claude",
         env={"K": EnvEntry(key="K", secret="claude-key")},
@@ -130,16 +130,16 @@ def test_agent_template_required_resources() -> None:
     assert reqs[0].source == ("agent-template", "claude")
 
 
-def test_session_template_required_resources_with_none_env() -> None:
+def test_session_template_dependencies_with_none_env() -> None:
     """``SessionTemplate.env`` is ``Optional`` (uniquely so among the
-    template kinds). ``required_resources()`` handles ``env=None``
+    template kinds). ``dependencies()`` handles ``env=None``
     without erroring.
     """
     tmpl = SessionTemplate(name="t", env=None)
     assert tmpl.dependencies(BuildContext()) == []
 
 
-def test_session_template_required_resources_with_secrets() -> None:
+def test_session_template_dependencies_with_secrets() -> None:
     tmpl = SessionTemplate(
         name="claude-coder",
         env={"K": EnvEntry(key="K", secret="cc-secret")},

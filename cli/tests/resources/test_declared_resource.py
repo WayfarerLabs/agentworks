@@ -2,7 +2,7 @@
 dataclass inherits.
 
 Two guarantees are pinned here. First, the base itself carries the four
-metadata fields with the right defaults and an empty ``referenced_resources``,
+metadata fields with the right defaults and an empty ``dependencies``,
 and a plain subclass inherits that override-free. Second, every concrete
 declared-resource dataclass (the operator-declared templates plus the
 apt / install-command entries) actually descends from the base, so the
@@ -43,7 +43,7 @@ def test_base_carries_metadata_fields_with_defaults() -> None:
     assert resource.dependencies(BuildContext()) == []
 
 
-def test_plain_subclass_inherits_empty_referenced_resources() -> None:
+def test_plain_subclass_inherits_empty_dependencies() -> None:
     @dataclass(frozen=True, kw_only=True)
     class _NoOverride(DeclaredResource):
         pass

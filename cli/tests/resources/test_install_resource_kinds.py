@@ -194,7 +194,7 @@ def test_apt_source_kind_published_from_builtin_manifest(tmp_path: Path) -> None
 
 
 def test_apt_package_references_flow_to_apt_source(tmp_path: Path) -> None:
-    """``AptPackageEntry.referenced_resources()`` emits one
+    """``AptPackageEntry.dependencies()`` emits one
     ``ResourceReference(kind="apt-source", ...)`` per name in the
     package's ``apt_sources`` field. After finalize, the apt-source's
     ``references`` collection includes the referencing apt-package --

@@ -213,7 +213,7 @@ def test_iter_kind_returns_published_resources(tmp_path: Path) -> None:
     """Published secrets land in iter_kind output. Phase 2a.1's
     always-materialized ``vm-template:default`` emits a
     ``SecretReference`` for ``tailscale-auth-key`` via its
-    ``required_resources``, so the requirement-driven path adds
+    ``dependencies``, so the requirement-driven path adds
     ``tailscale-auth-key`` alongside the published a/b/c. The test
     filters to operator-declared rows to pin the published-name set
     without coupling to which framework-auto-declared rows exist.

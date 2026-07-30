@@ -9,7 +9,7 @@ Test coverage:
 - ``VMTemplateKind`` declares the right kind / miss_policy / auto_declare_names.
 - ``synthesize`` honors the empty-requirements contract (Phase 2a.0 work)
   and the worklist-driven path (non-empty requirements).
-- ``VMTemplate.referenced_resources`` emits ``TemplateReference`` for each
+- ``VMTemplate.dependencies`` emits ``TemplateReference`` for each
   entry in ``inherits``.
 - The framework's miss policy fires on typo'd ``inherits`` references
   (e.g. ``inherits = ["defualt"]``).
@@ -101,10 +101,10 @@ def test_vm_template_kind_synthesize_with_requirement_uses_first_source() -> Non
     assert result.origin.source == ("vm-template", "child")
 
 
-# -- VMTemplate.referenced_resources ------------------------------------------
+# -- VMTemplate.dependencies ------------------------------------------
 
 
-def test_vm_template_required_resources_emits_template_requirement_for_inherits() -> None:
+def test_vm_template_dependencies_emits_template_requirement_for_inherits() -> None:
     """Each name in ``inherits`` produces a TemplateReference with
     kind=vm_template and the declaring template's source. Other
     requirements (env secrets, tailscale auth key) are unchanged.

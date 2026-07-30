@@ -71,7 +71,7 @@ def env_references(
     """Aggregate ``EnvEntry.referenced_resources(source)`` across an env table.
 
     Module-level helper shared by every env-bearing Resource type's
-    ``referenced_resources()`` method so the per-type method body stays
+    ``dependencies()`` method so the per-type method body stays
     one line. ``env`` may be ``None`` (``SessionTemplate.env`` is
     optional) or empty, in which case the result is an empty list.
 
