@@ -350,3 +350,9 @@ inventory is fully discharged.
       contract into the capability READMEs), per the SDD-not-permanent rule.
 - [x] `locked.md` written summarizing the final state (created on-branch pre-merge; the lock binds
       when it lands on `main`).
+- [x] **`--reveal-secrets` clean break (reverses the Phase 5 alias decision).** Per operator
+      direction, `--reveal-secrets` is removed outright rather than kept as the hidden one-release
+      deprecated alias Phase 5 shipped: the old spelling is now a rejected unknown option and this
+      is a `BREAKING CHANGE` (release-please). LLD e's alias decision and the docs/tests are updated
+      to match; the Phase 5 checkboxes above are left as the accurate record of what shipped at that
+      time (per the immutable-completed-checkbox rule).

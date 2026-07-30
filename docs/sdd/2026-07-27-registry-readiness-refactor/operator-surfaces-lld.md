@@ -2,8 +2,8 @@
 
 Implements HLA [component 8](./hla.md). Owns the `secret list` / `secret describe` output, the new
 doctor secret-backends group, the readiness-aware secret rows, the exact operator strings, the
-`--reveal-secrets` to `--resolve` rename (and the alias decision), the docs, and the completion
-regen. Governs FRD R6 (surface strings), R9.1, R9.7, R9.8.
+`--reveal-secrets` to `--resolve` breaking rename, the docs, and the completion regen. Governs FRD
+R6 (surface strings), R9.1, R9.7, R9.8.
 
 **Acceptance line (called out first):** the **interactive-optimism preview is unchanged**. Readiness
 is a new **offline, honest** layer _under_ the optimistic interactivity preview; a `prompt` /
@@ -89,12 +89,13 @@ The two empty-state messages are unchanged (`No secrets in the resource registry
 ## `env show --reveal-secrets` to `--resolve` (R9.8)
 
 - Rename the flag to `--resolve`, aligning with the resolution vocabulary.
-- **Alias decision: keep `--reveal-secrets` as a hidden, deprecated alias** for one release cycle,
-  emitting a single deprecation warning to stderr when used
-  (`--reveal-secrets is deprecated; use --resolve`). This spares operators' existing scripts and
-  muscle memory a hard break. Because the old flag still works, the change is **not** a
-  `BREAKING CHANGE` for release-please; the alias is removed at the next major with a proper
-  breaking note. The help text documents `--resolve`; the alias is hidden from help.
+- **Alias decision (final): a clean break, no alias.** `--reveal-secrets` is removed outright, so
+  the old spelling is now an unknown option that fails loudly rather than resolving secrets by
+  surprise. This is a `BREAKING CHANGE` for release-please (the commit carries the footer).
+  Rationale: the house stance is remove-in-the-same-PR over carrying deprecated cruft, and a stale
+  script failing loudly is safer than one silently revealing secret values under a renamed flag. (An
+  earlier draft kept a hidden one-release deprecated alias; that was reverted before merge in favor
+  of the clean break.)
 - The `preview_resolution` **preflight predictor** (`orchestration/secrets.py:85`) becomes
   readiness-aware in lockstep (the same readiness-aware `would_attempt` predicate as LLD d's walk),
   so it never predicts "would resolve via onepassword" for a backend resolution will skip.
@@ -109,11 +110,11 @@ Updated **in phase 5**, lockstep with the surface change that makes each claim t
   SDD-not-permanent promotion; do not anchor it to the SDD path).
 - `sample-config.toml`: the `secret_config.backends` opt-in chain comment; note that a not-ready
   backend is skipped at resolution (always-consider-sample-config rule).
-- `cli/README.md` (~line 787): the `--reveal-secrets` mention becomes `--resolve` (note the alias).
+- `cli/README.md`: the `--reveal-secrets` mention becomes `--resolve` (noting the breaking rename).
 - Command/section help strings for `secret list`/`describe`, `env show`, and `doctor`.
 - **Completions** (always-consider-completions rule): regenerate the completion tree; the
   `--resolve` rename should flow through the Typer-extracted spec, **verify** it does and that the
-  deprecated hidden alias is handled sanely (hidden aliases should not clutter completions).
+  removed `--reveal-secrets` spelling appears nowhere.
 
 ## `sessions/templates.py:175` note
 
@@ -131,8 +132,8 @@ resolved-view check. Either way it is not a new behavior, just the split shape.
   bare `enabled` / `disabled`; not-ready wins over the identifier.
 - R9.1: no operator-facing "disabled" string denotes host readiness anywhere; "enabled/disabled" is
   reserved for opt-in.
-- R9.8: `--resolve` works; `--reveal-secrets` works with a deprecation warning and is hidden from
-  help and completions.
+- R9.8: `--resolve` works; the removed `--reveal-secrets` spelling is rejected as an unknown option
+  and appears in neither help nor completions.
 - The doctor secret-backends group lists one readiness row per backend; a missing `op` shows
   `[not ready]: op not installed`.
 - Interactive-optimism preview is unchanged (a ready `prompt` still previews as resolving; a

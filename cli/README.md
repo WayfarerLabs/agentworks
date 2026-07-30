@@ -811,8 +811,8 @@ agw env show --session my-session              # secrets redacted as <from secre
 agw env show --vm my-vm --resolve              # resolves through the active backend chain
 ```
 
-(`--reveal-secrets` still works as a deprecated, hidden alias for `--resolve` for one release; it
-prints a deprecation notice.)
+(The flag was formerly spelled `--reveal-secrets`; it was renamed to `--resolve` as a breaking
+change, the old spelling no longer works.)
 
 Inspect how each active backend would resolve each declared or auto-declared secret (e.g. "which env
 var name does this secret read from?") with `agw secret list`:

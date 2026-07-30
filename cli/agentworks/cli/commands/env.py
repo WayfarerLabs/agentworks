@@ -54,17 +54,6 @@ def env_show(
             ),
         ),
     ] = False,
-    reveal_secrets: Annotated[
-        bool,
-        typer.Option(
-            "--reveal-secrets",
-            # Deprecated alias for --resolve, kept for one release so existing
-            # scripts and muscle memory do not hard-break (R9.8). Hidden from
-            # --help and completions; emits a single deprecation warning when
-            # used. Remove at the next major with a proper BREAKING note.
-            hidden=True,
-        ),
-    ] = False,
 ) -> None:
     """Show the effective env for a resource context.
 
@@ -76,11 +65,6 @@ def env_show(
     from agentworks.config import load_config
     from agentworks.env.show import show_env
 
-    if reveal_secrets:
-        from agentworks import output
-
-        output.warn("--reveal-secrets is deprecated; use --resolve")
-
     show_env(
         get_db(),
         load_config(),
@@ -88,5 +72,5 @@ def env_show(
         workspace_name=workspace,
         agent_name=agent,
         session_name=session,
-        reveal_secrets=resolve or reveal_secrets,
+        reveal_secrets=resolve,
     )
