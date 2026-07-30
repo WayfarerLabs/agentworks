@@ -94,15 +94,31 @@ name and option spelling, and resolution of the open question below.
 
 ### Open question the HLA must resolve by spike
 
-Herdr's state detection reads rendered pane content. In this design a pane's content is a nested
-tmux client attached to the session, so the harness's output reaches the screen through an extra
-multiplexer. **Whether herdr's agent-state detection remains accurate through that nesting is
-unverified, and it is the integration's primary value-add.** The HLA must resolve it with a spike
-before the plan commits, and must record the fallback honestly: if detection does not survive
-nesting, the remaining benefits (mouse interaction, layout persistence, notifications, phone access)
-are real but materially smaller, and the effort should be re-scoped or dropped rather than shipped
-on an assumption. Nesting itself is not a new risk (the tmux console already nests, and an outer
-herdr avoids tmux-in-tmux prefix collisions entirely), but detection accuracy through it is.
+Herdr's screen-based state detection reads rendered pane content. In this design a pane's content is
+a nested tmux client attached to the session, so the harness's output reaches the screen through an
+extra multiplexer, and **whether screen detection stays accurate through that nesting is
+unverified.** Nesting itself is not a new risk (the tmux console already nests, and an outer herdr
+avoids tmux-in-tmux prefix collisions entirely), but detection accuracy through it is.
+
+The spike must evaluate three paths, in increasing order of both robustness and effort, and the HLA
+picks one:
+
+1. **Screen detection unaided.** Cheapest if it works. Claude Code sits in herdr's screen-manifest
+   tier, so this is what happens with no effort on our side.
+2. **Screen detection with a classification hint.** Herdr documents an environment variable by which
+   a wrapped or sandboxed process still classifies correctly, which is precisely our situation. If
+   this is what makes nested detection reliable, it is a one-line change to the pane command.
+3. **Authoritative self-reporting.** Herdr exposes a reporting call by which a client tells it a
+   pane's semantic agent state instead of herdr inferring it, and that reported state is what drives
+   its sidebar, roll-ups, and notifications. Agentworks already knows a session's lifecycle state
+   authoritatively, and the harness-transcripts effort makes it know considerably more. Reporting is
+   therefore both the most robust option and the one that converges with R6's recorded future
+   direction, at the cost of a live reporting path rather than a one-shot render.
+
+**This materially lowers the effort's risk**: a negative result on path 1 no longer threatens the
+effort, because paths 2 and 3 do not depend on rendered output at all. The FRD nonetheless keeps the
+honesty rule from R6: whatever path is chosen must not present inferred state as authoritative, and
+must show nothing rather than something wrong.
 
 ## Terminology
 
@@ -247,18 +263,19 @@ console-internal pane construction to a real command.
 - The rendered view surfaces each session's state so an operator can see at a glance which sessions
   need attention. Where herdr's own detection provides this, the integration uses it rather than
   reimplementing it.
-- State shown in the view is understood to be herdr's inference from rendered output, not an
-  Agentworks-authoritative fact, and documentation says so plainly. Agentworks's own session status
-  (running / stopped / broken) remains the authoritative lifecycle signal and is unaffected.
-- Subject to the open question above: if detection does not survive nesting accurately, the
-  integration must not present degraded or misleading state as though it were reliable. Showing
-  nothing is better than showing wrong.
-- **Future direction, not built here.** Herdr supports a deeper integration tier in which a tool
-  reports its own lifecycle rather than being screen-scraped. The harness-transcripts effort
+- **Provenance must be honest and is not always the same.** Under screen detection, displayed state
+  is herdr's inference from rendered output and the documentation says so plainly. Under
+  authoritative reporting (the open question's path 3), it is Agentworks's own signal and may be
+  presented as such. What is never acceptable is inferred state presented as fact, or degraded
+  detection presented as reliable: showing nothing beats showing wrong.
+- Agentworks's own session status (running / stopped / broken) remains the authoritative lifecycle
+  signal regardless of which path is chosen, and is unaffected by this effort.
+- **Reporting is the convergence point with the transcripts effort.** Herdr accepts a
+  client-supplied semantic agent state for a pane, and that reported state drives its sidebar,
+  roll-ups, and notifications in place of inference. The harness-transcripts effort
   (`docs/sdd/2026-07-29-harness-transcripts`) gives Agentworks a harness-owned event stream that
-  already knows a session's state authoritatively. Feeding that stream into the view, so state comes
-  from the harness rather than from inference, is the natural convergence of the two efforts and is
-  recorded here so neither design forecloses it.
+  knows a session's state authoritatively. Whether this effort implements reporting now (as the
+  spike may recommend) or leaves it as the recorded next step, neither design may foreclose it.
 
 ### R7: Nothing on the VM changes
 
@@ -351,6 +368,32 @@ console-internal pane construction to a real command.
   workspaces, or VMs are out of scope; the console is the membership model this effort renders.
 - **Any hosted, multi-user, or team-facing capability.** Herdr is single-operator and local, and so
   is this integration.
+- **Herdr's agent-automation layer**, which is a deliberate exclusion rather than an absent feature
+  and therefore gets its reasoning recorded. Herdr ships a designed set of primitives for one
+  workload to drive another through its terminal: submit a prompt to a named agent, block until it
+  reaches a lifecycle state, read its output back, send key chords, wait on pane output by pattern,
+  and subscribe to another pane's state changes. It ships a skill file whose stated purpose is
+  teaching a coding agent to delegate to and supervise sibling agents this way, and its
+  documentation frames one agent creating work for others as a supported use case. Under this
+  effort's design those primitives would technically function against a rendered session pane, since
+  typing into the pane reaches the attached harness. They are excluded for two reasons. First,
+  everything they carry is terminal-mediated: the channel is a TTY, the protocol is typing and
+  screen-reading, and the delivery guarantee is whatever the rendered screen happens to show, which
+  is not a foundation Agentworks should put workload coordination on. Second, the direction of
+  control is wrong for the platform: programmatic input to a session is properly a harness concern
+  (the component that knows the tool it runs), and session-to-session coordination, if Agentworks
+  ever wants it, is a platform capability with its own record in the transcript, not an operator's
+  multiplexer typing into a terminal out of band. If this capability is wanted, it should be
+  designed as an Agentworks feature and not inherited as a side effect of a rendering choice.
+- **Herdr's git worktree feature**, in which each worktree becomes its own herdr workspace with its
+  own panes. Agentworks already models multiple independent workspace clones of one repository, so
+  this overlaps an owned concept rather than filling a gap, and adopting it would put repository
+  layout decisions inside the rendering layer.
+- **Herdr's layout export and apply**, which serialize and recreate a tab's pane tree. A console is
+  already Agentworks's declarative view specification, so a second, herdr-owned layout format
+  competing with it is exactly the ownership split R2 exists to prevent. The rendering may use these
+  calls internally as an implementation detail; what is out of scope is exposing them as an operator
+  surface or treating an exported layout as a source of truth.
 
 ## Migration notes
 
