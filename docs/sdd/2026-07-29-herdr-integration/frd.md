@@ -1,6 +1,7 @@
 # Herdr console rendering: functional requirements
 
-**Status:** Draft **Repo:** `agentworks` **Path:** `cli/agentworks/`
+**Status:** Draft, gated on a spike and not scheduled (see Sequencing) **Repo:** `agentworks`
+**Path:** `cli/agentworks/`
 
 ## Background
 
@@ -119,6 +120,49 @@ picks one:
 effort, because paths 2 and 3 do not depend on rendered output at all. The FRD nonetheless keeps the
 honesty rule from R6: whatever path is chosen must not present inferred state as authoritative, and
 must show nothing rather than something wrong.
+
+### Sequencing: this effort is gated, and part of it should ship without it
+
+This FRD records a design that is worth having written down. It is deliberately **not scheduled**
+(maintainer ruling, 2026-07-30), because the honest case for building it now is weaker than the case
+for using herdr manually first and deciding later.
+
+**Most of herdr's value needs nothing from this effort.** An operator can install herdr today, split
+panes, and run `agw session attach <name>` in each one. That already yields the agent-state sidebar,
+notifications when a session blocks, mouse-first interaction, better copy and paste, phone access
+over SSH, and layout persistence, because all of those are herdr's own features and none of them
+require Agentworks to know herdr exists. Herdr saves pane shape across restarts, so a hand-built
+layout is built once per console rather than once per sitting.
+
+**What this effort adds on top of manual use is therefore narrow**: building the layout
+automatically from console membership instead of by hand, keeping a live view in sync as membership
+changes, and rendering companion shells correctly. That is a real but modest margin, weighed against
+a permanent obligation to keep two rendering backends at parity against a young project publishing
+near-daily releases.
+
+**Two requirements here are independently valuable and should ship separately, ahead of and
+independent of any herdr work:**
+
+- **R4's companion-shell command.** It is the one thing that genuinely blocks manual herdr use,
+  since no existing command produces a session-scoped shell, and it is useful on its own terms to
+  any operator wanting a correctly scoped shell beside a running session.
+- **R5's resilient attach.** Self-healing reattach after a detach, network loss, or laptop sleep
+  benefits anyone attaching a session by hand, with or without a multiplexer around it.
+
+Neither needs the rendering backend, the capability seam, or herdr itself. Unbundling them is a
+small change rather than an SDD-sized effort.
+
+**The recommended sequence** is therefore: run the spike manually (install herdr, attach one session
+in a pane, observe whether the sidebar classifies it, then retry with the classification hint); ship
+the companion-shell command and resilient attach as a small standalone change; use herdr manually
+against real work for a few weeks; and only then decide whether the rendering backend earns its
+keep, informed by what actually proved annoying.
+
+**One factor could bring this forward.** The zeroconf-agents direction makes sessions far more
+churny, created and destroyed continuously rather than living for weeks. Hand-maintaining a herdr
+layout against that churn would get painful quickly, which is precisely what the rendering backend
+solves. That argues for revisiting this FRD once that direction lands and the real churn pattern is
+visible, rather than for building ahead of it now.
 
 ## Terminology
 
