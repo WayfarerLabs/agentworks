@@ -129,14 +129,29 @@ rows land.
 
 ### 7. `_check_collision` precedence extension (R7)
 
+**Two collision layers, reconciled (the LLD pins the split).** A capability's row name IS its impl's
+registry key, so a **capability** name-clash is caught earlier, at **seating** in `register_plugin`
+(component 2): seating a plugin `vm-platform` named `lima` finds the built-in `lima` already in
+`VM_PLATFORM_REGISTRY` and raises a typed error at registration, before any row reaches
+`_check_collision`. So the seating guard, not `_check_collision`, is the enforcement point for
+capability built-in/plugin and plugin/plugin clashes; its message must name the occupant's
+**actual** origin (a core built-in vs another plugin), not assume "cross-plugin".
+`_check_collision`'s system-plugin work is therefore reached for **declarable (manifest) rows** and
+for the operator-override case.
+
 Extend `resources/registry.py` `_check_collision` to decide by the unordered
-`{existing.variant, incoming.variant}` pair: `operator-declared` overrides `built-in` or
-`system-plugin` where `builtin_override` permits, else a typed reserved-name error; `system-plugin`
-and `built-in` are peers (typed error); two `system-plugin` rows collide (typed error). Existing
-operator/built-in pairings untouched; each new pairing gets its own message. Because all shipped
-plugins publish (R5), a curated-set name clash between two shipped plugins (enabled or not) is a
-legitimate build error, the correct outcome for a curation bug; namespacing (for independent
-external plugins) is deferred.
+`{existing.variant, incoming.variant}` pair, applying the unordered normalization **only to
+system-plugin-involving pairs** (the existing built-in/operator directional asymmetry is preserved
+verbatim): `operator-declared` overrides `built-in` or `system-plugin` where `builtin_override`
+permits, else a typed reserved-name error; `system-plugin` and `built-in` are peers (typed error);
+two `system-plugin` rows collide (typed error). Note that in practice every declarable kind a plugin
+would ship (`vm-site`, `vm-template`, `session-template`, `secret`) is
+`builtin_override = reserved`, so an operator cannot generally override a plugin's shipped resource;
+the "allow" path is only the deprecated TOML-only kinds. Because all shipped plugins publish (R5), a
+curated-set name clash between two shipped plugins (enabled or not) is a legitimate build error, the
+correct outcome for a curation bug; namespacing (for independent external plugins) is deferred.
+Acceptance tests target the layer that actually fires (capability clash, the seating guard;
+declarable/operator clash, `_check_collision`).
 
 ### 8. The `_node_enablement` producer (R9, R13), the load-bearing piece
 
@@ -174,6 +189,41 @@ The refactor left `_node_enablement()` returning all-enabled. This SDD makes ena
 This is where "a not-enabled plugin's capabilities are present-but-disabled" actually happens: the
 rows publish (component 3), and this producer marks the not-opted-in ones disabled. No parallel
 gate.
+
+### 8b. Closing the consumer-gating gap for `harness` and `git-credential-provider` (R14)
+
+The producer (component 8) only makes strictly-opt-in real for a kind whose **consumer** honors a
+disabled dependency. The refactor wired only two: the `vm-site` propagates (its `not_ready` reads
+the platform's disabled state) and the `secret` consults backend enablement in
+resolution/validation. The other two kinds' consumers currently opt out of readiness entirely, so a
+not-enabled plugin's harness or git-credential-provider would be silently usable. Per
+self-determined readiness, each consumer chooses its own model (not a blanket propagation):
+
+- **`git-credential` propagates (the vm-site model).** A `git-credential` has a single provider, so
+  it adds a `not_ready(deps)` hook that reads the provider dependency's `DependencyState` and
+  returns not-ready with the carried "enable plugin `<name>`" reason when the provider is disabled
+  (mirroring `VMSiteDecl.not_ready`). The use-time resolution path
+  (`vms/initializer/credentials.py`'s provider resolution, `git_credentials/__init__.py`'s
+  advisories) gains an `enablement_of`/`is_ready` refusal before the raw
+  `GIT_CREDENTIAL_PROVIDER_REGISTRY` lookup, so a disabled provider cannot be constructed even if a
+  resource names it. Its edge already exists (`git-credential -> provider`), so the fold hands it
+  the provider's state for free.
+- **`session-template` stays ready, gates the harness at use (the secret model).** A
+  `session-template` does NOT propagate (it lists ready); instead the harness is gated where it is
+  constructed. `harness_for` / `_harness_for_template` (`sessions/nodes.py`) thread no registry, so
+  the gate cannot sit literally inside them; it goes one level up at the two session-build call
+  sites that DO hold the registry + resolved template (`_create_build.py` create, `_lifecycle.py`
+  restart/reattach, both funneling through `_resolve_template`), via a shared
+  `ensure_harness_enabled(registry, name)` that reads `enablement_of("harness", name)` and raises a
+  typed "enable plugin `<name>`" error when disabled (like `active_backends` skipping a disabled
+  backend). Both call sites route every real construction, so this covers use; the read-only
+  `_display_harness` path is deliberately left ungated. A disabled harness fails loudly at
+  session-create, not silently succeeds.
+
+Both are additive consumer wiring against the already-produced enablement; neither changes the fold
+or the producer. The fixture plugin's tests exercise a disabled plugin of each of the four kinds
+through its actual consumer (site not-ready; secret backend excluded; git-credential not-ready;
+session harness use-error), so R9's guarantee is proven kind-by-kind, not only for vm-platform.
 
 ### 9. Presentation: disabled hides, not-ready shows; the doctor roster (R9)
 

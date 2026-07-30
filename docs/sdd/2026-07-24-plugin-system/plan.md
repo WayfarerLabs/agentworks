@@ -73,13 +73,18 @@ real config changes behavior; the fixture proves the framework.
 - [ ] Installed index (`plugins/__init__.py`): `SYSTEM_PLUGINS`, populated by the index importing
       each shipped module and calling `register_plugin(module.PLUGIN)` itself (inverted control);
       typed error on a duplicate plugin name; ships empty.
-- [ ] `_check_collision` `system-plugin` matrix (R7): decide by the unordered variant pair
-      (operator-overrides-where-`builtin_override`-permits; `system-plugin`/`built-in` peers;
-      plugin/plugin collide), each with its own message; existing pairings untouched.
+- [ ] Two collision layers, reconciled (R7): a **capability** name-clash (built-in/plugin,
+      plugin/plugin) is caught at **seating** in `register_plugin` (the impl name is the registry
+      key), with a message naming the occupant's real origin (core vs plugin); `_check_collision`'s
+      `system-plugin` matrix is for **declarable (manifest) rows** and operator-override. Extend
+      `_check_collision` by the unordered variant pair, applying the unordered normalization only to
+      system-plugin-involving pairs (the built-in/operator directional asymmetry is preserved
+      verbatim); each pairing its own message; existing pairings untouched.
 - [ ] Tests (fixture-driven): descriptor validation rejects missing-name / instance-not-class /
       unknown-kind / colliding-impl with a typed attributed error; atomic registration seats nothing
       on a mid-descriptor failure; the `CAPABILITY_ADAPTERS.keys()` == capability-kinds guard; the
-      R7 matrix per pairing; the seat/unseat helper round-trips.
+      collision cases target the **layer that actually fires** (capability clash, the seating guard;
+      declarable/operator clash, `_check_collision`); the seat/unseat helper round-trips.
 
 **DoD:** DoD-green; the framework registers, validates, and adapts across all four kinds; the
 collision matrix holds; the shipped index is empty; nothing publishes yet.
@@ -95,11 +100,12 @@ Governs: R4. LLD: (c).
 
 **DoD:** DoD-green; enablement is a config setting; nothing consumes it yet.
 
-## Phase 4: the `_node_enablement` producer (R9, R13), the load-bearing phase
+## Phase 4: the `_node_enablement` producer + consumer gating (R9, R13, R14), the load-bearing phase
 
-Governs: R9 (capability side), R13. LLD: (b). This is where a not-opted-in plugin's contributions
-first become present-but-disabled, exercised via a fixture whose rows are published by a test (Phase
-5 wires it into `build_registry`).
+Governs: R9 (capability side), R13, R14. LLD: (b). This is where a not-opted-in plugin's
+contributions first become present-but-disabled, exercised via a fixture whose rows are published by
+a test (Phase 5 wires it into `build_registry`), and where the two un-wired kinds' consumers start
+honoring enablement.
 
 - [ ] Reason-carrying enablement: extend the refactor's `Enablement`/disabled state with an optional
       **reason** + **source identity** (additive; the fold/gate/consumers are untouched except where
@@ -116,14 +122,28 @@ first become present-but-disabled, exercised via a fixture whose rows are publis
       `config.plugins_enabled` is disabled with the remediation reason "enable plugin `<name>`" (the
       doctor roster, not this mark, renders the "not enabled in [plugins]" state). Reads frozen row
       origins + the bound enabled set; no new probe.
+- [ ] **Close the consumer-gating gap for the two un-wired kinds (R14), per self-determined
+      readiness:** `git-credential` gains a `not_ready(deps)` hook that propagates its single
+      provider's disabled state (mirroring `vm-site`) plus a use-time refusal at the provider
+      resolution sites (`vms/initializer/credentials.py`, `git_credentials/__init__.py`);
+      `session-template` stays ready but a shared `ensure_harness_enabled(registry, name)` at the
+      two session-build call sites (`_create_build.py`, `_lifecycle.py`, which hold the registry,
+      since `harness_for` itself threads none) reads `enablement_of("harness", name)` and raises a
+      typed "enable plugin `<name>`" error when the harness is disabled (the secret model; the
+      read-only display path stays ungated). Both are additive against the already-produced
+      enablement; neither touches the fold or the producer.
 - [ ] Tests: a not-opted-in plugin capability node reads `enablement_of == disabled` with the plugin
-      reason; a `vm-site` referencing it is not-ready with "enable plugin `<name>`" (via the
-      existing fold, not new code); materialization withholds its deps and resolution/validation
-      exclude a disabled plugin backend (the refactor's consumers, pinned under this producer); a
-      **stub second source** composes (proving the R13 seam) without a real operator surface.
+      reason; **each of the four kinds is proven through its actual consumer**, a `vm-site` is
+      not-ready with "enable plugin `<name>`" (existing fold); a disabled plugin backend is excluded
+      from resolution/validation; a `git-credential` on a disabled plugin provider is not-ready and
+      refused at use; a `session-template` on a disabled plugin harness lists ready but raises the
+      typed enable-plugin error at harness construction; materialization withholds a disabled node's
+      deps; a **stub second source** composes (proving the R13 seam) without a real operator
+      surface.
 
-**DoD:** DoD-green; DoD-behavior for R9-capability + R13-seam; enablement is multi-source and
-reason-carrying; the plugin source marks not-opted-in plugin contributions disabled.
+**DoD:** DoD-green; DoD-behavior for R9-capability + R13-seam + R14 (all four kinds gated through
+their real consumer); enablement is multi-source and reason-carrying; the plugin source marks
+not-opted-in plugin contributions disabled.
 
 ## Phase 5: `build_registry` wiring, publication joins enablement (R5-publication, R9-manifests)
 

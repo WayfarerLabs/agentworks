@@ -155,9 +155,13 @@ default-surface rule is set:
   built-in (present, enabled, blocked) continues to list with its `(not ready)` marker. This is the
   coherent default: "off by opt-in" hides, "on but blocked" shows.
 - `describe_resource` (`inspect.py:266`) is an **explicit** lookup by name, so it always renders the
-  named row even when disabled, annotating its state. It reads `enablement_of` to add a
-  `Disabled: <...>` line and does not suppress the row (an operator debugging a specific disabled
-  resource asked for it by name).
+  named row even when disabled, annotating its state. It reads `enablement_of` (the **binary** axis)
+  to decide whether to add a `Disabled: <...>` line, and derives the line's **text** from the row's
+  `system-plugin` origin plus config, exactly as the doctor roster does
+  (`Disabled: not enabled in [plugins] (plugin <origin.plugin>)`), **not** from a per-node reason:
+  the disabled reason lives on the transient `DisabledMark`, never on the frozen graph node (LLD b,
+  `build_graph` untouched), so there is nothing to read off the node. It does not suppress the row
+  (an operator debugging a specific disabled resource asked for it by name).
 - **Provenance annotation.** A `system-plugin` row renders `from plugin <name>` (off
   `origin.plugin`) in the list DESCRIPTION cell / describe header, so a plugin's contributed
   resources are attributable without the plugin being a resource (R12). This reads the origin

@@ -233,12 +233,20 @@ Three reasons drive this first step, in priority order.
     the disabled node, not a reference-time index probe). This is why capabilities publish
     unconditionally (R5): an operator-declared `vm-site` naming a not-yet-enabled plugin's platform
     gets a helpful enable hint, not an unknown-name hard error.
-  - **Bundled manifests: enabled-only.** A plugin's own declarable resources publish only when the
-    plugin is enabled. A not-enabled plugin offers no resources; there is no external reference that
-    needs an enable hint for them (they are the plugin's offering, not a name an operator
-    references), so gating their publication on enablement is simpler than publishing-then-disabling
-    and avoids a not-enabled plugin's resources competing in collision checks against operator
-    resources.
+  - **Bundled manifests: enabled-only (a scoped v1 limitation).** A plugin's own declarable
+    resources publish only when the plugin is enabled: a not-enabled plugin contributes no
+    resources, which keeps a disabled plugin's resources out of collision checks against operator
+    resources and is simpler than publishing-then-disabling them. **Known limitation, stated
+    honestly:** unlike a capability (referenced by name from an operator resource, so
+    present-but-disabled buys the clean enable-hint), a bundled _declarable_ resource **is** also
+    referenceable by name, e.g. an operator `vm-template` with `extends = <plugin-template>`. Under
+    enabled-only publication, referencing a not-enabled plugin's bundled resource yields the
+    registry's unknown-name hard error, not the "enable plugin X" hint the capability side gives, so
+    the two are inconsistent for a plugin that ships referenceable bundled resources. This is inert
+    in v1 (the shipped index is empty; no real plugin ships bundled resources), so it is deferred:
+    the **follow-on** that ships the first plugin with referenceable bundled resources should move
+    manifests to present-but-disabled (with enablement-aware collision so a disabled plugin's
+    resource never blocks an operator's name), for symmetry with the capability side.
   - **Default-surface rule: disabled hides, not-ready shows.** Disabled (enablement-axis)
     contributions are **hidden from the default `resource list`**, realizing the signal-not-noise
     motivation, while a not-ready (present, enabled, blocked) node such as a host-unsupported
@@ -290,6 +298,32 @@ Three reasons drive this first step, in priority order.
   operator-explicit-disable surface, config, or per-unit granularity is built here; the requirement
   is that adding one later needs no re-shaping of the axis or the producer seam.
 
+- **R14 The opt-in guarantee holds for every kind a plugin contributes; each consumer honors
+  enablement per self-determined readiness.** R9's promise ("nothing a not-enabled plugin offers is
+  available at a consumption site") must hold for all four capability kinds R6 allows. But _how_ a
+  consumer honors a disabled dependency is the consumer's own choice (the registry's
+  self-determined-readiness principle), not a uniform not-ready propagation. The four:
+  - **vm-platform**: the `vm-site` **propagates**, it is not-ready when its single platform is
+    disabled (a site serves no purpose without its platform), and use-time site resolution refuses a
+    not-ready site. Already wired by the registry refactor.
+  - **secret-backend**: the `secret` stays **ready** and consults backend enablement in its own
+    resolution/validation (a secret maps to many backends; ready is not resolvable). Already wired
+    by the refactor.
+  - **git-credential-provider**: the `git-credential` **propagates**, like a vm-site it has a single
+    provider and is therefore not-ready when that provider is disabled, with a use-time refusal.
+    **Wired by this SDD** (a `not_ready` hook plus the use-time gate).
+  - **harness**: the `session-template` stays **ready** and gates the harness at **use**
+    (constructing or using a disabled harness is a typed error naming the plugin to enable), the
+    secret model, not propagation. **Wired by this SDD** (the harness-construction/use sites read
+    `enablement_of` and refuse a disabled harness).
+
+  The two the refactor left un-wired (git-credential-provider, harness) are closed here because the
+  plugin work is the first producer of a disabled node for _any_ kind: before it, nothing produced
+  disabled state, so those consumers "opting out" of readiness was harmless; the moment a plugin can
+  disable them, an un-gated harness or git-credential-provider would be silently usable while
+  not-enabled, holing strictly-opt-in for half of R6's kinds. Which model each kind uses is the
+  consuming resource's call (per above), not a blanket rule.
+
 ## Scope
 
 In scope: the `system-plugin` origin variant (R1); the validated `Plugin` descriptor and the
@@ -299,10 +333,13 @@ section and loader (R4); the unconditional plugin capability-row publication and
 manifest publication in `build_registry`, publication-only and pure (R5); the per-capability-kind
 registration adapter (R5, R6); the `_check_collision` precedence extension for `system-plugin` (R7);
 the `_node_enablement` producer that marks a not-opted-in plugin's contributions disabled, composed
-over sources with per-source reasons (R9, R13); the "disabled hides, not-ready shows"
-default-surface rule and the `doctor` plugin roster (R9); the reserved (unenforced)
-least-privilege-scope and command-declaration descriptor fields (R10); a test-fixture plugin proving
-the path (R11); author docs (`agentworks/plugins/README.md`) and an ADR.
+over sources with per-source reasons (R9, R13); **closing the enablement-consumer gap for the two
+kinds the refactor left un-wired**, a `not_ready` hook + use-time gate on `git-credential`
+(propagates), and a use-time enablement gate at the harness-construction sites for
+`session-template` (errors at use) (R14); the "disabled hides, not-ready shows" default-surface rule
+and the `doctor` plugin roster (R9); the reserved (unenforced) least-privilege-scope and
+command-declaration descriptor fields (R10); a test-fixture plugin proving the path (R11); author
+docs (`agentworks/plugins/README.md`) and an ADR.
 
 Out of scope: external plugins and any external loading/installation/discovery; the trust model and
 its enforcement; plugin-owned CLI commands; new capability or declarable kinds from plugins;

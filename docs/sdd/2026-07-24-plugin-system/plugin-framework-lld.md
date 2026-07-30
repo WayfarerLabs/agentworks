@@ -141,16 +141,27 @@ seatable**, so seating is all-or-nothing by construction (no rollback path):
      missing `name` as a typed error, not a raw `AttributeError` (both were Fable findings).
    - No **intra-descriptor** collision: no two impls in this descriptor (across all its kinds)
      resolve to the same `(kind, name)`.
-2. **Cross-plugin collision precheck** (still no mutation). For every impl, `adapter.peek(name)`:
+2. **Capability-name collision precheck** (still no mutation). For every impl, `adapter.peek(name)`:
    - occupant is `None`: seatable.
    - occupant is the **same class** (or, for `secret-backend`, an instance of the same class):
      **idempotent** re-registration, seatable as a no-op.
-   - occupant is a **different** impl: `PluginError` (typed cross-plugin impl-name collision, naming
-     the plugin and the kind/name). This is the seam that was previously last-writer-wins. If any
-     impl in the descriptor collides, the method raises here, **before seating any impl**.
+   - occupant is a **different** impl: `PluginError`, naming the plugin, the kind/name, and the
+     occupant's **actual origin**. The occupant is not always another plugin: a plugin `vm-platform`
+     named `lima` finds the **core built-in** `LimaPlatform` already in `VM_PLATFORM_REGISTRY`. The
+     message must distinguish the two cases (the occupant is a core built-in, or the occupant is
+     another plugin, discoverable because a plugin's seated impls are its own known set), not assume
+     "cross-plugin". If any impl in the descriptor collides, the method raises here, **before
+     seating any impl**. This is the seam that was previously last-writer-wins.
 3. **Seat all.** Only now, `adapter.seat(impl_cls)` for every impl. Because pass 2 proved every impl
    seatable, this loop cannot fail partway, so a mid-descriptor failure leaving orphaned impls (the
    reset code's bug) is unrepresentable.
+
+**This seating guard, not `_check_collision`, is the enforcement point for every capability
+name-clash** (built-in/plugin and plugin/plugin alike). A capability's published row name IS its
+impl's registry key, so a clash is caught here at registration, at import, before any capability row
+is ever built or handed to `Registry.add`. `_check_collision` (below) never sees a capability clash;
+its `system-plugin` work is reached only for **declarable (manifest) rows** and the
+operator-override case.
 
 `register_plugin` returns nothing and does **not** touch the index or publish rows; it only seats
 impls into the four code registries, exactly as core impls populate them at import.
@@ -199,33 +210,49 @@ exercised only by the fixture.
 
 ## The `_check_collision` `system-plugin` matrix (R7)
 
+**Two collision layers, reconciled.** Capability clashes are caught at **seating** (above), so they
+never reach `_check_collision`. What reaches `_check_collision` for a `system-plugin`-involving pair
+is a **declarable (manifest) row** (a plugin's bundled `vm-site` / `vm-template` /
+`session-template` / `secret` landing on an existing name) or the **operator-override** case. The
+two layers are disjoint: the seating guard owns capability rows (keyed by impl name in a code
+registry); `_check_collision` owns declarable-row + operator-override precedence.
+
 Extend `Registry._check_collision` (`registry.py:129-165`) to decide by the **unordered**
-`{existing.variant, incoming.variant}` pair, so the verdict is independent of publish order (the
-plugin rows land between the built-in capability rows and `config.publish_to`, but the matrix does
-not depend on that; LLD c). Existing `operator`/`built-in` pairings are untouched. The new pairings,
-each with its **own** message (never the generic "publisher ordering conflict"):
+`{existing.variant, incoming.variant}` pair **only for pairs that involve `system-plugin`**. The
+existing `built-in`/`operator-declared` directional asymmetry is **preserved verbatim** (an
+implementer must not apply an unordered helper uniformly and accidentally symmetrize the
+operator-override direction: `built-in` existing + `operator` incoming consults `builtin_override`,
+but `operator` existing + `built-in` incoming is still the generic ordering-conflict error). The new
+`system-plugin` pairings, each with its **own** message (never the generic "publisher ordering
+conflict"):
 
-| existing            | incoming            | outcome                                                                                                                                                      |
-| ------------------- | ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `system-plugin`     | `system-plugin`     | `PluginError`-worded `ConfigError`: `<kind> "<name>" is published by two system plugins` (curation bug)                                                      |
-| `built-in`          | `system-plugin`     | `ConfigError`: `system-plugin <kind> "<name>" collides with a built-in of the same name` (peers)                                                             |
-| `system-plugin`     | `built-in`          | `ConfigError`: same peer message, other direction                                                                                                            |
-| `system-plugin`     | `operator-declared` | `builtin_override == "allow"` -> operator wins (return); else `ConfigError` reserved-name (mirrors the built-in-over-operator branch, `registry.py:143-150`) |
-| `operator-declared` | `system-plugin`     | same as above, normalized on the pair                                                                                                                        |
+| pair (unordered)                     | outcome                                                                                                                                                      |
+| ------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `{system-plugin, system-plugin}`     | `ConfigError`: `<kind> "<name>" is published by two system plugins` (curation bug)                                                                           |
+| `{system-plugin, built-in}`          | `ConfigError`: `system-plugin <kind> "<name>" collides with a built-in of the same name` (peers), either direction                                           |
+| `{system-plugin, operator-declared}` | `builtin_override == "allow"` -> operator wins (return); else `ConfigError` reserved-name (mirrors the built-in-over-operator branch, `registry.py:143-150`) |
 
-Implementation note: normalize by inspecting both variants up front (a small helper that returns the
-`{existing, incoming}` set), then dispatch, so the two directions of each pair share one branch and
-one message. The collision message stays a `ConfigError` (it can be reached by operator data driving
-a publish order, so it must not be an `assert`, matching the existing contract at
-`registry.py:100`), even though the two-plugins case is a curation bug: the `ConfigError` rendering
-is the right operator surface if it ever escapes, and the curation bug is caught in CI by the
-fixture/collision tests.
+In practice every declarable kind a plugin would ship (`vm-site`, `vm-template`, `session-template`,
+`secret`) is `builtin_override = "reserved"`, so the operator-override "allow" path is only the
+deprecated TOML-only kinds; an operator generally cannot override a plugin's shipped declarable
+resource (a reserved-name `ConfigError`).
+
+Implementation note: branch on "does this pair involve `system-plugin`" first; inside that branch,
+normalize on the `{existing, incoming}` set so the two directions of each `system-plugin` pair share
+one message; leave the pre-existing non-`system-plugin` branches (`registry.py:141-165`) exactly as
+they are. The collision message stays a `ConfigError` (it can be reached by operator data driving a
+publish order, so it must not be an `assert`, matching the existing contract at `registry.py:100`),
+even though the two-plugins case is a curation bug: the `ConfigError` rendering is the right
+operator surface if it ever escapes, and the curation bug is caught in CI by the fixture/collision
+tests.
 
 **Curated-set collisions are legitimate build errors.** Because all shipped plugins publish
 unconditionally (R5, LLD c), a `(kind, name)` clash between two shipped plugins is a build error
-even when **both are not enabled** (both still publish their capability rows). That is the correct,
-loud outcome for an in-repo curation bug; resource-name namespacing that would let independent
-external plugins coexist is deferred (FRD Future direction).
+even when **both are not enabled** (both still seat their impls at import and publish their
+capability rows). A **capability** clash fails at seating (import-time `PluginError`); a
+**declarable** clash fails at `_check_collision` (`ConfigError`). Either way it is the correct, loud
+outcome for an in-repo curation bug; resource-name namespacing that would let independent external
+plugins coexist is deferred (FRD Future direction).
 
 ## What does not change
 
@@ -239,10 +266,15 @@ produces no enablement and publishes no row (LLDs b, c).
   `/`-bearing plugin name; a capability kind with no adapter (unknown-kind); an impl passed as an
   **instance** instead of a class (the `secret-backend` trap); an impl class with a missing or
   `/`-bearing `name`; two impls colliding within one descriptor.
-- **Atomicity**: a descriptor whose second impl collides cross-plugin seats **nothing** (assert all
-  four registries are unchanged after the failed `register_plugin`).
+- **Atomicity**: a descriptor whose second impl collides at seating leaves **nothing** seated
+  (assert all four registries are unchanged after the failed `register_plugin`).
 - **Idempotency**: registering the same plugin twice is a no-op; registering a different impl under
   a taken name is a typed `PluginError`.
+- **The seating guard is the capability-clash layer**: a plugin `vm-platform` named `lima` (a core
+  built-in) raises a `PluginError` at `register_plugin` naming the occupant as a **core built-in**;
+  two fixture plugins each seating a `vm-platform` named `x` raise a `PluginError` naming the
+  occupant as **another plugin**. Neither reaches `_check_collision` (no capability row is built for
+  the failed plugin).
 - **Adapters** seat and build a row for all four kinds; `build_row` on an unseated name raises
   `StateError` (publication-tied-to-seating); the `CAPABILITY_ADAPTERS.keys()` ==
   capability-category kinds guard holds.
@@ -251,6 +283,9 @@ produces no enablement and publishes no row (LLDs b, c).
   with the module name.
 - **`seated_plugin`** round-trips: inside the context the impl is seated; after it, all four
   registries equal their pre-context snapshots (even on exception).
-- **The R7 matrix**: one test per pairing asserting the exact message; operator-over-system-plugin
-  respects `builtin_override`; two shipped fixtures colliding on `(kind, name)` fail the build even
-  when neither is enabled; existing operator/built-in pairings still behave as before.
+- **The R7 `_check_collision` matrix (declarable rows + operator-override only)**: one test per
+  `system-plugin` pairing asserting the exact message, driven by a fixture that ships a **declarable
+  (manifest)** row colliding on a name (a capability collision would fire the seating guard instead,
+  so the `_check_collision` tests must use declarable rows); operator-over-system-plugin respects
+  `builtin_override`; the pre-existing `built-in`/`operator` directional pairings still behave
+  exactly as before (the unordered normalization did not symmetrize them).
