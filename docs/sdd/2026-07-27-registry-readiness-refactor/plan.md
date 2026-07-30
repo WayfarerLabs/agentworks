@@ -332,10 +332,10 @@ readiness-aware and vocabulary-clean; completions regenerated.
 Governs: R11. LLD: (b) (the guard's banned-pattern definition + exemptions). Caller inventory guard
 baseline.
 
-- [ ] Add the guard test pinning the four banned patterns (inventory guard baseline), with both
+- [x] Add the guard test pinning the four banned patterns (inventory guard baseline), with both
       exemptions encoded (the construct-time single-derivation, and the builder-supplied context),
       or the honest path and the banned pattern are the same call.
-- [ ] Confirm the caller inventory has zero remaining un-migrated rows; the guard's baseline matches
+- [x] Confirm the caller inventory has zero remaining un-migrated rows; the guard's baseline matches
       HEAD.
 
 **DoD:** DoD-green; the guard passes and would fail if any banned pattern returned; the caller
