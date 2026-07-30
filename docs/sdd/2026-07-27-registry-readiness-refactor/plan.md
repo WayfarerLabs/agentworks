@@ -291,29 +291,38 @@ the graph; resolution is a distinct layer over the graph; no consumer re-derives
 
 Governs: R6 (surface strings), R9.1, R9.7, R9.8. LLD: (e). Caller inventory section G.
 
-- [ ] **`secret list` grid**: columns stay the opted-in backends; cells become would-attempt
+- [x] **`secret list` grid**: columns stay the opted-in backends; cells become would-attempt
       identifier / `not ready: <reason>` / won't-attempt, replacing the overloaded
-      `disabled`/`enabled` literals (R9.7).
-- [ ] **`secret describe`**: "Backend mappings" and "Resolution preview" become readiness-aware; the
-      preview walks `present ∧ enabled ∧ ready ∧ opted-in`; interactive-optimism preserved.
-- [ ] **Doctor**: a **new secret-backends group** (one readiness row per backend, parallel to
+      `disabled`/`enabled` literals (R9.7). Not-ready wins over the identifier; won't-attempt (a
+      `false` opt-out or a mapping-required backend with no mapping) wins over not-ready.
+- [x] **`secret describe`**: "Backend mappings" and "Resolution preview" become readiness-aware; the
+      preview walks `present ∧ enabled ∧ ready ∧ opted-in` and shows skipped not-ready backends;
+      interactive-optimism preserved (pinned by a test).
+- [x] **Doctor**: a **new secret-backends group** (one readiness row per backend, parallel to
       `_check_vm_platforms`); `_check_vm_platforms`/`_check_vm_sites` read stored readiness off the
-      graph; `_check_secrets` becomes readiness-aware; the live `preflight` (network) stays.
-- [ ] **`--reveal-secrets` to `--resolve`** (R9.8): rename the `env show` flag; decide and implement
-      whether `--reveal-secrets` survives as a deprecated alias (LLD e).
-- [ ] **The preflight resolvability predictor** (`orchestration/secrets.py`, `preview_resolution`)
-      becomes readiness-aware in lockstep, so it never predicts "would resolve via onepassword" for
-      a backend resolution will skip (R9.6 consistency).
-- [ ] **Readiness vocabulary rename across all surfaces** (R9.1, R6): every remaining "disabled"
+      graph (`_check_vm_platforms` now takes the registry, retiring its live-registry probe);
+      `_check_secrets` becomes readiness-aware; the live `preflight` (network) stays.
+- [x] **`--reveal-secrets` to `--resolve`** (R9.8): renamed the `env show` flag; kept
+      `--reveal-secrets` as a hidden, deprecated alias for one release (single stderr deprecation
+      notice, hidden from help + completions), per LLD e.
+- [x] **The preflight resolvability predictor** (`secrets/resolve.py`, `preview_resolution`, used by
+      `orchestration/secrets.predict_resolution`) becomes readiness-aware in lockstep, so it never
+      predicts "would resolve via onepassword" for a backend resolution will skip (R9.6
+      consistency).
+- [x] **Readiness vocabulary rename across all surfaces** (R9.1, R6): every remaining "disabled"
       operator string for host readiness (`resource list`, `describe`, `doctor`, site selection and
-      use-time strings) adopts the readiness vocabulary; "enabled/disabled" is reserved for opt-in.
-- [ ] **Docs + completions (DoD-docs)**: `docs/guides/resources.md` "Secrets: backends and the
-      chain", `sample-config.toml`, `cli/README.md` (the `--reveal-secrets` mention),
-      command/section help strings; regenerate the completion tree per the
-      always-consider-completions rule and verify the `--resolve` rename flows through the
-      Typer-extracted spec.
-- [ ] Tests (DoD-behavior): R9.1 (surface strings), R9.7 (grid cell states), R9.8 (`--resolve`, and
-      the alias if kept); LLD (e)'s acceptance line that interactive-optimism preview is unchanged.
+      use-time strings, plus the fold-stored strings in `vms/sites.py` and the platform-node reason
+      in `resources/graph.py`) adopts the readiness vocabulary; "enabled/disabled" is reserved for
+      opt-in. `ensure_site_enabled` renamed `ensure_site_ready`; inspect's `disabled_reason`
+      field/projection renamed `not_ready_reason` / `not_ready_reason_for`.
+- [x] **Docs + completions (DoD-docs)**: `docs/guides/resources.md` "Secrets: backends and the
+      chain" (the present/enabled/ready/opted-in/would-attempt vocabulary + not-ready skip),
+      `sample-config.toml`, `cli/README.md` (the `--reveal-secrets` mention), command/section help
+      strings; the completion tree regenerates live from the Typer-extracted spec (verified
+      `--resolve` present, the hidden alias absent).
+- [x] Tests (DoD-behavior): R9.1 (surface strings), R9.7 (grid cell states), R9.8 (`--resolve`, and
+      the deprecated alias); LLD (e)'s acceptance line that interactive-optimism preview is
+      unchanged.
 
 **DoD:** DoD-green; DoD-behavior for R9.1, R9.7, R9.8; DoD-docs; every operator surface is
 readiness-aware and vocabulary-clean; completions regenerated.

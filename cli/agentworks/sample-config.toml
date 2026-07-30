@@ -175,6 +175,10 @@ ssh_private_key = "~/.ssh/id_ed25519"        # required: used for SSH connection
 #                 able to read at command time (the 1Password app's CLI
 #                 integration enabled, or `op signin`); a mapping that points
 #                 at a missing item is a hard error, not a fall-through.
+#                 If `op` is not installed the backend is NOT-READY on this
+#                 host: resolution skips it with a warning and falls through to
+#                 the next backend in the chain (`agw secret list` /
+#                 `agw doctor` show its readiness).
 #   prompt      : interactive prompt. Always applies; you are never asked for
 #                 the same secret twice in one command, and all prompting
 #                 happens before the command starts changing anything.
@@ -184,9 +188,12 @@ ssh_private_key = "~/.ssh/id_ed25519"        # required: used for SSH connection
 
 #[secret_config]
 #backends = ["env-var", "onepassword", "prompt"]    # example chain; the default is ["env-var", "prompt"].
-# Declared backends absent from this list are dormant. Order is resolution
-# precedence: the first backend that produces a value wins. An explicit
-# empty list `backends = []` disables resolution entirely.
+# This is the opt-in chain: only listed backends are consulted, in this
+# precedence order (the first backend that produces a value wins). Declared
+# backends absent from this list are dormant. A backend that is not-ready on
+# this host (e.g. onepassword with no `op` installed) is skipped with a warning
+# and the chain falls through to the next one. An explicit empty list
+# `backends = []` disables resolution entirely.
 
 # --- VM sites (azure, proxmox, remote Lima, ...) ---
 # Places to create VMs are declared as vm-site RESOURCES (YAML manifests

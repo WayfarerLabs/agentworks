@@ -139,8 +139,8 @@ spec:
   `spec.platform_config` is validated by that platform (unknown keys are errors). Remote Lima is
   just a lima site with `platform_config.vm_host: user@host`.
 - The `lima-local` and `wsl2` sites ship built in with empty config. Like every site they register
-  on every host and disable themselves where this host lacks what they need (wsl2 is Windows-only; a
-  local Lima site needs `limactl`); a disabled site still lists and describes with its reason, and
+  on every host and report not-ready where this host lacks what they need (wsl2 is Windows-only; a
+  local Lima site needs `limactl`); a not-ready site still lists and describes with its reason, and
   using it is an error. Their names are reserved. A site named after a platform must declare that
   platform.
 - Consumers name sites: `agw vm create --site`, `defaults.site` in config.toml, and each VM row's
@@ -261,12 +261,46 @@ Two layers, one rule each:
   in precedence order (default `["env-var", "prompt"]`). Registered backends absent from the chain
   are dormant.
 
+### The words the surfaces use
+
+A backend, for a given secret, sits on a few independent axes. The surfaces keep them straight, and
+so should you when reading them:
+
+- **present**: a node exists for it (a built-in; later, an installed plugin). Absent means a typo or
+  an uninstalled unit.
+- **enabled / disabled**: the opt-in axis (turned on or off). "enabled" and "disabled" mean this and
+  only this; they never describe host readiness. (No backend is disabled today; the axis is modeled
+  for the plugin work.)
+- **ready / not-ready**: whether the backend can run on THIS host right now, checked offline (e.g.
+  `onepassword` is not-ready when the `op` CLI is not on `PATH`). Readiness is not resolvability: a
+  ready backend may still have no value for a given secret.
+- **opted-in**: named in `[secret_config].backends` (the chain: selection plus order). Only opted-in
+  backends are columns in `agw secret list`.
+- **would-attempt**: for THIS secret, the backend has a mapping (or is mapping-optional). A pure
+  function of the secret and its `backend_mappings`, independent of readiness. `won't attempt` is a
+  `false` opt-out, or a mapping-required backend (like `onepassword`) with no mapping.
+
 Resolution is a pass over the chain in precedence order: the first backend that produces a value
 wins. You are never prompted for the same secret twice in one command, and all prompting happens up
-front, before the command starts changing anything. A secret no active backend can resolve fails at
-preflight with a hint, before any prompt and before anything changes. `agw secret list` shows how
-each active backend would look up each secret; `agw secret describe <name>` shows one secret in
-full; `agw doctor` reports one row per secret with the runtime outcome.
+front, before the command starts changing anything. The walk considers a candidate only when it is
+**present, enabled, ready, opted-in, and would-attempt** the secret.
+
+A **not-ready** opted-in backend is **skipped with a warning** and the chain falls through to the
+next candidate (so a configured `onepassword` with no `op` installed no longer halts resolution; it
+warns and the next backend, e.g. `prompt`, takes over). The anti-masking halt is kept only for a
+_ready_ store's hard miss (available, but definitively no value), so a misconfigured store never
+falls silently through to a prompt. A secret no active backend can resolve fails at preflight with a
+hint, before any prompt and before anything changes.
+
+Readiness is offline and honest; it sits UNDER the optimistic interactivity preview. A `prompt` (or
+a biometric `op`) is still previewed optimistically on would-attempt alone: the inspection surfaces
+never probe an interaction to answer readiness.
+
+`agw secret list` shows, per opted-in backend column, the lookup identifier / `would attempt` /
+`not ready: <reason>` / `won't attempt`; `agw secret describe <name>` shows one secret in full
+(mappings flagged not-ready where they apply, and a resolution preview that skips not-ready
+backends); `agw doctor` has a **Secret backends** group (one readiness row per backend) plus one row
+per secret with the runtime outcome.
 
 ## Inspecting the whole picture
 
