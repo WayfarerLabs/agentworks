@@ -29,6 +29,10 @@ def _operator(line: int) -> Origin:
     return Origin.operator_declared(file=Path(f"f{line}.yaml"), line=line)
 
 
+def _system_plugin(plugin: str) -> Origin:
+    return Origin.system_plugin(plugin=plugin, source=f"agentworks.plugins.{plugin}")
+
+
 def test_operator_over_operator_errors_with_both_locations() -> None:
     registry = Registry.empty()
     registry.add("secret", "s1", _decl("s1"), _operator(1))
@@ -90,3 +94,67 @@ def test_line_zero_origin_collides_on_every_kind() -> None:
     registry.add("apt-package", "tool", _decl("tool"), line_zero)
     with pytest.raises(ConfigError, match="duplicate apt-package"):
         registry.add("apt-package", "tool", _decl("tool"), _operator(3))
+
+
+# -- The R7 system-plugin matrix (declarable rows + operator override) ------
+#
+# Capability clashes never reach _check_collision (the seating guard in
+# register_plugin owns them), so these drive DECLARABLE rows. The two
+# directions of each system-plugin pairing share one message (the unordered
+# normalization); the pre-existing built-in/operator directional asymmetry is
+# preserved verbatim by the tests above (reserved one way, ordering-conflict
+# the other).
+
+
+def test_two_system_plugins_on_one_name_is_a_curation_error() -> None:
+    registry = Registry.empty()
+    registry.add("secret", "s1", _decl("s1"), _system_plugin("alpha"))
+    with pytest.raises(ConfigError, match="published by two system plugins"):
+        registry.add("secret", "s1", _decl("s1"), _system_plugin("beta"))
+
+
+def test_system_plugin_over_builtin_collides() -> None:
+    registry = Registry.empty()
+    registry.add("secret", "s1", _decl("s1"), Origin.built_in(source="app"))
+    with pytest.raises(ConfigError, match="collides with a built-in"):
+        registry.add("secret", "s1", _decl("s1"), _system_plugin("alpha"))
+
+
+def test_builtin_over_system_plugin_collides_same_message() -> None:
+    registry = Registry.empty()
+    registry.add("secret", "s1", _decl("s1"), _system_plugin("alpha"))
+    with pytest.raises(ConfigError, match="collides with a built-in"):
+        registry.add("secret", "s1", _decl("s1"), Origin.built_in(source="app"))
+
+
+def test_operator_over_reserved_system_plugin_errors() -> None:
+    registry = Registry.empty()
+    registry.add("secret", "s1", _decl("s1"), _system_plugin("alpha"))
+    with pytest.raises(ConfigError, match="system-plugin resource with a reserved name"):
+        registry.add("secret", "s1", _decl("s1"), _operator(3))
+
+
+def test_operator_over_allow_system_plugin_replaces() -> None:
+    from agentworks.apt import AptPackageEntry
+
+    registry = Registry.empty()
+    entry = AptPackageEntry(name="gh", description="plugin", apt=["gh"])
+    registry.add("apt-package", "gh", entry, _system_plugin("alpha"))
+    override = AptPackageEntry(name="gh", description="operator", apt=["gh2"])
+    registry.add("apt-package", "gh", override, _operator(5))
+    assert registry.lookup("apt-package", "gh").description == "operator"
+
+
+def test_system_plugin_over_operator_does_not_clobber_even_on_allow_kind() -> None:
+    # The override is DIRECTIONAL: allow-kind lets the OPERATOR override a
+    # plugin, but a plugin publishing over an operator's own declaration must
+    # error and leave the operator row intact (the reverse direction).
+    from agentworks.apt import AptPackageEntry
+
+    registry = Registry.empty()
+    operator_row = AptPackageEntry(name="gh", description="operator", apt=["gh"])
+    registry.add("apt-package", "gh", operator_row, _operator(5))
+    plugin_row = AptPackageEntry(name="gh", description="plugin", apt=["gh2"])
+    with pytest.raises(ConfigError, match="collides with an operator-declared"):
+        registry.add("apt-package", "gh", plugin_row, _system_plugin("alpha"))
+    assert registry.lookup("apt-package", "gh").description == "operator"

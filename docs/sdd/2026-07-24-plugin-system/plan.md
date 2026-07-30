@@ -61,28 +61,28 @@ Governs: R1. LLD: (c). Pure vocabulary; mergeable alone.
 Governs: R2, R3, R6, R7, R5's registration half. LLD: (a). No `build_registry` wiring yet, so no
 real config changes behavior; the fixture proves the framework.
 
-- [ ] `Plugin` descriptor (`plugins/base.py`): frozen; `name`, `description`, impls-by-kind,
+- [x] `Plugin` descriptor (`plugins/base.py`): frozen; `name`, `description`, impls-by-kind,
       `manifests`, reserved `required_scopes: tuple[ScopeLevel, ...]` and a real `commands`
       placeholder frame; `__post_init__` normalizes the capabilities mapping to immutable.
-- [ ] `register_plugin` (`plugins/registration.py`): validate the whole descriptor first (name
+- [x] `register_plugin` (`plugins/registration.py`): validate the whole descriptor first (name
       non-empty + `/`-free; every kind has an adapter; every impl a class with a non-empty +
       `/`-free `name`; no intra-descriptor collisions), THEN seat every impl atomically
       (all-or-nothing); idempotent per impl name; typed error on a cross-plugin impl-name collision.
       Export a seat/unseat snapshot context manager for tests.
-- [ ] The per-kind `CapabilityAdapter` + `CAPABILITY_ADAPTERS`: seat (class vs instance) + build-row
+- [x] The per-kind `CapabilityAdapter` + `CAPABILITY_ADAPTERS`: seat (class vs instance) + build-row
       (`VMPlatformEntry`/etc. with a supplied origin); a row is built only for an actually-seated
       impl.
-- [ ] Installed index (`plugins/__init__.py`): `SYSTEM_PLUGINS`, populated by the index importing
+- [x] Installed index (`plugins/__init__.py`): `SYSTEM_PLUGINS`, populated by the index importing
       each shipped module and calling `register_plugin(module.PLUGIN)` itself (inverted control);
       typed error on a duplicate plugin name; ships empty.
-- [ ] Two collision layers, reconciled (R7): a **capability** name-clash (built-in/plugin,
+- [x] Two collision layers, reconciled (R7): a **capability** name-clash (built-in/plugin,
       plugin/plugin) is caught at **seating** in `register_plugin` (the impl name is the registry
       key), with a message naming the occupant's real origin (core vs plugin); `_check_collision`'s
       `system-plugin` matrix is for **declarable (manifest) rows** and operator-override. Extend
       `_check_collision` by the unordered variant pair, applying the unordered normalization only to
       system-plugin-involving pairs (the built-in/operator directional asymmetry is preserved
       verbatim); each pairing its own message; existing pairings untouched.
-- [ ] Tests (fixture-driven): descriptor validation rejects missing-name / instance-not-class /
+- [x] Tests (fixture-driven): descriptor validation rejects missing-name / instance-not-class /
       unknown-kind / colliding-impl with a typed attributed error; atomic registration seats nothing
       on a mid-descriptor failure; the `CAPABILITY_ADAPTERS.keys()` == capability-kinds guard; the
       collision cases target the **layer that actually fires** (capability clash, the seating guard;

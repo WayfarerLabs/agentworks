@@ -138,6 +138,14 @@ class Registry:
 
         existing_origin: Origin | None = getattr(existing, "origin", None)
         existing_variant = getattr(existing_origin, "variant", None)
+        # A pair involving ``system-plugin`` is decided FIRST, on the
+        # UNORDERED ``{existing, incoming}`` variant set, so the two
+        # directions of each system-plugin pairing share one message (R7).
+        # The pre-existing non-system-plugin branches below keep their
+        # directional asymmetry verbatim.
+        if "system-plugin" in {existing_variant, incoming.variant}:
+            Registry._check_system_plugin_collision(kind, name, existing_variant, incoming.variant)
+            return
         if existing_variant == "built-in" and incoming.variant == "built-in":
             return
         if existing_variant == "built-in" and incoming.variant == "operator-declared":
@@ -162,6 +170,63 @@ class Registry:
         raise ConfigError(
             f"publisher ordering conflict: {incoming.variant} row published "
             f"over {existing_variant} row for {kind}/{name}"
+        )
+
+    @staticmethod
+    def _check_system_plugin_collision(
+        kind: str,
+        name: str,
+        existing_variant: str | None,
+        incoming_variant: str,
+    ) -> None:
+        """Decide a collision where at least one side is ``system-plugin``,
+        on the UNORDERED variant pair (R7).
+
+        Capability clashes never reach here (they are caught at seating, in
+        ``register_plugin``): what reaches this for a system-plugin pair is
+        a declarable (manifest) row or the operator-override case. Returns
+        normally only for the operator-override "allow" path (the caller
+        then lets the incoming row replace the existing one); every other
+        pairing raises its own ``ConfigError`` (never the generic
+        "publisher ordering conflict"). It stays a ``ConfigError`` even for
+        the two-plugins curation bug: the rendering is the right operator
+        surface if it ever escapes, and CI's fixture/collision tests catch
+        the curation bug.
+        """
+        variants = {existing_variant, incoming_variant}
+        if variants == {"system-plugin"}:
+            raise ConfigError(f'{kind} "{name}" is published by two system plugins')
+        if "built-in" in variants:
+            raise ConfigError(f'system-plugin {kind} "{name}" collides with a built-in of the same name')
+        if "operator-declared" in variants:
+            if existing_variant == "system-plugin" and incoming_variant == "operator-declared":
+                # Operator publishing OVER a plugin's declarable row. Mirror
+                # the built-in-over-operator branch, which is deliberately
+                # DIRECTIONAL: allow-kind lets the operator override, reserved
+                # errors. (Unordered only for the two symmetric pairings
+                # above; the override direction stays directional.)
+                handler = KIND_REGISTRY.get(kind)
+                if handler is not None and handler.builtin_override == "allow":
+                    return  # operator override permitted; the incoming operator row wins
+                raise ConfigError(
+                    f'{kind} "{name}" is a system-plugin resource with a reserved '
+                    f"name; declare a differently-named {kind} instead",
+                )
+            # Reverse direction (existing operator, incoming system-plugin): a
+            # plugin must NEVER clobber an operator's own declaration, even on
+            # an allow-override kind. Not reachable under build_registry's
+            # publish order (plugins publish before config.publish_to), but
+            # guarded explicitly so the unordered normalization cannot
+            # symmetrize it.
+            raise ConfigError(
+                f'system-plugin {kind} "{name}" collides with an operator-declared resource of the same name'
+            )
+        # Unreachable at publish time: auto-declared rows are synthesized at
+        # finalize, after every ``add`` call, so a system-plugin pair with an
+        # auto-declared side cannot arise here.
+        raise ConfigError(
+            f'unexpected system-plugin collision for {kind} "{name}" '
+            f"(incoming {incoming_variant}, existing {existing_variant})"
         )
 
     # -- Finalize phase ------------------------------------------------

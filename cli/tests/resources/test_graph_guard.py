@@ -256,6 +256,11 @@ _REGISTRY_READ_ALLOWLIST = frozenset(
         "capabilities/harness/__init__.py",
         "capabilities/git_credential/__init__.py",
         "secrets/backends.py",
+        # Plugin framework: the per-kind adapters SEAT plugin impls into the
+        # four registries (the plugin analog of the built-in publishers), and
+        # register_plugin snapshots/restores them for the seat/unseat helper.
+        "plugins/adapters.py",
+        "plugins/registration.py",
         # Graph builder (stamps impls, assembles the build context, folds).
         "resources/graph.py",
         # Edge production + finalize validate (fetch the capability class).
