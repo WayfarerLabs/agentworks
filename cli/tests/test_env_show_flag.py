@@ -7,6 +7,7 @@ service layer so no DB / config / VM context is needed.
 
 from __future__ import annotations
 
+import re
 from typing import TYPE_CHECKING, Any
 
 import pytest
@@ -16,6 +17,18 @@ from agentworks.cli import app
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
+
+_ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
+
+
+def _strip_ansi(text: str) -> str:
+    """Remove ANSI color codes so option-flag assertions survive colorized
+    help. Rich renders a flag like ``--resolve`` as two separately-styled
+    dash spans (``ESC[..m-ESC[0mESC[..m-resolve``), so a literal
+    ``"--resolve" in output`` check fails whenever the terminal is colorized
+    (as CI's is, but this VM's is not). Stripping the codes makes the flag
+    contiguous again and the assertion robust to the runner's color mode."""
+    return _ANSI_RE.sub("", text)
 
 
 @pytest.fixture()
@@ -76,5 +89,6 @@ def test_help_shows_resolve_hides_reveal_secrets() -> None:
     completion tree)."""
     result = CliRunner().invoke(app, ["env", "show", "--help"])
     assert result.exit_code == 0, result.output
-    assert "--resolve" in result.output
-    assert "--reveal-secrets" not in result.output
+    plain = _strip_ansi(result.output)
+    assert "--resolve" in plain
+    assert "--reveal-secrets" not in plain
