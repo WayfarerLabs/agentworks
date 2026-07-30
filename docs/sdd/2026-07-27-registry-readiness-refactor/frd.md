@@ -277,10 +277,18 @@ outcome holds.
      site-selection / use-time strings), i.e. all readiness strings per the caller inventory, to the
      readiness vocabulary.
   2. **A typo'd capability reference is now a hard error, not a silent self-disable** (R7).
-  3. **Which-error-wins can reorder.** With capability-block validation moved out of decode/load
-     into a post-graph pass (R3, R8) (construction still validates, per R3), a config with both a
-     malformed block and (say) a cycle now reports the cycle first, where today the malformed block
-     failed at decode before finalize ran.
+  3. **Which-error-wins can reorder, and a malformed block is re-framed by owner and origin.** With
+     capability-block validation moved out of decode/load into a post-graph pass (R3, R8)
+     (construction still validates, per R3), a config with both a malformed block and (say) a cycle
+     now reports the cycle first, where today the malformed block failed at decode before finalize
+     ran. The same move also re-frames the malformed-block message: it now carries the resource's
+     owner label plus its origin `file:line` (the finalize pass attributes each error to its
+     resource, not its raw load site), so a legacy `[proxmox]` TOML section's error reads
+     `vm-site/proxmox.<field> ... (<path>:<line>)` rather than `[proxmox].<field> ...`, and the TOML
+     path gains a `file:line` it never framed before (a strict improvement in traceability). One
+     doctor consequence: a malformed capability block in a manifest now surfaces under the "Resource
+     registry" check row rather than the "Manifest" row, since it no longer raises inside
+     `load_manifests`; the check still fires with the same hint.
   4. **A not-ready resource's malformed block is deferred, not silenced.** It is validated when the
      resource becomes ready, not at every build (R3); today decode/load validate it eagerly
      regardless of readiness.

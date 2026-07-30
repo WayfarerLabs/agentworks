@@ -121,15 +121,15 @@ Governs: R3. LLD: (b) for the pass; caller inventory section A (MOVE rows).
 The green-window care (HLA sequencing): decode/load must **stop** throwing on a capability block in
 the **same change** the finalize `validate` pass **starts**, so no window validates neither.
 
-- [x] Add the resource-level `validate(config)` aggregator (mirroring the resource-level
-      edge-extraction method): it pulls each capability sub-block and calls that capability's
-      `validate` (phase 1), centralizing what decode/load call inline today. This is the method the
-      finalize pass invokes per node.
+- [x] Add the resource-level `validate()` aggregator (mirroring the resource-level edge-extraction
+      method; it reads the resource's own fields, no `config` param): it pulls each capability
+      sub-block and calls that capability's `validate` (phase 1), centralizing what decode/load call
+      inline today. This is the method the finalize pass invokes per node.
 - [x] Add the finalize `validate` pass: after the graph is built, run each present resource's
-      `validate(config)` (which calls its capabilities' `validate`) with precise `file:line`
-      framing. This phase runs it over **every** present resource (the readiness gating that scopes
-      it to ready+enabled arrives in phase 3; until then all nodes are effectively ready, so scope
-      is identical).
+      `validate()` (which calls its capabilities' `validate`) with precise `file:line` framing. This
+      phase runs it over **every** present resource (the readiness gating that scopes it to
+      ready+enabled arrives in phase 3; until then all nodes are effectively ready, so scope is
+      identical).
 - [x] Remove the `validate_config`-for-validation calls from `manifests/decode.py:176,242,310` and
       the TOML loaders (`config/loaders_sessions.py:163`, `config/loaders_core.py:384`,
       `config/loaders_resources.py:430`) in the same commit.
