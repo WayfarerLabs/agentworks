@@ -66,9 +66,13 @@ row can exist.)
   - **Unknown keys in `[plugins]` are a hard `ConfigError`**, not a collected warn-issue. This
     **diverges** from `_warn_unexpected_keys` (`loaders_core.py:40-58`), which `secret_config` uses
     to accumulate a soft issue. The divergence is deliberate and pinned: R4 requires unknown keys to
-    be a config error precisely to keep the door for future per-plugin settings explicit (a typo'd
-    future key must fail loudly now, not warn-and-ignore). Message names the section and the
-    offending keys.
+    be a config error precisely because `[plugins]` is an opt-in gate, a typo'd key (`enabeld`, or a
+    future per-plugin key used a release too early) must fail loudly, not silently leave plugins
+    un-enabled behind a warning the operator may miss. Message names the section and the offending
+    keys. **Required in-code note (review disposition):** the loader carries an explicit comment
+    stating this is a deliberate departure from the soft `_warn_unexpected_keys` convention and WHY,
+    so a future section author does not "consistency-fix" it back to soft-warn; the same rationale
+    is recorded in the Phase 6 ADR as the project stance on strict-vs-lenient config sections.
 - `config/load.py` calls `_load_plugins(data, issues, decls)` on the **settings** path (`data`, not
   `resource_data`, `load.py:152`), so it is populated identically under
   `load_config(resources=False)`, and passes `plugins_enabled=...` into the `Config(...)`
@@ -128,7 +132,8 @@ shared helper (leave-it-nicer, and it retires the assert); its origin is
 
 ## 5. `build_registry` wiring, staying pure (R4, R5, R7, Phase 5)
 
-In `bootstrap.build_registry` (`bootstrap.py:82-98`):
+In `bootstrap.build_registry` (def at `bootstrap.py:34`; the publisher region is `~82-106`, interior
+anchors `95`/`96`/`98`/`105-106`):
 
 - Insert `plugins.publish_plugins(registry, config)` **between** the built-in capability rows
   (`vm_platforms.publish_to(registry)`, `bootstrap.py:95`) and `config.publish_to(registry)`

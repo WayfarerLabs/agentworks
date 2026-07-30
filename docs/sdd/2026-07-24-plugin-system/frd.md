@@ -296,7 +296,14 @@ Three reasons drive this first step, in priority order.
   computation; the disabled reason is carried on the enablement state, not hard-coded to "not
   enabled in [plugins]"; and nothing in the plugin producer assumes it is the only source. No
   operator-explicit-disable surface, config, or per-unit granularity is built here; the requirement
-  is that adding one later needs no re-shaping of the axis or the producer seam.
+  is that adding one later needs no re-shaping of the axis or the producer seam. **One known
+  future-work item that surface will bring** (noted so it is not a surprise): in v1 the surfaces
+  that need the disabled _reason_ but do not read the fold-carried mark (the doctor roster,
+  `describe`, the use-time gates) re-derive it from the row's `system-plugin` origin. An
+  operator-explicit-disable source can disable a **built-in** node, which has no plugin origin to
+  re-derive from, so those surfaces will need to read the reason from the disable source (or a
+  persisted reason) rather than the origin. This is a display-layer follow-on, not an axis or
+  producer change.
 
 - **R14 The opt-in guarantee holds for every kind a plugin contributes; each consumer honors
   enablement per self-determined readiness.** R9's promise ("nothing a not-enabled plugin offers is
@@ -323,6 +330,13 @@ Three reasons drive this first step, in priority order.
   disable them, an un-gated harness or git-credential-provider would be silently usable while
   not-enabled, holing strictly-opt-in for half of R6's kinds. Which model each kind uses is the
   consuming resource's call (per above), not a blanket rule.
+
+  **Operator-facing consequence** (falls out of the gates, stated so it is not a surprise):
+  disabling a plugin that an operator's resources already depend on does not tear anything down. An
+  already-running VM or session keeps running (nothing re-reads enablement mid-life); but the next
+  operation that would (re)construct the disabled unit, a VM reinit/restart on a disabled platform,
+  a git op needing a disabled provider, a session (re)build on a disabled harness, refuses loudly
+  with the "enable plugin `<name>`" hint. Disable is a forward gate, not a retroactive teardown.
 
 ## Scope
 

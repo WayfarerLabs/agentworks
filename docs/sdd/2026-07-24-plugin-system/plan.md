@@ -186,9 +186,10 @@ Governs: R9 (disabled-hides + roster), R10, R11. LLD: (c).
       `KIND_REGISTRY` hook (R12).
 - [ ] **Docs (DoD-docs)**: `agentworks/plugins/README.md` (authoring a system plugin, the
       descriptor, the enablement model), `sample-config.toml` (`[plugins]`), and an ADR recording
-      the decision (plugin-as-origin, enablement-as-first-class-multi-source-axis, the door for
-      operator-explicit disable). Regenerate completions if any CLI surface changed
-      (`--include-disabled`).
+      the decisions (plugin-as-origin, enablement-as-first-class-multi-source-axis, the door for
+      operator-explicit disable, and the deliberate `[plugins]` strict-unknown-key stance vs the
+      soft-warn convention, so future config-section authors know which precedent to follow).
+      Regenerate completions if any CLI surface changed (`--include-disabled`).
 - [ ] Tests (DoD-behavior, R11): the full fixture end-to-end (descriptor to index to registration to
       unconditional publication to enablement-overlay to consumption + hidden-when-disabled +
       roster); the shipped index is empty; the reserved fields are inert.
@@ -203,3 +204,8 @@ land; the fixture proves the whole path; no demo plugin ships.
 - [ ] Load-bearing content promoted to permanent homes (`plugins/README.md`, the ADR); nothing
       operator/contributor-facing depends on `docs/sdd/`.
 - [ ] `locked.md` written; the door for operator-explicit disable (R13) recorded for the follow-on.
+- [x] The registry refactor's `locked.md` seam note reconciled (supersession addendum recorded:
+      `_node_enablement()` -> injected `finalize(enablement_sources=...)`), per the PR design
+      review.
+- [ ] When Phase 4 removes `_node_enablement()`, confirm the registry `locked.md` supersession note
+      (added at design time) still matches the shipped seam.

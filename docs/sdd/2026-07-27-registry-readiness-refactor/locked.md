@@ -83,10 +83,20 @@ Nothing operator- or contributor-facing depends on `docs/sdd/`:
 ## Notes for the next effort (the plugin rebuild)
 
 - **The enablement axis is modeled but has no producer.** A node's `enablement` defaults to
-  `enabled` via `Registry._node_enablement()`; the plugin rebuild overrides it to mark opted-out
-  units `disabled`. The fold distributes a disabled dependency's state, `has_ready_referrer` and
+  `enabled` via `Registry._node_enablement()`; the plugin rebuild produces disabled state for
+  opted-out units. The fold distributes a disabled dependency's state, `has_ready_referrer` and
   resolution exclude disabled units, and a fixture test proves the "enable its unit" propagation end
   to end.
+  - **Seam superseded 2026-07-30 by the system-plugin SDD** (`docs/sdd/2026-07-24-plugin-system/`,
+    PR #237, stacked on this branch). This note originally said the producer "overrides
+    `_node_enablement()`". The plugin design refined the seam: because the `Registry` must stay
+    config-agnostic, `_node_enablement()` (a no-arg method) is **removed** in favor of injected
+    **enablement sources** (`finalize(enablement_sources=[...])`, where `build_registry` constructs
+    each source already bound to config), and the disabled state gains a carried remediation reason.
+    The plugin SDD's Phase 4 makes this code change (migrating this refactor's four
+    `test_readiness_fold.py` `_node_enablement` tests to inject a stub source instead of patching
+    the method); when it lands, this supersession is already recorded here. The consumer rule below
+    (gate on enablement, not readiness) is unchanged and honored.
 - **Disabled-node consumers must gate on enablement, not readiness.** A disabled node's own
   readiness is a `Readiness.ready()` placeholder (readiness is computed only for enabled nodes);
   every consumer that must exclude a disabled node reads `enablement_of` (or the fold verdict of a

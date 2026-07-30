@@ -25,7 +25,7 @@ The reason is **consumed** only by a **propagating** `not_ready` hook: `VMSiteDe
 `platform.enablement is Enablement.disabled` and returns a blocked `Readiness` with the hardcoded
 tail `"enable its unit"` (`vms/sites.py:122-123`), and the R14 git-credential hook (added below)
 does the same for its provider. The reason travels to those hooks inside the `DependencyState` the
-fold hands in (`graph.py:87-104`, `graph.py:384-389`). Nothing else needs the reason on the graph:
+fold hands in (`graph.py:88-104`, `graph.py:384-389`). Nothing else needs the reason on the graph:
 the disabled node's own readiness is a ready placeholder (`graph.py:368`), `has_ready_referrer` and
 `_validate_resources` gate on the **binary** axis only (`registry.py:486`, `registry.py:328`),
 `active_backends` / secret-mapping validation exclude disabled backends via the binary
@@ -80,7 +80,7 @@ rule (R13 seam).
 
 ### 3. `DependencyState.disabled_reason` (additive field)
 
-`DependencyState` (`graph.py:87-104`) gains one field, defaulted:
+`DependencyState` (`graph.py:88-104`) gains one field, defaulted:
 
 ```python
 disabled_reason: str | None = None   # the mark's reason when this dep is disabled; None otherwise
