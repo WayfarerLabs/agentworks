@@ -206,7 +206,14 @@ Three reasons drive this first step, in priority order.
   `secret-backend`, `git-credential-provider`) and declarable YAML resources of existing declarable
   kinds. A plugin does not introduce a new capability kind or declarable kind. A plugin naming a
   capability kind with no registration adapter is a typed error (enforced at descriptor validation,
-  R2), so "existing kinds only" holds by construction.
+  R2), so "existing kinds only" holds by construction. **Bundleable-declarable constraint (v1):**
+  because a bundled declarable resource is only strictly-opt-in if its reference has an enablement
+  use-gate (R9), a plugin may bundle a manifest resource only of a declarable kind whose consumption
+  is gated (an allowlist enforced at publication). The kinds the migrated plugins ship (`az-cli`,
+  `claude` are install-commands) are gated; a kind whose gate is not yet wired (for example a
+  bundled `secret` or `git-credential`) is excluded until its use-gate lands, an additive expansion.
+  This keeps R9's opt-in guarantee true by construction for every kind a plugin can bundle, rather
+  than by documentation.
 
 - **R7 Precedence and collisions are an explicit, order-independent matrix.** Because the
   interleaved publisher order means a single `build_registry` slot cannot sit "after all built-ins,
@@ -216,11 +223,19 @@ Three reasons drive this first step, in priority order.
   `builtin_override` permits, else a typed reserved-name error; `system-plugin` and `built-in` are
   peers (a typed error either way); two `system-plugin` rows on the same `(kind, name)` are a typed
   error. Existing operator-vs-operator and built-in-vs-built-in behavior is unchanged. Because
-  system plugins are a **curated in-repo set**, a name collision among them (even between two
-  not-enabled plugins, since all shipped plugins publish per R5) is a curation bug and a build error
-  is the correct, loud outcome; resource-name namespacing that would let independent external
-  plugins coexist is deferred (Future direction). Each new pairing gets its own clear message, not
-  the generic "publisher ordering conflict".
+  system plugins are a **curated in-repo set**, a name collision among them is a curation bug and a
+  build error is the correct, loud outcome; resource-name namespacing that would let independent
+  external plugins coexist is deferred (Future direction). Each new pairing gets its own clear
+  message, not the generic "publisher ordering conflict". The two collision layers behave
+  differently on the enablement axis, and the difference is deliberate: a **capability** name-clash
+  fires at **seating** (import time), so it is a build error whether or not either plugin is enabled
+  (both seat their impls unconditionally). A **declarable (manifest)** name-clash, once manifests
+  are present-but-disabled (R9), is resolved enablement-aware: a **disabled** plugin's declarable
+  row never errors and never blocks an operator's or another plugin's same-named row (it yields as
+  if absent); the two-plugin curation bug therefore surfaces when **both** colliding declarable rows
+  are enabled, caught by a CI fixture that enables every shipped plugin. This keeps a disabled
+  plugin's bundled resource from blocking an operator's name (R9) without weakening the curated-set
+  guarantee.
 
 - **R8 Plugin capabilities are configured at their consumption sites.** A plugin capability draws
   its config from the consuming resource that references it (a `vm-site`, a `session-template`),

@@ -254,6 +254,20 @@ capability rows). A **capability** clash fails at seating (import-time `PluginEr
 outcome for an in-repo curation bug; resource-name namespacing that would let independent external
 plugins coexist is deferred (FRD Future direction).
 
+> **Phase 7 refinement (2026-07-30, reopened SDD; see LLD (c) 3b).** Manifest parity publishes a
+> **not-enabled** plugin's declarable rows as **weak** (a publisher-declared add-if-absent /
+> silently-overwritable property consulted in `Registry.add` **before** this matrix), so for
+> declarable rows the "even when both are not enabled" clause above now applies only to
+> **capability** seating: a declarable clash reaches this matrix, and errors, only between
+> **strong** rows (enabled plugins, built-ins, operators). A disabled plugin's declarable row never
+> errors and never blocks; the two-plugins curation bug still fails loudly the moment both are
+> enabled, which the enable-every-shipped-plugin fixture pins in CI. The matrix itself, including
+> the reserved-name direction, is unchanged; the weak short-circuit simply runs first, so a disabled
+> plugin row behaves as if absent (no reserved-name error against an operator row either). The
+> "every declarable kind a plugin would ship is `reserved`" observation two paragraphs up also
+> narrows: the Phase 7 bundleable-kind allowlist (LLD c 3b.2) includes the install-command and apt
+> kinds, which are `builtin_override = "allow"`, so the operator-override path is live for them.
+
 ## What does not change
 
 The capability kinds and `KIND_REGISTRY`; the four capability registries' shapes; the manifest

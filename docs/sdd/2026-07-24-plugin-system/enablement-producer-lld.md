@@ -1,15 +1,16 @@
 # LLD (b): the `_node_enablement` producer (reason-carrying, composed over sources)
 
 Implements HLA [components 8, 8b](./hla.md), the load-bearing piece. Governs plan
-[Phase 4](./plan.md); FRD R9 (capability side), R13, R14. Owns the additive extension of the landed
-registry model so a not-opted-in plugin's contributions become **present-but-disabled** with a
-reason that reaches the dependent's hint, so `_node_enablement` becomes a **composition over
-enablement sources** into which a future operator-explicit-disable source slots with no re-shaping,
-and so the two capability kinds the refactor left un-wired (`harness`, `git-credential-provider`)
-actually honor enablement at their consumers (R14). It builds exactly one enablement source (plugin
-opt-in). It changes no fold or producer **logic**; the whole point is that the refactor already
-distributes and gates enablement, and this LLD produces it, threads a reason alongside it, and wires
-the last two consumers.
+[Phase 4, and Phase 7's reference-side half](./plan.md); FRD R9 (capability side and, per the Phase
+7 extension section below, the manifest side's reference gate), R13, R14. Owns the additive
+extension of the landed registry model so a not-opted-in plugin's contributions become
+**present-but-disabled** with a reason that reaches the dependent's hint, so `_node_enablement`
+becomes a **composition over enablement sources** into which a future operator-explicit-disable
+source slots with no re-shaping, and so the two capability kinds the refactor left un-wired
+(`harness`, `git-credential-provider`) actually honor enablement at their consumers (R14). It builds
+exactly one enablement source (plugin opt-in). It changes no fold or producer **logic**; the whole
+point is that the refactor already distributes and gates enablement, and this LLD produces it,
+threads a reason alongside it, and wires the last two consumers.
 
 The single hardest requirement here is **additive-ness**: get it wrong and the refactor's
 fold/materialization/validation/secret-resolution code has to change. Below, every touch point is
@@ -346,6 +347,131 @@ exercise a disabled plugin of **each of the four kinds** through its actual cons
 not-ready; secret backend excluded; git-credential not-ready; session harness use-error), so R9's
 guarantee is proven kind-by-kind, not only for vm-platform.
 
+## Closing the declarable-reference gap (R9 manifest parity, Phase 7)
+
+> Added 2026-07-30 for the reopened SDD. LLD (c) 3b makes a disabled plugin's **bundled declarable
+> rows present** (published weak, disabled by the same overlay). This section owns the consumption
+> side: without it, a present-but-disabled row is silently usable, because a present target is not a
+> miss at `_resolve_misses` (`resources/registry.py:512-513`) and every declarable consumer fetches
+> rows by name with no enablement read. The scouted consumers at HEAD: the agent install runner
+> reads `kind_dict(registry, "user-install-command")` and runs the entry
+> (`agents/initializer.py:469`, loop at `:475-503`); VM init phase B does the same for
+> `system-install-command` and the admin's `user-install-command` set
+> (`vms/initializer/driver.py:488-489`, run calls at `:619-622` and `:757-760`, runner at
+> `vms/initializer/packages.py:224`); and the template resolvers merge a parent row's entire recipe
+> with no enablement read (`agents/templates.py:96-102`, `vms/templates.py:112-118`,
+> `sessions/templates.py:128`), so a disabled plugin template named in `inherits` would leak its
+> whole contribution into an operator's resolved template.
+
+### The named-row rule (pinned)
+
+Enablement gates existed only where the four capability kinds are consumed (R14). A declarable row
+that is present but disabled generalizes the need: **any consumer that fetches a declarable row by
+name and acts on it must consult `enablement_of` first, and a disabled row is a typed refusal
+carrying the enable-plugin hint, never a silent use and never an unknown-name error.** Like R14,
+_how_ each consuming flow honors the rule is its own choice; unlike R14's four bespoke wirings, the
+declarable kinds share one shape (fetch-by-name then act), so they share one helper pair.
+
+### The helpers (additive, in `resources/access.py`)
+
+Co-located with `kind_dict` (`access.py:29`) and `admin_template` (`access.py:62`), the access layer
+every scouted consumer already imports:
+
+- `ensure_reference_enabled(registry, kind, name)`: the direct-name gate, mirroring
+  `ensure_harness_enabled` (`capabilities/harness/__init__.py:68-101`) line for line: return unless
+  `registry.graph.enablement_of(kind, name) is Enablement.disabled`; on disabled, raise a typed
+  `StateError` (entity kind/name attached) whose tail derives the plugin from the row's
+  `system-plugin` origin (`registry.lookup(kind, name).origin.plugin`), falling back to
+  `enable its unit` for a non-plugin disabled row (a future operator-explicit-disable source, R13),
+  with the doctor-roster hint line.
+- `ensure_recipe_enabled(registry, kind, name)`: the closure gate for template recipes. Checks the
+  named node itself, then every node in `registry.graph.reachable_from(kind, name)`
+  (`resources/graph.py:212-237`) whose kind is **declarable**
+  (`KIND_REGISTRY[kind].category == "declarable"`, the field pinned at e.g.
+  `install_commands.py:190`), refusing on the first disabled one via the same error shape, naming
+  the offending `(kind, name)`. **Capability nodes are deliberately excluded** from the closure
+  check: each capability kind keeps its own R14 model (platform propagates via the site, backend
+  excluded at resolution, provider propagates via the credential, harness gated by
+  `ensure_harness_enabled`), so the closure gate neither duplicates nor contradicts them.
+
+Why the closure is the right unit: the resolvers merge **everything reachable** into the recipe
+(parent lists append-merge, `agents/templates.py:116-133`, `vms/templates.py:145-157`), and the raw
+template's graph edges are exactly what the resolvers follow (`agents/template.py:59-77`,
+`vms/template.py:101-131`, `vms/admin.py:68-81`, plus the `apt-package -> apt-source` hop at
+`apt.py:79-105`), so "any disabled declarable in the closure" is "some disabled contribution the
+recipe would consume". Both helpers are safe no-ops for implicit defaults: `enablement_of` tolerates
+a missing node (`graph.py:262-263`) and `reachable_from` a missing start (`graph.py:228-230`).
+
+### The gate sites (pinned, all additive)
+
+Each gate sits at the mutation entry that already holds the registry and the resolved name, before
+any remote work, exactly where `ensure_site_ready` sits (`vms/manager/lifecycle.py:151`):
+
+| flow            | site                                                              | gate                                                                               |
+| --------------- | ----------------------------------------------------------------- | ---------------------------------------------------------------------------------- |
+| agent create    | `agents/manager/lifecycle.py:76` (after resolve)                  | `ensure_recipe_enabled(registry, "agent-template", agent_tmpl.name)`               |
+| agent reinit    | `agents/manager/lifecycle.py:420`                                 | same, on `agent.template`                                                          |
+| vm create       | `vms/manager/lifecycle.py:139` and `:177`                         | `ensure_recipe_enabled` on the `vm-template` **and** the selected `admin-template` |
+| vm reinit       | `vms/manager/lifecycle.py:514` and `:540`                         | same pair                                                                          |
+| session create  | `sessions/manager/_create_build.py:177` (beside the harness gate) | `ensure_recipe_enabled(registry, "session-template", template.name)`               |
+| session restart | `sessions/manager/_lifecycle.py:312` (beside the harness gate)    | same                                                                               |
+
+The install **runners** are not gated (single enforcement point): `_run_install_commands`
+(`packages.py:224`) and `_run_agent_install_commands` (`agents/initializer.py:438`) each gain the
+drift-guard comment pointing at the entry gate, plus a caller-gating test asserting every caller of
+the runners passes through a gated entry, the same guard shape the harness node factories carry
+(`sessions/nodes.py:288,328`). The read-only display paths stay ungated, matching
+`_display_harness`: `env/show.py:265-269` resolves templates for display, and `describe` renders a
+disabled row by design (LLD c section 6).
+
+### Why a use-gate and not a fold edge (evaluated, rejected)
+
+The fold-edge alternative (give the template kinds a `not_ready(deps)` hook so a disabled
+install-command propagates not-ready onto the template, vm-site style) was evaluated against the
+code and rejected:
+
+1. **Readiness has registry-wide side effects the recipe kinds must not trigger.** A not-ready
+   referrer stops readiness-gated materialization (`has_ready_referrer`, `registry.py:562-580`): one
+   disabled `az-cli` would make the vm-template not-ready and thereby suppress materialization of
+   its `tailscale-auth-key` secret (`vms/template.py:132-138`), silently changing `secret list`,
+   doctor, and resolution for functionality unrelated to the plugin. `_validate_resources` likewise
+   skips not-ready rows (`registry.py:425-427`), deferring validation of the template's other
+   blocks. The use-gate keeps templates ready, so neither shifts.
+2. **Precedent coherence.** The `session-template` maps to exactly **one** harness and still stays
+   ready, gating at use (R14's secret model); a template with N optional recipe inputs propagating
+   not-ready would be stricter than the single-dependency case. Propagation is reserved for "serves
+   no purpose without it" resources (vm-site, git-credential).
+3. **Fold-edge is not smaller.** Nothing consults template readiness at create today
+   (`resolve_template` reads rows, not verdicts), so fold-edge still needs the same entry refusals;
+   it adds three `not_ready` hooks (plus inheritance-cascade rules) on top of them.
+4. **The tradeoff, acknowledged:** fold-edge would surface the hint in `resource list` before first
+   use. Discoverability is instead carried by `describe`'s `Disabled:` line, the doctor roster, and
+   the typed error at the first mutating use; the plan's "reference ... is not-ready with the enable
+   hint" is satisfied as **not-consumable, with the hint rendered at the gate and on describe**, not
+   as a fold verdict. (Flagged in the review notes for the lead to confirm the reading.)
+
+### Coverage audit (every consumption path per bundleable kind)
+
+- `user-install-command`: agent path gated at agent create/reinit; admin path gated at vm
+  create/reinit (the admin-template closure carries its `user_install_commands` edges,
+  `vms/admin.py:72-81`). Runner lookups drift-guarded. **Covered.**
+- `system-install-command`: vm create/reinit via the vm-template closure
+  (`vms/template.py:123-131`). **Covered.** (`az-cli` at HEAD is this kind:
+  `manifests/builtin/install-commands.yaml:15-22`.)
+- `apt-package` / `apt-source`: reachable through the same vm-template closure, including the
+  package-to-source hop (`apt.py:79-105`). **Covered.**
+- `vm-template` / `agent-template` / `admin-template` / `session-template` (named use and
+  `inherits`): the named node and every parent are in the checked closure. **Covered.**
+- Excluded kinds (`secret`, `git-credential`, `vm-site`, `workspace-template`,
+  `named-console-template`): **not gated, therefore not bundleable**; LLD (c) 3b.2's allowlist
+  raises at publish, so no ungated path is reachable. Expanding the allowlist requires wiring that
+  kind's gate here first (e.g. `git-credential` would extend `resolve_git_credential_providers`'s
+  readiness read with an `enablement_of` read on the credential row, whose own readiness is a
+  placeholder when the row itself is disabled).
+- Out of registry scope, noted for honesty: `install_claude_plugins` probes the `claude` CLI binary
+  on the VM (`vms/initializer/driver.py:822-833`), a filesystem fact, not a registry row; no gate
+  applies or is needed.
+
 ## Acceptance (Phase 4 tests must pin)
 
 - A not-opted-in plugin capability node reads
@@ -380,3 +506,37 @@ guarantee is proven kind-by-kind, not only for vm-platform.
   the only source.
 - The migrated `test_readiness_fold.py` disabled-node cases pass through the source-injection seam
   with identical verdicts.
+
+## Acceptance (Phase 7, reference side; fixture-driven)
+
+Against a fixture plugin bundling a `user-install-command`, a `system-install-command`, and an
+`agent-template` (the publication/collision cases are LLD c's list):
+
+- **No unknown-name error**: an operator `agent-template` with
+  `user_install_commands = ["<fixture-cmd>"]` and the plugin **not enabled** finalizes cleanly (the
+  present row resolves the `miss_policy="error"` reference); the same config with the row truly
+  absent still hard-errors, pinning that present-but-disabled and absent stay distinct.
+- **Agent path refusal**: `create_agent` / `reinit_agent` on that template raise the typed
+  `StateError` naming `user-install-command '<fixture-cmd>'` and `enable plugin '<fixture>'`,
+  **before any transport call** (asserted via a transport spy); enabling the plugin makes the same
+  create run the command.
+- **VM path refusal**: `create_vm` / `reinit_vm` on a vm-template naming the fixture's
+  `system-install-command` (directly or via an inherited parent, pinning the closure) refuse the
+  same way; likewise an admin-template naming the fixture's `user-install-command`.
+- **Inherits refusal**: an operator `agent-template` with `inherits = ["<fixture-template>"]` while
+  the plugin is disabled refuses at agent create with the hint naming the template row. (The
+  resolver runs before the gate and does merge the parent into the in-memory resolved object; the
+  pin is that the refusal discards it, so no disabled contribution is ever **acted on**. The
+  read-only display resolve stays permitted by design.)
+- **Session path**: a `session-template` bundled by a disabled fixture plugin refuses at session
+  create/restart via `ensure_recipe_enabled` beside the existing harness gate; the harness gate's
+  own behavior is unchanged (no double-error for a disabled harness, which the closure gate skips as
+  a capability kind).
+- **Display stays ungated**: `describe` and the env/show template rendering still work against the
+  disabled fixture rows (annotated, not refused).
+- **Helper tolerances**: both helpers are no-ops for an implicit `default` template (missing node)
+  and for an all-enabled registry; a disabled row with a non-plugin origin (stub second source, R13)
+  refuses with the `enable its unit` fallback tail.
+- **Drift guard**: the caller-gating test enumerates the callers of `_run_install_commands` /
+  `_run_agent_install_commands` and asserts each is reached only through a gated entry, mirroring
+  the harness-factory guard.

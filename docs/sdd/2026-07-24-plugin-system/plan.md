@@ -250,12 +250,16 @@ bundled manifest) + a stub.
       (extend `_check_collision` / the finalize collision pass to consult `enablement_of`). A
       `disabled`-vs-`disabled` or `disabled`-vs-operator case resolves so operator/enabled always
       wins; two enabled system-plugin rows still collide (curation bug).
-- [ ] **Reference-to-disabled-declarable path**: a reference to a present-but-disabled declarable
-      resource (an agent template's `user_install_commands` naming a disabled plugin's install-
-      command; an `extends` naming a disabled plugin's template) resolves to **not-ready with the
-      enable hint**, not unknown-name and not silent use. Determine and pin the exact consumer gate
-      (analogous to R14, but for declarable-kind references) from the scouted reference-resolution
-      path.
+- [ ] **Reference-to-disabled-declarable use-gate**: a reference to a present-but-disabled
+      declarable resource (an agent template's `user_install_commands` naming a disabled plugin's
+      install- command; a `vm-template`/`extends` naming a disabled plugin's template) is **gated at
+      use** with the enable hint (a typed error at the mutation/consumption entry + a `describe`
+      annotation), not unknown-name and not silent use. This is the R14 use-gate model generalized
+      to declarable references, NOT a fold not-ready verdict (per LLD (b): a fold-edge would
+      suppress the referrer's own secret materialization and validation, a side effect the use-gate
+      avoids). The exact gate sites are pinned in LLD (b) (agent/vm/session create+reinit entries),
+      backed by a caller-drift guard on the runners; the bundleable-kind allowlist (R6) guarantees
+      every bundled kind has such a gate.
 - [ ] Tests: a fixture plugin shipping a bundled manifest, not enabled, its manifest resource is
       present-but-disabled, hidden from `list`, shown by `describe`, and a reference to it is
       not-ready with "enable plugin `<name>`"; enabling the plugin makes it consumable; an operator
@@ -267,26 +271,32 @@ closed; no migration yet.
 
 ### Phases 8-11: migrate the four bundles. Migration LLD + `migration-strategy.md`
 
-Governs: R11, R11.1. Each phase moves one bundle's impl(s) (and, for azure, its manifest) out of the
-core into a shipped plugin package `agentworks/plugins/<name>/` (the package `__init__.py` carries
-`PLUGIN`; impl submodules move in via git rename to preserve history), appends the package to
-`_INSTALLED_MODULES`, drops the impl from the core `*_REGISTRY` + `publish_to` + `__all__`, flips
-its origin `built-in` -> `system-plugin`, makes it opt-in, and lands the lockstep docs. Shared
-helpers stay in core (`vm_platform/base.py`, `bootstrap_script.py`, `cloud_init.py` (shared by azure
-AND proxmox), the four capability `base.py`s, `secrets/base.py`); `harness_for` /
+Governs: R11, R11.1. Each phase moves one bundle's impl(s) (and, for claude and azure, its manifest)
+out of the core into a shipped plugin package `agentworks/plugins/<name>/` (the package
+`__init__.py` carries `PLUGIN`; impl submodules move in via git rename to preserve history), appends
+the package to `_INSTALLED_MODULES`, drops the impl from the core `*_REGISTRY` + `publish_to` +
+`__all__`, flips its origin `built-in` -> `system-plugin`, makes it opt-in, and lands the lockstep
+docs. Shared helpers stay in core (`vm_platform/base.py`, `bootstrap_script.py`, `cloud_init.py`
+(shared by azure AND proxmox), the four capability `base.py`s, `secrets/base.py`); `harness_for` /
 `ensure_harness_enabled` stay in core (they key by registry name, not the concrete class). Ordered
-least-test-invasive first. Each: the breaking-change (opt-in, guided enable hint) behavior pinned;
-every test / help / sample-config / guide reference updated.
+so the first migration is a clean capability-only case, then the manifest-carrying and test-heavy
+ones. Each: the breaking-change (opt-in, guided enable hint) behavior pinned; every test / help /
+sample-config / guide reference updated. The two manifest-carrying plugins (claude, azure) rely on
+Phase 7.
 
-- [ ] **Phase 8: claude** (`claude-code` harness; NO manifest, the `claude` install-command does not
-      exist). The simplest migration (~6 test files): the harness impl moves, core
-      `HARNESS_REGISTRY` drops it, the plugin seats it, origin `system-plugin`; `shell` stays the
-      default harness so the common path is unaffected; a `session-template` with
-      `harness = "claude-code"` stays ready but the existing `ensure_harness_enabled` use-gate
-      refuses it until `[plugins] enabled = ["claude"]`.
-- [ ] **Phase 9: 1password** (`onepassword` secret-backend; no manifest). The instance-seated kind
-      (exercises the adapter `prepare` instance path): a `secret` mapping `onepassword` is excluded
-      from resolution until enabled; the resolver gates on the published row before the seated impl.
+- [ ] **Phase 8: 1password** (`onepassword` secret-backend; no manifest). The clean capability-only
+      migration proving the mechanics: the impl moves, core `SECRET_BACKEND_REGISTRY` drops it, the
+      plugin seats it (the instance-seated kind, exercising the adapter `prepare` instance path),
+      origin `system-plugin`; a `secret` mapping `onepassword` is excluded from resolution until
+      enabled; the resolver gates on the published row before the seated impl.
+- [ ] **Phase 9: claude** (`claude-code` harness + the `claude` install-command manifest; needs
+      Phase 7). First manifest-carrying migration, small (~6 harness test files + one manifest
+      entry): the harness impl moves, core `HARNESS_REGISTRY` drops it, origin `system-plugin`;
+      `shell` stays the default harness so the common path is unaffected; a `session-template` with
+      `harness = "claude-code"` stays ready but `ensure_harness_enabled` refuses it until enabled;
+      the `claude` install-command becomes a bundled manifest, present-but-disabled (Phase 7), so a
+      template referencing it while claude is not enabled is gated with the enable hint, not
+      unknown-name.
 - [ ] **Phase 10: proxmox** (`proxmox` vm-platform + its `proxmox_api.py` sibling; no manifest). The
       **test-invasive** migration: proxmox is the shared orchestrated-test fixture platform (~40
       files). Repoint incidental fixtures to a core platform (`lima`) and enable the proxmox plugin
@@ -294,9 +304,9 @@ every test / help / sample-config / guide reference updated.
       enable hint until enabled.
 - [ ] **Phase 11: azure** (`azure-vm` platform + `azdo` git-credential + the `az-cli`
       install-command manifest; needs Phase 7). One plugin contributing **three kinds + a bundled
-      manifest**, the fullest exercise and the only manifest-carrying plugin (so it validates the
-      Phase 7 parity end-to-end). `azdo` is part of the azure plugin, not a standalone plugin
-      (matches prior art). The largest impl (~954 lines).
+      manifest**, the fullest exercise (a multi-kind plugin validating the Phase 7 parity end-to-end
+      alongside claude). `azdo` is part of the azure plugin, not a standalone plugin (matches prior
+      art). The largest impl (~954 lines).
 
 **DoD (each):** DoD-green; the bundle is gone from the core (registry + imports + `__all__`), lives
 in its plugin package, is opt-in with the guided enable hint through its real consumer, and its

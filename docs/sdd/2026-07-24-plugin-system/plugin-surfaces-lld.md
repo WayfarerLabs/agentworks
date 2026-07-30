@@ -1,12 +1,20 @@
 # LLD (c): plugin surfaces (origin, publish step, config, presentation, doctor)
 
-Implements HLA [components 1, 4, 5, 6, 9](./hla.md). Governs plan [Phases 1, 3, 5, 6](./plan.md);
-FRD R1, R4, R5 (publication half), R9 (manifests and presentation), R10, R12. Owns the
-`system-plugin` origin and its rendering, the `[plugins]` config loader, `plugins.publish_plugins`
-and its `build_registry` wiring, the shared typed-error manifest loader body, the disabled-hides /
-not-ready-shows default-surface rule, and the doctor plugin roster. It leans on LLD (a)'s descriptor
-and adapters and LLD (b)'s enablement producer; it invents no new gate and no bespoke
-disabled-roster dispatch.
+Implements HLA [components 1, 4, 5, 6, 9](./hla.md). Governs plan
+[Phases 1, 3, 5, 6, and 7's publication/collision half](./plan.md); FRD R1, R4, R5 (publication
+half), R9 (manifests and presentation), R10, R12. Owns the `system-plugin` origin and its rendering,
+the `[plugins]` config loader, `plugins.publish_plugins` and its `build_registry` wiring, the shared
+typed-error manifest loader body, the disabled-hides / not-ready-shows default-surface rule, and the
+doctor plugin roster. It leans on LLD (a)'s descriptor and adapters and LLD (b)'s enablement
+producer; it invents no new gate and no bespoke disabled-roster dispatch.
+
+> **Phase 7 revision (2026-07-30, reopened SDD):** section 3 step 3 and the new section 3b replace
+> the Phase 5 enabled-only manifest gate with **manifest present-but-disabled parity** (the R9
+> resolution): bundled manifests publish unconditionally, a disabled plugin's declarable rows are
+> published **weak** so they never block a stronger row, and the reference-side use gate is LLD
+> (b)'s "declarable-reference gap" section. The Phase 5 checkboxes and acceptance bullets remain the
+> immutable record of what Phase 5 shipped; the sections below describe the target state Phase 7
+> implements.
 
 ## 1. The `system-plugin` origin (R1, Phase 1)
 
@@ -120,13 +128,152 @@ Order inside the function:
    5's tests pin this: a disabled plugin's harness resolves through `_resolve_template` far enough
    to hit the use-gate.
 
-3. **Bundled manifests for enabled plugins only** (R9). For each **enabled** `plugin` whose
-   `plugin.manifests` is set, load and publish via the shared body (section 4), stamping each entry
+3. **Bundled manifests for every shipped plugin, unconditionally** (R9, revised for Phase 7). For
+   each shipped `plugin` whose `plugin.manifests` is set (enabled or not), load and publish via the
+   shared body (section 4), stamping each entry
    `Origin.system_plugin(plugin=plugin.name, source=f"agentworks.plugins.{plugin.name}/manifests/{file.name}")`.
-   Manifests are enabled-only because a not-enabled plugin offers no resources: there is no external
-   reference needing an enable hint for them (they are the plugin's own offering, not a name an
-   operator writes), so gating publication is simpler than publish-then-disable and keeps a
-   not-enabled plugin's resources out of collision checks against operator resources (R9).
+   The `enabled` set (`publish.py:94`) no longer gates publication; it decides only the row
+   **strength** (section 3b): a not-enabled plugin's manifest rows publish **weak**, an enabled
+   plugin's publish normally. The Phase 5 rationale for enabled-only ("a not-enabled plugin offers
+   no resources an operator references by name") is **superseded**: bundled declarables are
+   referenceable by name (an agent-template's `user_install_commands`, a template's `inherits`), and
+   an absent row makes such a reference an unknown-name hard error at `_resolve_misses`
+   (`resources/registry.py:525-527`, the `miss_policy="error"` branch), while a present-but-disabled
+   row gets the enable hint. The `publish.py` module docstring's "two deliberate asymmetries"
+   paragraph (`publish.py:12-22`) pins the superseded rationale and is rewritten in the same change
+   (doc lockstep).
+
+## 3b. Manifest present-but-disabled parity (R9 resolution, Phase 7)
+
+Bundled declarable resources behave like capabilities under enablement: present when shipped,
+disabled by the same overlay, never an unknown-name hard error, never a block on a stronger row.
+Three pieces; the third (the reference-side use gate) is LLD (b)'s, cross-referenced at the end.
+
+### 3b.1 Unconditional publication rides the existing overlay (changed: `publish_plugins` step 3)
+
+Dropping the enabled-only gate needs **no new enablement logic**: `plugin_enablement_source`
+(`plugins/enablement.py:42-52`) already iterates every present row of **every kind** and marks any
+`system-plugin`-origin row whose `origin.plugin` is not enabled, so a manifest row is disabled by
+the identical overlay that disables a capability row the moment it is published with the
+`system_plugin(...)` origin step 3 already stamps. No per-manifest enablement source, no publish
+gate. The disabled rows then get the rest for free: hidden from the default `resource list` (section
+6 filters on `enablement_of`, kind-agnostic), rendered by explicit `describe` with the `Disabled:`
+line, and excluded from ready-set validation (`registry.py:425-427`).
+
+### 3b.2 The bundleable-kind allowlist (additive: `PLUGIN_MANIFEST_KINDS`)
+
+R9's guarantee ("nothing a not-enabled plugin offers is available at a consumption site") is only
+real for a declarable kind whose consumption sites are actually gated (LLD b's named-row rule). That
+invariant is **enforced at publish, not documented**: a frozen set in `plugins/publish.py`
+
+```python
+PLUGIN_MANIFEST_KINDS = frozenset({
+    "system-install-command", "user-install-command",
+    "apt-package", "apt-source",
+    "vm-template", "agent-template", "admin-template", "session-template",
+})
+```
+
+names exactly the declarable kinds whose gates Phase 7 wires (LLD b's site table).
+`publish_manifest_package` (`manifests/package.py:34`) gains an **additive** parameter
+`allowed_kinds: frozenset[str] | None = None` (`None`, the builtin caller's default, permits every
+decoder kind, so `builtin.py` is untouched); a plugin document whose `kind` falls outside the set
+raises a typed `ConfigError` naming the kind and the file, which `_publish_plugin_manifests`'s
+existing re-raise (`publish.py:120-123`) attributes to the plugin. Expanding the allowlist is a
+deliberate act: wire the kind's consumption gate (LLD b), add the kind here, and pin both with a
+test. The excluded kinds (`secret`, `git-credential`, `vm-site`, `workspace-template`,
+`named-console-template`) are the ones whose consumption paths Phase 7 does not gate; a plugin
+cannot bundle them, so no silent hole exists. This narrows R6's letter ("declarable YAML resources
+of existing declarable kinds") for the bundled-manifest path; flagged for FRD reconciliation.
+
+### 3b.3 Enablement-aware collision: the weak-row model (chosen design)
+
+**The constraint.** A disabled plugin's declarable row must never block a stronger row: the
+operator, a built-in, or an enabled plugin must win **as if the disabled row were absent**, with no
+collision error, while two **enabled** system-plugin rows on one name still collide (curation bug).
+But `_check_collision` runs inside `add` (`registry.py:130-132`), enablement is computed at
+`finalize` (`registry.py:357-362`), after every `add`, and the `Registry` is config-agnostic (it
+imports neither `Config` nor `plugins`), so the collision check cannot ask "is this plugin row
+disabled". The one component that knows each plugin's enablement **at publish time** is
+`publish_plugins` (it holds `config.plugins_enabled`, `publish.py:94`).
+
+**The design: publisher-declared weak rows.** `publish_plugins` publishes a **not-enabled** plugin's
+manifest rows as _weak_; weakness is a publisher-declared property of the add (like `origin`), so
+the `Registry` honors it without knowing why. Pinned mechanics, each labeled:
+
+- **Additive:** `Registry.add` gains a keyword-only `weak: bool = False`; every existing caller is
+  untouched.
+- **Additive:** the registry tracks `self._weak: set[tuple[str, str]]`, the keys currently occupied
+  by a weak row. Consulted only during `add`; meaningless after finalize.
+- **Semantics (pinned, order-symmetric):**
+  - weak incoming, slot occupied (by anything, weak or strong): the add is a **no-op**
+    (add-if-absent); no collision check runs, nothing errors.
+  - weak incoming, slot free: the row lands normally (stamped via `dataclasses.replace`,
+    `registry.py:133-134`) and the key is recorded weak.
+  - strong incoming, existing weak: the incoming row **replaces silently** (no `_check_collision`)
+    and the key leaves the weak set.
+  - strong incoming, existing strong: `_check_collision` exactly as today; the variant matrix
+    (`registry.py:137-237`) is **unchanged**, the weak short-circuit runs before it.
+- **Changed:** `publish_plugins` step 3 passes `weak=True` for a not-enabled plugin's manifest rows.
+  Enabled plugins' manifest rows and **all** capability rows publish strong (capability name clashes
+  stay caught at seating in `register_plugin`, which is enablement-independent, LLD a).
+- **Additive (invariant guard):** at `finalize`, after `compose_enablement`, every key still in the
+  weak set that still holds its weak row must appear in the composed `marks`; a survivor with no
+  mark is a `StateError` (a publisher declared weak rows without a disabling source, a framework
+  bug). This enforces "weak implies disabled" by construction, config-agnostically: the registry
+  compares two sets it already holds.
+
+**Pinned outcome matrix** (declarable rows; capability clashes are seating's, LLD a):
+
+| existing \ incoming    | weak (disabled plugin)  | strong system-plugin (enabled) | operator / built-in         |
+| ---------------------- | ----------------------- | ------------------------------ | --------------------------- |
+| _(slot free)_          | weak row lands          | row lands                      | row lands                   |
+| weak (disabled plugin) | no-op (first weak wins) | replaces silently              | replaces silently           |
+| strong system-plugin   | no-op                   | `ConfigError` (curation bug)   | existing matrix (R7)        |
+| operator / built-in    | no-op                   | existing matrix (R7)           | existing matrix (unchanged) |
+
+Consequences worth pinning: a disabled plugin row never errors and never displaces, **including on
+`builtin_override = "reserved"` kinds** (as-if-absent means no reserved-name error either); two
+disabled plugins sharing a name silently keep the first-published row (`SYSTEM_PLUGINS` index
+order), whose enable hint names its own plugin, and the curation bug surfaces loudly the moment both
+are enabled, which the enable-every-shipped-plugin acceptance fixture pins in CI;
+enabled-vs-disabled resolves to the enabled row in either publish order. **FRD reconciliation
+flag:** R7's parenthetical "even between two not-enabled plugins ... a build error" still holds for
+capability seating (enablement-independent) but is refined for declarable rows to the plan's Phase 7
+wording ("operator/enabled always wins; two enabled system-plugin rows still collide"); the FRD
+sentence needs the lead's one-line amendment.
+
+**Why not (B), "publish disabled manifests last, add-if-absent".** Rejected on four grounds, all in
+the code:
+
+1. Its premise (a plugin row is always the existing row, an operator row the incoming one) is false
+   at HEAD in one direction: the deprecated operator TOML install-command publisher runs **before**
+   `publish_plugins` (`bootstrap.py:97` vs `bootstrap.py:107`), so an operator's TOML
+   `user-install-command` row is existing when the plugin's manifest row arrives. (B) must therefore
+   also move the disabled-manifest step below `manifests.publish_to` (`bootstrap.py:109`), and the
+   semantics it needs there is exactly add-if-absent, i.e. (B) still requires (A)'s registry
+   mechanism, minus the symmetric direction.
+2. It reintroduces the order-dependence R7 and section 5 deliberately retired ("precedence is not a
+   function of the insertion point"); any future publisher added after the disabled-manifest step
+   silently changes precedence.
+3. It splits `publish_plugins` into two `build_registry` touch points bracketing the operator
+   publishers, complicating the one assembly point for no gain.
+4. (A)'s weak semantics is symmetric (weak never displaces; anything displaces weak), so it is
+   correct under any publisher ordering, current and future, and it is smaller: one flag, one set,
+   two guard clauses ahead of an untouched matrix.
+
+**Why not (C), finalize-time collision arbitration** (defer all collision decisions to where
+enablement is known): `add` stores exactly one row per `(kind, name)` (`registry.py:133-134`), so
+deferring arbitration means retaining multi-occupancy per key until finalize, reshaping the store
+and every existing collision test to solve only the case (A) solves with a set.
+
+### 3b.4 The reference side
+
+A surviving present-but-disabled declarable row resolves cleanly at `_resolve_misses` (a present
+target is not a miss, `registry.py:512-513`), so nothing on the publication side surfaces the enable
+hint at consumption. The consumption-side rule (the named-row rule, the `ensure_reference_enabled` /
+`ensure_recipe_enabled` helpers, and the exact gate sites) is LLD (b)'s "declarable-reference gap"
+section; the allowlist above is its enforcement twin.
 
 ## 4. The shared, typed-error manifest loader body (R9, Phase 5)
 
@@ -145,20 +292,22 @@ shared helper (leave-it-nicer, and it retires the assert); its origin is
 
 ## 5. `build_registry` wiring, staying pure (R4, R5, R7, Phase 5)
 
-In `bootstrap.build_registry` (def at `bootstrap.py:34`; the publisher region is `~82-106`, interior
-anchors `95`/`96`/`98`/`105-106`):
+In `bootstrap.build_registry` (def at `bootstrap.py:34`; anchors below are the post-Phase-5 landed
+lines):
 
-- Insert `plugins.publish_plugins(registry, config)` **between** the built-in capability rows
-  (`vm_platforms.publish_to(registry)`, `bootstrap.py:95`) and `config.publish_to(registry)`
-  (`bootstrap.py:96`). Publication-only, so purity holds.
-- Pass LLD (b)'s source to finalize:
-  `registry.finalize(enablement_sources=[plugins.plugin_enablement_source(config)])` (replacing the
-  bare `registry.finalize()` at `bootstrap.py:98`).
+- `plugins.publish_plugins(registry, config)` sits **between** the built-in capability rows
+  (`vm_platforms.publish_to(registry)`, `bootstrap.py:101`) and `config.publish_to(registry)`
+  (`bootstrap.py:108`), at `bootstrap.py:107`. Publication-only, so purity holds.
+- LLD (b)'s source is passed to finalize:
+  `registry.finalize(enablement_sources=[plugins.plugin_enablement_source(config)])`
+  (`bootstrap.py:110`).
 
 Precedence is **not** a function of the insertion point: `_check_collision` decides by the unordered
 variant pair (LLD a), so the result is identical wherever the plugin rows land relative to operator
-rows. The unknown-enabled-name error is raised inside `publish_plugins` (step 1), not in the
-post-finalize `secrets.validate_chain` / `validate_sites` block (`bootstrap.py:105-106`).
+rows. The Phase 7 weak-row semantics preserves this (section 3b.3: weak never displaces, anything
+displaces weak, in either encounter order), so `build_registry` needs **no reordering** for manifest
+parity. The unknown-enabled-name error is raised inside `publish_plugins` (step 1), not in the
+post-finalize `secrets.validate_chain` / `validate_sites` block (`bootstrap.py:117-118`).
 
 ## 6. Disabled hides, not-ready shows (R9 presentation, Phase 6)
 
@@ -207,9 +356,11 @@ resource kind, R12). A new `_check_plugins(config)` group in `doctor.py`, added 
 ## What does not change
 
 The capability kinds and `KIND_REGISTRY`; the manifest loader's envelope/decode; the finalize passes
-(this LLD publishes into them and reads their output); the CLI entry flow and command registration
-(no plugin owns a command in v1). `build_registry`'s purity is preserved (publication-only step,
-opaque source callable). The `_check_collision` policy change is LLD (a)'s.
+(this LLD publishes into them and reads their output; Phase 7 adds only the weak-survivor guard at
+the end of enablement composition, section 3b.3); the CLI entry flow and command registration (no
+plugin owns a command in v1). `build_registry`'s purity is preserved (publication-only step, opaque
+source callable). The `_check_collision` variant **matrix** is LLD (a)'s and stays untouched; Phase
+7's weak short-circuit (section 3b.3) runs before it and changes no matrix pairing.
 
 ## Acceptance (Phases 1, 3, 5, 6 tests must pin)
 
@@ -233,3 +384,26 @@ opaque source callable). The `_check_collision` policy change is LLD (a)'s.
   enabled / `disabled (not enabled in [plugins])`, never enumerating contributions, renders
   `required_scopes` informationally when set, and shows the empty-state for the shipped empty index;
   completions include `--include-disabled`.
+- **Phase 7, publication + collision** (fixture-driven; a fixture plugin shipping a bundled
+  manifest; the reference-side cases are LLD b's list):
+  - Not enabled: the fixture's manifest resource is **present-but-disabled** (`enablement_of` reads
+    `disabled` with the plugin mark), hidden from default `list`, shown by `describe` with the
+    `Disabled:` line; enabling the plugin makes it enabled and consumable, same row, same origin.
+  - Overwrite, both encounter orders: an operator resource with the same `(kind, name)` as a
+    disabled plugin's manifest resource wins with **no collision error**, whether the operator row
+    publishes first (deprecated TOML path, before `publish_plugins`) or last (operator
+    `ManifestSet`); the surviving row's origin is `operator-declared`, and no enablement mark
+    attaches to it. Same for a built-in row and for an enabled plugin's row over a disabled one.
+  - As-if-absent on reserved kinds: a disabled plugin row on a `builtin_override = "reserved"` kind
+    does not trigger the reserved-name error against an incoming operator row.
+  - Weak add-if-absent: a disabled plugin's manifest row does not displace an existing occupant of
+    any variant, and a slot-free weak row lands and carries the enable hint.
+  - Curation bug still loud: two **enabled** plugins publishing the same declarable `(kind, name)`
+    raise the two-system-plugins `ConfigError`; the **enable-every-shipped-plugin fixture** (build a
+    registry with every `SYSTEM_PLUGINS` name enabled) finalizes cleanly, pinning shipped-set
+    curation in CI while disabled-state overlap stays silent.
+  - The weak-survivor guard: publishing a weak row and finalizing with **no** enablement source is a
+    `StateError` (weak implies disabled, enforced).
+  - Allowlist: a fixture plugin bundling a manifest of an excluded kind (e.g. `secret`) is a typed
+    `ConfigError` naming the plugin, the kind, and the file; `builtin.py`'s call path (no
+    `allowed_kinds`) still publishes every decoder kind.
