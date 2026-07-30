@@ -184,7 +184,24 @@ deliberate act: wire the kind's consumption gate (LLD b), add the kind here, and
 test. The excluded kinds (`secret`, `git-credential`, `vm-site`, `workspace-template`,
 `named-console-template`) are the ones whose consumption paths Phase 7 does not gate; a plugin
 cannot bundle them, so no silent hole exists. This narrows R6's letter ("declarable YAML resources
-of existing declarable kinds") for the bundled-manifest path; flagged for FRD reconciliation.
+of existing declarable kinds") for the bundled-manifest path; the FRD now carries that
+bundleable-declarable constraint, so this is **reconciled**, not an open flag.
+
+**IMPORTANT 3: a plugin must not capture a reserved auto-declared name.** Four of the bundleable
+kinds (`vm-template`, `agent-template`, `admin-template`, `session-template`) auto-declare the
+reserved name `"default"` (`vms/kinds.py:54,104`, `agents/kinds.py:50`, `sessions/kinds.py:47`):
+`_materialize_reserved_defaults` (`registry.py:469-475`) synthesizes it at finalize **only if the
+slot is free**. A plugin bundling a `default`-named template lands in that free slot with no
+collision (nothing else has published it yet), so `_materialize_reserved_defaults` then skips
+synthesis and the plugin's row **becomes** the reserved default: disabled, it gates every
+implicit-default use behind "enable plugin X"; enabled, it silently shadows the framework default.
+No collision fires, so the enable-every-plugin fixture would not catch it. The same
+`publish_plugins` publication (via `publish_manifest_package` in plugin mode,
+`allowed_kinds is not None`) therefore **also rejects** any bundled `(kind, name)` where `name` is
+in `KIND_REGISTRY[kind].auto_declare_names` (the reserved set, `None`-guarded to empty), raising a
+typed `ConfigError` naming the plugin, kind, and reserved name. Builtin manifests
+(`allowed_kinds is None`) are unaffected. Pinned with a test: a fixture plugin bundling a `default`
+`agent-template` is a typed error, not a silent shadow.
 
 ### 3b.3 Enablement-aware collision: the weak-row model (chosen design)
 
@@ -197,23 +214,44 @@ imports neither `Config` nor `plugins`), so the collision check cannot ask "is t
 disabled". The one component that knows each plugin's enablement **at publish time** is
 `publish_plugins` (it holds `config.plugins_enabled`, `publish.py:94`).
 
-**The design: publisher-declared weak rows.** `publish_plugins` publishes a **not-enabled** plugin's
-manifest rows as _weak_; weakness is a publisher-declared property of the add (like `origin`), so
-the `Registry` honors it without knowing why. Pinned mechanics, each labeled:
+Two collision cases need a "keep existing, drop incoming, no error" outcome the binary
+`_check_collision` contract (return = incoming overwrites, raise = error) cannot express today: the
+**disabled** case (a weak plugin row must yield to any occupant) and the **enabled-over-operator**
+case (BLOCKING 1 below, an enabled plugin row must yield to an operator's row on an
+`builtin_override = "allow"` kind). Both are solved by one small generalization: `_check_collision`
+returns a **decision** instead of `None`, and `add` gains a weak short-circuit ahead of it.
+
+**The decision type (additive).** `_check_collision` (and `_check_system_plugin_collision`) return
+
+```python
+class _CollisionDecision(Enum):
+    OVERWRITE = "overwrite"          # store incoming, replacing existing (today's "return")
+    KEEP_EXISTING = "keep-existing"  # drop incoming, existing stands, no error (new)
+```
+
+Every branch that currently `return`s (built-in over built-in, allow-kind operator over built-in,
+the operator-override "allow" path) now `return`s `OVERWRITE`; every `raise` is unchanged. The **one
+new** `KEEP_EXISTING` producer is the enabled-plugin-over-operator allow-kind branch (below). `add`
+acts on the decision: `OVERWRITE` stores the stamped incoming row, `KEEP_EXISTING` is a no-op.
+
+**Weak rows (the disabled case).** `publish_plugins` publishes a **not-enabled** plugin's manifest
+rows as _weak_; weakness is a publisher-declared property of the add (like `origin`), so the
+`Registry` honors it without knowing why. Pinned mechanics, each labeled:
 
 - **Additive:** `Registry.add` gains a keyword-only `weak: bool = False`; every existing caller is
   untouched.
 - **Additive:** the registry tracks `self._weak: set[tuple[str, str]]`, the keys currently occupied
   by a weak row. Consulted only during `add`; meaningless after finalize.
-- **Semantics (pinned, order-symmetric):**
-  - weak incoming, slot occupied (by anything, weak or strong): the add is a **no-op**
-    (add-if-absent); no collision check runs, nothing errors.
+- **Semantics (pinned, order-symmetric), in `add`, ahead of `_check_collision`:**
+  - weak incoming, slot occupied (by anything, weak or strong): **no-op** (`KEEP_EXISTING`); no
+    collision check runs, nothing errors.
   - weak incoming, slot free: the row lands normally (stamped via `dataclasses.replace`,
     `registry.py:133-134`) and the key is recorded weak.
-  - strong incoming, existing weak: the incoming row **replaces silently** (no `_check_collision`)
-    and the key leaves the weak set.
-  - strong incoming, existing strong: `_check_collision` exactly as today; the variant matrix
-    (`registry.py:137-237`) is **unchanged**, the weak short-circuit runs before it.
+  - strong incoming, existing weak: the incoming row **replaces silently** (no `_check_collision`),
+    the key leaves the weak set.
+  - strong incoming, existing strong: `_check_collision` runs and returns a decision; the variant
+    matrix (`registry.py:137-237`) is **unchanged** except that each branch now names its
+    `_CollisionDecision`, and the enabled-plugin-over-operator allow branch returns `KEEP_EXISTING`.
 - **Changed:** `publish_plugins` step 3 passes `weak=True` for a not-enabled plugin's manifest rows.
   Enabled plugins' manifest rows and **all** capability rows publish strong (capability name clashes
   stay caught at seating in `register_plugin`, which is enablement-independent, LLD a).
@@ -223,25 +261,63 @@ the `Registry` honors it without knowing why. Pinned mechanics, each labeled:
   bug). This enforces "weak implies disabled" by construction, config-agnostically: the registry
   compares two sets it already holds.
 
-**Pinned outcome matrix** (declarable rows; capability clashes are seating's, LLD a):
+**BLOCKING 1: the enabled plugin row must not break an operator's legacy TOML row (both orders).**
+An operator who legally overrides an install-command / apt entry today (an allow-kind, e.g.
+`[system_install_commands] az-cli` in TOML) must keep winning after the azure plugin ships that same
+name and is **enabled**. Both encounter orders are genuinely reachable, because the operator's TOML
+and YAML surfaces sit on opposite sides of `publish_plugins`:
 
-| existing \ incoming    | weak (disabled plugin)  | strong system-plugin (enabled) | operator / built-in         |
-| ---------------------- | ----------------------- | ------------------------------ | --------------------------- |
-| _(slot free)_          | weak row lands          | row lands                      | row lands                   |
-| weak (disabled plugin) | no-op (first weak wins) | replaces silently              | replaces silently           |
-| strong system-plugin   | no-op                   | `ConfigError` (curation bug)   | existing matrix (R7)        |
-| operator / built-in    | no-op                   | existing matrix (R7)           | existing matrix (unchanged) |
+- **Operator-first** (deprecated TOML, `install_commands.publish_to` / `apt.publish_to` at
+  `bootstrap.py:96-97`, before `publish_plugins` at `:107`): existing operator-declared, incoming
+  enabled system-plugin. Today `_check_system_plugin_collision`'s reverse branch
+  (`registry.py:222-229`) **always raises** under a stale "not reachable under build_registry's
+  publish order" comment. That comment is **false post-migration**. The fix: this branch consults
+  `builtin_override` **symmetrically** with the forward branch: on an `"allow"` kind it returns
+  `KEEP_EXISTING` (operator wins, plugin row dropped, no error); on a `"reserved"` kind it still
+  raises (a plugin's reserved declarable cannot be shadowed, unchanged). The stale comment is
+  deleted.
+- **Plugin-first** (operator YAML `ManifestSet`, `manifests.publish_to` at `bootstrap.py:109`, after
+  `publish_plugins`): existing enabled system-plugin, incoming operator-declared. The **forward**
+  branch (`registry.py:209-221`) already handles this: `"allow"` returns (now `OVERWRITE`, operator
+  replaces the plugin row, operator wins); `"reserved"` raises. Unchanged in effect.
+
+So on an allow-kind the operator wins in **either** order (drop-incoming when operator is existing,
+overwrite when operator is incoming); on a reserved-kind an operator-vs-enabled-plugin name clash is
+a reserved-name error in either order. The **disabled** plugin case never reaches these branches
+(weak short-circuit), so this fix is purely about the **enabled** row. This makes the reverse and
+forward system-plugin-vs-operator branches symmetric on `builtin_override`, closing the asymmetry
+the "always raise" reverse branch encoded.
+
+_Why not make the enabled allow-kind plugin row weak instead?_ Weakness means "disabled"
+(add-if-absent, silently overwritable) and the finalize guard enforces weak-implies-disabled; an
+enabled weak row would violate that guard and would also be silently overwritable by a **later**
+weak row, neither of which is wanted. The `KEEP_EXISTING` decision is the precise tool: it expresses
+"operator wins" without touching enablement.
+
+**Pinned outcome matrix** (declarable rows; capability clashes are seating's, LLD a). "op allow" and
+"op reserved" split the operator column by the kind's `builtin_override`:
+
+| existing \ incoming          | weak (disabled plugin)  | strong system-plugin (enabled)    | operator (allow-kind)         | operator / built-in (reserved-kind) |
+| ---------------------------- | ----------------------- | --------------------------------- | ----------------------------- | ----------------------------------- |
+| _(slot free)_                | weak row lands          | row lands                         | row lands                     | row lands                           |
+| weak (disabled plugin)       | no-op (first weak wins) | replaces silently                 | replaces silently             | replaces silently                   |
+| strong system-plugin         | no-op                   | `ConfigError` (curation bug)      | operator OVERWRITEs (op wins) | reserved-name `ConfigError`         |
+| operator (allow-kind)        | no-op                   | KEEP_EXISTING (op wins) **[fix]** | existing op-vs-op matrix (R7) | n/a                                 |
+| operator/built-in (reserved) | no-op                   | reserved-name `ConfigError`       | n/a                           | existing matrix (unchanged)         |
 
 Consequences worth pinning: a disabled plugin row never errors and never displaces, **including on
-`builtin_override = "reserved"` kinds** (as-if-absent means no reserved-name error either); two
-disabled plugins sharing a name silently keep the first-published row (`SYSTEM_PLUGINS` index
-order), whose enable hint names its own plugin, and the curation bug surfaces loudly the moment both
-are enabled, which the enable-every-shipped-plugin acceptance fixture pins in CI;
-enabled-vs-disabled resolves to the enabled row in either publish order. **FRD reconciliation
-flag:** R7's parenthetical "even between two not-enabled plugins ... a build error" still holds for
-capability seating (enablement-independent) but is refined for declarable rows to the plan's Phase 7
-wording ("operator/enabled always wins; two enabled system-plugin rows still collide"); the FRD
-sentence needs the lead's one-line amendment.
+`builtin_override = "reserved"` kinds** (as-if-absent means no reserved-name error either); an
+**enabled** plugin row on an allow-kind yields to an operator's row in either encounter order
+(BLOCKING 1 fix), and errors (reserved-name) against an operator on a reserved-kind; two enabled
+plugins on one name error (curation bug), which the enable-every-shipped-plugin fixture pins in CI;
+enabled-vs-disabled resolves to the enabled row in either order. **Known tradeoff (acknowledged, not
+a bug):** two _disabled_ plugins sharing a name silently keep the first-published row, and "first"
+is `_INSTALLED_MODULES` insertion order, an implementation detail; the surviving row's enable hint
+names its own plugin, and the moment both are enabled the curation `ConfigError` fires, so CI
+catches the real problem while the harmless disabled-overlap stays quiet. **FRD/R7: reconciled**
+(the lead's amendment landed): R7's "two not-enabled plugins ... a build error" now holds for
+capability seating only; for declarable rows the rule is "operator/enabled wins; two _enabled_
+system-plugin rows still collide", matching the plan's Phase 7 wording. No open FRD flag remains.
 
 **Why not (B), "publish disabled manifests last, add-if-absent".** Rejected on four grounds, all in
 the code:
@@ -266,6 +342,15 @@ the code:
 enablement is known): `add` stores exactly one row per `(kind, name)` (`registry.py:133-134`), so
 deferring arbitration means retaining multi-occupancy per key until finalize, reshaping the store
 and every existing collision test to solve only the case (A) solves with a set.
+
+**Note on the built-in branch (landed asymmetry, deliberately left).** The
+`{system-plugin, built-in}` branch (`registry.py:206-207`) errors either way and does **not**
+consult `builtin_override`, unlike the operator branches. This is not an oversight to "fix" here: in
+the migration each phase **removes** its built-in counterpart when it flips a bundle to a plugin (a
+platform/harness/etc. is either core-built-in or plugin-shipped, never both), so a live
+`{system-plugin, built-in}` collision on the same name does not arise for a migrated bundle. The
+branch stays a plain error; a future reader should read the asymmetry as intentional, not a missing
+`builtin_override` consult.
 
 ### 3b.4 The reference side
 
@@ -389,13 +474,20 @@ source callable). The `_check_collision` variant **matrix** is LLD (a)'s and sta
   - Not enabled: the fixture's manifest resource is **present-but-disabled** (`enablement_of` reads
     `disabled` with the plugin mark), hidden from default `list`, shown by `describe` with the
     `Disabled:` line; enabling the plugin makes it enabled and consumable, same row, same origin.
-  - Overwrite, both encounter orders: an operator resource with the same `(kind, name)` as a
-    disabled plugin's manifest resource wins with **no collision error**, whether the operator row
-    publishes first (deprecated TOML path, before `publish_plugins`) or last (operator
+  - Disabled overwrite, both encounter orders: an operator resource with the same `(kind, name)` as
+    a **disabled** plugin's manifest resource wins with **no collision error**, whether the operator
+    row publishes first (deprecated TOML path, before `publish_plugins`) or last (operator
     `ManifestSet`); the surviving row's origin is `operator-declared`, and no enablement mark
     attaches to it. Same for a built-in row and for an enabled plugin's row over a disabled one.
-  - As-if-absent on reserved kinds: a disabled plugin row on a `builtin_override = "reserved"` kind
-    does not trigger the reserved-name error against an incoming operator row.
+  - **BLOCKING 1, enabled allow-kind operator override, both orders:** an operator declaring an
+    allow-kind entry (e.g. `system-install-command` `az-cli`) with the **enabled** azure plugin
+    shipping the same name finalizes with the **operator row winning and no error**, in **both**
+    orders: operator via deprecated TOML (existing, plugin incoming, `KEEP_EXISTING`) and operator
+    via YAML `ManifestSet` (incoming, plugin existing, `OVERWRITE`); the survivor is
+    `operator-declared`. On a **reserved**-kind (a template) the same operator-vs-enabled-plugin
+    name clash is a reserved-name `ConfigError` in either order.
+  - As-if-absent on reserved kinds: a **disabled** plugin row on a `builtin_override = "reserved"`
+    kind does not trigger the reserved-name error against an incoming operator row.
   - Weak add-if-absent: a disabled plugin's manifest row does not displace an existing occupant of
     any variant, and a slot-free weak row lands and carries the enable hint.
   - Curation bug still loud: two **enabled** plugins publishing the same declarable `(kind, name)`
@@ -407,3 +499,7 @@ source callable). The `_check_collision` variant **matrix** is LLD (a)'s and sta
   - Allowlist: a fixture plugin bundling a manifest of an excluded kind (e.g. `secret`) is a typed
     `ConfigError` naming the plugin, the kind, and the file; `builtin.py`'s call path (no
     `allowed_kinds`) still publishes every decoder kind.
+  - **IMPORTANT 3, reserved-name capture:** a fixture plugin bundling a `default`-named template
+    (any of `vm-template` / `agent-template` / `admin-template` / `session-template`) is a typed
+    `ConfigError` naming the plugin, kind, and reserved name, so the plugin cannot shadow the
+    framework's auto-declared default; `builtin.py`'s path is unaffected.

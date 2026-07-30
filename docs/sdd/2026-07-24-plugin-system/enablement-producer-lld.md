@@ -377,22 +377,27 @@ declarable kinds share one shape (fetch-by-name then act), so they share one hel
 Co-located with `kind_dict` (`access.py:29`) and `admin_template` (`access.py:62`), the access layer
 every scouted consumer already imports:
 
-- `ensure_reference_enabled(registry, kind, name)`: the direct-name gate, mirroring
+- `ensure_reference_enabled(registry, kind, name)`: the **single-row building block**, mirroring
   `ensure_harness_enabled` (`capabilities/harness/__init__.py:68-101`) line for line: return unless
   `registry.graph.enablement_of(kind, name) is Enablement.disabled`; on disabled, raise a typed
   `StateError` (entity kind/name attached) whose tail derives the plugin from the row's
   `system-plugin` origin (`registry.lookup(kind, name).origin.plugin`), falling back to
   `enable its unit` for a non-plugin disabled row (a future operator-explicit-disable source, R13),
-  with the doctor-roster hint line.
-- `ensure_recipe_enabled(registry, kind, name)`: the closure gate for template recipes. Checks the
-  named node itself, then every node in `registry.graph.reachable_from(kind, name)`
-  (`resources/graph.py:212-237`) whose kind is **declarable**
-  (`KIND_REGISTRY[kind].category == "declarable"`, the field pinned at e.g.
-  `install_commands.py:190`), refusing on the first disabled one via the same error shape, naming
-  the offending `(kind, name)`. **Capability nodes are deliberately excluded** from the closure
-  check: each capability kind keeps its own R14 model (platform propagates via the site, backend
-  excluded at resolution, provider propagates via the credential, harness gated by
-  `ensure_harness_enabled`), so the closure gate neither duplicates nor contradicts them.
+  with the doctor-roster hint line. No gate site calls it directly (every declarable consumer here
+  gates a whole recipe, so all six gate rows use `ensure_recipe_enabled`); it exists because
+  `ensure_recipe_enabled` **is** it applied per node, keeping the disabled-check and the error shape
+  single-sourced rather than duplicated inside the closure loop. (It is also the natural entry if a
+  future direct-single-row consumer appears; if none does, it can be inlined, but factoring the
+  one-row check out of the closure loop is the cleaner shape.)
+- `ensure_recipe_enabled(registry, kind, name)`: the closure gate for template recipes. Applies
+  `ensure_reference_enabled` to the named node, then to every node in
+  `registry.graph.reachable_from(kind, name)` (`resources/graph.py:212-237`) whose kind is
+  **declarable** (`KIND_REGISTRY[kind].category == "declarable"`, the field pinned at e.g.
+  `install_commands.py:190`), refusing on the first disabled one. **Capability nodes are
+  deliberately excluded** from the closure check: each capability kind keeps its own R14 model
+  (platform propagates via the site, backend excluded at resolution, provider propagates via the
+  credential, harness gated by `ensure_harness_enabled`), so the closure gate neither duplicates nor
+  contradicts them.
 
 Why the closure is the right unit: the resolvers merge **everything reachable** into the recipe
 (parent lists append-merge, `agents/templates.py:116-133`, `vms/templates.py:145-157`), and the raw
@@ -402,27 +407,58 @@ template's graph edges are exactly what the resolvers follow (`agents/template.p
 recipe would consume". Both helpers are safe no-ops for implicit defaults: `enablement_of` tolerates
 a missing node (`graph.py:262-263`) and `reachable_from` a missing start (`graph.py:228-230`).
 
-### The gate sites (pinned, all additive)
+### The gate sites (pinned, all additive; exhaustively audited)
 
 Each gate sits at the mutation entry that already holds the registry and the resolved name, before
-any remote work, exactly where `ensure_site_ready` sits (`vms/manager/lifecycle.py:151`):
+any remote work, exactly where `ensure_site_ready` sits (`vms/manager/lifecycle.py:151`). The gate
+set is derived by tracing **every** call chain that reaches a declarable-consuming runner
+(`_run_install_commands`, `_run_agent_install_commands`) or a template resolver whose result is
+acted on, back to its command entry:
 
-| flow            | site                                                              | gate                                                                               |
-| --------------- | ----------------------------------------------------------------- | ---------------------------------------------------------------------------------- |
-| agent create    | `agents/manager/lifecycle.py:76` (after resolve)                  | `ensure_recipe_enabled(registry, "agent-template", agent_tmpl.name)`               |
-| agent reinit    | `agents/manager/lifecycle.py:420`                                 | same, on `agent.template`                                                          |
-| vm create       | `vms/manager/lifecycle.py:139` and `:177`                         | `ensure_recipe_enabled` on the `vm-template` **and** the selected `admin-template` |
-| vm reinit       | `vms/manager/lifecycle.py:514` and `:540`                         | same pair                                                                          |
-| session create  | `sessions/manager/_create_build.py:177` (beside the harness gate) | `ensure_recipe_enabled(registry, "session-template", template.name)`               |
-| session restart | `sessions/manager/_lifecycle.py:312` (beside the harness gate)    | same                                                                               |
+| flow                             | site                                                                                                                 | gate                                                                               |
+| -------------------------------- | -------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------- |
+| agent create                     | `agents/manager/lifecycle.py:76` (after `resolve_template`)                                                          | `ensure_recipe_enabled(registry, "agent-template", agent_tmpl.name)`               |
+| agent reinit                     | `agents/manager/lifecycle.py:420` (after `resolve_template`)                                                         | same, on `agent.template`                                                          |
+| vm create                        | `vms/manager/lifecycle.py:139` and `:177`                                                                            | `ensure_recipe_enabled` on the `vm-template` **and** the selected `admin-template` |
+| vm reinit                        | `vms/manager/lifecycle.py:514` and `:540`                                                                            | same pair                                                                          |
+| session create (session)         | `sessions/manager/_create_build.py:177` (beside the harness gate)                                                    | `ensure_recipe_enabled(registry, "session-template", template.name)`               |
+| **session create `--new-agent`** | `sessions/manager/_create_build.py`, the `new_agent` branch (resolve `:157`, gate beside the harness gate at `:177`) | **`ensure_recipe_enabled(registry, "agent-template", agent_tmpl.name)`**           |
+| session restart                  | `sessions/manager/_lifecycle.py:312` (beside the harness gate)                                                       | `ensure_recipe_enabled(registry, "session-template", template.name)`               |
 
-The install **runners** are not gated (single enforcement point): `_run_install_commands`
-(`packages.py:224`) and `_run_agent_install_commands` (`agents/initializer.py:438`) each gain the
-drift-guard comment pointing at the entry gate, plus a caller-gating test asserting every caller of
-the runners passes through a gated entry, the same guard shape the harness node factories carry
-(`sessions/nodes.py:288,328`). The read-only display paths stay ungated, matching
-`_display_harness`: `env/show.py:265-269` resolves templates for display, and `describe` renders a
-disabled row by design (LLD c section 6).
+**BLOCKING 2, the `--new-agent` hole (added).** `session create --new-agent` resolves an **ephemeral
+agent-template** at `_create_build.py:157` (`_resolve_agent_tmpl(registry, agent_template)`) and
+realizes it through `_create_roll.py::_realize_ephemerals` (`:95`) ->
+`agents/realize.py::realize_agent` (`:102`) -> `agents/initializer.py::create_agent_on_vm` ->
+`_run_agent_install_commands` (`:438`). The existing session gate covers only the **session
+template's harness**, never the ephemeral agent-template, so before this row a disabled plugin's
+`user-install-command` (or an `inherits` on a disabled plugin agent-template) ran **ungated** on the
+new-agent path. The added gate sits in the `new_agent` branch beside the harness gate, on the
+already-resolved `agent_tmpl.name`.
+
+**The drift guard walks to the real entry points (not the immediate caller).** The runner call graph
+is three hops deep and fans out, so a shallow "the immediate caller of the runner is gated" test
+would pass while a hole stays open (the immediate caller, `create_agent_on_vm`, is itself never
+gated; `realize_agent` is choreography, also never gated). The two runners are reached by exactly:
+
+```text
+_run_install_commands            <- vms/initializer/driver.py::_phase_b_setup   (vm create, vm reinit)
+_run_agent_install_commands      <- agents/initializer.py::create_agent_on_vm
+    create_agent_on_vm           <- agents/manager/lifecycle.py::reinit_agent (:494, direct)
+                                 <- agents/realize.py::realize_agent (:102)
+        realize_agent            <- agents/manager/lifecycle.py::create_agent (:171)
+                                 <- sessions/manager/_create_roll.py::_realize_ephemerals (:95)
+```
+
+so the true entry set is
+`{vm create, vm reinit, agent create, agent reinit, session create --new-agent}`, each of which
+carries a gate row above. The drift guard is a **structural** test (the `CAPABILITY_ADAPTERS.keys()`
+/ harness-factory-caller pattern): it asserts the caller sets of `create_agent_on_vm` and
+`realize_agent` are exactly the ones enumerated here (so a **new** caller of either, or of the
+runners, fails the test until its entry is gated), and it asserts each enumerated entry command
+calls `ensure_recipe_enabled` before its realize/init call. A drift-guard comment on each runner and
+on `create_agent_on_vm` / `realize_agent` points at this test and the entry table. The read-only
+display paths stay ungated, matching `_display_harness`: `env/show.py:265-269` resolves templates
+for display, and `describe` renders a disabled row by design (LLD c section 6).
 
 ### Why a use-gate and not a fold edge (evaluated, rejected)
 
@@ -448,16 +484,20 @@ code and rejected:
    use. Discoverability is instead carried by `describe`'s `Disabled:` line, the doctor roster, and
    the typed error at the first mutating use; the plan's "reference ... is not-ready with the enable
    hint" is satisfied as **not-consumable, with the hint rendered at the gate and on describe**, not
-   as a fold verdict. (Flagged in the review notes for the lead to confirm the reading.)
+   as a fold verdict. (The FRD/plan use-refusal wording now reflects this reading, so it is
+   confirmed, not an open flag.)
 
 ### Coverage audit (every consumption path per bundleable kind)
 
-- `user-install-command`: agent path gated at agent create/reinit; admin path gated at vm
-  create/reinit (the admin-template closure carries its `user_install_commands` edges,
-  `vms/admin.py:72-81`). Runner lookups drift-guarded. **Covered.**
+- `user-install-command`: **standalone agent** path gated at agent create/reinit; **admin** path
+  gated at vm create/reinit (the admin-template closure carries its `user_install_commands` edges,
+  `vms/admin.py:72-81`); **session ephemeral agent** path gated at session create `--new-agent`
+  (BLOCKING 2). All three runner call chains (`_run_agent_install_commands`) trace back to a gated
+  entry per the drift-guard table. **Covered.**
 - `system-install-command`: vm create/reinit via the vm-template closure
-  (`vms/template.py:123-131`). **Covered.** (`az-cli` at HEAD is this kind:
-  `manifests/builtin/install-commands.yaml:15-22`.)
+  (`vms/template.py:123-131`); the only runner (`_run_install_commands`) is reached solely from
+  `_phase_b_setup`. **Covered.** (`az-cli` at HEAD is this kind:
+  `manifests/builtin/install-commands.yaml:15-22`, a `system-install-command`.)
 - `apt-package` / `apt-source`: reachable through the same vm-template closure, including the
   package-to-source hop (`apt.py:79-105`). **Covered.**
 - `vm-template` / `agent-template` / `admin-template` / `session-template` (named use and
@@ -471,6 +511,46 @@ code and rejected:
 - Out of registry scope, noted for honesty: `install_claude_plugins` probes the `claude` CLI binary
   on the VM (`vms/initializer/driver.py:822-833`), a filesystem fact, not a registry row; no gate
   applies or is needed.
+
+## The disabled-plugin secret-backend hint (R14 secret-backend, Phase 9)
+
+**IMPORTANT 4 (chosen: do it right, add the hint).** The secret-backend consumer honors enablement
+by **exclusion, not refusal** (R14's secret model, already wired): `active_backends`
+(`secrets/resolve.py:82-128`) silently drops a disabled backend at `resolve.py:113-116`, and
+`validate_chain` checks configured names, not enablement. So a secret whose only resolving backend
+is a disabled plugin backend (the flagship: a secret mapped **only** to `onepassword`, plugin not
+enabled) fails at use with the generic `SecretUnavailableError` "no active backend could resolve
+secret(s): ...; tried (none; secret unreachable)" (`_fail_unavailable`, `resolve.py:192-229`),
+naming no plugin. That contradicts R11.1's promise that every migration failure names the plugin, so
+Phase 9 adds the hint rather than softening the promise.
+
+The hint is **additive, on the failure path only** (the success path and `active_backends` are
+untouched):
+
+- A helper `disabled_plugin_backends(registry) -> dict[str, str]` (backend name -> plugin name)
+  reads the graph for `secret-backend` rows whose `enablement_of` is `disabled` and whose origin is
+  `system-plugin` (the same origin read the doctor roster uses). Lives beside `active_backends` in
+  `secrets/resolve.py`.
+- `resolve_for_command` (`secrets/orchestration.py:210`), which holds `registry`, threads this map
+  into `resolve_secrets` (additive param, default empty `{}`, so the inspection-path and test
+  callers that pass only backends are unaffected), which forwards it to `_fail_unavailable`.
+- In `_fail_unavailable`, for each still-missing `SecretDecl`, if any key of its `backend_mappings`
+  (`secrets/base.py:56`) is in the disabled-plugin map, append "; enable plugin `<name>`" (one
+  clause per distinct disabled plugin the secret maps to) to that secret's `tried ...` line. A
+  secret that maps to no disabled plugin backend is unchanged, so the generic message still covers
+  the ordinary "no mapping / wrong env var" cases.
+
+This is the exact site: `secrets/resolve.py::_fail_unavailable` (message assembly) fed by
+`disabled_plugin_backends(registry)` from `resolve_for_command`. It is a **Phase 9** addition (it
+becomes reachable only when `onepassword` migrates and can be disabled); until then no disabled
+secret-backend producer exists, so the map is always empty and the message is verbatim today's.
+Phase 9 pins it: a secret mapped only to a disabled `onepassword` fails with a message containing
+"enable plugin `onepassword`", and enabling the plugin resolves it.
+
+Note this is **not** propagation and **not** a create-time gate: a secret stays ready (many backends
+can resolve it, R14), so the plugin-aware text surfaces at the resolve failure, the one place the
+operator sees "this secret is unreachable". It is the secret-backend analogue of the recipe gate's
+enable hint, delivered through the kind's own (exclusion) model rather than a bolted-on refusal.
 
 ## Acceptance (Phase 4 tests must pin)
 
@@ -532,11 +612,27 @@ Against a fixture plugin bundling a `user-install-command`, a `system-install-co
   create/restart via `ensure_recipe_enabled` beside the existing harness gate; the harness gate's
   own behavior is unchanged (no double-error for a disabled harness, which the closure gate skips as
   a capability kind).
+- **BLOCKING 2, `--new-agent` path**: `session create --new-agent` with an ephemeral agent-template
+  that names the fixture's `user-install-command` (or `inherits` a disabled plugin agent-template),
+  plugin disabled, refuses at session create with the enable hint **before any transport call**
+  (transport spy), so the install-command never runs on that path; enabling the plugin lets it run.
+- **Drift guard (structural, walks to entries)**: the guard asserts the caller sets of
+  `create_agent_on_vm` and `realize_agent` match the enumerated set, and that each of the five true
+  entry commands (`vm create`, `vm reinit`, `agent create`, `agent reinit`,
+  `session create --new-agent`) calls `ensure_recipe_enabled` before its realize/init call; a
+  synthetic new caller of either function or of a runner fails the test until gated. This is
+  deliberately deeper than a "immediate caller is gated" check, which would pass while the
+  `--new-agent` hole stayed open (the immediate caller `create_agent_on_vm` is never itself gated).
 - **Display stays ungated**: `describe` and the env/show template rendering still work against the
   disabled fixture rows (annotated, not refused).
 - **Helper tolerances**: both helpers are no-ops for an implicit `default` template (missing node)
   and for an all-enabled registry; a disabled row with a non-plugin origin (stub second source, R13)
   refuses with the `enable its unit` fallback tail.
-- **Drift guard**: the caller-gating test enumerates the callers of `_run_install_commands` /
-  `_run_agent_install_commands` and asserts each is reached only through a gated entry, mirroring
-  the harness-factory guard.
+
+## Acceptance (Phase 9, the secret-backend hint; fixture-driven)
+
+- A secret whose sole `backend_mappings` target is a disabled plugin `secret-backend` fails resolve
+  with a `SecretUnavailableError` whose per-secret line contains "enable plugin `<name>`"; enabling
+  the plugin resolves the secret. A secret with a plain env-var/prompt mapping (no disabled plugin
+  backend) fails or succeeds with the **unchanged** message. The `disabled_plugin_backends` map is
+  empty (and the message verbatim today's) when no secret-backend producer is disabled.

@@ -254,19 +254,35 @@ capability rows). A **capability** clash fails at seating (import-time `PluginEr
 outcome for an in-repo curation bug; resource-name namespacing that would let independent external
 plugins coexist is deferred (FRD Future direction).
 
-> **Phase 7 refinement (2026-07-30, reopened SDD; see LLD (c) 3b).** Manifest parity publishes a
-> **not-enabled** plugin's declarable rows as **weak** (a publisher-declared add-if-absent /
-> silently-overwritable property consulted in `Registry.add` **before** this matrix), so for
-> declarable rows the "even when both are not enabled" clause above now applies only to
-> **capability** seating: a declarable clash reaches this matrix, and errors, only between
-> **strong** rows (enabled plugins, built-ins, operators). A disabled plugin's declarable row never
-> errors and never blocks; the two-plugins curation bug still fails loudly the moment both are
-> enabled, which the enable-every-shipped-plugin fixture pins in CI. The matrix itself, including
-> the reserved-name direction, is unchanged; the weak short-circuit simply runs first, so a disabled
-> plugin row behaves as if absent (no reserved-name error against an operator row either). The
-> "every declarable kind a plugin would ship is `reserved`" observation two paragraphs up also
-> narrows: the Phase 7 bundleable-kind allowlist (LLD c 3b.2) includes the install-command and apt
-> kinds, which are `builtin_override = "allow"`, so the operator-override path is live for them.
+> **Phase 7 refinement (2026-07-30, reopened SDD; see LLD (c) 3b, which OWNS the Phase 7 collision
+> changes).** Three changes reach this matrix; LLD (c) 3b.3 is the authoritative spec, summarized
+> here so a reader of the matrix is not surprised:
+>
+> 1. **Decision return type.** `_check_collision` / `_check_system_plugin_collision` return a
+>    `_CollisionDecision` (`OVERWRITE` | `KEEP_EXISTING`) instead of `None`; every branch that
+>    "returned" now returns `OVERWRITE`, every `raise` is unchanged, and one new branch returns
+>    `KEEP_EXISTING` (below). `add` acts on the decision.
+> 2. **Weak short-circuit runs first.** A **not-enabled** plugin's declarable rows publish **weak**
+>    (a publisher-declared add-if-absent / silently-overwritable property consulted in `add` before
+>    this matrix), so a declarable clash reaches this matrix and errors only between **strong**
+>    rows; a disabled plugin row never errors and never blocks (as-if-absent, no reserved-name error
+>    either). The two-plugins curation bug still fails the moment both are enabled (the
+>    enable-every-shipped-plugin fixture pins it). So the "even when both are not enabled" clause
+>    above now applies to **capability seating only**.
+> 3. **BLOCKING 1, reverse-branch symmetry (a real matrix change).** The
+>    `{system-plugin, operator-declared}` pair is now decided **symmetrically** on
+>    `builtin_override`: the reverse direction (existing operator, incoming enabled plugin)
+>    previously ALWAYS raised under a stale "not reachable" comment; it now returns `KEEP_EXISTING`
+>    (operator wins) on an `"allow"` kind and still raises reserved-name on a `"reserved"` kind,
+>    matching the forward direction. This closes the case where an operator's legacy TOML
+>    install-command override would break the moment the azure plugin is enabled. The two symmetric
+>    pairings (`{system-plugin, system-plugin}`, `{system-plugin, built-in}`) are unchanged.
+>
+> Consequently the "every declarable kind a plugin would ship is `reserved`" observation two
+> paragraphs up narrows: the Phase 7 bundleable-kind allowlist (LLD c 3b.2) includes the
+> install-command and apt kinds, which are `builtin_override = "allow"`, so the operator-override
+> path is live for them, and BLOCKING 1's symmetry is what makes it correct in both encounter
+> orders.
 
 ## What does not change
 
