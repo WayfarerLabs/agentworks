@@ -407,7 +407,9 @@ def _reveal_values(
         return {}, {}
 
     errors: dict[str, str] = {}
-    values = resolve_secrets(needed, backends, errors=errors)
+    # ``registry`` powers the disabled-plugin failure hint (LLD b) on the
+    # per-secret error line for the inspection path too.
+    values = resolve_secrets(needed, backends, errors=errors, registry=registry)
     return values, errors
 
 

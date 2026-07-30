@@ -221,7 +221,9 @@ def gate_secret_resolver(config: Config, registry: Registry, resolver: Resolver)
         # check guards against cannot arise here: there is only ever one
         # secret in flight per call.
         (decl,) = secret_declarations([secret_name], registry)
-        value = resolve_secrets([decl], active_backends(config, registry))[secret_name]
+        # ``registry`` powers the disabled-plugin failure hint (LLD b) if this
+        # gate secret's only backend is a disabled plugin.
+        value = resolve_secrets([decl], active_backends(config, registry), registry=registry)[secret_name]
         resolver.seed({secret_name: value})
         return value
 

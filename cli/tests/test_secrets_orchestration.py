@@ -423,9 +423,9 @@ backends = ["env-var"]
 
     calls: list[list[str]] = []
 
-    def _spy(decls: list[SecretDecl], backends: list[object]) -> dict[str, str]:
+    def _spy(decls: list[SecretDecl], backends: list[object], **kwargs: object) -> dict[str, str]:
         calls.append([d.name for d in decls])
-        return _real(decls, backends)  # type: ignore[arg-type]
+        return _real(decls, backends, **kwargs)  # type: ignore[arg-type]
 
     monkeypatch.setattr("agentworks.secrets.resolve.resolve_secrets", _spy)
 

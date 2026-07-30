@@ -56,8 +56,8 @@ _INSTALLED_MODULES: tuple[_PluginModule, ...] = (
 )
 ```
 
-The index ships **empty**, so `SYSTEM_PLUGINS == {}` and nothing seats until a module is added. On
-import the index:
+The index ships the migrated system plugins (`onepassword` so far); each listed module is registered
+and seated at import. On import the index:
 
 - registers each plugin, wrapping any failure with the real module name (a bad descriptor is a
   curation bug that reads as `system plugin '<module>' failed to register: ...`, not an opaque

@@ -300,11 +300,14 @@ ones. Each: the breaking-change (opt-in, guided enable hint) behavior pinned; ev
 sample-config / guide reference updated. The two manifest-carrying plugins (claude, azure) rely on
 Phase 7.
 
-- [ ] **Phase 8: 1password** (`onepassword` secret-backend; no manifest). The clean capability-only
+- [x] **Phase 8: 1password** (`onepassword` secret-backend; no manifest). The clean capability-only
       migration proving the mechanics: the impl moves, core `SECRET_BACKEND_REGISTRY` drops it, the
       plugin seats it (the instance-seated kind, exercising the adapter `prepare` instance path),
       origin `system-plugin`; a `secret` mapping `onepassword` is excluded from resolution until
-      enabled; the resolver gates on the published row before the seated impl.
+      enabled; the resolver gates on the published row before the seated impl. (Phase 8 also added
+      the secret-backend enable-plugin hint, LLD b, and the one-line `plugin_seated_names` skip in
+      the core `secret-backend` `publish_to` so the plugin-seated impl is not double-published; see
+      migration-strategy section 2.)
 - [ ] **Phase 9: claude** (`claude-code` harness + the `claude` install-command manifest; needs
       Phase 7). First manifest-carrying migration, small (~6 harness test files + one manifest
       entry): the harness impl moves, core `HARNESS_REGISTRY` drops it, origin `system-plugin`;

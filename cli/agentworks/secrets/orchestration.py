@@ -201,4 +201,9 @@ def resolve_for_command(
         return {}
     from agentworks.secrets.resolve import active_backends, resolve_secrets
 
-    return resolve_secrets(decls, active_backends(config, registry))
+    # ``registry`` powers the disabled-plugin failure hint (LLD b): a secret
+    # whose only mapping targets a disabled plugin backend (e.g. onepassword,
+    # plugin not enabled) fails naming the plugin to enable, not generically
+    # unreachable. Computed lazily in ``_fail_unavailable``, so the success path
+    # is untouched.
+    return resolve_secrets(decls, active_backends(config, registry), registry=registry)

@@ -303,7 +303,8 @@ def _batch_vm_boundary(db: Database, config: Config, vms: Sequence[VMRow]) -> It
             )
 
             (decl,) = secret_declarations([secret_name], registry)
-            return resolve_secrets([decl], active_backends(config, registry))[secret_name]
+            # ``registry`` powers the disabled-plugin failure hint (LLD b).
+            return resolve_secrets([decl], active_backends(config, registry), registry=registry)[secret_name]
 
         return _resolve
 

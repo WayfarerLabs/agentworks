@@ -9,7 +9,8 @@ against a FIXTURE plugin injected two ways at once:
   registries, exactly as the installed index does at import (so ``build_row``
   finds a seated occupant), and
 - ``monkeypatch``-ing ``SYSTEM_PLUGINS`` to ``{fixture.name: fixture}`` makes
-  ``publish_plugins`` iterate the fixture (the shipped index is empty, R11).
+  ``publish_plugins`` iterate the fixture only (replacing the shipped index, so
+  the migrated plugins like ``onepassword`` do not interfere).
 
 The fixture impls are REAL capability subclasses so they fold through their
 consumers (a ``vm-site`` goes not-ready, a ``session-template`` reaches the

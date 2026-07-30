@@ -132,6 +132,22 @@ def _precheck_and_prepare(
     return to_seat
 
 
+def plugin_seated_names(kind: str) -> frozenset[str]:
+    """The ``kind`` capability names a system plugin seated into the core
+    code registry (as opposed to the core built-ins).
+
+    A migrated capability's impl still lives in the core registry (the plugin's
+    adapter seats it there at import, and ``_impl_for`` stamps it onto the graph
+    node from there), but its RESOURCE ROW must be published exactly once, by
+    ``publish_plugins`` with a ``system-plugin`` origin. So each core capability
+    ``publish_to`` skips the names reported here, leaving the plugin as the sole
+    publisher of its row; publishing it here too would collide (built-in vs
+    system-plugin) at ``Registry.add``. This reuses the same provenance the
+    collision-message path uses (``_PLUGIN_SEATED``), so "seated by a plugin" has
+    one source of truth."""
+    return frozenset(name for (seated_kind, name) in _PLUGIN_SEATED if seated_kind == kind)
+
+
 def _occupant_origin(kind: str, name: str) -> str:
     """Describe the current occupant of ``(kind, name)`` for a collision
     message, distinguishing a core built-in from another system plugin."""

@@ -151,6 +151,9 @@ ssh_private_key = "~/.ssh/id_ed25519"        # required: used for SSH connection
 
 #[secrets.registry-password]
 #description = "container registry password"
+# onepassword ships as an opt-in system plugin: enable it with
+# `[plugins] enabled = ["onepassword"]` (see System plugins below) before these
+# mappings resolve; while the plugin is disabled the backend is dormant.
 # onepassword needs an explicit per-secret address (no name-based default).
 # The address is the `op://vault/item/field` reference 1Password's
 # "Copy Secret Reference" produces (an optional `.../section/field` segment
@@ -169,7 +172,10 @@ ssh_private_key = "~/.ssh/id_ed25519"        # required: used for SSH connection
 #                 AW_SECRET_<UPPER_SNAKE_CASE>, so secret "npm-token" reads
 #                 from AW_SECRET_NPM_TOKEN unless overridden via
 #                 `[secrets.<name>].backend_mappings.env-var`.
-#   onepassword : reads via the 1Password CLI (`op read op://...`). Requires
+#   onepassword : ships as the opt-in `onepassword` system plugin (enable it in
+#                 [plugins] below); while disabled it is dormant (dropped from
+#                 the chain). Once enabled it reads via the 1Password CLI
+#                 (`op read op://...`). Requires
 #                 a per-secret `backend_mappings.onepassword` address (string
 #                 or table, above); unmapped secrets are skipped. `op` must be
 #                 able to read at command time (the 1Password app's CLI
@@ -188,6 +194,9 @@ ssh_private_key = "~/.ssh/id_ed25519"        # required: used for SSH connection
 
 #[secret_config]
 #backends = ["env-var", "onepassword", "prompt"]    # example chain; the default is ["env-var", "prompt"].
+# Naming `onepassword` here also requires enabling its plugin
+# (`[plugins] enabled = ["onepassword"]` below); until then it is dropped from
+# the chain as disabled.
 # This is the opt-in chain: only listed backends are consulted, in this
 # precedence order (the first backend that produces a value wins). Declared
 # backends absent from this list are dormant. A backend that is not-ready on
@@ -202,11 +211,12 @@ ssh_private_key = "~/.ssh/id_ed25519"        # required: used for SSH connection
 # want enabled by name. A plugin NOT listed here still publishes its capability
 # rows, but they are disabled: a resource referencing one is not-ready with an
 # "enable plugin <name>" hint, and its bundled manifests are not loaded. Only
-# installed plugin names are valid here (an unknown name is a hard error), and
-# the shipped build installs none, so leave this empty unless you have added a
-# plugin. `agw doctor` shows a System plugins roster with each plugin's state.
+# installed plugin names are valid here (an unknown name is a hard error). The
+# shipped build installs `onepassword` (the 1Password secret backend); more
+# bundles migrate to plugins over time. `agw doctor` shows a System plugins
+# roster with each plugin's state.
 #[plugins]
-#enabled = ["azure"]                        # names of installed system plugins to enable
+#enabled = ["onepassword"]                  # names of installed system plugins to enable
 
 # --- VM sites (azure, proxmox, remote Lima, ...) ---
 # Places to create VMs are declared as vm-site RESOURCES (YAML manifests

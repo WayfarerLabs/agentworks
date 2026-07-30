@@ -234,14 +234,15 @@ policy is per kind:
   this host lacks what they need (`agw resource list` marks the row; `describe` and `agw doctor`
   carry the reason); using a not-ready site is an error naming the requirement. A site naming an
   UNKNOWN platform (a typo, or an uninstalled plugin) is a hard error at load, not a self-disable.
-- **Secret backends** (`env-var`, `onepassword`, `prompt`), **VM platforms** (`lima`, `wsl2`,
-  `azure-vm`, `proxmox`), and **session harnesses** (`shell`, `claude-code`): registered
-  capabilities, shown as read-only rows. You cannot declare or override them; secrets customize per
-  secret via `backend_mappings`, platforms configure per site via `platform_config`, and harnesses
-  configure per session-template via `harness_config`. Every installed platform publishes a row
-  regardless of host support: a platform whose host requirements are not met (e.g. `wsl2` off
-  Windows) publishes a present, not-ready row (`agw resource list` and `agw doctor` show it with the
-  reason), and a site referencing it is not-ready rather than erroring.
+- **Secret backends** (`env-var`, `prompt`; `onepassword` ships as an opt-in system plugin, see
+  below), **VM platforms** (`lima`, `wsl2`, `azure-vm`, `proxmox`), and **session harnesses**
+  (`shell`, `claude-code`): registered capabilities, shown as read-only rows. You cannot declare or
+  override them; secrets customize per secret via `backend_mappings`, platforms configure per site
+  via `platform_config`, and harnesses configure per session-template via `harness_config`. Every
+  installed platform publishes a row regardless of host support: a platform whose host requirements
+  are not met (e.g. `wsl2` off Windows) publishes a present, not-ready row (`agw resource list` and
+  `agw doctor` show it with the reason), and a site referencing it is not-ready rather than
+  erroring.
 
 ## System plugins
 
@@ -282,11 +283,15 @@ package README (`cli/agentworks/plugins/README.md`).
 Two layers, one rule each:
 
 - A **secret backend** is a capability resource: a read-only `secret-backend` row whose
-  implementation is registered code (`env-var`, `prompt`, `onepassword`; later plugins, ...). You
-  cannot declare one (the app, and later plugins, registers them), but they list and describe like
-  every other resource. Per-secret behavior (identifier overrides, structured store addressing like
-  `{ account = "my.1password.com", reference = "op://Work/npm/password" }`, and opt-outs) lives in
-  each secret's `backend_mappings.<backend>`. The `onepassword` backend reads via the 1Password CLI
+  implementation is registered code (`env-var`, `prompt`; `onepassword` ships as a system plugin;
+  later plugins, ...). You cannot declare one (the app, and plugins, register them), but they list
+  and describe like every other resource. Per-secret behavior (identifier overrides, structured
+  store addressing like `{ account = "my.1password.com", reference = "op://Work/npm/password" }`,
+  and opt-outs) lives in each secret's `backend_mappings.<backend>`. The `onepassword` backend now
+  ships as the opt-in `onepassword` system plugin (see [System plugins](#system-plugins)): its row
+  is present but disabled until you add `onepassword` to `[plugins] enabled`, so a secret mapped
+  only to it stays inert (and, if it is the sole path, fails resolve with an "enable plugin
+  `onepassword`" hint) until you opt in. Once enabled it reads via the 1Password CLI
   (`op read op://vault/item/field`); it needs a per-secret `backend_mappings.onepassword` address in
   one of two forms: a bare `op://vault/item/field` string (using op's default account, or
   `OP_ACCOUNT`), or a `{ account, reference }` table when a specific account must be pinned. `op`

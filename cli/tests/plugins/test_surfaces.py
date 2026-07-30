@@ -5,7 +5,8 @@ not-ready-shows default rule, the ``system-plugin`` provenance annotation, the
 These drive the service layer directly against a FIXTURE plugin injected the
 same two ways Phase 5 pins (``seated_plugin`` seats the impls; a monkeypatched
 ``SYSTEM_PLUGINS`` makes ``publish_plugins`` and the roster iterate the
-fixture, since the shipped index is empty, R11). The roster tests need no
+fixture only, replacing the shipped index so the migrated plugins like
+``onepassword`` do not interfere). The roster tests need no
 seating: ``_check_plugins`` reads only ``SYSTEM_PLUGINS`` and config, never the
 capability registries (a plugin is an origin, not a resource kind, R12).
 """

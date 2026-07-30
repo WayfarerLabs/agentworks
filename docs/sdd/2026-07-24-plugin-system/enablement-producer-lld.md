@@ -531,21 +531,36 @@ untouched):
   reads the graph for `secret-backend` rows whose `enablement_of` is `disabled` and whose origin is
   `system-plugin` (the same origin read the doctor roster uses). Lives beside `active_backends` in
   `secrets/resolve.py`.
-- `resolve_for_command` (`secrets/orchestration.py:210`), which holds `registry`, threads this map
-  into `resolve_secrets` (additive param, default empty `{}`, so the inspection-path and test
-  callers that pass only backends are unaffected), which forwards it to `_fail_unavailable`.
-- In `_fail_unavailable`, for each still-missing `SecretDecl`, if any key of its `backend_mappings`
-  (`secrets/base.py:56`) is in the disabled-plugin map, append "; enable plugin `<name>`" (one
-  clause per distinct disabled plugin the secret maps to) to that secret's `tried ...` line. A
-  secret that maps to no disabled plugin backend is unchanged, so the generic message still covers
-  the ordinary "no mapping / wrong env var" cases.
+- **The wiring is centralized, not per-caller.** Secret resolution has ~5 call sites into
+  `resolve_secrets` (the dominant `Resolver.resolve()` used by every VM / session / agent command;
+  the env-chain `resolve_for_command`; the activation gate `resolve_gate_secret`; the batch rejoin
+  in `_scope.py`; and the inspection `env show --resolve`), and R11.1's "every migration failure
+  names the plugin" must hold on ALL of them, not just one. So `resolve_secrets` gains one optional
+  `registry: Registry | None = None` param that it forwards to `_fail_unavailable`, which computes
+  `disabled_plugin_backends(registry)` **lazily, only on failure**. Each of the ~5 call sites passes
+  the `registry` it already holds (it built the backends via `active_backends(config, registry)`);
+  the compute-and-format logic lives in exactly one place. Defaulted to `None` (no hint), so
+  backends-only test callers are unaffected. (An earlier draft threaded a precomputed map from
+  `resolve_for_command` alone; that left the dominant `Resolver` path without the hint, so the
+  wiring was centralized in `_fail_unavailable`.)
+- In `_fail_unavailable`, for each still-missing `SecretDecl`, iterate its `backend_mappings`
+  (`secrets/base.py:56`) items, **skipping a `False` opt-out** (mirroring `SecretDecl.dependencies`
+  / `validate`, `base.py:103,110,134`), and for each remaining key in the disabled-plugin map append
+  "; enable plugin `<name>`" (one clause per distinct disabled plugin the secret maps to) to that
+  secret's `tried ...` line. The `False` skip matters because the map is global (populated for any
+  config not enabling the plugin), so a secret that explicitly opted OUT of a disabled plugin
+  backend must NOT be told to enable it (enabling would not resolve it). A secret that maps to no
+  disabled plugin backend is unchanged, so the generic message still covers the ordinary "no mapping
+  / wrong env var" cases.
 
-This is the exact site: `secrets/resolve.py::_fail_unavailable` (message assembly) fed by
-`disabled_plugin_backends(registry)` from `resolve_for_command`. It is a **Phase 8** addition (it
-becomes reachable only when `onepassword` migrates and can be disabled); until then no disabled
-secret-backend producer exists, so the map is always empty and the message is verbatim today's.
-Phase 8 pins it: a secret mapped only to a disabled `onepassword` fails with a message containing
-"enable plugin `onepassword`", and enabling the plugin resolves it.
+This is the exact site: `secrets/resolve.py::_fail_unavailable` (message assembly), fed by
+`disabled_plugin_backends(registry)` computed from the `registry` every resolution path forwards. It
+is a **Phase 8** addition (it becomes reachable only when `onepassword` migrates and can be
+disabled); until then no disabled secret-backend producer exists, so the map is always empty and the
+message is verbatim today's. Phase 8 pins it: a secret mapped only to a disabled `onepassword` fails
+(through `Resolver.resolve()` and `resolve_for_command` alike) with a message containing "enable
+plugin `onepassword`", enabling the plugin resolves it, and a secret with `onepassword = false` gets
+no such hint.
 
 Note this is **not** propagation and **not** a create-time gate: a secret stays ready (many backends
 can resolve it, R14), so the plugin-aware text surfaces at the resolve failure, the one place the
@@ -636,3 +651,8 @@ Against a fixture plugin bundling a `user-install-command`, a `system-install-co
   the plugin resolves the secret. A secret with a plain env-var/prompt mapping (no disabled plugin
   backend) fails or succeeds with the **unchanged** message. The `disabled_plugin_backends` map is
   empty (and the message verbatim today's) when no secret-backend producer is disabled.
+- **The hint reaches every resolution path** (centralized in `_fail_unavailable`), pinned through at
+  least `Resolver.resolve()` (the dominant path) in addition to `resolve_for_command`.
+- **A `False` opt-out gets no hint**: a secret that fails with `backend_mappings.<plugin> = false`
+  set (an explicit opt-out) does NOT gain the "enable plugin" clause, since enabling a backend it
+  opted out of would not resolve it.

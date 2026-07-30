@@ -392,6 +392,9 @@ def test_not_ready_backend_annotated_and_skipped_in_preview(
     cfg = _write_cfg(
         tmp_path,
         """\
+        [plugins]
+        enabled = ["onepassword"]
+
         [secrets.api-key]
         description = "API key"
         backend_mappings.onepassword = "op://Vault/api/field"
@@ -424,6 +427,9 @@ def test_render_shows_not_ready_annotation_and_skip(
     cfg = _write_cfg(
         tmp_path,
         """\
+        [plugins]
+        enabled = ["onepassword"]
+
         [secrets.api-key]
         description = "API key"
         backend_mappings.onepassword = "op://Vault/api/field"
@@ -456,6 +462,9 @@ def test_interactive_optimism_preview_unchanged_under_readiness(
     cfg = _write_cfg(
         tmp_path,
         """\
+        [plugins]
+        enabled = ["onepassword"]
+
         [secrets.api-key]
         description = "API key"
         backend_mappings.onepassword = "op://Vault/api/field"

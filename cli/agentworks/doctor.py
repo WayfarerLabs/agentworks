@@ -262,9 +262,10 @@ def _check_plugins(config: Config) -> HealthGroup:
     capabilities or resources (that is what the enablement axis and the
     reference hint are for). The reserved ``required_scopes`` (R10) render as an
     informational least-privilege line when populated, unenforced; empty (the
-    v1 default) renders nothing. The shipped build ships an empty index, so the
-    group renders empty-but-present, so the surface exists and is testable
-    before any plugin ships.
+    v1 default) renders nothing. When the shipped index is empty the group
+    renders empty-but-present, so the surface exists and is testable even before
+    any plugin ships; the migrated plugins (``onepassword`` so far) now populate
+    it.
     """
     from agentworks.plugins import SYSTEM_PLUGINS
 

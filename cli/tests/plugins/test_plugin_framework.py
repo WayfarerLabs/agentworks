@@ -284,8 +284,16 @@ def test_capability_adapters_keys_match_the_capability_category_kinds() -> None:
 # -- The installed index (inverted registration) ----------------------------
 
 
-def test_shipped_index_is_empty() -> None:
-    assert SYSTEM_PLUGINS == {}
+def test_shipped_index_ships_migrated_plugins() -> None:
+    """The shipped index carries the migrated system plugins. Phase 8 ships
+    ``onepassword`` (a capability-only secret-backend plugin, no manifests); the
+    empty-index invariant held only for the framework phase, before any bundle
+    migrated. As later phases migrate claude / proxmox / azure this set grows."""
+    assert "onepassword" in SYSTEM_PLUGINS
+    op = SYSTEM_PLUGINS["onepassword"]
+    assert op.name == "onepassword"
+    assert set(op.capabilities) == {"secret-backend"}
+    assert op.manifests is None
 
 
 class _FakeModule:

@@ -161,7 +161,10 @@ def test_secret_backends_group_reports_readiness(tmp_path: Path, monkeypatch: py
     from agentworks.doctor import _check_secret_backends
 
     monkeypatch.setattr("shutil.which", lambda name: None)  # op absent
-    config = load_config(_write_config(tmp_path), warn_issues=False)
+    config = load_config(
+        _write_config(tmp_path, extras='[plugins]\nenabled = ["onepassword"]\n'),
+        warn_issues=False,
+    )
     g = _check_secret_backends(build_registry(config))
 
     assert g.name == "Secret backends"
@@ -180,6 +183,9 @@ def test_check_secrets_flags_a_not_ready_only_backend(tmp_path: Path, monkeypatc
     cfg = _write_config(
         tmp_path,
         extras="""
+[plugins]
+enabled = ["onepassword"]
+
 [admin.env]
 TOKEN = { secret = "op-only" }
 

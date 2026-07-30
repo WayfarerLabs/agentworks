@@ -168,9 +168,14 @@ class Resolver:
             return
         self._values = {
             **self._seeded,
+            # ``registry`` powers the disabled-plugin failure hint (LLD b): a
+            # secret whose only mapping is a disabled plugin backend fails naming
+            # the plugin to enable. This is the dominant resolution path, so the
+            # hint reaches every VM / session / agent command through it.
             **resolve_secrets(
                 missing,
                 active_backends(self._config, self._registry),
+                registry=self._registry,
             ),
         }
 

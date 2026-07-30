@@ -152,11 +152,16 @@ def test_disabled_secret_backend_is_excluded_from_the_active_chain() -> None:
     from typing import cast
 
     from agentworks.config import Config
+    from agentworks.plugins import publish_plugins
     from agentworks.secrets import backends as secret_backends
     from agentworks.secrets.resolve import active_backends
 
     registry = Registry.empty()
     secret_backends.publish_to(registry)
+    # onepassword ships as a system plugin now (its built-in row is gone), so
+    # publish its capability row through the plugin path; the stub source below
+    # then disables it, exactly as the plugin opt-in source would.
+    publish_plugins(registry, cast("Config", SimpleNamespace(plugins_enabled=())))
     registry.finalize(enablement_sources=[_source_disabling(("secret-backend", "onepassword"))])
 
     # The enablement axis reads disabled; the fold still stored a ready
@@ -177,12 +182,19 @@ def test_r9_9_mapping_to_disabled_backend_is_inert_until_enabled() -> None:
     a stub enablement source, the same axis materialization-gating and
     resolution consult, so validation no longer needs re-touching for the
     plugin source's disabled units."""
+    from types import SimpleNamespace
+    from typing import cast
+
+    from agentworks.config import Config
+    from agentworks.plugins import publish_plugins
     from agentworks.secrets import backends as secret_backends
     from agentworks.secrets.base import SecretDecl
 
     def _build(*, disable_onepassword: bool) -> Registry:
         registry = Registry.empty()
         secret_backends.publish_to(registry)
+        # onepassword's row now comes from the plugin path, not a built-in.
+        publish_plugins(registry, cast("Config", SimpleNamespace(plugins_enabled=())))
         registry.add(
             "secret",
             "vaulted",

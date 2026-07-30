@@ -79,10 +79,20 @@ Each bundle becomes a package `agentworks/plugins/<name>/`:
   separate commits so rename detection holds), imports repointed at the core `base.py`s that stay.
 - The package is appended to `_INSTALLED_MODULES` (`plugins/__init__.py:75`), which registers and
   indexes it (`plugins/__init__.py:54-77`).
-- The core side **drops** the impl: registry dict entry, module import, `__all__` entry. The
-  per-kind `publish_to`s iterate their registries, so no publish-site edit is needed beyond the
-  registry drop; the plugin's rows are published by `publish_plugins` (`plugins/publish.py:84-90`)
-  with `Origin.system_plugin(...)` instead of `Origin.built_in(...)`.
+- The core side **drops** the impl from its literal registry seat (the dict entry), its module
+  import, and its `__all__` entry, but the impl does **not** leave the code registry:
+  `register_plugin` re-seats it there at import through the kind's adapter, and `_impl_for`
+  (`graph.py:528`) reads the impl off that same registry to stamp the graph node. That is required
+  (resolution reaches the impl through the node), and it means the per-kind core `publish_to` would
+  re-publish the plugin-seated impl as a **built-in** row, colliding with `publish_plugins`'s
+  `system-plugin` row at `Registry.add`. So each core `publish_to` **must skip the plugin-seated
+  names** (`plugin_seated_names(kind)` off `_PLUGIN_SEATED`, the provenance the collision-message
+  path already keeps), leaving `publish_plugins` (`plugins/publish.py:84-90`) as the sole publisher
+  of the plugin's rows with `Origin.system_plugin(...)`. Phase 8 adds this filter to
+  `secrets/backends.py::publish_to`; phases 9-11 add the same one-line filter to the harness /
+  vm-platform / git-credential `publish_to`s. (This corrects an earlier draft that claimed "no
+  publish-site edit is needed": that overlooked the plugin re-seating into the shared core
+  registry.)
 
 Plugin composition (pinned):
 
@@ -125,7 +135,7 @@ state per its R14 model. Per bundle, the operator-visible delta:
   `active_backends`, resolution, and mapping validation (the refactor's existing enablement gates),
   so mappings to it are inert until the plugin is enabled; a `[secret_config] backends` chain naming
   it skips it as disabled (distinct from the host-unsupported skip). A secret whose **only** mapping
-  targets the disabled backend fails resolve with the Phase 9 plugin-aware hint (LLD b, "enable
+  targets the disabled backend fails resolve with the Phase 8 plugin-aware hint (LLD b, "enable
   plugin `onepassword`"), not a generic unreachable message.
 - **proxmox**: a `vm-site` on the proxmox platform is **not-ready** with
   `depends on vm-platform 'proxmox', which is disabled; enable plugin proxmox`, and
@@ -152,9 +162,9 @@ the plugin, **never** an unknown-name hard error:
 - **secret-backend**: the one kind that gates by **exclusion, not refusal**. A disabled
   `onepassword` is silently dropped from the active chain, so a secret with **another** working
   backend still resolves (no failure at all). Only a secret whose **sole** mapping is the disabled
-  backend fails, and Phase 9 gives that failure the plugin-aware hint ("enable plugin
+  backend fails, and Phase 8 gives that failure the plugin-aware hint ("enable plugin
   `onepassword`", LLD b), so it too names the plugin rather than the generic "secret unreachable".
-  (Before the Phase 9 hint the message would be generic; the migration ships them together.)
+  (Before the Phase 8 hint the message would be generic; the migration ships them together.)
 
 The default local path (`lima` / `wsl2` + `shell` + `env-var` / `prompt` + `github` + the generic
 dev-tool install-commands) references none of them; a capstone test pins that a default config
@@ -186,7 +196,7 @@ phase green and complete on its own (no bridging aliases, no half-moved bundles)
 1. **onepassword (Phase 8)**: the clean capability-only first migration (10 test files, one class,
    no manifest, does not need Phase 7). It proves the end-to-end shape (move, descriptor, index,
    origin flip, opt-in gate) plus the one mechanism unique to its kind: the instance-seated adapter
-   path and the secret-resolution exclusion gates (with the Phase 9 plugin-aware unavailable hint,
+   path and the secret-resolution exclusion gates (with the Phase 8 plugin-aware unavailable hint,
    LLD b).
 2. **claude (Phase 9)**: harness capability **plus** the `claude` install-command manifest (6 test
    files for the harness; the manifest adds the recipe-gate cases). Needs Phase 7. Proves a
@@ -261,10 +271,14 @@ a capability-only migration.) Shown once so the other three read as deltas:
    (`plugins/__init__.py:75`); the index registers it (seating `claude-code` into `HARNESS_REGISTRY`
    at import, via the adapter) and `SYSTEM_PLUGINS["claude"]` exists.
 5. Core drop, `capabilities/harness/__init__.py`: remove the `ClaudeCodeHarness` import (`:20`), its
-   `HARNESS_REGISTRY` entry (`:43-46`), and its `__all__` entry (`:28`). `publish_to` (`:104-123`)
-   needs no edit: it iterates the registry, which now holds only `shell`; the `claude-code` row is
-   published by `publish_plugins` with the `system-plugin` origin, and the `claude` install-command
-   is published (weak while disabled) from the plugin bundle.
+   `HARNESS_REGISTRY` **literal** entry (`:43-46`), and its `__all__` entry (`:28`).
+   `HARNESS_REGISTRY` still holds `claude-code` at runtime, because the plugin re-seats it at
+   import; so `publish_to` (`:104-123`) **does** need the one-line skip of
+   `plugin_seated_names("harness")` (the same edit Phase 8 made to
+   `secrets/backends.py::publish_to`), otherwise it would publish `claude-code` as a built-in row
+   and collide with `publish_plugins`'s `system-plugin` row. With the skip, the `claude-code` row is
+   published only by `publish_plugins` with the `system-plugin` origin, and the `claude`
+   install-command is published (weak while disabled) from the plugin bundle.
 6. Behavior now, with no config change: the `claude-code` harness row and the `claude`
    user-install-command row are both present-but-disabled, hidden from default `resource list`;
    `describe harness/claude-code` shows `Disabled: not enabled in [plugins] (plugin claude)`; doctor
@@ -311,8 +325,8 @@ a capability-only migration.) Shown once so the other three read as deltas:
 - **Test-fixture drift during the proxmox repoint.** Safeguard: the repoint commit lands before the
   migration commit and must be green on its own, so any behavioral assumption a fixture silently
   made about proxmox surfaces as a lima diff, not as a migration failure.
-- **The secret-backend hint is a new failure-path branch** (Phase 9, LLD b). Risk: it fires only on
+- **The secret-backend hint is a new failure-path branch** (Phase 8, LLD b). Risk: it fires only on
   the sole-mapping-disabled case, so an over-broad implementation could change unrelated
   secret-unavailable messages. Safeguard: the map is empty when no secret-backend producer is
-  disabled (message verbatim today's), and the Phase 9 test pins both the augmented and the
+  disabled (message verbatim today's), and the Phase 8 test pins both the augmented and the
   unchanged message.
