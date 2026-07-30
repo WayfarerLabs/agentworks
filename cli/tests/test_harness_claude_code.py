@@ -65,31 +65,44 @@ def _session_scope() -> OperationScope:
 # -- config vocabulary -------------------------------------------------------
 
 
-def test_validate_accepts_the_three_fields_and_implies_no_reference() -> None:
-    refs = ClaudeCodeHarness.validate_config(
-        "session-template/claude",
-        {"permission_mode": "acceptEdits", "model": "opus", "extra_args": ["--foo"]},
+def test_dependencies_imply_no_reference() -> None:
+    """``claude-code`` implies no edge, and ``dependencies`` is total: it
+    returns ``()`` for the known fields and even for a malformed blob."""
+    assert (
+        ClaudeCodeHarness.dependencies(
+            "session-template/claude",
+            {"permission_mode": "acceptEdits", "model": "opus", "extra_args": ["--foo"]},
+        )
+        == ()
     )
-    assert refs == ()
+    # Never raises, even on config that ``validate`` would reject.
+    assert ClaudeCodeHarness.dependencies("session-template/claude", {"model": 3, "permision_mode": "typo"}) == ()
 
 
-def test_validate_accepts_empty_config() -> None:
-    assert ClaudeCodeHarness.validate_config("session-template/claude", {}) == ()
+def test_validate_accepts_the_three_fields_and_empty_config() -> None:
+    assert (
+        ClaudeCodeHarness.validate(
+            "session-template/claude",
+            {"permission_mode": "acceptEdits", "model": "opus", "extra_args": ["--foo"]},
+        )
+        is None
+    )
+    assert ClaudeCodeHarness.validate("session-template/claude", {}) is None
 
 
 def test_validate_rejects_unknown_field() -> None:
     with pytest.raises(ConfigError, match="unknown claude-code harness field"):
-        ClaudeCodeHarness.validate_config("session-template/claude", {"permision_mode": "typo"})
+        ClaudeCodeHarness.validate("session-template/claude", {"permision_mode": "typo"})
 
 
 def test_validate_rejects_non_string_model() -> None:
     with pytest.raises(ConfigError, match="model must be a string"):
-        ClaudeCodeHarness.validate_config("session-template/claude", {"model": 3})
+        ClaudeCodeHarness.validate("session-template/claude", {"model": 3})
 
 
 def test_validate_rejects_non_list_extra_args() -> None:
     with pytest.raises(ConfigError, match="extra_args must be a list of strings"):
-        ClaudeCodeHarness.validate_config("session-template/claude", {"extra_args": "just-a-string"})
+        ClaudeCodeHarness.validate("session-template/claude", {"extra_args": "just-a-string"})
 
 
 def test_construct_revalidates_config() -> None:

@@ -54,6 +54,7 @@ from agentworks.errors import (
 )
 
 if TYPE_CHECKING:
+    from agentworks.resources.reference import ConfigReference
     from agentworks.secrets.base import MappingValue, SecretDecl
 
 _OP_BINARY = "op"
@@ -281,6 +282,12 @@ class OnePasswordBackend:
             f"an 'op://vault/item/field' string or a {{account, reference}} "
             f"table (got {type(mapping).__name__})"
         )
+
+    def dependencies(self, mapping: MappingValue) -> tuple[ConfigReference, ...]:
+        """A onepassword mapping is an ``op://`` reference into an external
+        vault, not an agentworks resource, so it implies no edge (total,
+        non-throwing)."""
+        return ()
 
     def _resolved_ref(self, secret: SecretDecl, mapping: MappingValue | None) -> _OpRef:
         owner = f"secret {secret.name!r}"

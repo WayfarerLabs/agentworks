@@ -61,7 +61,7 @@ class GitCredentialConfig(DeclaredResource):
     # Provider-owned configuration (azdo's org; github's repos/owner;
     # and the ``token`` secret name that every current provider sources
     # its PAT from, default ``git-token-<name>``, owned by the
-    # provider's ``validate_config`` since sourcing is provider-specific
+    # provider's ``dependencies`` since sourcing is provider-specific
     # (a future minting provider declares a bootstrap secret, or none).
     # The flat TOML section is the ONLY place these live at the top
     # level; the loader nests them here so the internal representation
@@ -72,7 +72,7 @@ class GitCredentialConfig(DeclaredResource):
         from agentworks.resources.reference import (
             ResourceReference as _ResourceReq,
         )
-        from agentworks.resources.reference import SecretReference
+        from agentworks.resources.reference import sourced_references
 
         source = ("git-credential", self.name)
         # The ``provider`` field references a known provider
@@ -85,25 +85,21 @@ class GitCredentialConfig(DeclaredResource):
                 source=source,
             ),
         ]
-        # Everything the credential references (its token secret and
-        # any other provider-declared resources) comes from the
-        # provider validating its config block and returning the
-        # references it implies; this resource (the config block's
-        # owner) attributes them to itself.
+        # Everything the credential references (its token secret and any
+        # other provider-declared resources) comes from the provider
+        # deriving the references its config block implies (dependencies,
+        # total and non-throwing); this resource (the config block's
+        # owner) attributes them to itself via the shared conversion.
         from agentworks.capabilities.git_credential import (
             GIT_CREDENTIAL_PROVIDER_REGISTRY,
         )
 
         capability = GIT_CREDENTIAL_PROVIDER_REGISTRY.get(self.provider)
         if capability is not None:
-            for cref in capability.validate_config(f"git-credential/{self.name}", self.provider_config):
-                ref_cls = SecretReference if cref.kind == "secret" else _ResourceReq
-                refs.append(
-                    ref_cls(
-                        name=cref.name,
-                        kind=cref.kind,
-                        usage=cref.usage,
-                        source=source,
-                    )
+            refs.extend(
+                sourced_references(
+                    capability.dependencies(f"git-credential/{self.name}", self.provider_config),
+                    source,
                 )
+            )
         return refs

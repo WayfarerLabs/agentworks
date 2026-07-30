@@ -455,7 +455,7 @@ def _emit_document(doc: tomlkit.TOMLDocument, unit: MigrationUnit) -> str:
         platform_cls = VM_PLATFORM_REGISTRY.get(platform)
         if platform_cls is not None and "platform_config" in rebuilt_site:
             try:
-                platform_cls.validate_config(f"[{unit.section}]", rebuilt_site["platform_config"])
+                platform_cls.validate(f"[{unit.section}]", rebuilt_site["platform_config"])
             except ConfigError as exc:
                 raise ConfigError(
                     f"cannot migrate vm-site/{unit.name}: {exc}",
@@ -499,7 +499,7 @@ def _emit_document(doc: tomlkit.TOMLDocument, unit: MigrationUnit) -> str:
         capability = GIT_CREDENTIAL_PROVIDER_REGISTRY.get(str(provider))
         if capability is not None and "provider_config" in rebuilt:
             try:
-                capability.validate_config(f"git-credential/{unit.name}", rebuilt["provider_config"])
+                capability.validate(f"git-credential/{unit.name}", rebuilt["provider_config"])
             except ConfigError as exc:
                 raise ConfigError(
                     f"cannot migrate git-credential/{unit.name}: {exc}",
@@ -545,7 +545,7 @@ def _emit_document(doc: tomlkit.TOMLDocument, unit: MigrationUnit) -> str:
             harness_cap = HARNESS_REGISTRY.get(harness)
             if harness_cap is not None:
                 try:
-                    harness_cap.validate_config(f"session-template/{unit.name}", harness_config)
+                    harness_cap.validate(f"session-template/{unit.name}", harness_config)
                 except ConfigError as exc:
                     raise ConfigError(
                         f"cannot migrate session-template/{unit.name}: {exc}",

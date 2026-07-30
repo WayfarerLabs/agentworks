@@ -16,6 +16,7 @@ from agentworks import output
 from agentworks.errors import ConfigError
 
 if TYPE_CHECKING:
+    from agentworks.resources.reference import ConfigReference
     from agentworks.secrets.base import MappingValue, SecretDecl
 
 
@@ -47,6 +48,12 @@ class PromptBackend:
         raise ConfigError(
             f"{owner}: backend_mappings for the prompt backend has no meaning; remove it, or use false to opt out"
         )
+
+    def dependencies(self, mapping: MappingValue) -> tuple[ConfigReference, ...]:
+        """Prompt has no mapping vocabulary and resolves interactively; it
+        implies no agentworks resource, so the edge set is empty (total,
+        non-throwing)."""
+        return ()
 
     def would_attempt(
         self,

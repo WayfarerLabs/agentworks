@@ -71,21 +71,34 @@ def _azdo(
     [{}, {"repos": ["acme/widgets"]}, {"repos": ["acme/widgets", "acme/gadgets"]}, {"owner": "acme"}],
 )
 def test_valid_scopes_accepted(blob: dict[str, object]) -> None:
-    # validate_config returns the token-secret reference the provider
-    # sources its PAT from (default git-token-<name>); scope validation
-    # passing means no error.
-    refs = GitHubCredentialProvider.validate_config("git-credential/t", blob)
+    # dependencies returns the token-secret reference the provider sources
+    # its PAT from (default git-token-<name>); validate passing (no raise)
+    # means the scope is well-formed.
+    assert GitHubCredentialProvider.validate("git-credential/t", blob) is None
+    refs = GitHubCredentialProvider.dependencies("git-credential/t", blob)
     assert [(r.kind, r.name) for r in refs] == [("secret", "git-token-t")]
 
 
 def test_token_override_in_provider_config() -> None:
-    refs = GitHubCredentialProvider.validate_config("git-credential/gh", {"token": "my-secret"})
+    refs = GitHubCredentialProvider.dependencies("git-credential/gh", {"token": "my-secret"})
     assert [(r.kind, r.name) for r in refs] == [("secret", "my-secret")]
 
 
-def test_empty_token_rejected() -> None:
+def test_empty_token_rejected_by_validate() -> None:
     with pytest.raises(ConfigError, match="non-empty secret name"):
-        GitHubCredentialProvider.validate_config("git-credential/gh", {"token": ""})
+        GitHubCredentialProvider.validate("git-credential/gh", {"token": ""})
+
+
+def test_dependencies_total_on_malformed_config() -> None:
+    """``dependencies`` never raises: a malformed ``token`` field omits
+    the (now-underivable) token edge, and a malformed scope does not
+    raise here either (``validate`` owns the raising)."""
+    assert GitHubCredentialProvider.dependencies("git-credential/gh", {"token": ""}) == ()
+    assert GitHubCredentialProvider.dependencies("git-credential/gh", {"token": 3}) == ()
+    # A malformed scope still yields the default token edge (its identity
+    # does not depend on the scope fields).
+    refs = GitHubCredentialProvider.dependencies("git-credential/gh", {"repos": "not-a-list"})
+    assert [(r.kind, r.name) for r in refs] == [("secret", "git-token-gh")]
 
 
 @pytest.mark.parametrize(
@@ -107,7 +120,7 @@ def test_empty_token_rejected() -> None:
 )
 def test_invalid_scopes_rejected(blob: dict[str, object], match: str) -> None:
     with pytest.raises(ConfigError, match=match):
-        GitHubCredentialProvider.validate_config("t", blob)
+        GitHubCredentialProvider.validate("t", blob)
 
 
 # -- per-credential emission --------------------------------------------------
@@ -790,7 +803,7 @@ def test_azdo_org_charset_validated() -> None:
     with pytest.raises(ConfigError, match="organization name"):
         from agentworks.capabilities.git_credential.azdo import AzDOCredentialProvider as A
 
-        A.validate_config("t", {"org": "my org"})
+        A.validate("t", {"org": "my org"})
 
 
 def test_two_unscoped_creds_first_wins(tmp_path: Path) -> None:

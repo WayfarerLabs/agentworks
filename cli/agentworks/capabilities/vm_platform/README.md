@@ -2,8 +2,8 @@
 
 > Practical guidance for authors of `vm-platform` capabilities. This is the platform-kind companion
 > to the capability contract in [`../README.md`](../README.md): that doc defines the lifecycle every
-> capability obeys (`validate_config`, preflight, runup, ops); this one covers what is specific to
-> running VMs, plus the gotchas that have already bitten real platforms.
+> capability obeys (`dependencies` / `validate`, preflight, runup, ops); this one covers what is
+> specific to running VMs, plus the gotchas that have already bitten real platforms.
 
 Four platforms ship today and are the working references throughout this guide: `lima` (`lima.py`),
 `wsl2` (`wsl2.py`), `azure-vm` (`azure_vm.py`), and `proxmox` (`proxmox.py`). When a rule below has
@@ -74,10 +74,11 @@ just started:
 
 **Class-level contract methods**:
 
-- `validate_config(owner, config) -> tuple[ConfigReference, ...]` is a pure classmethod that
-  validates the `platform_config` shape and declares any secret references the config implies.
-  Proxmox returns a `ConfigReference(kind="secret", ...)` for its API token here; declaring it is
-  what later lets the op read it (below).
+- `dependencies(owner, config) -> tuple[ConfigReference, ...]` (total, non-throwing) declares any
+  secret references the `platform_config` implies, and `validate(owner, config) -> None` is the
+  throwing shape check. Both are pure classmethods. Proxmox returns a
+  `ConfigReference(kind="secret", ...)` for its API token from `dependencies`; declaring it is what
+  later lets the op read it (below).
 - `legacy_platform_metadata(cls, row, legacy) -> dict[str, str]` maps pre-migration DB rows into the
   `platform_metadata` shape, consumed only by the one-shot DB migration.
 
@@ -104,8 +105,8 @@ author most needs to get right.
 accessor methods rather than bare fields so a future permission model can gate them without changing
 signatures: `admin_target()` / `agent_target()` return execution `Transport`s, and `secret(name)`
 returns a resolved secret value. `ctx.secret(name)` raises a typed `ConfigError` if the context was
-assembled without a resolve pass, and it is scoped: an op can read only the names its
-`validate_config` declared.
+assembled without a resolve pass, and it is scoped: an op can read only the names its `dependencies`
+declared.
 
 What differs between stages is timing, not shape. `preflight` gets the command-start slice (existing
 targets only, no resolved secrets, which is what makes it structurally dependency-blind); `runup`
@@ -253,8 +254,9 @@ YAML block scalar, remote shell). Two traps that have already occurred:
    reader on the instance. If your backend has a persistent client, memoize the derived client, not
    the secret (the Proxmox `_api` pattern). Remember `create` is intentionally not `@idempotent_op`;
    the idempotent ops must land in-state themselves.
-2. Implement `validate_config` to validate your `platform_config` and return a `ConfigReference` for
-   each secret you read. Declaring a secret there is what authorizes the op to read it later.
+2. Implement `validate` to check your `platform_config` shape and `dependencies` to return a
+   `ConfigReference` for each secret you read. Declaring a secret in `dependencies` is what
+   authorizes the op to read it later.
 3. Register the class in `VM_PLATFORM_REGISTRY` (`__init__.py`).
 4. Set `unsupported_reason` if the platform cannot run on some hosts (WSL2 off Windows); implement
    `disabled_reason` for per-site tool checks (Lima with no `limactl`). Add
@@ -270,8 +272,9 @@ YAML block scalar, remote shell). Two traps that have already occurred:
 
 The existing tests under `cli/tests/vms/` are the templates to copy from:
 
-- `test_platform_validate_config.py`: table-driven `validate_config` shape across all platforms,
-  plus a registry-name/class parity check. A good template for a new platform's registration test.
+- `test_platform_validate_config.py`: table-driven `validate` shape and `dependencies` edge
+  extraction across all platforms, plus a registry-name/class parity check. A good template for a
+  new platform's registration test.
 - `test_platform_support.py`: `unsupported_reason` (host-wide) vs. `disabled_reason` (per-site) vs.
   the composed `site_disabled_reason`. Uses the `stub_platform_support` fixture to pin platforms
   supported regardless of host, so dispatch-shape tests do not depend on local tooling.

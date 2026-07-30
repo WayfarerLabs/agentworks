@@ -427,7 +427,7 @@ def _load_vm_sites_legacy(
             raise ConfigError(f"[{section}] must be a table")
         platform_config: dict[str, object] = {key: raw[key] for key in known_keys if key in raw}
         capability = VM_PLATFORM_REGISTRY[platform_name]
-        capability.validate_config(f"[{section}]", platform_config)
+        capability.validate(f"[{section}]", platform_config)
         sites[section] = VMSiteDecl(
             name=section,
             platform=platform_name,

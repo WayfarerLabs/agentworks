@@ -111,7 +111,13 @@ class LimaPlatform(VMPlatform):
         return None
 
     @classmethod
-    def validate_config(cls, owner: str, config: Mapping[str, object]) -> tuple[ConfigReference, ...]:
+    def dependencies(cls, owner: str, config: Mapping[str, object]) -> tuple[ConfigReference, ...]:
+        """``lima`` implies no resource reference, so its edge set is empty
+        (total, non-throwing per the ``dependencies`` contract)."""
+        return ()
+
+    @classmethod
+    def validate(cls, owner: str, config: Mapping[str, object]) -> None:
         vm_host = config.get("vm_host")
         if vm_host is not None and (not isinstance(vm_host, str) or not vm_host):
             raise ConfigError(
@@ -120,7 +126,6 @@ class LimaPlatform(VMPlatform):
         unknown = sorted(set(config) - {"vm_host"})
         if unknown:
             raise ConfigError(f"{owner}: unknown lima platform field(s): {', '.join(unknown)}")
-        return ()
 
     @classmethod
     def legacy_platform_metadata(cls, row: Mapping[str, Any], legacy: Mapping[str, Any]) -> dict[str, str]:

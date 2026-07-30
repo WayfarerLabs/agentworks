@@ -46,6 +46,7 @@ from agentworks.secrets.onepassword import OnePasswordBackend
 from agentworks.secrets.prompt import PromptBackend
 
 if TYPE_CHECKING:
+    from agentworks.resources.reference import ConfigReference
     from agentworks.resources.registry import Registry
     from agentworks.secrets.base import MappingValue, SecretDecl
 
@@ -117,6 +118,26 @@ class SecretBackend(Protocol):
         capabilities pushing a declarative config schema definition at
         registration time, letting the core engine validate (and derive
         any implied references) without invoking the capability.
+        """
+        ...
+
+    def dependencies(
+        self,
+        mapping: MappingValue,
+    ) -> tuple[ConfigReference, ...]:
+        """The resource references one ``backend_mappings`` value implies:
+        the reference-deriving counterpart to :meth:`validate_mapping`
+        (this is the ``secret-backend`` half of the capability contract's
+        ``dependencies`` / ``validate`` split).
+
+        Total and non-throwing, like every capability's ``dependencies``.
+        Today every backend's mapping is a bare external identifier (an
+        env var name, an ``op://`` reference, or nothing) that implies no
+        agentworks resource, so all three shipped backends return ``()``;
+        the method exists so a ``secret``'s own ``dependencies`` can
+        compose its backends' implied edges uniformly when a future
+        backend implies one. REQUIRED, not defaulted (Protocol bodies are
+        not inherited by structural implementers).
         """
         ...
 

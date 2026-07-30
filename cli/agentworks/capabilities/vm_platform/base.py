@@ -90,7 +90,7 @@ class VMPlatform(Capability):
 
     Class-level contract (consumed by the vm-site kind decoder, the
     capability publisher, and the DB migration): ``name``,
-    ``description``, ``validate_config``, and
+    ``description``, ``dependencies`` / ``validate``, and
     ``legacy_platform_metadata``.
 
     Idempotency: ops flagged with ``@idempotent_op`` (``start``,

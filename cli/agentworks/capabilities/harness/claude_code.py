@@ -55,13 +55,18 @@ class ClaudeCodeHarness(Harness):
     _resumed: bool | None = None
 
     @classmethod
-    def validate_config(cls, owner: str, config: Mapping[str, object]) -> tuple[ConfigReference, ...]:
+    def dependencies(cls, owner: str, config: Mapping[str, object]) -> tuple[ConfigReference, ...]:
+        """``claude-code`` implies no resource reference, so its edge set
+        is empty (total, non-throwing per the ``dependencies`` contract)."""
+        return ()
+
+    @classmethod
+    def validate(cls, owner: str, config: Mapping[str, object]) -> None:
         """Shape-and-vocabulary only (FRD R4): unknown fields raise; each
         present field is type-checked. The ``--permission-mode`` / ``--model``
         CHOICE sets are Claude-owned and drift between releases, so the
         VALUE is forwarded unvalidated (an invalid one surfaces as Claude's
-        own startup error in the pane). Implies no resource reference, so
-        it returns ``()``.
+        own startup error in the pane).
         """
         unknown = sorted(set(config) - _CLAUDE_CODE_FIELDS)
         if unknown:
@@ -75,7 +80,6 @@ class ClaudeCodeHarness(Harness):
             not isinstance(extra_args, list) or not all(isinstance(item, str) for item in extra_args)
         ):
             raise ConfigError(f"{owner}.extra_args must be a list of strings")
-        return ()
 
     def start(self, ctx: RunContext) -> str:
         """The pane command for ``session create``: resume the stored

@@ -35,9 +35,10 @@ __all__ = [
 
 
 # The capability registry (the canonical harness list): harness name ->
-# implementation class. ``validate_config`` (blob validation) is invoked
-# through this dict at each source's blob boundary, and ``merge_config``
-# through it at resolve; descriptor rows publish from it.
+# implementation class. ``validate`` (blob validation) and
+# ``dependencies`` (implied references) are invoked through this dict at
+# each source's blob boundary, and ``merge_config`` through it at
+# resolve; descriptor rows publish from it.
 HARNESS_REGISTRY: dict[str, type[Harness]] = {
     ShellHarness.name: ShellHarness,
     ClaudeCodeHarness.name: ClaudeCodeHarness,

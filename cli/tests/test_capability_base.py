@@ -31,7 +31,7 @@ class _SecretCap(Capability):
     owner_kind: ClassVar[str] = "thing"
 
     @classmethod
-    def validate_config(cls, owner: str, config: Mapping[str, object]) -> tuple[ConfigReference, ...]:
+    def dependencies(cls, owner: str, config: Mapping[str, object]) -> tuple[ConfigReference, ...]:
         from agentworks.resources.reference import ConfigReference
 
         return (ConfigReference(name="the-token", kind="secret", usage="the API token"),)

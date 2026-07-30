@@ -53,7 +53,7 @@ class VMSiteDecl(DeclaredResource):
         from agentworks.resources.reference import (
             ResourceReference as _ResourceRef,
         )
-        from agentworks.resources.reference import SecretReference
+        from agentworks.resources.reference import sourced_references
 
         source = ("vm-site", self.name)
         refs: list[ResourceReference] = []
@@ -77,19 +77,11 @@ class VMSiteDecl(DeclaredResource):
                 source=source,
             )
         )
-        # Capability-implied references: the platform validates its
-        # config block and returns the references it implies; this
-        # resource (the config block's owner) attributes them to itself.
-        for cref in capability.validate_config(f"vm-site/{self.name}", self.platform_config):
-            ref_cls = SecretReference if cref.kind == "secret" else _ResourceRef
-            refs.append(
-                ref_cls(
-                    name=cref.name,
-                    kind=cref.kind,
-                    usage=cref.usage,
-                    source=source,
-                )
-            )
+        # Capability-implied references: the platform derives the
+        # references its config block implies (dependencies, total and
+        # non-throwing); this resource (the config block's owner)
+        # attributes them to itself via the shared sourced-conversion.
+        refs.extend(sourced_references(capability.dependencies(f"vm-site/{self.name}", self.platform_config), source))
         return refs
 
 
@@ -185,7 +177,7 @@ def site_disabled_reason(decl: VMSiteDecl) -> str | None:
         return f"platform '{decl.platform}' is not installed"
     if (reason := platform_cls.unsupported_reason()) is not None:
         return f"platform '{decl.platform}' is disabled: {reason}"
-    # Construction re-runs validate_config, but it cannot fail here:
+    # Construction re-runs validate, but it cannot fail here:
     # every decl source runs the same pure classmethod at load whenever
     # the platform is installed (manifest decode, legacy TOML), and the
     # branches above returned for the one unvalidated shape (missing

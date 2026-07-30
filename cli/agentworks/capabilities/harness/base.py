@@ -1,7 +1,7 @@
 """Base interface for session harnesses.
 
 A harness is a capability (see ``capabilities/README.md``): it validates
-its own ``harness_config`` block (``validate_config``), owns the
+its own ``harness_config`` block (``validate``), owns the
 session's launch-target readiness (the required-commands probe and the
 skip/defer/probe/error fork), and produces the tmux pane command string
 that runs the workload as its ops (``start`` / ``restart``). Unlike the
@@ -166,7 +166,7 @@ class Harness(Capability):
 
     def secret_refs(self) -> tuple[str, ...]:
         """The secret names this harness declares (the secret-kind
-        references :meth:`validate_config` returned, bound at construct
+        references :meth:`dependencies` returned, bound at construct
         into ``self._secret_refs``), for the holding session node to fold
         into its own ``secret_refs`` union.
 
@@ -186,7 +186,7 @@ class Harness(Capability):
         capability where a key needs richer combination (``shell`` unions
         ``required_commands``). Runs classmethod-side from the resolver's
         ``_merge_pair`` walk with no instance yet, exactly as
-        :meth:`validate_config` does.
+        :meth:`validate` does.
         """
         return {**base, **child}
 

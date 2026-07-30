@@ -64,6 +64,10 @@ class _TestOnlyBackend:
 
             raise ConfigError(f"{owner}: test-only mapping must be str or dict")
 
+    def dependencies(self, mapping: Any) -> tuple[Any, ...]:
+        # A store address implies no agentworks resource.
+        return ()
+
     def would_attempt(self, secret: Any, mapping: Any) -> bool:
         # Store semantics: only attempts explicitly-mapped secrets
         # (soft-skip otherwise), unlike the always-attempt built-ins.
@@ -235,6 +239,32 @@ def test_legacy_toml_backend_unknown_name_still_errors(tmp_path: Path) -> None:
             [secret_backends.envvar]
             """,
         )
+
+
+def test_shipped_backends_dependencies_are_total_and_empty() -> None:
+    """Every shipped backend's ``dependencies`` (the ``secret-backend``
+    half of the capability split) is total and implies no edge today: a
+    bare identifier mapping names no agentworks resource. It never raises,
+    even on a shape ``validate_mapping`` would reject."""
+    for backend in SECRET_BACKEND_REGISTRY.values():
+        assert backend.dependencies("AW_SECRET_X") == ()
+        assert backend.dependencies({"vault": "Work"}) == ()
+        assert backend.dependencies(None) == ()  # type: ignore[arg-type]
+
+
+def test_would_attempt_is_pure_of_secret_and_mapping() -> None:
+    """``would_attempt`` must be a pure function of ``(secret, mapping)``
+    with no host probing, so freezing it into edges at finalize is safe.
+    env-var / prompt always attempt; onepassword attempts iff mapped."""
+    from agentworks.secrets.env_var import EnvVarBackend
+    from agentworks.secrets.onepassword import OnePasswordBackend
+    from agentworks.secrets.prompt import PromptBackend
+
+    secret = SecretDecl(name="s1", description="s1")
+    assert EnvVarBackend().would_attempt(secret, None) is True
+    assert PromptBackend().would_attempt(secret, None) is True
+    assert OnePasswordBackend().would_attempt(secret, None) is False
+    assert OnePasswordBackend().would_attempt(secret, "op://Vault/Item/field") is True
 
 
 def test_build_registry_is_pure(tmp_path: Path) -> None:

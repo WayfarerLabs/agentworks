@@ -32,8 +32,12 @@ class _FakeHarness(Harness):
     description = "test double harness"
 
     @classmethod
-    def validate_config(cls, owner, config):  # type: ignore[no-untyped-def]
+    def dependencies(cls, owner, config):  # type: ignore[no-untyped-def]
         return ()
+
+    @classmethod
+    def validate(cls, owner, config):  # type: ignore[no-untyped-def]
+        return None
 
     def start(self, ctx):  # type: ignore[no-untyped-def]
         return ""

@@ -263,7 +263,7 @@ class _CredRecord:
 
 # Values interpolated into sh case labels / word lists must be glob- and
 # quote-inert. Everything reaching this is already charset-validated at
-# its source (github scopes via _NAME_RE, azdo org at validate_config,
+# its source (github scopes via _NAME_RE, azdo org at validate,
 # store usernames = resource names); this guard makes the generator
 # safe by construction rather than by distant invariant.
 _SH_SAFE_RE = re.compile(r"^[A-Za-z0-9._/-]+$")

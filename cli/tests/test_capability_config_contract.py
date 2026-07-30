@@ -1,12 +1,13 @@
-"""The capability config-validation contract.
+"""The capability config contract.
 
-Capabilities are invoked during validation of the consuming resource:
-they validate their own config block and return the resource references
-it implies (``ConfigReference``, sourceless); the consuming resource
-emits those references with itself as the source. Two shipped hosts
-exercise it: the git-credential ``provider_config`` blob and per-secret
-``backend_mappings`` values. (The API notes it may be superseded by
-registration-time schema declarations.)
+Capabilities are invoked during interpretation of the consuming
+resource: ``dependencies`` extracts the resource references its config
+block implies (``ConfigReference``, sourceless; the consuming resource
+emits them with itself as the source) and ``validate`` is the throwing
+shape check. Two shipped hosts exercise it: the git-credential
+``provider_config`` blob and per-secret ``backend_mappings`` values.
+(The API notes it may be superseded by registration-time schema
+declarations.)
 """
 
 from __future__ import annotations
@@ -98,7 +99,7 @@ def test_base_class_accepts_no_configuration() -> None:
             return []
 
     with pytest.raises(ConfigError, match="accepts no configuration"):
-        _Bare.validate_config("spec.provider_config", {"anything": 1})
+        _Bare.validate("spec.provider_config", {"anything": 1})
 
 
 def test_github_rejects_unknown_blob_fields(tmp_path: Path) -> None:
@@ -134,24 +135,30 @@ def test_unknown_provider_defers_to_miss_policy(tmp_path: Path) -> None:
         build_registry(config)
 
 
-# -- The reference-returning half --------------------------------------------
+# -- The dependencies half ---------------------------------------------------
 
 
 class _SigningCredentialProvider(GitCredentialProvider):
     """Test-only capability whose config names a secret: exercises the
-    validate-and-return-references contract end to end."""
+    dependencies-extraction contract end to end."""
 
     provider_name = "test-signing"
 
     @classmethod
-    def validate_config(cls, owner: str, config: Any) -> tuple[ConfigReference, ...]:
+    def dependencies(cls, owner: str, config: Any) -> tuple[ConfigReference, ...]:
+        key = config.get("signing_key", "code-signing-key")
+        if not isinstance(key, str) or not key:
+            return ()
+        return (ConfigReference(kind="secret", name=key, usage="the signing key"),)
+
+    @classmethod
+    def validate(cls, owner: str, config: Any) -> None:
         unknown = sorted(set(config) - {"signing_key"})
         if unknown:
             raise ConfigError(f"{owner}: unknown field(s): {', '.join(unknown)}")
         key = config.get("signing_key", "code-signing-key")
         if not isinstance(key, str) or not key:
             raise ConfigError(f"{owner}.signing_key must be a secret name")
-        return (ConfigReference(kind="secret", name=key, usage="the signing key"),)
 
     def credential_lines(self, token: str) -> list[str]:
         return [f"https://signer:{token}@example.test"]

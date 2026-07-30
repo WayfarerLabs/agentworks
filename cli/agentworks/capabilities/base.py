@@ -5,10 +5,11 @@ A capability instance moves through stages with sharply different
 contracts (the full capability model is documented in
 ``capabilities/README.md``):
 
-1. ``validate_config``: pure classmethod; validates a config blob's
-   shape and returns the resource references it implies.
+1. ``dependencies`` / ``validate``: pure classmethods; ``dependencies``
+   extracts a config blob's implied resource references (total,
+   non-throwing) and ``validate`` is the throwing shape check.
 2. construct: cheap, config-valid by construction (re-runs
-   ``validate_config``); binds ``(name, config)``, never resolved
+   ``validate``); binds ``(name, config)``, never resolved
    secret values. No network, no resolution, no prompt.
 3. ``preflight``: pre-resolve, read-only, best-effort readiness;
    checks unauthenticated reachability / tools (the declared secrets'
@@ -292,7 +293,7 @@ class Capability(ABC):
     ) -> None:
         """Bind to ``(owner_name, config)``.
 
-        Config validity is a construct-time invariant: ``validate_config``
+        Config validity is a construct-time invariant: ``validate``
         re-runs here, so a shape error dies at construction, never later
         in preflight. Construction is otherwise cheap: no network, no
         secret resolution, no prompt, and no secret machinery at all:
@@ -303,8 +304,13 @@ class Capability(ABC):
         """
         self.owner_name = owner_name
         self.config = config
+        # Validate first (the construct-time invariant), then extract the
+        # config-implied edges: ``validate`` guarantees validity, so the
+        # total ``dependencies`` sees a valid blob and yields the same
+        # refs it would at finalize.
+        type(self).validate(self._owner_display, config)
         self._secret_refs: tuple[ConfigReference, ...] = tuple(
-            ref for ref in type(self).validate_config(self._owner_display, config) if ref.kind == "secret"
+            ref for ref in type(self).dependencies(self._owner_display, config) if ref.kind == "secret"
         )
 
     @property
@@ -312,15 +318,35 @@ class Capability(ABC):
         return f"{self.owner_kind}/{self.owner_name}"
 
     @classmethod
-    def validate_config(cls, owner: str, config: Mapping[str, object]) -> tuple[ConfigReference, ...]:
-        """Validate ``config`` (the blob owned by ``owner``) and return
-        the resource references it implies.
+    def dependencies(cls, owner: str, config: Mapping[str, object]) -> tuple[ConfigReference, ...]:
+        """The resource references ``config`` (the blob owned by ``owner``)
+        implies: this capability's config-derived graph out-edges.
+
+        Total and non-throwing: it never raises on a malformed blob and
+        emits every edge it can derive best-effort, omitting only an edge
+        whose identity depends on a field that is itself malformed (the
+        throwing correctness check is :meth:`validate`). Invoked by the
+        consuming resource's ``referenced_resources()`` at finalize and,
+        for the secret sub-refs, at construct. MUST be pure. ``owner`` is
+        display context (host-agnostic, never dispatched on); most kinds
+        that imply an edge derive its default name from it.
+
+        Base behavior: accepts no configuration, so it implies no
+        references. Subclasses with config-implied edges override
+        wholesale.
+        """
+        return ()
+
+    @classmethod
+    def validate(cls, owner: str, config: Mapping[str, object]) -> None:
+        """Validate ``config`` (the blob owned by ``owner``): the throwing
+        correctness check for the config block, raising ``ConfigError`` on
+        a malformed blob.
 
         Invoked at each source's blob boundary (manifest decode with
-        ``file:line`` framing; legacy TOML loaders), by the consuming
-        resource's ``referenced_resources()`` at finalize, and again at
-        construct; MUST be pure. ``owner`` is display context for error
-        messages: host-agnostic, never dispatched on.
+        ``file:line`` framing; legacy TOML loaders) and again at construct
+        (the construct-time invariant); MUST be pure. ``owner`` is display
+        context for error messages: host-agnostic, never dispatched on.
 
         Base behavior: accepts no configuration. Subclasses with config
         override wholesale.
@@ -335,7 +361,6 @@ class Capability(ABC):
         if config:
             display = getattr(cls, "name", cls.__name__)
             raise ConfigError(f"{owner}: the {display} capability accepts no configuration; got {sorted(config)}")
-        return ()
 
     def disabled_reason(self) -> str | None:
         """Why this bound instance cannot run on this host, or ``None``

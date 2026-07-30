@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING
 from agentworks.errors import ConfigError
 
 if TYPE_CHECKING:
+    from agentworks.resources.reference import ConfigReference
     from agentworks.secrets.base import MappingValue, SecretDecl
 
 
@@ -50,6 +51,12 @@ class EnvVarBackend:
                 f"{owner}: backend_mappings for the env-var backend must "
                 f"be a non-empty string (an env var name) or false"
             )
+
+    def dependencies(self, mapping: MappingValue) -> tuple[ConfigReference, ...]:
+        """An env-var mapping is a bare env var name; it implies no
+        agentworks resource, so the edge set is empty (total,
+        non-throwing)."""
+        return ()
 
     def _resolved_name(self, secret: SecretDecl, mapping: MappingValue | None) -> str:
         if isinstance(mapping, str):

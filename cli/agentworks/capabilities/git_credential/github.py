@@ -21,7 +21,8 @@ from typing import TYPE_CHECKING
 from agentworks.capabilities.git_credential.base import (
     GitCredentialProvider,
     HelperEntry,
-    token_config_reference,
+    token_dependency,
+    validate_token_field,
 )
 from agentworks.errors import ConfigError
 
@@ -103,9 +104,17 @@ class GitHubCredentialProvider(GitCredentialProvider):
     description = "GitHub personal access token"
 
     @classmethod
-    def validate_config(cls, owner: str, config: Mapping[str, object]) -> tuple[ConfigReference, ...]:
+    def dependencies(cls, owner: str, config: Mapping[str, object]) -> tuple[ConfigReference, ...]:
+        """The token-secret edge the scoped/unscoped PAT config implies
+        (total, non-throwing): a malformed ``token`` field omits the
+        edge, ``validate`` raises on it."""
+        ref = token_dependency(owner, config)
+        return (ref,) if ref is not None else ()
+
+    @classmethod
+    def validate(cls, owner: str, config: Mapping[str, object]) -> None:
         _validated_scope(owner, config)
-        return (token_config_reference(owner, config),)
+        validate_token_field(owner, config)
 
     def __init__(
         self,
@@ -115,8 +124,8 @@ class GitHubCredentialProvider(GitCredentialProvider):
         description: str | None = None,
     ) -> None:
         super().__init__(owner_name, config or {}, description=description)
-        # Scope shape re-parsed from the bound config (validate_config
-        # already ran at construct, so this cannot raise).
+        # Scope shape re-parsed from the bound config (validate already
+        # ran at construct, so this cannot raise).
         self._repos, self._owner = _validated_scope(self._owner_display, self.config)
 
     def _verify_token(self, token: str) -> None:

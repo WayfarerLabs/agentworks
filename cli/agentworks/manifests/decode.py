@@ -173,7 +173,7 @@ def _decode_session_template(doc: Document, spec: dict[str, object], issues: lis
 
         capability = HARNESS_REGISTRY.get(harness)
         if capability is not None:
-            capability.validate_config(
+            capability.validate(
                 f"session-template/{doc.name}",
                 harness_config if isinstance(harness_config, dict) else {},
             )
@@ -239,7 +239,7 @@ def _decode_git_credential(doc: Document, spec: dict[str, object], issues: list[
 
     capability = GIT_CREDENTIAL_PROVIDER_REGISTRY.get(provider)
     if capability is not None:
-        capability.validate_config(f"git-credential/{doc.name}", raw_config)
+        capability.validate(f"git-credential/{doc.name}", raw_config)
     result = _load_git_credentials(
         {"git_credentials": {doc.name: loader_spec}},
         issues,
@@ -307,7 +307,7 @@ def _decode_vm_site(doc: Document, spec: dict[str, object], issues: list[str]) -
         )
     capability = VM_PLATFORM_REGISTRY.get(platform)
     if capability is not None:
-        capability.validate_config("spec.platform_config", raw_config)
+        capability.validate("spec.platform_config", raw_config)
     return VMSiteDecl(
         name=doc.name,
         platform=platform,

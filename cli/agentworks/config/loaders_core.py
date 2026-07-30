@@ -339,7 +339,7 @@ def _load_git_credentials(
         # ``token`` is a bare secret name the provider sources its PAT
         # from. Flat in TOML, hoisted into provider_config so the
         # internal rep matches the YAML manifest shape (the provider's
-        # validate_config owns the ``git-token-<name>`` default when it
+        # dependencies owns the ``git-token-<name>`` default when it
         # is omitted). Empty-string is rejected so an operator who types
         # ``token = ""`` doesn't silently get the default behind their
         # back.
@@ -381,7 +381,7 @@ def _load_git_credentials(
 
         capability = GIT_CREDENTIAL_PROVIDER_REGISTRY.get(cred_type)
         if capability is not None:
-            capability.validate_config(f"git-credential/{name}", provider_config)
+            capability.validate(f"git-credential/{name}", provider_config)
         creds[name] = GitCredentialConfig(
             name=name,
             provider=cred_type,

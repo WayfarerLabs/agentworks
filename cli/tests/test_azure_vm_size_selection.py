@@ -101,24 +101,25 @@ class TestValidateConfig:
     }
 
     def test_accepts_without_vm_sizes(self) -> None:
-        assert AzureVMPlatform.validate_config("vm-site/az", dict(self._BASE)) == ()
+        assert AzureVMPlatform.validate("vm-site/az", dict(self._BASE)) is None
+        assert AzureVMPlatform.dependencies("vm-site/az", dict(self._BASE)) == ()
 
     def test_accepts_valid_vm_sizes(self) -> None:
         cfg = {
             **self._BASE,
             "vm_sizes": [{"cpus": 2, "memory": 4, "size": "Standard_B2s"}],
         }
-        assert AzureVMPlatform.validate_config("vm-site/az", cfg) == ()
+        assert AzureVMPlatform.validate("vm-site/az", cfg) is None
 
     def test_rejects_malformed_vm_sizes_at_load(self) -> None:
         cfg = {**self._BASE, "vm_sizes": [{"cpus": 2, "size": "Standard_B2s"}]}
         with pytest.raises(ConfigError, match="memory"):
-            AzureVMPlatform.validate_config("vm-site/az", cfg)
+            AzureVMPlatform.validate("vm-site/az", cfg)
 
     def test_still_rejects_unknown_field(self) -> None:
         cfg = {**self._BASE, "bogus": "x"}
         with pytest.raises(ConfigError, match="unknown"):
-            AzureVMPlatform.validate_config("vm-site/az", cfg)
+            AzureVMPlatform.validate("vm-site/az", cfg)
 
 
 class TestCreateProvisioningOutput:

@@ -48,6 +48,10 @@ one directly.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from collections.abc import Iterable
 
 
 @dataclass(frozen=True)
@@ -88,7 +92,7 @@ class ResourceReference:
 @dataclass(frozen=True)
 class ConfigReference:
     """A resource reference implied by a capability's config block,
-    returned by the capability's ``validate_config``. Sourceless by
+    returned by the capability's ``dependencies``. Sourceless by
     design: the consuming resource that owns the config block attaches
     itself as the ``source`` when it emits the corresponding
     ``ResourceReference`` (whoever hosts the config that names the
@@ -157,3 +161,32 @@ class ReferenceEntry:
 
     source: tuple[str, str]
     usage: str
+
+
+def sourced_references(
+    config_refs: Iterable[ConfigReference],
+    source: tuple[str, str],
+) -> list[ResourceReference]:
+    """Promote sourceless ``ConfigReference``s (a capability's
+    ``dependencies`` output) to sourced outbound ``ResourceReference``s.
+
+    Attaches ``source`` (the consuming resource that owns the config
+    block) and selects the concrete subclass each reference's ``kind``
+    implies: ``SecretReference`` for secrets, the base ``ResourceReference``
+    otherwise. The consuming resource composes the capability's implied
+    edges into its own outbound references through this one helper,
+    centralizing what the three capability-config resources
+    (``vm-site``, ``git-credential``, ``session-template``) duplicated.
+    """
+    result: list[ResourceReference] = []
+    for cref in config_refs:
+        ref_cls = SecretReference if cref.kind == "secret" else ResourceReference
+        result.append(
+            ref_cls(
+                name=cref.name,
+                kind=cref.kind,
+                usage=cref.usage,
+                source=source,
+            )
+        )
+    return result

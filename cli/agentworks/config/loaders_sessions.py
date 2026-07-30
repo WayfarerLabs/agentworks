@@ -160,5 +160,5 @@ def _session_harness_pair(name: str, tdata: dict[str, object]) -> tuple[str | No
 
         capability = HARNESS_REGISTRY.get(harness)
         if capability is not None:
-            capability.validate_config(f"session-template/{name}", harness_config)
+            capability.validate(f"session-template/{name}", harness_config)
     return harness, harness_config
