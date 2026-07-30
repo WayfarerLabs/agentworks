@@ -26,12 +26,14 @@ from __future__ import annotations
 from dataclasses import dataclass
 from enum import Enum
 from types import MappingProxyType
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping, Sequence
 
+    from agentworks.capabilities.vm_platform import VMPlatform
     from agentworks.resources.reference import ReferenceEntry, ResourceReference
+    from agentworks.secrets.backends import SecretBackend
 
 
 class Enablement(Enum):
@@ -71,6 +73,25 @@ class Readiness:
     @classmethod
     def blocked(cls, reason: str) -> Readiness:
         return cls(reason)
+
+
+@dataclass(frozen=True)
+class DependencyState:
+    """What the fold hands a node about ONE of its dependencies: the dep's
+    enablement, its readiness (when enabled), and its capability impl.
+
+    ``readiness`` is ``None`` iff the dep is disabled (readiness is computed
+    only for enabled nodes; enablement is the axis that answers for a disabled
+    node). ``impl`` is the dependency's capability implementation (a class for
+    vm-platform/harness/git-credential-provider, an instance for secret-backend,
+    ``None`` for a non-capability dep), carried so the depending node can run a
+    config-dependent capability check WITHOUT reaching into a live registry
+    (the impl came from the graph, so this stays guard-clean, R11). See LLD c.
+    """
+
+    enablement: Enablement
+    readiness: Readiness | None
+    impl: object | None
 
 
 @dataclass(frozen=True)
@@ -160,21 +181,27 @@ def build_graph(
     resources: Mapping[str, Mapping[str, object]],
     all_refs: Mapping[tuple[str, str], Sequence[ResourceReference]],
     all_outbound: Mapping[tuple[str, str], Sequence[ResourceReference]],
+    readiness: Mapping[tuple[str, str], Readiness] | None = None,
 ) -> DependencyGraph:
     """Build the frozen ``DependencyGraph`` from the finalized resource map and
     the two accumulated edge maps.
 
     ``all_outbound`` is keyed by source in source-emission order (each
-    resource's ``referenced_resources()`` appended contiguously during the
-    finalize walk), so a node's ``outbound`` preserves first-encountered order
-    per LLD (a). ``all_refs`` is keyed by target; ``inbound`` projects each edge
-    to the inbound ``ReferenceEntry`` on its target (the logic that lived in
+    resource's ``dependencies()`` appended contiguously during the finalize
+    walk), so a node's ``outbound`` preserves first-encountered order per LLD
+    (a). ``all_refs`` is keyed by target; ``inbound`` projects each edge to the
+    inbound ``ReferenceEntry`` on its target (the logic that lived in
     ``registry._references_tuple``), preserving that target's incoming order.
-    Every node is constructed ``enabled`` / ``ready`` this effort; the readiness
-    fold fills real verdicts later.
+
+    ``readiness`` is the verdict map the fold (:func:`fold_readiness`) produced,
+    keyed by node; a node absent from it is stored ``ready`` (a node the fold
+    did not reach, e.g. in a test that builds a graph without folding). Every
+    node is ``enabled`` this effort; the enablement axis is modeled on the node
+    but no producer ships a ``disabled`` node (R7).
     """
     from agentworks.resources.reference import ReferenceEntry
 
+    verdicts = readiness or {}
     inbound: dict[tuple[str, str], list[ReferenceEntry]] = {}
     for target, refs in all_refs.items():
         for ref in refs:
@@ -189,11 +216,139 @@ def build_graph(
                 outbound=tuple(all_outbound.get(key, ())),
                 inbound=tuple(inbound.get(key, ())),
                 enablement=Enablement.enabled,
-                readiness=Readiness.ready(),
+                readiness=verdicts.get(key, Readiness.ready()),
                 impl=_impl_for(kind, name),
             )
 
     return DependencyGraph(_nodes=MappingProxyType(nodes))
+
+
+# -- The readiness fold (LLD c) ---------------------------------------------
+
+# The four capability kinds whose node readiness comes from their impl (a
+# config-independent host-support check), not from a resource-level
+# ``not_ready`` hook. The fold dispatches per kind here because the impl is
+# heterogeneous (a class for platform/harness/provider, an instance for
+# secret-backend) and each kind's host-support source differs (LLD c's table).
+_CAPABILITY_KINDS = frozenset(
+    {"vm-platform", "harness", "git-credential-provider", "secret-backend"},
+)
+
+
+def fold_readiness(
+    resources: Mapping[str, Mapping[str, object]],
+    all_outbound: Mapping[tuple[str, str], Sequence[ResourceReference]],
+) -> dict[tuple[str, str], Readiness]:
+    """Compute each present node's readiness verdict, dependency-first.
+
+    Walks the built edge map in reverse-topological order (dependencies before
+    dependents; cycle detection has already guaranteed acyclicity) and, for each
+    node, hands its ``not_ready`` hook the ``DependencyState`` of each of its
+    ALREADY-FOLDED dependencies, storing the returned :class:`Readiness`. A
+    dependency with no present node yet (a deferred auto-declare target not
+    materialized until finalize pass 5) contributes no ``DependencyState`` (LLD
+    c): a resource's ``not_ready`` indexes only the deps it declares interest in.
+
+    The fold imposes NO propagation rule (R4): it only distributes states; each
+    node's hook decides its own verdict. Returns the verdict map, which finalize
+    hands to :func:`build_graph` and grows for late-materialized nodes.
+    """
+    present = {(kind, name) for kind, kind_dict in resources.items() for name in kind_dict}
+    readiness: dict[tuple[str, str], Readiness] = {}
+    for key in _reverse_topo_order(present, all_outbound):
+        readiness[key] = node_readiness(key, resources, all_outbound, readiness)
+    return readiness
+
+
+def node_readiness(
+    key: tuple[str, str],
+    resources: Mapping[str, Mapping[str, object]],
+    all_outbound: Mapping[tuple[str, str], Sequence[ResourceReference]],
+    readiness: Mapping[tuple[str, str], Readiness],
+) -> Readiness:
+    """One node's readiness verdict, given the verdicts of its dependencies.
+
+    A capability node computes from its impl (config-independent host support,
+    LLD c's table). A consuming resource with a ``not_ready(deps)`` hook (today
+    only ``vm-site``) is handed its dependencies' ``DependencyState``s and
+    decides for itself. Any other node (a secret, a template, a resource that
+    opts out) is ready. Exposed (not just the fold's inner loop) so finalize's
+    materialize pass can fold a single late-materialized node the same way.
+    """
+    kind, name = key
+    if kind in _CAPABILITY_KINDS:
+        return _capability_node_readiness(kind, name)
+    resource = resources[kind][name]
+    hook = getattr(resource, "not_ready", None)
+    if hook is None:
+        return Readiness.ready()
+    deps: dict[tuple[str, str], DependencyState] = {}
+    for ref in all_outbound.get(key, ()):
+        target = (ref.kind, ref.name)
+        if target not in readiness:
+            # Not a present, folded node (a deferred auto-declare target). The
+            # hook indexes only the deps it cares about, so a skipped one it
+            # does not consult never becomes a missing key (LLD c).
+            continue
+        deps[target] = DependencyState(
+            enablement=Enablement.enabled,
+            readiness=readiness[target],
+            impl=_impl_for(*target),
+        )
+    return cast("Readiness", hook(deps))
+
+
+def _capability_node_readiness(kind: str, name: str) -> Readiness:
+    """A capability node's own readiness: its impl's config-independent
+    host-support check (LLD c's table). ``vm-platform`` wraps
+    ``unsupported_reason``; ``secret-backend`` asks the backend instance;
+    ``harness`` / ``git-credential-provider`` have no host-support concept and
+    are always ready.
+    """
+    impl = _impl_for(kind, name)
+    if kind == "vm-platform":
+        reason = cast("type[VMPlatform]", impl).unsupported_reason()
+        # Store the BARE host-support reason (e.g. "Windows only"); the vm-site
+        # that depends on it wraps it into its own operator string, and the
+        # platform row's own projection renders it directly. The readiness
+        # vocabulary rename (R9.1) is a later phase; today's strings hold.
+        return Readiness.ready() if reason is None else Readiness.blocked(reason)
+    if kind == "secret-backend":
+        return cast("SecretBackend", impl).not_ready()
+    # harness, git-credential-provider: no host-support, no override.
+    return Readiness.ready()
+
+
+def _reverse_topo_order(
+    present: set[tuple[str, str]],
+    all_outbound: Mapping[tuple[str, str], Sequence[ResourceReference]],
+) -> list[tuple[str, str]]:
+    """Present nodes in reverse-topological order (dependencies before
+    dependents): an iterative DFS post-order over ``all_outbound``, following
+    only edges to present targets. The graph is acyclic (cycle detection ran
+    first); a visited set makes this defensively cycle-safe regardless.
+    """
+    visited: set[tuple[str, str]] = set()
+    order: list[tuple[str, str]] = []
+    for root in present:
+        if root in visited:
+            continue
+        # Each stack frame is (node, whether its children have been pushed).
+        stack: list[tuple[tuple[str, str], bool]] = [(root, False)]
+        while stack:
+            node, expanded = stack.pop()
+            if expanded:
+                order.append(node)
+                continue
+            if node in visited:
+                continue
+            visited.add(node)
+            stack.append((node, True))
+            for ref in all_outbound.get(node, ()):
+                target = (ref.kind, ref.name)
+                if target in present and target not in visited:
+                    stack.append((target, False))
+    return order
 
 
 def _impl_for(kind: str, name: str) -> object | None:

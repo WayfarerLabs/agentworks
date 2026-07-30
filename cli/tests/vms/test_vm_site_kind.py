@@ -118,23 +118,22 @@ def test_build_registry_validates_the_blob_via_the_capability(tmp_path: Path) ->
     assert "site.yaml" in str(exc.value)
 
 
-def test_unknown_platform_registers_a_disabled_site(tmp_path: Path) -> None:
-    """Decode must not error on an unregistered platform, and neither
-    may finalize: the site claims no capability edge and self-disables
-    ("platform 'nope' is not installed"); an uninstalled plugin and a
-    typo are indistinguishable by design, and both must degrade rather
-    than break the registry."""
-    from agentworks.vms.sites import site_disabled_reason
-
+def test_unknown_platform_site_hard_errors_at_finalize(tmp_path: Path) -> None:
+    """R9.2: decode still must not error on an unregistered platform (the
+    total-``dependencies`` contract), but finalize now DOES: with the
+    edge-suppression removed the site emits its platform edge
+    unconditionally, and the absent ``vm-platform`` row is the error miss
+    policy's unknown-reference. A typo no longer silently self-disables."""
     doc = "apiVersion: agentworks/v1\nkind: vm-site\nmetadata:\n  name: mystery\nspec:\n  platform: nope\n"
     site = _load_one(tmp_path, doc)
     assert site.platform == "nope"
-    assert site.referenced_resources() == []
+    # The platform edge is always emitted now (suppression removed).
+    assert [(r.kind, r.name) for r in site.referenced_resources()] == [("vm-platform", "nope")]
 
     registry = Registry.empty()
     registry.add("vm-site", "mystery", site, Origin.built_in(source="test"))
-    registry.finalize()  # no raise
-    assert site_disabled_reason(site) == "platform 'nope' is not installed"
+    with pytest.raises(ConfigError, match="unknown vm-platform 'nope'"):
+        registry.finalize()
 
 
 def test_reference_emission(tmp_path: Path) -> None:
@@ -163,13 +162,14 @@ def test_proxmox_site_emits_the_token_secret_reference() -> None:
     assert all(r.source == ("vm-site", "px") for r in refs)
 
 
-def test_host_disabled_site_emits_no_edges(
+def test_host_unsupported_site_still_emits_its_edges(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A host-disabled site claims NO edges: the platform edge would
-    dangle (no capability row), and the config-implied secret edges
-    would auto-declare and predict-resolve a secret for a site that can
-    never run here. Pinned against the first plugin that ships a
+    """R13/R12: a host-unsupported site emits its edges UNCONDITIONALLY
+    now (the suppression is gone). ``dependencies`` is total and blind to
+    host support; keeping a not-ready site's config-implied secret out of
+    the registry is the readiness-gated MATERIALIZATION pass's job (R12),
+    not the edge walk's. Pinned against the first plugin that ships a
     host-gated platform WITH a config secret."""
     from agentworks.capabilities.vm_platform.proxmox import ProxmoxPlatform
 
@@ -184,7 +184,10 @@ def test_host_disabled_site_emits_no_edges(
             "template_vmid": 9000,
         },
     )
-    assert site.referenced_resources() == []
+    assert [(r.kind, r.name) for r in site.referenced_resources()] == [
+        ("vm-platform", "proxmox"),
+        ("secret", "proxmox-token"),
+    ]
 
 
 def test_bundled_sites_are_reserved(tmp_path: Path) -> None:

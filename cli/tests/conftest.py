@@ -271,17 +271,19 @@ def stub_platform_support(monkeypatch: pytest.MonkeyPatch) -> None:
     supported and enabled, regardless of the test host's OS and
     tooling.
 
-    Platform capability rows are host-gated for real (wsl2 publishes
-    nothing off Windows) and sites self-disable for real (lima-local
-    needs a local limactl), so tests that want the full four-platform
-    graph enabled must opt out of the host's actual state. Tests OF
-    the disabled model itself patch the individual methods instead.
+    Platform capability rows publish unconditionally (R13), but their
+    readiness is host-gated for real (wsl2 is not-ready off Windows) and
+    sites are not-ready for real (lima-local needs a local limactl), so
+    tests that want the full four-platform graph READY must opt out of the
+    host's actual state. Tests OF the readiness model itself patch the
+    individual methods instead.
     """
     from agentworks.capabilities.vm_platform import VM_PLATFORM_REGISTRY
+    from agentworks.resources.graph import Readiness
 
     for cls in VM_PLATFORM_REGISTRY.values():
         monkeypatch.setattr(cls, "unsupported_reason", classmethod(lambda c: None))
-        monkeypatch.setattr(cls, "disabled_reason", lambda self: None)
+        monkeypatch.setattr(cls, "not_ready", classmethod(lambda c, config: Readiness.ready()))
 
 
 def stub_vm_gates(monkeypatch: pytest.MonkeyPatch) -> _StubPlatform:

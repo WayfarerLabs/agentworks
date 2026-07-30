@@ -57,6 +57,11 @@ class _TestOnlyBackend:
     def __init__(self) -> None:
         self.batch_get_calls: list[list[str]] = []
 
+    def not_ready(self) -> Any:
+        from agentworks.resources.graph import Readiness
+
+        return Readiness.ready()
+
     def validate_mapping(self, owner: str, mapping: Any) -> None:
         # Store semantics: string or structured addressing accepted.
         if not isinstance(mapping, (str, dict)):

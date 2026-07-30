@@ -46,6 +46,7 @@ from agentworks.secrets.onepassword import OnePasswordBackend
 from agentworks.secrets.prompt import PromptBackend
 
 if TYPE_CHECKING:
+    from agentworks.resources.graph import Readiness
     from agentworks.resources.reference import ConfigReference
     from agentworks.resources.registry import Registry
     from agentworks.secrets.base import MappingValue, SecretDecl
@@ -96,6 +97,26 @@ class SecretBackend(Protocol):
 
     @property
     def interactive(self) -> bool: ...
+
+    def not_ready(self) -> Readiness:
+        """Why this backend cannot resolve on this host, or ready when it
+        can. Config-INDEPENDENT (a backend's host tool is present or not,
+        irrespective of any per-secret mapping), so it takes no argument:
+        the readiness fold (LLD c) calls it once per ``secret-backend`` node
+        and stores the verdict (R9.6 gives backends offline readiness).
+
+        This is the per-kind refinement of the uniform capability
+        ``not_ready(config)`` hook: secret-backend impls are instances (LLD
+        a) whose readiness is config-free, so the no-arg instance form is the
+        honest shape, and the fold's per-kind dispatch contains the asymmetry.
+
+        Offline and cheap by contract: a pure presence test (``op`` on PATH),
+        never a store probe, biometric, or re-auth (that is
+        interactive-optimism's concern at resolution time, kept optimistic).
+        REQUIRED, not defaulted (Protocol bodies are not inherited by
+        structural implementers): every registered backend implements it.
+        """
+        ...
 
     def validate_mapping(
         self,

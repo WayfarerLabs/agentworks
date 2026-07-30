@@ -25,6 +25,7 @@ if TYPE_CHECKING:
     from agentworks.capabilities.base import RunContext
     from agentworks.config import Config
     from agentworks.db import VMRow
+    from agentworks.resources.graph import Readiness
     from agentworks.transports import Transport
 
 
@@ -472,16 +473,23 @@ class WSL2Platform(VMPlatform):
             return "Windows only"
         return None
 
-    def disabled_reason(self) -> str | None:
+    @classmethod
+    def not_ready(cls, config: Mapping[str, object]) -> Readiness:
         """On Windows a wsl2 site additionally needs ``wsl.exe`` itself
         (WSL is an optional Windows feature). Off Windows the platform
-        gate already disables everything, so this only ever fires on a
-        supported host."""
+        gate (``unsupported_reason``) already reports every wsl2 node
+        not-ready, so this config-dependent check only adds signal on a
+        supported host.
+
+        Non-constructing (LLD c): a classmethod over ``config``, never an
+        instance."""
         import shutil
 
+        from agentworks.resources.graph import Readiness
+
         if not shutil.which("wsl"):
-            return "wsl.exe not installed; run `wsl --install`"
-        return None
+            return Readiness.blocked("wsl.exe not installed; run `wsl --install`")
+        return Readiness.ready()
 
     def preflight(self, ctx: RunContext) -> None:
         """``wsl.exe`` must be on PATH (which also implies Windows).

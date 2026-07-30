@@ -209,7 +209,11 @@ def test_disabled_site_errors_before_tailscale_and_slug_prompt(
     from agentworks.errors import StateError
 
     config = make_config()
-    monkeypatch.setattr(LimaPlatform, "disabled_reason", lambda self: "limactl not installed")
+    from agentworks.resources.graph import Readiness
+
+    monkeypatch.setattr(
+        LimaPlatform, "not_ready", classmethod(lambda cls, config: Readiness.blocked("limactl not installed"))
+    )
 
     def _no_tailscale() -> None:
         raise AssertionError("tailscale probed for a disabled site")

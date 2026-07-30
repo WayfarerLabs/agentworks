@@ -161,6 +161,18 @@ class _VMPlatformKind:
             "first)"
         )
 
+    def disabled_reason(self, registry: Registry, resource: Any) -> str | None:
+        """The generic disabled hook for ``vm-platform`` rows, reading the
+        STORED readiness verdict off the graph (``readiness_of``), not
+        recomputing. Under R13 an installed-but-host-unsupported platform
+        (wsl2 off Windows) now publishes a present, not-ready row, so this
+        projection lets ``resource list`` / ``describe`` render its state
+        with today's vocabulary (the fold stores the bare host-support reason,
+        e.g. ``"Windows only"``). This is the sanctioned graph-read path, not
+        a live-registry probe.
+        """
+        return registry.graph.readiness_of("vm-platform", resource.name).reason
+
 
 KIND_REGISTRY["vm-platform"] = _VMPlatformKind()
 

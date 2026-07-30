@@ -232,9 +232,12 @@ def test_resolving_a_disabled_site_names_the_requirement(
     uninstalled after VMs existed) gets the site's disabled reason at
     resolve time: the site still EXISTS (lookup succeeds; the
     stranded paste-a-manifest error is only for undeclared names)."""
+    from agentworks.resources.graph import Readiness
     from agentworks.vms.sites import lookup_site
 
-    monkeypatch.setattr(LimaPlatform, "disabled_reason", lambda self: "limactl not installed")
+    monkeypatch.setattr(
+        LimaPlatform, "not_ready", classmethod(lambda cls, config: Readiness.blocked("limactl not installed"))
+    )
     registry = _registry()
 
     assert lookup_site("lima-local", registry).platform == "lima"

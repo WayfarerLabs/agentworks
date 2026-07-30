@@ -150,25 +150,25 @@ commit** (or a tight, individually-green sequence that is merged as a unit): the
 edge-suppression does two jobs, R13 replaces job 1 and R12 replaces job 2, and splitting them opens
 a non-green window where the suppression is gone but materialization is ungated (an R12 regression).
 
-- [ ] **R13 unconditional publication**: `vm_platform.publish_to` drops the
+- [x] **R13 unconditional publication**: `vm_platform.publish_to` drops the
       `unsupported_reason() is not None: continue` skip; every installed platform publishes a
       `vm-platform` row. `unsupported_reason` becomes an input to the platform node's readiness.
-- [ ] **The `not_ready` reshape** (rename from `disabled_reason`): capability
+- [x] **The `not_ready` reshape** (rename from `disabled_reason`): capability
       `not_ready(config) -> Readiness` is a **non-constructing classmethod** (does not build an
       instance, does not validate; tolerates malformed config); consuming-resource
       `not_ready(config, {dependency -> DependencyState}) -> Readiness` is pure over its own config
       and its deps' states. Add the `Readiness` verdict object and the `DependencyState` (carrying a
       dep's enablement and, when enabled, its readiness).
-- [ ] **The readiness fold**: finalize walks the graph reverse-topologically (after cycle
+- [x] **The readiness fold**: finalize walks the graph reverse-topologically (after cycle
       detection), hands each node its deps' `DependencyState`, calls the node's `not_ready`, and
       stores the `Readiness` verdict on the graph node. Self-determined: the fold imposes no
       propagation rule. `vm-site` propagates from its single platform; `secret` implements no
       `not_ready` (always ready).
-- [ ] **Where the `site_disabled_reason` chain lands** (LLD c): platform-missing to the resolve-time
+- [x] **Where the `site_disabled_reason` chain lands** (LLD c): platform-missing to the resolve-time
       hard error; platform-unsupported to the platform node's `not_ready`; the config-dependent tool
       check (local-Lima needs `limactl`) to the site's `not_ready`, calling the platform's
       `not_ready(site_config)` **off the graph node's impl**, non-constructing.
-- [ ] **R12 readiness-gated materialization**: the finalize ordering becomes build to resolve
+- [x] **R12 readiness-gated materialization**: the finalize ordering becomes build to resolve
       error-misses to cycle-detect to fold to **readiness-gated materialize (looping)** to attach to
       validate to freeze (component 3). A not-ready or disabled node's config-implied edges do not
       drive auto-declaration. The materialize **loop** structure lands here, but it is **dormant for
@@ -177,14 +177,14 @@ a non-green window where the suppression is gone but materialization is ungated 
       existing `site -> secret` edges (a host-disabled site's secret must not materialize); the
       loop's load-bearing secret case (a materialized secret's backend edges) and its VM-create
       acceptance test move to phase 4, where those edges exist.
-- [ ] **Remove the vm-site edge-suppression** (`sites.py:60-71`): the vm-site always emits its
+- [x] **Remove the vm-site edge-suppression** (`sites.py:60-71`): the vm-site always emits its
       platform edge (the platform node is always present under R13).
-- [ ] **Enablement axis, modeled not produced**: the graph node carries `enabled | disabled`; a
+- [x] **Enablement axis, modeled not produced**: the graph node carries `enabled | disabled`; a
       **test fixture** produces a disabled node to exercise the axis and the not-ready propagation
       ("depends on X, which is disabled; enable its unit"), but no real producer ships (R7).
-- [ ] **Validate pass gated**: the finalize `validate` pass (phase 2b) now runs over the **ready +
+- [x] **Validate pass gated**: the finalize `validate` pass (phase 2b) now runs over the **ready +
       enabled** set only (R3, R9.4).
-- [ ] Tests (DoD-behavior): R9.2 (typo'd platform is now a hard error, not a silent self-disable);
+- [x] Tests (DoD-behavior): R9.2 (typo'd platform is now a hard error, not a silent self-disable);
       R9.4 (a not-ready resource's malformed block is deferred, not validated); R9.5 **at the graph
       level** (an installed host-unsupported platform, e.g. `wsl2` on Linux, has a **present**
       `vm-platform` node whose `readiness_of` is not-ready; the _rendered_ not-ready row in

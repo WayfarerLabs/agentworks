@@ -22,7 +22,7 @@ from __future__ import annotations
 import dataclasses
 from typing import TYPE_CHECKING, Any
 
-from agentworks.errors import ConfigError
+from agentworks.errors import ConfigError, StateError
 from agentworks.resources.kind import KIND_REGISTRY
 
 if TYPE_CHECKING:
@@ -169,52 +169,43 @@ class Registry:
     def finalize(self) -> None:
         """Run the framework pass over published Resources, then freeze.
 
-        Steps:
+        The passes over the single retained graph (LLD b), in order:
 
-        0. **Always-materialize reserved-default names**:
-           Kinds whose ``auto_declare_names`` is a non-None set guarantee
-           those names exist in the registry after finalize, regardless
-           of whether anything referenced them. Seeded before the
-           worklist loop so the first pass walks these Resources
-           alongside operator-published ones. Kinds with
-           ``auto_declare_names = None`` (secrets) are unaffected --
-           they stay reference-driven.
-        1. **Worklist loop**: walk ``referenced_resources()`` on every
-           Resource not yet visited, accumulating references by
-           ``(kind, name)`` target. For any target that resolves to no
-           Resource currently in the Registry, dispatch the kind's miss
-           policy: ``"auto-declare"`` (subject to ``auto_declare_names``)
-           calls ``synthesize`` and inserts the result; ``"error"`` raises
-           ``ConfigError``. Loop until a pass adds no new Resources --
-           synthesized Resources may themselves produce references, so
-           a single pass would silently drop their unresolved edges. The
-           accumulated reference map is preserved across iterations so
-           the post-loop graph build sees the complete edge set.
-        2. **Build the dependency graph**: from the finalized resource
-           map and the accumulated reference map, build the frozen
-           ``DependencyGraph`` (``resources/graph.py``) the Registry
-           retains and exposes via the ``graph`` property. Inbound
-           references live on the graph node (``dependents_of``), not on
-           the resource dataclass; ``edges_of`` re-keys the same edges by
-           source. Every node is constructed ready/enabled this effort
-           (the readiness fold fills real verdicts later).
-        3. **Description polish**: for any Resource with a ``description``
-           field that's empty and an auto-declared origin, the framework
-           synthesizes a description from the graph's inbound references
-           (or, when there are none, falls back to ``"(auto)
-           auto-declared default <kind>"``).
-        4. **Cycle detection** in the now-complete reference graph via
-           iterative DFS three-coloring; raises ``ConfigError`` on the
-           first cycle with the offending path.
-        5. **Validate capability config blocks**: run each present
-           Resource's ``validate()`` (the throwing correctness check for
-           its capability sub-block). Distinct from graph construction
-           (R3): the build passes never throw on a malformed block, so a
-           config with both a malformed block and a cycle reports the
-           cycle first (R9.3). Errors are re-framed with the Resource's
-           ``origin`` so they stay source-located after the move out of
-           decode/load.
-        6. **Freeze**.
+        0. **reserved-defaults**: always-materialize reserved-default
+           names (kinds whose ``auto_declare_names`` is a non-None set)
+           so they are present before the walk. Kinds with
+           ``auto_declare_names = None`` (secrets) stay reference-driven.
+        1. **build**: walk every present Resource's
+           ``referenced_resources()`` (total, non-throwing) into the
+           outbound edge map. No validation, no throwing on a bad block.
+        2. **resolve**: for each edge whose target has no node, dispatch
+           the miss policy: ``"error"`` and a disallowed-name
+           ``"auto-declare"`` hard-error NOW (ungated); an allowed-name
+           ``"auto-declare"`` DEFERS to materialize (pass 5), so a
+           not-ready node cannot force it (R12).
+        3. **cycle-detect**: three-coloring over the BUILT edge map (no
+           re-derivation); raises on the first cycle.
+        4. **fold**: reverse-topological readiness (LLD c); each node is
+           handed its dependencies' ``DependencyState`` and stores its own
+           verdict. Imposes no propagation rule (R4).
+        5. **materialize**: synthesize each deferred auto-declare target
+           the reference set requires, but ONLY when a READY, ENABLED node
+           references it (R12); then walk / resolve / fold the new node,
+           looping to a fixpoint (a materialized node's out-edges point
+           only back into the settled set; LLD b subtlety 3). Dormant for
+           secrets this effort (they emit no ``secret -> secret-backend``
+           edges until phase 4), so a materialized secret has no out-edges
+           to walk yet.
+        6. **attach**: build the retained frozen ``DependencyGraph``
+           (inbound references + fold verdicts on the node), then synthesize
+           descriptions for auto-declared rows from the graph's inbound refs.
+        7. **validate**: run each READY + ENABLED Resource's ``validate()``
+           (throwing, ``file:line``-framed). A not-ready or disabled row's
+           block is deferred, not validated (R9.4). Distinct from graph
+           construction (R3): the build passes never throw on a malformed
+           block, so a config with both a malformed block and a cycle
+           reports the cycle first (R9.3).
+        8. **freeze**.
 
         Semantic checks that need CONFIG alongside the finalized graph
         (e.g. the secret chain's names and reachability) are not the
@@ -225,85 +216,74 @@ class Registry:
 
         First-encountered reference order (for the
         ``Origin.auto_declared(source=...)`` rule) is preserved by
-        ``dict``'s guaranteed insertion order in CPython 3.7+. The
-        worklist loop appends to the accumulated reference map; the
-        order in which references first appear is the order the
-        framework records.
+        ``dict``'s guaranteed insertion order: each Resource's edges are
+        appended contiguously during its own walk.
 
         Raises ``RuntimeError`` if already finalized. Raises
         ``ConfigError`` for unresolved references under an error policy,
-        reserved-name violations, and cycles.
+        disallowed auto-declare names, reserved-name violations, and cycles.
         """
         if self._frozen:
             raise RuntimeError("registry has already been finalized")
+        from agentworks.resources.graph import build_graph, fold_readiness
 
-        # 0: always-materialize reserved-default names. Seeds the worklist
-        # so unreferenced defaults still land in the registry.
+        # 0: reserved-defaults. Seed always-materialize rows so the build
+        # walk sees them alongside operator-published ones.
         self._materialize_reserved_defaults()
 
-        # 1: worklist loop. ``walked`` tracks which Resources have had
-        # their referenced_resources() walked so we don't double-count.
         # ``all_refs`` accumulates edges keyed by target (for inbound and
-        # miss dispatch); ``all_outbound`` accumulates the same edges keyed
-        # by source, in each source's own emission order, so the graph's
-        # outbound preserves first-encountered order (LLD a). The two are
-        # filled in the same walk rather than re-derived from each other.
+        # miss dispatch); ``all_outbound`` keyed by source, each source's
+        # edges contiguous, so the graph's outbound preserves
+        # first-encountered order (LLD a). Both are filled in one walk.
         all_refs: dict[tuple[str, str], list[ResourceReference]] = {}
         all_outbound: dict[tuple[str, str], list[ResourceReference]] = {}
-        walked: set[tuple[str, str]] = set()
 
-        while True:
-            new_walks = self._collect_new_references(all_refs, all_outbound, walked)
-            if not new_walks:
-                # No new Resources to walk. We're stable.
-                break
-            # Dispatch miss policies for any targets not yet in the
-            # Registry. A miss-handler may add a Resource whose own
-            # referenced_resources() the next iteration will walk.
-            for target, refs in list(all_refs.items()):
-                target_kind, target_name = target
-                if target_name in self._resources.get(target_kind, {}):
-                    continue
-                kind_handler = _lookup_kind(target_kind, refs[0])
-                self._handle_miss(target_kind, target_name, kind_handler, refs)
+        # 1: build. Walk every currently-present Resource once (secrets are
+        # not present yet, so this is operator + reserved-default rows).
+        for kind in list(self._resources.keys()):
+            for name in list(self._resources[kind].keys()):
+                self._walk_into((kind, name), all_refs, all_outbound)
 
-        # 2: build the retained dependency graph. Inbound references live
-        # on the graph node now (caller inventory E), so the graph is the
-        # source the description-polish pass reads from below.
-        from agentworks.resources.graph import build_graph
+        # 2: resolve. Classify misses; allowed auto-declares defer to pass 5.
+        deferred: set[tuple[str, str]] = set()
+        self._resolve_misses(all_refs, deferred)
 
-        self._graph = build_graph(self._resources, all_refs, all_outbound)
+        # 3: cycle-detect over the built edge map (no re-walk).
+        _detect_cycles(all_outbound, self._present_keys())
 
-        # 3: description polish for every Resource. Iterate all
-        # currently-published Resources (not just those with incoming
-        # references) so always-materialized rows get the empty-references
-        # description fallback too. The inbound references come off the
-        # graph node rather than a dataclass field.
+        # 4: fold readiness for the present nodes (LLD c).
+        readiness = fold_readiness(self._resources, all_outbound)
+
+        # 5: readiness-gated materialization (R12), looping to a fixpoint.
+        self._materialize_deferred(deferred, all_refs, all_outbound, readiness)
+
+        # 6: attach. Build the retained graph (inbound + readiness on the
+        # node), then polish auto-declared descriptions off its inbound refs.
+        self._graph = build_graph(self._resources, all_refs, all_outbound, readiness)
         for kind in list(self._resources.keys()):
             for name in list(self._resources[kind].keys()):
                 existing = self._resources[kind][name]
                 inbound = self._graph.dependents_of(kind, name)
                 self._resources[kind][name] = _polish_auto_declared_description(existing, kind, inbound)
 
-        # 4: cycle detection across the now-complete graph.
-        _detect_cycles(self._resources)
-
-        # 5: validate capability config blocks. Distinct from graph
-        # construction (R3): the build passes above are total and never
-        # throw on a malformed block, so a config with both a malformed
-        # block and (say) a cycle reports the CYCLE first (R9.3); the
-        # bad block no longer fails earlier at decode/load. Runs over
-        # every present resource this effort; the readiness gating that
-        # scopes it to the ready + enabled set arrives with the fold.
+        # 7: validate the ready + enabled set only (R3, R9.4).
         self._validate_resources()
 
-        # 6: freeze.
+        # 8: freeze.
         self._frozen = True
 
     def _validate_resources(self) -> None:
-        """Run each present Resource's ``validate()`` (the throwing
+        """Run each READY Resource's ``validate()`` (the throwing
         correctness check for its capability config sub-block), raising on
         the first malformed block.
+
+        Scoped to the READY + ENABLED set (R3, R9.4): a not-ready or disabled
+        resource's block is DEFERRED, not validated (there is nothing to run,
+        and its capability may be unavailable), so a malformed ``platform_config``
+        on a site the host cannot run does not abort every command; it is
+        validated when the resource becomes ready. Every node is enabled this
+        effort, so the gate is readiness (``graph.is_ready``); the enablement
+        half of the scope arrives with a real producer.
 
         The capability's ``validate`` frames its message with the logical
         owner label (``kind/name``); the source location that decode/load
@@ -311,9 +291,7 @@ class Registry:
         gone once validation runs here, so this pass re-attaches it from
         the Resource's ``origin`` (the same provenance operators see in
         ``describe`` / ``doctor``, rendered location-only for the inline
-        message). That keeps the error as source-located as before the
-        move, and adds ``file:line`` on the TOML path, which never framed
-        it.
+        message).
 
         The ``getattr(resource, "validate", None)`` guard skips the
         capability marker rows (``VMPlatformEntry`` and friends), which
@@ -323,8 +301,11 @@ class Registry:
         """
         from agentworks.resources.render import format_origin_location
 
+        assert self._graph is not None  # built in pass 6, before this pass
         for kind in list(self._resources.keys()):
             for name in list(self._resources[kind].keys()):
+                if not self._graph.is_ready(kind, name):
+                    continue
                 resource = self._resources[kind][name]
                 validate = getattr(resource, "validate", None)
                 if validate is None:
@@ -337,6 +318,10 @@ class Registry:
                         f"{exc} ({format_origin_location(origin)})",
                         hint=exc.hint,
                     ) from exc
+
+    def _present_keys(self) -> set[tuple[str, str]]:
+        """The ``(kind, name)`` of every currently-published Resource."""
+        return {(kind, name) for kind, kind_dict in self._resources.items() for name in kind_dict}
 
     def _materialize_reserved_defaults(self) -> None:
         """Seed the registry with reserved-default rows for every kind
@@ -369,65 +354,118 @@ class Registry:
                     continue
                 self._resources.setdefault(kind, {})[name] = kind_handler.synthesize(())
 
-    def _collect_new_references(
+    def _walk_into(
         self,
+        key: tuple[str, str],
         all_refs: dict[tuple[str, str], list[ResourceReference]],
         all_outbound: dict[tuple[str, str], list[ResourceReference]],
-        walked: set[tuple[str, str]],
-    ) -> bool:
-        """Walk ``referenced_resources()`` on every Resource not yet in
-        ``walked``, appending discovered references into ``all_refs``
-        (keyed by target) and ``all_outbound`` (keyed by the reference's
-        source), both in first-encountered order. Each resource's edges are
-        emitted contiguously, so ``all_outbound[source]`` holds that
-        source's edges in its own emission order. Returns True if any
-        Resource was walked this pass; False means the worklist stabilized.
-        """
-        any_walked = False
-        # Snapshot the current per-kind dicts so iteration is safe
-        # against concurrent additions by miss-policy dispatch in this
-        # outer pass.
-        snapshot: list[tuple[tuple[str, str], Any]] = []
-        for kind, kind_dict in self._resources.items():
-            for name, resource in kind_dict.items():
-                key = (kind, name)
-                if key not in walked:
-                    snapshot.append((key, resource))
-        for key, resource in snapshot:
-            walked.add(key)
-            any_walked = True
-            for req in _referenced_resources(resource):
-                all_refs.setdefault((req.kind, req.name), []).append(req)
-                all_outbound.setdefault(req.source, []).append(req)
-        return any_walked
-
-    def _handle_miss(
-        self,
-        kind: str,
-        name: str,
-        kind_handler: Any,
-        refs: list[ResourceReference],
     ) -> None:
-        """Dispatch the kind's miss policy. Mutates ``self._resources``
-        for the auto-declare branch; raises ``ConfigError`` otherwise.
+        """Walk one Resource's ``referenced_resources()``, appending its
+        edges into ``all_refs`` (keyed by target) and ``all_outbound``
+        (keyed by source). The source of every edge is ``key``, so
+        ``all_outbound[key]`` holds this Resource's edges contiguously in
+        emission order (LLD a's first-encountered guarantee).
         """
-        first = refs[0]
-        if kind_handler.miss_policy == "auto-declare":
-            allowed = kind_handler.auto_declare_names
-            if allowed is not None and name not in allowed:
+        kind, name = key
+        resource = self._resources[kind][name]
+        for req in _referenced_resources(resource):
+            all_refs.setdefault((req.kind, req.name), []).append(req)
+            all_outbound.setdefault(req.source, []).append(req)
+
+    def _resolve_misses(
+        self,
+        all_refs: dict[tuple[str, str], list[ResourceReference]],
+        deferred: set[tuple[str, str]],
+    ) -> None:
+        """Classify every edge whose target is not (yet) a Resource: an
+        ``"error"`` policy or a disallowed ``"auto-declare"`` name is a hard
+        error NOW (ungated by any referrer's readiness, LLD b subtlety 1); an
+        allowed ``"auto-declare"`` name is added to ``deferred`` for the
+        readiness-gated materialize pass (R12). A target already deferred or
+        already present is skipped.
+        """
+        for target, refs in list(all_refs.items()):
+            kind, name = target
+            if name in self._resources.get(kind, {}) or target in deferred:
+                continue
+            kind_handler = _lookup_kind(kind, refs[0])
+            first = refs[0]
+            if kind_handler.miss_policy == "auto-declare":
+                allowed = kind_handler.auto_declare_names
+                if allowed is not None and name not in allowed:
+                    raise ConfigError(
+                        f"{kind} kind only auto-declares the reserved name(s) "
+                        f"{sorted(allowed)!r}; got {name!r} "
+                        f"(required by {first.source[0]}/{first.source[1]})"
+                    )
+                deferred.add(target)
+            elif kind_handler.miss_policy == "error":
                 raise ConfigError(
-                    f"{kind} kind only auto-declares the reserved name(s) "
-                    f"{sorted(allowed)!r}; got {name!r} "
-                    f"(required by {first.source[0]}/{first.source[1]})"
+                    f"{first.source[0]} {first.source[1]!r} references unknown {kind} {name!r} ({first.usage})"
                 )
-            synthesized = kind_handler.synthesize(refs)
-            self._resources.setdefault(kind, {})[name] = synthesized
-            return
-        if kind_handler.miss_policy == "error":
-            raise ConfigError(
-                f"{first.source[0]} {first.source[1]!r} references unknown {kind} {name!r} ({first.usage})"
-            )
-        raise RuntimeError(f"unexpected miss_policy {kind_handler.miss_policy!r} on KIND_REGISTRY[{kind!r}]")
+            else:
+                raise RuntimeError(f"unexpected miss_policy {kind_handler.miss_policy!r} on KIND_REGISTRY[{kind!r}]")
+
+    def _materialize_deferred(
+        self,
+        deferred: set[tuple[str, str]],
+        all_refs: dict[tuple[str, str], list[ResourceReference]],
+        all_outbound: dict[tuple[str, str], list[ResourceReference]],
+        readiness: dict[tuple[str, str], Any],
+    ) -> None:
+        """Materialize deferred auto-declare targets, readiness-gated (R12),
+        looping to a fixpoint (LLD b subtlety 3).
+
+        A deferred target is synthesized ONLY when at least one READY, ENABLED
+        node references it (a target referenced solely by not-ready / disabled
+        nodes is left unmaterialized, so its would-be secrets never enter
+        ``secret list`` / doctor / resolution: the behavior the removed vm-site
+        suppression used to achieve). A newly-materialized node is then walked
+        (its edges resolved and it folded) so a materialized node that itself
+        references others still resolves them. The loop terminates because a
+        late-materialized node's out-edges point only back into the settled
+        set; a hard cap on iterations guards against a framework bug rather
+        than truncating silently.
+        """
+        from agentworks.resources.graph import node_readiness
+
+        def has_ready_referrer(target: tuple[str, str]) -> bool:
+            for ref in all_refs.get(target, ()):
+                verdict = readiness.get(ref.source)
+                # A referrer is always a present, folded node; all nodes are
+                # enabled this effort, so readiness is the whole gate.
+                if verdict is None or verdict.is_ready:
+                    return True
+            return False
+
+        cap = sum(len(kind_dict) for kind_dict in self._resources.values()) + len(deferred) + 1
+        for _ in range(cap):
+            if not deferred:
+                return
+            progressed = False
+            for target in sorted(deferred):
+                if not has_ready_referrer(target):
+                    continue
+                kind, name = target
+                refs = all_refs.get(target, [])
+                kind_handler = _lookup_kind(kind, refs[0])
+                self._resources.setdefault(kind, {})[name] = kind_handler.synthesize(refs)
+                deferred.discard(target)
+                progressed = True
+                # Walk the new node, resolve its misses, then fold it (its
+                # deps are already folded, so the reverse-topo invariant holds).
+                self._walk_into(target, all_refs, all_outbound)
+                self._resolve_misses(all_refs, deferred)
+                readiness[target] = node_readiness(target, self._resources, all_outbound, readiness)
+            if not progressed:
+                # Every remaining deferred target lacks a ready referrer (R12):
+                # leave it unmaterialized.
+                return
+        raise StateError(
+            "readiness-gated materialization did not reach a fixpoint within "
+            "the node-count cap; this is a framework bug (a materialized node's "
+            "out-edges should point only back into the already-folded set)"
+        )
 
     # -- Query phase ---------------------------------------------------
 
@@ -555,66 +593,59 @@ def _polish_auto_declared_description(
     return dataclasses.replace(resource, description=description)
 
 
-def _detect_cycles(resources: dict[str, dict[str, Any]]) -> None:
-    """Detect cycles across the reference graph via iterative DFS
-    three-coloring.
+def _detect_cycles(
+    all_outbound: dict[tuple[str, str], list[ResourceReference]],
+    present: set[tuple[str, str]],
+) -> None:
+    """Detect cycles over the BUILT edge map via iterative DFS
+    three-coloring (no re-walk of ``referenced_resources()``; the finalize
+    build pass already accumulated the edges).
 
-    Secrets don't reference secrets, so they can't form cycles; the
-    check exists to guard template-inheritance chains, which can.
-    Implemented iteratively so deep inheritance chains don't risk
-    CPython's default recursion limit.
+    Only edges to present nodes can close a cycle (a deferred / absent target
+    has no outbound edges of its own), so the walk follows edges to present
+    targets. Secrets don't reference secrets, so they can't form cycles; the
+    check exists to guard template-inheritance chains, which can. Implemented
+    iteratively so deep inheritance chains don't risk CPython's default
+    recursion limit.
 
     Raises ``ConfigError`` with the cycle path on the first cycle.
     """
     WHITE, GRAY, BLACK = 0, 1, 2
     color: dict[tuple[str, str], int] = {}
 
-    for start_kind, kind_dict in resources.items():
-        for start_name in kind_dict:
-            start_node = (start_kind, start_name)
-            if color.get(start_node, WHITE) != WHITE:
+    def edges_from(node: tuple[str, str]) -> Iterator[tuple[str, str]]:
+        for ref in all_outbound.get(node, ()):
+            target = (ref.kind, ref.name)
+            if target in present:
+                yield target
+
+    for start_node in present:
+        if color.get(start_node, WHITE) != WHITE:
+            continue
+
+        # Iterative DFS via a work stack. Each frame is a tuple of
+        # (node, edge_iterator). When we descend, push the parent
+        # frame back with its iterator; when we exhaust the iterator,
+        # color the node BLACK and pop.
+        color[start_node] = GRAY
+        path: list[tuple[str, str]] = [start_node]
+        edge_stack: list[Iterator[tuple[str, str]]] = [edges_from(start_node)]
+        while edge_stack:
+            edges = edge_stack[-1]
+            try:
+                target = next(edges)
+            except StopIteration:
+                color[path[-1]] = BLACK
+                path.pop()
+                edge_stack.pop()
                 continue
-
-            # Iterative DFS via a work stack. Each frame is a tuple of
-            # (node, edge_iterator). When we descend, push the parent
-            # frame back with its iterator; when we exhaust the iterator,
-            # color the node BLACK and pop.
-            color[start_node] = GRAY
-            path: list[tuple[str, str]] = [start_node]
-            edge_stack: list[Any] = [iter(_edges_from(resources, start_node))]
-            while edge_stack:
-                edges = edge_stack[-1]
-                try:
-                    target = next(edges)
-                except StopIteration:
-                    color[path[-1]] = BLACK
-                    path.pop()
-                    edge_stack.pop()
-                    continue
-                target_color = color.get(target, WHITE)
-                if target_color == GRAY:
-                    cycle = path[path.index(target) :] + [target]
-                    cycle_path = " -> ".join(f"{k}/{n}" for k, n in cycle)
-                    raise ConfigError(f"resource reference cycle detected: {cycle_path}")
-                if target_color == BLACK:
-                    continue
-                color[target] = GRAY
-                path.append(target)
-                edge_stack.append(iter(_edges_from(resources, target)))
-
-
-def _edges_from(
-    resources: dict[str, dict[str, Any]],
-    node: tuple[str, str],
-) -> Iterator[tuple[str, str]]:
-    """Yield outgoing edges from ``node`` (``(kind, name)`` -> target
-    ``(kind, name)``) via the Resource's ``referenced_resources()``.
-    Empty iterator if the node isn't in the Registry (defensive; the
-    finalize worklist ensures every reachable node has a Resource).
-    """
-    kind, name = node
-    resource = resources.get(kind, {}).get(name)
-    if resource is None:
-        return
-    for req in _referenced_resources(resource):
-        yield (req.kind, req.name)
+            target_color = color.get(target, WHITE)
+            if target_color == GRAY:
+                cycle = path[path.index(target) :] + [target]
+                cycle_path = " -> ".join(f"{k}/{n}" for k, n in cycle)
+                raise ConfigError(f"resource reference cycle detected: {cycle_path}")
+            if target_color == BLACK:
+                continue
+            color[target] = GRAY
+            path.append(target)
+            edge_stack.append(edges_from(target))

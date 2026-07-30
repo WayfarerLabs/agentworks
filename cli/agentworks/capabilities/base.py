@@ -46,6 +46,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable, Mapping
 
     from agentworks.config import Config
+    from agentworks.resources.graph import Readiness
     from agentworks.resources.reference import ConfigReference
     from agentworks.transports import Transport
 
@@ -362,24 +363,32 @@ class Capability(ABC):
             display = getattr(cls, "name", cls.__name__)
             raise ConfigError(f"{owner}: the {display} capability accepts no configuration; got {sorted(config)}")
 
-    def disabled_reason(self) -> str | None:
-        """Why this bound instance cannot run on this host, or ``None``
-        when it can. The generic "do you have what you need to run"
-        surface: the resource layer exposes it as a binary disabled
-        flag plus reason, so a disabled resource still registers (it
-        lists, describes, and holds references) but any attempt to use
-        it is a typed error and existing references degrade to
-        warnings.
+    @classmethod
+    def not_ready(cls, config: Mapping[str, object]) -> Readiness:
+        """Why a resource bound to ``config`` cannot run on this host, or
+        ready when it can. The config-dependent half of readiness: the
+        readiness fold (LLD c) calls this off the capability's graph-carried
+        impl to decide a consuming resource's verdict (a local-Lima site
+        without ``limactl``, keyed on the site's ``platform_config``).
 
-        Contract: cheap, offline, host-introspection only (OS, tool
-        presence, the shape of the bound config); never network,
-        secrets, or prompting. Readiness that needs a resolver or a
-        remote read is :meth:`preflight`'s job at the op boundary; this
-        runs on inspection surfaces (doctor, ``resource list``,
-        selection) where preflight would be too heavy. Default: never
-        disabled.
+        NON-CONSTRUCTING and total by contract: a classmethod that reads
+        ``config`` fields best-effort, tolerates malformed ones, and NEVER
+        constructs an instance or validates (construction re-runs the throwing
+        ``validate``, which would make the fold non-total and turn a malformed
+        block into a permanent readiness reason: the B1 loop the reshape from
+        the old bound-instance ``disabled_reason`` exists to avoid). The
+        config-INDEPENDENT half (a whole platform unsupported on this host)
+        is :meth:`VMPlatform.unsupported_reason`, owned by the capability node,
+        not this method.
+
+        Contract: cheap, offline, host-introspection only (OS, tool presence,
+        the shape of the passed config); never network, secrets, or prompting.
+        Readiness that needs a resolver or a remote read is :meth:`preflight`'s
+        job at the op boundary. Default: ready.
         """
-        return None
+        from agentworks.resources.graph import Readiness
+
+        return Readiness.ready()
 
     def preflight(self, ctx: RunContext) -> None:  # noqa: B027  # intentional concrete no-op default
         """Verify readiness: "will the real work probably succeed?"

@@ -54,6 +54,7 @@ from agentworks.errors import (
 )
 
 if TYPE_CHECKING:
+    from agentworks.resources.graph import Readiness
     from agentworks.resources.reference import ConfigReference
     from agentworks.secrets.base import MappingValue, SecretDecl
 
@@ -260,6 +261,21 @@ class OnePasswordBackend:
     # without a human (1Password Connect, a service account; not built
     # here) would not be interactive.
     interactive = True
+
+    def not_ready(self) -> Readiness:
+        """Not-ready when the ``op`` CLI is not on PATH: a pure presence test
+        (``shutil.which``), never a store probe, biometric, or re-auth (those
+        are resolution-time interactivity, kept optimistically previewed).
+        This is the offline readiness R9.6 gives backends: a configured
+        onepassword with no ``op`` installed now shows not-ready rather than
+        only failing at first resolution."""
+        import shutil
+
+        from agentworks.resources.graph import Readiness
+
+        if shutil.which("op") is None:
+            return Readiness.blocked("op CLI not installed")
+        return Readiness.ready()
 
     def validate_mapping(self, owner: str, mapping: MappingValue) -> None:
         # Load-time gate (called by validate_chain). ``_resolved_ref`` keeps

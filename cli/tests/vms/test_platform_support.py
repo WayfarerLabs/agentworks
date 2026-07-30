@@ -60,29 +60,38 @@ def _support(
 ) -> None:
     """Pin the two host-dependent checks to explicit outcomes.
 
-    ``wsl2`` pins the platform-level gate; ``lima_local`` pins the
-    instance-level requirement for LOCAL lima sites only (remote sites
-    with a ``vm_host`` stay enabled, mirroring the real check).
+    ``wsl2`` pins the platform-level host-support gate; ``lima_local``
+    pins the config-dependent requirement for LOCAL lima sites only (remote
+    sites with a ``vm_host`` stay ready, mirroring the real check).
     """
+    from agentworks.resources.graph import Readiness
+
     monkeypatch.setattr(WSL2Platform, "unsupported_reason", classmethod(lambda cls: wsl2))
-    monkeypatch.setattr(WSL2Platform, "disabled_reason", lambda self: None)
+    monkeypatch.setattr(WSL2Platform, "not_ready", classmethod(lambda cls, config: Readiness.ready()))
     monkeypatch.setattr(
         LimaPlatform,
-        "disabled_reason",
-        lambda self: None if self.platform_config.get("vm_host") else lima_local,
+        "not_ready",
+        classmethod(
+            lambda cls, config: (
+                Readiness.ready() if (config.get("vm_host") or lima_local is None) else Readiness.blocked(lima_local)
+            )
+        ),
     )
 
 
 def test_every_site_registers_regardless_of_host(make_config, monkeypatch: pytest.MonkeyPatch) -> None:
     """The worst host (no Windows, no limactl) still registers both
-    bundled sites; only the platform capability row is host-gated."""
+    bundled sites; under R13 every platform row publishes UNCONDITIONALLY
+    (host support is readiness, not absence), so all four are present even
+    when host-unsupported."""
     _support(monkeypatch, wsl2="Windows only", lima_local="limactl not installed")
     registry = build_registry(make_config())
     sites = dict(registry.iter_kind_items("vm-site"))
     assert {"lima-local", "wsl2"} <= set(sites)
     platforms = {e.name for e in registry.iter_kind("vm-platform")}
-    assert "wsl2" not in platforms
-    assert {"lima", "azure-vm", "proxmox"} <= platforms
+    # R9.5: the host-unsupported wsl2 platform is now a PRESENT (not-ready)
+    # row, where before publish_to skipped it.
+    assert platforms == {"lima", "wsl2", "azure-vm", "proxmox"}
 
 
 def test_disabled_reasons_chain(make_config, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -93,6 +102,27 @@ def test_disabled_reasons_chain(make_config, monkeypatch: pytest.MonkeyPatch) ->
     sites = dict(registry.iter_kind_items("vm-site"))
     assert site_disabled_reason(sites["lima-local"]) == "limactl not installed"
     assert site_disabled_reason(sites["wsl2"]) == "platform 'wsl2' is disabled: Windows only"
+
+
+def test_r9_5_host_unsupported_platform_is_present_and_not_ready_on_the_graph(
+    make_config, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """R9.5 at the graph level: an installed-but-host-unsupported platform
+    (wsl2 off Windows) is a PRESENT ``vm-platform`` node whose stored
+    ``readiness_of`` is not-ready, and the bundled wsl2 site that references
+    it is NOT-READY, not a hard error. (The RENDERED not-ready row in
+    ``resource list`` / doctor is asserted in later phases.)"""
+    _support(monkeypatch, wsl2="Windows only", lima_local=None)
+    registry = build_registry(make_config())  # no raise: wsl2 site is not-ready, not absent
+
+    # The platform node is present and not-ready (the bare host-support reason).
+    assert ("vm-platform", "wsl2") in {(k, n) for k in registry.iter_kinds() for n, _ in registry.iter_kind_items(k)}
+    platform_verdict = registry.graph.readiness_of("vm-platform", "wsl2")
+    assert platform_verdict.reason == "Windows only"
+
+    # The bundled wsl2 SITE folds to not-ready, propagating the platform reason.
+    site_verdict = registry.graph.readiness_of("vm-site", "wsl2")
+    assert site_verdict.reason == "platform 'wsl2' is disabled: Windows only"
 
 
 def test_supported_host_has_everything_enabled(make_config, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -131,20 +161,19 @@ def test_declared_site_on_disabled_platform_registers_disabled(make_config, monk
     assert "Windows only" in str(exc.value)
 
 
-def test_unknown_platform_site_registers_disabled(make_config, monkeypatch: pytest.MonkeyPatch) -> None:
-    """The plugin world for free: a site declared against a platform
-    this build doesn't ship (plugin uninstalled, or a typo;
-    indistinguishable by design) is a disabled site, not a registry
-    error."""
+def test_unknown_platform_site_is_a_hard_error(make_config, monkeypatch: pytest.MonkeyPatch) -> None:
+    """R9.2: a site declared against a platform this build doesn't ship
+    (a typo, or, later, an uninstalled plugin) is now a HARD finalize
+    error, not a silent self-disable. With the vm-site edge-suppression
+    removed, the site emits its platform edge unconditionally; the absent
+    ``vm-platform`` row is the error miss policy's unknown-reference (the
+    same loud failure every other kind's typo gets)."""
     _support(monkeypatch, wsl2=None, lima_local=None)
     config = make_config(
         resources=("apiVersion: agentworks/v1\nkind: vm-site\nmetadata:\n  name: orbital\nspec:\n  platform: skynet\n")
     )
-    registry = build_registry(config)
-    decl = dict(registry.iter_kind_items("vm-site"))["orbital"]
-    assert site_disabled_reason(decl) == "platform 'skynet' is not installed"
-    with pytest.raises(StateError, match="disabled on this host"):
-        resolve_site("orbital", registry)
+    with pytest.raises(ConfigError, match="unknown vm-platform 'skynet'"):
+        build_registry(config)
 
 
 def test_bundled_site_names_are_reserved_on_every_host(make_config, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -242,37 +271,37 @@ def test_wsl2_unsupported_reason_is_the_real_os_check(
     assert WSL2Platform.unsupported_reason() is None
 
 
-def test_wsl2_site_additionally_needs_wsl_exe(
+def test_wsl2_not_ready_additionally_needs_wsl_exe(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """The instance-level requirement on a supported host: wsl.exe is
-    an optional Windows feature."""
-    site = WSL2Platform("wsl2", {})
-
+    """The config-dependent requirement on a supported host: wsl.exe is
+    an optional Windows feature. ``not_ready`` is a NON-constructing
+    classmethod over the site's config (no instance built)."""
     monkeypatch.setattr("shutil.which", lambda name: None)
-    reason = site.disabled_reason()
-    assert reason is not None
-    assert "wsl.exe" in reason
+    verdict = WSL2Platform.not_ready({})
+    assert not verdict.is_ready
+    assert verdict.reason is not None
+    assert "wsl.exe" in verdict.reason
 
     monkeypatch.setattr("shutil.which", lambda name: "/x/wsl")
-    assert site.disabled_reason() is None
+    assert WSL2Platform.not_ready({}).is_ready
 
 
-def test_lima_disabled_reason_is_local_only(
+def test_lima_not_ready_is_local_only(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """lima the platform is supported everywhere; the limactl
     requirement binds to LOCAL sites only (remote sites run limactl on
-    the vm_host over SSH)."""
+    the vm_host over SSH). ``not_ready`` reads the config directly,
+    non-constructing."""
     assert LimaPlatform.unsupported_reason() is None
 
     monkeypatch.setattr("shutil.which", lambda name: None)
-    local = LimaPlatform("lima-local", {})
-    reason = local.disabled_reason()
-    assert reason is not None
-    assert "limactl" in reason
-    remote = LimaPlatform("gpu-box", {"vm_host": "me@box"})
-    assert remote.disabled_reason() is None
+    local = LimaPlatform.not_ready({})
+    assert not local.is_ready
+    assert local.reason is not None
+    assert "limactl" in local.reason
+    assert LimaPlatform.not_ready({"vm_host": "me@box"}).is_ready
 
     monkeypatch.setattr("shutil.which", lambda name: "/x/limactl")
-    assert LimaPlatform("lima-local", {}).disabled_reason() is None
+    assert LimaPlatform.not_ready({}).is_ready

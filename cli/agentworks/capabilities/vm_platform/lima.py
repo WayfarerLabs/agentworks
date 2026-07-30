@@ -30,6 +30,7 @@ if TYPE_CHECKING:
     from agentworks.capabilities.base import RunContext
     from agentworks.config import Config
     from agentworks.db import VMRow
+    from agentworks.resources.graph import Readiness
     from agentworks.resources.reference import ConfigReference
     from agentworks.transports import Transport
 
@@ -96,19 +97,26 @@ class LimaPlatform(VMPlatform):
     # every host, because remote-Lima sites run limactl on the vm_host
     # over SSH and need nothing locally.
 
-    def disabled_reason(self) -> str | None:
+    @classmethod
+    def not_ready(cls, config: Mapping[str, object]) -> Readiness:
         """A LOCAL Lima site (no ``vm_host``) is pointless without a
         local ``limactl``. This covers the bundled ``lima-local``
         site and any operator-declared local site alike; a host that
         later installs Lima enables them on the next look. Remote
-        sites need nothing here."""
-        if self.platform_config.get("vm_host"):
-            return None
+        sites need nothing here.
+
+        Non-constructing (LLD c): reads ``config`` fields directly, never
+        builds an instance, so the readiness fold stays total over
+        unvalidated ``platform_config``."""
+        from agentworks.resources.graph import Readiness
+
+        if config.get("vm_host"):
+            return Readiness.ready()
         import shutil
 
         if not shutil.which("limactl"):
-            return "limactl not installed"
-        return None
+            return Readiness.blocked("limactl not installed")
+        return Readiness.ready()
 
     @classmethod
     def dependencies(cls, owner: str, config: Mapping[str, object]) -> tuple[ConfigReference, ...]:

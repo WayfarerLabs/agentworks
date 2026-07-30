@@ -310,13 +310,14 @@ def test_doctor_vm_sites_disabled_and_preflight_rows(
             return db
 
     monkeypatch.setattr("agentworks.db.Database", _DbFactory)
-    # The LOCAL lima site disables itself; the remote mybox site stays
-    # enabled but its preflight fails; wsl2 stays fully healthy.
-    monkeypatch.setattr(
-        LimaPlatform,
-        "disabled_reason",
-        lambda self: None if self.platform_config.get("vm_host") else "limactl not installed",
-    )
+    # The LOCAL lima site is not-ready; the remote mybox site stays
+    # ready but its preflight fails; wsl2 stays fully healthy.
+    from agentworks.resources.graph import Readiness
+
+    def _lima_readiness(cls: type, config: dict[str, object]) -> Readiness:
+        return Readiness.ready() if config.get("vm_host") else Readiness.blocked("limactl not installed")
+
+    monkeypatch.setattr(LimaPlatform, "not_ready", classmethod(_lima_readiness))
 
     def _boom(self: object, ctx: object) -> None:
         raise ConfigError("preflight: ssh unreachable")
@@ -367,7 +368,11 @@ def test_doctor_warns_on_references_to_disabled_sites(
             return db
 
     monkeypatch.setattr("agentworks.db.Database", _DbFactory)
-    monkeypatch.setattr(LimaPlatform, "disabled_reason", lambda self: "limactl not installed")
+    from agentworks.resources.graph import Readiness
+
+    monkeypatch.setattr(
+        LimaPlatform, "not_ready", classmethod(lambda cls, config: Readiness.blocked("limactl not installed"))
+    )
     monkeypatch.setattr("shutil.which", lambda name: f"/usr/bin/{name}")
 
     group = doctor._check_vm_sites(_config_stub("lima-local"), registry)
