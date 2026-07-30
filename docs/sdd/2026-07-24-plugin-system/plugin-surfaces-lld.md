@@ -89,7 +89,13 @@ Order inside the function:
    `unknown = [n for n in config.plugins_enabled if n not in SYSTEM_PLUGINS]`; if non-empty, raise a
    single typed `ConfigError` listing all unknowns (a typo or an uninstalled plugin, R4), **never**
    a `KeyError`, and **before** any `registry.add`. This is the up-front resolution the FRD requires
-   (`build_registry`'s post-finalize block never sees an unknown enabled name).
+   (`build_registry`'s post-finalize block never sees an unknown enabled name). The Phase 3 loader
+   does not normalize `config.plugins_enabled`, so this resolution is also where a **duplicate**
+   name (`["azure", "azure"]`) or an **empty** name (`[""]`) is handled: membership-testing against
+   `SYSTEM_PLUGINS` already makes an empty or duplicated name a no-op for a real plugin (an empty
+   name is an unknown -> `ConfigError`; a duplicate resolves to the same plugin, and publication
+   iterates `SYSTEM_PLUGINS` not the enabled list, so it cannot double-publish), so no separate
+   dedup pass is needed, the set membership carries it.
 2. **Capability rows for every shipped plugin, unconditionally** (R5, mirroring the built-ins'
    unconditional publication, `vm_platform/__init__.py:89`). For each `plugin` in
    `SYSTEM_PLUGINS.values()`, for each `(kind, impls)` in `plugin.capabilities`, for each impl:

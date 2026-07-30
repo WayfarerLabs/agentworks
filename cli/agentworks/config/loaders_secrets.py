@@ -208,6 +208,45 @@ def _load_secret_config(
     return SecretConfig(backends=tuple(backends_raw), declared_at=declared_at)
 
 
+def _load_plugins(
+    data: dict[str, object],
+    issues: list[str],
+    decls: _SectionLineMap,
+) -> tuple[str, ...]:
+    """Load [plugins] with the opt-in list of enabled system plugin names (R4).
+
+    Absence of the [plugins] table, or of the ``enabled`` key within it,
+    means no plugins are enabled (``()``). ``issues``/``decls`` are unused
+    here (there is no soft-warn path and ``plugins_enabled`` is a bare
+    tuple with no wrapper to carry a ``declared_at``); the parameters are
+    kept to match the sibling settings loader ``_load_secret_config``'s
+    shape.
+
+    Unknown keys in [plugins] are a hard ``ConfigError``, NOT a collected
+    soft issue via ``_warn_unexpected_keys`` (the convention
+    ``_load_secret_config`` above uses). This is a deliberate departure:
+    [plugins] is an opt-in gate, so a typo'd key (``enabeld``, or a future
+    per-plugin key used a release too early) must fail loudly at load time
+    rather than silently leave plugins un-enabled behind a warning the
+    operator may miss. Do not "consistency-fix" this back to soft-warn.
+    """
+    if "plugins" not in data:
+        return ()
+    raw = data["plugins"]
+    if not isinstance(raw, dict):
+        raise ConfigError("[plugins] must be a table")
+    unexpected = set(raw.keys()) - {"enabled"}
+    if unexpected:
+        keys = ", ".join(sorted(str(k) for k in unexpected))
+        raise ConfigError(f"unexpected keys in [plugins]: {keys}")
+    if "enabled" not in raw:
+        return ()
+    enabled_raw = raw["enabled"]
+    if not isinstance(enabled_raw, list) or not all(isinstance(e, str) for e in enabled_raw):
+        raise ConfigError("[plugins].enabled must be a list of strings")
+    return tuple(enabled_raw)
+
+
 # Secret resolution lives in ``agentworks.secrets.resolve`` (ADR 0016):
 # the chain can name manifest-declared backends, which are unknowable at
 # config-load time, so the chain-name and unreachable-secret checks run

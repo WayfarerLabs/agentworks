@@ -95,10 +95,10 @@ collision matrix holds; the shipped index is empty; nothing publishes yet.
 
 Governs: R4. LLD: (c).
 
-- [ ] `Config.plugins_enabled: tuple[str, ...]` (empty when absent); a loader parses
+- [x] `Config.plugins_enabled: tuple[str, ...]` (empty when absent); a loader parses
       `[plugins] enabled = [...]`; unknown keys in the section are a config error; present on both
       load paths; never a Registry resource.
-- [ ] Tests: parse present/absent/unknown-key; the value reaches `Config` on both paths.
+- [x] Tests: parse present/absent/unknown-key; the value reaches `Config` on both paths.
 
 **DoD:** DoD-green; enablement is a config setting; nothing consumes it yet.
 
