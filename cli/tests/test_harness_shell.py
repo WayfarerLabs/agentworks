@@ -74,23 +74,40 @@ def _session_scope(
     )
 
 
-# -- config vocabulary: validate_config --------------------------------------
+# -- config vocabulary: dependencies + validate ------------------------------
 
 
-def test_validate_accepts_the_known_fields_and_implies_no_reference() -> None:
-    refs = ShellHarness.validate_config(
-        "session-template/claude",
-        {
-            "command": "claude",
-            "restart_command": "claude --resume",
-            "required_commands": ["claude", "rg"],
-        },
+def test_dependencies_imply_no_reference() -> None:
+    """``shell`` implies no edge, and ``dependencies`` is total: it
+    returns ``()`` for the known fields and even for a malformed blob."""
+    assert (
+        ShellHarness.dependencies(
+            "session-template/claude",
+            {
+                "command": "claude",
+                "restart_command": "claude --resume",
+                "required_commands": ["claude", "rg"],
+            },
+        )
+        == ()
     )
-    assert refs == ()
+    # Never raises, even on config that ``validate`` would reject.
+    assert ShellHarness.dependencies("session-template/claude", {"commnad": "typo", "command": 3}) == ()
 
 
-def test_validate_accepts_empty_config() -> None:
-    assert ShellHarness.validate_config("session-template/claude", {}) == ()
+def test_validate_accepts_the_known_fields_and_empty_config() -> None:
+    assert (
+        ShellHarness.validate(
+            "session-template/claude",
+            {
+                "command": "claude",
+                "restart_command": "claude --resume",
+                "required_commands": ["claude", "rg"],
+            },
+        )
+        is None
+    )
+    assert ShellHarness.validate("session-template/claude", {}) is None
 
 
 def test_shell_launch_note_is_silent() -> None:
@@ -100,22 +117,22 @@ def test_shell_launch_note_is_silent() -> None:
 
 def test_validate_rejects_unknown_field() -> None:
     with pytest.raises(ConfigError, match="unknown shell harness field"):
-        ShellHarness.validate_config("session-template/claude", {"commnad": "typo"})
+        ShellHarness.validate("session-template/claude", {"commnad": "typo"})
 
 
 def test_validate_rejects_non_string_command() -> None:
     with pytest.raises(ConfigError, match="command must be a string"):
-        ShellHarness.validate_config("session-template/claude", {"command": 3})
+        ShellHarness.validate("session-template/claude", {"command": 3})
 
 
 def test_validate_rejects_non_string_required_commands() -> None:
     with pytest.raises(ConfigError, match="required_commands must be a list"):
-        ShellHarness.validate_config("session-template/claude", {"required_commands": [1, 2]})
+        ShellHarness.validate("session-template/claude", {"required_commands": [1, 2]})
 
 
 def test_construct_revalidates_config() -> None:
     """A shape error dies at construction (the base re-runs
-    validate_config)."""
+    validate)."""
     with pytest.raises(ConfigError, match="unknown shell harness field"):
         _harness({"nope": 1})
 

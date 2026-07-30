@@ -46,6 +46,8 @@ from agentworks.secrets.onepassword import OnePasswordBackend
 from agentworks.secrets.prompt import PromptBackend
 
 if TYPE_CHECKING:
+    from agentworks.resources.graph import Readiness
+    from agentworks.resources.reference import ConfigReference
     from agentworks.resources.registry import Registry
     from agentworks.secrets.base import MappingValue, SecretDecl
 
@@ -96,6 +98,26 @@ class SecretBackend(Protocol):
     @property
     def interactive(self) -> bool: ...
 
+    def not_ready(self) -> Readiness:
+        """Why this backend cannot resolve on this host, or ready when it
+        can. Config-INDEPENDENT (a backend's host tool is present or not,
+        irrespective of any per-secret mapping), so it takes no argument:
+        the readiness fold (LLD c) calls it once per ``secret-backend`` node
+        and stores the verdict (R9.6 gives backends offline readiness).
+
+        This is the per-kind refinement of the uniform capability
+        ``not_ready(config)`` hook: secret-backend impls are instances (LLD
+        a) whose readiness is config-free, so the no-arg instance form is the
+        honest shape, and the fold's per-kind dispatch contains the asymmetry.
+
+        Offline and cheap by contract: a pure presence test (``op`` on PATH),
+        never a store probe, biometric, or re-auth (that is
+        interactive-optimism's concern at resolution time, kept optimistic).
+        REQUIRED, not defaulted (Protocol bodies are not inherited by
+        structural implementers): every registered backend implements it.
+        """
+        ...
+
     def validate_mapping(
         self,
         owner: str,
@@ -103,10 +125,12 @@ class SecretBackend(Protocol):
     ) -> None:
         """Validate one ``backend_mappings`` value addressed to this
         backend -- capability-owned config in its per-secret host.
-        Invoked by ``validate_chain`` for active-chain backends so a
-        malformed mapping fails at ``build_registry`` with config
-        vocabulary instead of at first resolution. The generic ``False``
-        opt-out never reaches this. ``owner`` is display context.
+        Invoked by the secret's own ``validate`` (run by the finalize
+        ``validate`` pass) for every PRESENT backend it addresses, so a
+        malformed mapping fails at ``build_registry`` with config vocabulary
+        instead of at first resolution (R9.9: every declared mapping, not just
+        the opted-in ones). The generic ``False`` opt-out never reaches this.
+        ``owner`` is display context.
 
         REQUIRED, not defaulted: Protocol bodies are not inherited by
         structural implementers, so every registered backend must
@@ -117,6 +141,26 @@ class SecretBackend(Protocol):
         capabilities pushing a declarative config schema definition at
         registration time, letting the core engine validate (and derive
         any implied references) without invoking the capability.
+        """
+        ...
+
+    def dependencies(
+        self,
+        mapping: MappingValue,
+    ) -> tuple[ConfigReference, ...]:
+        """The resource references one ``backend_mappings`` value implies:
+        the reference-deriving counterpart to :meth:`validate_mapping`
+        (this is the ``secret-backend`` half of the capability contract's
+        ``dependencies`` / ``validate`` split).
+
+        Total and non-throwing, like every capability's ``dependencies``.
+        Today every backend's mapping is a bare external identifier (an
+        env var name, an ``op://`` reference, or nothing) that implies no
+        agentworks resource, so all three shipped backends return ``()``;
+        the method exists so a ``secret``'s own ``dependencies`` can
+        compose its backends' implied edges uniformly when a future
+        backend implies one. REQUIRED, not defaulted (Protocol bodies are
+        not inherited by structural implementers).
         """
         ...
 

@@ -17,6 +17,7 @@ from agentworks.env.entry import env_references
 
 if TYPE_CHECKING:
     from agentworks.env import EnvEntry
+    from agentworks.resources.graph import BuildContext
     from agentworks.resources.reference import ResourceReference
 
 
@@ -29,7 +30,7 @@ class WorkspaceTemplate(DeclaredResource):
     git_user_email: str | None = None  # git user.email for commits in this workspace's repo
     env: dict[str, EnvEntry] = field(default_factory=dict)
 
-    def referenced_resources(self) -> list[ResourceReference]:
+    def dependencies(self, context: BuildContext) -> list[ResourceReference]:
         from agentworks.resources.reference import TemplateReference
 
         source = ("workspace-template", self.name)

@@ -163,10 +163,10 @@ def test_known_apt_package_reference_resolves(tmp_path: Path) -> None:
     gh = registry.lookup("apt-package", "gh")
     assert gh.name == "gh"
     # Cross-check: the bundled-manifest publisher attached built-in origin
-    # and the framework's finalize attached the inbound reference from
-    # vm-template:default.
+    # and the framework's finalize recorded the inbound reference from
+    # vm-template:default on the graph node.
     assert gh.origin.variant == "built-in"
-    assert any(u.source == ("vm-template", "default") for u in gh.references), (
+    assert any(u.source == ("vm-template", "default") for u in registry.graph.dependents_of("apt-package", "gh")), (
         "vm-template:default reference should be on the apt_package"
     )
 
@@ -194,7 +194,7 @@ def test_apt_source_kind_published_from_builtin_manifest(tmp_path: Path) -> None
 
 
 def test_apt_package_references_flow_to_apt_source(tmp_path: Path) -> None:
-    """``AptPackageEntry.referenced_resources()`` emits one
+    """``AptPackageEntry.dependencies()`` emits one
     ``ResourceReference(kind="apt-source", ...)`` per name in the
     package's ``apt_sources`` field. After finalize, the apt-source's
     ``references`` collection includes the referencing apt-package --
@@ -215,8 +215,12 @@ def test_apt_package_references_flow_to_apt_source(tmp_path: Path) -> None:
     registry = build_registry(cfg)
     # ``gh`` depends on the ``github-cli`` apt-source among the built-in
     # entries; check the inbound edge lands on the source.
-    github = registry.lookup("apt-source", "github-cli")
-    referencing_pkgs = [entry.source for entry in github.references if entry.source[0] == "apt-package"]
+    registry.lookup("apt-source", "github-cli")
+    referencing_pkgs = [
+        entry.source
+        for entry in registry.graph.dependents_of("apt-source", "github-cli")
+        if entry.source[0] == "apt-package"
+    ]
     assert ("apt-package", "gh") in referencing_pkgs, (
         f"expected apt_package:gh to reference apt_source:github-cli; got {referencing_pkgs}"
     )
@@ -284,4 +288,7 @@ def test_operator_declared_apt_source_layers_over_builtin(
     assert custom_src.origin.variant == "operator-declared"
     assert custom_src.name == "custom-src"
     # The referencing package shows up on the source's inbound edges.
-    assert any(entry.source == ("apt-package", "custom-pkg") for entry in custom_src.references)
+    assert any(
+        entry.source == ("apt-package", "custom-pkg")
+        for entry in registry.graph.dependents_of("apt-source", "custom-src")
+    )

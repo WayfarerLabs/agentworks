@@ -161,6 +161,11 @@ class _VMPlatformKind:
             "first)"
         )
 
+    # No per-kind readiness hook: readiness projection is unified on
+    # ``inspect.not_ready_reason_for`` reading ``graph.readiness_of`` directly
+    # (Phase 4 retired the per-kind shim, including the Phase-3 vm-platform
+    # projection pulled forward to render the now-published not-ready row).
+
 
 KIND_REGISTRY["vm-platform"] = _VMPlatformKind()
 
@@ -194,16 +199,10 @@ class _VMSiteKind:
             if vm.site == name:
                 yield InstanceRef(instance_kind="vm", instance_name=vm.name)
 
-    def disabled_reason(self, registry: Registry, resource: Any) -> str | None:
-        """The generic disabled hook (structural, like ``instances``):
-        a site registers on every host and self-disables when its
-        platform is missing, host-disabled, or the bound instance
-        reports a missing requirement. Domain logic lives with the
-        sites module; this is the framework-facing delegation.
-        """
-        from agentworks.vms.sites import site_disabled_reason
-
-        return site_disabled_reason(resource)
+    # No per-kind readiness hook: a site's readiness verdict is folded at
+    # finalize and read via ``graph.readiness_of`` (through
+    # ``inspect.not_ready_reason_for``), retiring the ``site_disabled_reason``
+    # recompute (R11).
 
 
 KIND_REGISTRY["vm-site"] = _VMSiteKind()

@@ -377,6 +377,104 @@ def test_resolution_preview_falls_through_to_prompt(tmp_path: Path, ssh_keys: tu
     assert desc.resolution.resolved_by == "prompt"
 
 
+# -- Readiness-aware describe (R9.1 / R9.6) ---------------------------------
+
+
+def test_not_ready_backend_annotated_and_skipped_in_preview(
+    tmp_path: Path, ssh_keys: tuple[Path, Path], monkeypatch
+) -> None:
+    """R9.1 / R9.6: a not-ready mapped backend (onepassword with no ``op`` on
+    PATH) keeps its mapping shown but flagged ``(not ready: <reason>)`` in
+    Backend mappings, is shown as skipped in the Resolution preview, and does
+    NOT count toward "would resolve via X": the chain falls through to prompt.
+    Readiness is offline (no store probe)."""
+    monkeypatch.setattr("shutil.which", lambda name: None)  # op absent -> not ready
+    cfg = _write_cfg(
+        tmp_path,
+        """\
+        [secrets.api-key]
+        description = "API key"
+        backend_mappings.onepassword = "op://Vault/api/field"
+
+        [secret_config]
+        backends = ["onepassword", "prompt"]
+        """,
+        ssh_keys,
+    )
+    config = load_config(cfg, warn_issues=False)
+    registry = build_registry(config)
+    desc = describe_secret(config, registry, "api-key")
+
+    op = next(m for m in desc.backend_mappings if m.backend == "onepassword")
+    assert op.would_attempt is True
+    assert op.not_ready_reason == "op CLI not installed"
+    assert ("onepassword", "op CLI not installed") in desc.resolution.skipped_not_ready
+    assert desc.resolution.resolved_by == "prompt"  # not-ready op does not count
+    assert desc.resolution.available
+
+
+def test_render_shows_not_ready_annotation_and_skip(
+    tmp_path: Path, ssh_keys: tuple[Path, Path], capsys: pytest.CaptureFixture[str], monkeypatch
+) -> None:
+    """The rendered describe view carries the not-ready annotation on the
+    mapping and the ``skipped: not ready`` line in the preview."""
+    from agentworks.secrets.inspect import render_secret_description
+
+    monkeypatch.setattr("shutil.which", lambda name: None)
+    cfg = _write_cfg(
+        tmp_path,
+        """\
+        [secrets.api-key]
+        description = "API key"
+        backend_mappings.onepassword = "op://Vault/api/field"
+
+        [secret_config]
+        backends = ["onepassword", "prompt"]
+        """,
+        ssh_keys,
+    )
+    config = load_config(cfg, warn_issues=False)
+    registry = build_registry(config)
+    render_secret_description(describe_secret(config, registry, "api-key"))
+
+    out = capsys.readouterr().out
+    assert "onepassword: op://Vault/api/field (not ready: op CLI not installed)" in out
+    assert "skipped onepassword: not ready: op CLI not installed" in out
+    assert "would resolve via prompt" in out
+
+
+def test_interactive_optimism_preview_unchanged_under_readiness(
+    tmp_path: Path, ssh_keys: tuple[Path, Path], monkeypatch
+) -> None:
+    """LLD e acceptance line: the interactive-optimism preview is UNCHANGED.
+    Readiness is the offline layer UNDER interactive-optimism: with an earlier
+    not-ready onepassword skipped, a ready ``prompt`` is STILL previewed as the
+    resolving backend on ``would_attempt`` alone (never probed for a TTY or
+    interaction). Readiness (offline) and interactivity (optimistic) stay
+    orthogonal; no surface conflates them."""
+    monkeypatch.setattr("shutil.which", lambda name: None)
+    cfg = _write_cfg(
+        tmp_path,
+        """\
+        [secrets.api-key]
+        description = "API key"
+        backend_mappings.onepassword = "op://Vault/api/field"
+
+        [secret_config]
+        backends = ["onepassword", "prompt"]
+        """,
+        ssh_keys,
+    )
+    config = load_config(cfg, warn_issues=False)
+    registry = build_registry(config)
+    desc = describe_secret(config, registry, "api-key")
+
+    # The prompt is previewed optimistically (describe passes
+    # interactive_available=True), exactly as before this phase.
+    assert desc.resolution.resolved_by == "prompt"
+    assert desc.resolution.available
+
+
 def test_resolution_preview_not_available_when_no_backend_attempts(tmp_path: Path, ssh_keys: tuple[Path, Path]) -> None:
     """A secret opted out of every active backend resolves via no
     backend; the preview reports "not available".

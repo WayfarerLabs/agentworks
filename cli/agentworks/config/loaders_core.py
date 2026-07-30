@@ -309,7 +309,7 @@ def _load_git_credentials(
             raise ConfigError(f"git_credentials.{name} must be a table")
         # The ``type`` field's reference-existence check
         # lives in the framework via
-        # ``GitCredentialConfig.referenced_resources`` emitting a
+        # ``GitCredentialConfig.dependencies`` emitting a
         # ``ResourceReference(kind="git-credential-provider", ...)``;
         # ``_GitCredentialProviderKind``'s error miss policy fires at
         # build_registry time with the framework's consistent error
@@ -332,14 +332,15 @@ def _load_git_credentials(
             raise ConfigError(f"git_credentials.{name}.provider is required")
         # (TOML keeps org at the section top level -- the only flat
         # domain; it nests into provider_config below, and the provider
-        # capability validates the assembled blob. Unknown provider
-        # names defer to the framework's miss policy at finalize.)
+        # capability validates the assembled blob at build_registry (the
+        # finalize ``validate`` pass, R3). Unknown provider names defer to
+        # the framework's miss policy at finalize.)
 
         provider_config: dict[str, object] = {}
         # ``token`` is a bare secret name the provider sources its PAT
         # from. Flat in TOML, hoisted into provider_config so the
         # internal rep matches the YAML manifest shape (the provider's
-        # validate_config owns the ``git-token-<name>`` default when it
+        # dependencies owns the ``git-token-<name>`` default when it
         # is omitted). Empty-string is rejected so an operator who types
         # ``token = ""`` doesn't silently get the default behind their
         # back.
@@ -375,13 +376,9 @@ def _load_git_credentials(
                 )
         if cred_type == "azdo" and "org" in cdata:
             provider_config["org"] = str(cdata["org"])
-        from agentworks.capabilities.git_credential import (
-            GIT_CREDENTIAL_PROVIDER_REGISTRY,
-        )
-
-        capability = GIT_CREDENTIAL_PROVIDER_REGISTRY.get(cred_type)
-        if capability is not None:
-            capability.validate_config(f"git-credential/{name}", provider_config)
+        # The assembled provider_config blob's shape is validated by the
+        # finalize ``validate`` pass (GitCredentialConfig.validate), not
+        # here: capability validation is decoupled from load (R3).
         creds[name] = GitCredentialConfig(
             name=name,
             provider=cred_type,

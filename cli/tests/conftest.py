@@ -271,17 +271,19 @@ def stub_platform_support(monkeypatch: pytest.MonkeyPatch) -> None:
     supported and enabled, regardless of the test host's OS and
     tooling.
 
-    Platform capability rows are host-gated for real (wsl2 publishes
-    nothing off Windows) and sites self-disable for real (lima-local
-    needs a local limactl), so tests that want the full four-platform
-    graph enabled must opt out of the host's actual state. Tests OF
-    the disabled model itself patch the individual methods instead.
+    Platform capability rows publish unconditionally (R13), but their
+    readiness is host-gated for real (wsl2 is not-ready off Windows) and
+    sites are not-ready for real (lima-local needs a local limactl), so
+    tests that want the full four-platform graph READY must opt out of the
+    host's actual state. Tests OF the readiness model itself patch the
+    individual methods instead.
     """
     from agentworks.capabilities.vm_platform import VM_PLATFORM_REGISTRY
+    from agentworks.resources.graph import Readiness
 
     for cls in VM_PLATFORM_REGISTRY.values():
         monkeypatch.setattr(cls, "unsupported_reason", classmethod(lambda c: None))
-        monkeypatch.setattr(cls, "disabled_reason", lambda self: None)
+        monkeypatch.setattr(cls, "not_ready", classmethod(lambda c, config: Readiness.ready()))
 
 
 def stub_vm_gates(monkeypatch: pytest.MonkeyPatch) -> _StubPlatform:
@@ -495,6 +497,64 @@ class _StubRegistry:
 
     def iter_kind_items(self, kind: str):  # noqa: ANN201 - mirrors Registry
         return iter(self._kind_dict(kind).items())
+
+    @property
+    def graph(self) -> _StubGraph:
+        """The dependency-graph read surface. Phase 4 routes edge / readiness
+        reads through ``registry.graph``; the stub computes edges on demand
+        from each row's ``dependencies`` (empty build context, since the stub
+        publishes no backend rows) and reports every node ready (the namespace
+        fixtures model runnable resources)."""
+        return _StubGraph(self)
+
+
+class _StubGraph:
+    """Minimal ``DependencyGraph`` double over a :class:`_StubRegistry`.
+
+    ``edges_of`` recomputes a row's outbound edges from its ``dependencies``
+    (the stub is not finalized, so there is no frozen edge map to read);
+    ``reachable_from`` DFS-walks those; readiness is always ready. Enough for
+    the consumer reads the manager entries make against namespace fixtures.
+    """
+
+    def __init__(self, registry: _StubRegistry) -> None:
+        self._registry = registry
+
+    def edges_of(self, kind: str, name: str):  # noqa: ANN201 - mirrors DependencyGraph
+        from agentworks.resources.graph import BuildContext
+
+        row = self._registry.lookup(kind, name)  # KeyError on unknown, like the real graph
+        method = getattr(row, "dependencies", None)
+        if method is None:
+            return ()
+        return tuple(method(BuildContext()))
+
+    def reachable_from(self, kind: str, name: str) -> list[tuple[str, str]]:
+        self._registry.lookup(kind, name)
+        visited: set[tuple[str, str]] = {(kind, name)}
+        ordered: list[tuple[str, str]] = []
+        stack: list[tuple[str, str]] = [(kind, name)]
+        while stack:
+            node = stack.pop()
+            try:
+                edges = self.edges_of(*node)
+            except KeyError:
+                continue
+            for ref in edges:
+                target = (ref.kind, ref.name)
+                if target not in visited:
+                    visited.add(target)
+                    ordered.append(target)
+                    stack.append(target)
+        return ordered
+
+    def readiness_of(self, kind: str, name: str):  # noqa: ANN201 - mirrors DependencyGraph
+        from agentworks.resources.graph import Readiness
+
+        return Readiness.ready()
+
+    def is_ready(self, kind: str, name: str) -> bool:
+        return True
 
 
 def stub_build_registry(monkeypatch: pytest.MonkeyPatch) -> None:

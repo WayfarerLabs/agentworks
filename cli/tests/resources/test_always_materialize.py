@@ -89,8 +89,8 @@ def test_always_materialized_row_gets_empty_usage_tuple_in_finalize(
     registry = Registry.empty()
     registry.finalize()
 
-    admin = registry.lookup("admin-template", "default")
-    assert admin.references == ()
+    registry.lookup("admin-template", "default")
+    assert registry.graph.dependents_of("admin-template", "default") == ()
 
 
 def test_polish_empty_usage_format() -> None:
@@ -110,14 +110,12 @@ def test_polish_empty_usage_format() -> None:
     class _Stub:
         description: str = ""
         origin: Origin | None = None
-        references: tuple = ()
 
     stub = _Stub(
         description="",
         origin=Origin.auto_declared(source=ALWAYS_MATERIALIZE_SOURCE),
-        references=(),
     )
-    polished = _polish_auto_declared_description(stub, "vm-template")
+    polished = _polish_auto_declared_description(stub, "vm-template", ())
     assert polished.description == "(auto) auto-declared default vm-template"
 
 
@@ -134,14 +132,12 @@ def test_polish_skips_operator_set_description() -> None:
     class _Stub:
         description: str = "operator's own text"
         origin: Origin | None = None
-        references: tuple = ()
 
     stub = _Stub(
         description="operator's own text",
         origin=Origin.auto_declared(source=("vm-template", "default")),
-        references=(),
     )
-    polished = _polish_auto_declared_description(stub, "vm-template")
+    polished = _polish_auto_declared_description(stub, "vm-template", ())
     assert polished.description == "operator's own text"
 
 
@@ -157,13 +153,11 @@ def test_polish_no_op_for_resources_without_description_field() -> None:
     @dataclass(frozen=True)
     class _NoDesc:
         origin: Origin | None = None
-        references: tuple = ()
 
     stub = _NoDesc(
         origin=Origin.auto_declared(source=("vm-template", "default")),
-        references=(),
     )
-    polished = _polish_auto_declared_description(stub, "vm-template")
+    polished = _polish_auto_declared_description(stub, "vm-template", ())
     assert polished is stub
 
 
@@ -173,7 +167,7 @@ def test_secret_kind_not_materialized_by_pre_step(tmp_path: Path) -> None:
     secret rows that DO appear in the registry came from the
     requirement-driven path (e.g., Phase 2a.1's always-materialized
     ``vm-template:default`` emits a ``SecretReference`` for
-    ``tailscale-auth-key`` via its existing required_resources, which
+    ``tailscale-auth-key`` via its existing dependencies, which
     is the legitimate auto-declare path -- not always-materialize).
 
     The proof: every secret row in a minimal config has a non-empty
@@ -189,17 +183,17 @@ def test_secret_kind_not_materialized_by_pre_step(tmp_path: Path) -> None:
     secrets = list(registry.iter_kind("secret"))
     # Positive assertion: Phase 2a.1's always-materialized
     # vm-template:default emits a SecretReference for
-    # tailscale-auth-key via its required_resources, so the cascade
+    # tailscale-auth-key via its dependencies, so the cascade
     # produces at least one secret row. Pinning this defends against a
     # future regression where the materialize-then-walk interaction
     # silently breaks (e.g. always-materialize lands rows but their
-    # required_resources doesn't run).
+    # dependencies doesn't run).
     secret_names = {s.name for s in secrets}
     assert "tailscale-auth-key" in secret_names, (
         "expected vm-template:default's tailscale requirement to auto-declare 'tailscale-auth-key' via the cascade"
     )
     for secret in secrets:
-        assert secret.references, (
+        assert registry.graph.dependents_of("secret", secret.name), (
             f"secret {secret.name!r} has empty references; suggests "
             f"always-materialize fired (which would be a contract "
             f"violation for the secret kind)"

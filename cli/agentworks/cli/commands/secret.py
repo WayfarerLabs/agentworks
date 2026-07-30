@@ -26,11 +26,13 @@ def secret_list(
 ) -> None:
     """Show declared secrets and how each active backend would look them up.
 
-    Rows are declared secrets; columns are the active backends in
-    ``[secret_config].backends`` precedence order. Cells render the
-    backend's lookup identifier (env var name, op:// URI, etc.) or
-    ``disabled`` / ``enabled`` for backends with no static identifier or
-    an explicit opt-out. Values are never resolved.
+    Rows are declared secrets; columns are the opted-in backends in
+    ``[secret_config].backends`` precedence order. Each cell says what that
+    backend would do for the secret: its lookup identifier (env var name,
+    op:// URI, etc.), ``would attempt`` (no static key, e.g. prompt),
+    ``not ready: <reason>`` (its host tool is missing), or ``won't attempt``
+    (a ``false`` opt-out, or a mapping-required backend with no mapping).
+    Values are never resolved.
     """
     from agentworks import output
     from agentworks.bootstrap import build_registry

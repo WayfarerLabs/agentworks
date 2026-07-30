@@ -35,7 +35,7 @@ if TYPE_CHECKING:
     from collections.abc import Sequence
 
     from agentworks.resources.origin import Origin
-    from agentworks.resources.reference import ReferenceEntry, ResourceReference
+    from agentworks.resources.reference import ResourceReference
 
 
 @dataclass(frozen=True)
@@ -48,11 +48,13 @@ class GitCredentialProviderEntry:
     ``agentworks.git_credentials.<name>``; this row is what
     ``[git_credentials.<name>].type = "..."`` resolves against in the
     framework.
+
+    Inbound references live on the dependency graph
+    (``Registry.graph.dependents_of``), not on this row.
     """
 
     name: str
     origin: Origin | None = None
-    references: tuple[ReferenceEntry, ...] = ()
 
 
 @dataclass(frozen=True)

@@ -2,7 +2,7 @@
 requirements, dispatching miss policies, attaching usage, detecting cycles.
 
 Phase 1a has no operator-side producers of ``SecretReference``; tests
-synthesize them by attaching ``required_resources()`` to stub Resources or
+synthesize them by attaching ``dependencies()`` to stub Resources or
 directly populating ``Registry._resources``.
 """
 
@@ -22,7 +22,7 @@ from agentworks.secrets.base import SecretDecl
 @dataclass(frozen=True)
 class _PublisherStub:
     """A test-only Resource that publishes a fixed list of requirements
-    via ``required_resources()``. Lives outside any kind in KIND_REGISTRY;
+    via ``dependencies()``. Lives outside any kind in KIND_REGISTRY;
     Registry stores it under whatever kind the test uses.
     """
 
@@ -30,7 +30,7 @@ class _PublisherStub:
     origin: Origin | None = None
     references: tuple = ()
 
-    def referenced_resources(self) -> tuple[ResourceReference, ...]:
+    def dependencies(self, context: object) -> tuple[ResourceReference, ...]:
         return self.reqs
 
 
@@ -129,9 +129,10 @@ def test_operator_declared_secret_gets_usage_populated() -> None:
     assert found.origin is not None
     assert found.origin.variant == "operator-declared"
     assert found.origin.line == 5
-    # Usage gets populated from BOTH requirements.
-    assert len(found.references) == 2
-    sources = sorted(u.source for u in found.references)
+    # Usage gets populated from BOTH requirements (now off the graph node).
+    dependents = r.graph.dependents_of("secret", "api-key")
+    assert len(dependents) == 2
+    sources = sorted(u.source for u in dependents)
     assert sources == [("admin-template", "default"), ("agent-template", "claude")]
 
 
@@ -169,7 +170,7 @@ def test_auto_declared_secret_origin_uses_first_matching_requirement() -> None:
     assert found.origin is not None
     assert found.origin.source == ("admin-template", "default")
     # Usage records BOTH requirements.
-    assert len(found.references) == 2
+    assert len(r.graph.dependents_of("secret", "shared-key")) == 2
 
 
 def test_publish_order_determines_first_matching_origin_source() -> None:
@@ -222,7 +223,7 @@ class _ChainPublisher:
     origin: Origin | None = None
     references: tuple = ()
 
-    def referenced_resources(self) -> tuple[SecretReference, ...]:
+    def dependencies(self, context: object) -> tuple[SecretReference, ...]:
         return (
             SecretReference(
                 name=self.target_name,
@@ -244,7 +245,7 @@ def test_synthesize_path_walked_for_second_level_requirements() -> None:
     the synthesized secret. The auto-declared secret's usage list
     should end up populated by finalize's post-stabilization pass --
     proving finalize walked the synthesized Resource even though its
-    ``required_resources()`` is empty (and the reverse case is also
+    ``dependencies()`` is empty (and the reverse case is also
     exercised: usage attachment happens after the worklist settles
     rather than at synthesize time).
     """
@@ -265,10 +266,11 @@ def test_synthesize_path_walked_for_second_level_requirements() -> None:
     )
     r.finalize()
 
-    shared = r.lookup("secret", "shared")
+    r.lookup("secret", "shared")
     # Both incoming requirements attached to usage after finalize.
-    assert len(shared.references) == 2
-    assert {u.source for u in shared.references} == {
+    dependents = r.graph.dependents_of("secret", "shared")
+    assert len(dependents) == 2
+    assert {u.source for u in dependents} == {
         ("publisher_kind", "p1"),
         ("publisher_kind", "p2"),
     }

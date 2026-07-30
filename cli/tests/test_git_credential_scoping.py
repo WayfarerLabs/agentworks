@@ -22,7 +22,6 @@ from agentworks.capabilities.git_credential.github import GitHubCredentialProvid
 from agentworks.config import load_config
 from agentworks.errors import ConfigError
 from agentworks.git_credentials import CredentialMaterials, build_credential_materials
-from agentworks.manifests import load_manifests
 from agentworks.vms.initializer import resolve_git_credential_providers
 
 if TYPE_CHECKING:
@@ -71,21 +70,34 @@ def _azdo(
     [{}, {"repos": ["acme/widgets"]}, {"repos": ["acme/widgets", "acme/gadgets"]}, {"owner": "acme"}],
 )
 def test_valid_scopes_accepted(blob: dict[str, object]) -> None:
-    # validate_config returns the token-secret reference the provider
-    # sources its PAT from (default git-token-<name>); scope validation
-    # passing means no error.
-    refs = GitHubCredentialProvider.validate_config("git-credential/t", blob)
+    # dependencies returns the token-secret reference the provider sources
+    # its PAT from (default git-token-<name>); validate passing (no raise)
+    # means the scope is well-formed.
+    assert GitHubCredentialProvider.validate("git-credential/t", blob) is None
+    refs = GitHubCredentialProvider.dependencies("git-credential/t", blob)
     assert [(r.kind, r.name) for r in refs] == [("secret", "git-token-t")]
 
 
 def test_token_override_in_provider_config() -> None:
-    refs = GitHubCredentialProvider.validate_config("git-credential/gh", {"token": "my-secret"})
+    refs = GitHubCredentialProvider.dependencies("git-credential/gh", {"token": "my-secret"})
     assert [(r.kind, r.name) for r in refs] == [("secret", "my-secret")]
 
 
-def test_empty_token_rejected() -> None:
+def test_empty_token_rejected_by_validate() -> None:
     with pytest.raises(ConfigError, match="non-empty secret name"):
-        GitHubCredentialProvider.validate_config("git-credential/gh", {"token": ""})
+        GitHubCredentialProvider.validate("git-credential/gh", {"token": ""})
+
+
+def test_dependencies_total_on_malformed_config() -> None:
+    """``dependencies`` never raises: a malformed ``token`` field omits
+    the (now-underivable) token edge, and a malformed scope does not
+    raise here either (``validate`` owns the raising)."""
+    assert GitHubCredentialProvider.dependencies("git-credential/gh", {"token": ""}) == ()
+    assert GitHubCredentialProvider.dependencies("git-credential/gh", {"token": 3}) == ()
+    # A malformed scope still yields the default token edge (its identity
+    # does not depend on the scope fields).
+    refs = GitHubCredentialProvider.dependencies("git-credential/gh", {"repos": "not-a-list"})
+    assert [(r.kind, r.name) for r in refs] == [("secret", "git-token-gh")]
 
 
 @pytest.mark.parametrize(
@@ -107,7 +119,7 @@ def test_empty_token_rejected() -> None:
 )
 def test_invalid_scopes_rejected(blob: dict[str, object], match: str) -> None:
     with pytest.raises(ConfigError, match=match):
-        GitHubCredentialProvider.validate_config("t", blob)
+        GitHubCredentialProvider.validate("t", blob)
 
 
 # -- per-credential emission --------------------------------------------------
@@ -329,6 +341,22 @@ def test_resolve_threads_scope_from_manifest(tmp_path: Path) -> None:
 
 
 def test_manifest_scope_validation_has_file_line(tmp_path: Path) -> None:
+    """The scope-shape check moved into the finalize ``validate`` pass
+    (R3), so a malformed provider_config fails at build_registry, and the
+    manifest file:line survives the move (re-attached from the resource
+    origin rather than the decode prefix)."""
+    pub = tmp_path / "k.pub"
+    priv = tmp_path / "k"
+    pub.write_text("ssh-ed25519 AAAA test")
+    priv.write_text("key")
+    cfg = tmp_path / "config.toml"
+    cfg.write_text(
+        dedent(f"""\
+        [operator]
+        ssh_public_key = "{pub.as_posix()}"
+        ssh_private_key = "{priv.as_posix()}"
+        """)
+    )
     resources = tmp_path / "resources"
     resources.mkdir()
     (resources / "creds.yaml").write_text(
@@ -344,7 +372,7 @@ def test_manifest_scope_validation_has_file_line(tmp_path: Path) -> None:
         """)
     )
     with pytest.raises(ConfigError, match='"owner/name"') as exc:
-        load_manifests(resources)
+        build_registry(load_config(cfg, warn_issues=False))
     assert "creds.yaml" in str(exc.value)
 
 
@@ -790,7 +818,7 @@ def test_azdo_org_charset_validated() -> None:
     with pytest.raises(ConfigError, match="organization name"):
         from agentworks.capabilities.git_credential.azdo import AzDOCredentialProvider as A
 
-        A.validate_config("t", {"org": "my org"})
+        A.validate("t", {"org": "my org"})
 
 
 def test_two_unscoped_creds_first_wins(tmp_path: Path) -> None:

@@ -11,13 +11,14 @@ feature with different security properties.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 from agentworks import output
 from agentworks.errors import AgentworksError, ConfigError, SecretUnavailableError
 
 if TYPE_CHECKING:
     from agentworks.config import Config
+    from agentworks.resources.graph import Readiness
     from agentworks.resources.registry import Registry
     from agentworks.secrets.backends import SecretBackend
     from agentworks.secrets.base import MappingValue, SecretDecl
@@ -25,14 +26,19 @@ if TYPE_CHECKING:
 
 @dataclass(frozen=True)
 class ActiveBackend:
-    """One chain entry at runtime: a registered capability plus the
-    loop-side orchestration (mapping lookup and the generic ``False``
-    opt-out). Not a resource -- a thin wrapper the resolution loop and
-    inspection surfaces share so the opt-out is enforced structurally
-    in one place (a ``False`` mapping never reaches the capability).
+    """One chain entry at runtime: a registered capability, its stored
+    readiness verdict, plus the loop-side orchestration (mapping lookup and the
+    generic ``False`` opt-out). Not a resource, just a thin wrapper the
+    resolution loop and inspection surfaces share so the opt-out is enforced
+    structurally in one place (a ``False`` mapping never reaches the capability).
+
+    ``readiness`` is the verdict the fold stored on the backend's graph node
+    (read by :func:`active_backends`, never recomputed, R11). Resolution gates
+    on it (R9.6): a not-ready backend is skipped with a warning.
     """
 
     capability: SecretBackend
+    readiness: Readiness
 
     @property
     def name(self) -> str:
@@ -76,78 +82,94 @@ def active_backends(config: Config, registry: Registry) -> list[ActiveBackend]:
     """The active chain as runtime backends, in precedence order.
 
     Each layer in its natural role: the chain comes from CONFIG
-    (``[secret_config].backends`` -- a setting), validated against the
-    ``secret-backend`` capability resources in the Registry, and the
-    implementations come from ``SECRET_BACKEND_REGISTRY``. An unknown chain
-    name gets the operator's vocabulary -- the chain is config, so the
-    error is a config error, not a registry-graph error -- and the hint
-    enumerates the registered backends.
-    """
-    from agentworks.secrets.backends import SECRET_BACKEND_REGISTRY
+    (``[secret_config].backends``, a setting), and each opted-in name is
+    resolved to its ``secret-backend`` graph node, off which this reads the
+    backend IMPL and its stored readiness verdict (LLD d; no
+    ``SECRET_BACKEND_REGISTRY`` probe, R11). An unknown chain name gets the
+    operator's vocabulary (the chain is config, so the error is a config
+    error), and the hint enumerates the registered backends.
 
+    The chain is filtered to ``present`` (a node exists) and ``enabled`` (its
+    opt-in axis, LLD d): a present-but-DISABLED opted-in backend is dormant,
+    excluded here exactly as an absent-from-chain backend is, so resolution
+    never attempts it. This is inert today (no disabled-backend producer ships,
+    R7) but is the enablement seam the plugin rebuild fills; a disabled node
+    folds to a ready placeholder, so this reads ``enablement_of``, not
+    ``readiness_of``. Readiness gates later, at resolution (R9.6).
+    """
+    from agentworks.resources.graph import Enablement
+
+    graph = registry.graph
     backends: list[ActiveBackend] = []
     for name in config.secret_config_data.backends:
         try:
-            registry.lookup("secret-backend", name)
+            impl = graph.impl_of("secret-backend", name)
         except KeyError:
             registered = sorted(entry.name for entry in registry.iter_kind("secret-backend"))
             raise ConfigError(
                 f"[secret_config].backends names unknown backend {name!r}",
                 hint=f"registered backends: {registered}",
             ) from None
-        capability = SECRET_BACKEND_REGISTRY.get(name)
-        if capability is None:
-            # The capability resources mirror the code registry; a row
-            # without an implementation means a publisher bug (or a
-            # hand-built registry that skipped the secrets publisher).
-            raise ConfigError(f"secret backend {name!r} has a registry row but no registered implementation")
-        backends.append(ActiveBackend(capability=capability))
+        if graph.enablement_of("secret-backend", name) is Enablement.disabled:
+            # A disabled opted-in backend is dormant (never consulted), the same
+            # as a backend absent from the chain. Not a readiness skip, so no
+            # warning: it is an opt-out, not a can't-run-here.
+            continue
+        # ``impl`` is never ``None`` here: a published capability row with no
+        # registered impl already fails fast at ``build_graph`` (``_impl_for``
+        # raises ``StateError``), so post-finalize every present backend node
+        # carries its instance. The cast reflects that invariant.
+        backends.append(
+            ActiveBackend(
+                capability=cast("SecretBackend", impl),
+                readiness=graph.readiness_of("secret-backend", name),
+            )
+        )
     return backends
 
 
 def validate_chain(config: Config, registry: Registry) -> None:
-    """Secret-system config consistency, run by ``build_registry`` right
-    after finalize: the chain's names must be ``secret-backend``
-    capability resources, and every operator-declared secret must be
-    reachable via the chain.
+    """Secret-system reachability, run by ``build_registry`` right after
+    finalize: the chain's names must be ``secret-backend`` capability
+    resources, and every operator-declared secret must be reachable via the
+    chain (some opted-in backend would attempt it).
 
-    The chain is pure config consumed here the way any subsystem
-    consumes its settings; this is simply the secrets subsystem
-    validating its config against the finalized registry, so every
-    resource-touching command fails fast with config vocabulary.
+    This is the reachability HALF of the old ``validate_chain``. Per-mapping
+    spec validation moved into the finalize ``validate`` pass (each secret's
+    own ``validate`` checks every present backend's mapping, R9.9); what stays
+    here is the eager post-finalize boundary check, now GRAPH-reading (LLD d):
+    a secret is reachable iff ``edges_of(secret) ∩ opted-in`` is non-empty.
 
-    The reachability check covers operator-declared secrets only,
-    preserving the env-and-secrets SDD's load-time behavior (it ran over
-    ``Config.secrets``). Auto-declared rows (e.g. the ever-present
-    tailscale-auth-key) must not invalidate a deliberate
-    ``backends = []`` opt-out; they surface at use time as
-    ``SecretUnavailableError`` instead.
+    Three preservation invariants (LLD d acceptance): the scope is
+    OPERATOR-DECLARED secrets only (an auto-declared row like the ever-present
+    tailscale-auth-key must not invalidate a deliberate ``backends = []``
+    opt-out; it surfaces at use time as ``SecretUnavailableError``), the keying
+    is WOULD-ATTEMPT and READINESS-BLIND (``edges_of`` is the frozen
+    would-attempt candidate set; a secret whose only opted-in backend is
+    not-ready is still reachable and fails only at resolution, exactly as
+    today), and the soft/hard miss halt semantics stay in ``resolve_secrets``.
     """
     from agentworks.resources.access import secret_decls
 
-    backends = active_backends(config, registry)
+    # Validate the chain names are known backends (config vocabulary) by
+    # building the active chain; the returned backends are not otherwise used
+    # here (reachability reads the frozen edges, not a live would_attempt).
+    active_backends(config, registry)
+    opted_in = set(config.secret_config_data.backends)
 
-    # Per-secret mapping values are capability-owned config; each
-    # active-chain backend validates its own (the generic ``False``
-    # opt-out is loop-owned and skipped). Mappings addressed to
-    # backends outside the chain stay dormant and unvalidated, exactly
-    # as they stay unused.
+    graph = registry.graph
     all_decls = secret_decls(registry)
-    for backend in backends:
-        for decl in all_decls.values():
-            mapping = decl.backend_mappings.get(backend.name)
-            if mapping is not None and mapping is not False:
-                backend.capability.validate_mapping(f"secret {decl.name!r}", mapping)
-
     operator_decls = [
         decl
         for decl in all_decls.values()
         if getattr(getattr(decl, "origin", None), "variant", None) == "operator-declared"
     ]
-    unreachable = [decl for decl in operator_decls if not any(b.would_attempt(decl) for b in backends)]
+    unreachable = [
+        decl for decl in operator_decls if not ({ref.name for ref in graph.edges_of("secret", decl.name)} & opted_in)
+    ]
     if unreachable:
         names = ", ".join(sorted(d.name for d in unreachable))
-        chain_str = ", ".join(b.name for b in backends) or "(empty)"
+        chain_str = ", ".join(config.secret_config_data.backends) or "(empty)"
         # Tight by construction: with the default chain (env-var,
         # prompt), prompt attempts every secret, so nothing is
         # unreachable. Reaching this error means the operator stripped
@@ -236,7 +258,7 @@ def resolve_secrets(
       remaining backend would attempt; in ``--non-interactive`` mode the
       prompt no-ops, so there is nothing to get ahead of and the
       end-of-loop raise stands.
-    - a dict (inspection surfaces, e.g. ``env show --reveal-secrets``):
+    - a dict (inspection surfaces, e.g. ``env show --resolve``):
       partial success. Per-secret failures land in ``errors`` keyed by
       secret name, successfully-resolved values are RETURNED rather
       than discarded (prompt answers are never re-asked), and a
@@ -257,6 +279,17 @@ def resolve_secrets(
     for index, backend in enumerate(backends):
         if not missing:
             break
+        # R9.6: a not-ready opted-in backend is SKIPPED WITH A WARNING (never
+        # silent) and the chain falls through to the next candidate. Delta vs
+        # today: a mapped-but-unavailable store (e.g. onepassword with no `op`)
+        # used to raise ConnectivityError and halt; now it warns and falls
+        # through. One warning per still-missing secret this backend would
+        # attempt.
+        if not backend.readiness.is_ready:
+            for s in missing:
+                if backend.would_attempt(s):
+                    output.warn(f"secret {s.name}: skipping {backend.name}, not ready: {backend.readiness.reason}")
+            continue
         # Fail before an interactive backend prompts (issue #202). Once
         # the non-interactive backends ahead of it have run, their soft
         # misses are known, so any still-missing secret that NO remaining
@@ -267,12 +300,18 @@ def resolve_secrets(
         # anyway. The attribution and raise reuse the end-of-loop
         # implementation, so the two failure sites are identical.
         #
+        # Readiness-aware (R9.6, in lockstep with the skip above): a NOT-READY
+        # remaining backend will be skipped, so it does not count as attempting;
+        # ``remaining`` is filtered to ready backends before the would_attempt
+        # test, so the predictor never spares a prompt for a secret a skipped
+        # backend "would" have taken.
+        #
         # Command path only: the inspection path (errors is not None)
         # never runs interactive backends, and in --non-interactive mode
         # the prompt backend no-ops, so there is no prompt to get ahead
         # of and the end-of-loop raise stands.
         if errors is None and backend.interactive and output.is_interactive():
-            remaining = backends[index:]
+            remaining = [b for b in backends[index:] if b.readiness.is_ready]
             doomed = [s for s in missing if not any(b.would_attempt(s) for b in remaining)]
             if doomed:
                 _fail_unavailable(doomed, backends, errors)
@@ -340,9 +379,13 @@ def preview_resolution(
     ``None`` if nothing in the chain would.
 
     Walks the chain in precedence order. ``would_attempt`` gates each
-    backend; an interactive backend (prompt) is reported without probing
-    (probing would BE the operator interaction); every other backend
-    must actually produce a value to be reported.
+    backend; a NOT-READY backend is skipped (in lockstep with the
+    resolution loop's readiness skip, R9.6/R9.7: it never resolves here, so
+    the predictor never names a backend resolution will skip); an interactive
+    backend (prompt) is reported without probing (probing would BE the operator
+    interaction); every other ready backend must actually produce a value to be
+    reported. Readiness is the offline layer UNDER interactive-optimism: a ready
+    ``prompt`` is still previewed optimistically on ``would_attempt`` alone.
 
     ``interactive_available`` is the caller's policy for whether an
     interactive backend counts as resolving (issue #202): the preflight
@@ -358,6 +401,12 @@ def preview_resolution(
     """
     for backend in backends:
         if not backend.would_attempt(secret):
+            continue
+        if not backend.readiness.is_ready:
+            # Not-ready: resolution will skip this backend with a warning
+            # (R9.6), so it never resolves the secret here either. Skipping it
+            # keeps the predictor honest (no "would resolve via onepassword" for
+            # a backend a real run would skip) without probing an unusable tool.
             continue
         if backend.interactive:
             if interactive_available:

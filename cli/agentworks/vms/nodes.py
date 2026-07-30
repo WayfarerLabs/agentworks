@@ -401,15 +401,17 @@ class PendingVMNode:
 def vm_site_node(registry: Registry, name: str) -> VMSiteNode:
     """Build the ``vm-site/<name>`` node from its DECLARED resource:
     the platform capability reference becomes the held bound instance
-    (via ``resolve_site``, the disabled-site chokepoint), and the
+    (via ``resolve_site``, the not-ready-site chokepoint), and the
     config-implied ``secret`` references become the node's
     ``secret_refs``.
     """
-    from agentworks.vms.sites import lookup_site, resolve_site
+    from agentworks.vms.sites import resolve_site
 
-    decl = lookup_site(name, registry)
     platform = resolve_site(name, registry)
-    secret_refs = tuple(ref for ref in decl.referenced_resources() if ref.kind == "secret")
+    # Read the site's config-implied secret edges off the retained graph (the
+    # single access path, R11) rather than re-walking the decl's dependencies.
+    # ``resolve_site`` already raises the stranded-site error on an unknown name.
+    secret_refs = tuple(ref for ref in registry.graph.edges_of("vm-site", name) if ref.kind == "secret")
     return VMSiteNode(name, platform, secret_refs, registry)
 
 

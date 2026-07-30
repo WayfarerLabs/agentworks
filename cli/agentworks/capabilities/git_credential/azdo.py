@@ -13,7 +13,8 @@ from typing import TYPE_CHECKING
 from agentworks.capabilities.git_credential.base import (
     GitCredentialProvider,
     HelperEntry,
-    token_config_reference,
+    token_dependency,
+    validate_token_field,
 )
 from agentworks.errors import ConfigError
 
@@ -33,7 +34,15 @@ class AzDOCredentialProvider(GitCredentialProvider):
     description = "Azure DevOps personal access token"
 
     @classmethod
-    def validate_config(cls, owner: str, config: Mapping[str, object]) -> tuple[ConfigReference, ...]:
+    def dependencies(cls, owner: str, config: Mapping[str, object]) -> tuple[ConfigReference, ...]:
+        """The token-secret edge the PAT config implies (total,
+        non-throwing): a malformed ``token`` field omits the edge,
+        ``validate`` raises on it."""
+        ref = token_dependency(owner, config)
+        return (ref,) if ref is not None else ()
+
+    @classmethod
+    def validate(cls, owner: str, config: Mapping[str, object]) -> None:
         org = config.get("org")
         if not isinstance(org, str) or not _ORG_RE.match(org):
             raise ConfigError(
@@ -45,7 +54,7 @@ class AzDOCredentialProvider(GitCredentialProvider):
         unknown = sorted(set(config) - {"org", "token"})
         if unknown:
             raise ConfigError(f"{owner}: unknown azdo provider field(s): {', '.join(unknown)}")
-        return (token_config_reference(owner, config),)
+        validate_token_field(owner, config)
 
     def __init__(
         self,
@@ -55,7 +64,7 @@ class AzDOCredentialProvider(GitCredentialProvider):
         description: str | None = None,
     ) -> None:
         super().__init__(owner_name, config or {}, description=description)
-        # validate_config ran at construct and guarantees a str org.
+        # validate ran at construct and guarantees a str org.
         org = self.config.get("org")
         assert isinstance(org, str)
         self._org = org

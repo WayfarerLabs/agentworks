@@ -23,6 +23,7 @@ from agentworks.errors import (
     ExternalError,
     SecretMappingError,
 )
+from agentworks.resources.graph import Readiness
 from agentworks.secrets import SECRET_BACKEND_REGISTRY, active_backends, resolve_secrets
 from agentworks.secrets import onepassword as op_mod
 from agentworks.secrets.base import SecretDecl
@@ -67,7 +68,7 @@ def _fake_op(
 
 
 def _backend_chain() -> list[ActiveBackend]:
-    return [ActiveBackend(capability=OnePasswordBackend())]
+    return [ActiveBackend(capability=OnePasswordBackend(), readiness=Readiness.ready())]
 
 
 # -- would_attempt -----------------------------------------------------------
@@ -319,8 +320,8 @@ def test_hard_miss_halts_chain_before_prompt(
         def batch_get(self, wants: list[tuple[Any, Any]]) -> dict[str, str]:
             raise AssertionError("later backend must not run after a hard miss")
 
-    op_chain = ActiveBackend(capability=OnePasswordBackend())
-    later = ActiveBackend(capability=_ExplodingBackend())  # type: ignore[arg-type]
+    op_chain = ActiveBackend(capability=OnePasswordBackend(), readiness=Readiness.ready())
+    later = ActiveBackend(capability=_ExplodingBackend(), readiness=Readiness.ready())  # type: ignore[arg-type]
     secret = _decl("gone", backend_mappings={"onepassword": "op://Work/gone/token"})
     with pytest.raises(SecretMappingError):
         resolve_secrets([secret], [op_chain, later])

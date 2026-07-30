@@ -16,6 +16,8 @@ from agentworks import output
 from agentworks.errors import ConfigError
 
 if TYPE_CHECKING:
+    from agentworks.resources.graph import Readiness
+    from agentworks.resources.reference import ConfigReference
     from agentworks.secrets.base import MappingValue, SecretDecl
 
 
@@ -38,6 +40,15 @@ class PromptBackend:
     description = "prompts interactively at resolution time"
     interactive = True
 
+    def not_ready(self) -> Readiness:
+        """Always ready: prompting needs no host tool. Whether a prompt can
+        actually run (TTY / non-interactive mode) is resolution-time
+        interactivity, kept optimistically previewed (LLD c/e), not a
+        backend readiness failure."""
+        from agentworks.resources.graph import Readiness
+
+        return Readiness.ready()
+
     def validate_mapping(self, owner: str, mapping: MappingValue) -> None:
         # Prompt has no mapping vocabulary, so any value that reaches
         # here (the loop owns the generic ``false`` opt-out) is dead
@@ -47,6 +58,12 @@ class PromptBackend:
         raise ConfigError(
             f"{owner}: backend_mappings for the prompt backend has no meaning; remove it, or use false to opt out"
         )
+
+    def dependencies(self, mapping: MappingValue) -> tuple[ConfigReference, ...]:
+        """Prompt has no mapping vocabulary and resolves interactively; it
+        implies no agentworks resource, so the edge set is empty (total,
+        non-throwing)."""
+        return ()
 
     def would_attempt(
         self,

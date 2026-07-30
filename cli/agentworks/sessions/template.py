@@ -21,6 +21,7 @@ from agentworks.sessions.layouts import AW_SESSION_VERTICAL_LAYOUT
 
 if TYPE_CHECKING:
     from agentworks.env import EnvEntry
+    from agentworks.resources.graph import BuildContext
     from agentworks.resources.reference import ResourceReference
 
 
@@ -63,13 +64,13 @@ class SessionTemplate(DeclaredResource):
     harness_config: dict[str, object] | None = None
     env: dict[str, EnvEntry] | None = None
 
-    def referenced_resources(self) -> list[ResourceReference]:
+    def dependencies(self, context: BuildContext) -> list[ResourceReference]:
         from agentworks.resources.reference import (
             ResourceReference as _ResourceRef,
         )
         from agentworks.resources.reference import (
-            SecretReference,
             TemplateReference,
+            sourced_references,
         )
 
         source = ("session-template", self.name)
@@ -104,14 +105,26 @@ class SessionTemplate(DeclaredResource):
 
             capability = HARNESS_REGISTRY.get(self.harness)
             if capability is not None:
-                for cref in capability.validate_config(f"session-template/{self.name}", self.harness_config or {}):
-                    ref_cls = SecretReference if cref.kind == "secret" else _ResourceRef
-                    refs.append(
-                        ref_cls(
-                            name=cref.name,
-                            kind=cref.kind,
-                            usage=cref.usage,
-                            source=source,
-                        )
+                refs.extend(
+                    sourced_references(
+                        capability.dependencies(f"session-template/{self.name}", self.harness_config or {}),
+                        source,
                     )
+                )
         return refs
+
+    def validate(self, enabled_backends: frozenset[str]) -> None:
+        """Throwing shape check for the ``harness_config`` blob, run by
+        the finalize ``validate`` pass (``enabled_backends`` is the
+        secret-only R9.9 input, ignored here). Mirrors ``dependencies``:
+        only a declared harness has a blob to validate, and its named
+        capability validates it. An undeclared harness (``None``) or an
+        unknown name is a no-op here (the miss policy reports the latter).
+        """
+        if self.harness is None:
+            return
+        from agentworks.capabilities.harness import HARNESS_REGISTRY
+
+        capability = HARNESS_REGISTRY.get(self.harness)
+        if capability is not None:
+            capability.validate(f"session-template/{self.name}", self.harness_config or {})

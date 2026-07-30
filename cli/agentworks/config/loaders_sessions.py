@@ -152,13 +152,9 @@ def _session_harness_pair(name: str, tdata: dict[str, object]) -> tuple[str | No
                 f'session_templates.{name}: harness_config needs a harness (a blob with no owner); add harness = "..."'
             )
 
-    # Shape-and-vocabulary validation on the declared/hoisted blob, in
-    # the operator's TOML vocabulary (harness-api-lld section 2). Unknown
-    # harness names skip: the kind's miss policy reports them at finalize.
-    if isinstance(harness, str) and harness_config is not None:
-        from agentworks.capabilities.harness import HARNESS_REGISTRY
-
-        capability = HARNESS_REGISTRY.get(harness)
-        if capability is not None:
-            capability.validate_config(f"session-template/{name}", harness_config)
+    # The declared/hoisted harness_config blob's shape is validated by
+    # the finalize ``validate`` pass (SessionTemplate.validate), not
+    # here: capability validation is decoupled from load (R3). The
+    # TOML-shape checks above (flat-vs-nested, blob-needs-harness) stay
+    # at load, in the operator's TOML vocabulary.
     return harness, harness_config

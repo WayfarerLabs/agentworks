@@ -54,7 +54,32 @@ class ProxmoxPlatform(VMPlatform):
         self._api_cached: ProxmoxAPI | None = None
 
     @classmethod
-    def validate_config(cls, owner: str, config: Mapping[str, object]) -> tuple[ConfigReference, ...]:
+    def dependencies(cls, owner: str, config: Mapping[str, object]) -> tuple[ConfigReference, ...]:
+        """The API-token secret reference the site's ``platform_config``
+        implies: ``token_secret`` names it (default
+        ``proxmox-token``). The owning site attaches itself as source
+        (whoever hosts the config that names the secret emits the edge).
+
+        Total and non-throwing: the edge's identity is the token secret
+        name, so a malformed ``token_secret`` (present but not a
+        non-empty string) omits the edge rather than raising; ``validate``
+        is where that shape error surfaces.
+        """
+        token_secret = config.get("token_secret", DEFAULT_TOKEN_SECRET)
+        if not isinstance(token_secret, str) or not token_secret:
+            return ()
+        from agentworks.resources.reference import ConfigReference
+
+        return (
+            ConfigReference(
+                kind="secret",
+                name=token_secret,
+                usage="the Proxmox API token",
+            ),
+        )
+
+    @classmethod
+    def validate(cls, owner: str, config: Mapping[str, object]) -> None:
         for key in _REQUIRED_KEYS:
             if key not in config:
                 raise ConfigError(f"{owner}.{key} is required for the proxmox platform")
@@ -71,19 +96,6 @@ class ProxmoxPlatform(VMPlatform):
         unknown = sorted(set(config) - set(_REQUIRED_KEYS) - set(_OPTIONAL_KEYS))
         if unknown:
             raise ConfigError(f"{owner}: unknown proxmox platform field(s): {', '.join(unknown)}")
-        # Capability-implied reference: the API token is an ordinary
-        # secret reference; the owning site attaches itself as source
-        # (whoever hosts the config that names the secret emits the
-        # reference).
-        from agentworks.resources.reference import ConfigReference
-
-        return (
-            ConfigReference(
-                kind="secret",
-                name=str(token_secret),
-                usage="the Proxmox API token",
-            ),
-        )
 
     @classmethod
     def legacy_platform_metadata(cls, row: Mapping[str, Any], legacy: Mapping[str, Any]) -> dict[str, str]:

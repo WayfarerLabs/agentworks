@@ -379,7 +379,7 @@ def test_provisioner_shell_target_attaches_and_registers_detach_for_azure(
     detach_calls: list[str] = []
 
     class _FakeAzureProvisioner(AzureVMPlatform):
-        # Chain super with a minimal valid config (validate_config re-runs
+        # Chain super with a minimal valid config (validate re-runs
         # at construct, so a bare {} would fail) so the base's cache slots
         # exist even though the overrides below never touch Azure.
         def __init__(self) -> None:  # noqa: D401

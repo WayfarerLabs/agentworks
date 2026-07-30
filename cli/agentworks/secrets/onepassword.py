@@ -54,6 +54,8 @@ from agentworks.errors import (
 )
 
 if TYPE_CHECKING:
+    from agentworks.resources.graph import Readiness
+    from agentworks.resources.reference import ConfigReference
     from agentworks.secrets.base import MappingValue, SecretDecl
 
 _OP_BINARY = "op"
@@ -260,6 +262,21 @@ class OnePasswordBackend:
     # here) would not be interactive.
     interactive = True
 
+    def not_ready(self) -> Readiness:
+        """Not-ready when the ``op`` CLI is not on PATH: a pure presence test
+        (``shutil.which``), never a store probe, biometric, or re-auth (those
+        are resolution-time interactivity, kept optimistically previewed).
+        This is the offline readiness R9.6 gives backends: a configured
+        onepassword with no ``op`` installed now shows not-ready rather than
+        only failing at first resolution."""
+        import shutil
+
+        from agentworks.resources.graph import Readiness
+
+        if shutil.which("op") is None:
+            return Readiness.blocked("op CLI not installed")
+        return Readiness.ready()
+
     def validate_mapping(self, owner: str, mapping: MappingValue) -> None:
         # Load-time gate (called by validate_chain). ``_resolved_ref`` keeps
         # its own defensive check for hand-built decls that never pass
@@ -281,6 +298,12 @@ class OnePasswordBackend:
             f"an 'op://vault/item/field' string or a {{account, reference}} "
             f"table (got {type(mapping).__name__})"
         )
+
+    def dependencies(self, mapping: MappingValue) -> tuple[ConfigReference, ...]:
+        """A onepassword mapping is an ``op://`` reference into an external
+        vault, not an agentworks resource, so it implies no edge (total,
+        non-throwing)."""
+        return ()
 
     def _resolved_ref(self, secret: SecretDecl, mapping: MappingValue | None) -> _OpRef:
         owner = f"secret {secret.name!r}"

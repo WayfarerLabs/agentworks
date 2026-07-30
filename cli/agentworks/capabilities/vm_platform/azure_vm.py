@@ -159,7 +159,8 @@ def _parse_size_catalog(config: Mapping[str, object], owner: str) -> tuple[_VMSi
     """The site's VM-size catalog: the operator override
     (``platform_config.vm_sizes``) when present, else the built-in
     B-series ladder. Raises ``ConfigError`` on a malformed override so
-    the shape is validated at config-load time, not first ``vm create``.
+    the shape is validated at registry build time (the finalize
+    ``validate`` pass), not first ``vm create``.
     """
     raw = config.get("vm_sizes")
     if raw is None:
@@ -243,7 +244,13 @@ class AzureVMPlatform(VMPlatform):
     # without resolved credentials.
 
     @classmethod
-    def validate_config(cls, owner: str, config: Mapping[str, object]) -> tuple[ConfigReference, ...]:
+    def dependencies(cls, owner: str, config: Mapping[str, object]) -> tuple[ConfigReference, ...]:
+        """``azure-vm`` implies no resource reference, so its edge set is
+        empty (total, non-throwing per the ``dependencies`` contract)."""
+        return ()
+
+    @classmethod
+    def validate(cls, owner: str, config: Mapping[str, object]) -> None:
         for key in _AZURE_REQUIRED_KEYS:
             value = config.get(key)
             if not isinstance(value, str) or not value:
@@ -254,7 +261,6 @@ class AzureVMPlatform(VMPlatform):
         # Validate the optional size-catalog override's shape here so a
         # malformed vm_sizes fails at config load, not first vm create.
         _parse_size_catalog(config, owner)
-        return ()
 
     @classmethod
     def legacy_platform_metadata(cls, row: Mapping[str, Any], legacy: Mapping[str, Any]) -> dict[str, str]:

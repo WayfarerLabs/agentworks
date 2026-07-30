@@ -172,7 +172,7 @@ def _validate_merged(resolved: ResolvedSessionTemplate) -> None:
     kind's miss policy at finalize)."""
     from agentworks.capabilities.harness import harness_for
 
-    harness_for(resolved.harness).validate_config(f"session-template/{resolved.name}", resolved.harness_config)
+    harness_for(resolved.harness).validate(f"session-template/{resolved.name}", resolved.harness_config)
 
 
 def _merge(target: ResolvedSessionTemplate, source: ResolvedSessionTemplate) -> None:

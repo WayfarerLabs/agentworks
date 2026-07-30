@@ -12,7 +12,7 @@ imports this registry or the concrete classes.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 from agentworks.capabilities.vm_platform.azure_vm import AzureVMPlatform
 from agentworks.capabilities.vm_platform.base import (
@@ -48,16 +48,18 @@ VM_PLATFORM_REGISTRY: dict[str, type[VMPlatform]] = {
     ProxmoxPlatform.name: ProxmoxPlatform,
 }
 """Every platform this BUILD ships (INSTALLED, in doctor's vocabulary).
-Which of them are usable on this host is the platform's own call:
-:meth:`VMPlatform.unsupported_reason` gates the capability row, and
-every site (bundled and declared alike) registers unconditionally and
-self-disables when its platform is missing/unsupported or the bound
-instance reports a missing requirement
-(:meth:`Capability.disabled_reason`). The knowledge lives on the
-platform class (no config knob, no host sniffing anywhere else),
-which is exactly the shape a plugin's platform brings along. Future
-plugins register here (and publish their own capability resources with
-plugin origins).
+Which of them are usable on this host is the platform's own call, but
+that call is READINESS, not presence: every installed platform publishes
+a ``vm-platform`` row (R13), and :meth:`VMPlatform.unsupported_reason`
+feeds the row's readiness verdict rather than gating publication, so a
+host-unsupported platform (wsl2 off Windows) is a present-but-not-ready
+node, not an absent one. Every site (bundled and declared alike)
+registers unconditionally and is not-ready when its platform is
+host-unsupported or the bound config reports a missing requirement
+(:meth:`Capability.not_ready`). The knowledge lives on the platform
+class (no config knob, no host sniffing anywhere else), which is exactly
+the shape a plugin's platform brings along. Future plugins register here
+(and publish their own capability resources with plugin origins).
 """
 
 
@@ -71,33 +73,37 @@ class VMPlatformEntry:
     row is what ``vm-site`` ``spec.platform`` references resolve against
     in the framework. Lives with the capability (not ``vms/kinds.py``)
     so publishing never imports the consuming domain.
+
+    Inbound references live on the dependency graph
+    (``Registry.graph.dependents_of``), not on this row. The row publishes
+    for every installed platform regardless of host support (R13); the
+    node's readiness (from ``unsupported_reason``) carries the host-support
+    verdict.
     """
 
     name: str
     description: str = ""
     origin: Origin | None = None
-    references: tuple[Any, ...] = ()
 
 
 def publish_to(registry: Registry) -> None:
     """Publish one ``vm-platform`` capability resource per registered
-    platform SUPPORTED on this host, ``built-in`` origin. Read-only
+    platform, UNCONDITIONALLY (R13), ``built-in`` origin. Read-only
     rows: ``vm-site`` ``spec.platform`` references validate against
     them uniformly, and the platforms list/describe like every other
     resource.
 
-    An unsupported platform (``unsupported_reason``) publishes nothing:
-    it is installed but disabled on this host and listed only by
-    doctor. Sites referencing it still register; they self-disable
-    with the platform's reason in the chain (and emit no capability
-    edge, so the missing row never trips finalize).
+    Host support is READINESS, not absence: an installed-but-unsupported
+    platform (wsl2 off Windows) still publishes a row, and its
+    ``unsupported_reason`` becomes the readiness fold's input for that
+    node (a present, not-ready ``vm-platform``), so a site referencing it
+    is not-ready rather than dangling on an absent row. This replaces the
+    old edge-suppression's job of hiding the missing capability row.
     """
     from agentworks.resources import Origin
 
     origin = Origin.built_in(source="agentworks.capabilities.vm_platform")
     for name, platform_cls in VM_PLATFORM_REGISTRY.items():
-        if platform_cls.unsupported_reason() is not None:
-            continue
         registry.add(
             "vm-platform",
             name,

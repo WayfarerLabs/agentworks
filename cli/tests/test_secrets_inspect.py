@@ -142,9 +142,9 @@ def test_env_var_cell_shows_mapping_override(tmp_path: Path) -> None:
     assert env_var_cell.identifier == "GITHUB_TOKEN"
 
 
-def test_env_var_cell_when_opted_out_reports_disabled(tmp_path: Path) -> None:
+def test_env_var_cell_when_opted_out_reports_wont_attempt(tmp_path: Path) -> None:
     """``backend_mappings.env-var = false``: would_attempt is False so the
-    renderer reports ``disabled``. Identifier is None."""
+    renderer reports ``won't attempt``. Identifier is None."""
     cfg_file = tmp_path / "config.toml"
     _write_base(
         cfg_file,
@@ -165,7 +165,7 @@ def test_env_var_cell_when_opted_out_reports_disabled(tmp_path: Path) -> None:
 
 def test_prompt_cell_has_no_static_identifier(tmp_path: Path) -> None:
     """Prompt always attempts but has no static lookup key; CLI renders
-    this as ``enabled``."""
+    this as ``would attempt``."""
     cfg_file = tmp_path / "config.toml"
     _write_base(
         cfg_file,
@@ -286,6 +286,7 @@ def test_render_secret_table_caps_long_backend_identifier(
                         backend="onepassword",
                         would_attempt=True,
                         identifier=long_ident,
+                        not_ready_reason=None,
                     ),
                 ),
             ),
@@ -326,6 +327,7 @@ def test_render_secret_table_caps_long_name(
                         backend="env-var",
                         would_attempt=True,
                         identifier=None,
+                        not_ready_reason=None,
                     ),
                 ),
             ),
@@ -339,3 +341,82 @@ def test_render_secret_table_caps_long_name(
     joined = "\n".join(captured_output.info)
     assert truncated in joined
     assert long_name not in joined
+
+
+def _readiness_grid_config(tmp_path: Path) -> Path:
+    """A chain of env-var / onepassword / prompt exercising every R9.7 cell
+    state, with ``op`` monkeypatched absent so onepassword folds not-ready."""
+    cfg_file = tmp_path / "config.toml"
+    _write_base(
+        cfg_file,
+        extras="""
+        [admin.env]
+        A = { secret = "mapped-op" }
+        B = { secret = "prompt-only" }
+        C = { secret = "unmapped-op" }
+
+        [secrets.mapped-op]
+        description = "op ref, env-var opted out"
+        backend_mappings.env-var = false
+        backend_mappings.onepassword = "op://Vault/item/field"
+
+        [secrets.prompt-only]
+        description = "no static key anywhere"
+        backend_mappings.env-var = false
+        backend_mappings.onepassword = false
+
+        [secrets.unmapped-op]
+        description = "onepassword mapping-required, no mapping"
+        backend_mappings.env-var = false
+
+        [secret_config]
+        backends = ["env-var", "onepassword", "prompt"]
+        """,
+    )
+    return cfg_file
+
+
+def test_grid_cell_not_ready_wins_over_identifier(tmp_path: Path, monkeypatch) -> None:
+    """R9.7: a not-ready backend (onepassword, no ``op`` on PATH) with a mapped
+    ``op://`` ref shows ``not ready: <reason>``, not the ref: it cannot run
+    here, so not-ready wins over the identifier."""
+    monkeypatch.setattr("shutil.which", lambda name: None)
+    table = _build_table(_readiness_grid_config(tmp_path))
+    row = next(r for r in table.rows if r.name == "mapped-op")
+    op = next(c for c in row.cells if c.backend == "onepassword")
+    assert op.would_attempt is True  # has a mapping
+    assert op.identifier == "op://Vault/item/field"  # the ref is still known
+    assert op.not_ready_reason == "op CLI not installed"  # but readiness wins at render
+
+
+def test_grid_cell_wont_attempt_wins_over_not_ready(tmp_path: Path, monkeypatch) -> None:
+    """R9.7 precedence: a backend that would NOT attempt this secret (onepassword
+    is mapping-required and has no mapping) shows ``won't attempt`` even when its
+    host tool is absent: readiness is moot for a secret it never attempts."""
+    monkeypatch.setattr("shutil.which", lambda name: None)
+    table = _build_table(_readiness_grid_config(tmp_path))
+    row = next(r for r in table.rows if r.name == "unmapped-op")
+    op = next(c for c in row.cells if c.backend == "onepassword")
+    assert op.would_attempt is False
+    assert op.not_ready_reason == "op CLI not installed"  # backend is not-ready...
+    # ...but the rendered cell is won't-attempt (checked below), not not-ready.
+
+
+def test_render_grid_uses_readiness_vocabulary(tmp_path: Path, monkeypatch, captured_output: CapturedOutput) -> None:
+    """R9.7 at the rendered level: cells are the identifier / ``would attempt`` /
+    ``not ready: <reason>`` / ``won't attempt`` states, never the retired
+    ``enabled`` / ``disabled`` literals."""
+    monkeypatch.setattr("shutil.which", lambda name: None)
+    table = _build_table(_readiness_grid_config(tmp_path))
+    render_secret_table(table)
+    out = "\n".join(captured_output.info)
+
+    assert "not ready: op CLI not installed" in out
+    assert "op://Vault/item/field" not in out  # hidden: not-ready wins over the ref
+    assert "won't attempt" in out
+    assert "would attempt" in out  # a ready prompt with no static key
+    # The retired overloaded literals are gone as standalone cells.
+    for line in captured_output.info:
+        cells = [c.strip() for c in line.split("  ") if c.strip()]
+        assert "disabled" not in cells
+        assert "enabled" not in cells

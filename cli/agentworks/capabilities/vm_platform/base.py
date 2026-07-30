@@ -90,7 +90,7 @@ class VMPlatform(Capability):
 
     Class-level contract (consumed by the vm-site kind decoder, the
     capability publisher, and the DB migration): ``name``,
-    ``description``, ``validate_config``, and
+    ``description``, ``dependencies`` / ``validate``, and
     ``legacy_platform_metadata``.
 
     Idempotency: ops flagged with ``@idempotent_op`` (``start``,
@@ -106,21 +106,23 @@ class VMPlatform(Capability):
     @classmethod
     def unsupported_reason(cls) -> str | None:
         """Why this platform cannot run on this host AT ALL, or ``None``
-        when it can. A non-None reason disables the platform wholesale:
-        no capability row publishes, every site referencing it
-        self-disables with this reason in its chain, and doctor lists
-        the platform as installed-but-disabled.
+        when it can. A non-None reason makes every ``vm-platform`` node for
+        it not-ready (host-support is READINESS, not absence, R13): the row
+        still publishes, every site referencing it is not-ready with this
+        reason folded into its chain, and doctor lists the platform as
+        installed-but-not-ready.
 
-        This is a registration-time gate, NOT preflight: a pure, fast
+        This is the config-INDEPENDENT half of readiness: a pure, fast
         classmethod with no config, no instance, and no secrets, run at
-        every registry build. It answers "could any configuration of
-        this platform ever work here" (wsl2 off Windows: no), not "is
-        this configured site ready" (that is preflight) and not "is a
-        tool merely missing but installable" (that is the instance's
-        :meth:`Capability.disabled_reason`: lima the platform is
-        supported everywhere because remote sites run ``limactl`` on
-        the vm_host over SSH, but a local-Lima site without a local
-        ``limactl`` disables itself). Default: supported everywhere.
+        every registry build and consumed by the readiness fold (LLD c) as
+        the platform node's own verdict. It answers "could any configuration
+        of this platform ever work here" (wsl2 off Windows: no), not "is this
+        configured site ready" (that is preflight) and not "is a tool merely
+        missing but installable" (that is the config-dependent
+        :meth:`Capability.not_ready`: lima the platform is supported
+        everywhere because remote sites run ``limactl`` on the vm_host over
+        SSH, but a local-Lima site without a local ``limactl`` is not-ready).
+        Default: supported everywhere.
         """
         return None
 

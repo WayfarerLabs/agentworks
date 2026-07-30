@@ -9,7 +9,7 @@ Test coverage:
 - ``VMTemplateKind`` declares the right kind / miss_policy / auto_declare_names.
 - ``synthesize`` honors the empty-requirements contract (Phase 2a.0 work)
   and the worklist-driven path (non-empty requirements).
-- ``VMTemplate.referenced_resources`` emits ``TemplateReference`` for each
+- ``VMTemplate.dependencies`` emits ``TemplateReference`` for each
   entry in ``inherits``.
 - The framework's miss policy fires on typo'd ``inherits`` references
   (e.g. ``inherits = ["defualt"]``).
@@ -33,6 +33,7 @@ from agentworks.resources import (
     KIND_REGISTRY,
     TemplateReference,
 )
+from agentworks.resources.graph import BuildContext
 from agentworks.vms.template import VMTemplate
 
 
@@ -100,16 +101,16 @@ def test_vm_template_kind_synthesize_with_requirement_uses_first_source() -> Non
     assert result.origin.source == ("vm-template", "child")
 
 
-# -- VMTemplate.referenced_resources ------------------------------------------
+# -- VMTemplate.dependencies ------------------------------------------
 
 
-def test_vm_template_required_resources_emits_template_requirement_for_inherits() -> None:
+def test_vm_template_dependencies_emits_template_requirement_for_inherits() -> None:
     """Each name in ``inherits`` produces a TemplateReference with
     kind=vm_template and the declaring template's source. Other
     requirements (env secrets, tailscale auth key) are unchanged.
     """
     tmpl = VMTemplate(name="child", inherits=["base", "extras"])
-    reqs = tmpl.referenced_resources()
+    reqs = tmpl.dependencies(BuildContext())
     template_reqs = [r for r in reqs if isinstance(r, TemplateReference)]
     assert len(template_reqs) == 2
     by_name = {r.name: r for r in template_reqs}
@@ -121,7 +122,7 @@ def test_vm_template_required_resources_emits_template_requirement_for_inherits(
 
 def test_vm_template_no_inherits_produces_no_template_requirements() -> None:
     tmpl = VMTemplate(name="alone")
-    reqs = tmpl.referenced_resources()
+    reqs = tmpl.dependencies(BuildContext())
     template_reqs = [r for r in reqs if isinstance(r, TemplateReference)]
     assert template_reqs == []
 

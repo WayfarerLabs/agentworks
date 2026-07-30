@@ -18,6 +18,7 @@ from agentworks.git_credentials.credential import credential_references
 
 if TYPE_CHECKING:
     from agentworks.env import EnvEntry
+    from agentworks.resources.graph import BuildContext
     from agentworks.resources.reference import ResourceReference
 
 
@@ -59,7 +60,7 @@ class AdminConfig(DeclaredResource):
     # Env that applies whenever a shell is opened as the admin user.
     env: dict[str, EnvEntry] = field(default_factory=dict)
 
-    def referenced_resources(self) -> list[ResourceReference]:
+    def dependencies(self, context: BuildContext) -> list[ResourceReference]:
         from agentworks.resources.reference import (
             ResourceReference as _ResourceReq,
         )

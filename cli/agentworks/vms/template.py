@@ -18,6 +18,7 @@ from agentworks.env.entry import env_references
 
 if TYPE_CHECKING:
     from agentworks.env import EnvEntry
+    from agentworks.resources.graph import BuildContext
     from agentworks.resources.reference import (
         ResourceReference,
         SecretReference,
@@ -29,8 +30,8 @@ def tailscale_secret_reference(
     template_name: str,
 ) -> SecretReference:
     """Build the ``SecretReference`` a VMTemplate publishes for its
-    Tailscale auth key. Used by both ``VMTemplate.referenced_resources``
-    (raw, in this module) and ``ResolvedVMTemplate.referenced_resources``
+    Tailscale auth key. Used by both ``VMTemplate.dependencies``
+    (raw, in this module) and ``ResolvedVMTemplate.dependencies``
     (resolved, in ``agentworks.vms.templates``) so the reference shape
     is single-sourced.
     """
@@ -81,7 +82,7 @@ class VMTemplate(DeclaredResource):
     # SDD; the field IS the secret reference.
     tailscale_auth_key: str | None = None
 
-    def referenced_resources(self) -> list[ResourceReference]:
+    def dependencies(self, context: BuildContext) -> list[ResourceReference]:
         from agentworks.resources.reference import (
             ResourceReference as _ResourceReq,
         )
@@ -131,7 +132,7 @@ class VMTemplate(DeclaredResource):
         # When the raw template doesn't set tailscale_auth_key, emit the
         # default secret name's reference so the registry finalizes
         # cleanly even before any inheritance walk. ResolvedVMTemplate's
-        # referenced_resources emits the inherited value at manager-entry
+        # dependencies emits the inherited value at manager-entry
         # call time.
         ts_name = self.tailscale_auth_key or "tailscale-auth-key"
         refs.append(tailscale_secret_reference(ts_name, self.name))

@@ -1,5 +1,5 @@
 """Tests for Phase 1b: env-block secret refs emit ``SecretReference``
-via ``required_resources()``, and missing references auto-declare
+via ``dependencies()``, and missing references auto-declare
 through the Resource Registry's miss policy.
 
 Replaces the strict-error behavior the env-and-secrets SDD shipped in
@@ -21,6 +21,7 @@ from agentworks.agents.template import AgentTemplate
 from agentworks.bootstrap import build_registry
 from agentworks.config import load_config
 from agentworks.env.entry import EnvEntry
+from agentworks.resources.graph import BuildContext
 from agentworks.sessions.template import SessionTemplate
 from agentworks.vms.admin import AdminConfig
 from agentworks.vms.template import VMTemplate
@@ -72,10 +73,10 @@ def test_env_entry_secret_ref_emits_secret_requirement() -> None:
     assert req.source == ("admin-template", "default")
 
 
-# -- Resource-type required_resources() aggregation -------------------------
+# -- Resource-type dependencies() aggregation -------------------------
 
 
-def test_admin_config_required_resources_aggregates_env() -> None:
+def test_admin_config_dependencies_aggregates_env() -> None:
     admin = AdminConfig(
         env={
             "A": EnvEntry(key="A", secret="sec-a"),
@@ -83,12 +84,12 @@ def test_admin_config_required_resources_aggregates_env() -> None:
             "C": EnvEntry(key="C", secret="sec-c"),
         }
     )
-    reqs = admin.referenced_resources()
+    reqs = admin.dependencies(BuildContext())
     assert {r.name for r in reqs} == {"sec-a", "sec-c"}
     assert all(r.source == ("admin-template", "default") for r in reqs)
 
 
-def test_vm_template_required_resources_uses_template_name_in_source() -> None:
+def test_vm_template_dependencies_uses_template_name_in_source() -> None:
     """VMTemplate emits an env-block requirement plus the framework's
     Phase-1c-added Tailscale auth-key requirement (default name).
     """
@@ -96,7 +97,7 @@ def test_vm_template_required_resources_uses_template_name_in_source() -> None:
         name="azure-prod",
         env={"KEY": EnvEntry(key="KEY", secret="ts-key")},
     )
-    reqs = tmpl.referenced_resources()
+    reqs = tmpl.dependencies(BuildContext())
     # 1 env-block + 1 tailscale (Phase 1c)
     assert len(reqs) == 2
     # All requirements carry the template's source.
@@ -111,39 +112,39 @@ def test_vm_template_required_resources_uses_template_name_in_source() -> None:
     assert ts_reqs[0].usage == "the Tailscale auth key"
 
 
-def test_workspace_template_required_resources() -> None:
+def test_workspace_template_dependencies() -> None:
     tmpl = WorkspaceTemplate(
         name="default",
         env={"K": EnvEntry(key="K", secret="ws-secret")},
     )
-    reqs = tmpl.referenced_resources()
+    reqs = tmpl.dependencies(BuildContext())
     assert reqs[0].source == ("workspace-template", "default")
 
 
-def test_agent_template_required_resources() -> None:
+def test_agent_template_dependencies() -> None:
     tmpl = AgentTemplate(
         name="claude",
         env={"K": EnvEntry(key="K", secret="claude-key")},
     )
-    reqs = tmpl.referenced_resources()
+    reqs = tmpl.dependencies(BuildContext())
     assert reqs[0].source == ("agent-template", "claude")
 
 
-def test_session_template_required_resources_with_none_env() -> None:
+def test_session_template_dependencies_with_none_env() -> None:
     """``SessionTemplate.env`` is ``Optional`` (uniquely so among the
-    template kinds). ``required_resources()`` handles ``env=None``
+    template kinds). ``dependencies()`` handles ``env=None``
     without erroring.
     """
     tmpl = SessionTemplate(name="t", env=None)
-    assert tmpl.referenced_resources() == []
+    assert tmpl.dependencies(BuildContext()) == []
 
 
-def test_session_template_required_resources_with_secrets() -> None:
+def test_session_template_dependencies_with_secrets() -> None:
     tmpl = SessionTemplate(
         name="claude-coder",
         env={"K": EnvEntry(key="K", secret="cc-secret")},
     )
-    reqs = tmpl.referenced_resources()
+    reqs = tmpl.dependencies(BuildContext())
     assert reqs[0].source == ("session-template", "claude-coder")
 
 
@@ -173,8 +174,9 @@ def test_undeclared_env_secret_auto_declares_through_build_registry(
     assert auto.origin.variant == "auto-declared"
     assert auto.origin.source == ("admin-template", "default")
     # Usage carries the env-var key so operators see what referenced it.
-    assert len(auto.references) == 1
-    assert auto.references[0].usage == "the API_KEY env var"
+    dependents = registry.graph.dependents_of("secret", "anthropic-api-ky")
+    assert len(dependents) == 1
+    assert dependents[0].usage == "the API_KEY env var"
 
 
 def test_operator_declared_secret_referenced_from_env_gets_usage_populated(
@@ -208,9 +210,10 @@ def test_operator_declared_secret_referenced_from_env_gets_usage_populated(
     decl = registry.lookup("secret", "shared-key")
     assert decl.origin is not None
     assert decl.origin.variant == "operator-declared"
-    # Two incoming requirements; both contribute UsageEntries.
-    assert len(decl.references) == 2
-    sources = sorted(u.source for u in decl.references)
+    # Two incoming requirements; both contribute ReferenceEntries.
+    dependents = registry.graph.dependents_of("secret", "shared-key")
+    assert len(dependents) == 2
+    sources = sorted(u.source for u in dependents)
     assert sources == [
         ("admin-template", "default"),
         ("vm-template", "azure-prod"),
@@ -230,8 +233,9 @@ def test_multiple_env_refs_from_one_resource_each_contribute_usage(tmp_path: Pat
     config = load_config(cfg, warn_issues=False)
     registry = build_registry(config)
 
-    auto = registry.lookup("secret", "shared")
+    registry.lookup("secret", "shared")
     # Both env vars contribute one ReferenceEntry each.
-    assert len(auto.references) == 2
-    texts = sorted(u.usage for u in auto.references)
+    dependents = registry.graph.dependents_of("secret", "shared")
+    assert len(dependents) == 2
+    texts = sorted(u.usage for u in dependents)
     assert texts == ["the KEY_A env var", "the KEY_B env var"]

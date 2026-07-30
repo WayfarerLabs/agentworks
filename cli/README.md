@@ -808,8 +808,11 @@ Inspect the merged result for any context with `agw env show`:
 
 ```bash
 agw env show --session my-session              # secrets redacted as <from secret: name>
-agw env show --vm my-vm --reveal-secrets       # resolves through the active backend chain
+agw env show --vm my-vm --resolve              # resolves through the active backend chain
 ```
+
+(The flag was formerly spelled `--reveal-secrets`; it was renamed to `--resolve` as a breaking
+change, the old spelling no longer works.)
 
 Inspect how each active backend would resolve each declared or auto-declared secret (e.g. "which env
 var name does this secret read from?") with `agw secret list`:

@@ -89,7 +89,7 @@ def test_bad_apt_source_reference_errors_at_build_registry(tmp_path: Path) -> No
     """An apt-package that names an unknown apt-source parses cleanly at
     load time but fails at ``build_registry`` when the ``apt-source`` kind's
     ``error`` miss policy resolves the reference emitted by
-    ``AptPackageEntry.referenced_resources()``. Single source of truth for
+    ``AptPackageEntry.dependencies()``. Single source of truth for
     reference validation lives in the framework.
     """
     from agentworks.bootstrap import build_registry

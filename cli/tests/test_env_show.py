@@ -4,7 +4,7 @@ Pins:
 - context-required validation (raises ValidationError on no flags)
 - auto-resolution from --session / --workspace / --agent down to the VM
 - precedence-sorted, scope-annotated rendering
-- secret redaction by default; --reveal-secrets resolves via the resolver
+- secret redaction by default; --resolve resolves via the resolver
 - per-context identity vars overlay user env (identity wins per FRD R1)
 """
 
@@ -230,7 +230,7 @@ def test_secret_revealed_with_flag(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """--reveal-secrets resolves through the active backend chain."""
+    """--resolve resolves secret-backed entries through the active backend chain."""
     monkeypatch.setenv("AW_SECRET_SHARED_TOKEN", "from-operator-env")
     cfg = _write_config(
         tmp_path,

@@ -54,17 +54,18 @@ class ResourceSummary:
     for one Registry-published Resource.
 
     - ``reference_count`` is the number of inbound ``ReferenceEntry``
-      instances on the Resource (how many config points name it). The
-      list view renders this as the REFS column.
+      instances on the Resource's graph node (how many config points name
+      it), from ``Registry.graph.dependents_of``. The list view renders
+      this as the REFS column.
     - ``used_by_count`` is the number of live DB instances that depend
       on this Resource per the current config, computed via the kind's
       ``instances(db, registry, resource)`` hook. ``None`` for kinds
       with no instance concept (apt / install-commands, providers,
       backends); the list view renders ``None`` as ``-`` in the USED BY
       column.
-    - ``disabled_reason`` is the kind's generic disabled hook's answer
-      (``None`` = enabled, or the kind has no disabled concept). The
-      list view marks disabled rows; describe shows the reason.
+    - ``not_ready_reason`` is the resource's stored readiness verdict's reason,
+      read off the graph (``None`` = ready, or the kind has no readiness
+      concept). The list view marks not-ready rows; describe shows the reason.
     """
 
     kind: str
@@ -73,7 +74,7 @@ class ResourceSummary:
     reference_count: int
     used_by_count: int | None
     description: str
-    disabled_reason: str | None = None
+    not_ready_reason: str | None = None
 
 
 @dataclass(frozen=True)
@@ -106,7 +107,7 @@ class ResourceDescription:
     description: str
     references: tuple[ReferenceEntry, ...]
     used_by: tuple[InstanceRef, ...] | None
-    disabled_reason: str | None = None
+    not_ready_reason: str | None = None
 
 
 # -- Filter parsing ---------------------------------------------------------
@@ -184,7 +185,7 @@ def list_resources(
             origin = getattr(resource, "origin", None)
             if not _matches_origin(origin, origin_filter):
                 continue
-            references: tuple[ReferenceEntry, ...] = tuple(getattr(resource, "references", ()))
+            references: tuple[ReferenceEntry, ...] = registry.graph.dependents_of(kind, name)
             description = getattr(resource, "description", "") or ""
             used_by_count = _count_used_by(db, registry, kind, resource)
             rows.append(
@@ -195,7 +196,7 @@ def list_resources(
                     reference_count=len(references),
                     used_by_count=used_by_count,
                     description=description,
-                    disabled_reason=disabled_reason_for(registry, kind, resource),
+                    not_ready_reason=not_ready_reason_for(registry, kind, name),
                 )
             )
             variant = origin.variant if origin is not None else None
@@ -214,26 +215,18 @@ def list_resources(
     )
 
 
-def disabled_reason_for(registry: Registry, kind: str, resource: object) -> str | None:
-    """Project the kind's generic disabled hook: why ``resource``
-    cannot run on this host, or ``None`` when it can (or the kind has
-    no disabled concept). Same structural-duck-typing gate as
-    ``used_by_for``: absent-on-class IS the "never disabled" signal.
+def not_ready_reason_for(registry: Registry, kind: str, name: str) -> str | None:
+    """Project ``(kind, name)``'s stored readiness verdict: why it cannot run
+    on this host, or ``None`` when it can (a kind with no readiness concept
+    folds to ready, so its reason is ``None``).
+
+    Reads the fold's verdict off the graph (``readiness_of``), the single
+    unified read (R10/R11): no recompute, no per-kind readiness hook dispatch,
+    no live-registry probe. Feeds the ``(not ready)`` list marker and the
+    ``Not ready:`` describe line; "enabled/disabled" is reserved for the opt-in
+    axis and never used for host readiness (R6/R9.1).
     """
-    from agentworks.resources import KIND_REGISTRY
-
-    handler = KIND_REGISTRY.get(kind)
-    if handler is None:
-        return None
-    method = getattr(handler, "disabled_reason", None)
-    if method is None:
-        return None
-    reason = method(registry, resource)
-    if reason is not None and not isinstance(reason, str):
-        from agentworks.errors import StateError
-
-        raise StateError(f"{kind}.disabled_reason returned {type(reason).__name__}, expected str | None")
-    return reason
+    return registry.graph.readiness_of(kind, name).reason
 
 
 def used_by_for(db: Database | None, registry: Registry, kind: str, resource: object) -> tuple[InstanceRef, ...] | None:
@@ -324,9 +317,9 @@ def describe_resource(
         name=name,
         origin=getattr(resource, "origin", None),
         description=getattr(resource, "description", "") or "",
-        references=tuple(getattr(resource, "references", ())),
+        references=registry.graph.dependents_of(kind, name),
         used_by=used_by_for(db, registry, kind, resource),
-        disabled_reason=disabled_reason_for(registry, kind, resource),
+        not_ready_reason=not_ready_reason_for(registry, kind, name),
     )
 
 
@@ -463,11 +456,13 @@ def render_resource_table(listing: ResourceListing) -> None:
         # to distinguish "no instance concept" from "zero instances
         # right now."
         used_by_cell = "-" if row.used_by_count is None else str(row.used_by_count)
-        # Disabled rows are marked in the DESCRIPTION cell, never the
+        # Not-ready rows are marked in the DESCRIPTION cell, never the
         # NAME cell: the rendered name must stay the exact selector an
         # operator copies into `agw resource describe KIND/NAME`.
         # `describe` carries the full reason.
-        description_cell = row.description if row.disabled_reason is None else f"(disabled) {row.description}".rstrip()
+        description_cell = (
+            row.description if row.not_ready_reason is None else f"(not ready) {row.description}".rstrip()
+        )
         rendered.append(
             (
                 row.kind,
@@ -501,8 +496,8 @@ def render_resource_description(desc: ResourceDescription) -> None:
     else:
         output.detail("Description: (none)")
     output.detail(f"Origin: {format_origin_line(desc.origin)}")
-    if desc.disabled_reason is not None:
-        output.detail(f"Disabled: {desc.disabled_reason}")
+    if desc.not_ready_reason is not None:
+        output.detail(f"Not ready: {desc.not_ready_reason}")
 
     output.info("")
     output.info("Referenced by:")

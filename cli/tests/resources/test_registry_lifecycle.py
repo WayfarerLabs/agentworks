@@ -134,7 +134,7 @@ class _RefEmitter:
     origin: object = None
     references: tuple = ()  # type: ignore[type-arg]
 
-    def referenced_resources(self) -> list[object]:
+    def dependencies(self, context: object) -> list[object]:
         from agentworks.resources.reference import ResourceReference
 
         return [
@@ -213,7 +213,7 @@ def test_iter_kind_returns_published_resources(tmp_path: Path) -> None:
     """Published secrets land in iter_kind output. Phase 2a.1's
     always-materialized ``vm-template:default`` emits a
     ``SecretReference`` for ``tailscale-auth-key`` via its
-    ``required_resources``, so the requirement-driven path adds
+    ``dependencies``, so the requirement-driven path adds
     ``tailscale-auth-key`` alongside the published a/b/c. The test
     filters to operator-declared rows to pin the published-name set
     without coupling to which framework-auto-declared rows exist.
@@ -324,7 +324,7 @@ def test_unknown_kind_in_requirement_errors_clearly(tmp_path: Path) -> None:
         origin = None
         usage = ()
 
-        def referenced_resources(self) -> list[ResourceReference]:
+        def dependencies(self, context: object) -> list[ResourceReference]:
             return [
                 ResourceReference(
                     name="anything",

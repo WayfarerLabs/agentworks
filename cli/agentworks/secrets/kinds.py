@@ -41,7 +41,7 @@ if TYPE_CHECKING:
     from collections.abc import Iterable, Sequence
 
     from agentworks.db import Database, SessionRow, VMRow
-    from agentworks.resources.reference import ReferenceEntry, ResourceReference
+    from agentworks.resources.reference import ResourceReference
     from agentworks.resources.registry import Registry
 
 
@@ -60,12 +60,14 @@ class SecretBackendEntry:
     ``agentworks.secrets.backends.SECRET_BACKEND_REGISTRY``; this row is
     what the chain and mapping names resolve against in the framework.
     ``description`` comes from the capability, for inspection surfaces.
+
+    Inbound references live on the dependency graph
+    (``Registry.graph.dependents_of``), not on this row.
     """
 
     name: str
     description: str = ""
     origin: Origin | None = None
-    references: tuple[ReferenceEntry, ...] = ()
 
 
 @dataclass(frozen=True)

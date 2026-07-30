@@ -21,7 +21,8 @@ from agentworks.capabilities.git_credential.base import (
     HelperEntry,
     credential_name_from_owner,
     default_token_secret,
-    token_config_reference,
+    token_dependency,
+    validate_token_field,
 )
 from agentworks.capabilities.git_credential.github import GitHubCredentialProvider
 
@@ -37,14 +38,15 @@ __all__ = [
     "credential_name_from_owner",
     "default_token_secret",
     "publish_to",
-    "token_config_reference",
+    "token_dependency",
+    "validate_token_field",
 ]
 
 
 # The capability registry (the canonical provider list): provider name
-# -> implementation class. ``validate_config`` (blob validation +
-# implied references) is invoked through this dict at each source's
-# blob boundary and at finalize; descriptor rows publish from it.
+# -> implementation class. ``dependencies`` (implied references) and
+# ``validate`` (blob validation) are invoked through this dict at each
+# source's blob boundary and at finalize; descriptor rows publish from it.
 GIT_CREDENTIAL_PROVIDER_REGISTRY: dict[str, type[GitCredentialProvider]] = {
     "azdo": AzDOCredentialProvider,
     "github": GitHubCredentialProvider,

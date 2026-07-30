@@ -1,8 +1,8 @@
 """``DeclaredResource``: the shared metadata base every declared-resource
 dataclass inherits.
 
-Two guarantees are pinned here. First, the base itself carries the five
-metadata fields with the right defaults and an empty ``referenced_resources``,
+Two guarantees are pinned here. First, the base itself carries the four
+metadata fields with the right defaults and an empty ``dependencies``,
 and a plain subclass inherits that override-free. Second, every concrete
 declared-resource dataclass (the operator-declared templates plus the
 apt / install-command entries) actually descends from the base, so the
@@ -24,6 +24,7 @@ from agentworks.install_commands import (
     SystemInstallCommandEntry,
     UserInstallCommandEntry,
 )
+from agentworks.resources.graph import BuildContext
 from agentworks.secrets.base import SecretDecl
 from agentworks.sessions.template import NamedConsoleConfig, SessionTemplate
 from agentworks.source_location import synthesized
@@ -39,22 +40,21 @@ def test_base_carries_metadata_fields_with_defaults() -> None:
     assert resource.description is None
     assert resource.declared_at == synthesized()
     assert resource.origin is None
-    assert resource.references == ()
-    assert resource.referenced_resources() == []
+    assert resource.dependencies(BuildContext()) == []
 
 
-def test_plain_subclass_inherits_empty_referenced_resources() -> None:
+def test_plain_subclass_inherits_empty_dependencies() -> None:
     @dataclass(frozen=True, kw_only=True)
     class _NoOverride(DeclaredResource):
         pass
 
-    assert _NoOverride(name="x").referenced_resources() == []
+    assert _NoOverride(name="x").dependencies(BuildContext()) == []
 
 
 # Every concrete declared-resource dataclass (all carrying name + description +
-# declared_at + origin + references via the base). Pinning the subclass
-# relationship is what keeps a kind from silently dropping a metadata field
-# again. The last four are the apt / install-command entries.
+# declared_at + origin via the base). Pinning the subclass relationship is what
+# keeps a kind from silently dropping a metadata field again. The last four are
+# the apt / install-command entries.
 _FULL_SHAPE_RESOURCES = [
     VMTemplate,
     AgentTemplate,

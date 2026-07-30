@@ -47,12 +47,12 @@ def test_sample_config_parses_with_phase_1c_field(sample_config: Path) -> None:
 
     # The default VM template is published as a Registry entry; the
     # finalize pass auto-declared the default Tailscale secret via the
-    # VMTemplate's required_resources emission.
+    # VMTemplate's dependencies emission.
     ts_secret = registry.lookup("secret", "tailscale-auth-key")
     assert ts_secret.origin is not None
     # In a sample config with no [secrets.tailscale-auth-key] block,
     # the auto-declare path produces it.
     assert ts_secret.origin.variant == "auto-declared"
-    # First-matching-source rule: VMTemplate.referenced_resources emits
+    # First-matching-source rule: VMTemplate.dependencies emits
     # the requirement; the source is the vm-template that published it.
     assert ts_secret.origin.source == ("vm-template", "default")
