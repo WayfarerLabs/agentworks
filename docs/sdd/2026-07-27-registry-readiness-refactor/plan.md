@@ -47,35 +47,35 @@ The split lands for **all four** capability kinds up front, with resources still
 methods where they called `validate_config`, so behavior is identical (this phase is a pure
 refactor, no behavior delta).
 
-- [ ] Add `dependencies(config) -> tuple[ConfigReference, ...]` (total, never raises) and
+- [x] Add `dependencies(config) -> tuple[ConfigReference, ...]` (total, never raises) and
       `validate(config) -> None` (throwing) to the capability contract, replacing `validate_config`
       on the base and all impls: harness (`shell`, `claude_code`), vm-platform (`lima`, `proxmox`,
       `azure_vm`), git-credential-provider (`github`, `azdo`). The base "accepts no configuration"
       default becomes a no-op `dependencies` + a throwing `validate`.
-- [ ] `secret-backend` joins the split: `SecretBackend` gains `dependencies(mapping)` alongside its
+- [x] `secret-backend` joins the split: `SecretBackend` gains `dependencies(mapping)` alongside its
       existing `validate_mapping` (which is already `validate(mapping)`'s shape); confirm the
       `would_attempt` purity constraint (pure function of `(secret, mapping)`, no host probing)
       holds for all three impls (`env-var`, `prompt`, `onepassword`).
-- [ ] Centralize the sourceless to sourced conversion (`ConfigReference` to `SecretReference` /
+- [x] Centralize the sourceless to sourced conversion (`ConfigReference` to `SecretReference` /
       `ResourceReference`, attaching `source`) into **one** helper, replacing the triplication in
       the three `referenced_resources` bodies (`vms/sites.py`, `git_credentials/credential.py`,
       `sessions/template.py`).
-- [ ] Resource-level `referenced_resources()` bodies call `capability.dependencies(config)` for edge
+- [x] Resource-level `referenced_resources()` bodies call `capability.dependencies(config)` for edge
       extraction; the separate `validate(config)` call is retained wherever `validate_config` was
       invoked for its throwing side effect (decode, load, construct), so validation timing is
       unchanged **this phase** (it moves in phase 2b). **The resource-level method keeps its name
       `referenced_resources()` this phase**; the rename to the uniform `dependencies(context)` and
       the build-context threading land in phase 4 (where the one consumer of `context`, the secret,
       needs it). This answers "when does `context` appear": not until phase 4.
-- [ ] Split the remaining `validate_config` invocation sites so the method can be removed: the
+- [x] Split the remaining `validate_config` invocation sites so the method can be removed: the
       resolve-time `sessions/templates.py:175` call becomes `validate(config)` (LLD e confirms
       whether it is redundant with the finalize pass and removable, or a distinct resolved-view
       check), and the three `migrate/planning.py:458,502,548` dry-run calls become `validate` (not a
       finalized-registry path, so they keep their explicit validation).
-- [ ] Construct-time `_secret_refs` (`capabilities/base.py:306`) sources from
+- [x] Construct-time `_secret_refs` (`capabilities/base.py:306`) sources from
       `dependencies(config)`; construct still calls `validate(config)` to preserve the
       construct-time invariant (R3).
-- [ ] Tests: unit tests for each kind's `dependencies` (total, non-throwing on malformed config) and
+- [x] Tests: unit tests for each kind's `dependencies` (total, non-throwing on malformed config) and
       `validate` (throws with the same messages as the old `validate_config`); a test that
       `dependencies` returns the same edges `validate_config` did for valid config.
 
