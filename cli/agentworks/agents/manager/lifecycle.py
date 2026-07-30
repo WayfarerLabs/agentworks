@@ -75,6 +75,14 @@ def create_agent(
 
     agent_tmpl = resolve_template(registry, template)
 
+    # Refuse a recipe that draws on a disabled plugin's declarable resource
+    # (an install-command / inherited template a not-enabled plugin bundled)
+    # BEFORE any DB / VM / realize work, with the enable-plugin hint (Phase 7,
+    # LLD b). Drift guard: tests/agents/test_recipe_gate_drift.py.
+    from agentworks.resources.access import ensure_recipe_enabled
+
+    ensure_recipe_enabled(registry, "agent-template", agent_tmpl.name)
+
     validate_name(name, max_length=MAX_AGENT_NAME_LENGTH)
 
     if db.get_agent(name) is not None:
@@ -410,14 +418,28 @@ def reinit_agent(
     # template. Both cheap not-found checks (agent, VM) run first, so a bad
     # agent / VM / template name raises pre-boundary and costs zero prompts,
     # and only a valid re-point is ever persisted.
+    from agentworks.resources.access import ensure_recipe_enabled
+
     if update_template is not None:
         from agentworks.resources.access import require_declared_template
 
         require_declared_template(registry, "agent-template", update_template)
+        # Refuse a repoint to a disabled-recipe template BEFORE persisting it,
+        # so a refused reinit never leaves the DB row pointing at the refused
+        # template (mirrors create's "gate before any DB / VM / realize work").
+        # require_declared_template only checks the name is DECLARED, not enabled.
+        ensure_recipe_enabled(registry, "agent-template", update_template)
         db.update_agent_template(name, update_template)
         agent.template = update_template
 
     agent_tmpl = resolve_template(registry, agent.template)
+
+    # Refuse a recipe drawing on a disabled plugin's declarable resource before
+    # the reinit realize (Phase 7, LLD b). A repoint already gated above
+    # (pre-persist); this is the sole gate on the no-repoint path and a cheap
+    # idempotent re-check after a repoint. Drift guard:
+    # tests/agents/test_recipe_gate_drift.py.
+    ensure_recipe_enabled(registry, "agent-template", agent_tmpl.name)
 
     # BUILD: the live agent from its row, plus the resolved template
     # whose declared credentials become edges (the template is a

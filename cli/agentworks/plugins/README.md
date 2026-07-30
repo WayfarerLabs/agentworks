@@ -89,14 +89,18 @@ host). What "opted in" versus "not opted in" changes:
   plugin's platform) is **not-ready with the remediation "enable plugin `<name>`"**, never an
   unknown-name hard error. Publishing rows unconditionally is what makes that friendly hint
   possible: an absent row could only produce an unknown-name error.
-- **Manifests publish for enabled plugins only.** A not-opted-in plugin's bundled resources are
-  simply absent (kept out of collision checks against operator resources) until the plugin is
-  enabled. This is a known, scoped asymmetry with the capability side: a bundled _declarable_
-  resource is also referenceable by name (for example a `vm-template` with
-  `extends = <plugin-template>`), so referencing a not-enabled plugin's bundled resource currently
-  yields an unknown-name error rather than the "enable plugin `<name>`" hint a capability gives. It
-  is inert until a plugin ships referenceable bundled resources; the follow-on that does should move
-  manifests to present-but-disabled for symmetry (see ADR 0021).
+- **Bundled manifests publish unconditionally too, at parity with capabilities.** A not-opted-in
+  plugin's bundled declarable resources (install-commands, apt entries, templates) are also
+  **present-but-disabled**: the row exists but the enablement axis marks it `disabled`. A reference
+  to one (an agent-template's `user_install_commands` naming a not-enabled plugin's install-command,
+  a `vm-template` `inherits` naming a not-enabled plugin's template) is **refused at use with the
+  remediation "enable plugin `<name>`"**, never an unknown-name error and never a silent use. To
+  keep a disabled plugin's row from ever blocking an operator's (or a built-in's, or an enabled
+  plugin's) resource of the same name, a not-opted-in plugin's manifest rows publish **weak**
+  (add-if-absent, silently replaced by any stronger row, never a collision error) in any publish
+  order; enabling the plugin republishes them strong. A plugin may only bundle declarable kinds
+  whose consumption sites are gated, and may not bundle a kind's reserved auto-declared name (such
+  as a `default` template), so the opt-in guarantee holds by construction (see ADR 0021).
 
 An `[plugins] enabled` entry that is not an installed plugin (a typo, or an uninstalled plugin) is a
 config error raised up front, before anything publishes. Unknown keys in the `[plugins]` table are
@@ -118,11 +122,13 @@ Each impl subclasses the kind's capability base class and exposes `name` / `desc
 attributes. The published row is read-only and lists, describes, and is referenced like any other
 resource of that kind.
 
-**Bundled manifests** are ordinary YAML resource documents (secrets, templates, apt entries, and so
-on) the plugin ships, under the `manifests/` subdirectory of the package `manifests` points at. They
-load through the same typed, validated loader the built-in manifests use, stamped with the plugin's
-`system-plugin` origin. A malformed bundle is a typed error attributed to the plugin, never a bare
-import or assertion failure.
+**Bundled manifests** are ordinary YAML resource documents the plugin ships, under the `manifests/`
+subdirectory of the package `manifests` points at. Only declarable kinds whose consumption sites are
+gated may be bundled (install-commands, apt entries/packages, and the template kinds); kinds whose
+reference paths are not gated (such as `secret` or `vm-site`) are rejected at publish, as is a
+reserved auto-declared name (a `default` template). They load through the same typed, validated
+loader the built-in manifests use, stamped with the plugin's `system-plugin` origin. A malformed
+bundle is a typed error attributed to the plugin, never a bare import or assertion failure.
 
 ## Reserved fields (inert in v1)
 

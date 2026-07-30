@@ -241,11 +241,11 @@ enablement, so a reference to a not-enabled plugin's install-command / template 
 guidance (a use-refusal), not an unknown-name error. No plugin migrates yet; proven by the fixture
 (given a bundled manifest) + a stub.
 
-- [ ] `publish_plugins` publishes bundled manifests **unconditionally** (drop the enabled-only
+- [x] `publish_plugins` publishes bundled manifests **unconditionally** (drop the enabled-only
       gate), stamped `system-plugin` origin, so the existing `plugin_enablement_source` disables a
       not-opted-in plugin's manifest rows by the same overlay it uses for capability rows (no new
       gate, no per-manifest enablement logic).
-- [ ] **Enablement-aware collision via "weak" rows** (LLD c 3b; a `finalize`-time `enablement_of`
+- [x] **Enablement-aware collision via "weak" rows** (LLD c 3b; a `finalize`-time `enablement_of`
       check is impossible since collision runs at `add()` before enablement is composed): a
       not-enabled plugin's manifest rows are added `weak` (add-if-absent, silently overwritable,
       never error), so a disabled plugin declarable row never blocks an operator/built-in/enabled
@@ -257,11 +257,11 @@ guidance (a use-refusal), not an unknown-name error. No plugin migrates yet; pro
       `builtin_override == "allow"` kind must let the operator win (not error), symmetric with the
       built-in-over-operator direction, so an operator's legacy `[system_install_commands] az-cli`
       does not break when they enable azure.
-- [ ] **Reject bundling a reserved/auto-declared name** (review finding): plugin manifest
+- [x] **Reject bundling a reserved/auto-declared name** (review finding): plugin manifest
       publication rejects a bundled resource whose name is in the kind's `auto_declare_names` /
       reserved set (the template kinds auto-declare `default`), so a plugin cannot shadow or gate a
       reserved default.
-- [ ] **Reference-to-disabled-declarable use-gate**: a reference to a present-but-disabled
+- [x] **Reference-to-disabled-declarable use-gate**: a reference to a present-but-disabled
       declarable resource (an agent template's `user_install_commands` naming a disabled plugin's
       install-command; a `vm-template` `inherits` naming a disabled plugin's template) is **gated at
       use** with the enable guidance (a typed error at the mutation/consumption entry + a `describe`
@@ -273,7 +273,7 @@ guidance (a use-refusal), not an unknown-name error. No plugin migrates yet; pro
       guard must walk to the real command entry points (a shallow immediate-caller check misses the
       multi-hop chain). The bundleable-kind allowlist (R6) guarantees every bundled kind has such a
       gate.
-- [ ] Tests: a fixture plugin shipping a bundled manifest, not enabled, its manifest resource is
+- [x] Tests: a fixture plugin shipping a bundled manifest, not enabled, its manifest resource is
       present-but-disabled, hidden from `list`, shown by `describe`, and a reference to it is
       refused at use with "enable plugin `<name>`" (via EVERY gate site including the session
       new-agent path); enabling the plugin makes it consumable; an operator resource (YAML AND

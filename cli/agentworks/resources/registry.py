@@ -20,6 +20,7 @@ which publishers exist; that's application-level knowledge.
 from __future__ import annotations
 
 import dataclasses
+from enum import Enum
 from typing import TYPE_CHECKING, Any
 
 from agentworks.errors import ConfigError, StateError
@@ -38,6 +39,25 @@ if TYPE_CHECKING:
     )
     from agentworks.resources.origin import Origin
     from agentworks.resources.reference import ReferenceEntry, ResourceReference
+
+
+class _CollisionDecision(Enum):
+    """What ``_check_collision`` tells ``add`` to do when a strong incoming
+    row lands on an occupied slot (Phase 7, LLD c 3b.3).
+
+    The binary ``return``/``raise`` contract the pre-Phase-7 collision check
+    used could express only "incoming replaces existing" (return) or "error"
+    (raise). Two enablement-aware cases need a third outcome, "keep the
+    existing row, drop the incoming one, no error": a weak (disabled-plugin)
+    incoming row yielding to any occupant, and an enabled plugin row yielding
+    to an operator's own declaration on an ``allow`` kind (BLOCKING 1). The
+    weak case is handled by a short-circuit in ``add`` ahead of the check; the
+    enabled-plugin-over-operator case is the one ``KEEP_EXISTING`` producer
+    inside ``_check_system_plugin_collision``.
+    """
+
+    OVERWRITE = "overwrite"  # store incoming, replacing existing (the old "return")
+    KEEP_EXISTING = "keep-existing"  # drop incoming, existing stands, no error (new)
 
 
 class Registry:
@@ -62,6 +82,11 @@ class Registry:
         # The retained dependency graph, built at the end of ``finalize``.
         # ``None`` until then; the ``graph`` property enforces the ordering.
         self._graph: DependencyGraph | None = None
+        # The ``(kind, name)`` keys currently occupied by a WEAK row (a
+        # not-enabled plugin's manifest row, published add-if-absent). Consulted
+        # only during ``add`` (the weak short-circuit) and once at ``finalize``
+        # (the weak-implies-disabled guard); meaningless after finalize.
+        self._weak: set[tuple[str, str]] = set()
 
     # -- Construction --------------------------------------------------
 
@@ -81,6 +106,8 @@ class Registry:
         name: str,
         resource: Any,
         origin: Origin,
+        *,
+        weak: bool = False,
     ) -> None:
         """Add a Resource from any publisher. The publisher constructs
         the appropriate ``Origin`` variant (``operator_declared`` /
@@ -107,6 +134,21 @@ class Registry:
         - anything else (built-in over operator) is a publisher
           ordering conflict and raises ``ConfigError`` (operator data
           can reach it, so it must not be an assert).
+
+        ``weak`` (Phase 7, LLD c 3b.3) marks a not-enabled plugin's manifest
+        row as add-if-absent: a disabled plugin's declarable row must never
+        block a stronger row, in any publish order. Weakness is a
+        publisher-declared property of the add (like ``origin``), so the
+        Registry honors it without knowing why a row is weak. The
+        order-symmetric semantics, applied ahead of ``_check_collision``:
+
+        - weak incoming, slot occupied (by anything): no-op (the existing row
+          stands, no collision check runs, nothing errors).
+        - weak incoming, slot free: the row lands and the key is recorded weak.
+        - strong incoming, existing weak: the incoming row replaces silently
+          (no collision check), the key leaves the weak set.
+        - strong incoming, existing strong: ``_check_collision`` decides
+          (``OVERWRITE`` stores, ``KEEP_EXISTING`` is a no-op, ``raise`` errors).
         """
         if self._frozen:
             raise RuntimeError("registry is frozen; add must precede finalize")
@@ -127,15 +169,31 @@ class Registry:
                     "Rename the resource: '/' is reserved for kind/name selectors and per-resource manifest filenames."
                 ),
             )
+        key = (kind, name)
         existing = self._resources.get(kind, {}).get(name)
         if existing is not None:
-            self._check_collision(kind, name, existing, origin)
+            if weak:
+                # Weak incoming never displaces an occupant; existing stands.
+                return
+            if key in self._weak:
+                # Strong incoming over an existing weak row: replace silently,
+                # the key is no longer weak-held.
+                self._weak.discard(key)
+            else:
+                decision = self._check_collision(kind, name, existing, origin)
+                if decision is _CollisionDecision.KEEP_EXISTING:
+                    return
+        elif weak:
+            # Weak row landing in a free slot: record the key as weak-held.
+            self._weak.add(key)
         stamped = dataclasses.replace(resource, origin=origin)
         self._resources.setdefault(kind, {})[name] = stamped
 
     @staticmethod
-    def _check_collision(kind: str, name: str, existing: Any, incoming: Origin) -> None:
-        """Raise unless the incoming publish may replace ``existing``.
+    def _check_collision(kind: str, name: str, existing: Any, incoming: Origin) -> _CollisionDecision:
+        """Decide a strong-over-strong collision: ``OVERWRITE`` (the incoming
+        row replaces ``existing``), ``KEEP_EXISTING`` (the existing row stands,
+        the incoming one is dropped, no error), or ``raise`` (``ConfigError``).
 
         Built-in over built-in replaces unconditionally: republish is
         idempotent, and a future app publisher shadowing another's row
@@ -151,14 +209,13 @@ class Registry:
         # The pre-existing non-system-plugin branches below keep their
         # directional asymmetry verbatim.
         if "system-plugin" in {existing_variant, incoming.variant}:
-            Registry._check_system_plugin_collision(kind, name, existing_variant, incoming.variant)
-            return
+            return Registry._check_system_plugin_collision(kind, name, existing_variant, incoming.variant)
         if existing_variant == "built-in" and incoming.variant == "built-in":
-            return
+            return _CollisionDecision.OVERWRITE
         if existing_variant == "built-in" and incoming.variant == "operator-declared":
             handler = KIND_REGISTRY.get(kind)
             if handler is not None and handler.builtin_override == "allow":
-                return
+                return _CollisionDecision.OVERWRITE
             raise ConfigError(
                 f'{kind} "{name}" is a built-in resource with a reserved '
                 f"name; declare a differently-named {kind} instead",
@@ -185,20 +242,28 @@ class Registry:
         name: str,
         existing_variant: str | None,
         incoming_variant: str,
-    ) -> None:
+    ) -> _CollisionDecision:
         """Decide a collision where at least one side is ``system-plugin``,
         on the UNORDERED variant pair (R7).
 
         Capability clashes never reach here (they are caught at seating, in
         ``register_plugin``): what reaches this for a system-plugin pair is
-        a declarable (manifest) row or the operator-override case. Returns
-        normally only for the operator-override "allow" path (the caller
-        then lets the incoming row replace the existing one); every other
-        pairing raises its own ``ConfigError`` (never the generic
-        "publisher ordering conflict"). It stays a ``ConfigError`` even for
-        the two-plugins curation bug: the rendering is the right operator
-        surface if it ever escapes, and CI's fixture/collision tests catch
-        the curation bug.
+        a declarable (manifest) row or the operator-override case. The two
+        operator-vs-plugin directions consult ``builtin_override`` SYMMETRICALLY
+        (LLD c 3b.3, BLOCKING 1): on an ``allow`` kind the operator's own
+        declaration wins in either encounter order (``OVERWRITE`` when the
+        operator row is incoming, ``KEEP_EXISTING`` when the plugin row is
+        incoming), so an operator's legacy TOML install-command / apt entry is
+        not broken when the plugin shipping that name is enabled; on a
+        ``reserved`` kind the clash is a reserved-name error in either order.
+        Every other pairing raises its own ``ConfigError`` (never the generic
+        "publisher ordering conflict"). It stays a ``ConfigError`` even for the
+        two-plugins curation bug: the rendering is the right operator surface if
+        it ever escapes, and CI's fixture/collision tests catch the curation bug.
+
+        The disabled-plugin case never reaches here: a weak (disabled-plugin)
+        row is short-circuited in ``add`` before the collision check, so this
+        method decides only STRONG (enabled-plugin or operator/built-in) pairs.
         """
         variants = {existing_variant, incoming_variant}
         if variants == {"system-plugin"}:
@@ -206,25 +271,27 @@ class Registry:
         if "built-in" in variants:
             raise ConfigError(f'system-plugin {kind} "{name}" collides with a built-in of the same name')
         if "operator-declared" in variants:
+            handler = KIND_REGISTRY.get(kind)
+            allow = handler is not None and handler.builtin_override == "allow"
             if existing_variant == "system-plugin" and incoming_variant == "operator-declared":
-                # Operator publishing OVER a plugin's declarable row. Mirror
-                # the built-in-over-operator branch, which is deliberately
-                # DIRECTIONAL: allow-kind lets the operator override, reserved
-                # errors. (Unordered only for the two symmetric pairings
-                # above; the override direction stays directional.)
-                handler = KIND_REGISTRY.get(kind)
-                if handler is not None and handler.builtin_override == "allow":
-                    return  # operator override permitted; the incoming operator row wins
+                # Operator publishing OVER a plugin's declarable row (the
+                # plugin-first order: operator YAML ManifestSet after
+                # publish_plugins). Allow-kind lets the incoming operator row
+                # replace the plugin row; reserved errors.
+                if allow:
+                    return _CollisionDecision.OVERWRITE  # operator override permitted; operator wins
                 raise ConfigError(
                     f'{kind} "{name}" is a system-plugin resource with a reserved '
                     f"name; declare a differently-named {kind} instead",
                 )
-            # Reverse direction (existing operator, incoming system-plugin): a
-            # plugin must NEVER clobber an operator's own declaration, even on
-            # an allow-override kind. Not reachable under build_registry's
-            # publish order (plugins publish before config.publish_to), but
-            # guarded explicitly so the unordered normalization cannot
-            # symmetrize it.
+            # Reverse direction (existing operator, incoming enabled system-plugin:
+            # the operator-first order, deprecated TOML install-command / apt
+            # publisher runs before publish_plugins). SYMMETRIC with the forward
+            # branch: on an allow-kind the operator's own row wins and the plugin
+            # row is dropped (KEEP_EXISTING), no error; on a reserved-kind a
+            # plugin cannot shadow an operator's reserved declarable, so it errors.
+            if allow:
+                return _CollisionDecision.KEEP_EXISTING  # operator's declaration wins; plugin row dropped
             raise ConfigError(
                 f'system-plugin {kind} "{name}" collides with an operator-declared resource of the same name'
             )
@@ -355,6 +422,20 @@ class Registry:
         # never drift; ``marks`` also flows to the fold as ``disabled_marks`` so
         # a propagating dependent's hint reads the carried reason.
         marks = compose_enablement(enablement_sources, self._resources)
+        # Weak-implies-disabled guard (LLD c 3b.3): a surviving weak row is a
+        # not-enabled plugin's manifest row, so every key still weak-held MUST
+        # be disabled by some composed mark. A weak survivor with no mark means
+        # a publisher declared a row weak without a disabling source (a
+        # framework bug); fail loud rather than ship a silently-overwritable
+        # enabled row. Compares two sets the Registry already holds, so it stays
+        # config-agnostic.
+        unmarked_weak = sorted(key for key in self._weak if key not in marks)
+        if unmarked_weak:
+            raise StateError(
+                "weak rows survived finalize with no disabling enablement mark "
+                f"(weak implies disabled): {unmarked_weak}; a publisher added weak "
+                "rows without a source that disables them (a framework bug)"
+            )
         enablement = {
             key: (Enablement.disabled if key in marks else Enablement.enabled)
             for kind, kind_dict in self._resources.items()

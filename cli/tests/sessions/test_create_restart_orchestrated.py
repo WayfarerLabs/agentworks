@@ -707,6 +707,39 @@ def test_create_stopped_vm_gate_resolves_once_and_seeds_the_boundary(
     )
 
 
+def test_create_new_agent_on_disabled_plugin_recipe_refuses_before_any_work(
+    db: Database,
+    make_config,  # noqa: ANN001
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Phase 7 BLOCKING 2, end-to-end on a live registry: ``session create
+    --new-agent`` with an ephemeral agent-template whose recipe is a disabled
+    plugin's is refused at the build phase (the gate added beside the harness
+    gate in ``_build_session_graph``), before any transport or session-row
+    write. Proves the newly-added ``--new-agent`` gate fires live, not just that
+    the call site references it textually (the drift guard's job)."""
+    from agentworks.plugins import Plugin
+    from agentworks.sessions.manager import create_session
+
+    config = make_config()
+    _seed_stopped_proxmox_vm(db)
+    plugin = Plugin(
+        name="decl-plugin",
+        description="a manifest-parity fixture",
+        manifests="tests.plugins._manifest_declarable_fixture",
+    )
+    monkeypatch.setattr("agentworks.plugins.SYSTEM_PLUGINS", {plugin.name: plugin})
+    events: list[str] = []
+    captured_env: dict[str, str] = {}
+    _patch_session_ops(monkeypatch, events, captured_env)  # transports must never be reached
+
+    with pytest.raises(StateError, match="enable plugin `decl-plugin`"):
+        create_session(db, config, name="s1", workspace="ws1", new_agent=True, agent_template="fixture-agent-tmpl")
+
+    assert db.get_session("s1") is None  # refused before any session-row write
+    assert "tmux_create" not in events  # refused before any transport work
+
+
 def test_restart_stopped_vm_gate_seeds_and_env_pass_is_the_only_other(
     db: Database,
     make_config,  # noqa: ANN001

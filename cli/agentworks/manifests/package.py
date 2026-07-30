@@ -23,6 +23,7 @@ from typing import TYPE_CHECKING
 
 from agentworks.errors import ConfigError
 from agentworks.manifests.loader import load_manifests
+from agentworks.resources.kind import KIND_REGISTRY
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -37,6 +38,8 @@ def publish_manifest_package(
     anchor: str,
     subdir: str,
     origin_for: Callable[[str], Origin],
+    allowed_kinds: frozenset[str] | None = None,
+    weak: bool = False,
 ) -> None:
     """Load the YAML manifests under ``anchor``'s ``subdir`` and publish
     each into ``registry``, stamping ``origin_for(<filename>)`` per entry.
@@ -48,6 +51,22 @@ def publish_manifest_package(
     returns the ``Origin`` to stamp (a ``built-in`` source for the app
     bundle, a ``system-plugin`` source for a plugin), so the source string
     points at the actual shipped file.
+
+    ``allowed_kinds`` restricts which resource kinds a bundle may declare
+    (Phase 7, LLD c 3b.2). ``None`` (the built-in caller's default) permits
+    every decoder kind, so ``builtin.py`` is untouched. A plugin caller passes
+    the bundleable-kind allowlist (``PLUGIN_MANIFEST_KINDS``): a document whose
+    ``kind`` falls outside it raises ``ConfigError`` naming the kind and file,
+    and a document whose ``name`` is in the kind's reserved
+    ``auto_declare_names`` set (a plugin bundling a ``default`` template) raises
+    ``ConfigError`` naming the kind, reserved name, and file, so a plugin cannot
+    shadow the framework's auto-declared default. The caller
+    (``_publish_plugin_manifests``) re-raises both with plugin attribution.
+
+    ``weak`` (Phase 7, LLD c 3b.3) is forwarded to every ``registry.add``: a
+    not-enabled plugin's manifest rows publish weak (add-if-absent) so they
+    never block a stronger row; the built-in caller and enabled plugins publish
+    strong (the default).
 
     An ``anchor`` that does not resolve to an importable package (a typo'd or
     unshipped package name) RAISES ``ConfigError`` naming the anchor/subdir,
@@ -74,9 +93,41 @@ def publish_manifest_package(
         raise ConfigError(f"bundled manifests under {anchor}/{subdir} must be issue-free: {manifests.issues}")
 
     for entry in manifests.entries:
+        file_name = entry.location.file.name
+        if allowed_kinds is not None:
+            _reject_unbundleable(entry.kind, entry.name, file_name, allowed_kinds)
         registry.add(
             entry.kind,
             entry.name,
             entry.resource,
-            origin_for(entry.location.file.name),
+            origin_for(file_name),
+            weak=weak,
+        )
+
+
+def _reject_unbundleable(kind: str, name: str, file_name: str, allowed_kinds: frozenset[str]) -> None:
+    """Guard a plugin-bundled ``(kind, name)`` against the two ways a bundle can
+    subvert the enablement guarantee (Phase 7, LLD c 3b.2): a kind outside the
+    gated allowlist, or a reserved auto-declared name.
+
+    A kind not in ``allowed_kinds`` has no wired consumption gate, so a disabled
+    plugin's row of it would be silently usable. A name in the kind's
+    ``auto_declare_names`` (the templates' reserved ``default``) would land in
+    the free reserved slot and BECOME the framework default: disabled, it gates
+    every implicit-default use; enabled, it silently shadows the framework's
+    own default, and no collision fires to catch it. Both are rejected at
+    publish. Raises naming the kind/name and file; the caller attributes the
+    plugin.
+    """
+    if kind not in allowed_kinds:
+        raise ConfigError(
+            f"kind {kind!r} (in {file_name}) is not a bundleable manifest kind; "
+            f"a plugin may only bundle: {', '.join(sorted(allowed_kinds))}"
+        )
+    handler = KIND_REGISTRY.get(kind)
+    reserved = handler.auto_declare_names if handler is not None else None
+    if reserved is not None and name in reserved:
+        raise ConfigError(
+            f"{kind} {name!r} (in {file_name}) is a reserved auto-declared name; "
+            f"a plugin may not bundle it (it would shadow the framework's default {kind})"
         )

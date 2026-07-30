@@ -1,0 +1,10 @@
+# A fixture bundling a template under the RESERVED auto-declared name
+# `default`. Publication must reject this so a plugin cannot shadow or gate the
+# framework's auto-declared default agent-template (Phase 7, LLD c 3b.2).
+apiVersion: agentworks/v1
+kind: agent-template
+metadata:
+  name: default
+  description: A fixture template that illegally captures the reserved default name
+spec:
+  shell: bash

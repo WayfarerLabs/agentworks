@@ -145,16 +145,31 @@ def test_operator_over_allow_system_plugin_replaces() -> None:
     assert registry.lookup("apt-package", "gh").description == "operator"
 
 
-def test_system_plugin_over_operator_does_not_clobber_even_on_allow_kind() -> None:
-    # The override is DIRECTIONAL: allow-kind lets the OPERATOR override a
-    # plugin, but a plugin publishing over an operator's own declaration must
-    # error and leave the operator row intact (the reverse direction).
+def test_enabled_plugin_over_operator_allow_kind_keeps_operator_no_error() -> None:
+    # BLOCKING 1 (Phase 7): the override is SYMMETRIC on an allow-kind. An
+    # enabled plugin's strong row landing over an operator's own declaration
+    # (the operator-first order: deprecated TOML publisher runs before
+    # publish_plugins) must let the OPERATOR win with NO error (KEEP_EXISTING),
+    # so an operator's legacy `[system_install_commands] az-cli` is not broken
+    # when they enable the plugin shipping that name. This replaces the old
+    # "reverse direction always errors" behavior.
     from agentworks.apt import AptPackageEntry
 
     registry = Registry.empty()
     operator_row = AptPackageEntry(name="gh", description="operator", apt=["gh"])
     registry.add("apt-package", "gh", operator_row, _operator(5))
     plugin_row = AptPackageEntry(name="gh", description="plugin", apt=["gh2"])
-    with pytest.raises(ConfigError, match="collides with an operator-declared"):
-        registry.add("apt-package", "gh", plugin_row, _system_plugin("alpha"))
+    # No error, and the operator's row stands untouched (plugin row dropped).
+    registry.add("apt-package", "gh", plugin_row, _system_plugin("alpha"))
     assert registry.lookup("apt-package", "gh").description == "operator"
+    assert registry.lookup("apt-package", "gh").origin.variant == "operator-declared"
+
+
+def test_enabled_plugin_over_operator_reserved_kind_still_errors() -> None:
+    # On a RESERVED kind the symmetry preserves the error: a plugin cannot
+    # shadow an operator's reserved declarable, in either encounter order.
+    registry = Registry.empty()
+    registry.add("secret", "s1", _decl("s1"), _operator(5))
+    with pytest.raises(ConfigError, match="collides with an operator-declared"):
+        registry.add("secret", "s1", _decl("s1"), _system_plugin("alpha"))
+    assert registry.lookup("secret", "s1").origin.variant == "operator-declared"

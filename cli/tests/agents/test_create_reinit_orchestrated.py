@@ -412,6 +412,74 @@ def test_reinit_update_template_persists_before_convergence_so_a_mid_failure_kee
     assert row is not None and row.template == "other"  # persisted before the failed convergence
 
 
+# -- Phase 7: the recipe use-gate fires on a live build -----------------------
+#
+# End-to-end proof (real config + real build_registry) that
+# ``ensure_recipe_enabled`` actually refuses on a live registry with the right
+# kind-string, before any DB / VM / mutation work. The fixture plugin ships a
+# disabled agent-template (referencing a disabled user-install-command) via a
+# bundled manifest; it is NOT in ``[plugins] enabled``, so its rows are
+# present-but-disabled.
+
+_DECLARABLE_ANCHOR = "tests.plugins._manifest_declarable_fixture"
+
+
+def _install_disabled_fixture(monkeypatch: pytest.MonkeyPatch) -> None:
+    from agentworks.plugins import Plugin
+
+    plugin = Plugin(name="decl-plugin", description="a manifest-parity fixture", manifests=_DECLARABLE_ANCHOR)
+    monkeypatch.setattr("agentworks.plugins.SYSTEM_PLUGINS", {plugin.name: plugin})
+
+
+def test_create_agent_on_disabled_plugin_recipe_refuses_before_any_work(
+    db: Database,
+    make_config,  # noqa: ANN001
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agentworks.errors import StateError
+
+    config = make_config()
+    _seed_vm(db)
+    _install_disabled_fixture(monkeypatch)
+
+    def _boom(*a: Any, **k: Any) -> None:
+        raise AssertionError("the mutation must not run for a disabled-recipe template")
+
+    monkeypatch.setattr(agent_initializer, "create_agent_on_vm", _boom)
+
+    with pytest.raises(StateError, match="enable plugin `decl-plugin`"):
+        agent_manager.create_agent(db, config, name="dev", vm_name="box", template="fixture-agent-tmpl")
+
+    assert db.get_agent("dev") is None  # refused before any DB write
+
+
+def test_reinit_update_template_to_disabled_recipe_refuses_before_persist(
+    db: Database,
+    make_config,  # noqa: ANN001
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Fix 1: a repoint to a real-but-disabled-recipe template is refused BEFORE
+    ``db.update_agent_template`` persists it, so the stored template is
+    unchanged (mirrors ``test_reinit_unknown_update_template_raises_and_keeps_the_row``)."""
+    from agentworks.errors import StateError
+
+    config = make_config()
+    _seed_vm(db)
+    db.insert_agent("dev", "box", "agt-dev", template="default")
+    _install_disabled_fixture(monkeypatch)
+
+    def _boom(*a: Any, **k: Any) -> None:
+        raise AssertionError("setup must not run for a refused repoint")
+
+    monkeypatch.setattr(agent_initializer, "create_agent_on_vm", _boom)
+
+    with pytest.raises(StateError, match="enable plugin `decl-plugin`"):
+        agent_manager.reinit_agent(db, config, name="dev", update_template="fixture-agent-tmpl")
+
+    row = db.get_agent("dev")
+    assert row is not None and row.template == "default"  # the refused repoint was NOT persisted
+
+
 # -- the operation scope reaches readiness ------------------------------------
 
 

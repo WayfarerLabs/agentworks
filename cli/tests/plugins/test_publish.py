@@ -137,7 +137,7 @@ def test_enabled_plugin_publishes_capability_and_manifest(monkeypatch: pytest.Mo
 # -- Not-enabled plugin: row present-but-disabled, manifest absent --------------
 
 
-def test_not_enabled_plugin_row_disabled_and_manifest_absent(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_not_enabled_plugin_row_and_manifest_present_but_disabled(monkeypatch: pytest.MonkeyPatch) -> None:
     plugin = _fixture_plugin()
     monkeypatch.setattr("agentworks.plugins.SYSTEM_PLUGINS", {plugin.name: plugin})
     config = _config()  # NOT opted in
@@ -162,8 +162,10 @@ def test_not_enabled_plugin_row_disabled_and_manifest_absent(monkeypatch: pytest
         assert verdict.reason == (
             "depends on vm-platform 'fixture-platform', which is disabled; enable plugin `pub-plugin`"
         )
-        # Its manifest resources are ABSENT (manifests are enabled-only, R9).
-        assert not _present(registry, "apt-source", "fixture-apt-source")
+        # Its manifest resources are now PRESENT-BUT-DISABLED too (Phase 7
+        # parity): published weak, disabled by the same overlay, never absent.
+        assert _present(registry, "apt-source", "fixture-apt-source")
+        assert registry.graph.enablement_of("apt-source", "fixture-apt-source") is Enablement.disabled
 
 
 # -- Unknown enabled name: typed ConfigError before any publish -----------------
