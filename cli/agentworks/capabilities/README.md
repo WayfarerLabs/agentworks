@@ -396,32 +396,44 @@ A flagged, idempotent minting op must therefore **check-then-mint**: read the cu
 it (the same read-only check `runup` runs), and mint only if it is absent or expired. That guard is
 real work the implementer is on the hook for, and the flag is what tells them so.
 
-## Disabled resources (`disabled_reason`)
+## Readiness (`not_ready`) and the fold
 
-Distinct from the lifecycle and cheaper than all of it: any resource (capability instance or
-declared resource) may answer **"do you have what you need to run on this host?"** via a generic
-`disabled_reason() -> str | None` (`None` = enabled). The contract is _cheap, offline,
-host-introspection only_: OS, tool presence, the shape of the bound config; never network, secrets,
-or prompting. Readiness that needs the secret machinery or a remote read is preflight's job at the
-op boundary; `disabled_reason` runs on inspection and selection surfaces (doctor, `resource list`,
-site selection) where preflight would be too heavy.
+Distinct from the lifecycle and cheaper than all of it: readiness answers **"can this run on this
+host right now?"** as a dependency-ordered fold computed once at finalize and stored on the graph
+(the registry's retained `DependencyGraph`; consumers read `graph.readiness_of`, never recompute).
+The contract is _cheap, offline, host-introspection only_: OS, tool presence, the shape of the
+config; never network, secrets, or prompting. Readiness that needs the secret machinery or a remote
+read is preflight's job at the op boundary.
 
-For most declared resources the answer is a no-op (a vm-template always has what it needs); the
-resource layer treats absent-on-kind as "never disabled" (the same structural-hook pattern as
-`instances`). Where it is real, the rules are uniform:
+Readiness splits into two config-shaped halves, both **non-constructing** (they never build an
+instance, so the fold stays total over unvalidated config, and a malformed block is never a
+permanent readiness reason):
 
-- A disabled resource **still registers**: it lists (marked), describes (with the reason), and holds
-  references. Existence and availability are separate axes.
-- **Using** a disabled resource is a typed error naming the reason chain.
-- **References to** a disabled resource are doctor warnings, never command failures: a resources dir
-  shared across hosts degrades gracefully on the host that lacks a requirement.
+- A capability's config-INDEPENDENT host support: `VMPlatform.unsupported_reason()` ("could any
+  configuration ever work here": wsl2 off Windows). This is the **capability node's own** readiness.
+- A capability's config-DEPENDENT check: the classmethod `not_ready(config) -> Readiness` (default:
+  ready), keyed on the consuming resource's config (a local-Lima site without `limactl`; a remote
+  site with a `vm_host` needs nothing locally). The fold calls it off the graph-carried impl.
 
-The vm stack is the first adopter: a platform's class-level `unsupported_reason` gates its
-capability row ("could any configuration ever work here": wsl2 off Windows), and every vm-site
-registers unconditionally, deriving its own `disabled_reason` from the chain: platform missing (an
-uninstalled plugin and a typo are indistinguishable by design), platform host-disabled, or the bound
-platform instance's own answer (a local-Lima site without `limactl`; remote sites run `limactl` on
-the `vm_host` and need nothing locally).
+A consuming resource decides its OWN verdict from its dependencies' states. The fold hands each node
+a `DependencyState` per dependency (the dep's enablement, its readiness when enabled, its impl); the
+resource-level `not_ready(deps) -> Readiness` folds them however it likes. The fold imposes no
+propagation rule: `vm-site` propagates from its single platform (disabled dependency: "enable its
+unit"; not-ready platform: propagate the reason; else re-ask with its own config), while a `secret`
+opts out (implements no `not_ready`, so it is always ready). The rules on the resulting verdict are
+uniform:
+
+- A not-ready resource **still registers**: it lists (marked), describes (with the reason), and
+  holds references. Existence and availability are separate axes.
+- **Using** a not-ready resource is a typed error naming the reason.
+- **References to** a not-ready resource are doctor warnings, never command failures: a resources
+  dir shared across hosts degrades gracefully on the host that lacks a requirement.
+- A reference to an **absent** resource (a typo, or an uninstalled plugin) is a hard error, not a
+  self-disable: absence is the registry's structural miss.
+
+Enablement (`enabled` / `disabled`) is a separate axis, reserved for operator opt-in. It is modeled
+on the node and distributed by the fold, but no producer of `disabled` nodes ships yet (the plugin
+rebuild is the first); everything this build produces is `enabled`.
 
 ## The base class
 

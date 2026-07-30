@@ -26,9 +26,9 @@ from agentworks.errors import ConfigError, StateError
 from agentworks.resources.kind import KIND_REGISTRY
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator, Sequence
+    from collections.abc import Iterator, Mapping, Sequence
 
-    from agentworks.resources.graph import DependencyGraph
+    from agentworks.resources.graph import DependencyGraph, Enablement, Readiness
     from agentworks.resources.origin import Origin
     from agentworks.resources.reference import ReferenceEntry, ResourceReference
 
@@ -251,15 +251,20 @@ class Registry:
         # 3: cycle-detect over the built edge map (no re-walk).
         _detect_cycles(all_outbound, self._present_keys())
 
-        # 4: fold readiness for the present nodes (LLD c).
-        readiness = fold_readiness(self._resources, all_outbound)
+        # 4: fold readiness for the present nodes (LLD c). ``enablement`` is
+        # the opt-in seam: all-enabled today (no producer, R7), overridable so
+        # the fold's distribution of a disabled dependency is exercisable and
+        # the plugin rebuild has a single place to fill.
+        enablement = self._node_enablement()
+        readiness = fold_readiness(self._resources, all_outbound, enablement)
 
         # 5: readiness-gated materialization (R12), looping to a fixpoint.
-        self._materialize_deferred(deferred, all_refs, all_outbound, readiness)
+        self._materialize_deferred(deferred, all_refs, all_outbound, readiness, enablement)
 
-        # 6: attach. Build the retained graph (inbound + readiness on the
-        # node), then polish auto-declared descriptions off its inbound refs.
-        self._graph = build_graph(self._resources, all_refs, all_outbound, readiness)
+        # 6: attach. Build the retained graph (inbound + readiness + enablement
+        # on the node), then polish auto-declared descriptions off its inbound
+        # refs.
+        self._graph = build_graph(self._resources, all_refs, all_outbound, readiness, enablement)
         for kind in list(self._resources.keys()):
             for name in list(self._resources[kind].keys()):
                 existing = self._resources[kind][name]
@@ -267,13 +272,13 @@ class Registry:
                 self._resources[kind][name] = _polish_auto_declared_description(existing, kind, inbound)
 
         # 7: validate the ready + enabled set only (R3, R9.4).
-        self._validate_resources()
+        self._validate_resources(enablement)
 
         # 8: freeze.
         self._frozen = True
 
-    def _validate_resources(self) -> None:
-        """Run each READY Resource's ``validate()`` (the throwing
+    def _validate_resources(self, enablement: Mapping[tuple[str, str], Enablement]) -> None:
+        """Run each READY + ENABLED Resource's ``validate()`` (the throwing
         correctness check for its capability config sub-block), raising on
         the first malformed block.
 
@@ -281,9 +286,9 @@ class Registry:
         resource's block is DEFERRED, not validated (there is nothing to run,
         and its capability may be unavailable), so a malformed ``platform_config``
         on a site the host cannot run does not abort every command; it is
-        validated when the resource becomes ready. Every node is enabled this
-        effort, so the gate is readiness (``graph.is_ready``); the enablement
-        half of the scope arrives with a real producer.
+        validated when the resource becomes ready. A disabled node's stored
+        readiness is a placeholder (enablement answers for it), so the gate
+        checks enablement explicitly rather than leaning on ``is_ready``.
 
         The capability's ``validate`` frames its message with the logical
         owner label (``kind/name``); the source location that decode/load
@@ -299,11 +304,14 @@ class Registry:
         with no capability config (a secret, an apt entry) validates via
         the no-op base ``validate`` and passes.
         """
+        from agentworks.resources.graph import Enablement
         from agentworks.resources.render import format_origin_location
 
         assert self._graph is not None  # built in pass 6, before this pass
         for kind in list(self._resources.keys()):
             for name in list(self._resources[kind].keys()):
+                if enablement.get((kind, name), Enablement.enabled) is Enablement.disabled:
+                    continue
                 if not self._graph.is_ready(kind, name):
                     continue
                 resource = self._resources[kind][name]
@@ -322,6 +330,20 @@ class Registry:
     def _present_keys(self) -> set[tuple[str, str]]:
         """The ``(kind, name)`` of every currently-published Resource."""
         return {(kind, name) for kind, kind_dict in self._resources.items() for name in kind_dict}
+
+    def _node_enablement(self) -> dict[tuple[str, str], Enablement]:
+        """Each present node's enablement (opt-in) axis, the seam the fold and
+        graph consume.
+
+        Every node is ``enabled`` this effort: no producer of ``disabled`` nodes
+        ships (R7). This is the single, minimal extension point the plugin
+        rebuild fills to mark an opted-out unit ``disabled`` (and a test
+        overrides to exercise the fold's distribution of a disabled dependency's
+        state); nodes materialized after this pass default to ``enabled``.
+        """
+        from agentworks.resources.graph import Enablement
+
+        return {(kind, name): Enablement.enabled for kind, kind_dict in self._resources.items() for name in kind_dict}
 
     def _materialize_reserved_defaults(self) -> None:
         """Seed the registry with reserved-default rows for every kind
@@ -404,37 +426,49 @@ class Registry:
                     f"{first.source[0]} {first.source[1]!r} references unknown {kind} {name!r} ({first.usage})"
                 )
             else:
-                raise RuntimeError(f"unexpected miss_policy {kind_handler.miss_policy!r} on KIND_REGISTRY[{kind!r}]")
+                raise StateError(f"unexpected miss_policy {kind_handler.miss_policy!r} on KIND_REGISTRY[{kind!r}]")
 
     def _materialize_deferred(
         self,
         deferred: set[tuple[str, str]],
         all_refs: dict[tuple[str, str], list[ResourceReference]],
         all_outbound: dict[tuple[str, str], list[ResourceReference]],
-        readiness: dict[tuple[str, str], Any],
+        readiness: dict[tuple[str, str], Readiness],
+        enablement: Mapping[tuple[str, str], Enablement],
     ) -> None:
         """Materialize deferred auto-declare targets, readiness-gated (R12),
         looping to a fixpoint (LLD b subtlety 3).
 
-        A deferred target is synthesized ONLY when at least one READY, ENABLED
-        node references it (a target referenced solely by not-ready / disabled
-        nodes is left unmaterialized, so its would-be secrets never enter
-        ``secret list`` / doctor / resolution: the behavior the removed vm-site
-        suppression used to achieve). A newly-materialized node is then walked
-        (its edges resolved and it folded) so a materialized node that itself
-        references others still resolves them. The loop terminates because a
-        late-materialized node's out-edges point only back into the settled
-        set; a hard cap on iterations guards against a framework bug rather
-        than truncating silently.
+        A deferred target is synthesized ONLY when at least one PRESENT, ENABLED,
+        READY node references it (a target referenced solely by not-ready or
+        disabled nodes is left unmaterialized, so its would-be secrets never
+        enter ``secret list`` / doctor / resolution: the behavior the removed
+        vm-site suppression used to achieve). A newly-materialized node is then
+        walked (its edges resolved and it folded) so a materialized node that
+        itself references others still resolves them. The loop terminates because
+        a late-materialized node's out-edges point only back into the settled
+        set; a hard cap on iterations guards against a framework bug rather than
+        truncating silently.
         """
-        from agentworks.resources.graph import node_readiness
+        from agentworks.resources.graph import Enablement, node_readiness
 
         def has_ready_referrer(target: tuple[str, str]) -> bool:
             for ref in all_refs.get(target, ()):
-                verdict = readiness.get(ref.source)
-                # A referrer is always a present, folded node; all nodes are
-                # enabled this effort, so readiness is the whole gate.
-                if verdict is None or verdict.is_ready:
+                source = ref.source
+                verdict = readiness.get(source)
+                if verdict is None:
+                    # A referrer is always a present, folded node. A missing
+                    # verdict means that build/fold invariant broke; fail loud
+                    # rather than silently defeating the R12 gate.
+                    raise StateError(
+                        f"referrer {source!r} of deferred target {target!r} has no readiness verdict; "
+                        f"the build/fold invariant is broken (this is a framework bug)"
+                    )
+                if enablement.get(source, Enablement.enabled) is Enablement.disabled:
+                    # A disabled referrer does not drive materialization (R12):
+                    # its readiness is not even computed.
+                    continue
+                if verdict.is_ready:
                     return True
             return False
 
@@ -456,7 +490,7 @@ class Registry:
                 # deps are already folded, so the reverse-topo invariant holds).
                 self._walk_into(target, all_refs, all_outbound)
                 self._resolve_misses(all_refs, deferred)
-                readiness[target] = node_readiness(target, self._resources, all_outbound, readiness)
+                readiness[target] = node_readiness(target, self._resources, all_outbound, readiness, enablement)
             if not progressed:
                 # Every remaining deferred target lacks a ready referrer (R12):
                 # leave it unmaterialized.

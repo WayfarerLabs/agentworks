@@ -26,7 +26,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from enum import Enum
 from types import MappingProxyType
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING, Protocol, cast, runtime_checkable
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping, Sequence
@@ -182,6 +182,7 @@ def build_graph(
     all_refs: Mapping[tuple[str, str], Sequence[ResourceReference]],
     all_outbound: Mapping[tuple[str, str], Sequence[ResourceReference]],
     readiness: Mapping[tuple[str, str], Readiness] | None = None,
+    enablement: Mapping[tuple[str, str], Enablement] | None = None,
 ) -> DependencyGraph:
     """Build the frozen ``DependencyGraph`` from the finalized resource map and
     the two accumulated edge maps.
@@ -195,13 +196,16 @@ def build_graph(
 
     ``readiness`` is the verdict map the fold (:func:`fold_readiness`) produced,
     keyed by node; a node absent from it is stored ``ready`` (a node the fold
-    did not reach, e.g. in a test that builds a graph without folding). Every
-    node is ``enabled`` this effort; the enablement axis is modeled on the node
-    but no producer ships a ``disabled`` node (R7).
+    did not reach, e.g. in a test that builds a graph without folding).
+    ``enablement`` is the per-node opt-in map; a node absent from it is stored
+    ``enabled``. Every node this effort produces is ``enabled`` (no producer of
+    disabled nodes ships, R7); the map is the seam the plugin rebuild fills, and
+    the finalize fold already distributes a disabled dependency's state.
     """
     from agentworks.resources.reference import ReferenceEntry
 
     verdicts = readiness or {}
+    opt_in = enablement or {}
     inbound: dict[tuple[str, str], list[ReferenceEntry]] = {}
     for target, refs in all_refs.items():
         for ref in refs:
@@ -215,7 +219,7 @@ def build_graph(
                 key=key,
                 outbound=tuple(all_outbound.get(key, ())),
                 inbound=tuple(inbound.get(key, ())),
-                enablement=Enablement.enabled,
+                enablement=opt_in.get(key, Enablement.enabled),
                 readiness=verdicts.get(key, Readiness.ready()),
                 impl=_impl_for(kind, name),
             )
@@ -235,9 +239,20 @@ _CAPABILITY_KINDS = frozenset(
 )
 
 
+@runtime_checkable
+class _ReadinessResource(Protocol):
+    """A consuming resource that self-determines its readiness from its
+    dependencies' states (today only ``vm-site``). The fold dispatches on this
+    structural shape, so a resource that opts out (implements no ``not_ready``)
+    is simply always ready."""
+
+    def not_ready(self, deps: Mapping[tuple[str, str], DependencyState]) -> Readiness: ...
+
+
 def fold_readiness(
     resources: Mapping[str, Mapping[str, object]],
     all_outbound: Mapping[tuple[str, str], Sequence[ResourceReference]],
+    enablement: Mapping[tuple[str, str], Enablement] | None = None,
 ) -> dict[tuple[str, str], Readiness]:
     """Compute each present node's readiness verdict, dependency-first.
 
@@ -249,14 +264,19 @@ def fold_readiness(
     materialized until finalize pass 5) contributes no ``DependencyState`` (LLD
     c): a resource's ``not_ready`` indexes only the deps it declares interest in.
 
-    The fold imposes NO propagation rule (R4): it only distributes states; each
-    node's hook decides its own verdict. Returns the verdict map, which finalize
-    hands to :func:`build_graph` and grows for late-materialized nodes.
+    ``enablement`` is the per-node opt-in map (a node absent from it is treated
+    ``enabled``): the seam the plugin rebuild fills. A DISABLED dependency is
+    handed to its dependents with ``readiness=None`` (enablement is the axis
+    that answers for it, LLD c), so a propagating dependent (``vm-site``) reports
+    the "enable its unit" hint. The fold imposes NO propagation rule (R4): it
+    only distributes states; each node's hook decides its own verdict. Returns
+    the verdict map, which finalize hands to :func:`build_graph` and grows for
+    late-materialized nodes.
     """
     present = {(kind, name) for kind, kind_dict in resources.items() for name in kind_dict}
     readiness: dict[tuple[str, str], Readiness] = {}
     for key in _reverse_topo_order(present, all_outbound):
-        readiness[key] = node_readiness(key, resources, all_outbound, readiness)
+        readiness[key] = node_readiness(key, resources, all_outbound, readiness, enablement)
     return readiness
 
 
@@ -265,22 +285,28 @@ def node_readiness(
     resources: Mapping[str, Mapping[str, object]],
     all_outbound: Mapping[tuple[str, str], Sequence[ResourceReference]],
     readiness: Mapping[tuple[str, str], Readiness],
+    enablement: Mapping[tuple[str, str], Enablement] | None = None,
 ) -> Readiness:
     """One node's readiness verdict, given the verdicts of its dependencies.
 
-    A capability node computes from its impl (config-independent host support,
-    LLD c's table). A consuming resource with a ``not_ready(deps)`` hook (today
-    only ``vm-site``) is handed its dependencies' ``DependencyState``s and
-    decides for itself. Any other node (a secret, a template, a resource that
-    opts out) is ready. Exposed (not just the fold's inner loop) so finalize's
-    materialize pass can fold a single late-materialized node the same way.
+    A DISABLED node's readiness is not computed (enablement answers for it, LLD
+    c); a ready placeholder is stored, and the node is instead handed to its
+    dependents with ``readiness=None``. An enabled capability node computes from
+    its impl (config-independent host support, LLD c's table). An enabled
+    consuming resource with a ``not_ready(deps)`` hook (today only ``vm-site``)
+    is handed its dependencies' ``DependencyState``s and decides for itself. Any
+    other node (a secret, a template, a resource that opts out) is ready.
+    Exposed (not just the fold's inner loop) so finalize's materialize pass can
+    fold a single late-materialized node the same way.
     """
+    opt_in = enablement or {}
+    if opt_in.get(key, Enablement.enabled) is Enablement.disabled:
+        return Readiness.ready()  # placeholder; enablement answers for a disabled node
     kind, name = key
     if kind in _CAPABILITY_KINDS:
         return _capability_node_readiness(kind, name)
     resource = resources[kind][name]
-    hook = getattr(resource, "not_ready", None)
-    if hook is None:
+    if not isinstance(resource, _ReadinessResource):
         return Readiness.ready()
     deps: dict[tuple[str, str], DependencyState] = {}
     for ref in all_outbound.get(key, ()):
@@ -290,12 +316,13 @@ def node_readiness(
             # hook indexes only the deps it cares about, so a skipped one it
             # does not consult never becomes a missing key (LLD c).
             continue
+        dep_enabled = opt_in.get(target, Enablement.enabled) is Enablement.enabled
         deps[target] = DependencyState(
-            enablement=Enablement.enabled,
-            readiness=readiness[target],
+            enablement=Enablement.enabled if dep_enabled else Enablement.disabled,
+            readiness=readiness[target] if dep_enabled else None,
             impl=_impl_for(*target),
         )
-    return cast("Readiness", hook(deps))
+    return resource.not_ready(deps)
 
 
 def _capability_node_readiness(kind: str, name: str) -> Readiness:

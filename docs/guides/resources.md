@@ -229,16 +229,18 @@ policy is per kind:
   `user-install-command`): declaring the same name overrides the built-in, the name is the
   interface, and same-name override is how you customize what `gh` installs.
 - **Bundled vm-sites** (`lima-local`, `wsl2`): reserved names. Redeclaring one is an error; declare
-  a sibling site instead. Like every vm-site they register on every host and disable themselves
-  where this host lacks what they need (`agw resource list` marks the row; `describe` and
-  `agw doctor` carry the reason); using a disabled site is an error naming the requirement.
+  a sibling site instead. Like every vm-site they register on every host and report not-ready where
+  this host lacks what they need (`agw resource list` marks the row; `describe` and `agw doctor`
+  carry the reason); using a not-ready site is an error naming the requirement. A site naming an
+  UNKNOWN platform (a typo, or an uninstalled plugin) is a hard error at load, not a self-disable.
 - **Secret backends** (`env-var`, `onepassword`, `prompt`), **VM platforms** (`lima`, `wsl2`,
   `azure-vm`, `proxmox`), and **session harnesses** (`shell`, `claude-code`): registered
   capabilities, shown as read-only rows. You cannot declare or override them; secrets customize per
   secret via `backend_mappings`, platforms configure per site via `platform_config`, and harnesses
-  configure per session-template via `harness_config`. A platform whose host requirements are not
-  met publishes no row at all: `agw doctor` lists installed-but-disabled platforms with the reason,
-  and sites referencing one self-disable rather than erroring.
+  configure per session-template via `harness_config`. Every installed platform publishes a row
+  regardless of host support: a platform whose host requirements are not met (e.g. `wsl2` off
+  Windows) publishes a present, not-ready row (`agw resource list` and `agw doctor` show it with the
+  reason), and a site referencing it is not-ready rather than erroring.
 
 ## Secrets: backends and the chain
 

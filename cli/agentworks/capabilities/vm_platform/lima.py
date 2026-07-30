@@ -188,8 +188,8 @@ class LimaPlatform(VMPlatform):
         the holding node's central prediction has nothing to check.
 
         The limactl check ordinarily never fires here: a limactl-less
-        local site is disabled (``disabled_reason``) before any op
-        reaches preflight. It stays as defense for directly-constructed
+        local site is not-ready (``not_ready``) before any op reaches
+        preflight. It stays as defense for directly-constructed
         instances, not as a disagreement about whose check this is."""
         super().preflight(ctx)
         if not self.is_remote:

@@ -65,12 +65,15 @@ just started:
 **Gates** (cheap, offline, distinct from preflight):
 
 - `unsupported_reason()` is a class-level, zero-arg classmethod run at every registry build. It
-  answers "could any config of this platform ever work on this host." WSL2 is the only platform that
-  overrides it (`"Windows only"` off Windows). Lima deliberately does not: a remote-Lima site runs
-  `limactl` on the `vm_host` over SSH and needs nothing locally.
-- `disabled_reason()` (inherited from `Capability`) is instance-level: "is this configured site
-  ready," host-introspection only, no network or secrets. A local Lima site with no `limactl` is
-  disabled; a remote one is not. WSL2 disables a site with no `wsl` on PATH even on Windows.
+  answers "could any config of this platform ever work on this host," and is the **platform node's
+  own** readiness in the fold. WSL2 is the only platform that overrides it (`"Windows only"` off
+  Windows). Lima deliberately does not: a remote-Lima site runs `limactl` on the `vm_host` over SSH
+  and needs nothing locally.
+- `not_ready(config) -> Readiness` (inherited from `Capability`, default ready) is a
+  **non-constructing classmethod**: "is a site with THIS config ready," host-introspection only, no
+  network or secrets, no instance built. A local Lima site with no `limactl` is not-ready; a remote
+  one is not. WSL2 reports a site with no `wsl` on PATH not-ready even on Windows. The fold calls it
+  off the graph-carried impl to fold into the vm-site's verdict.
 
 **Class-level contract methods**:
 
@@ -259,7 +262,7 @@ YAML block scalar, remote shell). Two traps that have already occurred:
    authorizes the op to read it later.
 3. Register the class in `VM_PLATFORM_REGISTRY` (`__init__.py`).
 4. Set `unsupported_reason` if the platform cannot run on some hosts (WSL2 off Windows); implement
-   `disabled_reason` for per-site tool checks (Lima with no `limactl`). Add
+   the non-constructing `not_ready(config)` for per-site tool checks (Lima with no `limactl`). Add
    `legacy_platform_metadata` only if there are pre-migration rows to map.
 5. Override only the transport/lifecycle hooks your backend needs; accept the defaults otherwise.
 6. Reuse `bootstrap_script.py` / `cloud_init.py` for the create-time payload rather than reinventing
@@ -275,9 +278,10 @@ The existing tests under `cli/tests/vms/` are the templates to copy from:
 - `test_platform_config_contract.py`: table-driven `validate` shape and `dependencies` edge
   extraction across all platforms, plus a registry-name/class parity check. A good template for a
   new platform's registration test.
-- `test_platform_support.py`: `unsupported_reason` (host-wide) vs. `disabled_reason` (per-site) vs.
-  the composed `site_disabled_reason`. Uses the `stub_platform_support` fixture to pin platforms
-  supported regardless of host, so dispatch-shape tests do not depend on local tooling.
+- `test_platform_support.py`: `unsupported_reason` (host-wide) vs. `not_ready` (per-site config) vs.
+  the composed `site_disabled_reason` shim and the graph's `readiness_of` verdict. Uses the
+  `stub_platform_support` fixture to pin platforms ready regardless of host, so dispatch-shape tests
+  do not depend on local tooling.
 - `test_platform_idempotency_guards.py`: patches `status` to an already-in-state value and asserts
   the backend verb is never called, proving the `@idempotent_op` contract.
 - `test_platform_runup.py`: Proxmox's authenticated pre-check, distinguishing a definitive 401/403

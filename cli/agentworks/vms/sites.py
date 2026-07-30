@@ -35,9 +35,11 @@ from agentworks.declared_resource import DeclaredResource
 from agentworks.errors import ConfigError
 
 if TYPE_CHECKING:
+    from collections.abc import Mapping
+
     from agentworks.capabilities.vm_platform import VMPlatform
     from agentworks.config import Config
-    from agentworks.resources.graph import Readiness
+    from agentworks.resources.graph import DependencyState, Readiness
     from agentworks.resources.reference import ResourceReference
     from agentworks.resources.registry import Registry
 
@@ -93,7 +95,7 @@ class VMSiteDecl(DeclaredResource):
             )
         return refs
 
-    def not_ready(self, deps: dict[tuple[str, str], object]) -> Readiness:
+    def not_ready(self, deps: Mapping[tuple[str, str], DependencyState]) -> Readiness:
         """This site's readiness verdict, self-determined from its single
         platform dependency's :class:`DependencyState` (the fold hands it in
         ``deps``) plus its own ``platform_config`` (LLD c). Pure, total,
@@ -108,30 +110,32 @@ class VMSiteDecl(DeclaredResource):
         with its OWN config (a remote-Lima site needs no local ``limactl``, so
         it does not blindly inherit the platform verdict, R4).
         """
-        from agentworks.resources.graph import DependencyState, Enablement, Readiness
+        from typing import cast
+
+        from agentworks.resources.graph import Enablement, Readiness
 
         platform = deps[("vm-platform", self.platform)]
-        assert isinstance(platform, DependencyState)
         if platform.enablement is Enablement.disabled:
             return Readiness.blocked(f"depends on vm-platform '{self.platform}', which is disabled; enable its unit")
         if platform.readiness is not None and not platform.readiness.is_ready:
             return Readiness.blocked(f"platform '{self.platform}' is disabled: {platform.readiness.reason}")
-        impl = platform.impl
-        if impl is None:
+        if platform.impl is None:
             return Readiness.ready()
-        from agentworks.capabilities.vm_platform import VMPlatform
-
-        assert isinstance(impl, type) and issubclass(impl, VMPlatform)
-        return impl.not_ready(self.platform_config)
+        # The impl is the platform CLASS the graph stamped (``_impl_for`` fails
+        # fast on a missing impl), so ``not_ready`` is a classmethod call, never
+        # a construction.
+        return cast("type[VMPlatform]", platform.impl).not_ready(self.platform_config)
 
     def validate(self) -> None:
         """Throwing shape check for the ``platform_config`` blob, run by
         the finalize ``validate`` pass. Mirrors ``referenced_resources``:
         the named platform capability validates the blob it owns. An
-        unknown platform is tolerated (the site self-disables today); the
-        blob is validated whenever the platform's implementation is
-        seated, regardless of host support (an unsupported platform still
-        validates an empty or well-formed blob).
+        unknown platform is a no-op HERE (the platform capability is absent,
+        so there is no blob owner to validate against); the site's dangling
+        platform edge is what makes the unknown platform a hard finalize miss
+        (R9.2). The blob is validated whenever the platform's implementation
+        is seated, regardless of host support (an unsupported platform still
+        validates an empty or well-formed blob for a ready+enabled site).
         """
         from agentworks.capabilities.vm_platform import VM_PLATFORM_REGISTRY
 
