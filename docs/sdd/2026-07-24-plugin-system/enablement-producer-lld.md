@@ -512,7 +512,7 @@ code and rejected:
   on the VM (`vms/initializer/driver.py:822-833`), a filesystem fact, not a registry row; no gate
   applies or is needed.
 
-## The disabled-plugin secret-backend hint (R14 secret-backend, Phase 9)
+## The disabled-plugin secret-backend hint (R14 secret-backend, Phase 8: onepassword)
 
 **IMPORTANT 4 (chosen: do it right, add the hint).** The secret-backend consumer honors enablement
 by **exclusion, not refusal** (R14's secret model, already wired): `active_backends`
@@ -522,7 +522,7 @@ is a disabled plugin backend (the flagship: a secret mapped **only** to `onepass
 enabled) fails at use with the generic `SecretUnavailableError` "no active backend could resolve
 secret(s): ...; tried (none; secret unreachable)" (`_fail_unavailable`, `resolve.py:192-229`),
 naming no plugin. That contradicts R11.1's promise that every migration failure names the plugin, so
-Phase 9 adds the hint rather than softening the promise.
+Phase 8 (the onepassword migration) adds the hint rather than softening the promise.
 
 The hint is **additive, on the failure path only** (the success path and `active_backends` are
 untouched):
@@ -541,10 +541,10 @@ untouched):
   the ordinary "no mapping / wrong env var" cases.
 
 This is the exact site: `secrets/resolve.py::_fail_unavailable` (message assembly) fed by
-`disabled_plugin_backends(registry)` from `resolve_for_command`. It is a **Phase 9** addition (it
+`disabled_plugin_backends(registry)` from `resolve_for_command`. It is a **Phase 8** addition (it
 becomes reachable only when `onepassword` migrates and can be disabled); until then no disabled
 secret-backend producer exists, so the map is always empty and the message is verbatim today's.
-Phase 9 pins it: a secret mapped only to a disabled `onepassword` fails with a message containing
+Phase 8 pins it: a secret mapped only to a disabled `onepassword` fails with a message containing
 "enable plugin `onepassword`", and enabling the plugin resolves it.
 
 Note this is **not** propagation and **not** a create-time gate: a secret stays ready (many backends
@@ -629,7 +629,7 @@ Against a fixture plugin bundling a `user-install-command`, a `system-install-co
   and for an all-enabled registry; a disabled row with a non-plugin origin (stub second source, R13)
   refuses with the `enable its unit` fallback tail.
 
-## Acceptance (Phase 9, the secret-backend hint; fixture-driven)
+## Acceptance (Phase 8, the secret-backend hint; fixture-driven)
 
 - A secret whose sole `backend_mappings` target is a disabled plugin `secret-backend` fails resolve
   with a `SecretUnavailableError` whose per-secret line contains "enable plugin `<name>`"; enabling
