@@ -1,231 +1,263 @@
 # HLA: system plugins (initial structure)
 
-Implements the [FRD](./frd.md). One new package (`agentworks/plugins/`), one new origin variant, one
-new config section, one new step in `build_registry`, and one extension to the Registry's collision
-policy. Every other seam already exists; the work is to add the plugin unit and route the existing
-publish/gate machinery through it.
+Implements the [FRD](./frd.md). Built on the landed registry readiness refactor, which already owns
+the enablement axis, the fold that distributes it, and every consumer that gates on it. The plugin
+work is therefore one new package (`agentworks/plugins/`), one new origin variant, one config
+section, an unconditional publish step plus an enabled-only manifest step in `build_registry`, one
+collision extension, and, the load-bearing new piece, the **first `_node_enablement` producer**.
+There is no bespoke publish-gate, no bespoke disabled-roster dispatch, and no reference-time
+diagnosis: the registry does that.
 
-> **Design dependency (2026-07-27): parked pending a registry-redesign SDD; see the [FRD](./frd.md)
-> note.** The plugin implementation was reset; it will be rebuilt from scratch after the registry
-> SDD lands. This HLA's "Current state" snapshot, the `_check_collision` extension (component 6b),
-> and the present-but-disabled roster (component 7) all lean on registry mechanics that the redesign
-> changes: decoupling graph construction from config validation, splitting resource "can't run"
-> readiness from plugin "not enabled" absence, and renaming the `disabled_reason` readiness hook.
-> Treat the component details below as the prior design of record, to be revised against the
-> registry SDD before the rebuild.
-
-## Current state (verified)
+## Current state (verified against post-refactor code)
 
 - `resources/origin.py`: `variant` is `operator-declared | built-in | auto-declared`;
-  `system-plugin` / `external-plugin` are documented as reserved and not constructible. Factories:
-  `operator_declared`, `built_in`, `auto_declared`. Rendering lives in `resources/render.py` and the
-  doctor / resource-list / describe surfaces.
-- `manifests/builtin.py`: `publish_to(registry)` globs `manifests/builtin/` via
-  `importlib.resources`, loads through `manifests.loader.load_manifests`, asserts issue-free, and
-  adds each entry with `Origin.built_in(source="agentworks.manifests.builtin/<file>")`.
-- Capabilities: each kind package owns an implementation registry keyed by impl `name`, populated
-  unconditionally at module import, and a `publish_to(registry)` that builds a per-kind row
-  dataclass (`VMPlatformEntry`, `HarnessEntry`, ...) with a `built-in` origin. The registries are
-  NOT uniform: `VM_PLATFORM_REGISTRY`, the harness registry, and the git-credential registry hold
-  impl _classes_; `SECRET_BACKEND_REGISTRY` holds stateless impl _instances_
-  (`secrets/backends.py`). The capability _kinds_ self-register into `KIND_REGISTRY` via
-  `resources/kinds/__init__` import side effects.
-- `bootstrap.build_registry(config, manifests=None)` is documented as a pure function (no memo, no
-  cache): `Registry.empty()`, then `builtin_manifests.publish_to`, then the operator `apt` /
-  `install_commands` publishers, then the built-in capability rows (`git_credential` / `harness` /
-  `secrets` / `vm_platform`), then `config.publish_to`, then `manifests.publish_to`, then
-  `finalize()`, then `secrets.validate_chain` / `vm_sites.validate_sites` (post-finalize). Note the
-  operator `apt` / `install` publishers run _early_ (steps 2-3), before the capability rows.
-- `resources/registry.py` `_check_collision`: variant-aware but only handles `built-in` (built-in
-  over built-in is a no-op; operator over built-in consults `builtin_override`) and
-  operator-over-operator (error); every other variant pairing hits a generic "publisher ordering
-  conflict" error. No `system-plugin` case.
-- `resources/inspect.py`: the generic `disabled_reason_for(registry, kind, resource)` dispatches
-  through `KIND_REGISTRY` to a kind's optional `disabled_reason` hook; `resource list` renders
-  `(disabled)` and `describe` renders `Disabled: <reason>`. This is resource-kind machinery.
-- `config/models.py` `Config` is a frozen dataclass; `config/load.py` + `loaders_*` parse the TOML.
-  There is no `[plugins]` section.
-- `cli/commands/*` attach subapps at import; `cli/commands/doctor.py` renders the doctor report.
+  `system-plugin` / `external-plugin` reserved and not constructible. Rendering in
+  `resources/render.py` + doctor/list/describe.
+- `resources/graph.py`: the frozen `DependencyGraph` carries per-node `enablement`
+  (`Enablement.enabled | disabled`), `readiness` (a `Readiness` verdict), and the capability `impl`.
+  `enablement_of` / `readiness_of` / `is_ready` / `edges_of` / `dependents_of` / `reachable_from` /
+  `impl_of` are the query API. The fold hands each node its dependencies' `DependencyState`
+  (enablement; readiness when enabled; impl); a disabled dependency has `readiness=None`, and a
+  dependent's own `not_ready` synthesizes the "depends on X, which is disabled; enable its unit"
+  hint (`vms/sites.py`).
+- `resources/registry.py`: `finalize` runs ordered passes (build, resolve, cycle-detect, fold,
+  readiness-gated materialize, attach, validate, freeze). **`_node_enablement()` is the seam**: it
+  returns an `enablement` map over present nodes, currently all `enabled`, threaded into the fold,
+  materialization gate (`has_ready_referrer`), `build_graph`, and the validate pass.
+  `_check_collision` is variant-aware over three variants only; the refactor left it unchanged.
+- Capabilities: each kind owns an impl registry populated at import; the graph builder reads it via
+  `_impl_for` (fail-fast on a registry-less capability row, a whitelisted builder read). Three
+  registries hold impl _classes_; `SECRET_BACKEND_REGISTRY` holds instances.
+- `secrets/resolve.py` `active_backends` filters `present ∧ enabled ∧ opted-in` via `enablement_of`;
+  the secret's finalize `validate` skips mappings to disabled backends (R9.9). So resolution and
+  validation already honor a disabled producer.
+- `doctor` reads stored `readiness_of` off the graph; `inspect` renders `resource list` / `describe`
+  from the graph; `bootstrap.build_registry` is a pure function with the fixed publisher order.
+- `config/models.py` `Config` is frozen; there is no `[plugins]` section. CLI subapps attach at
+  import.
 
 ## Target state
 
-A `agentworks/plugins/` package defines the `Plugin` descriptor, the installed index, the
-import-time impl registration, and the publication step. `Origin` can express `system-plugin`.
-`Config` carries an enabled-plugins list. `build_registry` publishes each enabled plugin's
-capabilities and manifests (publication only, no global mutation). `_check_collision` learns the
-`system-plugin` variant. `doctor` shows the plugin roster present-but-disabled. A test-fixture
-plugin exercises the whole path; the shipped installed set is empty.
+`agentworks/plugins/` defines the validated `Plugin` descriptor, the installed index with inverted
+`register_plugin`, the per-kind registration adapter, and the publish step. `Origin` can express
+`system-plugin`. `Config` carries an enabled-plugins list. `build_registry` publishes **every
+shipped plugin's** capability rows unconditionally and **enabled plugins'** manifests.
+`Registry._node_enablement` becomes a **composition over enablement sources**; the plugin source
+marks a not-opted-in plugin's contributions `disabled` with a reason. `_check_collision` learns
+`system-plugin`. `resource list` hides disabled contributions; `doctor` shows the plugin roster. A
+test-fixture plugin exercises the whole path; the shipped installed set is empty.
 
 ## Components
 
 ### 1. `system-plugin` origin (R1)
 
-Add `"system-plugin"` to the `variant` `Literal`, a `plugin: str | None` field, and an
-`Origin.system_plugin(*, plugin: str, source: str)` classmethod (`file`/`line` `None`, `plugin` set,
-`source` a code identifier). Extend the variant-contract docstring. `resources/render.py` and the
-doctor / list / describe renderers gain the `system-plugin <plugin> (<source>)` shape.
-`external-plugin` stays documented-only (not added to the `Literal`; it lands with external
-plugins).
+Add `"system-plugin"` to the `variant` `Literal`, a `plugin: str | None` field, and
+`Origin.system_plugin(*, plugin, source)` (`file`/`line` `None`, `plugin` set, `source` a code
+identifier). Extend the variant-contract docstring; add the `system-plugin <plugin> (<source>)`
+render shape. `external-plugin` stays documented-only.
 
-### 2. The plugin package (R2, R3, R5)
+### 2. The plugin package: descriptor, index, atomic registration (R2, R3, R5)
 
 `agentworks/plugins/`:
 
-- `base.py`: the `Plugin` descriptor (frozen dataclass): `name`, `description`, the contributed
-  capability impls grouped by capability kind, `manifests` (the package/dir holding the plugin's
-  bundled YAML, or `None`), plus the reserved `required_scopes` and `commands` fields (typed,
-  defaulted empty, unused in v1, R10). The descriptor carries impl _classes_ uniformly; the per-kind
-  adapter (component 3) knows how to seat each into its registry, including instantiating once for
-  the instance-shaped `secret-backend` registry.
-- `__init__.py`: the installed index `SYSTEM_PLUGINS: dict[str, Plugin]`, populated by importing
-  each shipped plugin package (import-index pattern, mirroring `resources/kinds/__init__`).
-  Importing a plugin package runs its impl registration (component 3), so the installed set's impls
-  populate the build-wide registries at import, unconditionally, exactly as core impls do. Starts
-  empty in the shipped build (R11); the fixture plugin is added to a test-local index, not this one.
-- `publish.py`: `publish_enabled(registry, config)`. For each name in `config.plugins_enabled`,
-  resolve the descriptor from `SYSTEM_PLUGINS`; an unresolved name is collected and raised as a
-  single typed config error (R4) _before_ any publish is attempted, so an unknown name never becomes
-  a `KeyError`. For each resolved (enabled) plugin, publish its capability rows and manifests. This
-  function does not register impls (that already happened at import); it only publishes.
+- `base.py`: the `Plugin` descriptor (frozen dataclass): `name`, `description`, contributed impls
+  grouped by capability kind, `manifests` (package/dir or `None`), plus reserved `required_scopes`
+  (typed to `ScopeLevel`) and `commands` (a real placeholder frame, not `tuple[Any, ...]`), both
+  defaulted empty and unused (R10). The descriptor holds impl **classes** uniformly; the adapter
+  (component 3) seats each into its registry, instantiating once for the instance-shaped
+  `secret-backend`. `__post_init__` normalizes the capabilities mapping to immutable.
+- `registration.py`: `register_plugin(plugin: Plugin)`. **Validates the whole descriptor first**
+  (R2: name non-empty and `/`-free; every kind has an adapter; every impl is a class with a
+  non-empty `/`-free `name`; no intra-descriptor collisions), **then** seats every impl atomically
+  (all-or-nothing; a mid-loop failure seats nothing). Idempotent per impl name; a cross-plugin impl
+  name collision is a typed error. A context-manager / snapshot helper is exported so tests can seat
+  and unseat a fixture plugin without hand-snapshotting global dicts.
+- `__init__.py`: the installed index `SYSTEM_PLUGINS: dict[str, Plugin]`. **The index imports each
+  shipped plugin module and calls `register_plugin(module.PLUGIN)` itself** (inverted control, R3),
+  so a registration failure is wrapped with plugin attribution and provenance is derived from the
+  real module. A duplicate plugin name is a typed error. Starts empty in the shipped build (R11);
+  the fixture uses the exported snapshot helper against a test-local index.
+- `publish.py`: `publish_plugins(registry, config)`. Publishes a capability row for **every shipped
+  plugin's** impl (unconditional, R5) and loads **enabled plugins'** manifests. Resolves
+  `config.plugins_enabled` names against `SYSTEM_PLUGINS`; an unresolved name is collected and
+  raised as a single typed config error (R4) before any publish, never a `KeyError`. Publication
+  only; no registration (that happened at import), so `build_registry` stays pure.
 
 ### 3. The generic per-capability-kind adapter (R5, R6)
 
-Publishing a capability row is per-kind today (each kind builds its own `*Entry`, and the registries
-differ in shape). Introduce a small adapter table in the plugin package:
-`CAPABILITY_ADAPTERS: Mapping[str, CapabilityAdapter]`, one entry per core capability kind. Each
-adapter knows two things for its kind: how to **seat an impl** into that kind's implementation
-registry (keyed by the impl's `name`), reconciling class-vs-instance (three registries take the impl
-class; `secret-backend` takes a constructed instance of the stateless impl), and how to **build and
-add its row** dataclass (`VMPlatformEntry`, `HarnessEntry`, ...) with a supplied origin. Seating
-runs at import (component 2); row-building runs in `publish_enabled` with
-`Origin.system_plugin(plugin=name, source="agentworks.plugins.<name>")`. The adapters wrap the
-existing per-kind registries and row types. A plugin naming a capability kind with no adapter (a
-non-capability or unknown kind) is a typed error, R6's "existing kinds only" enforced mechanically.
+A small adapter table `CAPABILITY_ADAPTERS: Mapping[str, CapabilityAdapter]`, one per core
+capability kind, each knowing (a) how to **seat an impl** into that kind's registry (class vs
+instance) and (b) how to **build and add its row** dataclass (`VMPlatformEntry`, `HarnessEntry`,
+...) with a supplied origin. Seating runs in `register_plugin`; row-building runs in
+`publish_plugins` with `Origin.system_plugin(plugin=name, source="agentworks.plugins.<name>")`.
+Publication is tied to seating: a row is built only for an impl actually seated (Fable hardening, so
+a descriptor claim can never publish an unseated row). A kind with no adapter is caught at
+descriptor validation (R2/R6). A test asserts `CAPABILITY_ADAPTERS.keys()` equals the
+capability-category kinds in `KIND_REGISTRY`, so a future kind fails until its adapter exists.
 
-**Publish source vs. lookup source (the seated-but-unreachable invariant).** Seating a plugin impl
-into a shared capability registry is only inert with respect to publication if the core capability
-publisher does NOT publish the whole registry. It did (each `publish_to` iterated its full
-`*_REGISTRY`), so a seated plugin impl was published as a `built-in` row unconditionally: reachable
-while disabled, and colliding with its own `system-plugin` row when enabled. So each of the four
-core publishers is changed to publish only its explicit built-in set (`_BUILTIN_HARNESSES`,
-`_BUILTIN_GIT_CREDENTIAL_PROVIDERS`, `_BUILTIN_VM_PLATFORMS`, `_BUILTIN_SECRET_BACKENDS`), with the
-mutable registry _derived_ from that constant so the two cannot drift. The registry stays the
-execution-lookup source (resolvers read it, so an enabled plugin's impl runs once its row
-publishes); only the built-in constant is the publish source. This is what makes a seated-but-
-disabled plugin genuinely absent (no row from any publisher) and an enabled one land exactly one
-`system-plugin` row.
+Note the refactor's R13 already made every built-in capability publish unconditionally, so there is
+no publish-gate to honor and no `_BUILTIN_*`-vs-full-registry split to introduce: a plugin
+capability row is just another unconditional row, distinguished only by its `system-plugin` origin.
+(The `_impl_for` builder read already resolves an enabled plugin's impl from its registry to run
+it.)
 
-### 4. Plugin manifests through the existing loader (R5)
+### 4. Plugin manifests through the existing loader (R5, R9)
 
-If the descriptor carries a manifests location, the publisher resolves it via `importlib.resources`
-(as `builtin.publish_to` does), calls `load_manifests`, asserts issue-free (plugin manifests are app
-data, a dirty bundle is a bug), and adds each entry with the `system-plugin` origin (source
-`agentworks.plugins.<name>/manifests/<file>`). This is `builtin.publish_to` parameterized by
-directory and origin; factor the shared body so both call it.
+For an **enabled** plugin whose descriptor carries a manifests location, the publisher resolves it
+via `importlib.resources`, calls `load_manifests`, and adds each entry with the `system-plugin`
+origin. This is `builtin.publish_to` parameterized by directory and origin; factor the shared body.
+The shared body **raises a typed error** on manifest issues rather than
+`assert not manifests.issues` (the assert is stripped under `python -O` and is wrong for the
+eventual external-plugin path; correct for first-party bundles now regardless). Manifests are
+enabled-only (R9): a not-enabled plugin contributes no resources.
 
 ### 5. Config `[plugins]` (R4, R8)
 
-`Config` gains `plugins_enabled: tuple[str, ...]` (empty when the section is absent). A loader in
-`config/loaders_*` parses `[plugins] enabled = [...]` (a string list; unknown keys in the section
-are a config error, keeping the door for future per-plugin settings explicit rather than silently
-tolerant). No resource publishing: enablement is a setting, consumed in `build_registry`, never a
-Registry resource (mirroring `secret_config`). It is present on both load paths (settings-only and
-full), since it is a setting.
+`Config` gains `plugins_enabled: tuple[str, ...]` (empty when the section is absent). A loader
+parses `[plugins] enabled = [...]`; unknown keys in the section are a config error. Enablement is a
+setting consumed in `build_registry`, never a Registry resource (mirroring `secret_config`), present
+on both load paths.
 
 ### 6. `build_registry` wiring, staying pure (R4, R5, R7)
 
-Insert a single `plugins.publish_enabled(registry, config)` call between the built-in capability
-rows and `config.publish_to`. It publishes only (impls were seated at import, component 2), so
-`build_registry` mutates no module-level state and its documented purity holds. The unknown-name
-typed error is raised _inside_ `publish_enabled`, before any publish; it is NOT appended to the
-post-finalize `secrets.validate_chain` / `vm_sites.validate_sites` block (those run after finalize,
-too late, and a `KeyError` would already have crashed the publish). Precedence is not a function of
-this insertion point: because the operator `apt` / `install` publishers run before it and the
-operator TOML/YAML publishers run after it, a single slot cannot be "after all built-ins, before all
-operator rows." Instead, `_check_collision` decides by variant pair (component 6b), so the result is
-the same wherever the rows land.
+Insert `plugins.publish_plugins(registry, config)` between the built-in capability rows and
+`config.publish_to`. It publishes only, so `build_registry` mutates no module-level state and its
+purity holds. The unknown-name typed error is raised inside `publish_plugins`, before any publish,
+not in the post-finalize block. Precedence is not a function of the insertion point:
+`_check_collision` decides by variant pair (component 7), so the result is the same wherever the
+rows land.
 
-### 6b. `_check_collision` precedence extension (R7)
+### 7. `_check_collision` precedence extension (R7)
 
-Extend `resources/registry.py` `_check_collision` to implement the R7 matrix, decided by the
-unordered `{existing.variant, incoming.variant}` pair so arrival order does not matter:
-`operator-declared` overrides `built-in` or `system-plugin` where the kind's `builtin_override`
-permits (reusing the existing reserved-name path), else a typed reserved-name error; `system-plugin`
+Extend `resources/registry.py` `_check_collision` to decide by the unordered
+`{existing.variant, incoming.variant}` pair: `operator-declared` overrides `built-in` or
+`system-plugin` where `builtin_override` permits, else a typed reserved-name error; `system-plugin`
 and `built-in` are peers (typed error); two `system-plugin` rows collide (typed error). Existing
-operator-vs-operator and built-in-vs-built-in behavior is untouched. Each new pairing gets its own
-clear message, not the generic "publisher ordering conflict".
+operator/built-in pairings untouched; each new pairing gets its own message. Because all shipped
+plugins publish (R5), a curated-set name clash between two shipped plugins (enabled or not) is a
+legitimate build error, the correct outcome for a curation bug; namespacing (for independent
+external plugins) is deferred.
 
-### 7. `doctor` roster: present-but-disabled (R9, R12)
+### 8. The `_node_enablement` producer (R9, R13), the load-bearing piece
 
-The two-layer gate: contents are publish-gated (a disabled plugin published nothing, so it is absent
-from the rest of the report for free), while the plugin _itself_ is shown present-but-disabled.
-`doctor` gains a Plugins section that iterates `SYSTEM_PLUGINS` and renders
-`plugin <name>: <description>` against `config.plugins_enabled`, tagging a disabled one
-`[disabled: not enabled in [plugins]]` and an enabled one as enabled, the same present-but-disabled
-shape a platform-less vm-site gets. Roster only: existence, description, enable-state; never a
-disabled plugin's contributed capabilities or resources. The reserved `required_scopes`, when
-populated, render as an informational line, unenforced (R10).
+The refactor left `_node_enablement()` returning all-enabled. This SDD makes enablement a
+**composition over enablement sources** and adds the first source. Shape:
 
-A plugin is NOT a resource kind (R12): it is an origin, not a referenced graph node, so this roster
-is a bespoke `doctor` surface, NOT the generic `disabled_reason_for` path (which dispatches through
-`KIND_REGISTRY` and therefore only serves resource kinds). It reimplements the same present-but-
-disabled presentation. The `system-plugin` origin on every contributed resource already carries the
-provenance link, so resource listings can annotate "from plugin `<name>`" without a plugin row. (An
-`agw plugins` command could later host the same roster; not needed in v1.)
+- An enablement **source** is a callable `(registry rows) -> Mapping[(kind, name), DisabledMark]`
+  where `DisabledMark` carries the disabling **remediation reason** (the clause a dependent's hint
+  renders, e.g. `enable plugin <name>`, NOT the state phrasing) and its **source identity** (so a
+  future surface can say _which source_ disabled it). Composition folds a **list** of sources: a
+  node is `disabled` if any source disables it, retaining that source's reason; otherwise `enabled`.
+  Multiple sources disabling one node compose deterministically (first-source-wins the reason,
+  ordered as `build_registry` supplies them, the LLD pins it), so the axis is genuinely multi-source
+  (R13), not plugin-only.
+- **Layering (the seam shape the LLD pins).** The `Registry` is deliberately config-agnostic, so it
+  cannot itself read `config.plugins_enabled`. `build_registry` (which holds config) constructs the
+  sources already **bound to config** and injects them at finalize; the `Registry` folds opaque
+  source callables and never imports `Config` or `plugins`. So the shipped `_node_enablement()`
+  no-arg method is replaced by injected sources (finalize gains a defaulted `enablement_sources`
+  input); the refactor's four `_node_enablement` monkeypatch tests migrate to injecting a stub
+  source (mechanism churn, not behavior). The binary `enablement` map stays a pure projection of the
+  marks (no drift).
+- The **plugin source** (the only one built): a row whose origin is `system-plugin` with
+  `plugin=<name>` is disabled with remediation reason `enable plugin <name>` iff `<name>` is not in
+  `config.plugins_enabled`. Reads the frozen rows' origins and the (bound) enabled set; no new
+  probe.
+- The refactor's consumers already honor the result: the fold distributes the disabled
+  `DependencyState` (so a `vm-site` on a disabled plugin platform is not-ready with the enable
+  hint), `has_ready_referrer` withholds a disabled node's materialized deps, and `active_backends` /
+  secret-mapping validation exclude disabled backends. A **carried reason** is the one extension the
+  refactor's binary `Enablement` needs: the disabled state gains an optional reason so the
+  dependent's hint reads "enable plugin `<name>`" rather than a generic "enable its unit". (The
+  refactor's `DependencyState` already flows enablement; this threads the reason alongside it.)
 
-### 8. Test-fixture plugin (R11)
+This is where "a not-enabled plugin's capabilities are present-but-disabled" actually happens: the
+rows publish (component 3), and this producer marks the not-opted-in ones disabled. No parallel
+gate.
+
+### 9. Presentation: disabled hides, not-ready shows; the doctor roster (R9)
+
+- **`resource list`** hides `disabled` (enablement-axis) rows by default (the plugin work is the
+  first producer, so this is where the rule is set), while continuing to show `not-ready` (present,
+  enabled, blocked) rows such as a host-unsupported built-in. `inspect` reads `enablement_of` and
+  filters the list; an explicit `--include-disabled` flag (or a future `agw plugins` view) reveals
+  them. **`describe KIND/NAME` is an explicit by-name lookup, so it always renders the named row**
+  (annotating its disabled state); the hide rule is list-only, hiding a resource the operator asked
+  for by name would be user-hostile. Provenance ("from plugin `<name>`") comes from the
+  `system-plugin` origin already on each row.
+- **The doctor plugin roster** iterates `SYSTEM_PLUGINS` against `config.plugins_enabled` and
+  renders `plugin <name>: <description>` tagged enabled or `disabled (not enabled in [plugins])`.
+  Roster only, existence/description/enable-state, never a disabled plugin's contributed
+  capabilities or resources. A plugin is not a resource kind (R12), so this is a bespoke `doctor`
+  surface, not a `KIND_REGISTRY`-dispatched hook. Reserved `required_scopes`, when populated, render
+  as an informational line (R10, unenforced).
+
+### 10. Test-fixture plugin (R11)
 
 A fixture plugin under `tests/` (its own descriptor + one trivial capability impl of an existing
-kind + one YAML manifest) registered into a test-local installed index. Tests assert: enabled means
-its capability row and manifest resource appear in the finalized Registry with `system-plugin`
-origin and are consumable at their site; disabled means both absent everywhere; unknown enabled name
-gives a typed config error (not `KeyError`); two fixtures colliding give a `_check_collision` error;
-operator override of a plugin resource wins where `builtin_override` permits; a plugin cannot
-override a built-in (peer error); enable-then-disable within one process leaves the seated impl
-present but unreachable at its consumption site (the process-scoped-registration guard).
+kind
+
+- one YAML manifest), seated via the exported snapshot helper into a test-local index. Tests assert,
+  against the landed registry: enabled means its capability row and manifest resource are present,
+  enabled, and consumable with `system-plugin` origin; not-enabled means its capability row is
+  **present-but-disabled** (an operator `vm-site` referencing it is not-ready with "enable plugin
+  `<name>`", NOT an unknown-name error), its manifest resources are absent, and both are hidden from
+  default `resource list`; an unknown enabled name is a typed config error (not `KeyError`); two
+  fixtures colliding give a `_check_collision` error; operator override of a plugin resource wins
+  where `builtin_override` permits; a plugin cannot override a built-in (peer error); descriptor
+  validation rejects a missing-name / instance-not-class / unknown-kind / colliding-impl descriptor
+  with a typed, attributed error; enable-then-disable in one process leaves the seated impl present
+  but its row disabled (the enablement axis, not re-registration). A composition test injects a
+  second stub source disabling a node and asserts `_node_enablement` composes it (R13 seam).
+
+## Interfaces (summary)
+
+- `Origin.system_plugin(*, plugin, source)`; `variant` gains `system-plugin`.
+- `Plugin` descriptor; `register_plugin(plugin)`; `SYSTEM_PLUGINS`; a seat/unseat snapshot helper.
+- `CapabilityAdapter` (seat + build-row) and `CAPABILITY_ADAPTERS` keyed by capability kind.
+- `plugins.publish_plugins(registry, config)`.
+- `Config.plugins_enabled: tuple[str, ...]`.
+- Enablement source: `(rows) -> Mapping[(kind, name), DisabledMark]`; `_node_enablement` composes a
+  list of sources; `Enablement`/`DependencyState` carry an optional disabled reason.
 
 ## Sequencing rationale
 
-Origin first (pure vocabulary, mergeable alone), then the plugin package + adapter +
-`_check_collision` extension against the fixture (framework provable in isolation), then config,
-then the `build_registry` wiring that joins them, then doctor and docs. Each step ends green. The
-wiring step is where behavior first changes for a real config; everything before it is inert
-additions.
+Origin first (pure vocabulary, mergeable alone); then the plugin package + adapter + atomic
+`register_plugin` + the `_check_collision` extension, provable against the fixture in isolation;
+then config; then the `_node_enablement` composition + the plugin source (the enablement producer);
+then the `build_registry` wiring that joins publication to enablement; then presentation
+(disabled-hides + the doctor roster) and docs. Each step ends green. The producer step is where a
+not-enabled plugin first becomes present-but-disabled; the wiring step is where a real config first
+changes behavior.
 
 ## Risks and mitigations
 
-- **Impl registration is process-global, but enablement is per-config.** Impls seat into
-  module-level registries at import, for every shipped plugin, unconditionally. This is deliberate:
-  it mirrors core exactly (core impls are always present too), keeps `build_registry` pure, and
-  means a plugin's reachability is governed solely by whether its row published, not by import
-  timing. In a long-lived process serving multiple configs (the anticipated web client), a shipped
-  plugin's impl is present regardless of any one config, which is correct: with no published row it
-  is unreachable. Mitigation: seating is idempotent per impl `name`; a genuine name collision
-  between two shipped impls is a typed error at import; a test enables-then-disables within one
-  process and asserts the seated impl stays unreachable at its consumption site.
-- **Enablement not honored somewhere resources are read.** The gate is "did the row publish"; every
-  consumption path reads the finalized Registry, so a disabled plugin is absent uniformly.
-  Mitigation: the disabled-fixture test asserts absence across `resource list`, a consumption site,
-  and doctor's non-roster sections.
-- **Unknown-name error placement.** The check must live inside `publish_enabled` (pre-publish), not
-  in the post-finalize boundary block, or a `KeyError` crashes first. Mitigation: the publisher
-  resolves all names up front and raises the typed error before publishing; a test pins the message
-  and that it precedes any publish.
-- **Collision-matrix coverage.** The R7 matrix must be exercised for each variant pairing.
-  Mitigation: tests cover operator-over-plugin (both `builtin_override` outcomes), plugin-over-
-  built-in, built-in-over-plugin, and plugin-over-plugin, each asserting the specific message.
-- **Adapter drift as capability kinds evolve.** The adapter table must cover every capability kind.
-  Mitigation: a test asserts `CAPABILITY_ADAPTERS.keys()` equals the set of capability-category
-  kinds in `KIND_REGISTRY`, so a new capability kind added later fails the test until its adapter
-  exists.
-- **Scope creep into external plugins / commands / trust.** The reserved fields are typed and
-  defaulted but touched by nothing. Mitigation: no code reads `required_scopes` or `commands` beyond
-  doctor's informational render; tests assert they are inert.
+- **Registration is process-global; enablement is per-config.** Impls seat at import for every
+  shipped plugin, unconditionally (mirroring core, keeping `build_registry` pure). Reachability is
+  governed by the published row and its enablement, not import timing. Mitigation: atomic idempotent
+  registration with a typed cross-plugin collision error; the enable-then-disable-in-one-process
+  test asserts the seated impl's row goes disabled, not absent.
+- **The reason-carrying enablement is a change to the refactor's binary `Enablement`.** Mitigation:
+  keep it additive, an optional reason on the disabled state, so the refactor's existing
+  fold/gate/consumer code is untouched except where it reads the hint; a test pins that a
+  plugin-caused not-ready reason reads "enable plugin `<name>`".
+- **Disabled-hides could hide a genuinely referenced-but-disabled row an operator needs to debug.**
+  Mitigation: the reference itself is loud (the dependent is not-ready with the enable hint); the
+  doctor roster shows the plugin's state; `--include-disabled` reveals the rows.
+- **Adapter drift as capability kinds evolve.** Mitigation: the `CAPABILITY_ADAPTERS.keys()` ==
+  capability-kinds test.
+- **Collision-matrix coverage.** Mitigation: tests for each variant pairing with its specific
+  message.
+- **Scope creep into external plugins / commands / trust / operator-explicit disable.** Mitigation:
+  reserved fields are typed and inert; the enablement source composition is built and tested with a
+  stub second source but ships only the plugin source; tests assert the reserved fields and the
+  unbuilt operator source are untouched by behavior.
 
 ## What does not change
 
-- The capability model and its kinds; the manifest loader and envelope; the Registry's finalize and
-  freeze; operator TOML and YAML surfaces; the CLI entry flow and command registration (no plugin
-  owns a command in v1). The Registry's collision policy DOES change (component 6b); everything else
-  in the Registry is untouched. Plugin capabilities configure through their consuming resources
-  exactly as built-in capabilities do.
+- The capability kinds and `KIND_REGISTRY`; the manifest loader and envelope; the registry's
+  finalize passes, fold, materialization, and freeze (the plugin work produces enablement _into_ the
+  existing seam, it does not change the passes); operator TOML/YAML surfaces; the CLI entry flow and
+  command registration (no plugin owns a command in v1). The Registry's collision policy DOES change
+  (component 7). Plugin capabilities configure through their consuming resources exactly as built-in
+  capabilities do.

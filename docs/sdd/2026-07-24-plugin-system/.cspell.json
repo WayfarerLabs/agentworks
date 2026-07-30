@@ -3,13 +3,23 @@
   "import": ["../../../.cspell.json"],
   "words": [
     "adrs",
+    "contextmanager",
     "declarable",
+    "frozenset",
     "impls",
+    "importlib",
+    "informationally",
+    "monkeypatch",
+    "monkeypatching",
+    "precheck",
     "referenceable",
     "repointed",
+    "rollups",
     "sandboxing",
+    "seatable",
     "subapp",
     "subapps",
+    "unbuilt",
     "unrepresentable"
   ]
 }
