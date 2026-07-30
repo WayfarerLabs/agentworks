@@ -17,11 +17,11 @@ from typing import TYPE_CHECKING
 import pytest
 
 from agentworks.bootstrap import build_registry
-from agentworks.capabilities.git_credential.azdo import AzDOCredentialProvider
 from agentworks.capabilities.git_credential.github import GitHubCredentialProvider
 from agentworks.config import load_config
 from agentworks.errors import ConfigError
 from agentworks.git_credentials import CredentialMaterials, build_credential_materials
+from agentworks.plugins.azure.azdo import AzDOCredentialProvider
 from agentworks.vms.initializer import resolve_git_credential_providers
 
 if TYPE_CHECKING:
@@ -816,7 +816,7 @@ def test_unsafe_scope_values_rejected_at_build() -> None:
 
 def test_azdo_org_charset_validated() -> None:
     with pytest.raises(ConfigError, match="organization name"):
-        from agentworks.capabilities.git_credential.azdo import AzDOCredentialProvider as A
+        from agentworks.plugins.azure.azdo import AzDOCredentialProvider as A
 
         A.validate("t", {"org": "my org"})
 

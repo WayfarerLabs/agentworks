@@ -136,8 +136,8 @@ spec:
     region: eastus2
 ```
 
-- `spec.platform` names a `vm-platform` capability row (`lima`, `wsl2`, `azure-vm`; `proxmox` ships
-  as the opt-in `proxmox` system plugin, see [System plugins](#system-plugins));
+- `spec.platform` names a `vm-platform` capability row (`lima`, `wsl2`; `proxmox` and `azure-vm`
+  ship as the opt-in `proxmox` and `azure` system plugins, see [System plugins](#system-plugins));
   `spec.platform_config` is validated by that platform (unknown keys are errors). Remote Lima is
   just a lima site with `platform_config.vm_host: user@host`.
 - The `lima-local` and `wsl2` sites ship built in with empty config. Like every site they register
@@ -151,7 +151,10 @@ spec:
   the `proxmox-token` secret (override with `token_secret`), auto-declared and resolved through the
   backend chain like any other. The `proxmox` platform ships as the opt-in `proxmox` system plugin,
   so a proxmox site (declared or legacy) is not-ready with an "enable plugin `proxmox`" hint and
-  refused at use until you set `[plugins] enabled = ["proxmox"]`.
+  refused at use until you set `[plugins] enabled = ["proxmox"]`. The `azure-vm` platform likewise
+  ships as the opt-in `azure` system plugin (which also provides the `azdo` git-credential provider
+  and the `az-cli` install-command), so the `azure-dev` example above is not-ready with an "enable
+  plugin `azure`" hint until you set `[plugins] enabled = ["azure"]`.
 - The legacy flat `[azure]` / `[proxmox]` TOML sections keep loading as deprecated vm-site
   declarations; `agw resource migrate vm-site` moves them to manifests.
 
@@ -242,13 +245,14 @@ policy is per kind:
   carry the reason); using a not-ready site is an error naming the requirement. A site naming an
   UNKNOWN platform (a typo, or an uninstalled plugin) is a hard error at load, not a self-disable.
 - **Secret backends** (`env-var`, `prompt`; `onepassword` ships as an opt-in system plugin, see
-  below), **VM platforms** (`lima`, `wsl2`, `azure-vm`; `proxmox` ships as the opt-in `proxmox`
-  system plugin, see below), and **session harnesses** (`shell`; `claude-code` ships as the opt-in
-  `claude` system plugin, see below): registered capabilities, shown as read-only rows. You cannot
-  declare or override them; secrets customize per secret via `backend_mappings`, platforms configure
-  per site via `platform_config`, and harnesses configure per session-template via `harness_config`.
-  Every installed platform publishes a row regardless of host support: a platform whose host
-  requirements are not met (e.g. `wsl2` off Windows) publishes a present, not-ready row
+  below), **VM platforms** (`lima`, `wsl2`; `proxmox` and `azure-vm` ship as the opt-in `proxmox`
+  and `azure` system plugins, see below), **git-credential providers** (`github`; `azdo` ships in
+  the opt-in `azure` system plugin), and **session harnesses** (`shell`; `claude-code` ships as the
+  opt-in `claude` system plugin, see below): registered capabilities, shown as read-only rows. You
+  cannot declare or override them; secrets customize per secret via `backend_mappings`, platforms
+  configure per site via `platform_config`, and harnesses configure per session-template via
+  `harness_config`. Every installed platform publishes a row regardless of host support: a platform
+  whose host requirements are not met (e.g. `wsl2` off Windows) publishes a present, not-ready row
   (`agw resource list` and `agw doctor` show it with the reason), and a site referencing it is
   not-ready rather than erroring.
 
@@ -284,9 +288,10 @@ is the opt-in state and hides the row, while a **not-ready** resource (enabled b
 this host) still lists with its reason.
 
 The shipped build installs the `onepassword` (1Password secret backend), `claude` (Claude Code
-session harness and its `claude` CLI install-command), and `proxmox` (Proxmox VE VM platform)
-plugins, all disabled until opted in. Authoring a system plugin is documented in the plugins package
-README (`cli/agentworks/plugins/README.md`).
+session harness and its `claude` CLI install-command), `proxmox` (Proxmox VE VM platform), and
+`azure` (Azure VM platform, `azdo` git-credential provider, and `az-cli` install-command) plugins,
+all disabled until opted in. Authoring a system plugin is documented in the plugins package README
+(`cli/agentworks/plugins/README.md`).
 
 **Config errors in a not-enabled plugin's resources surface only once you enable it.** Validation
 runs over enabled, reachable resources, so a mistake in a disabled plugin's config (for example a

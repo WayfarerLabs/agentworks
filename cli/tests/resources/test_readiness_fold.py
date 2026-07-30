@@ -200,11 +200,18 @@ def test_disabled_secret_backend_is_excluded_from_the_active_chain() -> None:
     # then disables it, exactly as the plugin opt-in source would.
     publish_plugins(registry, cast("Config", SimpleNamespace(plugins_enabled=())))
     # ``publish_plugins`` also emits the claude plugin's weak install-command
-    # row; disable it too so no weak row survives finalize unmarked (the
-    # weak-implies-disabled guard). The stub stands in for the real plugin
-    # source, which would disable every not-enabled plugin's rows.
+    # row and the azure plugin's weak az-cli install-command row; disable them
+    # too so no weak row survives finalize unmarked (the weak-implies-disabled
+    # guard). The stub stands in for the real plugin source, which would disable
+    # every not-enabled plugin's rows.
     registry.finalize(
-        enablement_sources=[_source_disabling(("secret-backend", "onepassword"), ("user-install-command", "claude"))]
+        enablement_sources=[
+            _source_disabling(
+                ("secret-backend", "onepassword"),
+                ("user-install-command", "claude"),
+                ("system-install-command", "az-cli"),
+            )
+        ]
     )
 
     # The enablement axis reads disabled; the fold still stored a ready
@@ -244,10 +251,11 @@ def test_r9_9_mapping_to_disabled_backend_is_inert_until_enabled() -> None:
             SecretDecl(name="vaulted", description="a vaulted key", backend_mappings={"onepassword": "not-an-op-uri"}),
             Origin.operator_declared(file=Path("c.toml"), line=1),
         )
-        # Always disable the claude plugin's weak install-command row (emitted
-        # by publish_plugins) so no weak row survives finalize unmarked;
-        # onepassword is disabled only on the disabled branch.
-        disabled = [("user-install-command", "claude")]
+        # Always disable the claude plugin's weak claude install-command row and
+        # the azure plugin's weak az-cli install-command row (both emitted by
+        # publish_plugins) so no weak row survives finalize unmarked; onepassword
+        # is disabled only on the disabled branch.
+        disabled = [("user-install-command", "claude"), ("system-install-command", "az-cli")]
         if disable_onepassword:
             disabled.append(("secret-backend", "onepassword"))
         registry.finalize(enablement_sources=[_source_disabling(*disabled)])

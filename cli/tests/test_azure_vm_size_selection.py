@@ -10,13 +10,13 @@ import pytest
 
 from agentworks.capabilities.base import RunContext
 from agentworks.capabilities.vm_platform import ProvisionRequest
-from agentworks.capabilities.vm_platform.azure_vm import (
+from agentworks.errors import ConfigError
+from agentworks.plugins.azure.platform import (
     _DEFAULT_VM_SIZES,
     AzureVMPlatform,
     _parse_size_catalog,
     _select_vm_size,
 )
-from agentworks.errors import ConfigError
 
 if TYPE_CHECKING:
     from tests.conftest import CapturedOutput
@@ -56,7 +56,7 @@ class TestSelectVMSize:
         """Selection is order-independent (the minimum by (cpus, memory)),
         so an unsorted (operator) catalog still yields the true smallest
         fit."""
-        from agentworks.capabilities.vm_platform.azure_vm import _VMSize
+        from agentworks.plugins.azure.platform import _VMSize
 
         unsorted = (
             _VMSize(8, 32, "big"),

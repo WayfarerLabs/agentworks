@@ -118,7 +118,9 @@ def test_build_registry_validates_the_blob_via_the_capability(tmp_path: Path) ->
     """The platform_config blob's shape check moved out of decode into
     the finalize ``validate`` pass (R3): a malformed blob decodes fine
     and fails at build_registry, framed by the site name (``azure-dev``)
-    with the source location re-attached from the origin."""
+    with the source location re-attached from the origin. ``azure-vm`` ships
+    in the opt-in ``azure`` system plugin, whose validation is deferred while
+    disabled, so the plugin is enabled here for the blob check to fire."""
     from agentworks.bootstrap import build_registry
     from agentworks.config import load_config
 
@@ -127,7 +129,10 @@ def test_build_registry_validates_the_blob_via_the_capability(tmp_path: Path) ->
     pub.write_text("ssh-ed25519 AAAA test")
     priv.write_text("key")
     cfg = tmp_path / "config.toml"
-    cfg.write_text(f'[operator]\nssh_public_key = "{pub.as_posix()}"\nssh_private_key = "{priv.as_posix()}"\n')
+    cfg.write_text(
+        f'[operator]\nssh_public_key = "{pub.as_posix()}"\nssh_private_key = "{priv.as_posix()}"\n'
+        '[plugins]\nenabled = ["azure"]\n'
+    )
     resources = tmp_path / "resources"
     resources.mkdir()
     (resources / "site.yaml").write_text(SITE_DOC.replace('    subscription_id: "0000"\n', ""))
@@ -237,4 +242,7 @@ def test_bundled_sites_finalize_against_the_platform_rows(
     registry.finalize()
     assert registry.lookup("vm-site", "lima-local").platform == "lima"
     assert registry.lookup("vm-site", "wsl2").platform == "wsl2"
-    assert registry.lookup("vm-platform", "azure-vm").name == "azure-vm"
+    # ``azure-vm`` is no longer a core built-in row; it publishes from the
+    # ``azure`` system plugin (Phase 11), so the core publisher above does not
+    # emit it. Its platform row is exercised in tests/plugins/test_azure.py.
+    assert registry.lookup("vm-platform", "lima").name == "lima"

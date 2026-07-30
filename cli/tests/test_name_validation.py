@@ -7,7 +7,6 @@ import pytest
 from agentworks.agents.grants import MAX_WORKSPACE_NAME_LENGTH, WS_GROUP_PREFIX, workspace_group
 from agentworks.agents.manager import AGENT_PREFIX, MAX_AGENT_NAME_LENGTH
 from agentworks.agents.manager._common import derive_linux_user
-from agentworks.capabilities.vm_platform.azure_vm import VNET_NAME_SUFFIX
 from agentworks.config import (
     AZURE_VNET_NAME_MAX_LENGTH,
     LINUX_GROUPNAME_MAX_LENGTH,
@@ -19,6 +18,7 @@ from agentworks.config import (
     validate_name,
 )
 from agentworks.output import ValidationError
+from agentworks.plugins.azure.platform import VNET_NAME_SUFFIX
 from agentworks.sessions.tmux import AGENT_SOCKET_ROOT, MAX_SESSION_NAME_LENGTH, SUN_PATH_MAX
 
 

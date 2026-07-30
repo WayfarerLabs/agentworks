@@ -12,9 +12,9 @@ name a descriptor could spoof; and external loading later becomes "another
 way to obtain a ``module.PLUGIN``", not a new authoring contract.
 
 ``_INSTALLED_MODULES`` ships the migrated system plugins (``onepassword``,
-``claude``, ``proxmox`` so far, R11); importing this package registers each, seating its
-capability impls into the core code registries, and indexes it into
-``SYSTEM_PLUGINS``. A shipped plugin's rows publish present-but-disabled
+``claude``, ``proxmox``, ``azure``, R11); importing this package registers
+each, seating its capability impls into the core code registries, and indexes
+it into ``SYSTEM_PLUGINS``. A shipped plugin's rows publish present-but-disabled
 until an operator opts in via ``[plugins] enabled``.
 """
 
@@ -22,6 +22,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Protocol
 
+from agentworks.plugins import azure as _azure
 from agentworks.plugins import claude as _claude
 from agentworks.plugins import onepassword as _onepassword
 from agentworks.plugins import proxmox as _proxmox
@@ -78,6 +79,6 @@ def _build_installed_index(modules: Sequence[_PluginModule]) -> dict[str, Plugin
 
 # Add a module here to ship a plugin. Each shipped module's ``PLUGIN`` is
 # registered (seating its capability impls) and indexed at import.
-_INSTALLED_MODULES: tuple[_PluginModule, ...] = (_onepassword, _claude, _proxmox)
+_INSTALLED_MODULES: tuple[_PluginModule, ...] = (_onepassword, _claude, _proxmox, _azure)
 
 SYSTEM_PLUGINS: dict[str, Plugin] = _build_installed_index(_INSTALLED_MODULES)

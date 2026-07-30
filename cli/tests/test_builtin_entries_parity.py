@@ -128,17 +128,13 @@ EXPECTED_APT_PACKAGES: dict[str, dict[str, Any]] = {
     },
 }
 
-EXPECTED_SYSTEM_INSTALL_COMMANDS: dict[str, dict[str, Any]] = {
-    "az-cli": {
-        "name": "az-cli",
-        "description": "Azure CLI",
-        "command": "curl -sL https://aka.ms/InstallAzureCLIDeb | sudo bash",
-        "path": [],
-        "test_exec": "az",
-        "test_file": None,
-        "test_dir": None,
-    },
-}
+# NOTE: `az-cli` (the Azure CLI) is deliberately absent: it migrated out of the
+# built-in bundle into the `azure` system plugin (Phase 11), so it now publishes
+# a `system-plugin` row, present-but-disabled by default. The built-in bundle
+# now ships no system-install-commands.
+# `test_bundled_builtin_rows_match_oracle` pins that it is gone from the built-in
+# bundle and now carries a system-plugin origin.
+EXPECTED_SYSTEM_INSTALL_COMMANDS: dict[str, dict[str, Any]] = {}
 
 EXPECTED_USER_INSTALL_COMMANDS: dict[str, dict[str, Any]] = {
     "oh-my-zsh": {
@@ -297,10 +293,13 @@ def test_bundled_builtin_rows_match_oracle(tmp_path: Path) -> None:
 
     srcs = kind_dict(registry, "apt-source")
     pkgs = kind_dict(registry, "apt-package")
-    sys_cmds = kind_dict(registry, "system-install-command")
-    # The `claude` user-install-command now ships (present-but-disabled) from
-    # the `claude` system plugin, so it appears here with a system-plugin
-    # origin; scope the built-in oracle to the built-in-origin rows.
+    # The `az-cli` system-install-command now ships (present-but-disabled) from
+    # the `azure` system plugin, and the `claude` user-install-command from the
+    # `claude` system plugin, each with a system-plugin origin; scope the
+    # built-in oracles to the built-in-origin rows.
+    sys_cmds = {
+        n: e for n, e in kind_dict(registry, "system-install-command").items() if e.origin.variant == "built-in"
+    }
     usr_cmds = {n: e for n, e in kind_dict(registry, "user-install-command").items() if e.origin.variant == "built-in"}
 
     assert {name: apt_source_payload(entry) for name, entry in srcs.items()} == EXPECTED_APT_SOURCES
@@ -317,6 +316,14 @@ def test_bundled_builtin_rows_match_oracle(tmp_path: Path) -> None:
     assert claude.origin is not None
     assert claude.origin.variant == "system-plugin"
     assert claude.origin.plugin == "claude"
+
+    # The migrated `az-cli` install-command is gone from the built-in bundle and
+    # now carries the `azure` system-plugin origin (Phase 11).
+    assert "az-cli" not in sys_cmds  # not a built-in row anymore
+    az_cli = kind_dict(registry, "system-install-command")["az-cli"]
+    assert az_cli.origin is not None
+    assert az_cli.origin.variant == "system-plugin"
+    assert az_cli.origin.plugin == "azure"
 
     # Provenance: every built-in row is a built-in origin pointed at the
     # bundled file for its kind (not the former agentworks.catalog source).

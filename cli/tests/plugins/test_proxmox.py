@@ -97,9 +97,10 @@ def test_platform_row_is_disabled_system_plugin_by_default(tmp_path: Path) -> No
 
 def test_core_platforms_stay_builtin(tmp_path: Path) -> None:
     """The common local path is untouched: the core platforms remain built-in,
-    enabled rows after the migration."""
+    enabled rows after the migration. (``azure-vm`` is no longer among them: it
+    migrated to the ``azure`` system plugin in Phase 11.)"""
     registry = build_registry(_config(tmp_path))
-    for name in ("lima", "wsl2", "azure-vm"):
+    for name in ("lima", "wsl2"):
         row = registry.lookup("vm-platform", name)
         assert row.origin.variant == "built-in"
         assert registry.graph.enablement_of("vm-platform", name) is Enablement.enabled

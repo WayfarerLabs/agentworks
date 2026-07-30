@@ -2,14 +2,15 @@
 
 ``VM_PLATFORM_REGISTRY`` holds the code behind the read-only
 ``vm-platform`` capability resources: one :class:`VMPlatform` subclass
-per backend kind (``lima``, ``wsl2``, ``azure-vm`` as core built-ins).
-The declarable ``vm-site`` kind exposes a configured platform, and site
-resolution (``agentworks.vms.sites``) is the only consumer that
-constructs platform instances; manager code never imports this registry
-or the concrete classes.
+per backend kind (``lima``, ``wsl2`` as core built-ins). The declarable
+``vm-site`` kind exposes a configured platform, and site resolution
+(``agentworks.vms.sites``) is the only consumer that constructs platform
+instances; manager code never imports this registry or the concrete
+classes.
 
-The ``proxmox`` platform now ships in the opt-in ``proxmox`` system plugin
-(``agentworks.plugins.proxmox``); its adapter re-seats it into
+The ``proxmox`` platform (``agentworks.plugins.proxmox``) and the
+``azure-vm`` platform (``agentworks.plugins.azure``) now ship in opt-in
+system plugins; each plugin's adapter re-seats its class into
 ``VM_PLATFORM_REGISTRY`` at import, so site resolution still finds it by
 registry name, while its ROW publishes with a ``system-plugin`` origin
 (see ``publish_to``).
@@ -20,7 +21,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from agentworks.capabilities.vm_platform.azure_vm import AzureVMPlatform
 from agentworks.capabilities.vm_platform.base import (
     ProvisionRequest,
     ProvisionResult,
@@ -35,7 +35,6 @@ if TYPE_CHECKING:
 
 __all__ = [
     "VM_PLATFORM_REGISTRY",
-    "AzureVMPlatform",
     "LimaPlatform",
     "ProvisionRequest",
     "ProvisionResult",
@@ -48,7 +47,6 @@ __all__ = [
 VM_PLATFORM_REGISTRY: dict[str, type[VMPlatform]] = {
     LimaPlatform.name: LimaPlatform,
     WSL2Platform.name: WSL2Platform,
-    AzureVMPlatform.name: AzureVMPlatform,
 }
 """Every platform this BUILD ships (INSTALLED, in doctor's vocabulary).
 Which of them are usable on this host is the platform's own call, but
@@ -69,12 +67,13 @@ the shape a plugin's platform brings along. Future plugins register here
 @dataclass(frozen=True)
 class VMPlatformEntry:
     """A name-keyed marker for one VM platform capability (``"lima"``,
-    ``"azure-vm"``, ...).
+    ``"wsl2"``, ...).
 
-    The actual platform class (``LimaPlatform``, ``AzureVMPlatform``)
-    lives beside this in ``agentworks.capabilities.vm_platform``; this
-    row is what ``vm-site`` ``spec.platform`` references resolve against
-    in the framework. Lives with the capability (not ``vms/kinds.py``)
+    The actual platform class (``LimaPlatform`` in core, ``AzureVMPlatform``
+    in the ``azure`` plugin) lives beside its module; a core platform lives in
+    ``agentworks.capabilities.vm_platform``, a plugin platform in its plugin
+    package. This row is what ``vm-site`` ``spec.platform`` references resolve
+    against in the framework. Lives with the capability (not ``vms/kinds.py``)
     so publishing never imports the consuming domain.
 
     Inbound references live on the dependency graph
@@ -104,11 +103,12 @@ def publish_to(registry: Registry) -> None:
     old edge-suppression's job of hiding the missing capability row.
 
     A platform seated by a system plugin (``proxmox`` via the ``proxmox``
-    plugin) keeps its impl in ``VM_PLATFORM_REGISTRY`` so site resolution can
-    construct it, but its row is published by ``plugins.publish_plugins`` with
-    a ``system-plugin`` origin. Skip those names here so the plugin is the sole
-    publisher of the row; publishing it here too would collide (built-in vs
-    system-plugin) at ``Registry.add``.
+    plugin, ``azure-vm`` via the ``azure`` plugin) keeps its impl in
+    ``VM_PLATFORM_REGISTRY`` so site resolution can construct it, but its row is
+    published by ``plugins.publish_plugins`` with a ``system-plugin`` origin.
+    Skip those names here so the plugin is the sole publisher of the row;
+    publishing it here too would collide (built-in vs system-plugin) at
+    ``Registry.add``.
     """
     from agentworks.plugins.registration import plugin_seated_names
     from agentworks.resources import Origin

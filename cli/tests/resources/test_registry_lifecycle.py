@@ -293,10 +293,13 @@ def test_build_registry_publishes_builtin_apt_and_install_entries(
     cfg = load_config(example_config, warn_issues=False)
     r = build_registry(cfg)
 
+    # ``system-install-command`` is deliberately absent: its only built-in
+    # entry (``az-cli``) migrated to the ``azure`` system plugin (Phase 11), so
+    # the built-in bundle now ships no system-install-commands. The remaining
+    # three kinds still have built-in rows.
     for kind in (
         "apt-source",
         "apt-package",
-        "system-install-command",
         "user-install-command",
     ):
         # The built-in rows are built-in. Operator overrides (if any) would

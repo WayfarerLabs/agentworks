@@ -265,7 +265,7 @@ def _check_plugins(config: Config) -> HealthGroup:
     v1 default) renders nothing. When the shipped index is empty the group
     renders empty-but-present, so the surface exists and is testable even before
     any plugin ships; the migrated plugins (``onepassword``, ``claude``,
-    ``proxmox`` so far) now populate it.
+    ``proxmox``, ``azure``) now populate it.
     """
     from agentworks.plugins import SYSTEM_PLUGINS
 

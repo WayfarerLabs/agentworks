@@ -81,7 +81,12 @@ def test_admin_to_git_credentials_to_secret_walk(tmp_path: Path, ssh_keys: tuple
 def test_agent_template_to_git_credentials_to_secret_walk(tmp_path: Path, ssh_keys: tuple[Path, Path]) -> None:
     cfg = _write_cfg(
         tmp_path,
+        # ``azdo`` ships in the opt-in ``azure`` system plugin; enable it so the
+        # azdo credential is ready and the subgraph walk reaches its secret.
         """\
+        [plugins]
+        enabled = ["azure"]
+
         [git_credentials.azdo]
         type = "azdo"
         org = "my-org"
@@ -112,7 +117,12 @@ def test_collect_secrets_for_walks_admin_subgraph(tmp_path: Path, ssh_keys: tupl
 
     cfg = _write_cfg(
         tmp_path,
+        # ``azdo`` ships in the opt-in ``azure`` system plugin; enable it so the
+        # azdo credential is ready and the admin subgraph walk reaches its secret.
         """\
+        [plugins]
+        enabled = ["azure"]
+
         [git_credentials.github]
         type = "github"
 

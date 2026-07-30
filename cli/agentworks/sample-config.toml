@@ -121,6 +121,9 @@ ssh_private_key = "~/.ssh/id_ed25519"        # required: used for SSH connection
 #description = "Azure DevOps for my-org"          # optional, shown in prompts and logs
 #token = "git-token-azdo"                         # optional; default is `git-token-<name>`
 # Resolved secret value is the PAT (create at https://dev.azure.com/{org}/_usersSettings/tokens).
+# The `azdo` provider ships in the opt-in `azure` system plugin: an azdo
+# credential is not-ready and refused at use with an "enable plugin `azure`"
+# hint until you add `[plugins] enabled = ["azure"]` below.
 
 # --- Secrets ---
 # A pluggable, named-secret system used by env tables on resources below.
@@ -214,11 +217,12 @@ ssh_private_key = "~/.ssh/id_ed25519"        # required: used for SSH connection
 # never an unknown-name error. Only installed plugin names are valid here (an
 # unknown name is a hard error). The shipped build installs `onepassword` (the
 # 1Password secret backend), `claude` (the Claude Code session harness and its
-# `claude` CLI install-command), and `proxmox` (the Proxmox VE VM platform);
-# more bundles migrate to plugins over time. `agw doctor` shows a System plugins
-# roster with each plugin's state.
+# `claude` CLI install-command), `proxmox` (the Proxmox VE VM platform), and
+# `azure` (the Azure VM platform, the Azure DevOps git-credential provider, and
+# the `az-cli` install-command). `agw doctor` shows a System plugins roster with
+# each plugin's state.
 #[plugins]
-#enabled = ["onepassword", "claude", "proxmox"]        # names of installed system plugins to enable
+#enabled = ["onepassword", "claude", "proxmox", "azure"]   # names of installed system plugins to enable
 
 # --- VM sites (azure, proxmox, remote Lima, ...) ---
 # Places to create VMs are declared as vm-site RESOURCES (YAML manifests
@@ -230,6 +234,9 @@ ssh_private_key = "~/.ssh/id_ed25519"        # required: used for SSH connection
 # or legacy) is not-ready with an "enable plugin `proxmox`" hint until you add
 # `[plugins] enabled = ["proxmox"]` above. The proxmox API token is the
 # `proxmox-token` secret (default env-var: AW_SECRET_PROXMOX_TOKEN).
+# azure-vm likewise ships as the opt-in `azure` system plugin: an azure site
+# (declared or legacy) is not-ready with an "enable plugin `azure`" hint until
+# you add `[plugins] enabled = ["azure"]` above.
 
 # =============================================================================
 # Templates
@@ -290,7 +297,7 @@ ssh_private_key = "~/.ssh/id_ed25519"        # required: used for SSH connection
 #]
 #apt_packages = ["gh", "docker"]            # named apt-package entries from the registry
 #snap = []                                  # direct snap packages
-#system_install_commands = ["az-cli"]       # system-install-command entries from the registry
+#system_install_commands = ["az-cli"]       # system-install-command entries from the registry (az-cli ships in the opt-in `azure` plugin; enable it above)
 
 #[vm_templates.heavy]
 #inherits = ["default"]

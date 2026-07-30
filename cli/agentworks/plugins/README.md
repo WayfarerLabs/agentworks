@@ -20,17 +20,18 @@ A plugin is a single frozen `Plugin` descriptor (`plugins/base.py`), authored as
 from agentworks.plugins import Plugin
 
 PLUGIN = Plugin(
-    name="azure",
-    description="Azure VM platform",
-    capabilities={"vm-platform": (AzureVMPlatform,)},
-    manifests="agentworks_azure",  # optional; an importlib-resources package anchor
+    name="example-cloud",  # a fictitious plugin, for illustration
+    description="Example Cloud VM platform",
+    capabilities={"vm-platform": (ExampleCloudPlatform,)},
+    manifests="agentworks.plugins.example_cloud",  # optional; an importlib-resources package anchor
 )
 ```
 
 Fields:
 
 - **`name`** (required): the plugin's identity. Non-empty and `/`-free. It is the name an operator
-  writes in `[plugins] enabled` and the name the surfaces attribute rows to (`from plugin azure`).
+  writes in `[plugins] enabled` and the name the surfaces attribute rows to
+  (`from plugin example-cloud`).
 - **`description`**: shown in the doctor roster.
 - **`capabilities`**: a mapping keyed by capability kind, each value a tuple of impl **classes**,
   uniformly, even for `secret-backend` (whose registry holds instances; the class-vs-instance
@@ -56,8 +57,8 @@ _INSTALLED_MODULES: tuple[_PluginModule, ...] = (
 )
 ```
 
-The index ships the migrated system plugins (`onepassword`, `claude`, `proxmox` so far); each listed
-module is registered and seated at import. On import the index:
+The index ships the migrated system plugins (`onepassword`, `claude`, `proxmox`, `azure`); each
+listed module is registered and seated at import. On import the index:
 
 - registers each plugin, wrapping any failure with the real module name (a bad descriptor is a
   curation bug that reads as `system plugin '<module>' failed to register: ...`, not an opaque

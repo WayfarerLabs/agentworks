@@ -213,10 +213,11 @@ def test_r9_3_manifest_malformed_block_surfaces_under_resource_registry(
     """R9.3 doctor consequence: a malformed capability block in a MANIFEST now
     surfaces under the "Resource registry" check row, not "Manifest". Capability
     validation moved out of decode/load into the finalize ``validate`` pass, so
-    ``load_manifests`` accepts the block and ``build_registry`` fails it. Uses a
-    git-credential (always ready, host-independent, so its block always
-    validates)."""
-    cfg = _write_config(tmp_path)
+    ``load_manifests`` accepts the block and ``build_registry`` fails it. Uses an
+    azdo git-credential; azdo ships in the opt-in ``azure`` system plugin, whose
+    validation is deferred while disabled, so the plugin is enabled here for the
+    block to validate (host-independent, so it always validates once enabled)."""
+    cfg = _write_config(tmp_path, extras='[plugins]\nenabled = ["azure"]')
     resources_dir = tmp_path / "resources"
     resources_dir.mkdir()
     (resources_dir / "res.yaml").write_text(

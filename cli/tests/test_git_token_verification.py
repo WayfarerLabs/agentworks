@@ -22,10 +22,10 @@ import pytest
 
 from agentworks.bootstrap import build_registry
 from agentworks.capabilities.base import RunContext
-from agentworks.capabilities.git_credential.azdo import AzDOCredentialProvider
 from agentworks.capabilities.git_credential.github import GitHubCredentialProvider
 from agentworks.config import load_config
 from agentworks.errors import TokenRejectedError
+from agentworks.plugins.azure.azdo import AzDOCredentialProvider
 
 _EXPIRY_HEADER = "github-authentication-token-expiration"
 

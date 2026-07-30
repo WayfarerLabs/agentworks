@@ -331,7 +331,7 @@ Phase 7.
       stay (harmlessly enabled) or move to lima. A `vm-site` on `proxmox` is not-ready with the
       enable hint until enabled (pinned by dedicated opt-in tests). `db/migrations.py`'s frozen
       `ProxmoxPlatform` import is repointed to the plugin package.
-- [ ] **Phase 11: azure** (`azure-vm` platform + `azdo` git-credential + the `az-cli`
+- [x] **Phase 11: azure** (`azure-vm` platform + `azdo` git-credential + the `az-cli`
       install-command manifest; needs Phase 7). One plugin contributing **three kinds + a bundled
       manifest**, the fullest exercise (a multi-kind plugin validating the Phase 7 parity end-to-end
       alongside claude). `azdo` is part of the azure plugin, not a standalone plugin (matches prior
