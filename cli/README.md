@@ -86,7 +86,8 @@ agw console delete my-console              # Extra shells are lost but sessions 
 - [uv](https://docs.astral.sh/uv/) or [pipx](https://pipx.pypa.io/) for installation
 - [Tailscale](https://tailscale.com/) installed and connected (for VM workspaces)
 - One of: [Lima](https://lima-vm.io/), Azure CLI (`az`), [Proxmox](https://www.proxmox.com/), or
-  WSL2 (for VM provisioning)
+  WSL2 (for VM provisioning; Azure and Proxmox also need their [system plugin](#system-plugins)
+  enabled)
 
 ## Global Options
 
@@ -144,13 +145,16 @@ Manage virtual machines across declared vm-sites (Lima local or remote, Azure, W
 
 Where VMs are created is declared as `vm-site` resources: YAML manifests under
 `~/.config/agentworks/resources/` that pair a platform (the code that runs VMs on one backend kind)
-with its configuration. The `lima-local` and `wsl2` sites ship built in. Every site registers on
-every host and disables itself when this host lacks what it needs (wsl2 is Windows-only; a local
-Lima site needs `limactl`; a platform may simply not be installed): a disabled site still lists and
-describes, using it is an error naming the requirement, and `agw doctor` shows each platform's and
-site's state with the reason. Run `agw resource sample vm-site` for commented, ready-to-edit
-examples (an Azure site, a remote-Lima site with `platform_config.vm_host`). The former
-`agw vm-host` registry is gone: a remote Lima host is now just a vm-site.
+with its configuration. The `lima-local` and `wsl2` sites ship built in and are always available;
+the `azure-vm` and `proxmox` platforms ship as the opt-in `azure` and `proxmox` system plugins (see
+[System Plugins](#system-plugins)) and are not-ready until enabled. Every site registers on every
+host and reports not-ready when this host lacks what it needs (wsl2 is Windows-only; a local Lima
+site needs `limactl`; a platform may simply not be installed, or its plugin not enabled): a
+not-ready site still lists and describes, using it is an error naming the requirement, and
+`agw doctor` shows each platform's and site's state with the reason. Run
+`agw resource sample vm-site` for commented, ready-to-edit examples (an Azure site, a remote-Lima
+site with `platform_config.vm_host`). The former `agw vm-host` registry is gone: a remote Lima host
+is now just a vm-site.
 
 > **Note on WSL2:** WSL2 distros share the Windows workstation's lifecycle. They idle-shut after
 > ~60s of no `wsl.exe` activity (`vmIdleTimeout` in `.wslconfig`) and do not survive workstation
@@ -593,9 +597,13 @@ which is a permanent supported spelling, not a deprecation.
 
 The `claude-code` harness runs Claude Code as the session: `session create` starts a new Claude
 session and `session restart` resumes the same conversation when its transcript still exists on disk
-(launching fresh when Claude never wrote one). It needs only that `claude` is installed on the
-launch target, and announces the chosen action (resume vs new session) in the pane, so the decision
-is never silent. Its `harness_config` vocabulary is three optional fields:
+(launching fresh when Claude never wrote one). It ships as the opt-in `claude` system plugin (see
+[System Plugins](#system-plugins)), disabled by default: a session-template naming it still lists
+ready, but creating a session on it is refused with an "enable plugin `claude`" hint until you add
+`claude` to `[plugins] enabled`. (The built-in `shell` harness stays the default and needs no
+opt-in.) Once enabled, it needs only that `claude` is installed on the launch target, and announces
+the chosen action (resume vs new session) in the pane, so the decision is never silent. Its
+`harness_config` vocabulary is three optional fields:
 
 - `permission_mode`: forwarded verbatim to `claude --permission-mode` (its choice set is Claude's,
   not validated here).
@@ -672,10 +680,12 @@ mappings, template inheritance chains, resolution previews), reach for the per-k
 | `agw resource sample KIND [--write]` | Print (or save) a kind's commented sample manifest (--all for all)   |
 
 `resource list` accepts `--kind <csv>` (e.g. `--kind secret,vm-template`) and `--origin <variant>`
-where variant is `operator`, `auto`, or `builtin`. `--names-only` emits `kind/name` per line and
-backs shell completion (`/` cannot appear in resource names, so the split is unambiguous). The
-`kind/name` token is the one grammar across the resource group: `resource describe secret/npm-token`
-and `resource migrate vm-template/dev` take the same shape.
+where variant is `operator`, `auto`, `builtin`, or `plugin`. Disabled rows (a not-enabled system
+plugin's capabilities and bundled resources) are hidden by default; pass `--include-disabled` to
+reveal them (combine with `--origin plugin` to see just a not-enabled plugin's rows). `--names-only`
+emits `kind/name` per line and backs shell completion (`/` cannot appear in resource names, so the
+split is unambiguous). The `kind/name` token is the one grammar across the resource group:
+`resource describe secret/npm-token` and `resource migrate vm-template/dev` take the same shape.
 
 `resource migrate` is a recurring, incremental mover -- run it any time you want to move resources
 (or a subset) from TOML to YAML manifests. Selectors scope the run: `KIND` one kind, `KIND/NAME` one
@@ -721,6 +731,7 @@ Settings sections (`config.toml`, permanent):
 - `[session.config]` -- session defaults (history limit)
 - `[secret_config]` -- active secret backend chain (`[secret_backends.*]` sections are deprecated
   no-ops; see Secret Backends below)
+- `[plugins]`: opt-in list of enabled system plugins (see [System Plugins](#system-plugins) below)
 
 Resource kinds (YAML manifests; the deprecated TOML section is noted for each):
 
@@ -729,8 +740,9 @@ Resource kinds (YAML manifests; the deprecated TOML section is noted for each):
   subscription/resource-group/region, Proxmox API endpoint + token secret, remote-Lima `vm_host`).
   The `lima-local` and `wsl2` sites ship built in (on hosts where their platform can run) and their
   names are reserved
-- `vm-platform`: read-only capability rows for the in-tree platforms (lima, wsl2, azure-vm,
-  proxmox); listed by `agw resource kinds`, never declared
+- `vm-platform`: read-only capability rows for the VM platforms (`lima`, `wsl2` built in; `azure-vm`
+  and `proxmox` ship as the opt-in `azure` and `proxmox` system plugins, disabled by default, see
+  [System Plugins](#system-plugins)); listed by `agw resource kinds`, never declared
 - `vm-template` (`[vm_templates.*]`): VM resources, apt packages, system install commands, mise, and
   the target `site`
 - `admin-template` (`[admin.config]`) -- admin user shell, dotfiles, git credentials, user install
@@ -893,11 +905,45 @@ the actual failure.
 
 ### Secret Backends
 
-A **backend** is a capability resource that produces secret values (`env-var`, `prompt`; future
-backends like `onepassword`): a read-only row backed by registered code, listed by
+A **backend** is a capability resource that produces secret values (`env-var`, `prompt` built in;
+`onepassword` ships as the opt-in `onepassword` system plugin, disabled by default, see
+[System Plugins](#system-plugins) below): a read-only row backed by registered code, listed by
 `agw resource list --kind secret-backend` and activated in precedence order by the chain
 (`[secret_config].backends`). Per-secret behavior -- identifier overrides, structured store
 addressing, opt-outs -- lives in each secret's `backend_mappings.<backend>`.
+
+### System Plugins
+
+Agentworks ships some vendor- and tool-specific capabilities (VM platforms, session harnesses,
+git-credential providers, secret backends) as **system plugins**: separable bundles that are
+installed but off by default. The shipped build installs `azure` (the `azure-vm` VM platform, the
+`azdo` git-credential provider, and the `az-cli` install-command), `proxmox` (the `proxmox` VM
+platform), `onepassword` (the `onepassword` secret backend), and `claude` (the `claude-code` session
+harness and the `claude` CLI install-command). (This is a different sense of "plugin" from
+[Claude Code Plugins](#claude-code-plugins) below, which installs marketplace plugins into Claude
+Code itself.)
+
+Opt in by name in `config.toml`:
+
+```toml
+[plugins]
+enabled = ["azure", "proxmox", "onepassword", "claude"]   # only the ones you use
+```
+
+A resource that references a not-enabled plugin's contribution (an `azure-vm` vm-site, a
+`claude-code` session-template, a secret mapped to `onepassword`, ...) is not-ready, or refused at
+use, with an "enable plugin `<name>`" hint, never an unknown-name error. The default local path (the
+`lima` / `wsl2` platforms, the `shell` harness, the `env-var` / `prompt` secret backends, and the
+`github` git-credential provider) is built in, always on, and needs no `[plugins]` entry.
+
+A not-enabled plugin's rows are hidden from `agw resource list` by default; pass
+`--include-disabled` to reveal them (see [Resource Registry](#resource-registry) above).
+`agw doctor` has a **System plugins** group listing every installed plugin, its description, and
+whether it is enabled.
+
+See [docs/guides/resources.md](../docs/guides/resources.md#system-plugins) for the full model
+(origins, the disabled-resource semantics, config-error deferral) and the upgrade note for configs
+that relied on Azure, Proxmox, 1Password, or Claude Code before they became opt-in.
 
 ### Mise (Polyglot Tool Manager)
 

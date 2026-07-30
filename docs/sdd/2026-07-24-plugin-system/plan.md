@@ -343,12 +343,16 @@ docs/sample-config/help are lockstep-updated.
 
 ### Migration closeout
 
-- [ ] `migration-strategy.md` authored and kept accurate (current-state inventory, per-bundle
-      before/after, the opt-in breaking change, the re-enable path).
-- [ ] Operator-facing: `sample-config.toml` shows an example `[plugins] enabled`;
-      `docs/guides/     resources.md` (or a migration note) documents the opt-in change and how to
-      re-enable; the doctor roster lists the four shipped plugins; completions still correct.
-- [ ] ADR 0021 updated: the R9 manifest limitation is now RESOLVED (present-but-disabled parity),
-      not deferred; the migration + breaking change recorded.
-- [ ] Capstone verification pass (R1-R14 + R11.1, all four migrated bundles gated through their real
-      consumer, the default local path unaffected); then `locked.md` re-written.
+- [x] `migration-strategy.md` authored and kept accurate (current-state inventory, per-bundle
+      before/after, the opt-in breaking change, the re-enable path). Corrected in-flight where the
+      code contradicted it (the proxmox fixture-strategy premise).
+- [x] Operator-facing: `sample-config.toml` shows an example `[plugins] enabled`;
+      `docs/guides/resources.md` documents the opt-in change and how to re-enable (the "Upgrading"
+      note); `cli/README.md` gains a "System Plugins" section and its stale platform/backend/harness
+      roster is de-staled; `docs/guides/proxmox.md` gains an enable step; the doctor roster lists
+      the four shipped plugins; completions unaffected (`[plugins]` is config, not a CLI surface).
+- [x] ADR 0021 updated: the R9 manifest limitation is RESOLVED (present-but-disabled parity), not
+      deferred; the migration + breaking change recorded.
+- [x] Capstone verification pass (R1-R14 + R11.1, all four migrated bundles gated through their real
+      consumer, the default local path unaffected; READY-TO-LOCK after two docs fixes, both
+      applied); `locked.md` re-written for the complete effort.

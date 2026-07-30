@@ -108,6 +108,14 @@ raised up front, before anything publishes, never a `KeyError` from deep in publ
 - The strict `[plugins]` stance is recorded as a reusable decision rule, so the
   strict-versus-lenient question is settled for future config sections rather than re-litigated per
   section.
+- The model is proven, not just built: four world-specific bundles were migrated out of the core
+  into shipped plugins in the same effort, `onepassword` (secret-backend), `claude` (harness + the
+  `claude` install-command), `proxmox` (vm-platform), and `azure` (the `azure-vm` platform, the
+  `azdo` git-credential provider, and the `az-cli` install-command). Together they exercise all four
+  capability kinds and the bundled-manifest path against their real consumers, and they establish
+  the migration pattern (impl `git mv` into the plugin package; the core `publish_to` skips the
+  plugin-seated name so it is published once with a `system-plugin` origin, not twice). The core
+  keeps only the universal path (`lima`/`wsl2`, `shell`, `env-var`/`prompt`, `github`).
 
 ### Negative
 
@@ -132,6 +140,13 @@ raised up front, before anything publishes, never a `KeyError` from deep in publ
   deferred this parity as a scoped limitation; it was resolved within the same effort once the
   migration shipped real plugins (azure's `az-cli`, claude's `claude` install-commands) with
   name-referenced bundled manifests, at which point the asymmetry became operator-reachable.
+- Migrating the four bundles is a **breaking change for existing operators**: an azure/proxmox/
+  1Password/Claude-Code user's working config now needs the matching `[plugins] enabled` entry, or
+  the resource is not-ready (or refused at use) with an "enable plugin `<name>`" hint. This is
+  deliberate (the whole point is that world-specific functionality is opt-in), guided (the hint
+  names the exact fix, never a silent failure or an unknown-name dead end), and bounded (the default
+  local path is untouched). The upgrade note lives in `docs/guides/resources.md`; the release
+  carries a `BREAKING CHANGE` changelog entry.
 
 ## Alternatives Considered
 

@@ -274,9 +274,14 @@ enabled = ["azure"]
 - An unknown name here (a typo, or a plugin that is not installed) is a hard error, and so is an
   unknown key in the `[plugins]` table: the section is an opt-in gate, so a mistake fails loudly
   rather than silently leaving plugins off.
-- A plugin you have **not** enabled still publishes its capability rows, but they are **disabled**:
-  a resource referencing one is not-ready with an `enable plugin <name>` hint (not an unknown-name
-  error), and the plugin's bundled manifest resources are simply absent until you enable it.
+- A plugin you have **not** enabled still publishes both its capability rows AND its bundled
+  manifest resources, all **disabled**: a resource referencing a disabled capability is not-ready
+  with an `enable plugin <name>` hint (not an unknown-name error), and a reference to a disabled
+  bundled resource (for example a template's `system_install_commands` naming the `az-cli`
+  install-command while `azure` is off) is refused at use with the same hint, never an unknown-name
+  error. A disabled plugin's resources are hidden from `resource list` and never block an operator's
+  identically-named resource, but they are present, so the reference always resolves to the friendly
+  hint.
 
 **Disabled resources are hidden by default.** `agw resource list` omits disabled rows; pass
 `--include-disabled` to reveal them. `--origin plugin` narrows the listing to plugin-contributed
@@ -300,6 +305,26 @@ reported until you add the plugin to `[plugins] enabled`. The first thing you se
 "enable plugin `<name>`" hint; the config error surfaces on the next build once enabled, still
 before any real work runs. This is the same rule that defers validation for any not-ready resource,
 applied to the opt-in axis.
+
+**Upgrading: Azure, Proxmox, 1Password, and Claude Code are now opt-in.** These vendor- and
+tool-specific capabilities used to be built in and always available; they now ship as the `azure`,
+`proxmox`, `onepassword`, and `claude` system plugins, disabled by default. If your config used any
+of them, add the plugin to `[plugins] enabled` to restore it:
+
+```toml
+[plugins]
+enabled = ["azure", "proxmox", "onepassword", "claude"]  # only the ones you use
+```
+
+Concretely, enable `onepassword` if a secret maps the `onepassword` backend; `proxmox` if a
+`vm-site` (or a legacy `[proxmox]` section) uses the `proxmox` platform; `azure` if you use the
+`azure-vm` platform, the `azdo` (Azure DevOps) git-credential provider, or the `az-cli`
+install-command; and `claude` if a `session-template` uses the `claude-code` harness or a template
+installs the `claude` CLI. Until you do, a resource that references one is not-ready (or refused at
+use) with an "enable plugin `<name>`" hint, never a silent failure. The default local path (the
+`lima` / `wsl2` platforms, the `shell` harness, the `env-var` / `prompt` secret backends, and the
+`github` git-credential provider) is unchanged and needs no `[plugins]` entry. `agw doctor` lists
+every installed plugin and whether it is enabled.
 
 ## Secrets: backends and the chain
 
