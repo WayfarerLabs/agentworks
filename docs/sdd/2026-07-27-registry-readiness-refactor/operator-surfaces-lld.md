@@ -68,10 +68,15 @@ The two empty-state messages are unchanged (`No secrets in the resource registry
   `[ok]` or `[not ready]: <reason>`, reading the **stored** `readiness_of` off the graph (backends
   are capabilities now). This is the R9.7-promised backend visibility.
 - **`_check_vm_platforms` / `_check_vm_sites`** read stored readiness off the graph instead of
-  recomputing `unsupported_reason` / `site_disabled_reason` ad hoc (`doctor.py:229,272`). The live
-  `preflight` (network) stays the deeper op-boundary check, now cleanly separated from the offline
-  verdict. An installed host-unsupported platform now shows as a not-ready row (R9.5), where today
-  it is absent.
+  recomputing `unsupported_reason` / `site_disabled_reason` ad hoc (`doctor.py:229,272`). Today
+  `_check_vm_platforms` takes no registry argument and iterates `VM_PLATFORM_REGISTRY` directly
+  (calling `unsupported_reason()` per platform, an R11-banned live-registry read); it must instead
+  iterate the published `vm-platform` rows and read `readiness_of` off the graph, gaining
+  registry/graph access. The live `preflight` (network) stays the deeper op-boundary check, now
+  cleanly separated from the offline verdict. The R9.5 delta here is **vocabulary and source**, not
+  visibility: doctor already lists an unsupported platform (today as `disabled (<reason>)`); the
+  change is that it reads the stored graph verdict and renders it as `not ready: <reason>`. (The
+  "now appears where today it was absent" framing applies to `resource list`, not doctor.)
 - **`_check_secrets`** stays one row per secret but becomes readiness-aware (a secret whose only
   opted-in backend is not-ready is flagged as at-risk, consistent with the resolution skip). Note
   the R9.11 granularity regression: a `backend_mappings.<typo>` now fails `build_registry`

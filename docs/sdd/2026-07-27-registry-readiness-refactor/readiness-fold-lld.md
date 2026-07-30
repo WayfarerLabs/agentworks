@@ -126,6 +126,13 @@ store probe); `env-var` and `prompt` are always ready. The fold calls it once pe
 stores the verdict (R9.6 gives backends offline readiness). This is orthogonal to
 interactive-optimism (the prompt/biometric stays optimistically previewed; LLD e).
 
+**This instance-method, no-config signature is the intended per-kind refinement of the uniform
+capability `not_ready(config)` hook, not a drift from it.** The HLA interface summary states one
+uniform hook but explicitly permits mechanism refinement; secret-backend's heterogeneous instance
+impl (LLD a) plus its config-free readiness make the no-arg instance form the honest shape. The fold
+already dispatches per kind (it must, given the heterogeneous impl), so this surface asymmetry is
+contained entirely inside the fold and never leaks to a caller.
+
 ## The fold algorithm
 
 Runs as finalize pass 4 (LLD b), after cycle detection (needs an acyclic graph):
@@ -143,6 +150,17 @@ Runs as finalize pass 4 (LLD b), after cycle detection (needs an acyclic graph):
      that answers for it).
 3. Materialization (pass 5) folds late-materialized nodes the same way (LLD b's loop); their deps
    (backend nodes) are already folded, so the reverse-topological invariant holds.
+
+**Dependencies with no node yet.** The fold hands a `DependencyState` only for a dependency that is
+**already a present node**. A deferred allowed-name auto-declare target (a secret not yet
+materialized until pass 5) has no node during the pass-4 fold of its referrer, so it contributes no
+`DependencyState`. This is safe because a resource's `not_ready` indexes only the dependencies it
+declares interest in (a `vm-site` reads `deps[("vm-platform", ...)]` and nothing else), and the one
+kind that references a deferred target, a `vm-site`/template referencing an auto-declared secret,
+does not consult that secret's state (secrets opt out of readiness and are always-satisfied for
+materialization purposes, LLD b pass 2). So no `not_ready` ever indexes a missing key. A resource
+that did care about a not-yet-present dependency would be a design error the fold surfaces as a
+`KeyError`, not something it silently defaults; this effort has no such resource.
 
 The fold **imposes no propagation rule** (R4): it only distributes `DependencyState`s. Whether a
 node propagates (vm-site: single-platform AND), combines (a hypothetical multi-dep AND/OR), or opts

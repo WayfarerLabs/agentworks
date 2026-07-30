@@ -62,7 +62,15 @@ refactor, no behavior delta).
 - [ ] Resource-level `referenced_resources()` bodies call `capability.dependencies(config)` for edge
       extraction; the separate `validate(config)` call is retained wherever `validate_config` was
       invoked for its throwing side effect (decode, load, construct), so validation timing is
-      unchanged **this phase** (it moves in phase 2b).
+      unchanged **this phase** (it moves in phase 2b). **The resource-level method keeps its name
+      `referenced_resources()` this phase**; the rename to the uniform `dependencies(context)` and
+      the build-context threading land in phase 4 (where the one consumer of `context`, the secret,
+      needs it). This answers "when does `context` appear": not until phase 4.
+- [ ] Split the remaining `validate_config` invocation sites so the method can be removed: the
+      resolve-time `sessions/templates.py:175` call becomes `validate(config)` (LLD e confirms
+      whether it is redundant with the finalize pass and removable, or a distinct resolved-view
+      check), and the three `migrate/planning.py:458,502,548` dry-run calls become `validate` (not a
+      finalized-registry path, so they keep their explicit validation).
 - [ ] Construct-time `_secret_refs` (`capabilities/base.py:306`) sources from
       `dependencies(config)`; construct still calls `validate(config)` to preserve the
       construct-time invariant (R3).
@@ -83,7 +91,13 @@ Governs: R1, R11 (structure only). LLD: (a). Caller inventory section E (field-t
       `dependents_of`, `reachable_from`, `readiness_of`, `is_ready`.
 - [ ] `finalize` builds and retains the graph from the edge map it already accumulates (`all_refs`),
       re-keyed by source for outbound; the `Registry` holds it after finalize alongside
-      `_resources`.
+      `_resources`. The builder still walks `referenced_resources()` (no `context` yet); secrets are
+      still leaves (they do not emit `secret -> secret-backend` edges until phase 4), so the graph
+      is a pure structural retention of today's edge set with no behavior delta.
+- [ ] Populate the capability nodes' `impl` field (LLD a): the publisher stamps each capability's
+      impl onto its graph node (or the builder reads it from the code registry under the whitelisted
+      builder exemption), so the fold (phase 3) and resolution (phase 4) read impls off the graph,
+      not the live registry.
 - [ ] Move inbound references off the resource dataclasses onto the graph: remove the `references`
       field from `DeclaredResource` and each capability `Entry` (`harness/kinds.py`,
       `git_credential/kinds.py`, `vm_platform/__init__.py`, `secrets/kinds.py`); route both readers
@@ -106,6 +120,10 @@ Governs: R3. LLD: (b) for the pass; caller inventory section A (MOVE rows).
 The green-window care (HLA sequencing): decode/load must **stop** throwing on a capability block in
 the **same change** the finalize `validate` pass **starts**, so no window validates neither.
 
+- [ ] Add the resource-level `validate(config)` aggregator (mirroring the resource-level
+      edge-extraction method): it pulls each capability sub-block and calls that capability's
+      `validate` (phase 1), centralizing what decode/load call inline today. This is the method the
+      finalize pass invokes per node.
 - [ ] Add the finalize `validate` pass: after the graph is built, run each present resource's
       `validate(config)` (which calls its capabilities' `validate`) with precise `file:line`
       framing. This phase runs it over **every** present resource (the readiness gating that scopes
@@ -152,8 +170,12 @@ a non-green window where the suppression is gone but materialization is ungated 
 - [ ] **R12 readiness-gated materialization**: the finalize ordering becomes build to resolve
       error-misses to cycle-detect to fold to **readiness-gated materialize (looping)** to attach to
       validate to freeze (component 3). A not-ready or disabled node's config-implied edges do not
-      drive auto-declaration; a materialized node's own edges **are** walked, resolved, and folded
-      (the fixpoint loop, so an auto-declared secret's backend edges exist).
+      drive auto-declaration. The materialize **loop** structure lands here, but it is **dormant for
+      secrets this phase**: secrets do not emit `secret -> secret-backend` edges until phase 4, so a
+      materialized secret has no out-edges to walk yet. R12 is therefore tested this phase via the
+      existing `site -> secret` edges (a host-disabled site's secret must not materialize); the
+      loop's load-bearing secret case (a materialized secret's backend edges) and its VM-create
+      acceptance test move to phase 4, where those edges exist.
 - [ ] **Remove the vm-site edge-suppression** (`sites.py:60-71`): the vm-site always emits its
       platform edge (the platform node is always present under R13).
 - [ ] **Enablement axis, modeled not produced**: the graph node carries `enabled | disabled`; a
@@ -162,12 +184,15 @@ a non-green window where the suppression is gone but materialization is ungated 
 - [ ] **Validate pass gated**: the finalize `validate` pass (phase 2b) now runs over the **ready +
       enabled** set only (R3, R9.4).
 - [ ] Tests (DoD-behavior): R9.2 (typo'd platform is now a hard error, not a silent self-disable);
-      R9.4 (a not-ready resource's malformed block is deferred, not validated); R9.5 (an installed
-      host-unsupported platform, e.g. `wsl2` on Linux, appears as a not-ready `vm-platform` row);
-      R12 (a host-disabled site's secrets stay absent from `secret list`/doctor while a ready site's
-      still materialize); the bundled `wsl2` site is **not-ready, not a hard error** on a
-      non-Windows host; the fixture disabled-node propagation; R5 (a ready resource with a malformed
-      block still fails validation; a not-ready resource with a valid block is still not-ready).
+      R9.4 (a not-ready resource's malformed block is deferred, not validated); R9.5 **at the graph
+      level** (an installed host-unsupported platform, e.g. `wsl2` on Linux, has a **present**
+      `vm-platform` node whose `readiness_of` is not-ready; the _rendered_ not-ready row in
+      `resource list` is asserted in phase 4 and in doctor in phase 5, once those projections read
+      the graph); R12 (a host-disabled site's secrets stay absent while a ready site's still
+      materialize, via `site -> secret` edges); the bundled `wsl2` site is **not-ready, not a hard
+      error** on a non-Windows host; the fixture disabled-node propagation; R5 (a ready resource
+      with a malformed block still fails validation; a not-ready resource with a valid block is
+      still not-ready).
 
 **DoD:** DoD-green; DoD-behavior for R9.2, R9.4, R9.5, R12; readiness is stored on the graph;
 suppression is gone; host-unsupported is readiness, not absence; the enablement axis is modeled and
@@ -179,6 +204,21 @@ Governs: R10, R11, and the R9 secret deltas (R9.6, R9.9, R9.10, R9.11). LLDs: (d
 (a)/(b) queries. Caller inventory sections B, C, F. Each consumer is an independently-green
 sub-step.
 
+- [ ] **Head step: the uniform `dependencies(context)` rename + build context + secret backend
+      edges.** Rename the resource-level `referenced_resources()` to `dependencies(context)` across
+      every resource (caller inventory section C: `vms/sites.py`, `vms/templates.py`,
+      `vms/template.py`, `vms/admin.py`, `git_credentials/credential.py`, `sessions/template.py`,
+      `agents/template.py`, `apt.py`, `workspaces/template.py`, `declared_resource.py`; **not**
+      `env/entry.py`'s arg-taking variant). Thread the build `context` (available-backend list +
+      read-only graph-in-progress) from the builder walk (`registry.py:321`) to every resource; most
+      ignore it. The **secret's** `dependencies(context)` now emits the `secret -> secret-backend`
+      edges (the union of present would-attempt backends and every explicit non-`false` mapping key,
+      LLD d / HLA component 2). This is the deliberate landing point for R9.9/R9.10/R9.11 and makes
+      the materialize loop load-bearing (a materialized secret now has backend edges). Update
+      `walk.py`'s duck-typed mirror (`walk.py:79-83`) accordingly. Tests: the materialize-fixpoint
+      VM-create acceptance (an auto-declared `tailscale-auth-key`'s backend edges exist and resolve;
+      the no-loop regression is pinned here); R9.11 (a typo'd `backend_mappings` key is a dangling
+      edge that hard-errors).
 - [ ] **Cycle detection** reads `edges_of` (removes the second
       `validate_config`/`referenced_resources` pass at `registry.py:542`).
 - [ ] **`walk.collect_secrets_for`** becomes a thin filter over `reachable_from`; its caller
@@ -187,7 +227,17 @@ sub-step.
       (`git_credentials/nodes.py:93`) read secret edges off `edges_of`.
 - [ ] **`inspect`** reads readiness via `readiness_of` and usage via `dependents_of` (R10); the list
       cell and describe line adopt the readiness vocabulary (folded into phase 5's surface work, but
-      the projection swap is here).
+      the projection swap is here). This is where the **rendered** R9.5 not-ready `vm-platform` row
+      appears in `resource list` (the phase-3 test asserted only the graph verdict).
+- [ ] **Site selection and the use-time gate**: `select_site` / `resolve_site` /
+      `ensure_site_enabled` (`sites.py:146,150,243,258`), doctor's `defaults.site` warning
+      (`doctor.py:294-297`), and `resource.py:111` stop calling `site_disabled_reason` (a lazy
+      recompute reaching into `VM_PLATFORM_REGISTRY`, an R11-banned pattern) and read `readiness_of`
+      off the graph. `ensure_site_enabled` / `resolve_site` / `select_site` gain registry-graph
+      access (HLA component 6 flags the `ensure_site_enabled(decl)` signature change). Either
+      `site_disabled_reason` is deleted or it survives only as a thin `readiness_of` wrapper that
+      takes the graph; the guard (phase 6) rejects the old recompute either way. Operator strings
+      adopt the readiness vocabulary in phase 5.
 - [ ] **Op-time held-capability secret refs** (`Harness.secret_refs`,
       `GitCredentialProvider.secret_name`): the single shared derivation is `dependencies(config)`;
       LLD (d) confirms single-derivation vs graph-threading before implementation.

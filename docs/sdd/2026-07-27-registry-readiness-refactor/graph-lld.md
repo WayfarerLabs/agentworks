@@ -95,9 +95,17 @@ The graph is built inside `finalize`, from the edge map the worklist loop alread
 (b) owns the pass ordering; this LLD owns the resulting structure. Construction is a pure function
 of (the final `_resources`, the accumulated `all_refs`, the fold's readiness verdicts, the
 enablement per node): build `_nodes` with `outbound` from `all_refs` re-keyed by source, `inbound`
-from the same edges keyed by target, `impl` looked up from the row (capability rows already carry or
-can reach their impl), `enablement` and `readiness` from the fold. It is frozen when `finalize`
-freezes.
+from the same edges keyed by target, `enablement` and `readiness` from the fold.
+
+**Populating `impl`.** The capability `Entry` rows do **not** carry their implementation today
+(`VMPlatformEntry` holds `name`/`description`/`origin`/`references` only,
+`vm_platform/__init__.py:75-79`), so the builder must obtain each capability node's impl from the
+code registry (`VM_PLATFORM_REGISTRY[name]` and the three peers). This is the **whitelisted builder
+exemption** (LLD b's guard grep #2 must not flag it): the graph builder reading `*_REGISTRY` to
+stamp impls onto nodes during the build is the sanctioned path, distinct from a **consumer** probing
+the live registry at op time. Equivalently, the capability publisher could stamp the impl onto the
+`Entry` at publish time; either is acceptable, but the LLD picks **builder-reads-registry** (fewer
+touched publishers, one clearly-exempt call site). The graph is frozen when `finalize` freezes.
 
 **Outbound-edge ordering** preserves first-encountered order (the `Origin.auto_declared(source=...)`
 rule depends on it, `registry.py:211-216`); the builder appends edges in walk order exactly as
