@@ -237,34 +237,50 @@ mechanics) and the `migration-strategy.md` are authored before implementation an
 ### Phase 7: manifest present-but-disabled parity (R9 resolution). LLD: (b) + (c) extension
 
 Governs: R9 (manifest side). Makes bundled declarable resources behave like capabilities under
-enablement, so a reference to a not-enabled plugin's install-command / template is not-ready with
-the enable hint, not an unknown-name error. No plugin migrates yet; proven by the fixture (given a
-bundled manifest) + a stub.
+enablement, so a reference to a not-enabled plugin's install-command / template surfaces the enable
+guidance (a use-refusal), not an unknown-name error. No plugin migrates yet; proven by the fixture
+(given a bundled manifest) + a stub.
 
 - [ ] `publish_plugins` publishes bundled manifests **unconditionally** (drop the enabled-only
       gate), stamped `system-plugin` origin, so the existing `plugin_enablement_source` disables a
       not-opted-in plugin's manifest rows by the same overlay it uses for capability rows (no new
       gate, no per-manifest enablement logic).
-- [ ] **Enablement-aware collision**: a `disabled` `system-plugin` declarable row must not block an
-      operator's identically-named resource, the operator wins as if the disabled row were absent
-      (extend `_check_collision` / the finalize collision pass to consult `enablement_of`). A
-      `disabled`-vs-`disabled` or `disabled`-vs-operator case resolves so operator/enabled always
-      wins; two enabled system-plugin rows still collide (curation bug).
+- [ ] **Enablement-aware collision via "weak" rows** (LLD c 3b; a `finalize`-time `enablement_of`
+      check is impossible since collision runs at `add()` before enablement is composed): a
+      not-enabled plugin's manifest rows are added `weak` (add-if-absent, silently overwritable,
+      never error), so a disabled plugin declarable row never blocks an operator/built-in/enabled
+      name in ANY publish order (including the deprecated operator TOML install-command / apt
+      publishers that run BEFORE `publish_plugins`). A `finalize` guard pins weak-implies-disabled.
+      Two enabled system-plugin rows on one name still collide (curation bug, caught by an
+      enable-every-plugin CI fixture). **Also fix the enabled-strong direction** (review finding):
+      an ENABLED plugin manifest row colliding with a pre-existing operator TOML row on an
+      `builtin_override == "allow"` kind must let the operator win (not error), symmetric with the
+      built-in-over-operator direction, so an operator's legacy `[system_install_commands] az-cli`
+      does not break when they enable azure.
+- [ ] **Reject bundling a reserved/auto-declared name** (review finding): plugin manifest
+      publication rejects a bundled resource whose name is in the kind's `auto_declare_names` /
+      reserved set (the template kinds auto-declare `default`), so a plugin cannot shadow or gate a
+      reserved default.
 - [ ] **Reference-to-disabled-declarable use-gate**: a reference to a present-but-disabled
       declarable resource (an agent template's `user_install_commands` naming a disabled plugin's
-      install- command; a `vm-template`/`extends` naming a disabled plugin's template) is **gated at
-      use** with the enable hint (a typed error at the mutation/consumption entry + a `describe`
-      annotation), not unknown-name and not silent use. This is the R14 use-gate model generalized
-      to declarable references, NOT a fold not-ready verdict (per LLD (b): a fold-edge would
-      suppress the referrer's own secret materialization and validation, a side effect the use-gate
-      avoids). The exact gate sites are pinned in LLD (b) (agent/vm/session create+reinit entries),
-      backed by a caller-drift guard on the runners; the bundleable-kind allowlist (R6) guarantees
-      every bundled kind has such a gate.
+      install-command; a `vm-template` `inherits` naming a disabled plugin's template) is **gated at
+      use** with the enable guidance (a typed error at the mutation/consumption entry + a `describe`
+      annotation), not unknown-name and not silent use. The R14 use-gate model generalized to
+      declarable references, NOT a fold not-ready verdict (per LLD (b): a fold-edge would suppress
+      the referrer's own secret materialization and validation). Gate sites pinned in LLD (b) MUST
+      cover EVERY consumption path including `session create --new-agent` (the ephemeral-agent
+      realize path via `agents/realize.py`, which the first design missed); the runner caller-drift
+      guard must walk to the real command entry points (a shallow immediate-caller check misses the
+      multi-hop chain). The bundleable-kind allowlist (R6) guarantees every bundled kind has such a
+      gate.
 - [ ] Tests: a fixture plugin shipping a bundled manifest, not enabled, its manifest resource is
       present-but-disabled, hidden from `list`, shown by `describe`, and a reference to it is
-      not-ready with "enable plugin `<name>`"; enabling the plugin makes it consumable; an operator
-      resource with the same name as a disabled plugin's manifest resource wins with no collision
-      error; two enabled plugins colliding still error.
+      refused at use with "enable plugin `<name>`" (via EVERY gate site including the session
+      new-agent path); enabling the plugin makes it consumable; an operator resource (YAML AND
+      legacy TOML) with the same name as a disabled plugin's manifest resource wins with no
+      collision error; an enabled plugin row vs a legacy operator TOML row on an allow-kind lets the
+      operator win in BOTH encounter orders; a bundled reserved/`default` name is rejected; two
+      enabled plugins colliding still error.
 
 **DoD:** DoD-green; DoD-behavior for R9 manifest parity; the capability/manifest asymmetry is
 closed; no migration yet.
