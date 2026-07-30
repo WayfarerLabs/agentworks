@@ -126,6 +126,30 @@ class TestDynamicCompletionsMapping:
             )
 
 
+class TestOptionFlagsInSpec:
+    """Pin option flags that must (or must not) reach the completion tree.
+
+    The tree is generated live from ``build_spec(app)``, so a flag rename or a
+    ``hidden=True`` alias flows through here. This is the direct completion-spec
+    guard for the ``env show --reveal-secrets`` -> ``--resolve`` rename (R9.8):
+    the renamed flag must complete, and the hidden deprecated alias must NOT
+    leak into completions (the always-consider-completions rule).
+    """
+
+    def _env_show_option_flags(self) -> list[str]:
+        spec = build_spec(app)
+        env_show = _walk_commands(spec)["agentworks.env.show"]
+        return [opt for param in env_show.params for opt in param.opts]
+
+    def test_resolve_flag_is_in_the_completion_spec(self) -> None:
+        assert "--resolve" in self._env_show_option_flags()
+
+    def test_deprecated_reveal_secrets_alias_is_absent_from_the_spec(self) -> None:
+        # ``hidden=True`` on the alias keeps it out of the Typer-extracted spec
+        # (spec.py skips hidden params), so it never clutters completions.
+        assert "--reveal-secrets" not in self._env_show_option_flags()
+
+
 class TestGeneration:
     """Smoke tests for completion script generation."""
 

@@ -52,6 +52,17 @@ def test_reveal_secrets_alias_still_works_with_deprecation(captured_show_env: di
     assert "--reveal-secrets is deprecated; use --resolve" in result.output
 
 
+def test_both_flags_together_resolve_and_still_warn_once(captured_show_env: dict[str, Any]) -> None:
+    """Passing both ``--resolve`` and the deprecated ``--reveal-secrets``
+    together behaves identically to ``--resolve`` (resolution on) and still
+    emits the deprecation notice exactly once (the ``resolve or reveal_secrets``
+    logic)."""
+    result = CliRunner().invoke(app, ["env", "show", "--vm", "x", "--resolve", "--reveal-secrets"])
+    assert result.exit_code == 0, result.output
+    assert captured_show_env["reveal_secrets"] is True
+    assert result.output.count("--reveal-secrets is deprecated; use --resolve") == 1
+
+
 def test_default_redacts(captured_show_env: dict[str, Any]) -> None:
     """Neither flag: secret values stay redacted (resolution off)."""
     result = CliRunner().invoke(app, ["env", "show", "--vm", "x"])
