@@ -30,16 +30,18 @@ and reviewed by `agentworks-reviewer` (tier >= dev) plus a fresh-eyes pass.
 - [x] HLA rewritten (the enablement producer is the load-bearing component; publication is
       unconditional; disabled-hides/not-ready-shows).
 - [x] Branch rebased onto `feat/registry-readiness-refactor` (keep current if the base moves).
-- [ ] Three LLDs authored and reviewed:
-  - [ ] (a) [plugin framework](./plugin-framework-lld.md): the `Plugin` descriptor + validation, the
+- [x] Three LLDs authored and reviewed:
+  - [x] (a) [plugin framework](./plugin-framework-lld.md): the `Plugin` descriptor + validation, the
         inverted atomic `register_plugin`, the per-kind `CapabilityAdapter`, the installed index +
         seat/unseat helper, and the `_check_collision` `system-plugin` matrix.
-  - [ ] (b) [enablement producer](./enablement-producer-lld.md): the `_node_enablement` composition
+  - [x] (b) [enablement producer](./enablement-producer-lld.md): the `_node_enablement` composition
         over sources, the reason-carrying enablement, and the plugin source.
-  - [ ] (c) [surfaces](./plugin-surfaces-lld.md): the origin variant + rendering, the
+  - [x] (c) [surfaces](./plugin-surfaces-lld.md): the origin variant + rendering, the
         `build_registry` publish step, the `[plugins]` loader, the disabled-hides rule, and the
         doctor roster.
-- [ ] Plan + LLDs pass `agentworks-reviewer` + a fresh-eyes pass.
+- [x] Plan + LLDs pass `agentworks-reviewer` + a fresh-eyes pass (both, plus focused delta
+      re-reviews: the manifest-rationale and collision-layer Important findings, and the R14
+      four-kind-gating Blocking, all closed clean).
 
 ## Phase 1: the `system-plugin` origin (R1)
 
@@ -131,7 +133,11 @@ honoring enablement.
       since `harness_for` itself threads none) reads `enablement_of("harness", name)` and raises a
       typed "enable plugin `<name>`" error when the harness is disabled (the secret model; the
       read-only display path stays ungated). Both are additive against the already-produced
-      enablement; neither touches the fold or the producer.
+      enablement; neither touches the fold or the producer. Because the harness gate sits at the
+      call sites (not the factory), add a **drift guard** so a future third caller of
+      `pending_session_node` / `live_session_node` cannot silently bypass it: a comment on both
+      factories pointing at `ensure_harness_enabled`, plus a test asserting those factories' only
+      callers gate (analogous to the `CAPABILITY_ADAPTERS.keys()` adapter-drift guard).
 - [ ] Tests: a not-opted-in plugin capability node reads `enablement_of == disabled` with the plugin
       reason; **each of the four kinds is proven through its actual consumer**, a `vm-site` is
       not-ready with "enable plugin `<name>`" (existing fold); a disabled plugin backend is excluded
