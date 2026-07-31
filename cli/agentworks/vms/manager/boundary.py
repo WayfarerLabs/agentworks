@@ -32,8 +32,11 @@ def _platform_ops_ctx(
     secret names (the declare/receive contract), under the command's
     scope.
 
-    One definition for both composition roots below, so the gated and
-    no-gate commands cannot drift on what a platform op is handed.
+    The ONE definition of that shape: both composition roots below use
+    it, and so does ``rekey_vm``, which assembles its own boundary
+    inline (its gate opens after the resolve, so it fits neither root).
+    Every platform op in the VM manager is therefore handed a context
+    built here, and they cannot drift.
     """
     from agentworks.orchestration.secrets import ScopedSecrets
 

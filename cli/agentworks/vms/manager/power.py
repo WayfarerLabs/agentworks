@@ -25,7 +25,7 @@ from ._helpers import (
     _require_vm,
     _vm_scope,
 )
-from .boundary import _live_vm_boundary
+from .boundary import _live_vm_boundary, _platform_ops_ctx
 
 if TYPE_CHECKING:
     from agentworks.config import Config
@@ -565,13 +565,7 @@ def rekey_vm(
     # The running check is an op (a backend status read), so it sits
     # past the boundary: on proxmox it needs the API token, delivered
     # scoped to the site's declared names.
-    from agentworks.orchestration.secrets import ScopedSecrets
-
-    ops_ctx = RunContext(
-        config=config,
-        operation_scope=scope,
-        secrets=ScopedSecrets(resolver.values, vm_node.site.secret_refs()),
-    )
+    ops_ctx = _platform_ops_ctx(config, scope, vm_node, resolver)
     platform = vm_node.site.platform
     status = platform.status(vm, ops_ctx)
     if status != VMStatus.RUNNING:
