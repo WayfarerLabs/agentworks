@@ -109,21 +109,25 @@ def run_checks(*, completion_version: str | None = None) -> HealthReport:
     report.groups.append(_check_python())
     report.groups.append(_check_required_tools())
     report.groups.append(_check_tailscale())
-    # The None checks are spelled out at each site (not hoisted into a
-    # boolean local) because mypy's narrowing does not flow through one.
-    # VM platforms now read stored readiness off the graph (R11), so they
-    # need the registry and skip cleanly in degraded mode like the others.
-    if registry is not None:
-        report.groups.append(_check_vm_platforms(registry))
-    else:
-        report.groups.append(_skipped_group("VM platforms", "Installed platforms"))
-    # The plugin roster reads config.enabled_system_plugins against SYSTEM_PLUGINS; it
-    # needs no registry (a plugin is an origin, not a resource kind, R12), so it
-    # sits beside VM platforms and skips only when config is unavailable.
+    # System plugins leads the config-driven groups: it is a fundamental opt-in
+    # (it determines which platforms, backends, and harnesses even exist), so it
+    # reads best up front, before the VM stack it shapes, rather than splitting VM
+    # platforms from VM sites. The roster reads config.enabled_system_plugins
+    # against SYSTEM_PLUGINS and needs no registry (a plugin is an origin, not a
+    # resource kind, R12), so it skips only when config is unavailable. The None
+    # checks are spelled out at each site (not hoisted into a boolean local)
+    # because mypy's narrowing does not flow through one.
     if config is not None:
         report.groups.append(_check_plugins(config))
     else:
         report.groups.append(_skipped_group("System plugins", "Installed plugins"))
+    # VM platforms and VM sites render adjacent. VM platforms read stored
+    # readiness off the graph (R11), so they need the registry and skip cleanly
+    # in degraded mode like the others.
+    if registry is not None:
+        report.groups.append(_check_vm_platforms(registry))
+    else:
+        report.groups.append(_skipped_group("VM platforms", "Installed platforms"))
     if config is not None and registry is not None:
         report.groups.append(_check_vm_sites(config, registry))
     else:
