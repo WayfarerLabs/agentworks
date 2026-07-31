@@ -78,7 +78,9 @@ def resolve_ws_template_env_or_empty(
     exec/shell env-scope resolver and ``env show`` so those two
     env-resolution sites cannot drift. Note ``repair`` deliberately does NOT
     use this: it resolves the same template for git identity, not ``.env``,
-    so it keeps its own guard.
+    and keeps its own local handling (the same exception set, quietly
+    skipping git-identity convergence when the template is gone — see
+    ``_converge_git_identity``).
     """
     try:
         return resolve_template(registry, template_name).env
