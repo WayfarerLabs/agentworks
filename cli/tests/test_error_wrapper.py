@@ -5,6 +5,7 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Annotated
 
 import click
 import pytest
@@ -134,6 +135,69 @@ def test_main_wrapper_lets_click_exceptions_through(tmp_path: Path, monkeypatch:
     # And no error.log entry from our wrapper.
     log_path = tmp_path / "logs" / "error.log"
     assert not log_path.exists()
+
+
+def test_main_wrapper_renders_click_usage_error_cleanly(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """An invalid ``click.Choice`` value must render as Click's own one-line
+    ``Error:`` message (not a Rich traceback), exit with the usage exit code
+    (2, not our generic 1), and write nothing to ``error.log`` (a bad choice
+    is user input, not a bug to debug later).
+
+    The trigger mirrors the real CLI: an option typed with a raw
+    ``click.Choice`` (``click_type=``). Typer's Rich error formatter does not
+    intercept those (it catches only typer's vendored ``click`` exceptions), so
+    the real-``click`` ``BadParameter`` propagates out of ``app()`` and reaches
+    ``main()``'s top-level catch, which is exactly the path this test pins.
+    """
+    from agentworks import cli as cli_mod
+    from agentworks.cli import _entry
+
+    # A raw click.Choice option nested under a subcommand group reproduces the
+    # real surface (e.g. `resource migrate --toml`): the invalid value raises a
+    # BadParameter that Typer does not render itself, so it propagates to main().
+    sub_app = typer.Typer()
+
+    @sub_app.command("mig")
+    def mig(
+        toml: Annotated[str, typer.Option("--toml", click_type=click.Choice(["comment", "delete"]))] = "comment",
+    ) -> None:
+        pass
+
+    test_app = typer.Typer()
+
+    @test_app.callback()
+    def _cb() -> None:
+        pass
+
+    test_app.add_typer(sub_app, name="res")
+
+    # A bad choice must never reach record_unhandled_error / error.log.
+    record_calls: list[BaseException] = []
+    monkeypatch.setattr(_entry, "record_unhandled_error", lambda exc: record_calls.append(exc))
+
+    monkeypatch.setattr(cli_mod, "app", test_app)
+    monkeypatch.setattr("agentworks.config.CONFIG_DIR", tmp_path)
+    monkeypatch.setattr("sys.argv", ["agentworks", "res", "mig", "--toml", "bogus"])
+    monkeypatch.setenv("AGW_DEBUG", "")
+    monkeypatch.setattr(sys.stderr, "isatty", lambda: False)
+
+    with pytest.raises(SystemExit) as exc_info:
+        cli_mod.main()
+
+    # Click's usage exit code (2), NOT our generic 1.
+    assert exc_info.value.code == 2
+
+    err = capsys.readouterr().err
+    # Click's own one-line message, listing the valid choices. No Rich traceback.
+    assert "Error:" in err
+    assert "'bogus' is not one of 'comment', 'delete'." in err
+    assert "Traceback" not in err
+
+    # No traceback was logged: a bad choice is user input, not a bug.
+    assert record_calls == []
+    assert not (tmp_path / "logs" / "error.log").exists()
 
 
 def test_main_wrapper_handles_keyboard_interrupt(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
