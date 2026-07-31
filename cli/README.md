@@ -91,16 +91,16 @@ agw console delete my-console              # Extra shells are lost but sessions 
 
 ## Global Options
 
-| Flag                | Description                                                                  |
-| ------------------- | ---------------------------------------------------------------------------- |
-| `--non-interactive` | Disable all interactive prompts                                              |
-| `--debug`           | Print the full Python traceback on unhandled errors (also via `AGW_DEBUG=1`) |
-| `--no-deprecations` | Suppress deprecation warnings (e.g. the TOML resource-section nudge)         |
+| Flag                | Description                                                                                                                                 |
+| ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--non-interactive` | Disable all interactive prompts                                                                                                             |
+| `--debug`           | Print the full traceback on unhandled errors, and show the Azure SDK's own log lines that are otherwise suppressed (also via `AGW_DEBUG=1`) |
+| `--no-deprecations` | Suppress deprecation warnings (e.g. the TOML resource-section nudge)                                                                        |
 
 When `--non-interactive` is set (or stdin is not a TTY), commands that would normally prompt for
 missing values (VM selection, workspace selection, name generation) will fail with a clear error
 indicating which flag is required. VM auto-selection still works: if there is exactly one usable VM,
-it is used without prompting. `session create` is an intentional exception -- it always prompts for
+it is used without prompting. `session create` is an intentional exception: it always prompts for
 workspace and mode (even when only one choice exists) since those are part of the session's identity
 and should be an explicit operator decision.
 
@@ -108,7 +108,8 @@ Domain errors (SSH timeouts, validation failures, missing resources, etc.) surfa
 line: `Error: <message>`. Truly unexpected failures (internal bugs, OS-level errors, third-party
 library failures) also get a clean single-line message, plus the full traceback appended to
 `~/.config/agentworks/logs/error.log` for debugging. Pass `--debug` (or set `AGW_DEBUG=1`) to print
-the traceback to stderr instead.
+the traceback to stderr instead. Debug mode also restores the Azure SDK's own credential-chain log
+lines, which are otherwise suppressed so a credential failure renders once as the typed error.
 
 On an interactive terminal, output is tastefully colorized by role so it is easy to scan at a
 glance: a yellow `Warning:` prefix, a red `Error:` prefix, bold section headers, a dim-green result

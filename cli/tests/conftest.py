@@ -26,8 +26,9 @@ def _restore_agw_debug() -> Generator[None, None, None]:
     """Snapshot and restore ``AGW_DEBUG`` around every test.
 
     A test that drives the CLI with ``--debug`` mirrors the flag into the
-    ``AGW_DEBUG`` env var (see ``cli/_app.py`` ``_set_debug``), a
-    process-global mutation pytest does not undo on its own. Without this,
+    ``AGW_DEBUG`` env var (see ``cli/_app.py`` ``_mirror_debug_to_env``,
+    called from the root Typer callback), a process-global mutation pytest
+    does not undo on its own. Without this,
     such a test would leak ``AGW_DEBUG=1`` into every later test in the
     process. That env var is the propagation vector for debug state: the CLI
     re-seeds its internal ``_debug`` flag from ``AGW_DEBUG`` on every

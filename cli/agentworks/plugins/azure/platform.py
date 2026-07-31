@@ -92,9 +92,10 @@ def _trim_message(message: str) -> str:
 
 # The azure-identity logger tree. Its ChainedTokenCredential emits a WARNING
 # ("DefaultAzureCredential failed to retrieve a token from the included
-# credentials...") when a configured credential cannot authenticate. Observed
-# by reproducing a bad service-principal probe: that WARNING is the only
-# azure-identity record that clears the default threshold; the per-member
+# credentials...") when the credential chain is exhausted (nothing in it can
+# authenticate). Observed by reproducing a failing DefaultAzureCredential
+# probe: that WARNING is the only azure-identity record that clears the
+# default threshold; the per-member
 # "... .get_token failed:" lines are DEBUG. azure.core is deliberately not
 # included: its HTTP request/response logging sits at INFO, so it never reaches
 # the last-resort stderr handler and is not part of this noise class.
@@ -125,6 +126,13 @@ def _quiet_azure_identity_logging() -> None:
     construction is safe. This one-time set (rather than a context manager
     scoped to the credential probe) covers both the probe and the lazy,
     op-time token requests inside the SDK clients, which emit the same WARNING.
+
+    Single-shot assumption: the ``setLevel`` is decided once, when the first
+    ``AzureVMPlatform`` is built, and never reset for the process lifetime.
+    If ``AGW_DEBUG`` were to flip true AFTER an instance was already built with
+    it off, the logger would stay quieted (no reset path). That is fine for
+    today's one-command CLI; a longer-lived client (e.g. the anticipated
+    web-UI) that toggles debug mid-process would need to re-decide the level.
     """
     if os.environ.get("AGW_DEBUG") == "1":
         return
