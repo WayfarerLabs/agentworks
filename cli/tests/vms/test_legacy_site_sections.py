@@ -161,6 +161,80 @@ def test_defaults_vm_host_is_a_hard_error(write_config) -> None:
         )
 
 
+def test_proxmox_token_secret_nonconforming_warns_but_loads(write_config) -> None:
+    """Issue #279 (coverage extension): a proxmox vm-site whose
+    ``token_secret`` names a non-conforming (uppercase) secret loads via the
+    legacy TOML path, keeps the site and the token_secret value, and warns
+    naming the secret and its ``proxmox.token_secret`` location."""
+    section = PROXMOX_SECTION + 'token_secret = "GITHUB_TOKEN"\n'
+    config = load_config(
+        write_config(section),
+        warn_issues=False,
+        warn_deprecations=False,
+    )
+    # The site and the raw secret name are preserved unchanged.
+    assert config.vm_sites["proxmox"].platform_config["token_secret"] == "GITHUB_TOKEN"
+    assert any("GITHUB_TOKEN" in issue and "proxmox.token_secret" in issue for issue in config.config_issues), (
+        config.config_issues
+    )
+
+
+def test_proxmox_token_secret_conforming_emits_no_warning(write_config) -> None:
+    """A conforming ``token_secret`` name emits no secret-naming warning."""
+    section = PROXMOX_SECTION + 'token_secret = "proxmox-token"\n'
+    config = load_config(
+        write_config(section),
+        warn_issues=False,
+        warn_deprecations=False,
+    )
+    assert config.vm_sites["proxmox"].platform_config["token_secret"] == "proxmox-token"
+    assert not any("secret naming rules" in issue for issue in config.config_issues), config.config_issues
+
+
+def _write_site_manifest(manifest_dir: Path, token_secret: str) -> None:
+    manifest_dir.mkdir(exist_ok=True)
+    (manifest_dir / "site.yaml").write_text(
+        "apiVersion: agentworks/v1\n"
+        "kind: vm-site\n"
+        "metadata:\n"
+        "  name: proxmox\n"
+        "spec:\n"
+        "  platform: proxmox\n"
+        "  platform_config:\n"
+        '    api_url: "https://pve:8006"\n'
+        "    node: pve1\n"
+        f'    token_secret: "{token_secret}"\n'
+    )
+
+
+def test_manifest_token_secret_nonconforming_warns(tmp_path: Path) -> None:
+    """The YAML manifest path emits the same warning: a non-conforming
+    ``platform_config.token_secret`` decodes with an issue whose location
+    includes ``platform_config.token_secret`` and names the bad secret."""
+    from agentworks.manifests.loader import load_manifests
+
+    manifest_dir = tmp_path / "resources"
+    _write_site_manifest(manifest_dir, "GITHUB_TOKEN")
+    manifests = load_manifests(manifest_dir)
+    assert any("GITHUB_TOKEN" in issue and "platform_config.token_secret" in issue for issue in manifests.issues), (
+        manifests.issues
+    )
+    # The site still decoded, with the secret name preserved.
+    (entry,) = manifests.entries
+    assert entry.resource.platform_config["token_secret"] == "GITHUB_TOKEN"
+
+
+def test_manifest_token_secret_conforming_emits_no_warning(tmp_path: Path) -> None:
+    """A conforming ``token_secret`` in a YAML vm-site manifest emits no
+    secret-naming warning."""
+    from agentworks.manifests.loader import load_manifests
+
+    manifest_dir = tmp_path / "resources"
+    _write_site_manifest(manifest_dir, "proxmox-token")
+    manifests = load_manifests(manifest_dir)
+    assert not any("secret naming rules" in issue for issue in manifests.issues), manifests.issues
+
+
 def test_legacy_toml_and_manifest_decode_agree(write_config, tmp_path: Path) -> None:
     """Decode parity: a flat [proxmox] section and the equivalent
     vm-site manifest produce the same resource fields. The Phase 5

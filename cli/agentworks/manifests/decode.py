@@ -263,6 +263,16 @@ def _decode_vm_site(doc: Document, spec: dict[str, object], issues: list[str]) -
     raw_config = spec.pop("platform_config", {})
     if not isinstance(raw_config, dict):
         raise ConfigError("spec.platform_config must be a mapping")
+    # ``token_secret`` (proxmox) is a bare operator-supplied secret name; warn
+    # (only) when it is present and non-conforming, matching the other
+    # reference sites. The location is kept relative; the decode layer prefixes
+    # ``doc.where``. A non-string / empty shape is left to the finalize
+    # ``validate`` pass (ProxmoxPlatform.validate), not re-checked here.
+    from agentworks.config.loaders_core import _warn_nonconforming_secret_name
+
+    token_secret = raw_config.get("token_secret")
+    if isinstance(token_secret, str) and token_secret:
+        _warn_nonconforming_secret_name(token_secret, location="platform_config.token_secret", issues=issues)
     # The blob may not shadow kind-owned surface (the git-credential
     # precedent): platform/description in the blob would silently
     # re-pick the capability or override metadata.

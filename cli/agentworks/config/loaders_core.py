@@ -66,13 +66,21 @@ def _warn_nonconforming_secret_name(name: str, *, location: str, issues: list[st
     not follow the secret naming rules, then leave the name unchanged.
 
     Names declared explicitly in ``[secrets.*]`` are validated with a hard
-    error (``_load_secrets``), but names that enter through a REFERENCE (a VM
-    template's ``tailscale_auth_key``, an env entry's ``secret = "..."``, a git
-    credential's ``token``) historically bypassed that check. Validating them
-    here at load unifies the guarantee at the operator boundary (issue #279)
-    WITHOUT breaking configs that already load: a non-conforming reference
-    still declares and resolves exactly as before. The runtime synthesize and
-    resolve paths stay tolerant by design, so the warning is the only effect.
+    error (``_load_secrets``). The covered set here is the operator-supplied
+    secret-name REFERENCE sites, which historically bypassed that check. There
+    are four: an env entry's ``env.<KEY>.secret``, a git credential's
+    ``git_credentials.<name>.token``, a VM template's
+    ``vm_templates.<name>.tailscale_auth_key``, and a vm-site's
+    ``platform_config.token_secret`` (both the TOML ``[proxmox]`` legacy path
+    and the YAML manifest path). Validating them here at load unifies the
+    guarantee at the operator boundary (issue #279) WITHOUT breaking configs
+    that already load: a non-conforming reference still declares and resolves
+    exactly as before. The runtime synthesize and resolve paths stay tolerant
+    by design, so the warning is the only effect.
+
+    Deriving this coverage structurally from the ``ConfigReference(kind=
+    "secret")`` edges, rather than hand-enumerating the loaders that reference
+    a secret, is tracked in issue #311.
     """
     try:
         validate_name(name, max_length=MAX_SECRET_NAME_LENGTH)

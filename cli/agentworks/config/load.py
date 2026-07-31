@@ -193,7 +193,7 @@ def load_config(
         apt_packages=apt_packages,
         system_install_commands=system_cmds,
         user_install_commands=user_cmds,
-        vm_sites=_load_vm_sites_legacy(resource_data, decls),
+        vm_sites=_load_vm_sites_legacy(resource_data, issues, decls),
         secrets=secrets,
         secret_config_data=secret_config_data,
         enabled_system_plugins=enabled_system_plugins,

@@ -103,6 +103,15 @@ def test_hard_miss_halts_chain_via_secret_mapping_error() -> None:
     assert later.resolve_calls == []
 
 
+def test_nonconforming_secret_name_still_resolves() -> None:
+    """Issue #279: a secret whose NAME is non-conforming (the load path only
+    warns, never rejects it) must still resolve through the runtime chain. This
+    is the path the prior (rejected) raising approach would have broken."""
+    backend = _FakeBackend("env-var", values={"GITHUB_TOKEN": "resolved-value"})
+    resolved = resolve_secrets([_decl("GITHUB_TOKEN")], _chain(backend))
+    assert resolved == {"GITHUB_TOKEN": "resolved-value"}
+
+
 def test_unsatisfied_raises_with_backends_tried() -> None:
     b1 = _FakeBackend("env-var")
     b2 = _FakeBackend("prompt")
