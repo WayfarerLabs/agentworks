@@ -47,8 +47,13 @@ def test_operator_over_operator_errors_with_both_locations() -> None:
 def test_operator_over_reserved_builtin_errors() -> None:
     registry = Registry.empty()
     registry.add("secret", "s1", _decl("s1"), Origin.built_in(source="app"))
-    with pytest.raises(ConfigError, match="reserved"):
+    with pytest.raises(ConfigError) as exc:
         registry.add("secret", "s1", _decl("s1"), _operator(3))
+    message = str(exc.value)
+    assert "reserved" in message
+    # The incoming (operator) declaration's file:line locator, matching the
+    # operator-over-operator sibling branch, so the operator can find it.
+    assert "f3.yaml:3" in message
 
 
 def test_operator_over_allow_builtin_replaces() -> None:
