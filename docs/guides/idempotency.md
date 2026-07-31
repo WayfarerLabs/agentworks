@@ -75,18 +75,27 @@ the template. Because the report is driven by detected state rather than by the 
 truly-gone agent user recreated on reinit is honestly reported as created, not silently
 "reinitialized" into existence.
 
+After the user step, reinit reconciles the agent's workspace group memberships against its recorded
+grants. This matters when the user was recreated: a fresh Linux user lands with no group
+memberships, while the DB grant rows survive the reinit untouched, so without this pass the agent
+would hold grants in the database but no actual on-VM workspace access. The reconcile is idempotent
+(each group add is a no-op when membership already holds), so it runs on every reinit, and it
+touches on-VM state only: the grant rows are left as they are. A grant row pointing at a
+since-deleted workspace is skipped with a warning rather than failing the repair.
+
 ### Fully idempotent
 
-| Step                  | Notes                                                                        |
-| --------------------- | ---------------------------------------------------------------------------- |
-| User creation         | Detection-based: created if absent, shell corrected if diverged, else no-op  |
-| Workspace group       | Skipped if exists                                                            |
-| Shell rc (prompt)     | Overwritten from template                                                    |
-| Git credentials       | Overwritten from template                                                    |
-| Dotfiles (git source) | `git pull` if already cloned                                                 |
-| Mise packages         | Installed if missing, pruned if removed (when `mise_prune_on_reinit = true`) |
-| Mise activation       | Overwritten from template                                                    |
-| PATH additions        | Appended idempotently                                                        |
+| Step                       | Notes                                                                                                                                                                    |
+| -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| User creation              | Detection-based: created if absent, shell corrected if diverged, else no-op                                                                                              |
+| Workspace group            | Skipped if exists                                                                                                                                                        |
+| Workspace grant membership | Reconciled from the agent's recorded grants: idempotent group add per granted workspace, no-op if already a member. Repairs a recreated user whose memberships were lost |
+| Shell rc (prompt)          | Overwritten from template                                                                                                                                                |
+| Git credentials            | Overwritten from template                                                                                                                                                |
+| Dotfiles (git source)      | `git pull` if already cloned                                                                                                                                             |
+| Mise packages              | Installed if missing, pruned if removed (when `mise_prune_on_reinit = true`)                                                                                             |
+| Mise activation            | Overwritten from template                                                                                                                                                |
+| PATH additions             | Appended idempotently                                                                                                                                                    |
 
 ### Additive only
 

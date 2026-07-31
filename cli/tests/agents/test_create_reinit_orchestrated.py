@@ -18,7 +18,7 @@ from agentworks.agents import grants as agent_grants
 from agentworks.agents import initializer as agent_initializer
 from agentworks.agents import manager as agent_manager
 from agentworks.capabilities.base import RunContext
-from agentworks.errors import ExternalError
+from agentworks.errors import ExternalError, NotFoundError
 from agentworks.output import Role
 from agentworks.plugins.proxmox.platform import ProxmoxPlatform
 from agentworks.vms import manager as vm_manager
@@ -555,3 +555,140 @@ def test_create_grant_all_reconciles_between_insert_and_sync(
     assert row is not None and row.grant_all
     assert group_adds == [("agt-dev", "ws1")]
     assert db.has_any_grant("dev", "ws1")
+
+
+# -- reinit reconciles recorded grants onto the VM (issue #280) ----------------
+
+
+def _seed_granted_agent(db: Database, workspaces: list[str]) -> None:
+    """Seed the 'dev' agent on 'box' with an explicit grant for each name in
+    ``workspaces`` (creating each workspace row too)."""
+    db.insert_agent("dev", "box", "agt-dev", template="default")
+    for ws in workspaces:
+        db._conn.execute(
+            "INSERT INTO workspaces (name, vm_name, workspace_path, linux_group) VALUES (?, 'box', ?, ?)",
+            (ws, f"/srv/{ws}", f"ws-{ws}"),
+        )
+        db._conn.commit()
+        db.insert_agent_grant("dev", ws, "explicit")
+
+
+def test_reinit_reconciles_recorded_grants_onto_the_vm(
+    db: Database,
+    make_config,  # noqa: ANN001
+    mutation: dict[str, Any],
+    monkeypatch: pytest.MonkeyPatch,
+    captured_output,  # noqa: ANN001
+) -> None:
+    """Regression for issue #280. reinit shares ``create_agent_on_vm`` with
+    the create path but not realize's grant pass, so when the user step
+    recreates a truly-gone agent user (issue #252) the fresh user lands with
+    no workspace group memberships while the DB grant rows survive. reinit
+    must reconcile the recorded grants back onto the VM. The on-VM mutation
+    is faked (the recreate happens inside it), so this asserts the reconcile
+    that follows adds the agent to the granted workspace's group. Fails
+    without the fix, because reinit never called ``add_to_workspace_group``."""
+    config = make_config()
+    _seed_vm(db)
+    _seed_granted_agent(db, ["ws1"])
+    _reachable(monkeypatch, True)
+    group_adds: list[tuple[str, str]] = []
+    monkeypatch.setattr(
+        agent_grants,
+        "add_to_workspace_group",
+        lambda vm, config_, db_, linux_user, ws, **k: group_adds.append((linux_user, ws)),
+    )
+
+    agent_manager.reinit_agent(db, config, name="dev")
+
+    assert group_adds == [("agt-dev", "ws1")]
+
+
+def test_reinit_reconcile_does_not_reinsert_grant_rows(
+    db: Database,
+    make_config,  # noqa: ANN001
+    mutation: dict[str, Any],
+    monkeypatch: pytest.MonkeyPatch,
+    captured_output,  # noqa: ANN001
+) -> None:
+    """The reconcile touches ON-VM state only. The grant rows already exist
+    on reinit (unlike create's initial grant_all materialization), so reinit
+    must NOT re-insert or duplicate them: only ``add_to_workspace_group``
+    runs, never ``insert_agent_grant``."""
+    config = make_config()
+    _seed_vm(db)
+    _seed_granted_agent(db, ["ws1"])
+    _reachable(monkeypatch, True)
+    monkeypatch.setattr(agent_grants, "add_to_workspace_group", lambda *a, **k: None)
+
+    before = len(db.list_agent_grants("dev"))
+    agent_manager.reinit_agent(db, config, name="dev")
+
+    assert len(db.list_agent_grants("dev")) == before == 1  # no new / duplicate rows
+    assert db.has_any_grant("dev", "ws1")
+
+
+def test_reinit_reconcile_is_idempotent_across_repeated_reinits(
+    db: Database,
+    make_config,  # noqa: ANN001
+    mutation: dict[str, Any],
+    monkeypatch: pytest.MonkeyPatch,
+    captured_output,  # noqa: ANN001
+) -> None:
+    """The reconcile runs on every reinit (both the recreate and the
+    already-exists branch of the user step) because it is idempotent:
+    ``add_to_workspace_group`` is ``getent || groupadd`` then ``usermod
+    -aG``, a no-op once membership holds. A second reinit (user now present,
+    membership already held) still invokes it, completes cleanly, and
+    duplicates no grant rows."""
+    config = make_config()
+    _seed_vm(db)
+    _seed_granted_agent(db, ["ws1"])
+    _reachable(monkeypatch, True)
+    calls: list[tuple[str, str]] = []
+    monkeypatch.setattr(
+        agent_grants,
+        "add_to_workspace_group",
+        lambda vm, config_, db_, linux_user, ws, **k: calls.append((linux_user, ws)),
+    )
+
+    agent_manager.reinit_agent(db, config, name="dev")
+    agent_manager.reinit_agent(db, config, name="dev")
+
+    assert calls == [("agt-dev", "ws1"), ("agt-dev", "ws1")]  # ran unconditionally both times
+    assert len(db.list_agent_grants("dev")) == 1  # no duplication
+    assert (Role.RESULT, 0, "Agent 'dev' reinitialized") in captured_output.lines
+
+
+def test_reinit_skips_stale_grant_and_reconciles_the_rest(
+    db: Database,
+    make_config,  # noqa: ANN001
+    mutation: dict[str, Any],
+    monkeypatch: pytest.MonkeyPatch,
+    captured_output,  # noqa: ANN001
+) -> None:
+    """A grant row pointing at a since-deleted workspace is an invariant
+    violation (workspace delete should sweep its grants), but reinit is a
+    repair command and must not crash on stale DB state. ``_resolve_ws_group``
+    raises NotFoundError, which reinit catches per workspace: it warns, skips
+    that workspace, and reconciles the rest. Simulated by making
+    ``add_to_workspace_group`` raise NotFoundError for the stale workspace
+    while the healthy one succeeds. Reinit completes without raising."""
+    config = make_config()
+    _seed_vm(db)
+    _seed_granted_agent(db, ["good", "stale"])
+    _reachable(monkeypatch, True)
+    done: list[str] = []
+
+    def _fake(vm: Any, config_: Any, db_: Any, linux_user: str, ws: str, **k: Any) -> None:
+        if ws == "stale":
+            raise NotFoundError("workspace 'stale' not found", entity_kind="workspace", entity_name="stale")
+        done.append(ws)
+
+    monkeypatch.setattr(agent_grants, "add_to_workspace_group", _fake)
+
+    agent_manager.reinit_agent(db, config, name="dev")  # must not raise
+
+    assert done == ["good"]  # the healthy grant was still reconciled
+    assert any("stale" in w and "skipping stale grant" in w for w in captured_output.warnings)
+    assert (Role.RESULT, 0, "Agent 'dev' reinitialized") in captured_output.lines

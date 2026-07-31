@@ -523,6 +523,44 @@ def reinit_agent(
                         git_tokens=git_tokens,
                         logger=ssh_logger,
                     )
+
+                    # Reconcile the agent's recorded workspace grants onto the
+                    # VM. reinit shares create_agent_on_vm with the create path
+                    # but not realize's grant pass, so when the user step
+                    # recreates a truly-gone Linux user (issue #252) the fresh
+                    # user lands with no workspace group memberships while the
+                    # DB grant rows survive untouched. The agent would then hold
+                    # grants in the DB but no on-VM access (issue #280); this
+                    # repairs that. list_granted_workspaces returns the distinct
+                    # workspaces the agent holds any grant for, and because
+                    # grant_all materializes explicit per-workspace rows at
+                    # grant time, that single query already covers both explicit
+                    # and grant_all grants (no separate grant_all branch).
+                    # add_to_workspace_group is idempotent (getent || groupadd,
+                    # then usermod -aG), so running it unconditionally is a
+                    # no-op on the already-exists branch and a repair on the
+                    # recreate branch. This reconciles ON-VM state only: the
+                    # grant rows already exist, so we do NOT re-insert them.
+                    from agentworks.agents.grants import add_to_workspace_group
+
+                    for ws_name in db.list_granted_workspaces(name):
+                        try:
+                            add_to_workspace_group(vm, config, db, agent.linux_user, ws_name, logger=ssh_logger)
+                        except NotFoundError:
+                            # list_granted_workspaces only returns workspaces
+                            # that still have grant rows, and workspace deletion
+                            # is supposed to sweep those rows
+                            # (revoke_workspace_grants), so a grant row pointing
+                            # at a deleted workspace is an invariant violation,
+                            # not a normal state. reinit is a repair command,
+                            # though, so it must not crash on stale DB state:
+                            # warn, skip this workspace, and reconcile the rest.
+                            # Any other failure (SSH / sudo) propagates through
+                            # the wrapper below, exactly like create_agent_on_vm.
+                            output.warn(
+                                f"agent '{name}': skipping stale grant for workspace "
+                                f"'{ws_name}' (workspace no longer exists)"
+                            )
                 except KeyboardInterrupt:
                     output.warn(
                         f"Cancelling agent reinit '{name}'. The agent may be in a partial state. "
