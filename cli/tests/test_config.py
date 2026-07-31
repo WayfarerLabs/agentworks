@@ -198,6 +198,46 @@ def test_git_credential_provider_wins_over_type(tmp_path: Path) -> None:
     assert any("git_credentials.ado" in issue and "provider wins" in issue for issue in cfg.config_issues)
 
 
+def test_git_credential_nonconforming_name_warns_and_loads(tmp_path: Path) -> None:
+    """A non-conforming credential name (uppercase) with no explicit token
+    still loads and stays usable, but warns: its default token secret
+    ``git-token-<name>`` inherits the non-conformance (issue #308)."""
+    config_file = _git_credential_config(
+        tmp_path,
+        '[git_credentials.GITHUB]\nprovider = "github"',
+    )
+    cfg = load_config(config_file, warn_issues=False)
+    # Warn-only, non-breaking: the credential is present and unchanged.
+    assert cfg.git_credentials["GITHUB"].provider == "github"
+    assert any("git_credentials.GITHUB" in issue and "git-token-GITHUB" in issue for issue in cfg.config_issues)
+
+
+def test_git_credential_conforming_name_no_warning(tmp_path: Path) -> None:
+    """A conforming credential name emits no derived-secret warning."""
+    config_file = _git_credential_config(
+        tmp_path,
+        '[git_credentials.github]\nprovider = "github"',
+    )
+    cfg = load_config(config_file, warn_issues=False)
+    assert not any("does not follow the naming rules" in issue for issue in cfg.config_issues)
+
+
+def test_git_credential_nonconforming_name_with_explicit_token_no_derived_warning(
+    tmp_path: Path,
+) -> None:
+    """When an explicit ``token`` is set, the credential name feeds no derived
+    secret, so #308's derived-default warning does not fire (the explicit
+    token value's own conformance is issue #279's concern, not this one)."""
+    config_file = _git_credential_config(
+        tmp_path,
+        '[git_credentials.GITHUB]\nprovider = "github"\ntoken = "git-token-github"',
+    )
+    cfg = load_config(config_file, warn_issues=False)
+    assert cfg.git_credentials["GITHUB"].provider == "github"
+    assert cfg.git_credentials["GITHUB"].provider_config["token"] == "git-token-github"
+    assert not any("does not follow the naming rules" in issue for issue in cfg.config_issues)
+
+
 def test_unexpected_top_level_keys_warns(tmp_path: Path) -> None:
     """Bare keys before any section header land at top level."""
     pub = tmp_path / "id.pub"
