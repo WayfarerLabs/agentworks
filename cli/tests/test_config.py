@@ -238,6 +238,46 @@ def test_git_credential_nonconforming_name_with_explicit_token_no_derived_warnin
     assert not any("does not follow the naming rules" in issue for issue in cfg.config_issues)
 
 
+def test_git_credential_name_deriving_secret_at_length_cap_no_warning(tmp_path: Path) -> None:
+    """A credential name whose derived ``git-token-<name>`` lands exactly at
+    MAX_SECRET_NAME_LENGTH emits no warning: the cap is inclusive (issue #308)."""
+    from agentworks.config.validation import MAX_SECRET_NAME_LENGTH
+
+    # 'git-token-' is 10 chars, so a name of (cap - 10) makes the derived
+    # secret name exactly the cap.
+    name = "a" * (MAX_SECRET_NAME_LENGTH - len("git-token-"))
+    config_file = _git_credential_config(
+        tmp_path,
+        f'[git_credentials.{name}]\nprovider = "github"',
+    )
+    cfg = load_config(config_file, warn_issues=False)
+    assert not any("does not follow the naming rules" in issue for issue in cfg.config_issues)
+
+
+def test_git_credential_name_conforming_but_derived_over_cap_warns(tmp_path: Path) -> None:
+    """The length-ceiling case: a credential name that passes the naming rules
+    on its own, but whose derived ``git-token-<name>`` overflows
+    MAX_SECRET_NAME_LENGTH once the prefix is added, still warns. Guards the
+    subtle property that the fix validates the DERIVED string, not the bare
+    name (issue #308): a future edit validating the bare name would pass this
+    name and silently regress."""
+    from agentworks.config.validation import MAX_SECRET_NAME_LENGTH, validate_name
+
+    # One char past the cap once the 10-char 'git-token-' prefix is added.
+    name = "a" * (MAX_SECRET_NAME_LENGTH - len("git-token-") + 1)
+    # Precondition: the bare name is itself valid; only the derived name overflows.
+    validate_name(name, max_length=MAX_SECRET_NAME_LENGTH)
+    config_file = _git_credential_config(
+        tmp_path,
+        f'[git_credentials.{name}]\nprovider = "github"',
+    )
+    cfg = load_config(config_file, warn_issues=False)
+    assert any(
+        f"git_credentials.{name}" in issue and "does not follow the naming rules" in issue
+        for issue in cfg.config_issues
+    )
+
+
 def test_unexpected_top_level_keys_warns(tmp_path: Path) -> None:
     """Bare keys before any section header land at top level."""
     pub = tmp_path / "id.pub"
