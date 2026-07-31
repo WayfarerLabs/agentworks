@@ -10,7 +10,10 @@ import pytest
 from agentworks.bootstrap import build_registry
 from agentworks.config import load_config
 from agentworks.errors import NotFoundError
-from agentworks.workspaces.templates import resolve_template
+from agentworks.workspaces.templates import (
+    resolve_template,
+    resolve_ws_template_env_or_empty,
+)
 
 
 @pytest.fixture()
@@ -106,6 +109,41 @@ def test_unknown_template(config):  # type: ignore[no-untyped-def]
     assert exc.value.hint.startswith("available workspace templates: ")
     for declared in ("base", "child", "default", "grandchild"):
         assert declared in exc.value.hint
+
+
+def test_resolve_ws_template_env_or_empty_unknown_returns_empty(config):  # type: ignore[no-untyped-def]
+    """The shared guard behind ``vm exec/shell --workspace`` and ``env
+    show``: an unresolvable template (the synthetic ``copied`` marker a
+    copied workspace records, or a template later removed from config)
+    yields an empty env dict instead of raising ``unknown_template_error``
+    (issue #285)."""
+    registry = build_registry(config)
+    assert resolve_ws_template_env_or_empty(registry, "copied") == {}
+    assert resolve_ws_template_env_or_empty(registry, "nonexistent") == {}
+
+
+def test_resolve_ws_template_env_or_empty_real_template_returns_its_env(tmp_path: Path) -> None:
+    """A resolvable template is NOT swallowed: its declared env flows
+    through unchanged, so the guard is scoped to the failure case."""
+    pub = tmp_path / "id.pub"
+    priv = tmp_path / "id"
+    pub.write_text("key")
+    priv.write_text("key")
+
+    config_file = tmp_path / "config.toml"
+    config_file.write_text(
+        dedent(f"""\
+        [operator]
+        ssh_public_key = "{pub.as_posix()}"
+        ssh_private_key = "{priv.as_posix()}"
+
+        [workspace_templates.proj.env]
+        WS_VAR = "ws-val"
+    """)
+    )
+    cfg = load_config(config_file)
+    env = resolve_ws_template_env_or_empty(build_registry(cfg), "proj")
+    assert env["WS_VAR"].value == "ws-val"
 
 
 def test_unknown_template_hint_when_none_declared() -> None:
