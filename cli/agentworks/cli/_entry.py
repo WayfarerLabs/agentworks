@@ -94,12 +94,30 @@ def main() -> None:
         error(str(e))
         echo_hint(e)
         raise SystemExit(1) from None
-    except (click.exceptions.ClickException, click.exceptions.Exit, click.exceptions.Abort):
-        # Let Click / Typer own their own rendering and exit codes. Typer
-        # converts KeyboardInterrupt to click.Exit(130) internally before this
-        # try block sees it (see typer/core.py), so ctrl-C is already handled
-        # silently with the conventional SIGINT exit code; per-op rollback
-        # handlers fire inside the command, before typer's conversion.
+    except click.exceptions.ClickException as e:
+        # Real-`click` parse/usage errors raised through a raw `click_type=`
+        # (e.g. a `click.Choice`, as in resource.py and completion.py). These
+        # reach us because typer vendors its own private copy of click
+        # (`typer._click`) and its internal handler catches only that vendored
+        # ClickException; a real-`click` exception fails typer's isinstance check
+        # and propagates past typer's own Rich renderer, out of app(), to here
+        # (which imports the same real `click`, so this except matches). Render
+        # Click's own message via e.show() (the one-line `Error: <message>`,
+        # already listing the valid choices, plus the usage/"Try --help" pointer
+        # when Click attached a context) and exit with its usage code, instead
+        # of re-raising into typer's Rich excepthook (a full traceback). No
+        # error.log write: these are user input errors, not bugs. This does NOT
+        # cover unknown-option / missing-argument errors from typer-native
+        # params; typer renders those itself as its boxed panel and they never
+        # reach this clause.
+        e.show()
+        raise SystemExit(e.exit_code) from None
+    except (click.exceptions.Exit, click.exceptions.Abort):
+        # Typer/Click own these: Exit carries its own code; Abort is ctrl-C.
+        # Typer converts KeyboardInterrupt to click.Exit(130) internally before
+        # this try block sees it (see typer/core.py), so ctrl-C is already
+        # handled silently with the conventional SIGINT exit code; per-op
+        # rollback handlers fire inside the command, before typer's conversion.
         raise
     except KeyboardInterrupt:
         # Defensive: a KI that somehow bypasses typer's internal conversion

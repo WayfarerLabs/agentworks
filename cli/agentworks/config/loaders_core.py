@@ -13,9 +13,14 @@ import sys
 from pathlib import Path
 
 from agentworks.config.models import DefaultsConfig, OperatorConfig, PathsConfig, _SectionLineMap
-from agentworks.config.validation import SSH_HOST_PREFIX_RE, validate_vm_workspaces
+from agentworks.config.validation import (
+    MAX_SECRET_NAME_LENGTH,
+    SSH_HOST_PREFIX_RE,
+    validate_name,
+    validate_vm_workspaces,
+)
 from agentworks.env import EnvEntry
-from agentworks.errors import ConfigError
+from agentworks.errors import ConfigError, ValidationError
 from agentworks.git_credentials.credential import GitCredentialConfig
 
 
@@ -54,6 +59,46 @@ def _warn_unexpected_keys(
     if unexpected:
         keys = ", ".join(sorted(unexpected))
         issues.append(f"unexpected keys in [{section}]: {keys}")
+
+
+def _warn_nonconforming_derived_secret(credential_name: str, issues: list[str]) -> None:
+    """Warn (do not raise) when a git-credential NAME would derive a
+    non-conforming default token secret.
+
+    When ``[git_credentials.<name>]`` omits an explicit ``token``, the token
+    secret name defaults to ``git-token-<name>`` (``default_token_secret``),
+    and that derived name inherits any non-conformance in the credential name
+    (uppercase, an over-length name, a trailing hyphen, ...). Nothing
+    downstream re-validates it: ``Registry.add`` rejects only ``/`` and
+    ``_SecretKind.synthesize`` imposes no name restriction, so a name like
+    ``[git_credentials.GITHUB]`` silently produces the secret
+    ``git-token-GITHUB``. Warning at the operator boundary unifies the
+    "conforming secret names" guarantee (issue #308) WITHOUT breaking configs
+    that already load: the credential and its derived secret still declare and
+    resolve exactly as before, so the warning is the only effect. Deriving this
+    coverage structurally from the ConfigReference(kind="secret") edges, rather
+    than hand-wiring it here, is tracked in issue #311.
+
+    The fully-derived ``git-token-<name>`` is validated (not the bare
+    credential name) against ``MAX_SECRET_NAME_LENGTH``: that string is exactly
+    the secret name that will exist, so it predicts conformance precisely,
+    including the length ceiling the ``git-token-`` prefix eats into (a
+    credential name that fits on its own can still push the derived name past
+    the cap). This matches how an explicitly declared ``[secrets.<name>]`` is
+    validated in ``_load_secrets``.
+    """
+    derived = f"git-token-{credential_name}"
+    try:
+        validate_name(derived, max_length=MAX_SECRET_NAME_LENGTH)
+    except ValidationError:
+        issues.append(
+            f"git_credentials.{credential_name}: credential name {credential_name!r} does "
+            f"not follow the naming rules (lowercase alphanumeric with hyphens or "
+            f"underscores, starting and ending with a letter or digit, at most "
+            f"{MAX_SECRET_NAME_LENGTH} characters once the 'git-token-' prefix is added); "
+            f"its default token secret {derived!r} inherits this. Rename the credential to "
+            f"conform, or set an explicit conforming 'token'."
+        )
 
 
 _ENV_KEY_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
@@ -357,6 +402,14 @@ def _load_git_credentials(
                     f'"git-token-{name}"'
                 )
             provider_config["token"] = cdata["token"]
+        else:
+            # Only the token-absent case derives ``git-token-<name>`` from the
+            # credential name; when ``token`` is set explicitly the name feeds
+            # no secret, so warning about it here would be noise (and the
+            # explicit value's own conformance is a separate reference-site
+            # concern, issue #279). Scoping the warning to the default-
+            # derivation case is exactly #308's gap and avoids double-warning.
+            _warn_nonconforming_derived_secret(name, issues)
         # The flat TOML shape only ever read ``org``, and only for azdo;
         # hoisting it into the blob for other providers would promote a
         # historically-ignored stray key into a validation error and

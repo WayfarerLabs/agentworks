@@ -164,13 +164,6 @@ class GitCredentialProvider(Capability):
         subclasses override where the host dictates otherwise."""
         return self.owner_name
 
-    @property
-    def display_name(self) -> str:
-        """Human-readable name: 'key (description)' or just 'key'."""
-        if self._description:
-            return f"{self.owner_name} ({self._description})"
-        return self.owner_name
-
     def runup(self, ctx: RunContext) -> None:
         """Authenticated readiness (the ``runup`` lifecycle stage):
         confirm the resolved PAT authorizes against the host before it is

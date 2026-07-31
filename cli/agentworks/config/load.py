@@ -104,6 +104,9 @@ def load_config(
 
     Raises:
         ConfigError: If the config is missing or invalid.
+        ValidationError: If a declared resource name is non-conforming (a
+            sibling of ConfigError under AgentworksError, not a subclass, so
+            callers guarding load must catch both).
         SystemExit: If the config file does not exist.
     """
     # Re-imported here (rather than bound at module load) so that tests'

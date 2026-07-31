@@ -443,6 +443,7 @@ def _check_tailscale() -> HealthGroup:
 def _check_config() -> tuple[HealthGroup, Config | None, Registry | None]:
     """Returns (group, config_or_none, registry_or_none)."""
     from agentworks.config import CONFIG_PATH, ConfigError
+    from agentworks.errors import ValidationError
 
     g = HealthGroup("Configuration")
     config = None
@@ -457,7 +458,13 @@ def _check_config() -> tuple[HealthGroup, Config | None, Registry | None]:
         from agentworks.config import load_config
 
         config = load_config(warn_issues=False)
-    except ConfigError as e:
+    except (ConfigError, ValidationError) as e:
+        # ValidationError is a SIBLING of ConfigError under AgentworksError,
+        # not a subclass, so it must be named explicitly: the secrets loader
+        # (_load_secrets -> validate_name) raises it for a non-conforming
+        # explicit [secrets.*] name. Catching it here yields a fail row and
+        # lets the rest of the report render, per doctor's maximal-visibility
+        # contract, instead of aborting with a bare one-liner and no report.
         g.fail("Config", str(e), hint=e.hint)
         return g, None, None
     except SystemExit:
@@ -481,7 +488,12 @@ def _check_config() -> tuple[HealthGroup, Config | None, Registry | None]:
     manifests = None
     try:
         manifests = load_manifests(resources_dir)
-    except ConfigError as e:
+    except (ConfigError, ValidationError) as e:
+        # Same sibling-miss guard as the config load above: the manifest
+        # decode path runs validate_name (e.g. _decode_vm_site, _decode_secret)
+        # and so can surface a ValidationError. Caught here it becomes a fail
+        # row and the rest of the report (TOML issues, SSH checks, ...) still
+        # renders, rather than aborting the whole run.
         g.fail("Manifest", str(e), hint=e.hint)
 
     # Deprecated-field usage (FRD R11) is surfaced as its own proactive
