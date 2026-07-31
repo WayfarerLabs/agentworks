@@ -16,8 +16,8 @@ from typing import TYPE_CHECKING
 import pytest
 
 from agentworks.capabilities.base import OperationScope, RunContext, ScopeLevel
-from agentworks.capabilities.harness import ClaudeCodeHarness
 from agentworks.errors import ConfigError, StateError
+from agentworks.plugins.claude.harness import ClaudeCodeHarness
 from tests.conftest import _FakeResult, _FakeTarget
 
 if TYPE_CHECKING:

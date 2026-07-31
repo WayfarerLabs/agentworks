@@ -61,6 +61,12 @@ def create_agent_on_vm(
     agent's behalf and matches the rule that operations whose target
     user is the agent open SSH directly as the agent's Linux user.
     """
+    # DRIFT GUARD (Phase 7, recipe use-gate): this function is itself never
+    # gated; it runs ``_run_agent_install_commands`` (a declarable consumer), so
+    # the recipe gate (``ensure_recipe_enabled``) must sit at each COMMAND ENTRY
+    # that reaches it (agent create/reinit, session create --new-agent). If you
+    # add a NEW caller of ``create_agent_on_vm``, add its command-entry gate and
+    # update tests/agents/test_recipe_gate_drift.py's enumerated caller set.
     from agentworks.sessions.tmux import (
         cleanup_stale_sockets,
         ensure_agent_socket_dir,
@@ -466,6 +472,11 @@ def _run_agent_install_commands(
     from agentworks.resources.access import kind_dict
     from agentworks.ssh import SSHError
 
+    # DRIFT GUARD (Phase 7, recipe use-gate): this runner consumes
+    # user-install-command rows by name and must never run a disabled plugin's
+    # row. It is reached only via ``create_agent_on_vm``; the recipe gate lives
+    # at each command entry that reaches it (see
+    # tests/agents/test_recipe_gate_drift.py's entry table).
     user_install_commands = kind_dict(registry, "user-install-command")
     shell = agent_tmpl.shell
     path_additions: list[str] = []

@@ -255,7 +255,10 @@ def test_resource_layer_surfaces_not_ready_state(make_config, monkeypatch: pytes
 def test_doctor_lists_platforms_and_not_ready_sites(make_config, monkeypatch: pytest.MonkeyPatch) -> None:
     """Platform rows carry only the platform-level state, read off the graph;
     per-site availability (lima-local without limactl) reports in the sites
-    group where the site lives."""
+    group where the site lives. DISABLED plugin platforms (``azure-vm`` and
+    ``proxmox`` with their plugins not enabled) are skipped: the System plugins
+    roster is the enablement authority, so this section never renders them as a
+    misleading ``[ok]``."""
     from agentworks import doctor
 
     _support(monkeypatch, wsl2="Windows only", lima_local="limactl not installed")
@@ -269,7 +272,30 @@ def test_doctor_lists_platforms_and_not_ready_sites(make_config, monkeypatch: py
     lima_row = by_name["lima"]
     assert lima_row.status is doctor.Status.OK
     assert lima_row.message is None  # the bundled-site note moved to VM sites
-    assert by_name["azure-vm"].status is doctor.Status.OK
+    # azure-vm and proxmox are plugin platforms; with no plugins enabled they
+    # are disabled and must NOT appear here (they list in the System plugins
+    # roster as disabled instead).
+    assert "azure-vm" not in by_name
+    assert "proxmox" not in by_name
+
+
+def test_doctor_shows_enabled_plugin_platform_with_real_readiness(make_config, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The other half of the disabled-hides rule: an ENABLED plugin platform
+    (``proxmox`` opted in) DOES appear in the VM platforms section, carrying its
+    real stored readiness rather than being hidden."""
+    from agentworks import doctor
+
+    _support(monkeypatch, wsl2="Windows only", lima_local="limactl not installed")
+    registry = build_registry(make_config('[plugins]\nsystem = ["proxmox"]\n'))
+
+    group = doctor._check_vm_platforms(registry)
+    by_name = {c.name: c for c in group.checks}
+    # Enabled: present, with its real readiness (proxmox is a remote-API platform
+    # with no host requirement, so it is ready here).
+    assert "proxmox" in by_name
+    assert by_name["proxmox"].status is doctor.Status.OK
+    # azure-vm stays disabled (its plugin is not enabled), so it stays hidden.
+    assert "azure-vm" not in by_name
 
 
 # -- The real methods (both branches, deterministically) ----------------------

@@ -530,7 +530,11 @@ class _StubGraph:
         return tuple(method(BuildContext()))
 
     def reachable_from(self, kind: str, name: str) -> list[tuple[str, str]]:
-        self._registry.lookup(kind, name)
+        # Tolerate a missing start node, exactly as the real graph does
+        # (graph.py:228-230): the DFS below catches the edges_of KeyError and
+        # yields an empty closure, so a consumer that walks a template resolved
+        # off a namespace fixture (not a registry row) gets [] rather than a
+        # KeyError. The recipe use-gate (ensure_recipe_enabled) relies on this.
         visited: set[tuple[str, str]] = {(kind, name)}
         ordered: list[tuple[str, str]] = []
         stack: list[tuple[str, str]] = [(kind, name)]
@@ -555,6 +559,16 @@ class _StubGraph:
 
     def is_ready(self, kind: str, name: str) -> bool:
         return True
+
+    def enablement_of(self, kind: str, name: str):  # noqa: ANN201 - mirrors DependencyGraph
+        # Every node is enabled in the stub (no plugin opt-out producer here),
+        # matching the real graph's every-node-is-enabled default. The session
+        # harness gate (``ensure_harness_enabled``) reads this at the build
+        # sites; a built-in harness (``shell``) stays enabled, so the gate is a
+        # no-op under the stub.
+        from agentworks.resources.graph import Enablement
+
+        return Enablement.enabled
 
 
 def stub_build_registry(monkeypatch: pytest.MonkeyPatch) -> None:

@@ -16,8 +16,8 @@ from typing import TYPE_CHECKING, Any
 import pytest
 
 from agentworks.capabilities.base import RunContext
-from agentworks.capabilities.vm_platform.azure_vm import AzureVMPlatform
 from agentworks.db import VMStatus
+from agentworks.plugins.azure.platform import AzureVMPlatform
 
 if TYPE_CHECKING:
     from agentworks.db import VMRow

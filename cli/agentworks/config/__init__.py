@@ -29,7 +29,8 @@ import path ``agentworks.config`` unchanged:
 - ``loaders_sessions``: ``[session.config]`` and ``[session_templates.*]``,
   including the legacy flat-field-to-harness hoisting.
 - ``loaders_secrets``: ``[secrets.*]``, ``[secret_backends.*]``, the
-  aggregated deprecated-TOML-section warning, and ``[secret_config]``.
+  aggregated deprecated-TOML-section warning, ``[secret_config]``, and
+  ``[plugins]``.
 - ``load``: the ``load_config`` entry point that drives the above.
 
 This ``__init__.py`` re-exports the public surface (and the handful of
@@ -72,6 +73,7 @@ from agentworks.config.loaders_resources import (
     _load_workspace_templates,
 )
 from agentworks.config.loaders_secrets import (
+    _load_plugins,
     _load_secret_backends,
     _load_secret_config,
     _load_secrets,
@@ -147,6 +149,7 @@ __all__ = [
     "_load_named_console",
     "_load_operator",
     "_load_paths",
+    "_load_plugins",
     "_load_secret_backends",
     "_load_secret_config",
     "_load_secrets",

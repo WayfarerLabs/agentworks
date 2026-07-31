@@ -167,6 +167,26 @@ def _build_session_graph(
         assert existing_agent is not None  # loaded by the anchor / prompt blocks
         agent_node = live_agent_node(existing_agent, vm_node)
 
+    # Gate a disabled plugin harness at USE (R14, the secret model): the
+    # session-template lists ready, but constructing a session on a disabled
+    # harness is a typed error naming the plugin to enable. The gate lives at
+    # this call site (not inside ``pending_session_node``, which threads no
+    # registry); a drift guard pins that every caller of the node factory gates.
+    from agentworks.capabilities.harness import ensure_harness_enabled
+    from agentworks.resources.access import ensure_recipe_enabled
+
+    ensure_harness_enabled(registry, template.harness)
+    # Refuse a session-template recipe that draws on a disabled plugin's
+    # declarable resource, and (on the --new-agent path) the ephemeral
+    # agent-template's recipe too, before any transport work (Phase 7, LLD b).
+    # The --new-agent gate is BLOCKING 2: without it a disabled plugin's
+    # user-install-command (or an inherited disabled agent-template) would run
+    # ungated on the ephemeral-agent realize path. Drift guard:
+    # tests/agents/test_recipe_gate_drift.py.
+    ensure_recipe_enabled(registry, "session-template", template.name)
+    if new_agent:
+        assert agent_tmpl is not None  # set on the new_agent branch above
+        ensure_recipe_enabled(registry, "agent-template", agent_tmpl.name)
     session_node = pending_session_node(
         db,
         config,

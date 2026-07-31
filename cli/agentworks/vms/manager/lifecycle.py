@@ -138,6 +138,15 @@ def create_vm(
 
     vm_tmpl = resolve_template(registry, template)
 
+    # Refuse a vm-template recipe that draws on a disabled plugin's declarable
+    # resource (a bundled install-command / apt entry / inherited template)
+    # BEFORE any DB or backend work, with the enable-plugin hint (Phase 7,
+    # LLD b). Drift guard: tests/agents/test_recipe_gate_drift.py. The
+    # admin-template recipe is gated below, once it is resolved.
+    from agentworks.resources.access import ensure_recipe_enabled
+
+    ensure_recipe_enabled(registry, "vm-template", vm_tmpl.name)
+
     # Resolve the target site and its declaration. An undeclared site
     # fails here with the stranded-site ConfigError + manifest hint,
     # and a NOT-READY one with its reason chain, both before any DB or
@@ -182,6 +191,9 @@ def create_vm(
             name=selected_admin_template,
             available=kind_dict(registry, "admin-template"),
         ) from None
+    # Gate the selected admin-template's recipe too (its own
+    # user_install_commands closure), before backend work (Phase 7, LLD b).
+    ensure_recipe_enabled(registry, "admin-template", selected_admin_template)
     resolved_admin_username = admin.username
     validate_admin_username(resolved_admin_username)
 
@@ -513,6 +525,14 @@ def reinit_vm(
 
     reinit_vm_tmpl = resolve_template(registry, vm.template)
 
+    # Refuse a recipe drawing on a disabled plugin's declarable resource before
+    # the reinit realize (Phase 7, LLD b). Drift guard:
+    # tests/agents/test_recipe_gate_drift.py. The admin-template recipe is gated
+    # below, once it is resolved.
+    from agentworks.resources.access import ensure_recipe_enabled
+
+    ensure_recipe_enabled(registry, "vm-template", reinit_vm_tmpl.name)
+
     if vm.provisioning_status != ProvisioningStatus.COMPLETE.value:
         raise StateError(
             f"VM '{name}' provisioning is '{vm.provisioning_status}', not 'complete'. Cannot reinitialize.",
@@ -545,6 +565,10 @@ def reinit_vm(
             name=selected_admin_template,
             available=kind_dict(registry, "admin-template"),
         ) from None
+
+    # Gate the selected admin-template's recipe too, before backend work
+    # (Phase 7, LLD b).
+    ensure_recipe_enabled(registry, "admin-template", selected_admin_template)
 
     _mgr.verify_tailscale_available()
     cred_nodes = tuple(git_credential_node(registry, cred_name) for cred_name in admin.git_credentials)

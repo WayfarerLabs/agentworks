@@ -25,11 +25,11 @@ from typing import TYPE_CHECKING
 import pytest
 
 from agentworks.capabilities.git_credential.github import GitHubCredentialProvider
-from agentworks.capabilities.vm_platform.proxmox import ProxmoxPlatform
 from agentworks.db import VMStatus
 from agentworks.errors import StateError, TokenRejectedError, ValidationError
+from agentworks.plugins.proxmox.platform import ProxmoxPlatform
 from agentworks.vms import manager as vm_manager
-from tests.orchestrated_fixtures import PROXMOX_SECTION, write_operator_config
+from tests.orchestrated_fixtures import PLUGINS_ENABLED, PROXMOX_SECTION, write_operator_config
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -52,7 +52,7 @@ def make_config(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setenv("AW_SECRET_GIT_TOKEN_GH", "ghtok")
 
     def _make(extra: str = PROXMOX_SECTION + GIT_CRED_SECTION):
-        return write_operator_config(tmp_path, extra)
+        return write_operator_config(tmp_path, PLUGINS_ENABLED + extra)
 
     return _make
 

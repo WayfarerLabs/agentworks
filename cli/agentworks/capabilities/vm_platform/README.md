@@ -5,9 +5,13 @@
 > capability obeys (`dependencies` / `validate`, preflight, runup, ops); this one covers what is
 > specific to running VMs, plus the gotchas that have already bitten real platforms.
 
-Four platforms ship today and are the working references throughout this guide: `lima` (`lima.py`),
-`wsl2` (`wsl2.py`), `azure-vm` (`azure_vm.py`), and `proxmox` (`proxmox.py`). When a rule below has
-a concrete example, it names the platform and file that demonstrates it.
+Four platforms ship today and are the working references throughout this guide: `lima` (`lima.py`)
+and `wsl2` (`wsl2.py`) as core built-ins, plus `proxmox` and `azure-vm`, which now ship in opt-in
+system plugins (`agentworks/plugins/proxmox/platform.py`, with its REST client in `api.py`; and
+`agentworks/plugins/azure/platform.py`). The rules below apply to a plugin-shipped platform exactly
+as to a core one; each plugin re-seats its class into `VM_PLATFORM_REGISTRY` at import, so authoring
+a platform is the same either way. When a rule below has a concrete example, it names the platform
+and file that demonstrates it.
 
 ## What a VM platform is
 
@@ -92,7 +96,8 @@ read back only by the owning platform (Lima stores `instance_name`, WSL2 `distro
 `ProvisionRequest`, not by changing the protocol. But note the opposite pattern is also right:
 purely internal translation stays inside the platform. Azure's VM-size selection (mapping the
 request's `cpus`/`memory_gib`/`disk_gib` onto a concrete SKU, with a `platform_config.vm_sizes`
-override, per ADR 0018) lives entirely in `azure_vm.py` and adds nothing to `ProvisionRequest`.
+override, per ADR 0018) lives entirely in `plugins/azure/platform.py` and adds nothing to
+`ProvisionRequest`.
 
 ## How an op gets its dependencies: `RunContext`
 

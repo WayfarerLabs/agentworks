@@ -1,0 +1,29 @@
+# Declarable resources bundled by a fixture system plugin, used to prove the
+# Phase 7 manifest present-but-disabled parity and the reference-side use-gate.
+# A user-install-command and a system-install-command (referenced by name from
+# templates), plus an agent-template that references the user-install-command
+# so its recipe closure carries a disabled contribution when the plugin is off.
+apiVersion: agentworks/v1
+kind: user-install-command
+metadata:
+  name: fixture-user-cmd
+  description: A fixture per-user install command shipped by a system plugin
+spec:
+  command: "echo fixture-user-cmd"
+---
+apiVersion: agentworks/v1
+kind: system-install-command
+metadata:
+  name: fixture-sys-cmd
+  description: A fixture system install command shipped by a system plugin
+spec:
+  command: "echo fixture-sys-cmd"
+---
+apiVersion: agentworks/v1
+kind: agent-template
+metadata:
+  name: fixture-agent-tmpl
+  description: A fixture agent template shipped by a system plugin
+spec:
+  shell: bash
+  user_install_commands: [fixture-user-cmd]

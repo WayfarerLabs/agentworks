@@ -323,7 +323,7 @@ def test_provisioner_shell_target_proxmox_hint_points_at_web_console(
 
     db = _seed_db(tmp_path, platform="proxmox")
 
-    from agentworks.capabilities.vm_platform.proxmox import ProxmoxPlatform
+    from agentworks.plugins.proxmox.platform import ProxmoxPlatform
 
     class _ProxmoxProvisioner:
         name = "proxmox"
@@ -368,7 +368,7 @@ def test_provisioner_shell_target_attaches_and_registers_detach_for_azure(
     come down regardless of how shell_vm unwinds (success, SSH failure, ^C)."""
     import contextlib
 
-    from agentworks.capabilities.vm_platform.azure_vm import AzureVMPlatform
+    from agentworks.plugins.azure.platform import AzureVMPlatform
     from agentworks.transports import SSHTransport, Transport
     from agentworks.transports import native_transport as _native_transport
     from agentworks.vms import manager as vm_manager
@@ -444,7 +444,7 @@ def test_provisioner_shell_target_detaches_on_exception_for_azure(
     the surrounding ExitStack closes."""
     import contextlib
 
-    from agentworks.capabilities.vm_platform.azure_vm import AzureVMPlatform
+    from agentworks.plugins.azure.platform import AzureVMPlatform
     from agentworks.transports import Transport
     from agentworks.transports import native_transport as _native_transport
     from agentworks.vms import manager as vm_manager

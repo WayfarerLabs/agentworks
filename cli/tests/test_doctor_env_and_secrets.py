@@ -161,7 +161,10 @@ def test_secret_backends_group_reports_readiness(tmp_path: Path, monkeypatch: py
     from agentworks.doctor import _check_secret_backends
 
     monkeypatch.setattr("shutil.which", lambda name: None)  # op absent
-    config = load_config(_write_config(tmp_path), warn_issues=False)
+    config = load_config(
+        _write_config(tmp_path, extras='[plugins]\nsystem = ["onepassword"]\n'),
+        warn_issues=False,
+    )
     g = _check_secret_backends(build_registry(config))
 
     assert g.name == "Secret backends"
@@ -172,6 +175,35 @@ def test_secret_backends_group_reports_readiness(tmp_path: Path, monkeypatch: py
     assert by_name["onepassword"].message == "not ready: op CLI not installed"
 
 
+def test_secret_backends_group_skips_disabled_plugin_backend(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A DISABLED plugin backend (``onepassword`` with the plugin not enabled) is
+    NOT listed in the Secret backends section: the System plugins roster is the
+    enablement authority and lists it as disabled instead. This is the fix for
+    the bug where a disabled backend rendered a misleading ``[ok]`` off its
+    ready-placeholder readiness, and where ENABLING onepassword made doctor look
+    worse (it flipped from ``[ok]`` to not-ready). The two core backends
+    (``env-var`` / ``prompt``) still list as ``ok``.
+    """
+    from agentworks.doctor import _check_plugins, _check_secret_backends
+
+    monkeypatch.setattr("shutil.which", lambda name: None)  # op absent
+    config = load_config(_write_config(tmp_path), warn_issues=False)  # no [plugins] system
+    registry = build_registry(config)
+
+    g = _check_secret_backends(registry)
+    by_name = {c.name: c for c in g.checks}
+    assert by_name["env-var"].status is Status.OK
+    assert by_name["prompt"].status is Status.OK
+    # Disabled: skipped here, never a misleading [ok].
+    assert "onepassword" not in by_name
+
+    # The System plugins roster IS the enablement authority: it lists the
+    # disabled backend's plugin as disabled.
+    roster = {c.name: c for c in _check_plugins(config).checks}
+    assert roster["plugin onepassword"].status is Status.INFO
+    assert "not enabled in [plugins].system" in (roster["plugin onepassword"].message or "")
+
+
 def test_check_secrets_flags_a_not_ready_only_backend(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """R9.6: a secret whose only attempting backend is not-ready is at-risk;
     ``_check_secrets`` warns and names the not-ready backend rather than
@@ -180,6 +212,9 @@ def test_check_secrets_flags_a_not_ready_only_backend(tmp_path: Path, monkeypatc
     cfg = _write_config(
         tmp_path,
         extras="""
+[plugins]
+system = ["onepassword"]
+
 [admin.env]
 TOKEN = { secret = "op-only" }
 
@@ -207,10 +242,11 @@ def test_r9_3_manifest_malformed_block_surfaces_under_resource_registry(
     """R9.3 doctor consequence: a malformed capability block in a MANIFEST now
     surfaces under the "Resource registry" check row, not "Manifest". Capability
     validation moved out of decode/load into the finalize ``validate`` pass, so
-    ``load_manifests`` accepts the block and ``build_registry`` fails it. Uses a
-    git-credential (always ready, host-independent, so its block always
-    validates)."""
-    cfg = _write_config(tmp_path)
+    ``load_manifests`` accepts the block and ``build_registry`` fails it. Uses an
+    azdo git-credential; azdo ships in the opt-in ``azure`` system plugin, whose
+    validation is deferred while disabled, so the plugin is enabled here for the
+    block to validate (host-independent, so it always validates once enabled)."""
+    cfg = _write_config(tmp_path, extras='[plugins]\nsystem = ["azure"]')
     resources_dir = tmp_path / "resources"
     resources_dir.mkdir()
     (resources_dir / "res.yaml").write_text(

@@ -16,9 +16,9 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from agentworks.capabilities.vm_platform.proxmox import ProxmoxPlatform
 from agentworks.db import VMStatus
 from agentworks.errors import UserAbort
+from agentworks.plugins.proxmox.platform import ProxmoxPlatform
 from agentworks.vms import manager as vm_manager
 
 if TYPE_CHECKING:

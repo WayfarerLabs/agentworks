@@ -350,6 +350,9 @@ def _readiness_grid_config(tmp_path: Path) -> Path:
     _write_base(
         cfg_file,
         extras="""
+        [plugins]
+        system = ["onepassword"]
+
         [admin.env]
         A = { secret = "mapped-op" }
         B = { secret = "prompt-only" }

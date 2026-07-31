@@ -176,6 +176,7 @@ def test_run_checks_group_order_and_config_failure_placeholder(
         "Python",
         "Required tools",
         "Tailscale",
+        "System plugins",
         "VM platforms",
         "VM sites",
         "Configuration",
@@ -183,7 +184,7 @@ def test_run_checks_group_order_and_config_failure_placeholder(
         "Secrets",
         "Database",
     ]
-    for group_name in ("VM platforms", "VM sites", "Secret backends", "Secrets"):
+    for group_name in ("VM platforms", "System plugins", "VM sites", "Secret backends", "Secrets"):
         placeholder = next(g for g in report.groups if g.name == group_name).checks
         assert len(placeholder) == 1, group_name
         assert placeholder[0].status is doctor.Status.INFO, group_name

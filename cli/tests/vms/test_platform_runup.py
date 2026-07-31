@@ -21,13 +21,13 @@ from types import SimpleNamespace
 import pytest
 
 from agentworks.capabilities.base import RunContext
-from agentworks.capabilities.vm_platform.azure_vm import AzureError, AzureVMPlatform
-from agentworks.capabilities.vm_platform.proxmox import ProxmoxPlatform
-from agentworks.capabilities.vm_platform.proxmox_api import (
+from agentworks.errors import NotFoundError, TokenRejectedError
+from agentworks.plugins.azure.platform import AzureError, AzureVMPlatform
+from agentworks.plugins.proxmox.api import (
     ProxmoxAPI,
     ProxmoxAPIError,
 )
-from agentworks.errors import NotFoundError, TokenRejectedError
+from agentworks.plugins.proxmox.platform import ProxmoxPlatform
 
 _CONFIG = {
     "api_url": "https://pve:8006",

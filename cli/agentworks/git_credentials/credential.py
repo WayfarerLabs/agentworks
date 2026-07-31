@@ -17,7 +17,9 @@ from typing import TYPE_CHECKING
 from agentworks.declared_resource import DeclaredResource
 
 if TYPE_CHECKING:
-    from agentworks.resources.graph import BuildContext
+    from collections.abc import Mapping
+
+    from agentworks.resources.graph import BuildContext, DependencyState, Readiness
     from agentworks.resources.reference import ResourceReference
 
 
@@ -104,6 +106,31 @@ class GitCredentialConfig(DeclaredResource):
                 )
             )
         return refs
+
+    def not_ready(self, deps: Mapping[tuple[str, str], DependencyState]) -> Readiness:
+        """This credential's readiness verdict, propagated from its SINGLE
+        provider dependency's enablement (mirroring ``VMSiteDecl.not_ready``,
+        the vm-site propagation model, R14).
+
+        A ``git-credential`` fronts exactly one provider, so, like a vm-site
+        over its platform, it is not-ready when that provider is disabled: the
+        fold hands the provider's :class:`DependencyState` for free (the
+        ``git-credential -> git-credential-provider`` edge already exists in
+        ``dependencies``), and this hook returns a blocked verdict carrying the
+        mark's remediation reason (e.g. "enable plugin `<name>`"), falling back
+        to "enable its unit" when no source supplied one. The provider itself
+        has no host-support axis (a git-credential-provider node is always
+        ready), so there is no not-ready readiness to propagate: only the
+        opt-in (enablement) axis matters here. An enabled provider leaves the
+        credential ready.
+        """
+        from agentworks.resources.graph import Enablement, Readiness
+
+        provider = deps[("git-credential-provider", self.provider)]
+        if provider.enablement is Enablement.disabled:
+            tail = provider.disabled_reason or "enable its unit"
+            return Readiness.blocked(f"depends on git-credential-provider '{self.provider}', which is disabled; {tail}")
+        return Readiness.ready()
 
     def validate(self, enabled_backends: frozenset[str]) -> None:
         """Throwing shape check for the ``provider_config`` blob, run by

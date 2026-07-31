@@ -11,7 +11,7 @@ from pathlib import Path
 import pytest
 
 from agentworks.resources.origin import Origin
-from agentworks.resources.render import format_file_path, format_origin_line
+from agentworks.resources.render import format_file_path, format_origin_line, format_origin_location
 
 
 def test_format_origin_line_handles_none() -> None:
@@ -42,6 +42,40 @@ def test_format_origin_line_auto_declared_with_source() -> None:
 def test_format_origin_line_built_in_with_source() -> None:
     origin = Origin.built_in(source="framework:always-materialize")
     assert format_origin_line(origin) == "built-in (framework:always-materialize)"
+
+
+def test_format_origin_line_system_plugin_with_source() -> None:
+    origin = Origin.system_plugin(plugin="apt", source="agentworks.plugins.apt")
+    assert format_origin_line(origin) == "system-plugin apt (agentworks.plugins.apt)"
+
+
+def test_format_origin_line_system_plugin_without_source_returns_bare_label() -> None:
+    """The defensive path for a system-plugin origin with no source. The
+    factory always sets ``source``, so this exercises a hand-built
+    ``Origin`` (a malformed producer, or a future caller bypassing the
+    factory) the same way the operator-declared defensive test does.
+    """
+    origin = Origin(variant="system-plugin", plugin="apt", source=None)
+    assert format_origin_line(origin) == "system-plugin apt"
+
+
+def test_format_origin_line_system_plugin_without_plugin_degrades_gracefully() -> None:
+    """A malformed system-plugin origin missing its ``plugin`` name degrades
+    to the bare label rather than rendering the literal ``"None"``. The
+    factory always sets ``plugin``, so this exercises a hand-built ``Origin``;
+    the branch guards ``plugin`` for the same defensive reason it guards
+    ``source``.
+    """
+    origin = Origin(variant="system-plugin", plugin=None, source="agentworks.plugins.apt")
+    assert format_origin_line(origin) == "system-plugin (agentworks.plugins.apt)"
+
+
+def test_format_origin_location_system_plugin_falls_through_to_line() -> None:
+    """A system-plugin origin carries no file:line, so the bare-location
+    renderer falls through to the labelled ``format_origin_line`` form.
+    """
+    origin = Origin.system_plugin(plugin="apt", source="agentworks.plugins.apt")
+    assert format_origin_location(origin) == "system-plugin apt (agentworks.plugins.apt)"
 
 
 def test_format_origin_line_raises_on_unknown_variant() -> None:

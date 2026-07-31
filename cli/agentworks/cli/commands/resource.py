@@ -55,7 +55,12 @@ def resource_list(
     origin_filter: str | None = typer.Option(
         None,
         "--origin",
-        help=("Filter by origin variant: operator, auto, or builtin. Default: all origins."),
+        help=("Filter by origin variant: operator, auto, builtin, or plugin. Default: all origins."),
+    ),
+    include_disabled: bool = typer.Option(
+        False,
+        "--include-disabled",
+        help=("Also show disabled resources, for example a not-enabled plugin's rows. Default: hidden."),
     ),
     names_only: bool = typer.Option(
         False,
@@ -103,6 +108,7 @@ def resource_list(
         db,
         kinds=kinds,
         origin_filter=cast("OriginFilter | None", origin_filter),
+        include_disabled=include_disabled,
     )
     # ``--names-only`` short-circuits the table render. Per the
     # cli-conventions ``--names-only`` rule, render-only work is skipped:

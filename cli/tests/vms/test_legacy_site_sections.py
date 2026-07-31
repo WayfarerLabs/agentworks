@@ -91,11 +91,13 @@ def test_legacy_section_blob_validates(write_config) -> None:
     """The assembled platform_config blob is shape-validated by the
     finalize ``validate`` pass (R3), so a malformed legacy section fails
     at build_registry, not at load. The site name (``azure``) frames the
-    error, with the source location re-attached from the origin."""
+    error, with the source location re-attached from the origin. ``azure-vm``
+    ships in the opt-in ``azure`` system plugin, whose validation is deferred
+    while disabled, so the plugin is enabled here for the blob check to fire."""
     from agentworks.bootstrap import build_registry
     from agentworks.manifests import ManifestSet
 
-    broken = AZURE_SECTION.replace('subscription_id = "0000"\n', "")
+    broken = '[plugins]\nsystem = ["azure"]\n' + AZURE_SECTION.replace('subscription_id = "0000"\n', "")
     config = load_config(write_config(broken), warn_issues=False, warn_deprecations=False)
     with pytest.raises(ConfigError, match="subscription_id"):
         build_registry(config, ManifestSet.empty())

@@ -21,7 +21,13 @@ from agentworks.vms import manager as vm_manager
 if TYPE_CHECKING:
     from agentworks.db import Database
 
+# Proxmox ships in the opt-in ``proxmox`` system plugin since Phase 10 (R11),
+# so a config that uses the proxmox site enables the plugin, exactly as a real
+# proxmox operator would.
 PROXMOX_SECTION = """
+[plugins]
+system = ["proxmox"]
+
 [proxmox]
 api_url = "https://pve:8006"
 node = "pve1"
@@ -314,8 +320,8 @@ def test_r11_hostname_and_vnet_bound_by_construction() -> None:
     (inside the 63-char DNS-label limit), and the tighter {slug}-{name}-vnet
     Azure virtual-network name is exactly 64 (its cap). The vnet sink is what
     binds the cap at 38."""
-    from agentworks.capabilities.vm_platform.azure_vm import VNET_NAME_SUFFIX
     from agentworks.config import AZURE_VNET_NAME_MAX_LENGTH, DNS_LABEL_MAX_LENGTH, MAX_VM_NAME_LENGTH, validate_name
+    from agentworks.plugins.azure.platform import VNET_NAME_SUFFIX
 
     slug = "a" * 20
     vm_manager.validate_slug(slug)
@@ -338,7 +344,7 @@ def test_proxmox_token_resolves_end_to_end(
     pass (env-var backend under the AW_SECRET_ convention) and ops read
     it from the resolver's cache; there is no raw
     PROXMOX_TOKEN_SECRET env fallback."""
-    from agentworks.capabilities.vm_platform.proxmox import ProxmoxPlatform
+    from agentworks.plugins.proxmox.platform import ProxmoxPlatform
 
     config = make_config(PROXMOX_SECTION)
     monkeypatch.setenv("AW_SECRET_PROXMOX_TOKEN", "pve-token-value")

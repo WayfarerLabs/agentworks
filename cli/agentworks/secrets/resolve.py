@@ -128,6 +128,36 @@ def active_backends(config: Config, registry: Registry) -> list[ActiveBackend]:
     return backends
 
 
+def disabled_plugin_backends(registry: Registry) -> dict[str, str]:
+    """Map each disabled system-plugin ``secret-backend`` name to its plugin
+    name (backend name -> plugin name).
+
+    Read for the resolve-failure hint (LLD b): a disabled plugin backend is
+    excluded from the active chain by :func:`active_backends`, so a secret whose
+    only ``backend_mappings`` target is one fails resolve. This map lets
+    :func:`_fail_unavailable` name the plugin to enable ("enable plugin
+    `<name>`") instead of emitting the generic unreachable message, keeping
+    R11.1's promise that every migration failure names the plugin.
+
+    Reads the SAME axis and origin the doctor roster reads (``enablement_of``
+    plus the ``system-plugin`` origin); it probes no impl and constructs
+    nothing. Empty when no secret-backend producer is disabled, so the failure
+    message is verbatim today's until a plugin backend (onepassword) is present
+    but not enabled.
+    """
+    from agentworks.resources.graph import Enablement
+
+    graph = registry.graph
+    disabled: dict[str, str] = {}
+    for name, row in registry.iter_kind_items("secret-backend"):
+        origin = getattr(row, "origin", None)
+        if origin is None or origin.variant != "system-plugin":
+            continue
+        if graph.enablement_of("secret-backend", name) is Enablement.disabled:
+            disabled[name] = cast("str", origin.plugin)
+    return disabled
+
+
 def validate_chain(config: Config, registry: Registry) -> None:
     """Secret-system reachability, run by ``build_registry`` right after
     finalize: the chain's names must be ``secret-backend`` capability
@@ -193,6 +223,7 @@ def _fail_unavailable(
     missing: list[SecretDecl],
     backends: list[ActiveBackend],
     errors: dict[str, str] | None,
+    registry: Registry | None = None,
 ) -> None:
     """Attribute every unresolved secret to the backends that DID attempt
     it, then fail per the active policy: raise the all-or-nothing
@@ -202,7 +233,24 @@ def _fail_unavailable(
     Shared by both callers in :func:`resolve_secrets`: the end-of-loop
     fall-through and the before-interactive doom check (issue #202), so
     both build the SAME per-secret attribution and message.
+
+    ``registry`` powers the additive, failure-path-only plugin hint (LLD b),
+    centralized here so EVERY resolution path (the ``Resolver``, the env-chain
+    ``resolve_for_command``, the activation gate, the batch rejoin, and the
+    inspection surfaces) gets it uniformly rather than each caller threading a
+    map. The disabled-plugin map is computed lazily (only on failure) via
+    :func:`disabled_plugin_backends`. For a still-missing secret any of whose
+    ``backend_mappings`` target a disabled plugin backend, the per-secret line
+    gains an "enable plugin `<name>`" clause per distinct disabled plugin it
+    maps to. A ``False`` opt-out entry is skipped (mirroring
+    ``SecretDecl.dependencies`` / ``validate``): a secret that explicitly opted
+    OUT of a disabled plugin backend is not told to enable it, since enabling it
+    would not help. A secret mapping no disabled plugin backend is unchanged, so
+    the generic message still covers the ordinary no-mapping / wrong-env-var
+    cases. ``registry`` defaulted to ``None`` (no hint), so callers that pass
+    only backends (tests) are unaffected.
     """
+    disabled_backend_plugins = disabled_plugin_backends(registry) if registry is not None else {}
     sorted_missing = sorted(missing, key=lambda d: d.name)
     # Per-secret backend list: only backends that actually attempted
     # (would_attempt == True) appear, so a secret with a backend
@@ -211,7 +259,22 @@ def _fail_unavailable(
     for d in sorted_missing:
         attempted = [b.name for b in backends if b.would_attempt(d)]
         tried = ", ".join(attempted) if attempted else "(none; secret unreachable)"
-        per_secret[d.name] = f"{d.name}: tried {tried}"
+        line = f"{d.name}: tried {tried}"
+        # One clause per DISTINCT disabled plugin this secret's mappings target,
+        # so a secret whose only mapping is a disabled plugin backend names the
+        # plugin to enable rather than reading as generically unreachable. A
+        # ``False`` opt-out never counts: enabling a plugin the secret opted out
+        # of would not resolve it.
+        named: list[str] = []
+        for backend_name, mapping in d.backend_mappings.items():
+            if mapping is False:
+                continue
+            plugin = disabled_backend_plugins.get(backend_name)
+            if plugin is not None and plugin not in named:
+                named.append(plugin)
+        for plugin in named:
+            line += f"; enable plugin `{plugin}`"
+        per_secret[d.name] = line
     if errors is None:
         names = [d.name for d in sorted_missing]
         # Always name a REAL secret in the example command: an
@@ -235,6 +298,7 @@ def resolve_secrets(
     backends: list[ActiveBackend],
     *,
     errors: dict[str, str] | None = None,
+    registry: Registry | None = None,
 ) -> dict[str, str]:
     """Resolve every secret through the active backends, in chain order.
 
@@ -266,6 +330,12 @@ def resolve_secrets(
       backend was attempting (batch-level attribution) without
       forwarding them to later backends, preserving the hard-miss
       "don't mask a store misconfiguration with a prompt" semantics.
+
+    ``registry`` is forwarded to :func:`_fail_unavailable`, which uses it (only
+    on failure) to compute the plugin-aware "enable plugin `<name>`" hint for a
+    secret whose mapping targets a disabled plugin backend (LLD b). Every
+    resolution path passes the registry it already holds; defaulted to ``None``
+    (no hint), so callers that pass only backends (tests) are unaffected.
     """
     resolved: dict[str, str] = {}
     deduped: list[SecretDecl] = []
@@ -314,7 +384,7 @@ def resolve_secrets(
             remaining = [b for b in backends[index:] if b.readiness.is_ready]
             doomed = [s for s in missing if not any(b.would_attempt(s) for b in remaining)]
             if doomed:
-                _fail_unavailable(doomed, backends, errors)
+                _fail_unavailable(doomed, backends, errors, registry)
         attemptable = [s for s in missing if backend.would_attempt(s)]
         if not attemptable:
             continue
@@ -365,7 +435,7 @@ def resolve_secrets(
         missing = [s for s in missing if s.name not in got]
 
     if missing:
-        _fail_unavailable(missing, backends, errors)
+        _fail_unavailable(missing, backends, errors, registry)
     return resolved
 
 

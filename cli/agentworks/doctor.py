@@ -109,10 +109,21 @@ def run_checks(*, completion_version: str | None = None) -> HealthReport:
     report.groups.append(_check_python())
     report.groups.append(_check_required_tools())
     report.groups.append(_check_tailscale())
-    # The None checks are spelled out at each site (not hoisted into a
-    # boolean local) because mypy's narrowing does not flow through one.
-    # VM platforms now read stored readiness off the graph (R11), so they
-    # need the registry and skip cleanly in degraded mode like the others.
+    # System plugins leads the config-driven groups: it is a fundamental opt-in
+    # (it determines which platforms, backends, and harnesses even exist), so it
+    # reads best up front, before the VM stack it shapes, rather than splitting VM
+    # platforms from VM sites. The roster reads config.enabled_system_plugins
+    # against SYSTEM_PLUGINS and needs no registry (a plugin is an origin, not a
+    # resource kind, R12), so it skips only when config is unavailable. The None
+    # checks are spelled out at each site (not hoisted into a boolean local)
+    # because mypy's narrowing does not flow through one.
+    if config is not None:
+        report.groups.append(_check_plugins(config))
+    else:
+        report.groups.append(_skipped_group("System plugins", "Installed plugins"))
+    # VM platforms and VM sites render adjacent. VM platforms read stored
+    # readiness off the graph (R11), so they need the registry and skip cleanly
+    # in degraded mode like the others.
     if registry is not None:
         report.groups.append(_check_vm_platforms(registry))
     else:
@@ -230,17 +241,69 @@ def _check_vm_platforms(registry: Registry) -> HealthGroup:
     registry): a supported platform is ``ok``; a host-unsupported one shows
     ``not ready: <reason>``. Per-site availability (a local-Lima site without
     ``limactl``) is the SITE's state and reports in the VM sites group.
+
+    A DISABLED platform (its opt-in axis reads ``Enablement.disabled``, e.g. a
+    plugin platform whose plugin is not enabled) is SKIPPED here: the "System
+    plugins" roster is the enablement authority and already lists it as
+    disabled, so folding it in would double-list it and, worse, render its
+    ready-placeholder readiness as a misleading ``[ok]``. This matches the
+    "disabled hides" default-surface rule that ``agw resource list`` uses.
     """
+    from agentworks.resources.graph import Enablement
+
     g = HealthGroup("VM platforms")
     # Registry-definition order (what ``publish_to`` established from
     # ``VM_PLATFORM_REGISTRY``), preserved: the pre-refactor group rendered in
     # this order, and the reordering is not one of the R9 deltas.
     for name, _decl in registry.iter_kind_items("vm-platform"):
+        if registry.graph.enablement_of("vm-platform", name) is Enablement.disabled:
+            continue
         reason = registry.graph.readiness_of("vm-platform", name).reason
         if reason is not None:
             g.info(name, f"not ready: {reason}")
         else:
             g.ok(name)
+    return g
+
+
+def _check_plugins(config: Config) -> HealthGroup:
+    """The system-plugin roster (R9, R10, R12): every installed plugin, its
+    description, and its opt-in state, read from ``SYSTEM_PLUGINS`` against
+    ``config.enabled_system_plugins``.
+
+    A BESPOKE surface, not a ``KIND_REGISTRY``-dispatched hook: a plugin is an
+    origin, not a resource kind (R12). Roster only (existence, description,
+    enable-state); it never enumerates a disabled plugin's contributed
+    capabilities or resources (that is what the enablement axis and the
+    reference hint are for). The reserved ``required_scopes`` (R10) render as an
+    informational least-privilege line when populated, unenforced; empty (the
+    v1 default) renders nothing. When the shipped index is empty the group
+    renders empty-but-present, so the surface exists and is testable even before
+    any plugin ships; the migrated plugins (``onepassword``, ``claude``,
+    ``proxmox``, ``azure``) now populate it.
+    """
+    from agentworks.plugins import SYSTEM_PLUGINS
+
+    g = HealthGroup("System plugins")
+    if not SYSTEM_PLUGINS:
+        g.info("No system plugins installed.")
+        return g
+
+    enabled = set(config.enabled_system_plugins)
+    for name, plugin in sorted(SYSTEM_PLUGINS.items()):
+        if name in enabled:
+            g.ok(f"plugin {name}", plugin.description or None)
+        else:
+            # The doctor renders the "not enabled in [plugins].system" STATE
+            # phrasing (the enablement mark carries only the "enable plugin
+            # <name>" remediation clause, never this state string).
+            message = "disabled (not enabled in [plugins].system)"
+            if plugin.description:
+                message = f"{message}; {plugin.description}"
+            g.info(f"plugin {name}", message)
+        if plugin.required_scopes:
+            levels = ", ".join(level.value for level in plugin.required_scopes)
+            g.info(f"plugin {name} least privilege", levels)
     return g
 
 
@@ -537,13 +600,25 @@ def _check_secret_backends(registry: Registry) -> HealthGroup:
     specific secret resolves is ``_check_secrets``, and enablement (opt-in) /
     chain membership are ``agw secret describe`` / ``agw secret list`` concerns,
     not this per-backend readiness sweep (R9.7's promised backend visibility).
+
+    A DISABLED backend (its opt-in axis reads ``Enablement.disabled``, e.g. a
+    plugin backend like ``onepassword`` whose plugin is not enabled) is SKIPPED
+    here, parallel to ``_check_vm_platforms``: the "System plugins" roster is the
+    enablement authority and already lists it as disabled, so folding it in would
+    double-list it and render its ready-placeholder readiness as a misleading
+    ``[ok]``. This matches the "disabled hides" default-surface rule that
+    ``agw resource list`` uses.
     """
+    from agentworks.resources.graph import Enablement
+
     g = HealthGroup("Secret backends")
     backends = sorted(registry.iter_kind_items("secret-backend"), key=lambda item: item[0])
     if not backends:
         g.info("Registered backends", "none")
         return g
     for name, _decl in backends:
+        if registry.graph.enablement_of("secret-backend", name) is Enablement.disabled:
+            continue
         reason = registry.graph.readiness_of("secret-backend", name).reason
         if reason is not None:
             g.info(name, f"not ready: {reason}")

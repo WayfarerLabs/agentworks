@@ -491,14 +491,17 @@ def test_reachability_keying_is_would_attempt_readiness_blind(tmp_path: Path, mo
     keyed on WOULD-ATTEMPT (the frozen edges), READINESS-BLIND. A secret whose
     only opted-in backend is onepassword, forced NOT-READY, is still reachable
     (the build succeeds); it would fail only at resolution, exactly as today."""
+    from agentworks.plugins.onepassword.backend import OnePasswordBackend
     from agentworks.resources.graph import Readiness
-    from agentworks.secrets.onepassword import OnePasswordBackend
 
     monkeypatch.setattr(OnePasswordBackend, "not_ready", lambda self: Readiness.blocked("op CLI not installed"))
     cfg_file = tmp_path / "config.toml"
     _write_base(
         cfg_file,
         extras="""
+        [plugins]
+        system = ["onepassword"]
+
         [secrets.vaulted]
         description = "only resolvable via onepassword"
         backend_mappings.onepassword = "op://Work/item/field"

@@ -3,6 +3,18 @@
 Proxmox VE is a server virtualization platform based on KVM/QEMU. Agentworks provisions VMs by
 cloning a Debian 12 cloud-init template that you prepare once on your Proxmox node.
 
+> **Enable the proxmox plugin first.** The Proxmox VM platform ships as an opt-in system plugin, so
+> before any proxmox site will work you must enable it in your `config.toml`:
+>
+> ```toml
+> [plugins]
+> system = ["proxmox"]
+> ```
+>
+> Until you do, a proxmox `vm-site` is present-but-not-ready with an "enable plugin `proxmox`" hint
+> and every VM command on it is refused (never an unknown-name error). `agw doctor` lists the plugin
+> and its enable state. Step 2 below repeats this alongside the site declaration.
+
 ## Prerequisites
 
 - A Proxmox VE 8.x server accessible from your workstation
@@ -82,7 +94,15 @@ components are:
 
 ## Step 2: Configure agentworks
 
-Declare a `vm-site` resource for the cluster. Save this (any filename) under
+First enable the proxmox plugin in `config.toml` (see the note at the top of this guide), otherwise
+the site you declare next is not-ready and refused at use:
+
+```toml
+[plugins]
+system = ["proxmox"]
+```
+
+Then declare a `vm-site` resource for the cluster. Save this (any filename) under
 `~/.config/agentworks/resources/`, filling in the values the setup script printed:
 
 ```yaml

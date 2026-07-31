@@ -416,12 +416,15 @@ permanent readiness reason):
   site with a `vm_host` needs nothing locally). The fold calls it off the graph-carried impl.
 
 A consuming resource decides its OWN verdict from its dependencies' states. The fold hands each node
-a `DependencyState` per dependency (the dep's enablement, its readiness when enabled, its impl); the
-resource-level `not_ready(deps) -> Readiness` folds them however it likes. The fold imposes no
-propagation rule: `vm-site` propagates from its single platform (disabled dependency: "enable its
-unit"; not-ready platform: propagate the reason; else re-ask with its own config), while a `secret`
-opts out (implements no `not_ready`, so it is always ready). The rules on the resulting verdict are
-uniform:
+a `DependencyState` per dependency (the dep's enablement, its readiness when enabled, its carried
+disabled reason, its impl); the resource-level `not_ready(deps) -> Readiness` folds them however it
+likes. The fold imposes no propagation rule. Two consumers propagate from a single dependency:
+`vm-site` from its platform and `git-credential` from its provider (disabled dependency: the carried
+remediation reason, e.g. "enable plugin `<name>`", falling back to "enable its unit" when no source
+supplied one; a not-ready dependency with a readiness reason propagates that; else re-ask with the
+resource's own config). A `secret` and a `session-template` opt out (implement no `not_ready`, so
+they are always ready); a `session-template`'s harness is instead gated at use
+(`ensure_harness_enabled`), the secret model. The rules on the resulting verdict are uniform:
 
 - A not-ready resource **still registers**: it lists (marked), describes (with the reason), and
   holds references. Existence and availability are separate axes.
@@ -431,9 +434,13 @@ uniform:
 - A reference to an **absent** resource (a typo, or an uninstalled plugin) is a hard error, not a
   self-disable: absence is the registry's structural miss.
 
-Enablement (`enabled` / `disabled`) is a separate axis, reserved for operator opt-in. It is modeled
-on the node and distributed by the fold, but no producer of `disabled` nodes ships yet (the plugin
-rebuild is the first); everything this build produces is `enabled`.
+Enablement (`enabled` / `disabled`) is a separate axis, for operator opt-in. It is modeled on the
+node and distributed by the fold, and it is now PRODUCED: `finalize` composes injected enablement
+sources into a disabled-node mark map and projects the binary axis from it (a node is `disabled` iff
+some source marks it). The plugin opt-in source (a not-opted-in `system-plugin` row is `disabled`
+with an "enable plugin `<name>`" reason) is the first such producer; it is threaded into `finalize`
+from `build_registry` (that wiring lands in a later plugin phase). A build with no sources yields
+all-`enabled`, exactly as before.
 
 ## The base class
 

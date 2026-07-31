@@ -261,8 +261,8 @@ def test_would_attempt_is_pure_of_secret_and_mapping() -> None:
     """``would_attempt`` must be a pure function of ``(secret, mapping)``
     with no host probing, so freezing it into edges at finalize is safe.
     env-var / prompt always attempt; onepassword attempts iff mapped."""
+    from agentworks.plugins.onepassword.backend import OnePasswordBackend
     from agentworks.secrets.env_var import EnvVarBackend
-    from agentworks.secrets.onepassword import OnePasswordBackend
     from agentworks.secrets.prompt import PromptBackend
 
     secret = SecretDecl(name="s1", description="s1")

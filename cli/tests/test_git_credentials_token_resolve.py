@@ -133,7 +133,12 @@ def test_collect_git_tokens_batches_multiple_credentials(
     """
     cfg = _write_cfg(
         tmp_path,
+        # ``azdo`` ships in the opt-in ``azure`` system plugin; enable it so the
+        # azdo credential is ready and its token resolves.
         """\
+        [plugins]
+        system = ["azure"]
+
         [git_credentials.github]
         type = "github"
 

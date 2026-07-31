@@ -69,12 +69,16 @@ def _migrate_vm_sites(conn: sqlite3.Connection, context: MigrationContext) -> No
     # failing after them would leave a half-migrated v26 DB that dies
     # on duplicate-column at every retry, even once the operator fixes
     # the corrupt row.
+    # ``proxmox`` and ``azure`` now ship in opt-in system plugins; this frozen
+    # backfill imports their classes DIRECTLY (from the plugin packages, not
+    # through the live registry) to keep the registry-bypassing philosophy
+    # above intact.
     from agentworks.capabilities.vm_platform import (
-        AzureVMPlatform,
         LimaPlatform,
-        ProxmoxPlatform,
         WSL2Platform,
     )
+    from agentworks.plugins.azure.platform import AzureVMPlatform
+    from agentworks.plugins.proxmox.platform import ProxmoxPlatform
 
     legacy_platform_classes = {
         "lima": LimaPlatform,

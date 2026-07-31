@@ -106,6 +106,17 @@ class Config:
 
     # Top-level [secret_config] table; carries the enabled-backends precedence list.
     secret_config_data: SecretConfig = field(default_factory=SecretConfig)
+    # The [plugins] table's ``system`` key; the opt-in list of enabled
+    # system plugin names (R4). Named ``enabled_system_plugins`` (not a
+    # mechanical ``plugins_system``) to read clearly and to stay distinct
+    # from ``SYSTEM_PLUGINS``, the index of ALL installed system plugins;
+    # this field is the operator-enabled subset. A setting, not a resource,
+    # carried exactly like secret_config_data above: empty when [plugins]
+    # is absent, present on both load paths, and never published as a
+    # pseudo-resource (see the secret_config non-publication note in
+    # publish_to below; the same rationale applies here). Consumed by
+    # plugins.publish_plugins / build_registry.
+    enabled_system_plugins: tuple[str, ...] = ()
     config_issues: tuple[str, ...] = ()
     # Deprecation nudges (TOML resource sections, [secret_backends.*]
     # no-ops): a separate channel so real issues stay sharp for tests
@@ -143,6 +154,10 @@ class Config:
         registry by ``secrets.validate_chain`` in ``build_registry``,
         read again at resolve time). Settings don't become
         pseudo-resources just because they point at resources.
+        ``enabled_system_plugins`` is the same kind of setting (an opt-in
+        list of names, not a resource) and is likewise not published here;
+        it is consumed directly by ``plugins.publish_plugins`` /
+        ``build_registry``.
 
         Imports ``Registry`` and ``Origin`` from ``agentworks.resources``
         -- the explicit layer handoff. Config's data structures (parsed

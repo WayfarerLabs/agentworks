@@ -23,11 +23,11 @@ from agentworks.errors import (
     ExternalError,
     SecretMappingError,
 )
+from agentworks.plugins.onepassword import backend as op_mod
+from agentworks.plugins.onepassword.backend import OnePasswordBackend, _OpResult
 from agentworks.resources.graph import Readiness
-from agentworks.secrets import SECRET_BACKEND_REGISTRY, active_backends, resolve_secrets
-from agentworks.secrets import onepassword as op_mod
+from agentworks.secrets import active_backends, resolve_secrets
 from agentworks.secrets.base import SecretDecl
-from agentworks.secrets.onepassword import OnePasswordBackend, _OpResult
 from agentworks.secrets.resolve import ActiveBackend, preview_resolution
 
 
@@ -249,6 +249,9 @@ def test_validate_chain_surfaces_malformed_mapping_at_build_registry(
     config = _config(
         tmp_path,
         """
+        [plugins]
+        system = ["onepassword"]
+
         [secret_config]
         backends = ["onepassword", "prompt"]
 
@@ -265,6 +268,9 @@ def test_valid_mapping_passes_build_registry(tmp_path: Path) -> None:
     config = _config(
         tmp_path,
         """
+        [plugins]
+        system = ["onepassword"]
+
         [secret_config]
         backends = ["onepassword", "prompt"]
 
@@ -463,15 +469,187 @@ def test_preview_returns_none_for_unmapped_secret(
 # -- registry ----------------------------------------------------------------
 
 
-def test_onepassword_registered() -> None:
+def test_onepassword_seated_by_plugin() -> None:
+    """The onepassword backend ships as the ``onepassword`` system plugin,
+    whose adapter seats the backend instance into the code registry at import
+    (so ``_impl_for`` can stamp it onto the graph node)."""
+    from agentworks.plugins import SYSTEM_PLUGINS
+    from agentworks.secrets.backends import SECRET_BACKEND_REGISTRY
+
+    assert "onepassword" in SYSTEM_PLUGINS
     assert "onepassword" in SECRET_BACKEND_REGISTRY
 
 
-def test_onepassword_descriptor_row_published(tmp_path: Path) -> None:
-    """The secret-backend row for onepassword publishes with a built-in
-    origin and a non-empty description."""
+def test_onepassword_descriptor_row_is_disabled_system_plugin_by_default(
+    tmp_path: Path,
+) -> None:
+    """The secret-backend row publishes present-but-disabled with a
+    ``system-plugin`` origin until the operator opts in via [plugins]. (Post
+    migration: the row is no longer a built-in.)"""
+    from agentworks.resources.graph import Enablement
+
     config = _config(tmp_path)
     registry = build_registry(config)
     row = registry.lookup("secret-backend", "onepassword")
-    assert row.origin.variant == "built-in"
-    assert row.description
+    assert row.origin.variant == "system-plugin"
+    assert row.origin.plugin == "onepassword"
+    assert row.description  # capability-supplied, for inspection surfaces
+    assert registry.graph.enablement_of("secret-backend", "onepassword") is Enablement.disabled
+
+
+# -- Phase 8 migration: the opt-in breaking change (R11.1) --------------------
+
+
+def _op_only_body(*, enabled: bool) -> str:
+    """A config whose only path to ``op-only`` is the onepassword backend
+    (env-var opted out), with onepassword in the chain; ``enabled`` toggles the
+    [plugins] opt-in."""
+    plugins = '[plugins]\nsystem = ["onepassword"]\n\n' if enabled else ""
+    return (
+        plugins
+        + """
+        [secret_config]
+        backends = ["env-var", "onepassword"]
+
+        [secrets.op-only]
+        description = "resolvable only via onepassword"
+        backend_mappings.env-var = false
+        backend_mappings.onepassword = "op://Vault/item/field"
+        """
+    )
+
+
+def test_disabled_plugin_backends_maps_onepassword_only_when_disabled(tmp_path: Path) -> None:
+    """The hint's data source: ``disabled_plugin_backends`` reports onepassword
+    (backend name -> plugin name) while the plugin is disabled, and is empty
+    once it is enabled (so the failure message is verbatim today's)."""
+    from agentworks.secrets.resolve import disabled_plugin_backends
+
+    disabled = build_registry(_config(tmp_path, _op_only_body(enabled=False)))
+    assert disabled_plugin_backends(disabled) == {"onepassword": "onepassword"}
+
+    enabled = build_registry(_config(tmp_path, _op_only_body(enabled=True)))
+    assert disabled_plugin_backends(enabled) == {}
+
+
+def test_secret_mapped_only_to_disabled_onepassword_fails_with_enable_hint(tmp_path: Path) -> None:
+    """R11.1 / LLD b: a secret whose sole mapping targets onepassword, with the
+    plugin not enabled, is excluded from the active chain and fails resolve with
+    the plugin-aware ``enable plugin `onepassword``` hint, not the generic
+    unreachable message."""
+    from agentworks.env.entry import EnvEntry
+    from agentworks.errors import SecretUnavailableError
+    from agentworks.secrets import SecretTarget, resolve_for_command
+
+    config = _config(tmp_path, _op_only_body(enabled=False))
+    registry = build_registry(config)
+    target = SecretTarget(vm={"TOKEN": EnvEntry(key="TOKEN", secret="op-only")})
+    with pytest.raises(SecretUnavailableError) as exc:
+        resolve_for_command([target], config, registry)
+    assert "enable plugin `onepassword`" in (exc.value.hint or "")
+
+
+def test_enabling_the_plugin_resolves_the_onepassword_secret(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Enabling the plugin puts onepassword back in the active chain and the
+    same secret resolves (the ``op`` subprocess is faked; ``op`` is present on
+    PATH so the backend folds ready)."""
+    from agentworks.env.entry import EnvEntry
+    from agentworks.secrets import SecretTarget, resolve_for_command
+
+    monkeypatch.setattr("shutil.which", lambda name: "/usr/bin/op" if name == "op" else None)
+    config = _config(tmp_path, _op_only_body(enabled=True))
+    registry = build_registry(config)
+    _install_runner(monkeypatch, _fake_op(values={"op://Vault/item/field": "the-token"}))
+    target = SecretTarget(vm={"TOKEN": EnvEntry(key="TOKEN", secret="op-only")})
+    values = resolve_for_command([target], config, registry)
+    assert values["op-only"] == "the-token"
+
+
+def test_non_plugin_secret_failure_message_is_unchanged(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A secret that maps no disabled plugin backend fails with the generic
+    message (no ``enable plugin`` clause): the hint is additive to the sole
+    onepassword-only case, not a blanket change to every resolve failure."""
+    from agentworks.env.entry import EnvEntry
+    from agentworks.errors import SecretUnavailableError
+    from agentworks.secrets import SecretTarget, resolve_for_command
+
+    monkeypatch.delenv("AW_SECRET_PLAIN", raising=False)
+    config = _config(
+        tmp_path,
+        """
+        [secret_config]
+        backends = ["env-var"]
+
+        [secrets.plain]
+        description = "reachable via env-var's default convention, but unset"
+        """,
+    )
+    registry = build_registry(config)
+    target = SecretTarget(vm={"TOKEN": EnvEntry(key="TOKEN", secret="plain")})
+    with pytest.raises(SecretUnavailableError) as exc:
+        resolve_for_command([target], config, registry)
+    assert "plain: tried env-var" in (exc.value.hint or "")
+    assert "enable plugin" not in (exc.value.hint or "")
+
+
+def test_hint_reaches_the_dominant_resolver_path(tmp_path: Path) -> None:
+    """The hint reaches the dominant resolution path ``Resolver.resolve()`` (the
+    per-operation resolver used by VM / session / agent commands), not only the
+    env-chain ``resolve_for_command``. Centralizing the hint in
+    ``_fail_unavailable`` is what makes every path carry it."""
+    from agentworks.errors import SecretUnavailableError
+    from agentworks.secrets.resolver import Resolver
+
+    config = _config(tmp_path, _op_only_body(enabled=False))
+    registry = build_registry(config)
+    resolver = Resolver(config, registry)
+    resolver.register_name("op-only")
+    with pytest.raises(SecretUnavailableError) as exc:
+        resolver.resolve()
+    assert "enable plugin `onepassword`" in (exc.value.hint or "")
+
+
+def test_explicit_false_opt_out_of_onepassword_gets_no_enable_hint(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A secret that explicitly opts OUT of onepassword (`onepassword = false`)
+    and fails for another reason does NOT get the enable-plugin hint: enabling a
+    plugin the secret opted out of would not resolve it. The hint loop skips a
+    ``False`` mapping, mirroring ``SecretDecl.dependencies`` / ``validate``."""
+    from agentworks.env.entry import EnvEntry
+    from agentworks.errors import SecretUnavailableError
+    from agentworks.secrets import SecretTarget, resolve_for_command
+
+    monkeypatch.delenv("AW_SECRET_OPTED_OUT", raising=False)
+    config = _config(
+        tmp_path,
+        """
+        [secret_config]
+        backends = ["env-var", "onepassword"]
+
+        [secrets.opted-out]
+        description = "opts out of onepassword; reachable via env-var default, but unset"
+        backend_mappings.onepassword = false
+        """,
+    )
+    registry = build_registry(config)
+    target = SecretTarget(vm={"TOKEN": EnvEntry(key="TOKEN", secret="opted-out")})
+    with pytest.raises(SecretUnavailableError) as exc:
+        resolve_for_command([target], config, registry)
+    assert "enable plugin" not in (exc.value.hint or "")
+
+
+def test_doctor_roster_lists_the_onepassword_plugin(tmp_path: Path) -> None:
+    """``agw doctor``'s System plugins roster lists onepassword, disabled by
+    default and enabled once opted in (the discovery surface the enable hint
+    points at)."""
+    from agentworks.doctor import Status, _check_plugins
+
+    disabled = _check_plugins(_config(tmp_path))
+    op = next(c for c in disabled.checks if c.name == "plugin onepassword")
+    assert op.status is Status.INFO
+    assert "not enabled in [plugins].system" in (op.message or "")
+
+    enabled = _check_plugins(_config(tmp_path, '[plugins]\nsystem = ["onepassword"]\n'))
+    op_on = next(c for c in enabled.checks if c.name == "plugin onepassword")
+    assert op_on.status is Status.OK

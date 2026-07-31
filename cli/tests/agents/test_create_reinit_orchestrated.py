@@ -18,11 +18,11 @@ from agentworks.agents import grants as agent_grants
 from agentworks.agents import initializer as agent_initializer
 from agentworks.agents import manager as agent_manager
 from agentworks.capabilities.base import RunContext
-from agentworks.capabilities.vm_platform.proxmox import ProxmoxPlatform
 from agentworks.errors import ExternalError
 from agentworks.output import Role
+from agentworks.plugins.proxmox.platform import ProxmoxPlatform
 from agentworks.vms import manager as vm_manager
-from tests.orchestrated_fixtures import PROXMOX_SECTION, write_operator_config
+from tests.orchestrated_fixtures import PLUGINS_ENABLED, PROXMOX_SECTION, write_operator_config
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -50,7 +50,7 @@ def make_config(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):  # noqa: ANN20
     monkeypatch.setenv("AW_SECRET_GIT_TOKEN_GH", "ghtok")
 
     def _make():  # noqa: ANN202
-        return write_operator_config(tmp_path, PROXMOX_SECTION + AGENT_SECTION)
+        return write_operator_config(tmp_path, PLUGINS_ENABLED + PROXMOX_SECTION + AGENT_SECTION)
 
     return _make
 
@@ -410,6 +410,79 @@ def test_reinit_update_template_persists_before_convergence_so_a_mid_failure_kee
 
     row = db.get_agent("dev")
     assert row is not None and row.template == "other"  # persisted before the failed convergence
+
+
+# -- Phase 7: the recipe use-gate fires on a live build -----------------------
+#
+# End-to-end proof (real config + real build_registry) that
+# ``ensure_recipe_enabled`` actually refuses on a live registry with the right
+# kind-string, before any DB / VM / mutation work. The fixture plugin ships a
+# disabled agent-template (referencing a disabled user-install-command) via a
+# bundled manifest; it is NOT in ``[plugins] system``, so its rows are
+# present-but-disabled.
+
+_DECLARABLE_ANCHOR = "tests.plugins._manifest_declarable_fixture"
+
+
+def _install_disabled_fixture(monkeypatch: pytest.MonkeyPatch) -> None:
+    from agentworks.plugins import SYSTEM_PLUGINS, Plugin
+
+    plugin = Plugin(name="decl-plugin", description="a manifest-parity fixture", manifests=_DECLARABLE_ANCHOR)
+    # Merge alongside the real shipped plugins (proxmox, which the shared config
+    # enables and this suite's VM runs on, plus claude / onepassword) rather than
+    # replacing them: replacing would drop proxmox's row and fail the enabled-name
+    # check. decl-plugin ships present-but-disabled (not in [plugins] system), so
+    # its bundled recipe refuses with the enable hint.
+    monkeypatch.setattr("agentworks.plugins.SYSTEM_PLUGINS", {**SYSTEM_PLUGINS, plugin.name: plugin})
+
+
+def test_create_agent_on_disabled_plugin_recipe_refuses_before_any_work(
+    db: Database,
+    make_config,  # noqa: ANN001
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agentworks.errors import StateError
+
+    config = make_config()
+    _seed_vm(db)
+    _install_disabled_fixture(monkeypatch)
+
+    def _boom(*a: Any, **k: Any) -> None:
+        raise AssertionError("the mutation must not run for a disabled-recipe template")
+
+    monkeypatch.setattr(agent_initializer, "create_agent_on_vm", _boom)
+
+    with pytest.raises(StateError, match="enable plugin `decl-plugin`"):
+        agent_manager.create_agent(db, config, name="dev", vm_name="box", template="fixture-agent-tmpl")
+
+    assert db.get_agent("dev") is None  # refused before any DB write
+
+
+def test_reinit_update_template_to_disabled_recipe_refuses_before_persist(
+    db: Database,
+    make_config,  # noqa: ANN001
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Fix 1: a repoint to a real-but-disabled-recipe template is refused BEFORE
+    ``db.update_agent_template`` persists it, so the stored template is
+    unchanged (mirrors ``test_reinit_unknown_update_template_raises_and_keeps_the_row``)."""
+    from agentworks.errors import StateError
+
+    config = make_config()
+    _seed_vm(db)
+    db.insert_agent("dev", "box", "agt-dev", template="default")
+    _install_disabled_fixture(monkeypatch)
+
+    def _boom(*a: Any, **k: Any) -> None:
+        raise AssertionError("setup must not run for a refused repoint")
+
+    monkeypatch.setattr(agent_initializer, "create_agent_on_vm", _boom)
+
+    with pytest.raises(StateError, match="enable plugin `decl-plugin`"):
+        agent_manager.reinit_agent(db, config, name="dev", update_template="fixture-agent-tmpl")
+
+    row = db.get_agent("dev")
+    assert row is not None and row.template == "default"  # the refused repoint was NOT persisted
 
 
 # -- the operation scope reaches readiness ------------------------------------

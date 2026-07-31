@@ -20,6 +20,7 @@ which publishers exist; that's application-level knowledge.
 from __future__ import annotations
 
 import dataclasses
+from enum import Enum
 from typing import TYPE_CHECKING, Any
 
 from agentworks.errors import ConfigError, StateError
@@ -28,9 +29,35 @@ from agentworks.resources.kind import KIND_REGISTRY
 if TYPE_CHECKING:
     from collections.abc import Iterator, Mapping, Sequence
 
-    from agentworks.resources.graph import BuildContext, DependencyGraph, Enablement, Readiness
+    from agentworks.resources.graph import (
+        BuildContext,
+        DependencyGraph,
+        DisabledMark,
+        Enablement,
+        EnablementSource,
+        Readiness,
+    )
     from agentworks.resources.origin import Origin
     from agentworks.resources.reference import ReferenceEntry, ResourceReference
+
+
+class _CollisionDecision(Enum):
+    """What ``_check_collision`` tells ``add`` to do when a strong incoming
+    row lands on an occupied slot (Phase 7, LLD c 3b.3).
+
+    The binary ``return``/``raise`` contract the pre-Phase-7 collision check
+    used could express only "incoming replaces existing" (return) or "error"
+    (raise). Two enablement-aware cases need a third outcome, "keep the
+    existing row, drop the incoming one, no error": a weak (disabled-plugin)
+    incoming row yielding to any occupant, and an enabled plugin row yielding
+    to an operator's own declaration on an ``allow`` kind (BLOCKING 1). The
+    weak case is handled by a short-circuit in ``add`` ahead of the check; the
+    enabled-plugin-over-operator case is the one ``KEEP_EXISTING`` producer
+    inside ``_check_system_plugin_collision``.
+    """
+
+    OVERWRITE = "overwrite"  # store incoming, replacing existing (the old "return")
+    KEEP_EXISTING = "keep-existing"  # drop incoming, existing stands, no error (new)
 
 
 class Registry:
@@ -55,6 +82,11 @@ class Registry:
         # The retained dependency graph, built at the end of ``finalize``.
         # ``None`` until then; the ``graph`` property enforces the ordering.
         self._graph: DependencyGraph | None = None
+        # The ``(kind, name)`` keys currently occupied by a WEAK row (a
+        # not-enabled plugin's manifest row, published add-if-absent). Consulted
+        # only during ``add`` (the weak short-circuit) and once at ``finalize``
+        # (the weak-implies-disabled guard); meaningless after finalize.
+        self._weak: set[tuple[str, str]] = set()
 
     # -- Construction --------------------------------------------------
 
@@ -74,6 +106,8 @@ class Registry:
         name: str,
         resource: Any,
         origin: Origin,
+        *,
+        weak: bool = False,
     ) -> None:
         """Add a Resource from any publisher. The publisher constructs
         the appropriate ``Origin`` variant (``operator_declared`` /
@@ -100,6 +134,21 @@ class Registry:
         - anything else (built-in over operator) is a publisher
           ordering conflict and raises ``ConfigError`` (operator data
           can reach it, so it must not be an assert).
+
+        ``weak`` (Phase 7, LLD c 3b.3) marks a not-enabled plugin's manifest
+        row as add-if-absent: a disabled plugin's declarable row must never
+        block a stronger row, in any publish order. Weakness is a
+        publisher-declared property of the add (like ``origin``), so the
+        Registry honors it without knowing why a row is weak. The
+        order-symmetric semantics, applied ahead of ``_check_collision``:
+
+        - weak incoming, slot occupied (by anything): no-op (the existing row
+          stands, no collision check runs, nothing errors).
+        - weak incoming, slot free: the row lands and the key is recorded weak.
+        - strong incoming, existing weak: the incoming row replaces silently
+          (no collision check), the key leaves the weak set.
+        - strong incoming, existing strong: ``_check_collision`` decides
+          (``OVERWRITE`` stores, ``KEEP_EXISTING`` is a no-op, ``raise`` errors).
         """
         if self._frozen:
             raise RuntimeError("registry is frozen; add must precede finalize")
@@ -120,15 +169,31 @@ class Registry:
                     "Rename the resource: '/' is reserved for kind/name selectors and per-resource manifest filenames."
                 ),
             )
+        key = (kind, name)
         existing = self._resources.get(kind, {}).get(name)
         if existing is not None:
-            self._check_collision(kind, name, existing, origin)
+            if weak:
+                # Weak incoming never displaces an occupant; existing stands.
+                return
+            if key in self._weak:
+                # Strong incoming over an existing weak row: replace silently,
+                # the key is no longer weak-held.
+                self._weak.discard(key)
+            else:
+                decision = self._check_collision(kind, name, existing, origin)
+                if decision is _CollisionDecision.KEEP_EXISTING:
+                    return
+        elif weak:
+            # Weak row landing in a free slot: record the key as weak-held.
+            self._weak.add(key)
         stamped = dataclasses.replace(resource, origin=origin)
         self._resources.setdefault(kind, {})[name] = stamped
 
     @staticmethod
-    def _check_collision(kind: str, name: str, existing: Any, incoming: Origin) -> None:
-        """Raise unless the incoming publish may replace ``existing``.
+    def _check_collision(kind: str, name: str, existing: Any, incoming: Origin) -> _CollisionDecision:
+        """Decide a strong-over-strong collision: ``OVERWRITE`` (the incoming
+        row replaces ``existing``), ``KEEP_EXISTING`` (the existing row stands,
+        the incoming one is dropped, no error), or ``raise`` (``ConfigError``).
 
         Built-in over built-in replaces unconditionally: republish is
         idempotent, and a future app publisher shadowing another's row
@@ -138,12 +203,19 @@ class Registry:
 
         existing_origin: Origin | None = getattr(existing, "origin", None)
         existing_variant = getattr(existing_origin, "variant", None)
+        # A pair involving ``system-plugin`` is decided FIRST, on the
+        # UNORDERED ``{existing, incoming}`` variant set, so the two
+        # directions of each system-plugin pairing share one message (R7).
+        # The pre-existing non-system-plugin branches below keep their
+        # directional asymmetry verbatim.
+        if "system-plugin" in {existing_variant, incoming.variant}:
+            return Registry._check_system_plugin_collision(kind, name, existing_variant, incoming.variant)
         if existing_variant == "built-in" and incoming.variant == "built-in":
-            return
+            return _CollisionDecision.OVERWRITE
         if existing_variant == "built-in" and incoming.variant == "operator-declared":
             handler = KIND_REGISTRY.get(kind)
             if handler is not None and handler.builtin_override == "allow":
-                return
+                return _CollisionDecision.OVERWRITE
             raise ConfigError(
                 f'{kind} "{name}" is a built-in resource with a reserved '
                 f"name; declare a differently-named {kind} instead",
@@ -164,10 +236,87 @@ class Registry:
             f"over {existing_variant} row for {kind}/{name}"
         )
 
+    @staticmethod
+    def _check_system_plugin_collision(
+        kind: str,
+        name: str,
+        existing_variant: str | None,
+        incoming_variant: str,
+    ) -> _CollisionDecision:
+        """Decide a collision where at least one side is ``system-plugin``,
+        on the UNORDERED variant pair (R7).
+
+        Capability clashes never reach here (they are caught at seating, in
+        ``register_plugin``): what reaches this for a system-plugin pair is
+        a declarable (manifest) row or the operator-override case. The two
+        operator-vs-plugin directions consult ``builtin_override`` SYMMETRICALLY
+        (LLD c 3b.3, BLOCKING 1): on an ``allow`` kind the operator's own
+        declaration wins in either encounter order (``OVERWRITE`` when the
+        operator row is incoming, ``KEEP_EXISTING`` when the plugin row is
+        incoming), so an operator's legacy TOML install-command / apt entry is
+        not broken when the plugin shipping that name is enabled; on a
+        ``reserved`` kind the clash is a reserved-name error in either order.
+        Every other pairing raises its own ``ConfigError`` (never the generic
+        "publisher ordering conflict"). It stays a ``ConfigError`` even for the
+        two-plugins curation bug: the rendering is the right operator surface if
+        it ever escapes, and CI's fixture/collision tests catch the curation bug.
+
+        The disabled-plugin case never reaches here: a weak (disabled-plugin)
+        row is short-circuited in ``add`` before the collision check, so this
+        method decides only STRONG (enabled-plugin or operator/built-in) pairs.
+        """
+        variants = {existing_variant, incoming_variant}
+        if variants == {"system-plugin"}:
+            raise ConfigError(f'{kind} "{name}" is published by two system plugins')
+        if "built-in" in variants:
+            raise ConfigError(f'system-plugin {kind} "{name}" collides with a built-in of the same name')
+        if "operator-declared" in variants:
+            handler = KIND_REGISTRY.get(kind)
+            allow = handler is not None and handler.builtin_override == "allow"
+            if existing_variant == "system-plugin" and incoming_variant == "operator-declared":
+                # Operator publishing OVER a plugin's declarable row (the
+                # plugin-first order: operator YAML ManifestSet after
+                # publish_plugins). Allow-kind lets the incoming operator row
+                # replace the plugin row; reserved errors.
+                if allow:
+                    return _CollisionDecision.OVERWRITE  # operator override permitted; operator wins
+                raise ConfigError(
+                    f'{kind} "{name}" is a system-plugin resource with a reserved '
+                    f"name; declare a differently-named {kind} instead",
+                )
+            # Reverse direction (existing operator, incoming enabled system-plugin:
+            # the operator-first order, deprecated TOML install-command / apt
+            # publisher runs before publish_plugins). SYMMETRIC with the forward
+            # branch: on an allow-kind the operator's own row wins and the plugin
+            # row is dropped (KEEP_EXISTING), no error; on a reserved-kind a
+            # plugin cannot shadow an operator's reserved declarable, so it errors.
+            if allow:
+                return _CollisionDecision.KEEP_EXISTING  # operator's declaration wins; plugin row dropped
+            raise ConfigError(
+                f'system-plugin {kind} "{name}" collides with an operator-declared resource of the same name'
+            )
+        # Unreachable at publish time: auto-declared rows are synthesized at
+        # finalize, after every ``add`` call, so a system-plugin pair with an
+        # auto-declared side cannot arise here.
+        raise ConfigError(
+            f'unexpected system-plugin collision for {kind} "{name}" '
+            f"(incoming {incoming_variant}, existing {existing_variant})"
+        )
+
     # -- Finalize phase ------------------------------------------------
 
-    def finalize(self) -> None:
+    def finalize(self, enablement_sources: Sequence[EnablementSource] = ()) -> None:
         """Run the framework pass over published Resources, then freeze.
+
+        ``enablement_sources`` is the injected list of enablement sources
+        (LLD b): each is an opaque ``(rows) -> {(kind, name): DisabledMark}``
+        callable, composed (first-source-wins the reason) into the disabled-node
+        mark map, of which the binary per-node ``enablement`` map is a pure
+        projection (disabled iff a mark exists). Defaulted to empty, so every
+        existing ``finalize()`` call yields all-enabled, exactly as the landed
+        refactor did. The ``Registry`` stays config-agnostic: a config-bound
+        source (the plugin opt-in source) is constructed by ``build_registry``
+        and passed in, never imported here.
 
         The passes over the single retained graph (LLD b), in order:
 
@@ -225,7 +374,13 @@ class Registry:
         """
         if self._frozen:
             raise RuntimeError("registry has already been finalized")
-        from agentworks.resources.graph import build_context, build_graph, fold_readiness
+        from agentworks.resources.graph import (
+            Enablement,
+            build_context,
+            build_graph,
+            compose_enablement,
+            fold_readiness,
+        )
 
         # 0: reserved-defaults. Seed always-materialize rows so the build
         # walk sees them alongside operator-published ones.
@@ -258,15 +413,38 @@ class Registry:
         # 3: cycle-detect over the built edge map (no re-walk).
         _detect_cycles(all_outbound, self._present_keys())
 
-        # 4: fold readiness for the present nodes (LLD c). ``enablement`` is
-        # the opt-in seam: all-enabled today (no producer, R7), overridable so
-        # the fold's distribution of a disabled dependency is exercisable and
-        # the plugin rebuild has a single place to fill.
-        enablement = self._node_enablement()
-        readiness = fold_readiness(self._resources, all_outbound, enablement)
+        # 4: fold readiness for the present nodes (LLD c). ``marks`` is the
+        # single source of truth: compose the injected enablement sources over
+        # the present rows (all-enabled when none fire). The binary
+        # ``enablement`` map the fold / materialization gate / ``build_graph`` /
+        # ``_validate_resources`` consume is a PURE PROJECTION of ``marks``
+        # (disabled iff a mark exists), so "which nodes are disabled" and "why"
+        # never drift; ``marks`` also flows to the fold as ``disabled_marks`` so
+        # a propagating dependent's hint reads the carried reason.
+        marks = compose_enablement(enablement_sources, self._resources)
+        # Weak-implies-disabled guard (LLD c 3b.3): a surviving weak row is a
+        # not-enabled plugin's manifest row, so every key still weak-held MUST
+        # be disabled by some composed mark. A weak survivor with no mark means
+        # a publisher declared a row weak without a disabling source (a
+        # framework bug); fail loud rather than ship a silently-overwritable
+        # enabled row. Compares two sets the Registry already holds, so it stays
+        # config-agnostic.
+        unmarked_weak = sorted(key for key in self._weak if key not in marks)
+        if unmarked_weak:
+            raise StateError(
+                "weak rows survived finalize with no disabling enablement mark "
+                f"(weak implies disabled): {unmarked_weak}; a publisher added weak "
+                "rows without a source that disables them (a framework bug)"
+            )
+        enablement = {
+            key: (Enablement.disabled if key in marks else Enablement.enabled)
+            for kind, kind_dict in self._resources.items()
+            for key in ((kind, name) for name in kind_dict)
+        }
+        readiness = fold_readiness(self._resources, all_outbound, enablement, marks)
 
         # 5: readiness-gated materialization (R12), looping to a fixpoint.
-        self._materialize_deferred(deferred, all_refs, all_outbound, readiness, enablement, context)
+        self._materialize_deferred(deferred, all_refs, all_outbound, readiness, enablement, marks, context)
 
         # 6: attach. Build the retained graph (inbound + readiness + enablement
         # on the node), then polish auto-declared descriptions off its inbound
@@ -345,20 +523,6 @@ class Registry:
     def _present_keys(self) -> set[tuple[str, str]]:
         """The ``(kind, name)`` of every currently-published Resource."""
         return {(kind, name) for kind, kind_dict in self._resources.items() for name in kind_dict}
-
-    def _node_enablement(self) -> dict[tuple[str, str], Enablement]:
-        """Each present node's enablement (opt-in) axis, the seam the fold and
-        graph consume.
-
-        Every node is ``enabled`` this effort: no producer of ``disabled`` nodes
-        ships (R7). This is the single, minimal extension point the plugin
-        rebuild fills to mark an opted-out unit ``disabled`` (and a test
-        overrides to exercise the fold's distribution of a disabled dependency's
-        state); nodes materialized after this pass default to ``enabled``.
-        """
-        from agentworks.resources.graph import Enablement
-
-        return {(kind, name): Enablement.enabled for kind, kind_dict in self._resources.items() for name in kind_dict}
 
     def _materialize_reserved_defaults(self) -> None:
         """Seed the registry with reserved-default rows for every kind
@@ -453,6 +617,7 @@ class Registry:
         all_outbound: dict[tuple[str, str], list[ResourceReference]],
         readiness: dict[tuple[str, str], Readiness],
         enablement: Mapping[tuple[str, str], Enablement],
+        disabled_marks: Mapping[tuple[str, str], DisabledMark],
         context: BuildContext,
     ) -> None:
         """Materialize deferred auto-declare targets, readiness-gated (R12),
@@ -468,6 +633,10 @@ class Registry:
         a late-materialized node's out-edges point only back into the settled
         set; a hard cap on iterations guards against a framework bug rather than
         truncating silently.
+
+        ``disabled_marks`` is forwarded to each late node's ``node_readiness``
+        call so a late-materialized dependent of a disabled node gets the carried
+        reason on the same additive path finalize's fold used (LLD b 4b).
         """
         from agentworks.resources.graph import Enablement, node_readiness
 
@@ -511,7 +680,9 @@ class Registry:
                 # emits its backend edges (the loop is load-bearing, LLD b).
                 self._walk_into(target, all_refs, all_outbound, context)
                 self._resolve_misses(all_refs, deferred)
-                readiness[target] = node_readiness(target, self._resources, all_outbound, readiness, enablement)
+                readiness[target] = node_readiness(
+                    target, self._resources, all_outbound, readiness, enablement, disabled_marks
+                )
             if not progressed:
                 # Every remaining deferred target lacks a ready referrer (R12):
                 # leave it unmaterialized.

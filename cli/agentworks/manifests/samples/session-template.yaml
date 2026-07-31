@@ -25,11 +25,14 @@
 #  env:
 #    TERM: xterm-256color
 ##
-## The `claude-code` harness runs Claude Code as the session. It selects the
-## launch/resume conventions with one line (harness: claude-code) instead of
-## restating command strings: `session create` starts a new Claude session and
-## `session restart` resumes the same conversation when its transcript still
-## exists. `harness_config` is three optional fields:
+## The `claude-code` harness runs Claude Code as the session. It ships as the
+## opt-in `claude` system plugin, so enable it with `[plugins] system =
+## ["claude"]` (otherwise creating a session on this template is refused with an
+## "enable plugin `claude`" hint). It selects the launch/resume conventions with
+## one line (harness: claude-code) instead of restating command strings:
+## `session create` starts a new Claude session and `session restart` resumes
+## the same conversation when its transcript still exists. `harness_config` is
+## three optional fields:
 ##   permission_mode: forwarded to `claude --permission-mode`
 ##   model:           forwarded to `claude --model`
 ##   extra_args:      raw argv tokens appended last (the escape hatch)

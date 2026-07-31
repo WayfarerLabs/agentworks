@@ -30,9 +30,9 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from agentworks.capabilities.vm_platform.proxmox import ProxmoxPlatform
 from agentworks.db import PID_STOPPED, SessionMode, VMStatus
 from agentworks.errors import NotFoundError, StateError
+from agentworks.plugins.proxmox.platform import ProxmoxPlatform
 from agentworks.sessions import manager as session_manager
 from agentworks.vms import manager as vm_manager
 

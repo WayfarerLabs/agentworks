@@ -39,8 +39,8 @@ LINUX_GROUPNAME_MAX_LENGTH = 32
 #   - Hostname sink: ``{slug}-{vm}`` becomes the OS hostname / Tailscale
 #     MagicDNS label (``vms/manager/lifecycle.py``). A DNS label caps at 63,
 #     leaving 63 - 1 - 20 = 42 for the VM name.
-#   - Azure vnet sink: ``azure_vm.py`` derives the virtual-network subresource
-#     name ``{slug}-{vm}-vnet`` (``capabilities/vm_platform/azure_vm.py``).
+#   - Azure vnet sink: the azure platform derives the virtual-network
+#     subresource name ``{slug}-{vm}-vnet`` (``plugins/azure/platform.py``).
 #     Microsoft.Network/virtualNetworks caps names at 64, leaving
 #     64 - 20 - 1 - 5 = 38 for the VM name.
 #
@@ -53,7 +53,7 @@ LINUX_GROUPNAME_MAX_LENGTH = 32
 DNS_LABEL_MAX_LENGTH = 63
 AZURE_VNET_NAME_MAX_LENGTH = 64
 MAX_SYSTEM_SLUG_LENGTH = 20  # validate_slug (vms/manager/_helpers.py)
-_AZURE_VNET_SUFFIX = "-vnet"  # capabilities/vm_platform/azure_vm.py
+_AZURE_VNET_SUFFIX = "-vnet"  # plugins/azure/platform.py
 # hostname sink: 63 - 1 - 20 = 42
 _HOSTNAME_SINK_CAP = DNS_LABEL_MAX_LENGTH - len("-") - MAX_SYSTEM_SLUG_LENGTH
 # Azure vnet sink: 64 - 20 - 1 - 5 = 38 (the binding one)

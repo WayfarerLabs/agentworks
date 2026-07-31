@@ -26,11 +26,15 @@ from agentworks.errors import ConfigError
 from agentworks.resources.reference import ConfigReference
 
 
-def _config(tmp_path: Path, body: str = "") -> Any:
+def _config(tmp_path: Path, body: str = "", *, enabled: bool = False) -> Any:
+    # ``azdo`` ships in the opt-in ``azure`` system plugin, whose capability
+    # validation is deferred while disabled; a test exercising the azdo
+    # ``validate`` pass must enable the plugin so validation fires.
     pub = tmp_path / "k.pub"
     priv = tmp_path / "k"
     pub.write_text("ssh-ed25519 AAAA test")
     priv.write_text("key")
+    plugins = '[plugins]\nsystem = ["azure"]\n\n' if enabled else ""
     cfg = tmp_path / "config.toml"
     cfg.write_text(
         dedent(f"""\
@@ -38,6 +42,7 @@ def _config(tmp_path: Path, body: str = "") -> Any:
         ssh_public_key = "{pub.as_posix()}"
         ssh_private_key = "{priv.as_posix()}"
         """)
+        + plugins
         + dedent(body)
     )
     return load_config(cfg, warn_issues=False)
@@ -64,6 +69,7 @@ def test_azdo_org_required_toml(tmp_path: Path) -> None:
         [git_credentials.ado]
         provider = "azdo"
         """,
+        enabled=True,
     )
     with pytest.raises(ConfigError, match="org is required for the azdo provider") as exc:
         build_registry(config)
@@ -89,7 +95,7 @@ def test_azdo_rejects_unknown_blob_fields_yaml(tmp_path: Path) -> None:
             bogus: 1
         """,
     )
-    config = _config(tmp_path)
+    config = _config(tmp_path, enabled=True)
     with pytest.raises(ConfigError, match="unknown azdo provider field") as exc:
         build_registry(config)
     assert "res.yaml" in str(exc.value)
@@ -179,7 +185,7 @@ def test_construct_time_validation_survives_the_move(tmp_path: Path) -> None:
     still re-runs ``validate`` and rejects a malformed blob (a provider
     that reasons "validate ran at construct, so ``org`` is a valid str"
     still holds)."""
-    from agentworks.capabilities.git_credential.azdo import AzDOCredentialProvider
+    from agentworks.plugins.azure.azdo import AzDOCredentialProvider
 
     with pytest.raises(ConfigError, match="org is required for the azdo provider"):
         AzDOCredentialProvider("ado", {})

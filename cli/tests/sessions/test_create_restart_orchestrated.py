@@ -34,7 +34,7 @@ from agentworks.secrets.orchestration import (
 )
 
 from ..conftest import stub_build_registry, stub_session_resolvers, stub_vm_gates
-from ..orchestrated_fixtures import PROXMOX_SECTION, write_operator_config
+from ..orchestrated_fixtures import PLUGINS_ENABLED, PROXMOX_SECTION, write_operator_config
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -598,7 +598,7 @@ def make_config(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):  # noqa: ANN20
     monkeypatch.setattr("agentworks.secrets.resolve_for_command", _real_resolve_for_command)
 
     def _make():  # noqa: ANN202
-        return write_operator_config(tmp_path, PROXMOX_SECTION + SESSION_ENV_SECTION)
+        return write_operator_config(tmp_path, PLUGINS_ENABLED + PROXMOX_SECTION + SESSION_ENV_SECTION)
 
     return _make
 
@@ -617,8 +617,8 @@ def _stop_the_vm(monkeypatch: pytest.MonkeyPatch, events: list[str]) -> None:
     """The VM observes as stopped: the fast path fails, the gate's
     status/start ops run (needing the API token pre-boundary), and the
     reconnect repair is a recorded no-op."""
-    from agentworks.capabilities.vm_platform.proxmox import ProxmoxPlatform
     from agentworks.db import VMStatus
+    from agentworks.plugins.proxmox.platform import ProxmoxPlatform
     from agentworks.vms import manager as vm_manager
 
     monkeypatch.setattr(vm_manager, "_is_tailscale_reachable", lambda host: False)
@@ -705,6 +705,45 @@ def test_create_stopped_vm_gate_resolves_once_and_seeds_the_boundary(
         role is Role.RESULT and level == 0 and msg.startswith("Session 's1' started")
         for role, level, msg in captured_output.lines
     )
+
+
+def test_create_new_agent_on_disabled_plugin_recipe_refuses_before_any_work(
+    db: Database,
+    make_config,  # noqa: ANN001
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Phase 7 BLOCKING 2, end-to-end on a live registry: ``session create
+    --new-agent`` with an ephemeral agent-template whose recipe is a disabled
+    plugin's is refused at the build phase (the gate added beside the harness
+    gate in ``_build_session_graph``), before any transport or session-row
+    write. Proves the newly-added ``--new-agent`` gate fires live, not just that
+    the call site references it textually (the drift guard's job)."""
+    from agentworks.plugins import Plugin
+    from agentworks.sessions.manager import create_session
+
+    config = make_config()
+    _seed_stopped_proxmox_vm(db)
+    from agentworks.plugins import SYSTEM_PLUGINS
+
+    plugin = Plugin(
+        name="decl-plugin",
+        description="a manifest-parity fixture",
+        manifests="tests.plugins._manifest_declarable_fixture",
+    )
+    # Merge alongside the real shipped plugins (proxmox, which the shared config
+    # enables and this suite's VM runs on) rather than replacing them: replacing
+    # would drop proxmox's row and fail the enabled-name check. decl-plugin ships
+    # present-but-disabled, so its bundled recipe refuses with the enable hint.
+    monkeypatch.setattr("agentworks.plugins.SYSTEM_PLUGINS", {**SYSTEM_PLUGINS, plugin.name: plugin})
+    events: list[str] = []
+    captured_env: dict[str, str] = {}
+    _patch_session_ops(monkeypatch, events, captured_env)  # transports must never be reached
+
+    with pytest.raises(StateError, match="enable plugin `decl-plugin`"):
+        create_session(db, config, name="s1", workspace="ws1", new_agent=True, agent_template="fixture-agent-tmpl")
+
+    assert db.get_session("s1") is None  # refused before any session-row write
+    assert "tmux_create" not in events  # refused before any transport work
 
 
 def test_restart_stopped_vm_gate_seeds_and_env_pass_is_the_only_other(

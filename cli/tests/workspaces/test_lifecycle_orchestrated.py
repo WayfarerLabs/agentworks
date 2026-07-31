@@ -27,7 +27,6 @@ from typing import TYPE_CHECKING
 import pytest
 
 from agentworks.capabilities.base import RunContext
-from agentworks.capabilities.vm_platform.proxmox import ProxmoxPlatform
 from agentworks.db import InitStatus, VMStatus
 from agentworks.errors import (
     ExternalError,
@@ -36,6 +35,7 @@ from agentworks.errors import (
     UserAbort,
     ValidationError,
 )
+from agentworks.plugins.proxmox.platform import ProxmoxPlatform
 from agentworks.transports import SSHTransport
 from agentworks.vms import manager as vm_manager
 from agentworks.workspaces import manager as workspace_manager
@@ -53,13 +53,13 @@ def make_config(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):  # noqa: ANN20
     """The shared ``make_config`` shape, plus a tmp ``[paths]`` section
     so delete's ``.code-workspace`` unlink and copy's VS Code stub
     never touch the operator's real directories."""
-    from tests.orchestrated_fixtures import PROXMOX_SECTION, write_operator_config
+    from tests.orchestrated_fixtures import PLUGINS_ENABLED, PROXMOX_SECTION, write_operator_config
 
     monkeypatch.setenv("AW_SECRET_PROXMOX_TOKEN", "pve-token")
     paths_section = f'[paths]\nvscode_workspaces = "{tmp_path / "vscode"}"\n'
 
     def _make(extra: str = ""):  # noqa: ANN202
-        return write_operator_config(tmp_path, PROXMOX_SECTION + paths_section + extra)
+        return write_operator_config(tmp_path, PLUGINS_ENABLED + PROXMOX_SECTION + paths_section + extra)
 
     return _make
 

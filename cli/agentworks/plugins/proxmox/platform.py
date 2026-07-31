@@ -11,9 +11,9 @@ from agentworks import output
 from agentworks.capabilities.vm_platform.base import ProvisionRequest, ProvisionResult, VMPlatform
 from agentworks.capabilities.vm_platform.bootstrap_script import generate_bootstrap_script
 from agentworks.capabilities.vm_platform.cloud_init import PROVISIONING_PACKAGES
-from agentworks.capabilities.vm_platform.proxmox_api import ProxmoxAPI, ProxmoxAPIError
 from agentworks.db import VMStatus
 from agentworks.errors import ConfigError, StateError
+from agentworks.plugins.proxmox.api import ProxmoxAPI, ProxmoxAPIError
 from agentworks.transports import SSHTransport
 
 if TYPE_CHECKING:
