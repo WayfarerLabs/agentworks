@@ -95,6 +95,15 @@ convention.** Future config-section authors choose the precedent that matches th
 Consistently, an `[plugins] enabled` entry that is not an installed plugin is a typed config error
 raised up front, before anything publishes, never a `KeyError` from deep in publication.
 
+**Degradation contract.** A `[plugins]` (or any) config error that breaks `build_registry` fails
+only the commands that build the registry (they surface the typed error and exit non-zero);
+DB-backed commands that do not build the registry, notably `agw vm list`, keep working off the
+database. This is the pre-existing registry-config-error behavior (a broken `[plugins]` section is a
+new way to reach it, not a new behavior), and it is desirable: an operator whose config is
+temporarily broken can still inspect existing VMs. `agw doctor` degrades gracefully the same way,
+the registry check FAILs, the registry-dependent groups skip with a pointer, and the run still
+completes with a summary.
+
 ## Consequences
 
 ### Positive

@@ -72,7 +72,13 @@ def publish_manifest_package(
     unshipped package name) RAISES ``ConfigError`` naming the anchor/subdir,
     never a raw ``ModuleNotFoundError``/``ImportError``, so a plugin-curation
     bug surfaces as a typed error the caller can attribute (mirroring the
-    plugin-attributed re-raises in ``register_plugin``). Warn-level ``issues``
+    plugin-attributed re-raises in ``register_plugin``). A plugin
+    (``allowed_kinds is not None``) whose anchor imports but ships no ``subdir``
+    directory likewise RAISES ``ConfigError`` naming the anchor/subdir, rather
+    than falling through to ``load_manifests`` on a non-existent directory and
+    publishing nothing silently (a plugin declared ``manifests`` but bundled no
+    package data). The built-in caller (``allowed_kinds=None``, its ``builtin/``
+    subdir always ships) is never gated by this check. Warn-level ``issues``
     in a first-party bundle are likewise a curation/app bug: this RAISES
     ``ConfigError`` rather than asserting (``assert`` is stripped under
     ``python -O``), so a dirty bundle fails loudly in every build mode.
@@ -84,6 +90,20 @@ def publish_manifest_package(
         # anchor and TypeError for a non-package module; re-type all of them so
         # a bad manifest anchor is never an opaque traceback.
         raise ConfigError(f"manifest package {anchor!r}/{subdir} could not be resolved: {exc}") from exc
+    # A plugin (``allowed_kinds is not None``) that imports fine but ships no
+    # ``<subdir>/`` package data is a curation bug: the anchor resolved, so the
+    # unimportable-anchor guard above never fired, but ``load_manifests`` on the
+    # missing directory would silently publish nothing. Fail loudly instead. The
+    # ``.is_dir()`` traversable check reads False for a missing subdir under both
+    # the repo (a real ``PosixPath``) and a wheel install (a ``zipfile.Path``),
+    # so it holds for every install mode. The built-in caller passes
+    # ``allowed_kinds=None`` and its ``builtin/`` subdir always ships, so it is
+    # never gated here and its behavior is unchanged.
+    if allowed_kinds is not None and not directory.is_dir():
+        raise ConfigError(
+            f"plugin manifest package {anchor!r} declares manifests but ships no {subdir!r} "
+            f"package data (expected a {subdir}/ directory beside {anchor})"
+        )
     # The traversable is a real directory both in the repo and in wheels
     # (hatchling ships package data); resolve to a Path for the loader.
     with importlib_resources.as_file(directory) as resolved:

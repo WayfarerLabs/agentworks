@@ -51,6 +51,10 @@ PLUGIN = "pub-plugin"
 # stores in ``Plugin.manifests``.
 _MANIFEST_ANCHOR = f"{__package__}._manifest_fixture"
 _DIRTY_ANCHOR = f"{__package__}._manifest_dirty_fixture"
+# A real, importable package that ships NO ``manifests/`` subdir: the anchor
+# resolves (so the unimportable-anchor guard never fires) but its curated
+# bundle is missing.
+_NO_SUBDIR_ANCHOR = f"{__package__}._manifest_no_subdir_fixture"
 
 
 # -- Real fixture impls (subclasses, so they fold through their consumers) ------
@@ -249,6 +253,67 @@ def test_bad_plugin_manifest_anchor_raises_typed_plugin_attributed_error(monkeyp
         assert "could not be resolved" in message
         # A bare import failure is NOT what escapes.
         assert not isinstance(exc.value, ImportError)
+
+
+def test_plugin_manifest_anchor_without_subdir_raises_typed_plugin_attributed_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A plugin declaring ``manifests=<anchor>`` where the anchor imports fine but
+    ships NO ``manifests/`` subdir must fail LOUDLY, not silently publish nothing.
+    Before the guard, ``load_manifests`` ran on the non-existent directory and the
+    plugin's curated bundle vanished with no error. Now it is a typed,
+    plugin-attributed ``ConfigError`` naming the missing subdir, exactly like the
+    bad-anchor case above.
+    """
+    plugin = Plugin(
+        name=PLUGIN,
+        description="a plugin whose manifest anchor ships no manifests/ subdir",
+        capabilities={"harness": (_FixtureHarness,)},
+        manifests=_NO_SUBDIR_ANCHOR,
+    )
+    monkeypatch.setattr("agentworks.plugins.SYSTEM_PLUGINS", {plugin.name: plugin})
+    config = _config(PLUGIN)  # opted in, so its manifests are loaded
+    with seated_plugin(plugin):
+        registry = Registry.empty()
+        with pytest.raises(ConfigError) as exc:
+            publish_plugins(registry, config)
+        message = str(exc.value)
+        assert f"plugin '{PLUGIN}'" in message  # plugin-attributed
+        assert "ships no 'manifests'" in message  # names the missing subdir
+        assert "no-op" not in message  # it is a loud failure, not a silent skip
+
+
+def test_plugin_path_gates_missing_subdir_but_builtin_path_does_not(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The missing-subdir guard is the PLUGIN path only (``allowed_kinds is not
+    None``): a direct plugin-style call on the no-subdir anchor raises, while the
+    built-in-style call (``allowed_kinds=None``, whose ``builtin/`` subdir always
+    ships) keeps its unchanged behavior. Pins that the gate keys off the caller,
+    not the anchor.
+    """
+    from agentworks.plugins.publish import PLUGIN_MANIFEST_KINDS
+
+    registry = Registry.empty()
+    with pytest.raises(ConfigError, match="ships no 'manifests'"):
+        publish_manifest_package(
+            registry,
+            anchor=_NO_SUBDIR_ANCHOR,
+            subdir="manifests",
+            origin_for=lambda file_name: Origin.built_in(source=f"nosub/{file_name}"),
+            allowed_kinds=PLUGIN_MANIFEST_KINDS,
+        )
+
+    # The built-in path (``allowed_kinds=None``) is ungated: the same missing
+    # subdir does NOT raise, it loads nothing (a built-in's ``builtin/`` subdir
+    # always ships, so this path never actually hits a missing dir in practice).
+    publish_manifest_package(
+        Registry.empty(),
+        anchor=_NO_SUBDIR_ANCHOR,
+        subdir="manifests",
+        origin_for=lambda file_name: Origin.built_in(source=f"nosub/{file_name}"),
+        allowed_kinds=None,
+    )
 
 
 def test_builtin_publish_routes_through_shared_body_preserving_origin() -> None:

@@ -167,8 +167,10 @@ the plugin, **never** an unknown-name hard error:
   (Before the Phase 8 hint the message would be generic; the migration ships them together.)
 
 The default local path (`lima` / `wsl2` + `shell` + `env-var` / `prompt` + `github` + the generic
-dev-tool install-commands) references none of them; a capstone test pins that a default config
-builds and runs green with zero plugins enabled.
+dev-tool install-commands) references none of them; a capstone test
+(`tests/plugins/test_surfaces.py::test_default_config_builds_green_with_zero_plugins_enabled`) pins
+that a default config with no `[plugins]` section builds green through the real `build_registry`
+with all four plugins present-but-disabled and the core rows enabled.
 
 The guidance shipped with the change (each in the phase that makes it true, per doc lockstep):
 

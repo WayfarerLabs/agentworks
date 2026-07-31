@@ -357,8 +357,9 @@ so should you when reading them:
 - **present**: a node exists for it (a built-in; later, an installed plugin). Absent means a typo or
   an uninstalled unit.
 - **enabled / disabled**: the opt-in axis (turned on or off). "enabled" and "disabled" mean this and
-  only this; they never describe host readiness. (No backend is disabled today; the axis is modeled
-  for the plugin work.)
+  only this; they never describe host readiness. A system plugin's contributions are disabled until
+  the operator opts in via `[plugins] enabled` (for example the `onepassword` backend is disabled by
+  default); the core backends (`env-var`, `prompt`) are always enabled.
 - **ready / not-ready**: whether the backend can run on THIS host right now, checked offline (e.g.
   `onepassword` is not-ready when the `op` CLI is not on `PATH`). Readiness is not resolvability: a
   ready backend may still have no value for a given secret.

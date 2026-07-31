@@ -35,6 +35,7 @@ from agentworks.vms.sites import VMSiteDecl
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
+    from pathlib import Path
 
     from agentworks.config import Config
 
@@ -179,6 +180,34 @@ def test_list_renders_from_plugin_provenance(
     out = capsys.readouterr().out
     # The DESCRIPTION cell attributes the row to its plugin.
     assert "from plugin alpha" in out
+
+
+def test_include_disabled_render_marks_disabled_and_not_ready_distinctly(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Under ``--include-disabled`` a disabled row carries a ``(disabled)``
+    marker parallel to the ``(not ready)`` marker, so mixed states are legible
+    per row (not just via the count line). Three rows, three distinct signals:
+    beta's platform is disabled -> ``(disabled)``; alpha's not-ready-but-enabled
+    platform -> ``(not ready)``; alpha's ready platform -> neither.
+    """
+    config = _config("alpha")  # alpha enabled, beta disabled
+    registry = _seat_and_publish(monkeypatch, config)
+
+    listing = list_resources(registry, kinds=("vm-platform",), include_disabled=True)
+    render_resource_table(listing)
+    out_lines = capsys.readouterr().out.splitlines()
+
+    def _row(name: str) -> str:
+        # Each table row leads with the KIND column, so match on the NAME token.
+        return next(line for line in out_lines if f" {name} " in f" {line} ")
+
+    assert "(disabled)" in _row("beta-platform")
+    assert "(not ready)" not in _row("beta-platform")
+    assert "(not ready)" in _row("alpha-notready-platform")
+    assert "(disabled)" not in _row("alpha-notready-platform")
+    assert "(disabled)" not in _row("alpha-platform")
+    assert "(not ready)" not in _row("alpha-platform")
 
 
 # -- describe of a disabled row (explicit lookup, always renders) ---------------
@@ -331,3 +360,63 @@ def test_reserved_fields_do_not_affect_publication(monkeypatch: pytest.MonkeyPat
         commands=(PluginCommand(name="do-thing"),),
     )
     assert _published(bare) == _published(loaded)
+
+
+# -- Capstone: a default config builds green with zero plugins enabled ----------
+
+
+def test_default_config_builds_green_with_zero_plugins_enabled(tmp_path: Path) -> None:
+    """The migration-strategy claim, pinned end to end against the REAL shipped
+    plugin index (not the alpha/beta fixture): a DEFAULT config with no
+    ``[plugins]`` section runs the whole ``build_registry`` path with no error,
+    and lands every shipped plugin's capability rows present-but-disabled while
+    the core universal path stays present-and-enabled.
+
+    This is the "opt-in plugins never break the zero-config build" guarantee: a
+    fresh install with nothing turned on is a first-class, green state.
+    """
+    from agentworks.bootstrap import build_registry
+    from agentworks.config import load_config
+    from agentworks.plugins import SYSTEM_PLUGINS
+
+    key = tmp_path / "id_ed25519"
+    key.write_text("private")
+    (tmp_path / "id_ed25519.pub").write_text("public")
+    config_path = tmp_path / "config.toml"
+    config_path.write_text(f'[operator]\nssh_public_key = "{key}.pub"\nssh_private_key = "{key}"\n')
+    config = load_config(config_path, warn_issues=False, warn_deprecations=False)
+    assert config.plugins_enabled == ()  # no [plugins] section at all
+
+    # build_registry succeeds (no raise) on the zero-plugins default.
+    registry = build_registry(config)
+
+    # Every shipped plugin's contributed capability rows are present-but-disabled.
+    disabled_rows = {
+        ("secret-backend", "onepassword"),  # onepassword plugin
+        ("harness", "claude-code"),  # claude plugin
+        ("vm-platform", "proxmox"),  # proxmox plugin
+        ("vm-platform", "azure-vm"),  # azure plugin
+        ("git-credential-provider", "azdo"),  # azure plugin
+    }
+    for kind, name in disabled_rows:
+        assert registry.graph.enablement_of(kind, name) is Enablement.disabled, (kind, name)
+
+    # The core universal path is present-and-enabled.
+    enabled_rows = {
+        ("vm-platform", "lima"),
+        ("vm-platform", "wsl2"),
+        ("harness", "shell"),
+        ("secret-backend", "env-var"),
+        ("secret-backend", "prompt"),
+        ("git-credential-provider", "github"),
+    }
+    for kind, name in enabled_rows:
+        assert registry.graph.enablement_of(kind, name) is Enablement.enabled, (kind, name)
+
+    # The roster reflects the same: all four shipped plugins present and disabled.
+    roster = {c.name: c for c in _check_plugins(config).checks}
+    for plugin_name in ("onepassword", "claude", "proxmox", "azure"):
+        assert plugin_name in SYSTEM_PLUGINS
+        entry = roster[f"plugin {plugin_name}"]
+        assert entry.status is Status.INFO
+        assert "not enabled in [plugins]" in (entry.message or "")

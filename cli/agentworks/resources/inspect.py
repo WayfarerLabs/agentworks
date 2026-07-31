@@ -67,6 +67,11 @@ class ResourceSummary:
     - ``not_ready_reason`` is the resource's stored readiness verdict's reason,
       read off the graph (``None`` = ready, or the kind has no readiness
       concept). The list view marks not-ready rows; describe shows the reason.
+    - ``disabled`` is the row's opt-in axis (``enablement_of is disabled``).
+      Only ever ``True`` on a row surfaced by ``list_resources(..., include_disabled=True)``,
+      since disabled rows are otherwise skipped. The list view marks it with a
+      ``(disabled)`` marker that dominates the ``(not ready)`` marker (a disabled
+      row's readiness is a ready placeholder anyway).
     """
 
     kind: str
@@ -76,6 +81,7 @@ class ResourceSummary:
     used_by_count: int | None
     description: str
     not_ready_reason: str | None = None
+    disabled: bool = False
 
 
 @dataclass(frozen=True)
@@ -210,7 +216,8 @@ def list_resources(
             # Disabled hides, not-ready shows: skip a row that is off by
             # opt-in unless the operator asked for it. Reads the ENABLEMENT
             # axis, never readiness, so a not-ready-but-enabled row survives.
-            if not include_disabled and registry.graph.enablement_of(kind, name) is Enablement.disabled:
+            disabled = registry.graph.enablement_of(kind, name) is Enablement.disabled
+            if not include_disabled and disabled:
                 continue
             references: tuple[ReferenceEntry, ...] = registry.graph.dependents_of(kind, name)
             description = getattr(resource, "description", "") or ""
@@ -224,6 +231,7 @@ def list_resources(
                     used_by_count=used_by_count,
                     description=description,
                     not_ready_reason=not_ready_reason_for(registry, kind, name),
+                    disabled=disabled,
                 )
             )
             variant = origin.variant if origin is not None else None
@@ -534,7 +542,14 @@ def render_resource_table(listing: ResourceListing) -> None:
         provenance = _plugin_provenance(row.origin)
         if provenance is not None:
             description_cell = f"{description_cell} ({provenance})" if description_cell else provenance
-        if row.not_ready_reason is not None:
+        # A disabled row (only ever surfaced under --include-disabled) is marked
+        # with a ``(disabled)`` marker parallel to ``(not ready)``. Disabled
+        # dominates: a disabled node folds to a ready-placeholder readiness, so
+        # the ``(not ready)`` marker never coexists in practice, but if it ever
+        # did, ``(disabled)`` is the honest signal (opt-in, not host support).
+        if row.disabled:
+            description_cell = f"(disabled) {description_cell}".rstrip()
+        elif row.not_ready_reason is not None:
             description_cell = f"(not ready) {description_cell}".rstrip()
         rendered.append(
             (
