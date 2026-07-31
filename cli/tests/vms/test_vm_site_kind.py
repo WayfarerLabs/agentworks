@@ -185,6 +185,49 @@ def test_proxmox_site_emits_the_token_secret_reference() -> None:
     assert all(r.source == ("vm-site", "px") for r in refs)
 
 
+def test_azure_service_principal_secret_reaches_the_site_node(tmp_path: Path) -> None:
+    """The whole hop, end to end: a manifest-declared azure site with a
+    ``service_principal`` block reaches ``vm_site_node(...).secret_refs()``
+    carrying its client secret.
+
+    Three links that the per-layer unit tests each cover only one side
+    of: the platform's ``dependencies`` derives the reference from the
+    blob, finalize records it as a ``secret`` edge on the retained graph,
+    and the node factory reads THAT graph (not a re-walk of the decl) to
+    build ``secret_refs``. Those refs are what put the client secret into
+    an operation's boundary union, so a break anywhere along here would
+    surface as "the site authenticates fine until the secret is actually
+    needed", which is exactly the failure this pins against.
+    """
+    from agentworks.bootstrap import build_registry
+    from agentworks.config import load_config
+    from agentworks.vms.nodes import vm_site_node
+
+    pub = tmp_path / "k.pub"
+    priv = tmp_path / "k"
+    pub.write_text("ssh-ed25519 AAAA test")
+    priv.write_text("key")
+    cfg = tmp_path / "config.toml"
+    cfg.write_text(
+        f'[operator]\nssh_public_key = "{pub.as_posix()}"\nssh_private_key = "{priv.as_posix()}"\n'
+        '[plugins]\nsystem = ["azure"]\n'
+    )
+    resources = tmp_path / "resources"
+    resources.mkdir()
+    (resources / "site.yaml").write_text(
+        SITE_DOC + "    service_principal:\n      tenant_id: tenant-1\n      client_id: client-1\n      secret: az-sp\n"
+    )
+
+    registry = build_registry(load_config(cfg, warn_issues=False))
+
+    assert vm_site_node(registry, "azure-dev").secret_refs() == ("az-sp",)
+    # And a site WITHOUT the block declares nothing, so the ambient-path
+    # sites every existing operator runs stay edge-free.
+    (resources / "site.yaml").write_text(SITE_DOC.replace("name: azure-dev", "name: azure-ambient"))
+    ambient = build_registry(load_config(cfg, warn_issues=False))
+    assert vm_site_node(ambient, "azure-ambient").secret_refs() == ()
+
+
 def test_host_unsupported_site_still_emits_its_edges(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
