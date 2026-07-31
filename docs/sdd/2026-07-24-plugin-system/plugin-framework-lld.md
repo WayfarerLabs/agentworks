@@ -85,26 +85,35 @@ and build-row contract:
 ```python
 class CapabilityAdapter(Protocol):
     kind: str
-    def seat(self, impl_cls: type) -> None: ...            # write impl into the kind's registry under impl_cls.name
     def peek(self, name: str) -> object | None: ...        # the current occupant of that name, for the collision precheck
+    def matches(self, occupant: object, impl_cls: type) -> bool: ...  # same impl? (idempotent re-registration check)
+    def prepare(self, impl_cls: type) -> object: ...       # build the registry payload; fallible, mutates nothing
+    def seat(self, name: str, payload: object) -> None: ...  # write the prepared payload; a pure dict write
     def build_row(self, name: str, origin: Origin) -> Any: ...  # the kind's Entry dataclass, stamped with origin
 
 CAPABILITY_ADAPTERS: Mapping[str, CapabilityAdapter]
 ```
 
-Per-kind seat/build behavior (all keyed by `impl_cls.name`):
+Seating is split into a **fallible `prepare`** (build the payload, no mutation) and a **pure
+`seat`** (write the prepared payload), so all failure-prone work happens during the precheck, before
+any registry is touched — seat-loop atomicity holds by construction. `matches` is the per-kind
+idempotency check reconciling the class-vs-instance asymmetry by exact identity.
 
-| kind                      | seat                                           | build_row (Entry, `resources/...`)                                       |
-| ------------------------- | ---------------------------------------------- | ------------------------------------------------------------------------ |
-| `vm-platform`             | `VM_PLATFORM_REGISTRY[name] = impl_cls`        | `VMPlatformEntry(name, description=<seated>.description, origin=...)`    |
-| `harness`                 | `HARNESS_REGISTRY[name] = impl_cls`            | `HarnessEntry(name, origin=...)`                                         |
-| `git-credential-provider` | `GIT_CREDENTIAL_PROVIDER_REGISTRY[name] = cls` | `GitCredentialProviderEntry(name, origin=...)`                           |
-| `secret-backend`          | `SECRET_BACKEND_REGISTRY[name] = impl_cls()`   | `SecretBackendEntry(name, description=<seated>.description, origin=...)` |
+Per-kind prepare/build behavior (all keyed by `impl_cls.name`; `seat` is always
+`REGISTRY[name] = payload`):
 
-- **The instance trap is confined to `seat`.** `secret-backend` is the one kind whose registry holds
-  a constructed **instance** (`secrets/backends.py:185`), so its adapter alone calls `impl_cls()`
-  (once, at seat). The other three seat the class. This mirrors exactly how the graph's `impl_of`
-  documents the same asymmetry (`graph.py:176-183`) and how the built-in publishers seat
+| kind                      | prepare payload | build_row (Entry, `resources/...`)                                       |
+| ------------------------- | --------------- | ------------------------------------------------------------------------ |
+| `vm-platform`             | `impl_cls`      | `VMPlatformEntry(name, description=<seated>.description, origin=...)`    |
+| `harness`                 | `impl_cls`      | `HarnessEntry(name, origin=...)`                                         |
+| `git-credential-provider` | `impl_cls`      | `GitCredentialProviderEntry(name, origin=...)`                           |
+| `secret-backend`          | `impl_cls()`    | `SecretBackendEntry(name, description=<seated>.description, origin=...)` |
+
+- **The instance trap is confined to `prepare`.** `secret-backend` is the one kind whose registry
+  holds a constructed **instance** (`secrets/backends.py:185`), so its adapter alone calls
+  `impl_cls()` (once, at prepare — during the precheck, so a throwing constructor aborts before any
+  registry mutation). The other three prepare the class itself. This mirrors exactly how the graph's
+  `impl_of` documents the same asymmetry (`graph.py:176-183`) and how the built-in publishers seat
   (`vm_platform/__init__.py:44` classes; `secrets/backends.py:185` instances).
 - **`build_row` reads description off the seated impl** via `peek(name)` (the registry occupant),
   never re-instantiating and never trusting an unseated descriptor claim. `VMPlatformEntry` /
