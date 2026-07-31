@@ -86,7 +86,22 @@ def test_site_names_obey_the_freeform_name_rules(tmp_path: Path) -> None:
 
 def test_platform_named_site_must_declare_that_platform(tmp_path: Path) -> None:
     """A site `vm-site/azure-vm` backed by lima would make
-    `--site azure-vm` mean something other than it says."""
+    `--site azure-vm` mean something other than it says.
+
+    The shadow check reads ``VM_PLATFORM_REGISTRY``, so the precondition is
+    that ``azure-vm`` is seated there. It ships in the opt-in ``azure`` system
+    plugin, and importing the plugins package seats every shipped plugin's
+    platform at import (``SYSTEM_PLUGINS`` build). Establish that here so the
+    check fires whether this file runs solo or in-suite; a full-suite run gets
+    the same seating incidentally from an earlier plugin test, which is why
+    this test passed in-suite but not solo before (issue #302).
+    """
+    from agentworks.capabilities.vm_platform import VM_PLATFORM_REGISTRY
+    from agentworks.plugins import SYSTEM_PLUGINS
+
+    assert "azure" in SYSTEM_PLUGINS
+    assert "azure-vm" in VM_PLATFORM_REGISTRY
+
     doc = "apiVersion: agentworks/v1\nkind: vm-site\nmetadata:\n  name: azure-vm\nspec:\n  platform: lima\n"
     (tmp_path / "site.yaml").write_text(doc)
     with pytest.raises(ConfigError, match="shadows a platform name"):
