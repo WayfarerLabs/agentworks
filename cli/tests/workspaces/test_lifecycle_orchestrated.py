@@ -1136,6 +1136,49 @@ def test_create_rollback_tolerates_a_groupdel_failure(
     assert not any("rollback during workspace create" in w for w in captured_output.warnings)
 
 
+# -- create-rollback reclaims resources on a MID-create failure (issue #262) ---
+
+
+def test_create_rollback_on_clone_failure_leaves_no_residue(
+    db: Database,
+    make_config,  # noqa: ANN001
+    monkeypatch: pytest.MonkeyPatch,
+    captured_output: CapturedOutput,
+) -> None:
+    """A create that fails INSIDE ``create_vm_workspace`` (the git clone,
+    after the group and directory were already made) must leave no
+    residue: ``create_vm_workspace`` self-cleans exactly what it created
+    (issue #262). ``realize._cleanup`` is gated on the function RETURNING,
+    so for this window the self-cleanup is the ONLY teardown, and it fires
+    exactly once. The original clone error propagates unmasked, the
+    directory ``rm -rf`` and the ``groupdel ws-ws1`` are both issued (the
+    group after the directory, mirroring delete), and no DB row survives.
+    ``failing=('test -d', 'git clone')`` makes the existence probe report
+    the directory absent (so create proceeds) and the clone raise."""
+    from agentworks.ssh import SSHError
+
+    fake = _CheckAwareTarget(failing=("test -d", "git clone"))
+    _wire_target(monkeypatch, fake)
+
+    config = make_config('[workspace_templates.default]\nrepo = "https://example.com/repo.git"\n')
+    _seed_vm_only(db)
+    _reachable(monkeypatch, True)
+
+    # SSHError is an AgentworksError, so realize re-raises it verbatim (not
+    # wrapped in ExternalError): the operator-facing clone error survives.
+    with pytest.raises(SSHError, match="git clone"):
+        workspace_manager.create_workspace(db, config, name="ws1", vm_name="box")
+
+    dir_removed = next(i for i, c in enumerate(fake.commands) if c.startswith("rm -rf") and "ws1" in c)
+    group_removed = next(i for i, c in enumerate(fake.commands) if "groupdel ws-ws1" in c)
+    assert group_removed > dir_removed
+    assert db.get_workspace("ws1") is None
+    # The teardown succeeded, so the self-cleanup's own failure warning must
+    # not fire, and realize's post-return rollback path never engaged.
+    assert not any("cleanup after failed workspace create" in w for w in captured_output.warnings)
+    assert not any("rollback during workspace create" in w for w in captured_output.warnings)
+
+
 # -- the operation scope reaches readiness ------------------------------------
 
 
