@@ -177,7 +177,8 @@ def test_console_list_names_only_respects_vm_filter(tmp_path: Path) -> None:
     ],
 )
 def test_list_names_only_empty_db_prints_nothing(
-    tmp_path: Path, subcommand: list[str],
+    tmp_path: Path,
+    subcommand: list[str],
 ) -> None:
     db = Database(tmp_path / "test.db")
     code, names = _invoke(db, subcommand)

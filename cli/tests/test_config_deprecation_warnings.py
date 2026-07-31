@@ -122,11 +122,7 @@ def test_secret_backends_keeps_its_own_no_op_warning(tmp_path: Path) -> None:
 def test_shipped_sample_config_warns_nothing(tmp_path: Path) -> None:
     """The shipped sample is YAML-first: as-shipped (resource examples
     commented out) it produces zero deprecation issues."""
-    sample = (
-        Path(__file__).resolve().parent.parent
-        / "agentworks"
-        / "sample-config.toml"
-    )
+    sample = Path(__file__).resolve().parent.parent / "agentworks" / "sample-config.toml"
     pub = tmp_path / "id.pub"
     priv = tmp_path / "id"
     pub.write_text("ssh-ed25519 AAAA...")
@@ -139,9 +135,7 @@ def test_shipped_sample_config_warns_nothing(tmp_path: Path) -> None:
     assert _deprecations(cfg) == ()
 
 
-def test_cli_no_deprecations_flag_silences_the_warning(
-    tmp_path: Path, monkeypatch
-) -> None:
+def test_cli_no_deprecations_flag_silences_the_warning(tmp_path: Path, monkeypatch) -> None:
     """`agw --no-deprecations <cmd>` suppresses the deprecation warning;
     without the flag it prints. Only deprecations are silenced -- the
     flag does not touch config_issues."""
@@ -166,9 +160,7 @@ def test_cli_no_deprecations_flag_silences_the_warning(
     assert with_warning.exit_code == 0, with_warning.output
     assert "deprecated TOML resource" in with_warning.output
 
-    silenced = CliRunner().invoke(
-        app, ["--no-deprecations", "resource", "list", "--names-only"]
-    )
+    silenced = CliRunner().invoke(app, ["--no-deprecations", "resource", "list", "--names-only"])
     assert silenced.exit_code == 0, silenced.output
     assert "deprecated" not in silenced.output
 
@@ -192,16 +184,12 @@ def test_remediation_commands_do_not_nag(tmp_path: Path, monkeypatch) -> None:
     )
     monkeypatch.setattr("agentworks.config.CONFIG_PATH", cfg)
 
-    dry = CliRunner().invoke(
-        app, ["resource", "migrate", "secret", "--dry-run"]
-    )
+    dry = CliRunner().invoke(app, ["resource", "migrate", "secret", "--dry-run"])
     assert dry.exit_code == 0, dry.output
     assert "deprecated TOML resource" not in dry.output
     assert "secret/npm-token" in dry.output  # it still planned the move
 
-    written = CliRunner().invoke(
-        app, ["resource", "sample", "secret", "--write", "samples.yaml"]
-    )
+    written = CliRunner().invoke(app, ["resource", "sample", "secret", "--write", "samples.yaml"])
     assert written.exit_code == 0, written.output
     assert "deprecated TOML resource" not in written.output
     assert (tmp_path / "resources" / "samples.yaml").exists()

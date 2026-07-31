@@ -1,14 +1,13 @@
 """Subgraph walks across the Resource Registry.
 
-``collect_secrets_for(registry, root)`` walks a Resource's
-``referenced_resources()`` DFS from ``root``, dedupes targets by
-``(kind, name)``, and returns the SecretDecls reachable from the walk.
-Used by manager-entry code (``vm create``, ``agent create``, etc.) to
-build the ``extra_decls`` list passed to
-``agentworks.secrets.orchestration.resolve_for_command`` for
-eager-resolve. The orchestrator does its own env-block walk via
-``SecretTarget``; ``collect_secrets_for`` covers system-level secrets
-(Tailscale, git-credential tokens) the env-block walk doesn't reach.
+``collect_secrets_for(registry, root)`` returns the ``SecretDecl`` Resources
+transitively reachable from ``root`` in the retained dependency graph. Used by
+manager-entry code (``vm create``, ``agent create``, etc.) to build the
+``extra_decls`` list passed to
+``agentworks.secrets.orchestration.resolve_for_command`` for eager-resolve. The
+orchestrator does its own env-block walk via ``SecretTarget``;
+``collect_secrets_for`` covers system-level secrets (Tailscale, git-credential
+tokens) the env-block walk doesn't reach.
 """
 
 from __future__ import annotations
@@ -16,7 +15,6 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from agentworks.resources.reference import ResourceReference
     from agentworks.resources.registry import Registry
     from agentworks.secrets.base import SecretDecl
 
@@ -25,62 +23,37 @@ def collect_secrets_for(
     registry: Registry,
     root: tuple[str, str],
 ) -> list[SecretDecl]:
-    """Walk ``referenced_resources()`` depth-first from ``root``; collect
-    ``SecretDecl`` Resources reachable from the walk.
+    """Collect the ``SecretDecl`` Resources transitively reachable from
+    ``root``, a thin filter over the graph's ``reachable_from`` query (R11: the
+    graph is the single access path; this no longer hand-rolls a DFS over
+    ``dependencies()``).
 
-    Order: first-encounter via DFS, deduplicated by secret name. The
-    root itself isn't included (it's the publisher, not a target);
-    only secrets the root and its transitive references point at are
-    returned.
+    Order: first-encounter, as ``reachable_from`` yields it, deduplicated. The
+    root itself isn't included (it's the publisher, not a target); only secrets
+    the root and its transitive references point at are returned. The
+    ``secret -> secret-backend`` edges the graph now carries do not add secrets
+    (backends are a distinct kind), so the filtered result matches the old
+    walk's secret set.
 
-    The Registry must be finalized (so synthesized auto-declares exist
-    and ``Origin.auto_declared.source`` references are accurate). Calls
-    against a non-finalized Registry are not guaranteed correct; the
-    finalize pass is what walks every Resource's references and
-    auto-declares missing names.
-
-    Raises ``KeyError`` if ``root`` doesn't resolve to a Resource in the
-    Registry; the manager-entry caller is expected to have looked up
-    the resource (``vm.template`` etc.) before calling.
+    The Registry must be finalized (``reachable_from`` reads the retained
+    graph). Raises ``KeyError`` if ``root`` doesn't resolve to a Resource in the
+    Registry; the manager-entry caller is expected to have looked up the
+    resource (``vm.template`` etc.) before calling.
     """
-    seen: set[tuple[str, str]] = set()
+    registry.lookup(*root)  # preserve the "unknown root raises KeyError" contract
     secret_decls: list[SecretDecl] = []
-    stack: list[tuple[str, str]] = [root]
-
-    while stack:
-        node = stack.pop()
-        if node in seen:
+    # ``reachable_from`` excludes the start node, so a secret-typed ``root`` is
+    # not in its own result. The old hand-rolled DFS included such a root; the
+    # divergence is deliberate and unobservable (no caller passes a secret root)
+    # and matches this function's contract that "the root itself isn't included".
+    for kind, name in registry.graph.reachable_from(*root):
+        if kind != "secret":
             continue
-        seen.add(node)
         try:
-            resource = registry.lookup(*node)
+            secret_decls.append(registry.lookup(kind, name))
         except KeyError:
-            # Defensive: the finalize pass should have auto-declared any
-            # missing references the root reaches, so an unreached
-            # (kind, name) here means a typo in producer code; raise so
-            # the caller hears about it. Use the same KeyError shape
-            # registry.lookup raises.
-            if node == root:
-                raise
+            # An edge target left unmaterialized (a not-ready node's gated
+            # secret, R12) appears in the reachable key list but has no row;
+            # skip it, matching the old walk's "skip an unreached target".
             continue
-
-        if node[0] == "secret":
-            secret_decls.append(resource)
-
-        # Walk this resource's references next.
-        for req in _referenced_resources(resource):
-            target = (req.kind, req.name)
-            if target not in seen:
-                stack.append(target)
-
     return secret_decls
-
-
-def _referenced_resources(resource: object) -> list[ResourceReference]:
-    """Mirror of ``Registry._referenced_resources``: duck-type via
-    ``getattr`` so resources without the method return no references.
-    """
-    method = getattr(resource, "referenced_resources", None)
-    if method is None:
-        return []
-    return list(method())

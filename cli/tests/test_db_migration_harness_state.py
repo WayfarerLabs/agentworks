@@ -58,18 +58,12 @@ def _seed_admin_session(path: str) -> None:
     """A VM, workspace, and one admin session, valid under the FKs (the
     migration run's foreign_key_check would flag orphans)."""
     conn = sqlite3.connect(path)
-    conn.execute(
-        "INSERT INTO vms (name, site, hostname, admin_username) "
-        "VALUES ('vm1', 'lima', 'h', 'admin')"
-    )
+    conn.execute("INSERT INTO vms (name, site, hostname, admin_username) VALUES ('vm1', 'lima', 'h', 'admin')")
     conn.execute(
         "INSERT INTO workspaces (name, vm_name, workspace_path, linux_group) "
         "VALUES ('ws1', 'vm1', '/home/me/ws1', 'ws-ws1')"
     )
-    conn.execute(
-        "INSERT INTO sessions (name, workspace_name, template, mode) "
-        "VALUES ('s1', 'ws1', 'default', 'admin')"
-    )
+    conn.execute("INSERT INTO sessions (name, workspace_name, template, mode) VALUES ('s1', 'ws1', 'default', 'admin')")
     conn.commit()
     conn.close()
 
@@ -83,9 +77,7 @@ def test_migration_adds_column_and_backfills_existing_rows(tmp_path: Path) -> No
     # foreign_key_check), so a clean open proves the FKs still hold.
     db = Database(db_path)
     try:
-        info = {
-            row[1]: row for row in db._conn.execute("PRAGMA table_info(sessions)")
-        }
+        info = {row[1]: row for row in db._conn.execute("PRAGMA table_info(sessions)")}
         assert "harness_state" in info
         assert info["harness_state"][3] == 1  # NOT NULL
 
@@ -100,10 +92,7 @@ def test_migration_adds_column_and_backfills_existing_rows(tmp_path: Path) -> No
 def test_harness_state_round_trips_through_insert_get_update(tmp_path: Path) -> None:
     db = Database(tmp_path / "rt.db")
     try:
-        db._conn.execute(
-            "INSERT INTO vms (name, site, hostname, admin_username) "
-            "VALUES ('vm1', 'lima', 'h', 'admin')"
-        )
+        db._conn.execute("INSERT INTO vms (name, site, hostname, admin_username) VALUES ('vm1', 'lima', 'h', 'admin')")
         db._conn.execute(
             "INSERT INTO workspaces (name, vm_name, workspace_path, linux_group) "
             "VALUES ('ws1', 'vm1', '/home/me/ws1', 'ws-ws1')"
@@ -148,10 +137,7 @@ def test_malformed_blob_degrades_to_empty_with_a_warning(
     the row conversion over every session) for all the others."""
     db = Database(tmp_path / "bad.db")
     try:
-        db._conn.execute(
-            "INSERT INTO vms (name, site, hostname, admin_username) "
-            "VALUES ('vm1', 'lima', 'h', 'admin')"
-        )
+        db._conn.execute("INSERT INTO vms (name, site, hostname, admin_username) VALUES ('vm1', 'lima', 'h', 'admin')")
         db._conn.execute(
             "INSERT INTO workspaces (name, vm_name, workspace_path, linux_group) "
             "VALUES ('ws1', 'vm1', '/home/me/ws1', 'ws-ws1')"
@@ -159,17 +145,12 @@ def test_malformed_blob_degrades_to_empty_with_a_warning(
         db.insert_session("good", "ws1", "default", SessionMode.ADMIN)
         db.insert_session("bad", "ws1", "default", SessionMode.ADMIN)
         # Corrupt one row's blob directly, bypassing the JSON writer.
-        db._conn.execute(
-            "UPDATE sessions SET harness_state = ? WHERE name = 'bad'", (raw,)
-        )
+        db._conn.execute("UPDATE sessions SET harness_state = ? WHERE name = 'bad'", (raw,))
         db._conn.commit()
 
         # The single read degrades, not raises, and warns naming the session.
         assert db.get_session("bad").harness_state == {}  # type: ignore[union-attr]
-        assert any(
-            "bad" in msg and detail_fragment in msg
-            for msg in captured_output.warnings
-        )
+        assert any("bad" in msg and detail_fragment in msg for msg in captured_output.warnings)
 
         # And the list read (the real blast radius) survives the bad row.
         listed = {s.name: s for s in db.list_sessions()}

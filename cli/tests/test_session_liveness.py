@@ -109,9 +109,7 @@ def test_batch_builds_compound_command() -> None:
         _session("a1", pid=100, socket_path="/sock", mode="agent", boot_id="b"),
         _session("s1", pid=200, mode="admin"),
     ]
-    target = _FakeTarget(
-        {"has-session": _FakeResult(ok=True, stdout="S:a1:0\nS:s1:0\n")}
-    )
+    target = _FakeTarget({"has-session": _FakeResult(ok=True, stdout="S:a1:0\nS:s1:0\n")})
     batch_check_status(sessions, target=target)
     assert len(target.commands) == 1
     assert "has-session" in target.commands[0]
@@ -133,21 +131,25 @@ def test_agent_ok() -> None:
 def test_agent_stopped_pid_dead() -> None:
     """Agent session: has-session fails, PID dead -> STOPPED."""
     session = _session("s1", pid=42, socket_path="/sock", mode="agent", boot_id=BOOT_CURRENT)
-    target = _FakeTarget({
-        "has-session": _FakeResult(ok=False),
-        "boot_id": _FakeResult(ok=True, stdout=BOOT_CURRENT + "\n"),
-        "test -d /proc/42": _FakeResult(ok=False),
-    })
+    target = _FakeTarget(
+        {
+            "has-session": _FakeResult(ok=False),
+            "boot_id": _FakeResult(ok=True, stdout=BOOT_CURRENT + "\n"),
+            "test -d /proc/42": _FakeResult(ok=False),
+        }
+    )
     assert check_session_status(session, target=target) == SessionStatus.STOPPED
 
 
 def test_agent_stopped_stale_boot() -> None:
     """Agent session: has-session fails, stale boot -> STOPPED (no PID check)."""
     session = _session("s1", pid=42, socket_path="/sock", mode="agent", boot_id=BOOT_STALE)
-    target = _FakeTarget({
-        "has-session": _FakeResult(ok=False),
-        "boot_id": _FakeResult(ok=True, stdout=BOOT_CURRENT + "\n"),
-    })
+    target = _FakeTarget(
+        {
+            "has-session": _FakeResult(ok=False),
+            "boot_id": _FakeResult(ok=True, stdout=BOOT_CURRENT + "\n"),
+        }
+    )
     assert check_session_status(session, target=target) == SessionStatus.STOPPED
     # PID should NOT be checked (stale boot short-circuits)
     assert not any("test -d /proc" in cmd for cmd in target.commands)
@@ -156,11 +158,13 @@ def test_agent_stopped_stale_boot() -> None:
 def test_agent_broken() -> None:
     """Agent session: has-session fails, same boot, PID alive -> BROKEN."""
     session = _session("s1", pid=42, socket_path="/sock", mode="agent", boot_id=BOOT_CURRENT)
-    target = _FakeTarget({
-        "has-session": _FakeResult(ok=False),
-        "boot_id": _FakeResult(ok=True, stdout=BOOT_CURRENT + "\n"),
-        "test -d /proc/42": _FakeResult(ok=True),
-    })
+    target = _FakeTarget(
+        {
+            "has-session": _FakeResult(ok=False),
+            "boot_id": _FakeResult(ok=True, stdout=BOOT_CURRENT + "\n"),
+            "test -d /proc/42": _FakeResult(ok=True),
+        }
+    )
     assert check_session_status(session, target=target) == SessionStatus.BROKEN
 
 
@@ -178,11 +182,13 @@ def test_admin_stopped_dead_pid() -> None:
     sockets, so the status check uses the same path as agent sessions
     (BROKEN applies if the PID is alive on the same boot)."""
     session = _session("s1", pid=42, socket_path="/sock", mode="admin", boot_id=BOOT_CURRENT)
-    target = _FakeTarget({
-        "has-session": _FakeResult(ok=False),
-        "boot_id": _FakeResult(ok=True, stdout=BOOT_CURRENT + "\n"),
-        "test -d /proc/42": _FakeResult(ok=False),
-    })
+    target = _FakeTarget(
+        {
+            "has-session": _FakeResult(ok=False),
+            "boot_id": _FakeResult(ok=True, stdout=BOOT_CURRENT + "\n"),
+            "test -d /proc/42": _FakeResult(ok=False),
+        }
+    )
     assert check_session_status(session, target=target) == SessionStatus.STOPPED
 
 
@@ -193,11 +199,13 @@ def test_admin_broken_after_setenv_pivot() -> None:
     unreachable state didn't exist). With per-session admin sockets the
     same BROKEN semantic that applies to agents now applies to admin."""
     session = _session("s1", pid=42, socket_path="/sock", mode="admin", boot_id=BOOT_CURRENT)
-    target = _FakeTarget({
-        "has-session": _FakeResult(ok=False),
-        "boot_id": _FakeResult(ok=True, stdout=BOOT_CURRENT + "\n"),
-        "test -d /proc/42": _FakeResult(ok=True),
-    })
+    target = _FakeTarget(
+        {
+            "has-session": _FakeResult(ok=False),
+            "boot_id": _FakeResult(ok=True, stdout=BOOT_CURRENT + "\n"),
+            "test -d /proc/42": _FakeResult(ok=True),
+        }
+    )
     assert check_session_status(session, target=target) == SessionStatus.BROKEN
 
 
@@ -323,9 +331,7 @@ def test_batch_status_pid_stopped_not_unknown() -> None:
     # The unknown detection logic should NOT flag stopped1:
     # s.pid == PID_STOPPED -> skip
     unknown = [
-        s for s in sessions
-        if s.pid != PID_STOPPED
-        and (s.pid is None or s.boot_id is None or s.name not in result)
+        s for s in sessions if s.pid != PID_STOPPED and (s.pid is None or s.boot_id is None or s.name not in result)
     ]
     assert unknown == []
 
@@ -336,10 +342,12 @@ def test_batch_status_pid_stopped_not_unknown() -> None:
 def test_agent_unknown_when_boot_id_unreadable() -> None:
     """If boot_id can't be read, return UNKNOWN (don't offer --force on unverified PID)."""
     session = _session("s1", pid=42, socket_path="/sock", mode="agent", boot_id=BOOT_CURRENT)
-    target = _FakeTarget({
-        "has-session": _FakeResult(ok=False),
-        "boot_id": _FakeResult(ok=False, stdout=""),
-    })
+    target = _FakeTarget(
+        {
+            "has-session": _FakeResult(ok=False),
+            "boot_id": _FakeResult(ok=False, stdout=""),
+        }
+    )
     assert check_session_status(session, target=target) == SessionStatus.UNKNOWN
 
 
@@ -352,9 +360,11 @@ def test_batch_empty_boot_id_omits_from_map() -> None:
         _session("a1", pid=100, socket_path="/sock", mode="agent", boot_id=BOOT_CURRENT),
     ]
     # Agent failure with empty boot_id field
-    target = _FakeTarget({
-        "has-session": _FakeResult(ok=True, stdout="S:a1:1::0\n"),
-    })
+    target = _FakeTarget(
+        {
+            "has-session": _FakeResult(ok=True, stdout="S:a1:1::0\n"),
+        }
+    )
     result = batch_check_status(sessions, target=target)
     assert "a1" not in result  # omitted, not misclassified
 

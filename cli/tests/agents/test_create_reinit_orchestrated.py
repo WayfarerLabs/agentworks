@@ -18,11 +18,11 @@ from agentworks.agents import grants as agent_grants
 from agentworks.agents import initializer as agent_initializer
 from agentworks.agents import manager as agent_manager
 from agentworks.capabilities.base import RunContext
-from agentworks.capabilities.vm_platform.proxmox import ProxmoxPlatform
 from agentworks.errors import ExternalError
 from agentworks.output import Role
+from agentworks.plugins.proxmox.platform import ProxmoxPlatform
 from agentworks.vms import manager as vm_manager
-from tests.orchestrated_fixtures import PROXMOX_SECTION, write_operator_config
+from tests.orchestrated_fixtures import PLUGINS_ENABLED, PROXMOX_SECTION, write_operator_config
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -36,6 +36,9 @@ provider = "github"
 
 [agent_templates.default]
 git_credentials = ["gh"]
+
+[agent_templates.other]
+git_credentials = ["gh"]
 """
 
 
@@ -47,7 +50,7 @@ def make_config(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):  # noqa: ANN20
     monkeypatch.setenv("AW_SECRET_GIT_TOKEN_GH", "ghtok")
 
     def _make():  # noqa: ANN202
-        return write_operator_config(tmp_path, PROXMOX_SECTION + AGENT_SECTION)
+        return write_operator_config(tmp_path, PLUGINS_ENABLED + PROXMOX_SECTION + AGENT_SECTION)
 
     return _make
 
@@ -63,9 +66,7 @@ def mutation(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
         captured["agent_name"] = kwargs["agent_name"]
 
     monkeypatch.setattr(agent_initializer, "create_agent_on_vm", _fake_mutation)
-    monkeypatch.setattr(
-        "agentworks.ssh_config.sync_ssh_config", lambda *a, **k: None
-    )
+    monkeypatch.setattr("agentworks.ssh_config.sync_ssh_config", lambda *a, **k: None)
     return captured
 
 
@@ -87,20 +88,14 @@ def _stop_the_vm(monkeypatch: pytest.MonkeyPatch, events: list[str]) -> None:
         "status",
         lambda self, row, ctx: events.append("status") or _VMStatus.STOPPED,
     )
-    monkeypatch.setattr(
-        ProxmoxPlatform, "start", lambda self, row, ctx: events.append("start")
-    )
-    monkeypatch.setattr(
-        vm_manager, "_ensure_tailscale", lambda *a, **k: events.append("tailscale")
-    )
+    monkeypatch.setattr(ProxmoxPlatform, "start", lambda self, row, ctx: events.append("start"))
+    monkeypatch.setattr(vm_manager, "_ensure_tailscale", lambda *a, **k: events.append("tailscale"))
 
 
 # -- the derived graph --------------------------------------------------------
 
 
-def test_create_graph_derives_from_template_and_row(
-    db: Database, make_config, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_create_graph_derives_from_template_and_row(db: Database, make_config, monkeypatch: pytest.MonkeyPatch) -> None:
     """The pending agent's graph: its edges are the resolved template
     (whose declared credentials become git-credential nodes) and the
     VM's row (whose site field is the vm-site edge); the union is the
@@ -121,9 +116,7 @@ def test_create_graph_derives_from_template_and_row(
 
     vm_node = live_vm_node(db, config, registry, vm)
     tmpl_node = agent_template_node(registry, resolve_template(registry, None))
-    pending = pending_agent_node(
-        db, config, "dev", tmpl_node, vm_node
-    )
+    pending = pending_agent_node(db, config, "dev", tmpl_node, vm_node)
     nodes = walk(pending)
 
     assert [n.key for n in nodes] == [
@@ -159,9 +152,7 @@ def test_reinit_graph_derives_from_row_and_stored_template(
 
     vm_node = live_vm_node(db, config, registry, vm)
     agent_node = live_agent_node(row, vm_node)
-    tmpl_node = agent_template_node(
-        registry, resolve_template(registry, row.template)
-    )
+    tmpl_node = agent_template_node(registry, resolve_template(registry, row.template))
     nodes = walk(agent_node, tmpl_node)
 
     assert [n.key for n in nodes] == [
@@ -291,9 +282,7 @@ def test_create_mutation_failure_cleans_up_and_leaves_no_row(
     config = make_config()
     _seed_vm(db)
     _reachable(monkeypatch, True)
-    monkeypatch.setattr(
-        "agentworks.ssh_config.sync_ssh_config", lambda *a, **k: None
-    )
+    monkeypatch.setattr("agentworks.ssh_config.sync_ssh_config", lambda *a, **k: None)
 
     def _boom(*a: Any, **k: Any) -> None:
         raise RuntimeError("ssh exploded")
@@ -333,6 +322,167 @@ def test_reinit_mutation_failure_wraps_and_keeps_the_agent(
         agent_manager.reinit_agent(db, config, name="dev")
 
     assert db.get_agent("dev") is not None  # re-runnable, as before
+
+
+# -- --update-template re-points before reinit --------------------------------
+
+
+def test_reinit_update_template_repoints_and_resolves_the_new_template(
+    db: Database,
+    make_config,  # noqa: ANN001
+    monkeypatch: pytest.MonkeyPatch,
+    captured_output,  # noqa: ANN001
+) -> None:
+    """``agent reinit --update-template other`` persists the new stored
+    template and reinit resolves + sets up against it (not the old one)."""
+    config = make_config()
+    _seed_vm(db)
+    db.insert_agent("dev", "box", "agt-dev", template="default")
+    _reachable(monkeypatch, True)
+
+    captured: dict[str, Any] = {}
+
+    def _capture(vm: Any, config_: Any, registry: Any, agent_tmpl: Any, linux_user: str, **kwargs: Any) -> None:
+        captured["template"] = agent_tmpl.name
+
+    monkeypatch.setattr(agent_initializer, "create_agent_on_vm", _capture)
+    monkeypatch.setattr("agentworks.ssh_config.sync_ssh_config", lambda *a, **k: None)
+
+    agent_manager.reinit_agent(db, config, name="dev", update_template="other")
+
+    assert captured["template"] == "other"  # setup ran against the NEW template
+    row = db.get_agent("dev")
+    assert row is not None and row.template == "other"  # persisted
+
+
+def test_reinit_unknown_update_template_raises_and_keeps_the_row(
+    db: Database,
+    make_config,  # noqa: ANN001
+    resolve_counter: list[list[str]],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An undeclared ``--update-template`` name fails pre-boundary with a
+    typed NotFoundError; nothing is persisted, nothing resolves, and the
+    stored template is left as it was (validate BEFORE any side effect)."""
+    from agentworks.errors import NotFoundError
+
+    config = make_config()
+    _seed_vm(db)
+    db.insert_agent("dev", "box", "agt-dev", template="default")
+
+    def _boom(*a: Any, **k: Any) -> None:
+        raise AssertionError("setup must not run for an invalid template name")
+
+    monkeypatch.setattr(agent_initializer, "create_agent_on_vm", _boom)
+
+    with pytest.raises(NotFoundError, match="Unknown agent template"):
+        agent_manager.reinit_agent(db, config, name="dev", update_template="ghost")
+
+    assert resolve_counter == []  # refused before any secret resolve
+    row = db.get_agent("dev")
+    assert row is not None and row.template == "default"  # unchanged
+
+
+def test_reinit_update_template_persists_before_convergence_so_a_mid_failure_keeps_the_new_binding(
+    db: Database,
+    make_config,  # noqa: ANN001
+    monkeypatch: pytest.MonkeyPatch,
+    captured_output,  # noqa: ANN001
+) -> None:
+    """The re-point is persisted BEFORE the on-VM convergence, so a setup
+    failure mid-reinit leaves the agent bound to the NEW template (the op
+    is non-atomic and re-runnable): the wrapped ExternalError propagates,
+    but the row already points at 'other', so a plain `agent reinit` (no
+    flag) re-converges toward it."""
+    config = make_config()
+    _seed_vm(db)
+    db.insert_agent("dev", "box", "agt-dev", template="default")
+    _reachable(monkeypatch, True)
+
+    def _boom(*a: Any, **k: Any) -> None:
+        raise RuntimeError("ssh exploded")
+
+    monkeypatch.setattr(agent_initializer, "create_agent_on_vm", _boom)
+    monkeypatch.setattr("agentworks.ssh_config.sync_ssh_config", lambda *a, **k: None)
+
+    with pytest.raises(ExternalError, match="reinitializing agent: ssh exploded"):
+        agent_manager.reinit_agent(db, config, name="dev", update_template="other")
+
+    row = db.get_agent("dev")
+    assert row is not None and row.template == "other"  # persisted before the failed convergence
+
+
+# -- Phase 7: the recipe use-gate fires on a live build -----------------------
+#
+# End-to-end proof (real config + real build_registry) that
+# ``ensure_recipe_enabled`` actually refuses on a live registry with the right
+# kind-string, before any DB / VM / mutation work. The fixture plugin ships a
+# disabled agent-template (referencing a disabled user-install-command) via a
+# bundled manifest; it is NOT in ``[plugins] system``, so its rows are
+# present-but-disabled.
+
+_DECLARABLE_ANCHOR = "tests.plugins._manifest_declarable_fixture"
+
+
+def _install_disabled_fixture(monkeypatch: pytest.MonkeyPatch) -> None:
+    from agentworks.plugins import SYSTEM_PLUGINS, Plugin
+
+    plugin = Plugin(name="decl-plugin", description="a manifest-parity fixture", manifests=_DECLARABLE_ANCHOR)
+    # Merge alongside the real shipped plugins (proxmox, which the shared config
+    # enables and this suite's VM runs on, plus claude / onepassword) rather than
+    # replacing them: replacing would drop proxmox's row and fail the enabled-name
+    # check. decl-plugin ships present-but-disabled (not in [plugins] system), so
+    # its bundled recipe refuses with the enable hint.
+    monkeypatch.setattr("agentworks.plugins.SYSTEM_PLUGINS", {**SYSTEM_PLUGINS, plugin.name: plugin})
+
+
+def test_create_agent_on_disabled_plugin_recipe_refuses_before_any_work(
+    db: Database,
+    make_config,  # noqa: ANN001
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agentworks.errors import StateError
+
+    config = make_config()
+    _seed_vm(db)
+    _install_disabled_fixture(monkeypatch)
+
+    def _boom(*a: Any, **k: Any) -> None:
+        raise AssertionError("the mutation must not run for a disabled-recipe template")
+
+    monkeypatch.setattr(agent_initializer, "create_agent_on_vm", _boom)
+
+    with pytest.raises(StateError, match="enable plugin `decl-plugin`"):
+        agent_manager.create_agent(db, config, name="dev", vm_name="box", template="fixture-agent-tmpl")
+
+    assert db.get_agent("dev") is None  # refused before any DB write
+
+
+def test_reinit_update_template_to_disabled_recipe_refuses_before_persist(
+    db: Database,
+    make_config,  # noqa: ANN001
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Fix 1: a repoint to a real-but-disabled-recipe template is refused BEFORE
+    ``db.update_agent_template`` persists it, so the stored template is
+    unchanged (mirrors ``test_reinit_unknown_update_template_raises_and_keeps_the_row``)."""
+    from agentworks.errors import StateError
+
+    config = make_config()
+    _seed_vm(db)
+    db.insert_agent("dev", "box", "agt-dev", template="default")
+    _install_disabled_fixture(monkeypatch)
+
+    def _boom(*a: Any, **k: Any) -> None:
+        raise AssertionError("setup must not run for a refused repoint")
+
+    monkeypatch.setattr(agent_initializer, "create_agent_on_vm", _boom)
+
+    with pytest.raises(StateError, match="enable plugin `decl-plugin`"):
+        agent_manager.reinit_agent(db, config, name="dev", update_template="fixture-agent-tmpl")
+
+    row = db.get_agent("dev")
+    assert row is not None and row.template == "default"  # the refused repoint was NOT persisted
 
 
 # -- the operation scope reaches readiness ------------------------------------
@@ -396,14 +546,10 @@ def test_create_grant_all_reconciles_between_insert_and_sync(
     monkeypatch.setattr(
         agent_grants,
         "add_to_workspace_group",
-        lambda vm, config_, db_, linux_user, ws, **k: group_adds.append(
-            (linux_user, ws)
-        ),
+        lambda vm, config_, db_, linux_user, ws, **k: group_adds.append((linux_user, ws)),
     )
 
-    agent_manager.create_agent(
-        db, config, name="dev", vm_name="box", grant_all_workspaces=True
-    )
+    agent_manager.create_agent(db, config, name="dev", vm_name="box", grant_all_workspaces=True)
 
     row = db.get_agent("dev")
     assert row is not None and row.grant_all

@@ -78,9 +78,7 @@ def _resolve(
     """
     if name in _visiting:
         path = " -> ".join((*_visiting, name))
-        raise ConfigError(
-            f"workspace_templates inheritance cycle detected: {path}"
-        )
+        raise ConfigError(f"workspace_templates inheritance cycle detected: {path}")
 
     if name not in templates:
         return ResolvedTemplate(name=name)

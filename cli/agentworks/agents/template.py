@@ -5,8 +5,8 @@ declared-resource type next to the resolver
 (``agentworks.agents.templates``) and the kinds
 (``agentworks.agents.kinds``). The agent-shaped ``AdminConfig`` is homed
 in ``agentworks.vms.admin`` instead (by lifecycle: the admin user is a
-per-VM concept). ``config.py`` keeps only the legacy TOML loader that
-constructs this.
+per-VM concept). The ``agentworks.config`` package keeps only the legacy
+TOML loader that constructs this.
 """
 
 from __future__ import annotations
@@ -20,6 +20,7 @@ from agentworks.git_credentials.credential import credential_references
 
 if TYPE_CHECKING:
     from agentworks.env import EnvEntry
+    from agentworks.resources.graph import BuildContext
     from agentworks.resources.reference import ResourceReference
 
 
@@ -44,7 +45,7 @@ class AgentTemplate(DeclaredResource):
     claude_plugins: list[str] | None = None
     env: dict[str, EnvEntry] = field(default_factory=dict)
 
-    def referenced_resources(self) -> list[ResourceReference]:
+    def dependencies(self, context: BuildContext) -> list[ResourceReference]:
         from agentworks.resources.reference import (
             ResourceReference as _ResourceReq,
         )
@@ -53,9 +54,7 @@ class AgentTemplate(DeclaredResource):
         )
 
         source = ("agent-template", self.name)
-        refs: list[ResourceReference] = list(
-            env_references(self.env, source)
-        )
+        refs: list[ResourceReference] = list(env_references(self.env, source))
         refs.extend(credential_references(self.git_credentials, source))
         for parent in self.inherits:
             refs.append(

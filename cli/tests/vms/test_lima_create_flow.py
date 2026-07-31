@@ -50,9 +50,7 @@ def _wire(
     monkeypatch.setattr(LimaPlatform, "_ensure_limactl", lambda self: None)
     monkeypatch.setattr(LimaPlatform, "_instance_exists", lambda self, name: False)
     monkeypatch.setattr(LimaPlatform, "_create_local", lambda self, name, yaml: None)
-    monkeypatch.setattr(
-        LimaPlatform, "_transport_for", lambda self, name: SimpleNamespace()
-    )
+    monkeypatch.setattr(LimaPlatform, "_transport_for", lambda self, name: SimpleNamespace())
 
     def _fake_run(self: LimaPlatform, cmd: str, **_kw: object) -> str:
         ran.append(cmd)
@@ -68,9 +66,7 @@ def _wire(
     return ran
 
 
-def test_sve_sentinel_triggers_one_host_restart(
-    monkeypatch: pytest.MonkeyPatch, captured_output: object
-) -> None:
+def test_sve_sentinel_triggers_one_host_restart(monkeypatch: pytest.MonkeyPatch, captured_output: object) -> None:
     platform = LimaPlatform("lima", {})
     ran = _wire(monkeypatch, platform, sentinel_present=True)
     platform.create(_request(), RunContext())
@@ -80,18 +76,14 @@ def test_sve_sentinel_triggers_one_host_restart(
     assert len(restarts) == 1, restarts
 
 
-def test_no_restart_when_sentinel_absent(
-    monkeypatch: pytest.MonkeyPatch, captured_output: object
-) -> None:
+def test_no_restart_when_sentinel_absent(monkeypatch: pytest.MonkeyPatch, captured_output: object) -> None:
     platform = LimaPlatform("lima", {})
     ran = _wire(monkeypatch, platform, sentinel_present=False)
     platform.create(_request(), RunContext())
     assert not any("limactl restart" in cmd for cmd in ran)
 
 
-def test_probe_failure_warns_and_does_not_restart(
-    monkeypatch: pytest.MonkeyPatch, warnings: list[str]
-) -> None:
+def test_probe_failure_warns_and_does_not_restart(monkeypatch: pytest.MonkeyPatch, warnings: list[str]) -> None:
     """A genuine probe failure is reported, not read as an absent sentinel.
 
     The probe exits 0 whether or not the sentinel is there, so an SSHError
@@ -104,9 +96,7 @@ def test_probe_failure_warns_and_does_not_restart(
     monkeypatch.setattr(LimaPlatform, "_ensure_limactl", lambda self: None)
     monkeypatch.setattr(LimaPlatform, "_instance_exists", lambda self, name: False)
     monkeypatch.setattr(LimaPlatform, "_create_local", lambda self, name, yaml: None)
-    monkeypatch.setattr(
-        LimaPlatform, "_transport_for", lambda self, name: SimpleNamespace()
-    )
+    monkeypatch.setattr(LimaPlatform, "_transport_for", lambda self, name: SimpleNamespace())
 
     def _fake_run(self: LimaPlatform, cmd: str, **_kw: object) -> str:
         ran.append(cmd)

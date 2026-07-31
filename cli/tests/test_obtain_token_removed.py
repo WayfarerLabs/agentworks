@@ -38,12 +38,11 @@ def test_obtain_token_method_gone_from_base() -> None:
 def test_obtain_token_method_gone_from_concrete_providers() -> None:
     for module_name in (
         "agentworks.capabilities.git_credential.github",
-        "agentworks.capabilities.git_credential.azdo",
+        "agentworks.plugins.azure.azdo",
     ):
         src = _read_module_source(module_name)
         assert "obtain_token" not in src, (
-            f"Phase 1d removed obtain_token; {module_name} should only "
-            f"format credential_lines + pre-flight auth"
+            f"Phase 1d removed obtain_token; {module_name} should only format credential_lines + pre-flight auth"
         )
         assert "_prompt_token" not in src, (
             f"Phase 1d removed _prompt_token from {module_name}; tokens "
@@ -77,7 +76,7 @@ def test_legacy_env_var_names_gone_from_git_credentials_module() -> None:
     for module_name in (
         "agentworks.capabilities.git_credential.base",
         "agentworks.capabilities.git_credential.github",
-        "agentworks.capabilities.git_credential.azdo",
+        "agentworks.plugins.azure.azdo",
     ):
         src = _read_module_source(module_name)
         assert "AW_GIT_CREDENTIALS_" not in src

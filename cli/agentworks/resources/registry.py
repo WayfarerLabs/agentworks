@@ -7,10 +7,10 @@ push composed Resources in via ``Registry.add(kind, name, resource,
 origin)``. After all publishers have contributed, ``Registry.finalize()``
 runs the framework pass: walks the reference graph, dispatches per-kind
 miss policies (auto-declare may
-synthesize new Resources; error raises ``ConfigError``), attaches
-``usage`` lists, detects cycles, and freezes the Registry. After
-``finalize`` returns, the Registry is read-only and queryable via
-``lookup`` / ``iter_kind``.
+synthesize new Resources; error raises ``ConfigError``), builds the
+retained ``DependencyGraph``, detects cycles, and freezes the Registry.
+After ``finalize`` returns, the Registry is read-only and queryable via
+``lookup`` / ``iter_kind`` / ``graph``.
 
 The convenience that orchestrates the standard set of publishers lives in
 ``agentworks.bootstrap.build_registry``. The Registry itself doesn't know
@@ -20,16 +20,44 @@ which publishers exist; that's application-level knowledge.
 from __future__ import annotations
 
 import dataclasses
+from enum import Enum
 from typing import TYPE_CHECKING, Any
 
-from agentworks.errors import ConfigError
+from agentworks.errors import ConfigError, StateError
 from agentworks.resources.kind import KIND_REGISTRY
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator, Sequence
+    from collections.abc import Iterator, Mapping, Sequence
 
+    from agentworks.resources.graph import (
+        BuildContext,
+        DependencyGraph,
+        DisabledMark,
+        Enablement,
+        EnablementSource,
+        Readiness,
+    )
     from agentworks.resources.origin import Origin
-    from agentworks.resources.reference import ResourceReference
+    from agentworks.resources.reference import ReferenceEntry, ResourceReference
+
+
+class _CollisionDecision(Enum):
+    """What ``_check_collision`` tells ``add`` to do when a strong incoming
+    row lands on an occupied slot (Phase 7, LLD c 3b.3).
+
+    The binary ``return``/``raise`` contract the pre-Phase-7 collision check
+    used could express only "incoming replaces existing" (return) or "error"
+    (raise). Two enablement-aware cases need a third outcome, "keep the
+    existing row, drop the incoming one, no error": a weak (disabled-plugin)
+    incoming row yielding to any occupant, and an enabled plugin row yielding
+    to an operator's own declaration on an ``allow`` kind (BLOCKING 1). The
+    weak case is handled by a short-circuit in ``add`` ahead of the check; the
+    enabled-plugin-over-operator case is the one ``KEEP_EXISTING`` producer
+    inside ``_check_system_plugin_collision``.
+    """
+
+    OVERWRITE = "overwrite"  # store incoming, replacing existing (the old "return")
+    KEEP_EXISTING = "keep-existing"  # drop incoming, existing stands, no error (new)
 
 
 class Registry:
@@ -51,6 +79,14 @@ class Registry:
         # is fine for tests / framework code that wants a stub.
         self._resources: dict[str, dict[str, Any]] = {}
         self._frozen: bool = False
+        # The retained dependency graph, built at the end of ``finalize``.
+        # ``None`` until then; the ``graph`` property enforces the ordering.
+        self._graph: DependencyGraph | None = None
+        # The ``(kind, name)`` keys currently occupied by a WEAK row (a
+        # not-enabled plugin's manifest row, published add-if-absent). Consulted
+        # only during ``add`` (the weak short-circuit) and once at ``finalize``
+        # (the weak-implies-disabled guard); meaningless after finalize.
+        self._weak: set[tuple[str, str]] = set()
 
     # -- Construction --------------------------------------------------
 
@@ -70,6 +106,8 @@ class Registry:
         name: str,
         resource: Any,
         origin: Origin,
+        *,
+        weak: bool = False,
     ) -> None:
         """Add a Resource from any publisher. The publisher constructs
         the appropriate ``Origin`` variant (``operator_declared`` /
@@ -96,6 +134,21 @@ class Registry:
         - anything else (built-in over operator) is a publisher
           ordering conflict and raises ``ConfigError`` (operator data
           can reach it, so it must not be an assert).
+
+        ``weak`` (Phase 7, LLD c 3b.3) marks a not-enabled plugin's manifest
+        row as add-if-absent: a disabled plugin's declarable row must never
+        block a stronger row, in any publish order. Weakness is a
+        publisher-declared property of the add (like ``origin``), so the
+        Registry honors it without knowing why a row is weak. The
+        order-symmetric semantics, applied ahead of ``_check_collision``:
+
+        - weak incoming, slot occupied (by anything): no-op (the existing row
+          stands, no collision check runs, nothing errors).
+        - weak incoming, slot free: the row lands and the key is recorded weak.
+        - strong incoming, existing weak: the incoming row replaces silently
+          (no collision check), the key leaves the weak set.
+        - strong incoming, existing strong: ``_check_collision`` decides
+          (``OVERWRITE`` stores, ``KEEP_EXISTING`` is a no-op, ``raise`` errors).
         """
         if self._frozen:
             raise RuntimeError("registry is frozen; add must precede finalize")
@@ -113,21 +166,34 @@ class Registry:
                 f"{kind} name {name!r} contains '/', which is not allowed "
                 f"in resource names ({format_origin_line(origin)})",
                 hint=(
-                    "Rename the resource: '/' is reserved for kind/name "
-                    "selectors and per-resource manifest filenames."
+                    "Rename the resource: '/' is reserved for kind/name selectors and per-resource manifest filenames."
                 ),
             )
+        key = (kind, name)
         existing = self._resources.get(kind, {}).get(name)
         if existing is not None:
-            self._check_collision(kind, name, existing, origin)
+            if weak:
+                # Weak incoming never displaces an occupant; existing stands.
+                return
+            if key in self._weak:
+                # Strong incoming over an existing weak row: replace silently,
+                # the key is no longer weak-held.
+                self._weak.discard(key)
+            else:
+                decision = self._check_collision(kind, name, existing, origin)
+                if decision is _CollisionDecision.KEEP_EXISTING:
+                    return
+        elif weak:
+            # Weak row landing in a free slot: record the key as weak-held.
+            self._weak.add(key)
         stamped = dataclasses.replace(resource, origin=origin)
         self._resources.setdefault(kind, {})[name] = stamped
 
     @staticmethod
-    def _check_collision(
-        kind: str, name: str, existing: Any, incoming: Origin
-    ) -> None:
-        """Raise unless the incoming publish may replace ``existing``.
+    def _check_collision(kind: str, name: str, existing: Any, incoming: Origin) -> _CollisionDecision:
+        """Decide a strong-over-strong collision: ``OVERWRITE`` (the incoming
+        row replaces ``existing``), ``KEEP_EXISTING`` (the existing row stands,
+        the incoming one is dropped, no error), or ``raise`` (``ConfigError``).
 
         Built-in over built-in replaces unconditionally: republish is
         idempotent, and a future app publisher shadowing another's row
@@ -137,20 +203,24 @@ class Registry:
 
         existing_origin: Origin | None = getattr(existing, "origin", None)
         existing_variant = getattr(existing_origin, "variant", None)
+        # A pair involving ``system-plugin`` is decided FIRST, on the
+        # UNORDERED ``{existing, incoming}`` variant set, so the two
+        # directions of each system-plugin pairing share one message (R7).
+        # The pre-existing non-system-plugin branches below keep their
+        # directional asymmetry verbatim.
+        if "system-plugin" in {existing_variant, incoming.variant}:
+            return Registry._check_system_plugin_collision(kind, name, existing_variant, incoming.variant)
         if existing_variant == "built-in" and incoming.variant == "built-in":
-            return
+            return _CollisionDecision.OVERWRITE
         if existing_variant == "built-in" and incoming.variant == "operator-declared":
             handler = KIND_REGISTRY.get(kind)
             if handler is not None and handler.builtin_override == "allow":
-                return
+                return _CollisionDecision.OVERWRITE
             raise ConfigError(
                 f'{kind} "{name}" is a built-in resource with a reserved '
                 f"name; declare a differently-named {kind} instead",
             )
-        if (
-            existing_variant == "operator-declared"
-            and incoming.variant == "operator-declared"
-        ):
+        if existing_variant == "operator-declared" and incoming.variant == "operator-declared":
             raise ConfigError(
                 f'duplicate {kind} "{name}": declared at '
                 f"{format_origin_line(existing_origin)} and "
@@ -166,46 +236,125 @@ class Registry:
             f"over {existing_variant} row for {kind}/{name}"
         )
 
+    @staticmethod
+    def _check_system_plugin_collision(
+        kind: str,
+        name: str,
+        existing_variant: str | None,
+        incoming_variant: str,
+    ) -> _CollisionDecision:
+        """Decide a collision where at least one side is ``system-plugin``,
+        on the UNORDERED variant pair (R7).
+
+        Capability clashes never reach here (they are caught at seating, in
+        ``register_plugin``): what reaches this for a system-plugin pair is
+        a declarable (manifest) row or the operator-override case. The two
+        operator-vs-plugin directions consult ``builtin_override`` SYMMETRICALLY
+        (LLD c 3b.3, BLOCKING 1): on an ``allow`` kind the operator's own
+        declaration wins in either encounter order (``OVERWRITE`` when the
+        operator row is incoming, ``KEEP_EXISTING`` when the plugin row is
+        incoming), so an operator's legacy TOML install-command / apt entry is
+        not broken when the plugin shipping that name is enabled; on a
+        ``reserved`` kind the clash is a reserved-name error in either order.
+        Every other pairing raises its own ``ConfigError`` (never the generic
+        "publisher ordering conflict"). It stays a ``ConfigError`` even for the
+        two-plugins curation bug: the rendering is the right operator surface if
+        it ever escapes, and CI's fixture/collision tests catch the curation bug.
+
+        The disabled-plugin case never reaches here: a weak (disabled-plugin)
+        row is short-circuited in ``add`` before the collision check, so this
+        method decides only STRONG (enabled-plugin or operator/built-in) pairs.
+        """
+        variants = {existing_variant, incoming_variant}
+        if variants == {"system-plugin"}:
+            raise ConfigError(f'{kind} "{name}" is published by two system plugins')
+        if "built-in" in variants:
+            raise ConfigError(f'system-plugin {kind} "{name}" collides with a built-in of the same name')
+        if "operator-declared" in variants:
+            handler = KIND_REGISTRY.get(kind)
+            allow = handler is not None and handler.builtin_override == "allow"
+            if existing_variant == "system-plugin" and incoming_variant == "operator-declared":
+                # Operator publishing OVER a plugin's declarable row (the
+                # plugin-first order: operator YAML ManifestSet after
+                # publish_plugins). Allow-kind lets the incoming operator row
+                # replace the plugin row; reserved errors.
+                if allow:
+                    return _CollisionDecision.OVERWRITE  # operator override permitted; operator wins
+                raise ConfigError(
+                    f'{kind} "{name}" is a system-plugin resource with a reserved '
+                    f"name; declare a differently-named {kind} instead",
+                )
+            # Reverse direction (existing operator, incoming enabled system-plugin:
+            # the operator-first order, deprecated TOML install-command / apt
+            # publisher runs before publish_plugins). SYMMETRIC with the forward
+            # branch: on an allow-kind the operator's own row wins and the plugin
+            # row is dropped (KEEP_EXISTING), no error; on a reserved-kind a
+            # plugin cannot shadow an operator's reserved declarable, so it errors.
+            if allow:
+                return _CollisionDecision.KEEP_EXISTING  # operator's declaration wins; plugin row dropped
+            raise ConfigError(
+                f'system-plugin {kind} "{name}" collides with an operator-declared resource of the same name'
+            )
+        # Unreachable at publish time: auto-declared rows are synthesized at
+        # finalize, after every ``add`` call, so a system-plugin pair with an
+        # auto-declared side cannot arise here.
+        raise ConfigError(
+            f'unexpected system-plugin collision for {kind} "{name}" '
+            f"(incoming {incoming_variant}, existing {existing_variant})"
+        )
+
     # -- Finalize phase ------------------------------------------------
 
-    def finalize(self) -> None:
+    def finalize(self, enablement_sources: Sequence[EnablementSource] = ()) -> None:
         """Run the framework pass over published Resources, then freeze.
 
-        Steps:
+        ``enablement_sources`` is the injected list of enablement sources
+        (LLD b): each is an opaque ``(rows) -> {(kind, name): DisabledMark}``
+        callable, composed (first-source-wins the reason) into the disabled-node
+        mark map, of which the binary per-node ``enablement`` map is a pure
+        projection (disabled iff a mark exists). Defaulted to empty, so every
+        existing ``finalize()`` call yields all-enabled, exactly as the landed
+        refactor did. The ``Registry`` stays config-agnostic: a config-bound
+        source (the plugin opt-in source) is constructed by ``build_registry``
+        and passed in, never imported here.
 
-        0. **Always-materialize reserved-default names**:
-           Kinds whose ``auto_declare_names`` is a non-None set guarantee
-           those names exist in the registry after finalize, regardless
-           of whether anything referenced them. Seeded before the
-           worklist loop so the first pass walks these Resources
-           alongside operator-published ones. Kinds with
-           ``auto_declare_names = None`` (secrets) are unaffected --
-           they stay reference-driven.
-        1. **Worklist loop**: walk ``referenced_resources()`` on every
-           Resource not yet visited, accumulating references by
-           ``(kind, name)`` target. For any target that resolves to no
-           Resource currently in the Registry, dispatch the kind's miss
-           policy: ``"auto-declare"`` (subject to ``auto_declare_names``)
-           calls ``synthesize`` and inserts the result; ``"error"`` raises
-           ``ConfigError``. Loop until a pass adds no new Resources --
-           synthesized Resources may themselves produce references, so
-           a single pass would silently drop their unresolved edges. The
-           accumulated reference map is preserved across iterations so
-           the post-loop usage-attachment pass sees the complete graph.
-        2. **Usage attachment + description polish**: every Resource
-           (operator-declared, built-in, auto-declared) gets a
-           ``usage`` tuple attached via ``dataclasses.replace`` -- empty
-           if nothing referenced it. The kind-agnostic
-           description-polish runs in the same pass: for any Resource
-           with a ``description`` field that's empty and an
-           auto-declared origin, the framework synthesizes a
-           description from the reference graph (or, when ``usage``
-           is empty, falls back to ``"(auto) auto-declared default
-           <kind>"``).
-        3. **Cycle detection** in the now-complete reference graph via
-           iterative DFS three-coloring; raises ``ConfigError`` on the
-           first cycle with the offending path.
-        4. **Freeze**.
+        The passes over the single retained graph (LLD b), in order:
+
+        0. **reserved-defaults**: always-materialize reserved-default
+           names (kinds whose ``auto_declare_names`` is a non-None set)
+           so they are present before the walk. Kinds with
+           ``auto_declare_names = None`` (secrets) stay reference-driven.
+        1. **build**: walk every present Resource's
+           ``dependencies(context)`` (total, non-throwing) into the
+           outbound edge map. No validation, no throwing on a bad block.
+        2. **resolve**: for each edge whose target has no node, dispatch
+           the miss policy: ``"error"`` and a disallowed-name
+           ``"auto-declare"`` hard-error NOW (ungated); an allowed-name
+           ``"auto-declare"`` DEFERS to materialize (pass 5), so a
+           not-ready node cannot force it (R12).
+        3. **cycle-detect**: three-coloring over the BUILT edge map (no
+           re-derivation); raises on the first cycle.
+        4. **fold**: reverse-topological readiness (LLD c); each node is
+           handed its dependencies' ``DependencyState`` and stores its own
+           verdict. Imposes no propagation rule (R4).
+        5. **materialize**: synthesize each deferred auto-declare target
+           the reference set requires, but ONLY when a READY, ENABLED node
+           references it (R12); then walk / resolve / fold the new node,
+           looping to a fixpoint (a materialized node's out-edges point
+           only back into the settled set; LLD b subtlety 3). Dormant for
+           secrets this effort (they emit no ``secret -> secret-backend``
+           edges until phase 4), so a materialized secret has no out-edges
+           to walk yet.
+        6. **attach**: build the retained frozen ``DependencyGraph``
+           (inbound references + fold verdicts on the node), then synthesize
+           descriptions for auto-declared rows from the graph's inbound refs.
+        7. **validate**: run each READY + ENABLED Resource's ``validate()``
+           (throwing, ``file:line``-framed). A not-ready or disabled row's
+           block is deferred, not validated (R9.4). Distinct from graph
+           construction (R3): the build passes never throw on a malformed
+           block, so a config with both a malformed block and a cycle
+           reports the cycle first (R9.3).
+        8. **freeze**.
 
         Semantic checks that need CONFIG alongside the finalized graph
         (e.g. the secret chain's names and reachability) are not the
@@ -216,61 +365,164 @@ class Registry:
 
         First-encountered reference order (for the
         ``Origin.auto_declared(source=...)`` rule) is preserved by
-        ``dict``'s guaranteed insertion order in CPython 3.7+. The
-        worklist loop appends to the accumulated reference map; the
-        order in which references first appear is the order the
-        framework records.
+        ``dict``'s guaranteed insertion order: each Resource's edges are
+        appended contiguously during its own walk.
 
         Raises ``RuntimeError`` if already finalized. Raises
         ``ConfigError`` for unresolved references under an error policy,
-        reserved-name violations, and cycles.
+        disallowed auto-declare names, reserved-name violations, and cycles.
         """
         if self._frozen:
             raise RuntimeError("registry has already been finalized")
+        from agentworks.resources.graph import (
+            Enablement,
+            build_context,
+            build_graph,
+            compose_enablement,
+            fold_readiness,
+        )
 
-        # 0: always-materialize reserved-default names. Seeds the worklist
-        # so unreferenced defaults still land in the registry.
+        # 0: reserved-defaults. Seed always-materialize rows so the build
+        # walk sees them alongside operator-published ones.
         self._materialize_reserved_defaults()
 
-        # 1: worklist loop. ``walked`` tracks which Resources have had
-        # their referenced_resources() walked so we don't double-count.
+        # The build context the walk threads to every resource's
+        # ``dependencies``: today the available-backend list a ``secret`` reads
+        # to emit its ``secret -> secret-backend`` edges. Assembled once (the
+        # ``secret-backend`` rows are published before finalize and never
+        # materialize later).
+        context = build_context(self._resources)
+
+        # ``all_refs`` accumulates edges keyed by target (for inbound and
+        # miss dispatch); ``all_outbound`` keyed by source, each source's
+        # edges contiguous, so the graph's outbound preserves
+        # first-encountered order (LLD a). Both are filled in one walk.
         all_refs: dict[tuple[str, str], list[ResourceReference]] = {}
-        walked: set[tuple[str, str]] = set()
+        all_outbound: dict[tuple[str, str], list[ResourceReference]] = {}
 
-        while True:
-            new_walks = self._collect_new_references(all_refs, walked)
-            if not new_walks:
-                # No new Resources to walk. We're stable.
-                break
-            # Dispatch miss policies for any targets not yet in the
-            # Registry. A miss-handler may add a Resource whose own
-            # referenced_resources() the next iteration will walk.
-            for target, refs in list(all_refs.items()):
-                target_kind, target_name = target
-                if target_name in self._resources.get(target_kind, {}):
-                    continue
-                kind_handler = _lookup_kind(target_kind, refs[0])
-                self._handle_miss(target_kind, target_name, kind_handler, refs)
+        # 1: build. Walk every currently-present Resource once (secrets are
+        # not present yet, so this is operator + reserved-default rows).
+        for kind in list(self._resources.keys()):
+            for name in list(self._resources[kind].keys()):
+                self._walk_into((kind, name), all_refs, all_outbound, context)
 
-        # 2: references attachment + description polish for every Resource.
-        # Iterate all currently-published Resources (not just those with
-        # incoming references) so always-materialized rows get
-        # ``references=()`` plus the empty-references description fallback too.
+        # 2: resolve. Classify misses; allowed auto-declares defer to pass 5.
+        deferred: set[tuple[str, str]] = set()
+        self._resolve_misses(all_refs, deferred)
+
+        # 3: cycle-detect over the built edge map (no re-walk).
+        _detect_cycles(all_outbound, self._present_keys())
+
+        # 4: fold readiness for the present nodes (LLD c). ``marks`` is the
+        # single source of truth: compose the injected enablement sources over
+        # the present rows (all-enabled when none fire). The binary
+        # ``enablement`` map the fold / materialization gate / ``build_graph`` /
+        # ``_validate_resources`` consume is a PURE PROJECTION of ``marks``
+        # (disabled iff a mark exists), so "which nodes are disabled" and "why"
+        # never drift; ``marks`` also flows to the fold as ``disabled_marks`` so
+        # a propagating dependent's hint reads the carried reason.
+        marks = compose_enablement(enablement_sources, self._resources)
+        # Weak-implies-disabled guard (LLD c 3b.3): a surviving weak row is a
+        # not-enabled plugin's manifest row, so every key still weak-held MUST
+        # be disabled by some composed mark. A weak survivor with no mark means
+        # a publisher declared a row weak without a disabling source (a
+        # framework bug); fail loud rather than ship a silently-overwritable
+        # enabled row. Compares two sets the Registry already holds, so it stays
+        # config-agnostic.
+        unmarked_weak = sorted(key for key in self._weak if key not in marks)
+        if unmarked_weak:
+            raise StateError(
+                "weak rows survived finalize with no disabling enablement mark "
+                f"(weak implies disabled): {unmarked_weak}; a publisher added weak "
+                "rows without a source that disables them (a framework bug)"
+            )
+        enablement = {
+            key: (Enablement.disabled if key in marks else Enablement.enabled)
+            for kind, kind_dict in self._resources.items()
+            for key in ((kind, name) for name in kind_dict)
+        }
+        readiness = fold_readiness(self._resources, all_outbound, enablement, marks)
+
+        # 5: readiness-gated materialization (R12), looping to a fixpoint.
+        self._materialize_deferred(deferred, all_refs, all_outbound, readiness, enablement, marks, context)
+
+        # 6: attach. Build the retained graph (inbound + readiness + enablement
+        # on the node), then polish auto-declared descriptions off its inbound
+        # refs.
+        self._graph = build_graph(self._resources, all_refs, all_outbound, readiness, enablement)
         for kind in list(self._resources.keys()):
             for name in list(self._resources[kind].keys()):
                 existing = self._resources[kind][name]
-                refs = all_refs.get((kind, name), [])
-                polished = dataclasses.replace(
-                    existing, references=_references_tuple(refs)
-                )
-                polished = _polish_auto_declared_description(polished, kind)
-                self._resources[kind][name] = polished
+                inbound = self._graph.dependents_of(kind, name)
+                self._resources[kind][name] = _polish_auto_declared_description(existing, kind, inbound)
 
-        # 3: cycle detection across the now-complete graph.
-        _detect_cycles(self._resources)
+        # 7: validate the ready + enabled set only (R3, R9.4).
+        self._validate_resources(enablement)
 
-        # 4: freeze.
+        # 8: freeze.
         self._frozen = True
+
+    def _validate_resources(self, enablement: Mapping[tuple[str, str], Enablement]) -> None:
+        """Run each READY + ENABLED Resource's ``validate()`` (the throwing
+        correctness check for its capability config sub-block), raising on
+        the first malformed block.
+
+        Scoped to the READY + ENABLED set (R3, R9.4): a not-ready or disabled
+        resource's block is DEFERRED, not validated (there is nothing to run,
+        and its capability may be unavailable), so a malformed ``platform_config``
+        on a site the host cannot run does not abort every command; it is
+        validated when the resource becomes ready. A disabled node's stored
+        readiness is a placeholder (enablement answers for it), so the gate
+        checks enablement explicitly rather than leaning on ``is_ready``.
+
+        The capability's ``validate`` frames its message with the logical
+        owner label (``kind/name``); the source location that decode/load
+        used to supply (the manifest ``file:line``, the TOML section) is
+        gone once validation runs here, so this pass re-attaches it from
+        the Resource's ``origin`` (the same provenance operators see in
+        ``describe`` / ``doctor``, rendered location-only for the inline
+        message).
+
+        The ``getattr(resource, "validate", None)`` guard skips the
+        capability marker rows (``VMPlatformEntry`` and friends), which
+        carry no ``validate`` attribute; a ``DeclaredResource`` subclass
+        with no capability config (a secret, an apt entry) validates via
+        the no-op base ``validate`` and passes.
+
+        Each ``validate`` is handed the enabled ``secret-backend`` name set so a
+        ``secret`` validates only mappings addressed to a present AND enabled
+        backend (R9.9); a mapping to a disabled backend stays inert until
+        enabled. Every non-secret resource ignores the set.
+        """
+        from agentworks.resources.graph import Enablement
+        from agentworks.resources.render import format_origin_location
+
+        assert self._graph is not None  # built in pass 6, before this pass
+        enabled_backends = frozenset(
+            name for (kind, name), axis in enablement.items() if kind == "secret-backend" and axis is Enablement.enabled
+        )
+        for kind in list(self._resources.keys()):
+            for name in list(self._resources[kind].keys()):
+                if enablement.get((kind, name), Enablement.enabled) is Enablement.disabled:
+                    continue
+                if not self._graph.is_ready(kind, name):
+                    continue
+                resource = self._resources[kind][name]
+                validate = getattr(resource, "validate", None)
+                if validate is None:
+                    continue
+                try:
+                    validate(enabled_backends)
+                except ConfigError as exc:
+                    origin = getattr(resource, "origin", None)
+                    raise ConfigError(
+                        f"{exc} ({format_origin_location(origin)})",
+                        hint=exc.hint,
+                    ) from exc
+
+    def _present_keys(self) -> set[tuple[str, str]]:
+        """The ``(kind, name)`` of every currently-published Resource."""
+        return {(kind, name) for kind, kind_dict in self._resources.items() for name in kind_dict}
 
     def _materialize_reserved_defaults(self) -> None:
         """Seed the registry with reserved-default rows for every kind
@@ -301,67 +553,144 @@ class Registry:
             for name in kind_handler.auto_declare_names:
                 if name in self._resources.get(kind, {}):
                     continue
-                self._resources.setdefault(kind, {})[name] = (
-                    kind_handler.synthesize(())
-                )
+                self._resources.setdefault(kind, {})[name] = kind_handler.synthesize(())
 
-    def _collect_new_references(
+    def _walk_into(
+        self,
+        key: tuple[str, str],
+        all_refs: dict[tuple[str, str], list[ResourceReference]],
+        all_outbound: dict[tuple[str, str], list[ResourceReference]],
+        context: BuildContext,
+    ) -> None:
+        """Walk one Resource's ``dependencies(context)``, appending its
+        edges into ``all_refs`` (keyed by target) and ``all_outbound``
+        (keyed by source). The source of every edge is ``key``, so
+        ``all_outbound[key]`` holds this Resource's edges contiguously in
+        emission order (LLD a's first-encountered guarantee). ``context`` is
+        the builder's threaded :class:`BuildContext` (the secret's
+        backend-list read; every other resource ignores it).
+        """
+        kind, name = key
+        resource = self._resources[kind][name]
+        for req in _dependencies(resource, context):
+            all_refs.setdefault((req.kind, req.name), []).append(req)
+            all_outbound.setdefault(req.source, []).append(req)
+
+    def _resolve_misses(
         self,
         all_refs: dict[tuple[str, str], list[ResourceReference]],
-        walked: set[tuple[str, str]],
-    ) -> bool:
-        """Walk ``referenced_resources()`` on every Resource not yet in
-        ``walked``, appending discovered references into ``all_refs``
-        (in first-encountered order). Returns True if any Resource was
-        walked this pass; False means the worklist has stabilized.
-        """
-        any_walked = False
-        # Snapshot the current per-kind dicts so iteration is safe
-        # against concurrent additions by miss-policy dispatch in this
-        # outer pass.
-        snapshot: list[tuple[tuple[str, str], Any]] = []
-        for kind, kind_dict in self._resources.items():
-            for name, resource in kind_dict.items():
-                key = (kind, name)
-                if key not in walked:
-                    snapshot.append((key, resource))
-        for key, resource in snapshot:
-            walked.add(key)
-            any_walked = True
-            for req in _referenced_resources(resource):
-                all_refs.setdefault((req.kind, req.name), []).append(req)
-        return any_walked
-
-    def _handle_miss(
-        self,
-        kind: str,
-        name: str,
-        kind_handler: Any,
-        refs: list[ResourceReference],
+        deferred: set[tuple[str, str]],
     ) -> None:
-        """Dispatch the kind's miss policy. Mutates ``self._resources``
-        for the auto-declare branch; raises ``ConfigError`` otherwise.
+        """Classify every edge whose target is not (yet) a Resource: an
+        ``"error"`` policy or a disallowed ``"auto-declare"`` name is a hard
+        error NOW (ungated by any referrer's readiness, LLD b subtlety 1); an
+        allowed ``"auto-declare"`` name is added to ``deferred`` for the
+        readiness-gated materialize pass (R12). A target already deferred or
+        already present is skipped.
         """
-        first = refs[0]
-        if kind_handler.miss_policy == "auto-declare":
-            allowed = kind_handler.auto_declare_names
-            if allowed is not None and name not in allowed:
+        for target, refs in list(all_refs.items()):
+            kind, name = target
+            if name in self._resources.get(kind, {}) or target in deferred:
+                continue
+            kind_handler = _lookup_kind(kind, refs[0])
+            first = refs[0]
+            if kind_handler.miss_policy == "auto-declare":
+                allowed = kind_handler.auto_declare_names
+                if allowed is not None and name not in allowed:
+                    raise ConfigError(
+                        f"{kind} kind only auto-declares the reserved name(s) "
+                        f"{sorted(allowed)!r}; got {name!r} "
+                        f"(required by {first.source[0]}/{first.source[1]})"
+                    )
+                deferred.add(target)
+            elif kind_handler.miss_policy == "error":
                 raise ConfigError(
-                    f"{kind} kind only auto-declares the reserved name(s) "
-                    f"{sorted(allowed)!r}; got {name!r} "
-                    f"(required by {first.source[0]}/{first.source[1]})"
+                    f"{first.source[0]} {first.source[1]!r} references unknown {kind} {name!r} ({first.usage})"
                 )
-            synthesized = kind_handler.synthesize(refs)
-            self._resources.setdefault(kind, {})[name] = synthesized
-            return
-        if kind_handler.miss_policy == "error":
-            raise ConfigError(
-                f"{first.source[0]} {first.source[1]!r} references "
-                f"unknown {kind} {name!r} ({first.usage})"
-            )
-        raise RuntimeError(
-            f"unexpected miss_policy {kind_handler.miss_policy!r} on "
-            f"KIND_REGISTRY[{kind!r}]"
+            else:
+                raise StateError(f"unexpected miss_policy {kind_handler.miss_policy!r} on KIND_REGISTRY[{kind!r}]")
+
+    def _materialize_deferred(
+        self,
+        deferred: set[tuple[str, str]],
+        all_refs: dict[tuple[str, str], list[ResourceReference]],
+        all_outbound: dict[tuple[str, str], list[ResourceReference]],
+        readiness: dict[tuple[str, str], Readiness],
+        enablement: Mapping[tuple[str, str], Enablement],
+        disabled_marks: Mapping[tuple[str, str], DisabledMark],
+        context: BuildContext,
+    ) -> None:
+        """Materialize deferred auto-declare targets, readiness-gated (R12),
+        looping to a fixpoint (LLD b subtlety 3).
+
+        A deferred target is synthesized ONLY when at least one PRESENT, ENABLED,
+        READY node references it (a target referenced solely by not-ready or
+        disabled nodes is left unmaterialized, so its would-be secrets never
+        enter ``secret list`` / doctor / resolution: the behavior the removed
+        vm-site suppression used to achieve). A newly-materialized node is then
+        walked (its edges resolved and it folded) so a materialized node that
+        itself references others still resolves them. The loop terminates because
+        a late-materialized node's out-edges point only back into the settled
+        set; a hard cap on iterations guards against a framework bug rather than
+        truncating silently.
+
+        ``disabled_marks`` is forwarded to each late node's ``node_readiness``
+        call so a late-materialized dependent of a disabled node gets the carried
+        reason on the same additive path finalize's fold used (LLD b 4b).
+        """
+        from agentworks.resources.graph import Enablement, node_readiness
+
+        def has_ready_referrer(target: tuple[str, str]) -> bool:
+            for ref in all_refs.get(target, ()):
+                source = ref.source
+                verdict = readiness.get(source)
+                if verdict is None:
+                    # A referrer is always a present, folded node. A missing
+                    # verdict means that build/fold invariant broke; fail loud
+                    # rather than silently defeating the R12 gate.
+                    raise StateError(
+                        f"referrer {source!r} of deferred target {target!r} has no readiness verdict; "
+                        f"the build/fold invariant is broken (this is a framework bug)"
+                    )
+                if enablement.get(source, Enablement.enabled) is Enablement.disabled:
+                    # A disabled referrer does not drive materialization (R12):
+                    # its readiness is not even computed.
+                    continue
+                if verdict.is_ready:
+                    return True
+            return False
+
+        cap = sum(len(kind_dict) for kind_dict in self._resources.values()) + len(deferred) + 1
+        for _ in range(cap):
+            if not deferred:
+                return
+            progressed = False
+            for target in sorted(deferred):
+                if not has_ready_referrer(target):
+                    continue
+                kind, name = target
+                refs = all_refs.get(target, [])
+                kind_handler = _lookup_kind(kind, refs[0])
+                self._resources.setdefault(kind, {})[name] = kind_handler.synthesize(refs)
+                deferred.discard(target)
+                progressed = True
+                # Walk the new node, resolve its misses, then fold it (its
+                # deps are already folded, so the reverse-topo invariant holds).
+                # The newly-materialized secret's ``dependencies(context)`` now
+                # emits its backend edges (the loop is load-bearing, LLD b).
+                self._walk_into(target, all_refs, all_outbound, context)
+                self._resolve_misses(all_refs, deferred)
+                readiness[target] = node_readiness(
+                    target, self._resources, all_outbound, readiness, enablement, disabled_marks
+                )
+            if not progressed:
+                # Every remaining deferred target lacks a ready referrer (R12):
+                # leave it unmaterialized.
+                return
+        raise StateError(
+            "readiness-gated materialization did not reach a fixpoint within "
+            "the node-count cap; this is a framework bug (a materialized node's "
+            "out-edges should point only back into the already-folded set)"
         )
 
     # -- Query phase ---------------------------------------------------
@@ -404,19 +733,33 @@ class Registry:
         """True after ``finalize`` has run."""
         return self._frozen
 
+    @property
+    def graph(self) -> DependencyGraph:
+        """The retained ``DependencyGraph``, available only after
+        ``finalize``. Raises ``RuntimeError`` if accessed before then
+        (the graph is built from the complete reference walk, so there is
+        no meaningful pre-finalize graph to return).
+        """
+        if self._graph is None:
+            raise RuntimeError("registry graph is available only after finalize")
+        return self._graph
+
 
 # -- Internal helpers --------------------------------------------------
 
 
-def _referenced_resources(resource: Any) -> Sequence[ResourceReference]:
-    """Return the Resource's ``referenced_resources()`` or an empty
-    sequence if it doesn't define one. Not every Resource type defines
-    the method, so the ``getattr`` fallback keeps the walk safe.
+def _dependencies(resource: Any, context: BuildContext) -> Sequence[ResourceReference]:
+    """Return the Resource's ``dependencies(context)`` edges or an empty
+    sequence if it doesn't define the method. The capability marker rows
+    (``SecretBackendEntry`` and friends) carry no ``dependencies``, so the
+    ``getattr`` fallback keeps the walk safe. ``context`` is the builder's
+    threaded :class:`~agentworks.resources.graph.BuildContext` (the secret
+    reads its available-backend list; every other resource ignores it).
     """
-    method = getattr(resource, "referenced_resources", None)
+    method = getattr(resource, "dependencies", None)
     if method is None:
         return ()
-    return tuple(method())
+    return tuple(method(context))
 
 
 def _lookup_kind(kind: str, req: ResourceReference) -> Any:
@@ -427,17 +770,21 @@ def _lookup_kind(kind: str, req: ResourceReference) -> Any:
     try:
         return KIND_REGISTRY[kind]
     except KeyError:
-        raise ConfigError(
-            f"{req.source[0]} {req.source[1]!r} references "
-            f"unregistered kind {kind!r}"
-        ) from None
+        raise ConfigError(f"{req.source[0]} {req.source[1]!r} references unregistered kind {kind!r}") from None
 
 
-def _polish_auto_declared_description(resource: Any, kind: str) -> Any:
+def _polish_auto_declared_description(
+    resource: Any,
+    kind: str,
+    references: Sequence[ReferenceEntry],
+) -> Any:
     """Synthesize a description for an auto-declared Resource when its
     description is empty. Operators rely on a non-empty Description in
     ``agw resource list`` / ``agw secret list``; the framework derives
     one so the row reads as "what this resource is for and who's asking".
+
+    ``references`` is the resource's inbound reference list, read off the
+    graph node by the caller (they no longer live on the dataclass).
 
     Two cases share this polish step:
 
@@ -462,7 +809,6 @@ def _polish_auto_declared_description(resource: Any, kind: str) -> Any:
     origin = getattr(resource, "origin", None)
     if origin is None or origin.variant != "auto-declared":
         return resource
-    references = getattr(resource, "references", ())
     if not references:
         # Always-materialized default with no static incoming references.
         description = f"(auto) auto-declared default {kind}"
@@ -472,95 +818,63 @@ def _polish_auto_declared_description(resource: Any, kind: str) -> Any:
         # guarantees the shape at finalize time. No runtime guard.
         distinct_other = {entry.source for entry in references} - {first.source}
         suffix = f" (and {len(distinct_other)} more)" if distinct_other else ""
-        description = (
-            f"(auto) {first.usage} for {first.source[0]}/{first.source[1]}{suffix}"
-        )
+        description = f"(auto) {first.usage} for {first.source[0]}/{first.source[1]}{suffix}"
     return dataclasses.replace(resource, description=description)
 
 
-def _references_tuple(
-    refs: Sequence[ResourceReference],
-) -> tuple[Any, ...]:
-    """Build the ``references`` tuple a Resource carries on it after
-    ``finalize``. Lives here (rather than imported from reference.py
-    at runtime) to keep the import graph minimal; the return tuple
-    holds ``ReferenceEntry`` instances but is typed loosely so this module
-    doesn't need a TYPE_CHECKING import for the static typing.
+def _detect_cycles(
+    all_outbound: dict[tuple[str, str], list[ResourceReference]],
+    present: set[tuple[str, str]],
+) -> None:
+    """Detect cycles over the BUILT edge map via iterative DFS
+    three-coloring (no re-walk of ``dependencies(context)``; the finalize
+    build pass already accumulated the edges).
 
-    Projects each outbound ``ResourceReference`` to an inbound
-    ``ReferenceEntry`` by keeping ``source`` and ``usage`` (the prose);
-    the ``kind``/``name`` fields drop because they're implicit from the
-    container Resource the entry attaches to.
-    """
-    from agentworks.resources.reference import ReferenceEntry
-
-    return tuple(ReferenceEntry(source=r.source, usage=r.usage) for r in refs)
-
-
-def _detect_cycles(resources: dict[str, dict[str, Any]]) -> None:
-    """Detect cycles across the reference graph via iterative DFS
-    three-coloring.
-
-    Secrets don't reference secrets, so they can't form cycles; the
-    check exists to guard template-inheritance chains, which can.
-    Implemented iteratively so deep inheritance chains don't risk
-    CPython's default recursion limit.
+    Only edges to present nodes can close a cycle (a deferred / absent target
+    has no outbound edges of its own), so the walk follows edges to present
+    targets. Secrets don't reference secrets, so they can't form cycles; the
+    check exists to guard template-inheritance chains, which can. Implemented
+    iteratively so deep inheritance chains don't risk CPython's default
+    recursion limit.
 
     Raises ``ConfigError`` with the cycle path on the first cycle.
     """
     WHITE, GRAY, BLACK = 0, 1, 2
     color: dict[tuple[str, str], int] = {}
 
-    for start_kind, kind_dict in resources.items():
-        for start_name in kind_dict:
-            start_node = (start_kind, start_name)
-            if color.get(start_node, WHITE) != WHITE:
+    def edges_from(node: tuple[str, str]) -> Iterator[tuple[str, str]]:
+        for ref in all_outbound.get(node, ()):
+            target = (ref.kind, ref.name)
+            if target in present:
+                yield target
+
+    for start_node in present:
+        if color.get(start_node, WHITE) != WHITE:
+            continue
+
+        # Iterative DFS via a work stack. Each frame is a tuple of
+        # (node, edge_iterator). When we descend, push the parent
+        # frame back with its iterator; when we exhaust the iterator,
+        # color the node BLACK and pop.
+        color[start_node] = GRAY
+        path: list[tuple[str, str]] = [start_node]
+        edge_stack: list[Iterator[tuple[str, str]]] = [edges_from(start_node)]
+        while edge_stack:
+            edges = edge_stack[-1]
+            try:
+                target = next(edges)
+            except StopIteration:
+                color[path[-1]] = BLACK
+                path.pop()
+                edge_stack.pop()
                 continue
-
-            # Iterative DFS via a work stack. Each frame is a tuple of
-            # (node, edge_iterator). When we descend, push the parent
-            # frame back with its iterator; when we exhaust the iterator,
-            # color the node BLACK and pop.
-            color[start_node] = GRAY
-            path: list[tuple[str, str]] = [start_node]
-            edge_stack: list[Any] = [
-                iter(_edges_from(resources, start_node))
-            ]
-            while edge_stack:
-                edges = edge_stack[-1]
-                try:
-                    target = next(edges)
-                except StopIteration:
-                    color[path[-1]] = BLACK
-                    path.pop()
-                    edge_stack.pop()
-                    continue
-                target_color = color.get(target, WHITE)
-                if target_color == GRAY:
-                    cycle = path[path.index(target):] + [target]
-                    cycle_path = " -> ".join(f"{k}/{n}" for k, n in cycle)
-                    raise ConfigError(
-                        f"resource reference cycle detected: {cycle_path}"
-                    )
-                if target_color == BLACK:
-                    continue
-                color[target] = GRAY
-                path.append(target)
-                edge_stack.append(iter(_edges_from(resources, target)))
-
-
-def _edges_from(
-    resources: dict[str, dict[str, Any]],
-    node: tuple[str, str],
-) -> Iterator[tuple[str, str]]:
-    """Yield outgoing edges from ``node`` (``(kind, name)`` -> target
-    ``(kind, name)``) via the Resource's ``referenced_resources()``.
-    Empty iterator if the node isn't in the Registry (defensive; the
-    finalize worklist ensures every reachable node has a Resource).
-    """
-    kind, name = node
-    resource = resources.get(kind, {}).get(name)
-    if resource is None:
-        return
-    for req in _referenced_resources(resource):
-        yield (req.kind, req.name)
+            target_color = color.get(target, WHITE)
+            if target_color == GRAY:
+                cycle = path[path.index(target) :] + [target]
+                cycle_path = " -> ".join(f"{k}/{n}" for k, n in cycle)
+                raise ConfigError(f"resource reference cycle detected: {cycle_path}")
+            if target_color == BLACK:
+                continue
+            color[target] = GRAY
+            path.append(target)
+            edge_stack.append(edges_from(target))

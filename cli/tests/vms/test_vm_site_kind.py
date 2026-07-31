@@ -12,6 +12,7 @@ import pytest
 from agentworks.errors import ConfigError
 from agentworks.manifests.loader import load_manifests
 from agentworks.resources import Origin, Registry
+from agentworks.resources.graph import BuildContext
 from agentworks.vms.sites import VMSiteDecl
 
 SITE_DOC = """\
@@ -52,31 +53,41 @@ def test_decode_nests_platform_config(tmp_path: Path) -> None:
     assert site.description == "Dev subscription"
 
 
-def test_site_names_follow_the_vm_name_rules(tmp_path: Path) -> None:
-    """Site names appear in hostnames and SSH aliases, so they
-    obey validate_name (lowercase, length cap, no double hyphen)."""
-    doc = SITE_DOC.replace("name: azure-dev", "name: MY_Site_With_A_Very_Long_Name_Indeed")
+def test_site_names_obey_the_freeform_name_rules(tmp_path: Path) -> None:
+    """Site names hit no OS identifier limit (registry key + display only, NOT
+    derived into hostnames or SSH aliases: VM names are), so they use the
+    freeform cap (64). They still obey validate_name's character rules
+    (lowercase, no double hyphen) and reject a name past the freeform cap."""
+    from agentworks.config import MAX_FREEFORM_NAME_LENGTH
+
+    # Character rules still hold: uppercase is rejected regardless of length.
+    doc = SITE_DOC.replace("name: azure-dev", "name: MY_Site")
     (tmp_path / "site.yaml").write_text(doc)
-    with pytest.raises(ConfigError, match="too long"):
+    with pytest.raises(ConfigError, match="lowercase"):
         load_manifests(tmp_path)
 
+    # Consecutive hyphens are still rejected.
     doc = SITE_DOC.replace("name: azure-dev", "name: azure--dev")
     (tmp_path / "site.yaml").write_text(doc)
     with pytest.raises(ConfigError, match="consecutive hyphens"):
         load_manifests(tmp_path)
 
+    # A name past the freeform cap is rejected as too long.
+    doc = SITE_DOC.replace("name: azure-dev", f"name: {'a' * (MAX_FREEFORM_NAME_LENGTH + 1)}")
+    (tmp_path / "site.yaml").write_text(doc)
+    with pytest.raises(ConfigError, match="too long"):
+        load_manifests(tmp_path)
+
+    # A name that the old 30-char cap rejected but the freeform cap allows now
+    # decodes cleanly (40 chars, lowercase, no double hyphen).
+    site = _load_one(tmp_path, SITE_DOC.replace("name: azure-dev", f"name: {'a' * 40}"))
+    assert site.name == "a" * 40
+
 
 def test_platform_named_site_must_declare_that_platform(tmp_path: Path) -> None:
     """A site `vm-site/azure-vm` backed by lima would make
     `--site azure-vm` mean something other than it says."""
-    doc = (
-        "apiVersion: agentworks/v1\n"
-        "kind: vm-site\n"
-        "metadata:\n"
-        "  name: azure-vm\n"
-        "spec:\n"
-        "  platform: lima\n"
-    )
+    doc = "apiVersion: agentworks/v1\nkind: vm-site\nmetadata:\n  name: azure-vm\nspec:\n  platform: lima\n"
     (tmp_path / "site.yaml").write_text(doc)
     with pytest.raises(ConfigError, match="shadows a platform name"):
         load_manifests(tmp_path)
@@ -103,42 +114,54 @@ def test_decode_rejects_stray_spec_keys(tmp_path: Path) -> None:
         load_manifests(tmp_path)
 
 
-def test_decode_validates_the_blob_via_the_capability(tmp_path: Path) -> None:
-    doc = SITE_DOC.replace('    subscription_id: "0000"\n', "")
-    (tmp_path / "site.yaml").write_text(doc)
-    with pytest.raises(ConfigError, match="subscription_id"):
-        load_manifests(tmp_path)
+def test_build_registry_validates_the_blob_via_the_capability(tmp_path: Path) -> None:
+    """The platform_config blob's shape check moved out of decode into
+    the finalize ``validate`` pass (R3): a malformed blob decodes fine
+    and fails at build_registry, framed by the site name (``azure-dev``)
+    with the source location re-attached from the origin. ``azure-vm`` ships
+    in the opt-in ``azure`` system plugin, whose validation is deferred while
+    disabled, so the plugin is enabled here for the blob check to fire."""
+    from agentworks.bootstrap import build_registry
+    from agentworks.config import load_config
 
-
-def test_unknown_platform_registers_a_disabled_site(tmp_path: Path) -> None:
-    """Decode must not error on an unregistered platform, and neither
-    may finalize: the site claims no capability edge and self-disables
-    ("platform 'nope' is not installed"); an uninstalled plugin and a
-    typo are indistinguishable by design, and both must degrade rather
-    than break the registry."""
-    from agentworks.vms.sites import site_disabled_reason
-
-    doc = (
-        "apiVersion: agentworks/v1\n"
-        "kind: vm-site\n"
-        "metadata:\n"
-        "  name: mystery\n"
-        "spec:\n"
-        "  platform: nope\n"
+    pub = tmp_path / "k.pub"
+    priv = tmp_path / "k"
+    pub.write_text("ssh-ed25519 AAAA test")
+    priv.write_text("key")
+    cfg = tmp_path / "config.toml"
+    cfg.write_text(
+        f'[operator]\nssh_public_key = "{pub.as_posix()}"\nssh_private_key = "{priv.as_posix()}"\n'
+        '[plugins]\nsystem = ["azure"]\n'
     )
+    resources = tmp_path / "resources"
+    resources.mkdir()
+    (resources / "site.yaml").write_text(SITE_DOC.replace('    subscription_id: "0000"\n', ""))
+    with pytest.raises(ConfigError, match="subscription_id") as exc:
+        build_registry(load_config(cfg, warn_issues=False))
+    assert "site.yaml" in str(exc.value)
+
+
+def test_unknown_platform_site_hard_errors_at_finalize(tmp_path: Path) -> None:
+    """R9.2: decode still must not error on an unregistered platform (the
+    total-``dependencies`` contract), but finalize now DOES: with the
+    edge-suppression removed the site emits its platform edge
+    unconditionally, and the absent ``vm-platform`` row is the error miss
+    policy's unknown-reference. A typo no longer silently self-disables."""
+    doc = "apiVersion: agentworks/v1\nkind: vm-site\nmetadata:\n  name: mystery\nspec:\n  platform: nope\n"
     site = _load_one(tmp_path, doc)
     assert site.platform == "nope"
-    assert site.referenced_resources() == []
+    # The platform edge is always emitted now (suppression removed).
+    assert [(r.kind, r.name) for r in site.dependencies(BuildContext())] == [("vm-platform", "nope")]
 
     registry = Registry.empty()
     registry.add("vm-site", "mystery", site, Origin.built_in(source="test"))
-    registry.finalize()  # no raise
-    assert site_disabled_reason(site) == "platform 'nope' is not installed"
+    with pytest.raises(ConfigError, match="unknown vm-platform 'nope'"):
+        registry.finalize()
 
 
 def test_reference_emission(tmp_path: Path) -> None:
     site = _load_one(tmp_path, SITE_DOC)
-    refs = site.referenced_resources()
+    refs = site.dependencies(BuildContext())
     assert [(r.kind, r.name) for r in refs] == [("vm-platform", "azure-vm")]
     assert refs[0].source == ("vm-site", "azure-dev")
 
@@ -154,7 +177,7 @@ def test_proxmox_site_emits_the_token_secret_reference() -> None:
             "template_vmid": 9000,
         },
     )
-    refs = site.referenced_resources()
+    refs = site.dependencies(BuildContext())
     assert [(r.kind, r.name) for r in refs] == [
         ("vm-platform", "proxmox"),
         ("secret", "proxmox-token"),
@@ -162,19 +185,18 @@ def test_proxmox_site_emits_the_token_secret_reference() -> None:
     assert all(r.source == ("vm-site", "px") for r in refs)
 
 
-def test_host_disabled_site_emits_no_edges(
+def test_host_unsupported_site_still_emits_its_edges(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A host-disabled site claims NO edges: the platform edge would
-    dangle (no capability row), and the config-implied secret edges
-    would auto-declare and predict-resolve a secret for a site that can
-    never run here. Pinned against the first plugin that ships a
+    """R13/R12: a host-unsupported site emits its edges UNCONDITIONALLY
+    now (the suppression is gone). ``dependencies`` is total and blind to
+    host support; keeping a not-ready site's config-implied secret out of
+    the registry is the readiness-gated MATERIALIZATION pass's job (R12),
+    not the edge walk's. Pinned against the first plugin that ships a
     host-gated platform WITH a config secret."""
-    from agentworks.capabilities.vm_platform.proxmox import ProxmoxPlatform
+    from agentworks.plugins.proxmox.platform import ProxmoxPlatform
 
-    monkeypatch.setattr(
-        ProxmoxPlatform, "unsupported_reason", classmethod(lambda cls: "no cluster os")
-    )
+    monkeypatch.setattr(ProxmoxPlatform, "unsupported_reason", classmethod(lambda cls: "no cluster os"))
     site = VMSiteDecl(
         name="px",
         platform="proxmox",
@@ -185,7 +207,10 @@ def test_host_disabled_site_emits_no_edges(
             "template_vmid": 9000,
         },
     )
-    assert site.referenced_resources() == []
+    assert [(r.kind, r.name) for r in site.dependencies(BuildContext())] == [
+        ("vm-platform", "proxmox"),
+        ("secret", "proxmox-token"),
+    ]
 
 
 def test_bundled_sites_are_reserved(tmp_path: Path) -> None:
@@ -194,12 +219,7 @@ def test_bundled_sites_are_reserved(tmp_path: Path) -> None:
     from agentworks.manifests import builtin as builtin_manifests
 
     (tmp_path / "site.yaml").write_text(
-        "apiVersion: agentworks/v1\n"
-        "kind: vm-site\n"
-        "metadata:\n"
-        "  name: lima-local\n"
-        "spec:\n"
-        "  platform: lima\n"
+        "apiVersion: agentworks/v1\nkind: vm-site\nmetadata:\n  name: lima-local\nspec:\n  platform: lima\n"
     )
     manifests = load_manifests(tmp_path)
     registry = Registry.empty()
@@ -222,4 +242,7 @@ def test_bundled_sites_finalize_against_the_platform_rows(
     registry.finalize()
     assert registry.lookup("vm-site", "lima-local").platform == "lima"
     assert registry.lookup("vm-site", "wsl2").platform == "wsl2"
-    assert registry.lookup("vm-platform", "azure-vm").name == "azure-vm"
+    # ``azure-vm`` is no longer a core built-in row; it publishes from the
+    # ``azure`` system plugin (Phase 11), so the core publisher above does not
+    # emit it. Its platform row is exercised in tests/plugins/test_azure.py.
+    assert registry.lookup("vm-platform", "lima").name == "lima"

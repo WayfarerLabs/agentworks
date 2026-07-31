@@ -88,9 +88,19 @@ def test_legacy_sections_publish_and_finalize(write_config) -> None:
 
 
 def test_legacy_section_blob_validates(write_config) -> None:
-    broken = AZURE_SECTION.replace('subscription_id = "0000"\n', "")
+    """The assembled platform_config blob is shape-validated by the
+    finalize ``validate`` pass (R3), so a malformed legacy section fails
+    at build_registry, not at load. The site name (``azure``) frames the
+    error, with the source location re-attached from the origin. ``azure-vm``
+    ships in the opt-in ``azure`` system plugin, whose validation is deferred
+    while disabled, so the plugin is enabled here for the blob check to fire."""
+    from agentworks.bootstrap import build_registry
+    from agentworks.manifests import ManifestSet
+
+    broken = '[plugins]\nsystem = ["azure"]\n' + AZURE_SECTION.replace('subscription_id = "0000"\n', "")
+    config = load_config(write_config(broken), warn_issues=False, warn_deprecations=False)
     with pytest.raises(ConfigError, match="subscription_id"):
-        load_config(write_config(broken), warn_issues=False, warn_deprecations=False)
+        build_registry(config, ManifestSet.empty())
 
 
 def test_settings_only_load_skips_legacy_sites(write_config) -> None:
@@ -122,10 +132,7 @@ def test_defaults_platform_alias_maps_to_site(write_config) -> None:
         warn_deprecations=False,
     )
     assert config.defaults.site == "lima-local"
-    assert any(
-        "defaults.platform is deprecated" in issue
-        for issue in config.deprecation_issues
-    )
+    assert any("defaults.platform is deprecated" in issue for issue in config.deprecation_issues)
 
     config = load_config(
         write_config('[defaults]\nplatform = "azure"\n'),

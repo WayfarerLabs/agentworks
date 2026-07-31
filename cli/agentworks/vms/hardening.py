@@ -48,9 +48,7 @@ kernel.unprivileged_bpf_disabled = 1
 HARDENING_FSTAB_PATH = "/etc/fstab"
 HARDENING_FSTAB_COMMENT = "# hidepid managed by agentworks"
 # Used only when appending a brand-new /proc line (no existing entry).
-HARDENING_FSTAB_NEW_LINE = (
-    f"proc  /proc  proc  defaults,hidepid=1  0  0  {HARDENING_FSTAB_COMMENT}"
-)
+HARDENING_FSTAB_NEW_LINE = f"proc  /proc  proc  defaults,hidepid=1  0  0  {HARDENING_FSTAB_COMMENT}"
 
 
 def _split_fstab_line(line: str) -> tuple[str, str]:
@@ -137,11 +135,7 @@ def _ensure_proc_hidepid_in_fstab(content: str) -> tuple[str, str, int]:
     # add our informational marker.
     new_fields = [fields[0], fields[1], fields[2], ",".join(options), fields[4], fields[5]]
     new_code = "  ".join(new_fields)
-    new_line = (
-        f"{new_code}  {trailing_comment}"
-        if trailing_comment
-        else f"{new_code}  {HARDENING_FSTAB_COMMENT}"
-    )
+    new_line = f"{new_code}  {trailing_comment}" if trailing_comment else f"{new_code}  {HARDENING_FSTAB_COMMENT}"
     lines[proc_line_idx] = new_line
     return "\n".join(lines) + "\n", action, effective
 
@@ -173,10 +167,7 @@ def _apply_hardening_sysctl(target: Transport, logger: SSHLogger) -> None:
     # sudo on the read for consistency with the fstab read below; the file
     # itself is mode 0644 and would be world-readable when present.
     existing = target.run(f"cat {HARDENING_SYSCTL_PATH}", sudo=True, check=False)
-    if (
-        getattr(existing, "ok", False)
-        and getattr(existing, "stdout", "") == HARDENING_SYSCTL_CONTENT
-    ):
+    if getattr(existing, "ok", False) and getattr(existing, "stdout", "") == HARDENING_SYSCTL_CONTENT:
         output.info("Sysctl baseline already applied; no change.")
         return
 
@@ -221,9 +212,7 @@ def _apply_hardening_fstab(target: Transport, logger: SSHLogger) -> None:
         logger.warning(msg)
         output.warn(msg)
     elif action == "preserved-stricter":
-        output.detail(
-            f"/proc already mounted with hidepid={effective} (stricter than agentworks default); preserved."
-        )
+        output.detail(f"/proc already mounted with hidepid={effective} (stricter than agentworks default); preserved.")
     elif action == "no-op":
         # Already exactly what we want; nothing to log.
         pass

@@ -90,7 +90,7 @@ class VMPlatform(Capability):
 
     Class-level contract (consumed by the vm-site kind decoder, the
     capability publisher, and the DB migration): ``name``,
-    ``description``, ``validate_config``, and
+    ``description``, ``dependencies`` / ``validate``, and
     ``legacy_platform_metadata``.
 
     Idempotency: ops flagged with ``@idempotent_op`` (``start``,
@@ -106,30 +106,31 @@ class VMPlatform(Capability):
     @classmethod
     def unsupported_reason(cls) -> str | None:
         """Why this platform cannot run on this host AT ALL, or ``None``
-        when it can. A non-None reason disables the platform wholesale:
-        no capability row publishes, every site referencing it
-        self-disables with this reason in its chain, and doctor lists
-        the platform as installed-but-disabled.
+        when it can. A non-None reason makes every ``vm-platform`` node for
+        it not-ready (host-support is READINESS, not absence, R13): the row
+        still publishes, every site referencing it is not-ready with this
+        reason folded into its chain, and doctor lists the platform as
+        installed-but-not-ready.
 
-        This is a registration-time gate, NOT preflight: a pure, fast
+        This is the config-INDEPENDENT half of readiness: a pure, fast
         classmethod with no config, no instance, and no secrets, run at
-        every registry build. It answers "could any configuration of
-        this platform ever work here" (wsl2 off Windows: no), not "is
-        this configured site ready" (that is preflight) and not "is a
-        tool merely missing but installable" (that is the instance's
-        :meth:`Capability.disabled_reason`: lima the platform is
-        supported everywhere because remote sites run ``limactl`` on
-        the vm_host over SSH, but a local-Lima site without a local
-        ``limactl`` disables itself). Default: supported everywhere.
+        every registry build and consumed by the readiness fold (LLD c) as
+        the platform node's own verdict. It answers "could any configuration
+        of this platform ever work here" (wsl2 off Windows: no), not "is this
+        configured site ready" (that is preflight) and not "is a tool merely
+        missing but installable" (that is the config-dependent
+        :meth:`Capability.not_ready`: lima the platform is supported
+        everywhere because remote sites run ``limactl`` on the vm_host over
+        SSH, but a local-Lima site without a local ``limactl`` is not-ready).
+        Default: supported everywhere.
         """
         return None
+
     # Operator guidance shown when native_transport returns None (the
     # transports factory embeds it in the StateError hint). Platforms
     # that opt out of a native transport override with prose naming
     # their actual escape hatch.
-    no_native_transport_hint: ClassVar[str] = (
-        "This platform has no interactive native transport."
-    )
+    no_native_transport_hint: ClassVar[str] = "This platform has no interactive native transport."
 
     @property
     def site_name(self) -> str:
@@ -144,9 +145,7 @@ class VMPlatform(Capability):
         return self.config
 
     @classmethod
-    def legacy_platform_metadata(
-        cls, row: Mapping[str, Any], legacy: Mapping[str, Any]
-    ) -> dict[str, str]:
+    def legacy_platform_metadata(cls, row: Mapping[str, Any], legacy: Mapping[str, Any]) -> dict[str, str]:
         """Map a pre-v27 ``vms`` row's legacy column values to this
         platform's ``platform_metadata`` conventions.
 
@@ -229,9 +228,7 @@ class VMPlatform(Capability):
         proxmox ``vmid@node``). Reads ``vm.platform_metadata``.
         """
 
-    def native_transport(
-        self, vm: VMRow, *, config: Config | None = None
-    ) -> Transport | None:
+    def native_transport(self, vm: VMRow, *, config: Config | None = None) -> Transport | None:
         """Platform-native :class:`Transport` for bootstrap and
         ``vm shell --platform``, or ``None`` when the platform has no
         interactive native transport (proxmox: one-shot QEMU guest-agent
@@ -258,7 +255,7 @@ class VMPlatform(Capability):
         :meth:`transient_route` is genuine: the matching attach lives
         inside :meth:`create` (cloud-init bootstrap needs the IP) and
         the detach fires at an async Tailscale-ready point inside
-        ``initialize_vm``, neither of which is an ExitStack-shaped
+        ``bootstrap_vm`` (Phase A), neither of which is an ExitStack-shaped
         lifecycle.
         """
 
@@ -274,18 +271,25 @@ class VMPlatform(Capability):
         """
         return nullcontext()
 
-    def vm_active(
-        self, vm: VMRow, *, config: Config | None = None
-    ) -> AbstractContextManager[None]:
+    def vm_active(self, vm: VMRow, *, config: Config | None = None) -> AbstractContextManager[None]:
         """Hold the VM against the backend's own idle-shutdown mechanism
         for the duration of the context.
 
-        Callers converge the power state first (the orchestrated
-        activation gate, or a create's just-provisioned VM), so on
-        entry the VM is either running or was just started. Default
-        no-op for platforms without an idle-shutdown mechanism (lima,
-        azure, proxmox); wsl2 overrides to anchor the distro against
-        ``vmIdleTimeout``. ``config`` carries operator settings (wsl2
-        builds the Tailscale transport for its reconnect wait).
+        A pure power-hold on every platform: it holds power, and does no
+        connectivity verification or retry (that is handled uniformly by
+        the shared paths, which run inside this hold). Callers converge
+        the power state first (the orchestrated activation gate, or a
+        create's just-provisioned VM), so on entry the VM is either
+        running or was just started. Because no platform's hold retries
+        connectivity, a gate that finds the target not confirmed-active
+        yet not observed-stopped either (``ensure_active`` skips
+        ``auto_start`` when a status probe reports RUNNING while
+        tailscaled is mid-reattach) proceeds into the hold and the op and
+        surfaces a plain SSHError, uniformly, rather than a WSL2-only
+        reachability retry. Default no-op for platforms without
+        an idle-shutdown mechanism (lima, azure, proxmox); wsl2 overrides
+        to anchor the distro against ``vmIdleTimeout``. ``config`` is
+        reserved operator settings, available to a platform whose hold
+        needs them (none does today).
         """
         return nullcontext()

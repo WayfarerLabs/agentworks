@@ -133,21 +133,17 @@ def test_owner_branch_stages_then_installs(tmp_path: Path) -> None:
     logger = MagicMock()
     logger.has_warnings = False
 
-    _reconcile_authorized_keys(
-        target, config, "/home/agt-foo", logger, owner="agt-foo"
-    )
+    _reconcile_authorized_keys(target, config, "/home/agt-foo", logger, owner="agt-foo")
 
     # Sequence of target.run commands (run is called 4 times: install -d,
     # mktemp, install -o ..., rm -f).
     run_cmds = [call.args[0] for call in target.run.call_args_list]
-    assert any(
-        cmd.startswith("install -d -o agt-foo -g agt-foo -m 0700 /home/agt-foo/.ssh")
-        for cmd in run_cmds
-    ), f"missing install -d in {run_cmds}"
+    assert any(cmd.startswith("install -d -o agt-foo -g agt-foo -m 0700 /home/agt-foo/.ssh") for cmd in run_cmds), (
+        f"missing install -d in {run_cmds}"
+    )
     assert any(cmd.startswith("mktemp") for cmd in run_cmds), f"missing mktemp in {run_cmds}"
     assert any(
-        "install -o agt-foo -g agt-foo -m 0600" in cmd
-        and "/home/agt-foo/.ssh/authorized_keys" in cmd
+        "install -o agt-foo -g agt-foo -m 0600" in cmd and "/home/agt-foo/.ssh/authorized_keys" in cmd
         for cmd in run_cmds
     ), f"missing final install in {run_cmds}"
     assert any(cmd.startswith("rm -f") for cmd in run_cmds), f"missing rm -f cleanup in {run_cmds}"
@@ -190,9 +186,7 @@ def test_owner_branch_cleans_up_on_install_failure(tmp_path: Path) -> None:
     import contextlib
 
     with contextlib.suppress(SSHError):
-        _reconcile_authorized_keys(
-            target, config, "/home/agt-foo", logger, owner="agt-foo"
-        )
+        _reconcile_authorized_keys(target, config, "/home/agt-foo", logger, owner="agt-foo")
 
     # Cleanup must have run despite the install failure.
     assert any(cmd.startswith("rm -f /tmp/agw-ak.ABC123") for cmd in run_calls), (
@@ -226,9 +220,7 @@ def test_owner_branch_raises_on_failure(tmp_path: Path) -> None:
 
     raised = False
     try:
-        _reconcile_authorized_keys(
-            target, config, "/home/agt-foo", logger, owner="agt-foo"
-        )
+        _reconcile_authorized_keys(target, config, "/home/agt-foo", logger, owner="agt-foo")
     except SSHError:
         raised = True
     assert raised, "owner= path must raise on failure"

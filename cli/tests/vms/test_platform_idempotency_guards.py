@@ -52,9 +52,7 @@ def test_lima_start_proceeds_when_stopped(monkeypatch: pytest.MonkeyPatch, captu
     platform = LimaPlatform("lima", {})
     monkeypatch.setattr(LimaPlatform, "status", lambda self, vm, ctx: VMStatus.STOPPED)
     ran: list[str] = []
-    monkeypatch.setattr(
-        LimaPlatform, "_run_lima", lambda self, cmd, **k: ran.append(cmd) or ""
-    )
+    monkeypatch.setattr(LimaPlatform, "_run_lima", lambda self, cmd, **k: ran.append(cmd) or "")
     platform.start(_vm(), RunContext())  # type: ignore[arg-type]
     assert ran and "limactl start" in ran[0]
 
@@ -62,7 +60,7 @@ def test_lima_start_proceeds_when_stopped(monkeypatch: pytest.MonkeyPatch, captu
 def test_proxmox_start_skips_when_already_running(monkeypatch: pytest.MonkeyPatch, captured_output: object) -> None:
     """The empty context refuses any `ctx.secret` read, so a passing
     guard proves the API client was never built."""
-    from agentworks.capabilities.vm_platform.proxmox import ProxmoxPlatform
+    from agentworks.plugins.proxmox.platform import ProxmoxPlatform
 
     platform = ProxmoxPlatform(
         "px",
@@ -73,7 +71,7 @@ def test_proxmox_start_skips_when_already_running(monkeypatch: pytest.MonkeyPatc
 
 
 def test_proxmox_stop_skips_when_already_stopped(monkeypatch: pytest.MonkeyPatch, captured_output: object) -> None:
-    from agentworks.capabilities.vm_platform.proxmox import ProxmoxPlatform
+    from agentworks.plugins.proxmox.platform import ProxmoxPlatform
 
     platform = ProxmoxPlatform(
         "px",

@@ -4,11 +4,16 @@
     // version; trust the pinned-version generator output, not the schema check.
     "$schema": "https://raw.githubusercontent.com/dyoshikawa/rulesync/refs/heads/main/config-schema.json",
     "features": ["rules", "skills", "subagents"],
-    // copilot is the shared target whose generated output is committed -- it
-    // gives Copilot Code Review access to the project's rules and subagents on
-    // every PR. Personal targets (claudecode, cursor, etc.) go in
-    // rulesync.local.jsonc; their outputs are gitignored.
-    "targets": ["copilot"],
+    // These are the shared targets whose generated output is committed:
+    //   - copilot: gives Copilot Code Review the project's rules and subagents
+    //     on every PR (output under .github/).
+    //   - claudecode / codexcli: our primary agent tools, committed so a fresh
+    //     clone has the full context without running workspace-initialize.sh
+    //     (output: CLAUDE.md + .claude/, AGENTS.md + .codex/).
+    // The CI drift check (scripts/rulesync-upgen.sh --check) guards all three.
+    // Other tools (cursor, gemini, etc.) are personal: put them in
+    // rulesync.local.jsonc and their outputs stay gitignored.
+    "targets": ["copilot", "claudecode", "codexcli"],
     "baseDirs": ["."],
     "delete": true,
     "verbose": false,

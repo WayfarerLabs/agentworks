@@ -247,10 +247,9 @@ def test_agentworks_prefix_env_emits_warning(tmp_path: Path) -> None:
         """,
     )
     cfg = load_config(cfg_file, warn_issues=False)
-    assert any(
-        "AGENTWORKS_VM" in issue and "identity variable" in issue
-        for issue in cfg.config_issues
-    ), cfg.config_issues
+    assert any("AGENTWORKS_VM" in issue and "identity variable" in issue for issue in cfg.config_issues), (
+        cfg.config_issues
+    )
 
 
 def test_env_inline_table_unknown_key_rejected(tmp_path: Path) -> None:
@@ -339,6 +338,45 @@ def test_secret_declared_with_all_mapping_forms(tmp_path: Path) -> None:
     assert cfg.secrets["token-c"].backend_mappings == {"env-var": False}
 
 
+def test_secret_name_over_username_cap_loads_from_toml(tmp_path: Path) -> None:
+    """Issue #275: the TOML [secrets.*] loader validates secret names against
+    the larger secret cap. The git-token-<credential> default (33 chars) loads
+    even though it exceeds the 30-char username cap."""
+    cfg_file = tmp_path / "config.toml"
+    long_name = "git-token-github-fg-wf-agw-tester"  # 33 chars
+    assert len(long_name) > 30
+    _write_base(
+        cfg_file,
+        extras=f"""
+        [secrets.{long_name}]
+        description = "PAT for the tester credential"
+        """,
+    )
+    cfg = load_config(cfg_file, warn_issues=False)
+    assert cfg.secrets[long_name].name == long_name
+
+
+def test_secret_name_over_secret_cap_rejected_from_toml(tmp_path: Path) -> None:
+    """A secret name beyond the secret cap (253) is rejected, and the error
+    reports the correct (secret) max, not 30."""
+    from agentworks.config import MAX_SECRET_NAME_LENGTH
+    from agentworks.errors import ValidationError
+
+    cfg_file = tmp_path / "config.toml"
+    _write_base(
+        cfg_file,
+        extras=f"""
+        [secrets.{"s" * (MAX_SECRET_NAME_LENGTH + 1)}]
+        description = "too long"
+        """,
+    )
+    with pytest.raises(ValidationError) as exc:
+        load_config(cfg_file, warn_issues=False)
+    message = str(exc.value)
+    assert "is too long" in message
+    assert f"max {MAX_SECRET_NAME_LENGTH}" in message
+
+
 def test_secret_true_in_backend_mappings_rejected(tmp_path: Path) -> None:
     cfg_file = tmp_path / "config.toml"
     _write_base(
@@ -385,9 +423,7 @@ def test_active_backends_stand_up_when_configured(tmp_path: Path) -> None:
     registry = build_registry(cfg)
     backends = active_backends(cfg, registry)
     # Smoke-check the chain: the first attempting backend is env-var.
-    first = next(
-        (b for b in backends if b.would_attempt(cfg.secrets["shared"])), None
-    )
+    first = next((b for b in backends if b.would_attempt(cfg.secrets["shared"])), None)
     assert first is not None
     assert first.name == "env-var"
 
@@ -428,6 +464,56 @@ def test_unreachable_secret_raises(tmp_path: Path) -> None:
     cfg = load_config(cfg_file, warn_issues=False)
     with pytest.raises(ConfigError, match="unreachable"):
         build_registry(cfg)
+
+
+def test_reachability_scope_is_operator_declared_only(tmp_path: Path) -> None:
+    """Reachability preservation invariant (LLD d): the check covers
+    OPERATOR-declared secrets only. With ``backends = []`` every secret is
+    unreachable, but the only secrets present are auto-declared (the
+    ever-present tailscale-auth-key), so the build SUCCEEDS; an auto-declared
+    secret cannot invalidate a deliberate empty-chain opt-out (it surfaces at
+    use time instead)."""
+    cfg_file = tmp_path / "config.toml"
+    _write_base(
+        cfg_file,
+        extras="""
+        [secret_config]
+        backends = []
+        """,
+    )
+    cfg = load_config(cfg_file, warn_issues=False)
+    registry = build_registry(cfg)  # no raise: no operator-declared secret is unreachable
+    assert any(name == "tailscale-auth-key" for name, _ in registry.iter_kind_items("secret"))
+
+
+def test_reachability_keying_is_would_attempt_readiness_blind(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Reachability preservation invariant (LLD d): the build-time check is
+    keyed on WOULD-ATTEMPT (the frozen edges), READINESS-BLIND. A secret whose
+    only opted-in backend is onepassword, forced NOT-READY, is still reachable
+    (the build succeeds); it would fail only at resolution, exactly as today."""
+    from agentworks.plugins.onepassword.backend import OnePasswordBackend
+    from agentworks.resources.graph import Readiness
+
+    monkeypatch.setattr(OnePasswordBackend, "not_ready", lambda self: Readiness.blocked("op CLI not installed"))
+    cfg_file = tmp_path / "config.toml"
+    _write_base(
+        cfg_file,
+        extras="""
+        [plugins]
+        system = ["onepassword"]
+
+        [secrets.vaulted]
+        description = "only resolvable via onepassword"
+        backend_mappings.onepassword = "op://Work/item/field"
+
+        [secret_config]
+        backends = ["onepassword"]
+        """,
+    )
+    cfg = load_config(cfg_file, warn_issues=False)
+    registry = build_registry(cfg)  # no raise: not-ready does not make it unreachable
+    assert registry.graph.readiness_of("secret-backend", "onepassword").reason == "op CLI not installed"
+    assert any(name == "vaulted" for name, _ in registry.iter_kind_items("secret"))
 
 
 def test_unreachable_secret_error_message_and_hint(tmp_path: Path) -> None:
@@ -487,15 +573,17 @@ def test_unknown_backend_kind_in_secret_backends_errors(
 @pytest.mark.parametrize(
     ("scope_extras", "context_label"),
     [
-        ("[vm_templates.default.env]\nAGENTWORKS_VM = \"override\"", "vm_templates.default.env"),
-        ("[admin.env]\nAGENTWORKS_PLATFORM = \"override\"", "admin.env"),
-        ("[agent_templates.claude.env]\nAGENTWORKS_AGENT = \"override\"", "agent_templates.claude.env"),
-        ("[workspace_templates.ws.env]\nAGENTWORKS_WORKSPACE = \"override\"", "workspace_templates.ws.env"),
-        ("[session_templates.shell.env]\nAGENTWORKS_SESSION = \"override\"", "session_templates.shell.env"),
+        ('[vm_templates.default.env]\nAGENTWORKS_VM = "override"', "vm_templates.default.env"),
+        ('[admin.env]\nAGENTWORKS_PLATFORM = "override"', "admin.env"),
+        ('[agent_templates.claude.env]\nAGENTWORKS_AGENT = "override"', "agent_templates.claude.env"),
+        ('[workspace_templates.ws.env]\nAGENTWORKS_WORKSPACE = "override"', "workspace_templates.ws.env"),
+        ('[session_templates.shell.env]\nAGENTWORKS_SESSION = "override"', "session_templates.shell.env"),
     ],
 )
 def test_agentworks_prefix_warning_fires_for_every_scope(
-    tmp_path: Path, scope_extras: str, context_label: str,
+    tmp_path: Path,
+    scope_extras: str,
+    context_label: str,
 ) -> None:
     """The AGENTWORKS_* override warning fires for every scope's env table,
     not just admin.env. Pin this so a future refactor that moves the check
@@ -503,10 +591,9 @@ def test_agentworks_prefix_warning_fires_for_every_scope(
     cfg_file = tmp_path / "config.toml"
     _write_base(cfg_file, extras="\n" + scope_extras + "\n")
     cfg = load_config(cfg_file, warn_issues=False)
-    assert any(
-        context_label in issue and "identity variable" in issue
-        for issue in cfg.config_issues
-    ), cfg.config_issues
+    assert any(context_label in issue and "identity variable" in issue for issue in cfg.config_issues), (
+        cfg.config_issues
+    )
 
 
 def test_plaintext_env_with_newline_warns_at_load(tmp_path: Path) -> None:
@@ -519,10 +606,7 @@ def test_plaintext_env_with_newline_warns_at_load(tmp_path: Path) -> None:
         extras='\n[admin.env]\nMULTILINE = "line1\\nline2"\n',
     )
     cfg = load_config(cfg_file, warn_issues=False)
-    assert any(
-        "MULTILINE" in issue and "newline" in issue
-        for issue in cfg.config_issues
-    ), cfg.config_issues
+    assert any("MULTILINE" in issue and "newline" in issue for issue in cfg.config_issues), cfg.config_issues
 
 
 def test_session_template_inherits_parent_env(tmp_path: Path) -> None:

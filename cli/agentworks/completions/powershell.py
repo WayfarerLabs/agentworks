@@ -9,19 +9,13 @@ if TYPE_CHECKING:
 
 # PowerShell snippets that provide dynamic completions.
 DYNAMIC_SNIPPETS: dict[str, str] = {
-    "vms": (
-        "(agw vm list --names-only 2>$null |"
-        ' Where-Object { $_ -like "$wordToComplete*" })'
-    ),
+    "vms": ('(agw vm list --names-only 2>$null | Where-Object { $_ -like "$wordToComplete*" })'),
     "sites": (
         "(agw resource list --kind vm-site --names-only 2>$null"
         " | ForEach-Object { ($_ -split '/', 2)[1] }"
         ' | Where-Object { $_ -like "$wordToComplete*" })'
     ),
-    "workspaces": (
-        "(agw workspace list --names-only 2>$null |"
-        ' Where-Object { $_ -like "$wordToComplete*" })'
-    ),
+    "workspaces": ('(agw workspace list --names-only 2>$null | Where-Object { $_ -like "$wordToComplete*" })'),
     "ws_templates": (
         "(agw resource list --kind workspace-template --names-only 2>$null"
         " | ForEach-Object { ($_ -split '/', 2)[1] }"
@@ -32,18 +26,9 @@ DYNAMIC_SNIPPETS: dict[str, str] = {
         " | ForEach-Object { ($_ -split '/', 2)[1] }"
         ' | Where-Object { $_ -like "$wordToComplete*" })'
     ),
-    "sessions": (
-        "(agw session list --names-only 2>$null |"
-        ' Where-Object { $_ -like "$wordToComplete*" })'
-    ),
-    "agents": (
-        "(agw agent list --names-only 2>$null |"
-        ' Where-Object { $_ -like "$wordToComplete*" })'
-    ),
-    "consoles": (
-        "(agw console list --names-only 2>$null |"
-        ' Where-Object { $_ -like "$wordToComplete*" })'
-    ),
+    "sessions": ('(agw session list --names-only 2>$null | Where-Object { $_ -like "$wordToComplete*" })'),
+    "agents": ('(agw agent list --names-only 2>$null | Where-Object { $_ -like "$wordToComplete*" })'),
+    "consoles": ('(agw console list --names-only 2>$null | Where-Object { $_ -like "$wordToComplete*" })'),
     "session_templates": (
         "(agw resource list --kind session-template --names-only 2>$null"
         " | ForEach-Object { ($_ -split '/', 2)[1] }"
@@ -64,18 +49,9 @@ DYNAMIC_SNIPPETS: dict[str, str] = {
         " | ForEach-Object { ($_ -split '/', 2)[1] }"
         ' | Where-Object { $_ -like "$wordToComplete*" })'
     ),
-    "secrets": (
-        "(agw secret list --names-only 2>$null |"
-        ' Where-Object { $_ -like "$wordToComplete*" })'
-    ),
-    "resource_kinds": (
-        "(agw resource kinds --names-only 2>$null |"
-        ' Where-Object { $_ -like "$wordToComplete*" })'
-    ),
-    "resource_refs": (
-        "(agw resource list --names-only 2>$null |"
-        ' Where-Object { $_ -like "$wordToComplete*" })'
-    ),
+    "secrets": ('(agw secret list --names-only 2>$null | Where-Object { $_ -like "$wordToComplete*" })'),
+    "resource_kinds": ('(agw resource kinds --names-only 2>$null | Where-Object { $_ -like "$wordToComplete*" })'),
+    "resource_refs": ('(agw resource list --names-only 2>$null | Where-Object { $_ -like "$wordToComplete*" })'),
     "migrate_selectors": (
         "(agw resource list --origin operator --names-only 2>$null"
         " | ForEach-Object { ($_ -split '/', 2)[0]; $_ }"
@@ -236,10 +212,7 @@ def _emit_param_completions(lines: list[str], spec: CommandSpec, token_offset: i
         cmp_op = "-ge" if param.multiple else "-eq"
         if param.choices:
             lines.append(f"{indent}# Positional: {param.name}")
-            lines.append(
-                f"{indent}if ($wordToComplete -notlike '-*' -and "
-                f"$tokenCount {cmp_op} {pos_token}) {{"
-            )
+            lines.append(f"{indent}if ($wordToComplete -notlike '-*' -and $tokenCount {cmp_op} {pos_token}) {{")
             _open_result_array(lines, f"{indent}    ")
             for choice in param.choices:
                 lines.append(
@@ -253,10 +226,7 @@ def _emit_param_completions(lines: list[str], spec: CommandSpec, token_offset: i
         elif param.dynamic_completer and param.dynamic_completer in DYNAMIC_SNIPPETS:
             snippet = DYNAMIC_SNIPPETS[param.dynamic_completer]
             lines.append(f"{indent}# Positional: {param.name}")
-            lines.append(
-                f"{indent}if ($wordToComplete -notlike '-*' -and "
-                f"$tokenCount {cmp_op} {pos_token}) {{"
-            )
+            lines.append(f"{indent}if ($wordToComplete -notlike '-*' -and $tokenCount {cmp_op} {pos_token}) {{")
             lines.append(f"{indent}    {snippet}")
             lines.append(f"{indent}    return")
             lines.append(f"{indent}}}")

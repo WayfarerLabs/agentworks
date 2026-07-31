@@ -75,12 +75,19 @@ def agent_describe(
 @agent_app.command("reinit")
 def agent_reinit(
     name: Annotated[str, typer.Argument(help="Agent name")],
+    update_template: Annotated[
+        str | None,
+        typer.Option(
+            "--update-template",
+            help="Re-point this agent to a different template, then reinit to apply it",
+        ),
+    ] = None,
 ) -> None:
     """Re-run agent setup using the stored template."""
     from agentworks.agents.manager import reinit_agent
     from agentworks.config import load_config
 
-    reinit_agent(get_db(), load_config(), name=name)
+    reinit_agent(get_db(), load_config(), name=name, update_template=update_template)
 
 
 @agent_app.command("grant-workspaces")
@@ -90,9 +97,7 @@ def agent_grant_workspaces(
         list[str] | None,
         typer.Argument(help="Workspace names (omit when using --all)"),
     ] = None,
-    all_workspaces: Annotated[
-        bool, typer.Option("--all", help="Grant access to all workspaces")
-    ] = False,
+    all_workspaces: Annotated[bool, typer.Option("--all", help="Grant access to all workspaces")] = False,
 ) -> None:
     """Grant an agent explicit access to workspaces."""
     from agentworks.agents.grants import grant_workspaces
@@ -114,9 +119,7 @@ def agent_revoke_workspaces(
         list[str] | None,
         typer.Argument(help="Workspace names (omit when using --all)"),
     ] = None,
-    all_workspaces: Annotated[
-        bool, typer.Option("--all", help="Remove all explicit grants")
-    ] = False,
+    all_workspaces: Annotated[bool, typer.Option("--all", help="Remove all explicit grants")] = False,
 ) -> None:
     """Revoke explicit workspace grants from an agent."""
     from agentworks.agents.grants import revoke_workspaces
@@ -167,9 +170,7 @@ def agent_shell(
     from agentworks.agents.manager import shell_agent
     from agentworks.config import load_config
 
-    raise typer.Exit(
-        shell_agent(get_db(), load_config(), name=name, workspace_name=workspace)
-    )
+    raise typer.Exit(shell_agent(get_db(), load_config(), name=name, workspace_name=workspace))
 
 
 @agent_app.command("delete")

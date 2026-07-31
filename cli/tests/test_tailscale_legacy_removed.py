@@ -23,11 +23,25 @@ _MODULES_TO_SCAN = (
 
 
 def _read_module_source(name: str) -> str:
+    """Return the full source text an import name's implementation lives in.
+
+    ``agentworks.vms.manager`` and ``agentworks.vms.initializer`` are
+    packages (split into submodules to stay under the file-size limit),
+    so ``inspect.getfile``/``inspect.getsource`` on the package object
+    would return only ``__init__.py``'s re-export shim, silently
+    narrowing this tripwire to a few lines that never contain the
+    guarded legacy patterns. Concatenate every submodule's source
+    instead, so the check covers the package's actual implementation
+    (wherever a future refactor moves it) exactly as it covered the
+    single-file module before the split.
+    """
     import importlib
 
     mod = importlib.import_module(name)
-    src_path = inspect.getfile(mod)
-    return Path(src_path).read_text()
+    src_path = Path(inspect.getfile(mod))
+    if hasattr(mod, "__path__"):
+        return "\n".join(p.read_text() for p in sorted(src_path.parent.glob("*.py")))
+    return src_path.read_text()
 
 
 def test_initializer_has_no_read_env_with_legacy_for_tailscale() -> None:
@@ -45,8 +59,7 @@ def test_initializer_has_no_read_env_with_legacy_for_tailscale() -> None:
         "framework"
     )
     assert "read_env_with_legacy" not in src, (
-        "found read_env_with_legacy call in agentworks.vms.initializer; "
-        "Tailscale must resolve via the framework"
+        "found read_env_with_legacy call in agentworks.vms.initializer; Tailscale must resolve via the framework"
     )
 
 
@@ -74,8 +87,7 @@ def test_vm_manager_does_not_read_legacy_env_for_tailscale_in_collect() -> None:
     src = inspect.getsource(create_vm)
     forbidden_call = 'read_env_with_legacy("AW_TAILSCALE_AUTH_KEY"'
     assert forbidden_call not in src, (
-        "found legacy env-var fallback in create_vm; the create path "
-        "must resolve Tailscale via the framework"
+        "found legacy env-var fallback in create_vm; the create path must resolve Tailscale via the framework"
     )
     # The framework call shape is what we DO expect: the vm-template
     # node's preflight (run by the sweep) registers + predicts the key

@@ -45,9 +45,7 @@ def _write_config(tmp_path: Path, body: str, ssh_keys: tuple[Path, Path]) -> Pat
     return config_file
 
 
-def test_vm_template_declared_at_points_at_root_header(
-    tmp_path: Path, ssh_keys: tuple[Path, Path]
-) -> None:
+def test_vm_template_declared_at_points_at_root_header(tmp_path: Path, ssh_keys: tuple[Path, Path]) -> None:
     config_file = _write_config(
         tmp_path,
         """\
@@ -88,9 +86,7 @@ def test_vm_template_declared_at_uses_subsection_when_only_env_present(
     assert tmpl.declared_at.line == 5
 
 
-def test_admin_config_declared_at_points_at_admin_subtree(
-    tmp_path: Path, ssh_keys: tuple[Path, Path]
-) -> None:
+def test_admin_config_declared_at_points_at_admin_subtree(tmp_path: Path, ssh_keys: tuple[Path, Path]) -> None:
     config_file = _write_config(
         tmp_path,
         """\
@@ -109,9 +105,7 @@ def test_admin_config_declared_at_points_at_admin_subtree(
     assert cfg.admin.declared_at.line == 5  # earliest under [admin.*]
 
 
-def test_admin_config_synthesized_when_section_omitted(
-    tmp_path: Path, ssh_keys: tuple[Path, Path]
-) -> None:
+def test_admin_config_synthesized_when_section_omitted(tmp_path: Path, ssh_keys: tuple[Path, Path]) -> None:
     """A config with no ``[admin.*]`` sections loads with
     ``Config.admin = None``: the loader publishes nothing and the
     framework auto-declares the default at finalize (no synthesized
@@ -122,9 +116,7 @@ def test_admin_config_synthesized_when_section_omitted(
     assert cfg.admin is None
 
 
-def test_named_console_declared_at(
-    tmp_path: Path, ssh_keys: tuple[Path, Path]
-) -> None:
+def test_named_console_declared_at(tmp_path: Path, ssh_keys: tuple[Path, Path]) -> None:
     config_file = _write_config(
         tmp_path,
         """\
@@ -140,18 +132,14 @@ def test_named_console_declared_at(
     assert cfg.named_console.declared_at.line == 5
 
 
-def test_named_console_synthesized_when_omitted(
-    tmp_path: Path, ssh_keys: tuple[Path, Path]
-) -> None:
+def test_named_console_synthesized_when_omitted(tmp_path: Path, ssh_keys: tuple[Path, Path]) -> None:
     config_file = _write_config(tmp_path, "", ssh_keys)
 
     cfg = load_config(config_file, warn_issues=False)
     assert cfg.named_console is None
 
 
-def test_git_credential_declared_at(
-    tmp_path: Path, ssh_keys: tuple[Path, Path]
-) -> None:
+def test_git_credential_declared_at(tmp_path: Path, ssh_keys: tuple[Path, Path]) -> None:
     config_file = _write_config(
         tmp_path,
         """\
@@ -167,9 +155,7 @@ def test_git_credential_declared_at(
     assert cred.declared_at.line == 5
 
 
-def test_secret_decl_declared_at(
-    tmp_path: Path, ssh_keys: tuple[Path, Path]
-) -> None:
+def test_secret_decl_declared_at(tmp_path: Path, ssh_keys: tuple[Path, Path]) -> None:
     config_file = _write_config(
         tmp_path,
         """\
@@ -185,9 +171,7 @@ def test_secret_decl_declared_at(
     assert decl.declared_at.line == 5
 
 
-def test_secret_config_declared_at(
-    tmp_path: Path, ssh_keys: tuple[Path, Path]
-) -> None:
+def test_secret_config_declared_at(tmp_path: Path, ssh_keys: tuple[Path, Path]) -> None:
     config_file = _write_config(
         tmp_path,
         """\
@@ -202,9 +186,7 @@ def test_secret_config_declared_at(
     assert cfg.secret_config_data.declared_at.line == 5
 
 
-def test_secret_config_synthesized_when_omitted(
-    tmp_path: Path, ssh_keys: tuple[Path, Path]
-) -> None:
+def test_secret_config_synthesized_when_omitted(tmp_path: Path, ssh_keys: tuple[Path, Path]) -> None:
     config_file = _write_config(tmp_path, "", ssh_keys)
 
     cfg = load_config(config_file, warn_issues=False)
@@ -212,9 +194,7 @@ def test_secret_config_synthesized_when_omitted(
     assert cfg.secret_config_data.declared_at.line == 0
 
 
-def test_session_template_declared_at(
-    tmp_path: Path, ssh_keys: tuple[Path, Path]
-) -> None:
+def test_session_template_declared_at(tmp_path: Path, ssh_keys: tuple[Path, Path]) -> None:
     config_file = _write_config(
         tmp_path,
         """\
@@ -230,9 +210,7 @@ def test_session_template_declared_at(
     assert tmpl.declared_at.line == 5
 
 
-def test_workspace_template_declared_at(
-    tmp_path: Path, ssh_keys: tuple[Path, Path]
-) -> None:
+def test_workspace_template_declared_at(tmp_path: Path, ssh_keys: tuple[Path, Path]) -> None:
     config_file = _write_config(
         tmp_path,
         """\
@@ -248,9 +226,7 @@ def test_workspace_template_declared_at(
     assert tmpl.declared_at.line == 5
 
 
-def test_agent_template_declared_at(
-    tmp_path: Path, ssh_keys: tuple[Path, Path]
-) -> None:
+def test_agent_template_declared_at(tmp_path: Path, ssh_keys: tuple[Path, Path]) -> None:
     config_file = _write_config(
         tmp_path,
         """\

@@ -6,11 +6,10 @@ The framework's ``Origin`` (in ``agentworks.resources``) is built from a
 types stay separate because they belong to different layers.
 
 ``SourceLocation`` lives in its own module rather than ``agentworks.config``
-because (a) ``config.py`` is already past the project's 1000-line soft target
-and (b) types under ``agentworks.secrets`` (``SecretDecl`` et al.) need
-``SourceLocation`` for their ``declared_at`` field, and ``config.py`` already
-imports from ``agentworks.secrets`` -- a definition in ``config.py`` would
-create a circular import.
+because types under ``agentworks.secrets`` (``SecretDecl`` et al.) need
+``SourceLocation`` for their ``declared_at`` field, and ``agentworks.config``
+already imports from ``agentworks.secrets``: a definition in
+``agentworks.config`` would create a circular import.
 
 Companion ``scan_section_lines`` parses raw TOML text and returns a map of
 dotted section paths to opening-line numbers. The map is the data backing

@@ -38,11 +38,55 @@ def test_every_kind_has_a_sample() -> None:
         assert sample_text(kind).strip()
 
 
+def test_sample_kinds_are_exactly_the_registry_declarable_kinds() -> None:
+    """SAMPLE_KINDS (the set `resource sample --all` emits and the guard
+    treats as sampleable) is derived from the kind registry's per-kind
+    category, the same source of truth the capability guard keys off.
+    Pin that they stay identical so a future capability kind can't slip
+    into the sampleable set (and make `--all` crash on a missing sample
+    file), and a declarable kind can't fall out of it."""
+    from agentworks.resources import KIND_REGISTRY
+
+    declarable = {name for name, handler in KIND_REGISTRY.items() if handler.category == "declarable"}
+    assert set(SAMPLE_KINDS) == declarable
+    # No capability kind is ever sampleable.
+    assert set(SAMPLE_KINDS).isdisjoint(_capability_kinds())
+
+
+def _capability_kinds() -> list[str]:
+    """The code-backed kinds that carry no manifest, straight from the
+    registry so this list can't drift from the kind inventory."""
+    from agentworks.resources import KIND_REGISTRY
+
+    return [name for name, handler in KIND_REGISTRY.items() if handler.category == "capability"]
+
+
 def test_secret_backend_has_no_sample() -> None:
     """The declarable secret-backend kind died in the Phase 5.5
-    collapse; its (prose-only) sample died with it."""
-    with pytest.raises(ValidationError, match="unknown kind"):
+    collapse; it survives only as a capability descriptor, so sampling
+    it reports the capability-kind error rather than crashing."""
+    with pytest.raises(ValidationError, match="capability kind"):
         sample_text("secret-backend")
+
+
+@pytest.mark.parametrize("kind", _capability_kinds())
+def test_capability_kinds_report_no_sample(kind: str) -> None:
+    """Every capability kind `resource kinds` lists (harness,
+    secret-backend, vm-platform, git-credential-provider) is a valid
+    click.Choice value, so it reaches the service layer instead of
+    dying as a raw parse error (issue #276). The service layer rejects
+    it with a typed domain error that names the kind and lists the
+    declarable kinds that do have samples."""
+    with pytest.raises(ValidationError) as excinfo:
+        sample_text(kind)
+    err = excinfo.value
+    assert kind in str(err)
+    assert "capability kind" in str(err)
+    assert "no sample manifest" in str(err)
+    # The declarable set is offered as remediation, matching --all.
+    assert err.hint is not None
+    for declarable in SAMPLE_KINDS:
+        assert declarable in err.hint
 
 
 def test_all_kinds_concatenation_and_unknown_kind() -> None:
@@ -115,7 +159,6 @@ ssh_private_key = "{priv.as_posix()}"
     build_registry(config)
 
 
-
 def test_commented_samples_are_inert_through_the_loader(tmp_path: Path) -> None:
     """As shipped (commented), a written sample declares nothing."""
     resources = tmp_path / "resources"
@@ -142,6 +185,32 @@ def test_write_sample_creates_and_appends(tmp_path: Path) -> None:
     # Still inert after the append.
     manifests = load_manifests(resources)
     assert not manifests.entries
+
+
+def test_sample_capability_kind_is_a_clean_cli_error(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """End-to-end error contract for issue #276: `resource sample
+    harness` exits non-zero with a single clean `Error:` line, no
+    traceback, and (being a domain error, not an unexpected failure)
+    leaves error.log untouched. Regression guard against the raw
+    click.Choice traceback that used to escape the top-level handler."""
+    from agentworks import cli as cli_mod
+
+    monkeypatch.setattr("agentworks.config.CONFIG_DIR", tmp_path)
+    monkeypatch.setattr("sys.argv", ["agentworks", "resource", "sample", "harness"])
+    monkeypatch.setenv("AGW_DEBUG", "")
+
+    with pytest.raises(SystemExit) as excinfo:
+        cli_mod.main()
+
+    assert excinfo.value.code == 1
+    err = capsys.readouterr().err
+    assert "'harness' is a capability kind; it has no sample manifest" in err
+    assert "Traceback" not in err
+    assert "StopIteration" not in err
+    # Domain errors are clean-line, not logged: error.log must not appear.
+    assert not (tmp_path / "logs" / "error.log").exists()
 
 
 def test_write_sample_refuses_escapes_and_suffixes(tmp_path: Path) -> None:

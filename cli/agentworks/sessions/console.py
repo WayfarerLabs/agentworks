@@ -48,11 +48,7 @@ def create_console(
     # No sudo wrapper: the SSH user IS the admin user; sudo
     # to admin was a no-op user-switch that wiped env (left over from the
     # pre-direct-target-user-SSH era).
-    run_command(
-        f"tmux new-session -d -s {CONSOLE_SESSION_NAME} "
-        f"-n admin-shell "
-        f"{shlex.quote('exec $SHELL -l')}"
-    )
+    run_command(f"tmux new-session -d -s {CONSOLE_SESSION_NAME} -n admin-shell {shlex.quote('exec $SHELL -l')}")
 
     # Keep windows open when attached session command exits
     run_command(f"tmux set -t {CONSOLE_SESSION_NAME} remain-on-exit on", check=False)

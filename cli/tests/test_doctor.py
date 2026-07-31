@@ -123,9 +123,7 @@ class TestCompletionChecks:
         assert doctor._shell_available("powershell") is True
         assert doctor._shell_available("zsh") is False
 
-        monkeypatch.setattr(
-            shutil, "which", lambda name: "/x/powershell" if name == "powershell" else None
-        )
+        monkeypatch.setattr(shutil, "which", lambda name: "/x/powershell" if name == "powershell" else None)
         assert doctor._shell_available("powershell") is True
 
 
@@ -155,12 +153,15 @@ def test_run_checks_group_order_and_config_failure_placeholder(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Group order is a presentation choice decoupled from which checks
-    need config: with config unavailable, the report keeps its shape;
-    the VM sites group renders a skipped pointer (it precedes the
-    Configuration group that explains the failure, so silent absence
-    would read as "no sites") and every config-free group renders in
-    presentation order. Integration for the same reason as the smoke
-    test above: the config-free groups probe the real environment.
+    need config: with config/registry unavailable, the report keeps its shape;
+    the registry-dependent groups (VM platforms, VM sites, Secret backends,
+    Secrets) each render a skipped pointer (they precede the Configuration
+    group that explains the failure, so silent absence would read as "no
+    sites"/"no secrets") and every config-free group renders in presentation
+    order. VM platforms and Secret backends now read stored readiness off the
+    graph (R11), so they too need the registry and skip cleanly in degraded
+    mode. Integration for the same reason as the smoke test above: the
+    config-free groups probe the real environment.
     """
     from agentworks import doctor
 
@@ -175,12 +176,42 @@ def test_run_checks_group_order_and_config_failure_placeholder(
         "Python",
         "Required tools",
         "Tailscale",
+        "System plugins",
         "VM platforms",
         "VM sites",
         "Configuration",
+        "Secret backends",
+        "Secrets",
         "Database",
     ]
-    placeholder = next(g for g in report.groups if g.name == "VM sites").checks
-    assert len(placeholder) == 1
-    assert placeholder[0].status is doctor.Status.INFO
-    assert "Configuration" in (placeholder[0].message or "")
+    for group_name in ("VM platforms", "System plugins", "VM sites", "Secret backends", "Secrets"):
+        placeholder = next(g for g in report.groups if g.name == group_name).checks
+        assert len(placeholder) == 1, group_name
+        assert placeholder[0].status is doctor.Status.INFO, group_name
+        message = placeholder[0].message or ""
+        assert "skipped" in message, group_name
+        assert "Configuration" in message, group_name
+
+
+@pytest.mark.integration
+def test_run_checks_secrets_group_skips_not_vanishes_when_config_broken(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Regression for #253: when config/manifests are unavailable, the
+    Secrets group must render an explicit skipped-with-reason line rather
+    than vanishing from the report entirely, matching the VM sites group.
+    """
+    from agentworks import doctor
+
+    failed = doctor.HealthGroup("Configuration")
+    failed.fail("Manifest", "kind: not-a-real-kind")
+    monkeypatch.setattr(doctor, "_check_config", lambda: (failed, None, None))
+
+    report = doctor.run_checks()
+
+    secrets = next(g for g in report.groups if g.name == "Secrets")
+    vm_sites = next(g for g in report.groups if g.name == "VM sites")
+    # Secrets follows the VM sites skip pattern exactly.
+    assert len(secrets.checks) == 1
+    assert secrets.checks[0].status is doctor.Status.INFO
+    assert secrets.checks[0].message == vm_sites.checks[0].message

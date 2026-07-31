@@ -83,9 +83,7 @@ def test_sve_gate_matches_sve_and_sve2_as_whole_words() -> None:
     flags, pattern = match.group(1), match.group(2)
 
     def fires(features: str) -> bool:
-        proc = subprocess.run(
-            ["grep", flags, pattern], input=features, text=True, capture_output=True
-        )
+        proc = subprocess.run(["grep", flags, pattern], input=features, text=True, capture_output=True)
         return proc.returncode == 0
 
     # Apple vz advertising the full SVE2 set, and SVE without SVE2.

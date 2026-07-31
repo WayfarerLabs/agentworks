@@ -47,9 +47,7 @@ def _write_cfg(tmp_path: Path, body: str, ssh_keys: tuple[Path, Path]) -> Path:
 # -- Header section ---------------------------------------------------------
 
 
-def test_operator_declared_secret_shows_file_and_line(
-    tmp_path: Path, ssh_keys: tuple[Path, Path]
-) -> None:
+def test_operator_declared_secret_shows_file_and_line(tmp_path: Path, ssh_keys: tuple[Path, Path]) -> None:
     cfg = _write_cfg(
         tmp_path,
         """\
@@ -79,9 +77,7 @@ def test_operator_declared_secret_shows_file_and_line(
     assert desc.origin.line > 0
 
 
-def test_auto_declared_secret_shows_first_requirement_source(
-    tmp_path: Path, ssh_keys: tuple[Path, Path]
-) -> None:
+def test_auto_declared_secret_shows_first_requirement_source(tmp_path: Path, ssh_keys: tuple[Path, Path]) -> None:
     """A secret referenced from `[admin.env]` but not declared in
     ``[secrets.*]`` auto-declares; the origin carries the structured
     source tuple and the description is synthesized so the list view
@@ -112,9 +108,7 @@ def test_auto_declared_secret_shows_first_requirement_source(
     assert desc.description == "(auto) the API_KEY env var for admin-template/default"
 
 
-def test_auto_declared_description_suffix_counts_other_sources(
-    tmp_path: Path, ssh_keys: tuple[Path, Path]
-) -> None:
+def test_auto_declared_description_suffix_counts_other_sources(tmp_path: Path, ssh_keys: tuple[Path, Path]) -> None:
     """An auto-declared secret required by N distinct sources gets a
     ``" (and N-1 more)"`` suffix on the synthesized description (Origin
     names the first source; the suffix accounts for the rest). N
@@ -155,18 +149,13 @@ def test_auto_declared_description_suffix_counts_other_sources(
     assert desc.description.startswith("(auto) ")
     assert desc.description.endswith("(and 1 more)")
     # First-named source is one of the two requiring templates.
-    assert (
-        " for admin-template/default " in desc.description
-        or " for vm-template/azure-prod " in desc.description
-    )
+    assert " for admin-template/default " in desc.description or " for vm-template/azure-prod " in desc.description
 
 
 # -- Usages section ---------------------------------------------------------
 
 
-def test_multiple_usages_render_one_row_each(
-    tmp_path: Path, ssh_keys: tuple[Path, Path]
-) -> None:
+def test_multiple_usages_render_one_row_each(tmp_path: Path, ssh_keys: tuple[Path, Path]) -> None:
     """A secret referenced by three sources shows three usage rows; the
     sources are distinct so the dedupe step does nothing.
     """
@@ -202,9 +191,7 @@ def test_multiple_usages_render_one_row_each(
     assert texts == ["the ADMIN_KEY env var", "the TEMPLATE_KEY env var"]
 
 
-def test_no_usages_for_unreferenced_operator_declared_secret(
-    tmp_path: Path, ssh_keys: tuple[Path, Path]
-) -> None:
+def test_no_usages_for_unreferenced_operator_declared_secret(tmp_path: Path, ssh_keys: tuple[Path, Path]) -> None:
     """An operator-declared secret nothing references has an empty
     ``usages`` tuple.
     """
@@ -225,9 +212,7 @@ def test_no_usages_for_unreferenced_operator_declared_secret(
 # -- Backend mappings section ----------------------------------------------
 
 
-def test_backend_mappings_show_each_active_backend(
-    tmp_path: Path, ssh_keys: tuple[Path, Path]
-) -> None:
+def test_backend_mappings_show_each_active_backend(tmp_path: Path, ssh_keys: tuple[Path, Path]) -> None:
     """One mapping per active backend in the resolver chain order. The
     env-var backend shows its derived identifier; the prompt backend has
     no static identifier.
@@ -259,9 +244,7 @@ def test_backend_mappings_show_each_active_backend(
     assert prompt.identifier is None
 
 
-def test_backend_mapping_respects_operator_override(
-    tmp_path: Path, ssh_keys: tuple[Path, Path]
-) -> None:
+def test_backend_mapping_respects_operator_override(tmp_path: Path, ssh_keys: tuple[Path, Path]) -> None:
     """An operator's ``backend_mappings.env-var = "CUSTOM"`` overrides
     the framework default.
     """
@@ -285,9 +268,7 @@ def test_backend_mapping_respects_operator_override(
     assert env_var.identifier == "CUSTOM_API_KEY"
 
 
-def test_backend_mapping_respects_opt_out(
-    tmp_path: Path, ssh_keys: tuple[Path, Path]
-) -> None:
+def test_backend_mapping_respects_opt_out(tmp_path: Path, ssh_keys: tuple[Path, Path]) -> None:
     """An operator's ``backend_mappings.env-var = false`` skips that
     backend for this secret; ``would_attempt`` is False.
     """
@@ -375,9 +356,7 @@ def test_resolution_preview_falls_through_when_env_var_is_unset(
     assert desc.resolution.resolved_by == "prompt"
 
 
-def test_resolution_preview_falls_through_to_prompt(
-    tmp_path: Path, ssh_keys: tuple[Path, Path]
-) -> None:
+def test_resolution_preview_falls_through_to_prompt(tmp_path: Path, ssh_keys: tuple[Path, Path]) -> None:
     cfg = _write_cfg(
         tmp_path,
         """\
@@ -398,9 +377,114 @@ def test_resolution_preview_falls_through_to_prompt(
     assert desc.resolution.resolved_by == "prompt"
 
 
-def test_resolution_preview_not_available_when_no_backend_attempts(
-    tmp_path: Path, ssh_keys: tuple[Path, Path]
+# -- Readiness-aware describe (R9.1 / R9.6) ---------------------------------
+
+
+def test_not_ready_backend_annotated_and_skipped_in_preview(
+    tmp_path: Path, ssh_keys: tuple[Path, Path], monkeypatch
 ) -> None:
+    """R9.1 / R9.6: a not-ready mapped backend (onepassword with no ``op`` on
+    PATH) keeps its mapping shown but flagged ``(not ready: <reason>)`` in
+    Backend mappings, is shown as skipped in the Resolution preview, and does
+    NOT count toward "would resolve via X": the chain falls through to prompt.
+    Readiness is offline (no store probe)."""
+    monkeypatch.setattr("shutil.which", lambda name: None)  # op absent -> not ready
+    cfg = _write_cfg(
+        tmp_path,
+        """\
+        [plugins]
+        system = ["onepassword"]
+
+        [secrets.api-key]
+        description = "API key"
+        backend_mappings.onepassword = "op://Vault/api/field"
+
+        [secret_config]
+        backends = ["onepassword", "prompt"]
+        """,
+        ssh_keys,
+    )
+    config = load_config(cfg, warn_issues=False)
+    registry = build_registry(config)
+    desc = describe_secret(config, registry, "api-key")
+
+    op = next(m for m in desc.backend_mappings if m.backend == "onepassword")
+    assert op.would_attempt is True
+    assert op.not_ready_reason == "op CLI not installed"
+    assert ("onepassword", "op CLI not installed") in desc.resolution.skipped_not_ready
+    assert desc.resolution.resolved_by == "prompt"  # not-ready op does not count
+    assert desc.resolution.available
+
+
+def test_render_shows_not_ready_annotation_and_skip(
+    tmp_path: Path, ssh_keys: tuple[Path, Path], capsys: pytest.CaptureFixture[str], monkeypatch
+) -> None:
+    """The rendered describe view carries the not-ready annotation on the
+    mapping and the ``skipped: not ready`` line in the preview."""
+    from agentworks.secrets.inspect import render_secret_description
+
+    monkeypatch.setattr("shutil.which", lambda name: None)
+    cfg = _write_cfg(
+        tmp_path,
+        """\
+        [plugins]
+        system = ["onepassword"]
+
+        [secrets.api-key]
+        description = "API key"
+        backend_mappings.onepassword = "op://Vault/api/field"
+
+        [secret_config]
+        backends = ["onepassword", "prompt"]
+        """,
+        ssh_keys,
+    )
+    config = load_config(cfg, warn_issues=False)
+    registry = build_registry(config)
+    render_secret_description(describe_secret(config, registry, "api-key"))
+
+    out = capsys.readouterr().out
+    assert "onepassword: op://Vault/api/field (not ready: op CLI not installed)" in out
+    assert "skipped onepassword: not ready: op CLI not installed" in out
+    assert "would resolve via prompt" in out
+
+
+def test_interactive_optimism_preview_unchanged_under_readiness(
+    tmp_path: Path, ssh_keys: tuple[Path, Path], monkeypatch
+) -> None:
+    """LLD e acceptance line: the interactive-optimism preview is UNCHANGED.
+    Readiness is the offline layer UNDER interactive-optimism: with an earlier
+    not-ready onepassword skipped, a ready ``prompt`` is STILL previewed as the
+    resolving backend on ``would_attempt`` alone (never probed for a TTY or
+    interaction). Readiness (offline) and interactivity (optimistic) stay
+    orthogonal; no surface conflates them."""
+    monkeypatch.setattr("shutil.which", lambda name: None)
+    cfg = _write_cfg(
+        tmp_path,
+        """\
+        [plugins]
+        system = ["onepassword"]
+
+        [secrets.api-key]
+        description = "API key"
+        backend_mappings.onepassword = "op://Vault/api/field"
+
+        [secret_config]
+        backends = ["onepassword", "prompt"]
+        """,
+        ssh_keys,
+    )
+    config = load_config(cfg, warn_issues=False)
+    registry = build_registry(config)
+    desc = describe_secret(config, registry, "api-key")
+
+    # The prompt is previewed optimistically (describe passes
+    # interactive_available=True), exactly as before this phase.
+    assert desc.resolution.resolved_by == "prompt"
+    assert desc.resolution.available
+
+
+def test_resolution_preview_not_available_when_no_backend_attempts(tmp_path: Path, ssh_keys: tuple[Path, Path]) -> None:
     """A secret opted out of every active backend resolves via no
     backend; the preview reports "not available".
 
@@ -443,7 +527,9 @@ def test_resolution_preview_not_available_when_no_backend_attempts(
         backend_mappings={"env-var": False},
     )
     registry.add(
-        "secret", "api-key", decl,
+        "secret",
+        "api-key",
+        decl,
         Origin.auto_declared(source=("test", "api-key")),
     )
     registry.finalize()
@@ -511,9 +597,7 @@ def test_render_emits_header_usages_mappings_preview(
 # -- Used-by (Phase 3c dynamic dimension) -----------------------------------
 
 
-def test_describe_secret_used_by_is_none_without_db(
-    tmp_path: Path, ssh_keys: tuple[Path, Path]
-) -> None:
+def test_describe_secret_used_by_is_none_without_db(tmp_path: Path, ssh_keys: tuple[Path, Path]) -> None:
     """Without ``db``, ``describe_secret`` leaves ``used_by = None`` and
     the renderer omits the ``Used by:`` section. Preserves the
     pre-Phase-3c behavior for callers that don't care about the
@@ -536,9 +620,7 @@ def test_describe_secret_used_by_is_none_without_db(
     assert desc.used_by is None
 
 
-def test_describe_secret_used_by_populated_with_db(
-    tmp_path: Path, ssh_keys: tuple[Path, Path]
-) -> None:
+def test_describe_secret_used_by_populated_with_db(tmp_path: Path, ssh_keys: tuple[Path, Path]) -> None:
     """With ``db``, ``used_by`` is a tuple of ``InstanceRef``. For an
     admin-mode session referencing this secret via ``[admin.env]``,
     the tuple has one entry pointing at the session.
@@ -558,20 +640,19 @@ def test_describe_secret_used_by_populated_with_db(
 
     db = Database(tmp_path / "used_by_test.db")
     db.insert_vm("vm-1", site="lima", hostname="lima--vm-1")
-    db.insert_workspace(
-        "ws-1", workspace_path="/tmp/ws-1", vm_name="vm-1", linux_group="ws-ws-1"
-    )
+    db.insert_workspace("ws-1", workspace_path="/tmp/ws-1", vm_name="vm-1", linux_group="ws-ws-1")
     db.insert_session(
-        "sess-1", "ws-1", template="default", mode=SessionMode.ADMIN,
+        "sess-1",
+        "ws-1",
+        template="default",
+        mode=SessionMode.ADMIN,
         socket_path="/tmp/sess-1.sock",
     )
     db._conn.commit()
 
     desc = describe_secret(config, registry, "shared-key", db=db)
     assert desc.used_by is not None
-    assert [(r.instance_kind, r.instance_name) for r in desc.used_by] == [
-        ("session", "sess-1")
-    ]
+    assert [(r.instance_kind, r.instance_name) for r in desc.used_by] == [("session", "sess-1")]
 
 
 def test_render_emits_used_by_section_when_populated(
@@ -599,11 +680,12 @@ def test_render_emits_used_by_section_when_populated(
 
     db = Database(tmp_path / "render_used_by.db")
     db.insert_vm("vm-1", site="lima", hostname="lima--vm-1")
-    db.insert_workspace(
-        "ws-1", workspace_path="/tmp/ws-1", vm_name="vm-1", linux_group="ws-ws-1"
-    )
+    db.insert_workspace("ws-1", workspace_path="/tmp/ws-1", vm_name="vm-1", linux_group="ws-ws-1")
     db.insert_session(
-        "sess-1", "ws-1", template="default", mode=SessionMode.ADMIN,
+        "sess-1",
+        "ws-1",
+        template="default",
+        mode=SessionMode.ADMIN,
         socket_path="/tmp/sess-1.sock",
     )
     db._conn.commit()
@@ -693,9 +775,7 @@ def test_render_omits_used_by_section_when_none(
 # -- Missing-name behavior --------------------------------------------------
 
 
-def test_describe_secret_raises_not_found_for_unknown_name(
-    tmp_path: Path, ssh_keys: tuple[Path, Path]
-) -> None:
+def test_describe_secret_raises_not_found_for_unknown_name(tmp_path: Path, ssh_keys: tuple[Path, Path]) -> None:
     """The service-layer function raises ``NotFoundError`` for an
     unknown secret name (typed at the service layer per the project's
     service-layer-is-the-authority rule; CLI / future web/API clients

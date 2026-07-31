@@ -66,9 +66,7 @@ class GitCredentialNode:
         # then the held instance's own world checks.
         from agentworks.orchestration.secrets import require_predicted_refs
 
-        require_predicted_refs(
-            self.key, self._secret_refs, ctx.config, self._registry
-        )
+        require_predicted_refs(self.key, self._secret_refs, ctx.config, self._registry)
         self._provider.preflight(ctx)
 
     def runup(self, ctx: RunContext) -> None:
@@ -92,7 +90,7 @@ def git_credential_node(registry: Registry, name: str) -> GitCredentialNode:
             entity_name=name,
         )
     provider = resolve_git_credential_providers(registry, [name])[name]
-    secret_refs = tuple(
-        ref for ref in decl.referenced_resources() if ref.kind == "secret"
-    )
+    # Read the credential's config-implied secret edges off the retained graph
+    # (the single access path, R11) rather than re-walking the decl.
+    secret_refs = tuple(ref for ref in registry.graph.edges_of("git-credential", name) if ref.kind == "secret")
     return GitCredentialNode(name, provider, secret_refs, registry)

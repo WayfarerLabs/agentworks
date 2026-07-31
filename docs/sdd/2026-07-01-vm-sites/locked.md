@@ -123,3 +123,30 @@ semantic property; the behavioral guard suite is the enforcement).
 
 The FRD, HLA, plan, capability-model note, and LLDs are accurate as-built as of this date. They are
 now locked.
+
+## Addendum: 2026-07-26 (PR #271)
+
+`vm_active` is now a pure power-hold on every platform and no longer performs a reconnect wait, so
+the HLA's WSL2 justification for `config` on the hold path (building the Tailscale transport for
+that wait) no longer holds. `config` remains on `vm_active`'s signature as reserved operator
+settings (the base-class contract), but no platform's hold uses it today. The Azure
+`native_transport()` public-IP rationale for `config` is unchanged. See
+`capabilities/vm_platform/wsl2.py::_keepalive`.
+
+## Addendum: 2026-07-27 (issue #278, name-length caps)
+
+Two name-length statements in the FRD are corrected as-built (the FRD is a point-in-time record and
+is not edited in place; this addendum is authoritative):
+
+- **Site names** no longer follow the VM-name rules and are NOT capped at 30. Site names hit no
+  OS-level identifier limit: they are a registry key and display/config surface only, never derived
+  into a hostname or SSH host alias (the FRD's "they appear in hostnames and SSH host aliases" was
+  incorrect; VM names, not site names, feed `{slug}-{vm}` hostnames). They now use the freeform cap,
+  `MAX_FREEFORM_NAME_LENGTH` (64).
+- **The hostname bound** in the FRD's Tailscale section ("slug max 20 plus dash plus name max 30 is
+  51 characters") is updated: the VM-name cap is now `MAX_VM_NAME_LENGTH` (38). The VM name feeds
+  two composed sinks and the cap is the MIN over both: the `{slug}-{vm}` hostname / DNS label
+  (`63 - 1 - 20 = 42`) and the `{slug}-{vm}-vnet` Azure virtual-network name
+  (`64 - 20 - 1 - 5 = 38`). The vnet sink binds (its `-vnet` suffix costs 5 more characters than the
+  bare hostname), so the cap is 38, NOT the 63-char hostname and NOT Azure's 64-char computer-name.
+  See the resource-manifests lockfile's 2026-07-27 entry for the full per-kind cap rationale.

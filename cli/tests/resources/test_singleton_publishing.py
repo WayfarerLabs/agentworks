@@ -45,9 +45,7 @@ def _write_cfg(tmp_path: Path, body: str, ssh_keys: tuple[Path, Path]) -> Path:
     return p
 
 
-def test_admin_template_default_present_when_no_admin_sections(
-    tmp_path: Path, ssh_keys: tuple[Path, Path]
-) -> None:
+def test_admin_template_default_present_when_no_admin_sections(tmp_path: Path, ssh_keys: tuple[Path, Path]) -> None:
     cfg = _write_cfg(tmp_path, "", ssh_keys)
     r = build_registry(load_config(cfg, warn_issues=False))
 
@@ -61,9 +59,7 @@ def test_admin_template_default_present_when_no_admin_sections(
     assert len(list(r.iter_kind("admin-template"))) == 1
 
 
-def test_admin_template_default_present_with_admin_env_only(
-    tmp_path: Path, ssh_keys: tuple[Path, Path]
-) -> None:
+def test_admin_template_default_present_with_admin_env_only(tmp_path: Path, ssh_keys: tuple[Path, Path]) -> None:
     """The implicit-parent case at the singleton scope: ``[admin.env]``
     alone still yields one admin-template:default with env populated.
     """
@@ -86,9 +82,7 @@ def test_admin_template_default_present_with_admin_env_only(
     assert admin.env["FOO"].value == "bar"
 
 
-def test_named_console_template_default_always_present(
-    tmp_path: Path, ssh_keys: tuple[Path, Path]
-) -> None:
+def test_named_console_template_default_always_present(tmp_path: Path, ssh_keys: tuple[Path, Path]) -> None:
     cfg = _write_cfg(tmp_path, "", ssh_keys)
     r = build_registry(load_config(cfg, warn_issues=False))
 
@@ -98,9 +92,7 @@ def test_named_console_template_default_always_present(
     assert len(list(r.iter_kind("named-console-template"))) == 1
 
 
-def test_named_console_template_default_with_real_section(
-    tmp_path: Path, ssh_keys: tuple[Path, Path]
-) -> None:
+def test_named_console_template_default_with_real_section(tmp_path: Path, ssh_keys: tuple[Path, Path]) -> None:
     cfg = _write_cfg(
         tmp_path,
         """\
@@ -117,9 +109,7 @@ def test_named_console_template_default_with_real_section(
     assert nc.tmux_layout == "tiled"
 
 
-def test_manifest_declared_default_needs_no_exemption(
-    tmp_path: Path, ssh_keys: tuple[Path, Path]
-) -> None:
+def test_manifest_declared_default_needs_no_exemption(tmp_path: Path, ssh_keys: tuple[Path, Path]) -> None:
     """The scenario the old synthesized-singleton collision exemption
     existed for: a manifest declares admin-template/default and the TOML
     has no [admin.*] sections. With no placeholder published, the

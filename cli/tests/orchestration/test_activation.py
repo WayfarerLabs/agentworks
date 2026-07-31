@@ -146,9 +146,7 @@ def test_gate_span_closes_on_failure_in_the_body() -> None:
     (where any unwind runs), so teardown still reaches a held
     target."""
     target = _Target(active=True)
-    with pytest.raises(RuntimeError, match="boom"), activation_gate(
-        target, _resolver({}, [])
-    ):
+    with pytest.raises(RuntimeError, match="boom"), activation_gate(target, _resolver({}, [])):
         raise RuntimeError("boom")
     assert target.events == ["probe", "hold-open", "hold-close"]
 
@@ -184,9 +182,7 @@ class _Rejoining(_Target):
 
     def auto_start(self, gate_secrets: SecretReader) -> None:
         super().auto_start(gate_secrets)
-        self.seen_secrets["tailscale-auth-key"] = gate_secrets.get(
-            "tailscale-auth-key"
-        )
+        self.seen_secrets["tailscale-auth-key"] = gate_secrets.get("tailscale-auth-key")
         # A second read must serve the recorded value, not re-resolve.
         gate_secrets.get("tailscale-auth-key")
 
@@ -223,9 +219,7 @@ def test_repair_secret_resolves_lazily_and_lands_in_the_seed() -> None:
     # ordering across them is provable.
     values = ensure_active(
         target,
-        _resolver(
-            {"proxmox-token": "tok", "tailscale-auth-key": "ts"}, target.events
-        ),
+        _resolver({"proxmox-token": "tok", "tailscale-auth-key": "ts"}, target.events),
     )
     assert target.events == [
         "probe",

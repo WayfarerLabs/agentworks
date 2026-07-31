@@ -27,6 +27,9 @@ jobs:
       - name: Ruff check
         run: uv run ruff check agentworks/ tests/
 
+      - name: Ruff format check
+        run: uv run ruff format --check agentworks/ tests/
+
       - name: Mypy
         run: uv run mypy agentworks/ tests/
 
@@ -34,12 +37,12 @@ jobs:
         run: |
           # Business logic must not import typer; use the output module instead.
           # Allowed: cli/ package (CLI layer), completions/ (CLI layer),
-          # sessions/manager.py (raw data pipe, see comment in file).
+          # sessions/manager/_logs.py (raw data pipe, see comment in file).
           violations=$(grep -rnP '^\s*(import typer|from typer)' agentworks/ --include='*.py' \
             | grep -v '__pycache__' \
             | grep -v 'agentworks/cli/' \
             | grep -v 'completions/' \
-            | grep -v 'sessions/manager\.py' \
+            | grep -v 'sessions/manager/_logs\.py' \
             || true)
           if [ -n "$violations" ]; then
             echo "ERROR: typer imported in business logic (use agentworks.output instead):"
@@ -75,7 +78,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@v7
         with:
           node-version-file: .node-version
 
@@ -87,12 +90,36 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@v7
         with:
           node-version-file: .node-version
 
       - name: ./scripts/rulesync-upgen.sh --check
         run: ./scripts/rulesync-upgen.sh --check
+
+  locked-sdds:
+    runs-on: ubuntu-latest
+    steps:
+      # Full history so the merge-base with the base branch is reachable; the
+      # check compares against where this branch diverged from main.
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          # For PRs, check out the head commit (not the synthetic merge commit)
+          # so merge-base against the base ref is meaningful. Empty on push.
+          ref: ${{ github.event.pull_request.head.sha }}
+
+      - name: Determine base ref
+        id: base
+        run: |
+          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            echo "ref=${{ github.event.pull_request.base.sha }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "ref=${{ github.event.before }}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: ./scripts/check-locked-sdds.sh
+        run: ./scripts/check-locked-sdds.sh "${{ steps.base.outputs.ref }}"
 
   # Umbrella job: require this single check in branch protection on main.
   # Adding a new job to CI means adding it to `needs:` below, so the
@@ -100,7 +127,7 @@ jobs:
   # rather than in GitHub settings that can drift silently.
   ci-success:
     if: always()
-    needs: [python-checks, test, lint-files, rulesync-drift]
+    needs: [python-checks, test, lint-files, rulesync-drift, locked-sdds]
     runs-on: ubuntu-latest
     steps:
       - name: Verify all required jobs passed

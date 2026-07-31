@@ -192,7 +192,4 @@ def test_unknown_workspace_template_key_warns(tmp_path: Path) -> None:
         ),
         warn_issues=False,
     )
-    assert any(
-        "workspace_templates.default" in issue and "git_user_emial" in issue
-        for issue in cfg.config_issues
-    )
+    assert any("workspace_templates.default" in issue and "git_user_emial" in issue for issue in cfg.config_issues)

@@ -18,8 +18,9 @@ if TYPE_CHECKING:
 def format_origin_line(origin: Origin | None) -> str:
     """Render an ``Origin`` as a single-line parenthetical:
     ``"operator-declared (~/path:42)"``, ``"auto-declared (kind:name)"``,
-    ``"built-in (source)"``. ``"unknown"`` when ``origin`` is None
-    (defensive for Resources constructed outside the framework path).
+    ``"built-in (source)"``, ``"system-plugin <plugin> (source)"``.
+    ``"unknown"`` when ``origin`` is None (defensive for Resources
+    constructed outside the framework path).
 
     Raises ``AssertionError`` on an unknown ``Origin`` variant -- a loud
     failure here catches the case where a future variant is added to
@@ -39,7 +40,26 @@ def format_origin_line(origin: Origin | None) -> str:
     if origin.variant == "built-in":
         source = origin.source
         return f"built-in ({source})" if source else "built-in"
+    if origin.variant == "system-plugin":
+        label = f"system-plugin {origin.plugin}" if origin.plugin else "system-plugin"
+        return f"{label} ({origin.source})" if origin.source else label
     raise AssertionError(f"unhandled Origin variant: {origin.variant!r}")
+
+
+def format_origin_location(origin: Origin | None) -> str:
+    """Render an ``Origin`` as a bare source location for inline error
+    framing, dropping the variant prefix ``format_origin_line`` carries
+    for the describe / doctor views. An operator-declared row renders as
+    ``~/path:42`` (an operator reading a config error already knows it is
+    their config, so the ``operator-declared`` prefix is redundant noise
+    inside the message). Other variants fall back to the full
+    ``format_origin_line`` rendering: a built-in ``source`` or an
+    auto-declared ``kind/name`` carries no bare file location, so the
+    labelled form stays the informative one.
+    """
+    if origin is not None and origin.variant == "operator-declared" and origin.file is not None and origin.line:
+        return f"{format_file_path(origin.file)}:{origin.line}"
+    return format_origin_line(origin)
 
 
 def format_file_path(file: Path) -> str:

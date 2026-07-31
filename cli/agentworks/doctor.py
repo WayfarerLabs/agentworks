@@ -109,22 +109,38 @@ def run_checks(*, completion_version: str | None = None) -> HealthReport:
     report.groups.append(_check_python())
     report.groups.append(_check_required_tools())
     report.groups.append(_check_tailscale())
-    report.groups.append(_check_vm_platforms())
+    # System plugins leads the config-driven groups: it is a fundamental opt-in
+    # (it determines which platforms, backends, and harnesses even exist), so it
+    # reads best up front, before the VM stack it shapes, rather than splitting VM
+    # platforms from VM sites. The roster reads config.enabled_system_plugins
+    # against SYSTEM_PLUGINS and needs no registry (a plugin is an origin, not a
+    # resource kind, R12), so it skips only when config is unavailable. The None
+    # checks are spelled out at each site (not hoisted into a boolean local)
+    # because mypy's narrowing does not flow through one.
+    if config is not None:
+        report.groups.append(_check_plugins(config))
+    else:
+        report.groups.append(_skipped_group("System plugins", "Installed plugins"))
+    # VM platforms and VM sites render adjacent. VM platforms read stored
+    # readiness off the graph (R11), so they need the registry and skip cleanly
+    # in degraded mode like the others.
+    if registry is not None:
+        report.groups.append(_check_vm_platforms(registry))
+    else:
+        report.groups.append(_skipped_group("VM platforms", "Installed platforms"))
     if config is not None and registry is not None:
         report.groups.append(_check_vm_sites(config, registry))
     else:
-        # The group renders before Configuration explains the failure;
-        # an empty slot would read as "no sites", which isn't known.
-        sites = HealthGroup("VM sites")
-        sites.info(
-            "Declared sites",
-            "skipped (config or manifests unavailable; see the "
-            "Configuration group)",
-        )
-        report.groups.append(sites)
+        report.groups.append(_skipped_group("VM sites", "Declared sites"))
     report.groups.append(config_group)
+    if registry is not None:
+        report.groups.append(_check_secret_backends(registry))
+    else:
+        report.groups.append(_skipped_group("Secret backends", "Registered backends"))
     if config is not None and registry is not None:
         report.groups.append(_check_secrets(config, registry))
+    else:
+        report.groups.append(_skipped_group("Secrets", "Declared secrets"))
     report.groups.append(_check_database())
 
     if completion_version is not None:
@@ -136,6 +152,27 @@ def run_checks(*, completion_version: str | None = None) -> HealthReport:
 # ---------------------------------------------------------------------------
 # Individual check groups
 # ---------------------------------------------------------------------------
+
+
+def _skipped_group(name: str, item: str) -> HealthGroup:
+    """Render a group that cannot run because config or manifests are
+    unavailable (degraded mode).
+
+    A config/registry-dependent group renders in presentation order,
+    before the Configuration group that explains the failure. Omitting it
+    entirely would read as a real (empty) result: "no sites", "no
+    secrets". So it renders one explicit skip row instead, giving an
+    operator comparing a healthy run to a degraded one a clear signal
+    that the group was not checked and where to look for why. Any future
+    config-dependent group routes its degraded case through here so it
+    gets the same visible skip for free.
+    """
+    g = HealthGroup(name)
+    g.info(
+        item,
+        "skipped (config or manifests unavailable; see the Configuration group)",
+    )
+    return g
 
 
 def _check_system() -> HealthGroup:
@@ -197,23 +234,76 @@ def _check_required_tools() -> HealthGroup:
     return g
 
 
-def _check_vm_platforms() -> HealthGroup:
-    """Installed platforms and their host support, from the platform's
-    own check (the same gate that decides capability-row publication):
-    a supported platform is ``ok``; installed-but-disabled shows the
-    platform's stated reason. Per-site availability (a local-Lima site
-    without ``limactl``) is the SITE's state and reports in the VM
-    sites group.
+def _check_vm_platforms(registry: Registry) -> HealthGroup:
+    """Installed platforms and their host support, read from each
+    ``vm-platform`` row's stored readiness verdict off the graph (R11: the
+    finalize fold computed it, doctor does not recompute or probe the live
+    registry): a supported platform is ``ok``; a host-unsupported one shows
+    ``not ready: <reason>``. Per-site availability (a local-Lima site without
+    ``limactl``) is the SITE's state and reports in the VM sites group.
+
+    A DISABLED platform (its opt-in axis reads ``Enablement.disabled``, e.g. a
+    plugin platform whose plugin is not enabled) is SKIPPED here: the "System
+    plugins" roster is the enablement authority and already lists it as
+    disabled, so folding it in would double-list it and, worse, render its
+    ready-placeholder readiness as a misleading ``[ok]``. This matches the
+    "disabled hides" default-surface rule that ``agw resource list`` uses.
     """
-    from agentworks.capabilities.vm_platform import VM_PLATFORM_REGISTRY
+    from agentworks.resources.graph import Enablement
 
     g = HealthGroup("VM platforms")
-    for name, cls in VM_PLATFORM_REGISTRY.items():
-        reason = cls.unsupported_reason()
+    # Registry-definition order (what ``publish_to`` established from
+    # ``VM_PLATFORM_REGISTRY``), preserved: the pre-refactor group rendered in
+    # this order, and the reordering is not one of the R9 deltas.
+    for name, _decl in registry.iter_kind_items("vm-platform"):
+        if registry.graph.enablement_of("vm-platform", name) is Enablement.disabled:
+            continue
+        reason = registry.graph.readiness_of("vm-platform", name).reason
         if reason is not None:
-            g.info(name, f"disabled ({reason})")
+            g.info(name, f"not ready: {reason}")
         else:
             g.ok(name)
+    return g
+
+
+def _check_plugins(config: Config) -> HealthGroup:
+    """The system-plugin roster (R9, R10, R12): every installed plugin, its
+    description, and its opt-in state, read from ``SYSTEM_PLUGINS`` against
+    ``config.enabled_system_plugins``.
+
+    A BESPOKE surface, not a ``KIND_REGISTRY``-dispatched hook: a plugin is an
+    origin, not a resource kind (R12). Roster only (existence, description,
+    enable-state); it never enumerates a disabled plugin's contributed
+    capabilities or resources (that is what the enablement axis and the
+    reference hint are for). The reserved ``required_scopes`` (R10) render as an
+    informational least-privilege line when populated, unenforced; empty (the
+    v1 default) renders nothing. When the shipped index is empty the group
+    renders empty-but-present, so the surface exists and is testable even before
+    any plugin ships; the migrated plugins (``onepassword``, ``claude``,
+    ``proxmox``, ``azure``) now populate it.
+    """
+    from agentworks.plugins import SYSTEM_PLUGINS
+
+    g = HealthGroup("System plugins")
+    if not SYSTEM_PLUGINS:
+        g.info("No system plugins installed.")
+        return g
+
+    enabled = set(config.enabled_system_plugins)
+    for name, plugin in sorted(SYSTEM_PLUGINS.items()):
+        if name in enabled:
+            g.ok(f"plugin {name}", plugin.description or None)
+        else:
+            # The doctor renders the "not enabled in [plugins].system" STATE
+            # phrasing (the enablement mark carries only the "enable plugin
+            # <name>" remediation clause, never this state string).
+            message = "disabled (not enabled in [plugins].system)"
+            if plugin.description:
+                message = f"{message}; {plugin.description}"
+            g.info(f"plugin {name}", message)
+        if plugin.required_scopes:
+            levels = ", ".join(level.value for level in plugin.required_scopes)
+            g.info(f"plugin {name} least privilege", levels)
     return g
 
 
@@ -221,16 +311,16 @@ def _check_vm_sites(config: Config, registry: Registry) -> HealthGroup:
     """VM sites: every registered site's state, and every VM's site
     resolving to a usable declaration.
 
-    A DISABLED site (its own generic ``disabled_reason``: platform
-    missing/host-disabled, or a missing local requirement) is
+    A NOT-READY site (its stored readiness verdict: platform
+    host-unsupported, a disabled platform, or a missing local requirement) is
     informational (normal for the host, the site still exists) and
     skips preflight (pointless without its requirements). References
-    to a disabled site are the operator's problem-in-waiting and warn:
+    to a not-ready site are the operator's problem-in-waiting and warn:
     ``defaults.site`` and each VM row pointing at one. A VM whose site
     is not declared at all still FAILS with the paste-ready manifest
     snippet (the stranded remote-Lima case).
 
-    An enabled site's row IS the site node's ``preflight`` (the same
+    A ready site's row IS the site node's ``preflight`` (the same
     central resolvability prediction plus the held platform instance's
     world checks every service-layer operation sweeps): read-only by
     contract, which is exactly what lets doctor call it. A failing row
@@ -239,7 +329,6 @@ def _check_vm_sites(config: Config, registry: Registry) -> HealthGroup:
     from agentworks.db import Database
     from agentworks.vms.sites import (
         VMSiteDecl,
-        site_disabled_reason,
         site_manifest_hint,
     )
 
@@ -249,13 +338,16 @@ def _check_vm_sites(config: Config, registry: Registry) -> HealthGroup:
     for name, decl in registry.iter_kind_items("vm-site"):
         assert isinstance(decl, VMSiteDecl)
         sites[name] = decl
-    disabled: dict[str, str] = {}
+    not_ready: dict[str, str] = {}
     for name in sorted(sites):
         decl = sites[name]
-        reason = site_disabled_reason(decl)
+        # Read the site's stored readiness verdict off the graph (R11), no
+        # recompute. A site whose platform is disabled (the opt-in axis) or
+        # host-unsupported reads not-ready here too.
+        reason = registry.graph.readiness_of("vm-site", name).reason
         if reason is not None:
-            disabled[name] = reason
-            g.info(name, f"disabled ({reason})")
+            not_ready[name] = reason
+            g.info(name, f"not ready: {reason}")
             continue
         try:
             from agentworks.capabilities.base import RunContext
@@ -275,11 +367,10 @@ def _check_vm_sites(config: Config, registry: Registry) -> HealthGroup:
         g.ok(name, f"platform {decl.platform}")
 
     default_site = config.defaults.site
-    if default_site is not None and default_site in disabled:
+    if default_site is not None and default_site in not_ready:
         g.warn(
             "defaults.site",
-            f"names '{default_site}', which is disabled: "
-            f"{disabled[default_site]}",
+            f"names '{default_site}', which is not ready: {not_ready[default_site]}",
         )
 
     try:
@@ -300,10 +391,10 @@ def _check_vm_sites(config: Config, registry: Registry) -> HealthGroup:
         db = Database()
         try:
             for vm in db.list_vms():
-                if vm.site in disabled:
+                if vm.site in not_ready:
                     g.warn(
                         f"VM '{vm.name}'",
-                        f"site '{vm.site}' is disabled: {disabled[vm.site]}",
+                        f"site '{vm.site}' is not ready: {not_ready[vm.site]}",
                     )
                 elif vm.site not in sites:
                     g.fail(
@@ -429,8 +520,7 @@ def _check_config() -> tuple[HealthGroup, Config | None, Registry | None]:
     for section in config.noop_secret_backend_sections:
         g.warn(
             f"Config has a no-op {section} section",
-            "deprecated and ignored; remove it, or `agw resource migrate "
-            "--all` drops it",
+            "deprecated and ignored; remove it, or `agw resource migrate --all` drops it",
         )
 
     # SSH keys
@@ -500,6 +590,42 @@ def _check_ssh_key(g: HealthGroup, path: object, label: str) -> None:
             g.warn("SSH private key permissions", f"{oct(mode)}, recommend 600")
 
 
+def _check_secret_backends(registry: Registry) -> HealthGroup:
+    """Every registered secret-backend's stored readiness verdict off the graph
+    (R11), parallel to ``_check_vm_platforms``: a backend usable here is ``ok``;
+    a backend whose host tool is missing (e.g. ``onepassword`` with no ``op`` on
+    PATH) is ``not ready: <reason>``.
+
+    This is offline host readiness only (no store probe, no biometric); whether a
+    specific secret resolves is ``_check_secrets``, and enablement (opt-in) /
+    chain membership are ``agw secret describe`` / ``agw secret list`` concerns,
+    not this per-backend readiness sweep (R9.7's promised backend visibility).
+
+    A DISABLED backend (its opt-in axis reads ``Enablement.disabled``, e.g. a
+    plugin backend like ``onepassword`` whose plugin is not enabled) is SKIPPED
+    here, parallel to ``_check_vm_platforms``: the "System plugins" roster is the
+    enablement authority and already lists it as disabled, so folding it in would
+    double-list it and render its ready-placeholder readiness as a misleading
+    ``[ok]``. This matches the "disabled hides" default-surface rule that
+    ``agw resource list`` uses.
+    """
+    from agentworks.resources.graph import Enablement
+
+    g = HealthGroup("Secret backends")
+    backends = sorted(registry.iter_kind_items("secret-backend"), key=lambda item: item[0])
+    if not backends:
+        g.info("Registered backends", "none")
+        return g
+    for name, _decl in backends:
+        if registry.graph.enablement_of("secret-backend", name) is Enablement.disabled:
+            continue
+        reason = registry.graph.readiness_of("secret-backend", name).reason
+        if reason is not None:
+            g.info(name, f"not ready: {reason}")
+        else:
+            g.ok(name)
+    return g
+
 
 def _check_secrets(config: Config, registry: Registry) -> HealthGroup:
     """Check every registry secret for a runtime-resolvable value.
@@ -516,7 +642,8 @@ def _check_secrets(config: Config, registry: Registry) -> HealthGroup:
       prompt" is the heads-up that a prompt is coming).
     - WARN: no active backend would resolve it (config is valid but
       there's no path to a value -- e.g. env-var has no matching env
-      var set and prompt is opted out).
+      var set and prompt is opted out, or the only attempting backend is
+      not-ready on this host so resolution would skip it, R9.6).
     - FAIL: the secret's ``backend_mappings`` references an unknown
       backend name. Config error; nothing to resolve against. FAIL
       takes precedence over OK / WARN so the operator fixes the typo
@@ -546,11 +673,7 @@ def _check_secrets(config: Config, registry: Registry) -> HealthGroup:
     for name, decl in sorted(secrets.items()):
         auto = getattr(decl.origin, "variant", None) == "auto-declared"
         label = f"Secret {name!r} (auto)" if auto else f"Secret {name!r}"
-        invalid = sorted(
-            backend
-            for backend in decl.backend_mappings
-            if backend not in known_backends
-        )
+        invalid = sorted(backend for backend in decl.backend_mappings if backend not in known_backends)
         if invalid:
             noun = "backend" if len(invalid) == 1 else "backends"
             g.fail(
@@ -569,7 +692,18 @@ def _check_secrets(config: Config, registry: Registry) -> HealthGroup:
         if resolved_by is not None:
             g.ok(label, f"would resolve via {resolved_by}")
         else:
-            g.warn(label, "not available in any active backend")
+            # Readiness-aware (R9.6, in lockstep with the resolution skip): a
+            # secret whose only attempting backend is not-ready is at-risk, and
+            # the reason is the not-ready backend, not "no backend attempts it."
+            skipped = [
+                f"{b.name} ({b.readiness.reason})"
+                for b in backends
+                if b.would_attempt(decl) and not b.readiness.is_ready
+            ]
+            if skipped:
+                g.warn(label, f"no ready backend would resolve it; not ready: {'; '.join(skipped)}")
+            else:
+                g.warn(label, "not available in any active backend")
 
     return g
 
@@ -685,10 +819,12 @@ def _get_completion_paths() -> list[tuple[str, list[Path]]]:
     shells: list[tuple[str, list[Path]]] = []
 
     # Bash
-    shells.append((
-        "bash",
-        [home / ".local" / "share" / "bash-completion" / "completions" / "agentworks"],
-    ))
+    shells.append(
+        (
+            "bash",
+            [home / ".local" / "share" / "bash-completion" / "completions" / "agentworks"],
+        )
+    )
 
     # Zsh
     zsh_paths: list[Path] = [home / ".zfunc" / "_agentworks"]
@@ -705,10 +841,12 @@ def _get_completion_paths() -> list[tuple[str, list[Path]]]:
 
     profile = _query_powershell_profile()
     if profile is not None:
-        shells.append((
-            "powershell",
-            [profile.parent / "Completions" / "agentworks.ps1"],
-        ))
+        shells.append(
+            (
+                "powershell",
+                [profile.parent / "Completions" / "agentworks.ps1"],
+            )
+        )
 
     return shells
 

@@ -67,11 +67,7 @@ def test_framework_module_has_no_old_vocabulary(module: ModuleType) -> None:
     a public-surface change; a future edit that re-introduces either
     word is a regression.
     """
-    offenders = [
-        name
-        for name in _public_names(module)
-        if any(banned in name for banned in _BANNED_SUBSTRINGS)
-    ]
+    offenders = [name for name in _public_names(module) if any(banned in name for banned in _BANNED_SUBSTRINGS)]
     assert offenders == [], (
         f"{module.__name__} exposes legacy-named symbols: {offenders}. "
         f"Rename to the Phase 3a vocabulary (Reference / ReferenceEntry)."
@@ -96,25 +92,34 @@ def test_resource_reference_carries_usage_field_not_text() -> None:
     assert "text" not in entry_fields
 
 
-def test_producer_method_is_referenced_resources_not_required_resources() -> None:
-    """Producers expose ``referenced_resources()``, not the old
-    ``required_resources()``. Phase 3a renamed both the method and every
-    call site (including the framework's ``getattr`` lookups in
-    ``Registry._referenced_resources`` and ``walk._referenced_resources``).
+def test_graph_node_producers_expose_dependencies_not_referenced_resources() -> None:
+    """Graph-node producers expose the uniform ``dependencies(context)`` (the
+    Phase 4 rename); the greenness-scaffold ``referenced_resources`` alias is
+    gone. ``EnvEntry.referenced_resources(source)`` is deliberately RETAINED:
+    it is an internal env-table aggregation each template's ``dependencies``
+    composes, not a graph-node method the builder calls.
     """
+    from agentworks.vms.sites import VMSiteDecl
+
+    site = VMSiteDecl(name="s", platform="lima")
+    assert hasattr(site, "dependencies")
+    assert not hasattr(site, "referenced_resources")
+    assert not hasattr(site, "required_resources")
+
+    # EnvEntry keeps its arg-taking aggregation variant, not the graph-node one.
     entry = EnvEntry(key="K", secret="s")
     assert hasattr(entry, "referenced_resources")
-    assert not hasattr(entry, "required_resources")
-    # Inspect that the method exists as a real method, not via getattr
-    # fallback. The kinds/* modules' Resource types all expose this name
-    # (those with no references override to an empty list).
+    assert not hasattr(entry, "dependencies")
     sig = inspect.signature(entry.referenced_resources)
     assert "source" in sig.parameters
 
 
-def test_resource_kinds_have_references_field_not_usage() -> None:
-    """Every Resource type in the framework's kind set carries the
-    collection field as ``references``, not the pre-rename ``usage``.
+def test_resource_kinds_carry_no_inbound_reference_field() -> None:
+    """No Resource type in the framework's kind set carries an inbound
+    reference collection field: not the pre-rename ``usage``, and not the
+    post-rename ``references`` (removed in the readiness refactor, phase 2).
+    Inbound references live on the dependency graph
+    (``Registry.graph.dependents_of``) now, not on the resource dataclass.
     """
     from agentworks.agents.template import AgentTemplate
     from agentworks.apt import AptPackageEntry, AptSourceEntry
@@ -147,12 +152,11 @@ def test_resource_kinds_have_references_field_not_usage() -> None:
 
     for cls in resource_types:
         fields = {f.name for f in dataclasses.fields(cls)}
-        assert "references" in fields, (
-            f"{cls.__name__} missing `references` field after Phase 3a rename"
+        assert "references" not in fields, (
+            f"{cls.__name__} still carries an inbound `references` field; "
+            f"inbound references live on the dependency graph now"
         )
-        assert "usage" not in fields, (
-            f"{cls.__name__} still carries pre-rename `usage` collection field"
-        )
+        assert "usage" not in fields, f"{cls.__name__} still carries pre-rename `usage` collection field"
 
 
 def test_resources_package_has_no_old_vocabulary_in_source() -> None:
@@ -187,6 +191,5 @@ def test_resources_package_has_no_old_vocabulary_in_source() -> None:
             if bad in text:
                 offenders.append(f"{py_file.relative_to(pkg_root)}: {bad}")
     assert offenders == [], (
-        f"agentworks.resources still carries pre-rename vocabulary in "
-        f"comments/docstrings: {offenders}"
+        f"agentworks.resources still carries pre-rename vocabulary in comments/docstrings: {offenders}"
     )

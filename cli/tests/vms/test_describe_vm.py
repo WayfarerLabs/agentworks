@@ -27,9 +27,7 @@ def config(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Config:
     (tmp_path / "id_ed25519.pub").write_text("public")
     monkeypatch.setattr("shutil.which", lambda name: f"/usr/bin/{name}")
     path = tmp_path / "config.toml"
-    path.write_text(
-        f'[operator]\nssh_public_key = "{key}.pub"\nssh_private_key = "{key}"\n'
-    )
+    path.write_text(f'[operator]\nssh_public_key = "{key}.pub"\nssh_private_key = "{key}"\n')
     return load_config(path, warn_issues=False, warn_deprecations=False)
 
 

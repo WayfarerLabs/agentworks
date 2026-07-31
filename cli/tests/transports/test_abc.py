@@ -46,9 +46,7 @@ def test_abc_surface_is_complete() -> None:
     polymorphic-transports SDD.
     """
     abc_methods = {
-        name
-        for name, value in inspect.getmembers(Transport)
-        if getattr(value, "__isabstractmethod__", False)
+        name for name, value in inspect.getmembers(Transport) if getattr(value, "__isabstractmethod__", False)
     }
     assert abc_methods == REQUIRED_METHODS
 
@@ -78,9 +76,16 @@ def test_incomplete_subclass_cannot_be_instantiated() -> None:
         # Signatures intentionally unannotated to keep the broken-subclass
         # minimal: this is a contract test, not a runnable transport.
         def run(  # type: ignore[no-untyped-def, override] # noqa: ANN001, ANN201
-            self, command, *,
-            sudo=False, tty=None, check=True, timeout=None, env=None,
-            retries=None, on_retry=None,
+            self,
+            command,
+            *,
+            sudo=False,
+            tty=None,
+            check=True,
+            timeout=None,
+            env=None,
+            retries=None,
+            on_retry=None,
         ):
             raise NotImplementedError
 

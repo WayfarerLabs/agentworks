@@ -17,6 +17,7 @@ venv/
 # IDE
 .idea/
 .vscode/
+*.code-workspace
 *.swp
 *.swo
 *~
@@ -25,24 +26,42 @@ venv/
 rulesync.local.jsonc
 rulesync.lock
 
-# Rulesync - generated output (regenerate with: npx rulesync generate)
+# Rulesync - generated output (regenerate with: ./scripts/rulesync-upgen.sh).
+#
+# copilot, claudecode, and codexcli are shared targets: their generated output
+# IS committed (copilot under .github/; claudecode and codexcli below). The
+# entries here are the per-developer outputs for personal targets, which stay
+# ignored. See CONTRIBUTING.md ("What gets committed").
 .agents/
-CLAUDE.md
-.claude
 .claudeignore
 .mcp.json
 .cursor/
 .cursorrules
 .cursorignore
 .copilotignore
-AGENTS.md
 GEMINI.md
 .gemini/
 .geminiignore
 .windsurfrules
 .clinerules/
 .roo/
-.codex/
+
+# claudecode and codexcli outputs are committed, but only the dirs rulesync
+# generates. Ignore everything else under these dirs (e.g. personal
+# .claude/settings.local.json) via a catch-all plus explicit re-includes.
+# The re-include list is an allowlist: if rulesync's output set for these
+# targets grows (a new feature emits e.g. .claude/commands/ or .mcp.json),
+# add the new path here, otherwise it silently stays ignored. The drift check
+# (rulesync-upgen.sh --check) fails loudly if that happens, so it can't pass
+# unnoticed.
+.claude/*
+!.claude/agents/
+!.claude/rules/
+!.claude/skills/
+.codex/*
+!.codex/agents/
+!.codex/memories/
+!.codex/skills/
 
 # Tmux
 .tmuxinator.yml
@@ -53,6 +72,7 @@ GEMINI.md
 # OS
 .DS_Store
 Thumbs.db
+desktop.ini
 
 # mypy
 .mypy_cache/

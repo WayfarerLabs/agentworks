@@ -38,9 +38,7 @@ def test_kind_registry_keys_are_lower_kebab() -> None:
 
 def test_kind_handlers_match_their_registry_key() -> None:
     for key, handler in KIND_REGISTRY.items():
-        assert handler.kind == key, (
-            f"KIND_REGISTRY[{key!r}] has mismatched handler.kind {handler.kind!r}"
-        )
+        assert handler.kind == key, f"KIND_REGISTRY[{key!r}] has mismatched handler.kind {handler.kind!r}"
 
 
 def test_code_declared_vocabulary_is_gone() -> None:

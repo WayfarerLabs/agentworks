@@ -81,10 +81,7 @@ def test_failed_teardown_warns_and_never_masks(
         log.mark_realized(node)
     log.unwind()  # no raise
     assert events[-2:] == ["teardown:session/s1", "teardown:vm/box"]
-    assert any(
-        "rollback: teardown of agent/dev failed: db locked" in w
-        for w in captured_output.warnings
-    )
+    assert any("rollback: teardown of agent/dev failed: db locked" in w for w in captured_output.warnings)
 
 
 def test_user_abort_during_teardown_is_reraised() -> None:

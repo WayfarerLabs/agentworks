@@ -39,6 +39,7 @@ if TYPE_CHECKING:
 
     from agentworks.config import Config, _SectionLineMap
     from agentworks.resources import Registry
+    from agentworks.resources.graph import BuildContext
     from agentworks.resources.reference import ResourceReference
 
 
@@ -75,7 +76,7 @@ class AptPackageEntry(DeclaredResource):
     apt: list[str]
     apt_sources: list[str] = field(default_factory=list)
 
-    def referenced_resources(self) -> list[ResourceReference]:
+    def dependencies(self, context: BuildContext) -> list[ResourceReference]:
         """Emit one ``ResourceReference`` per name in ``apt_sources``. The
         framework's ``apt-source`` kind uses an ``error`` miss policy, so
         an unknown source name surfaces as a clean ``ConfigError`` at

@@ -7,12 +7,14 @@ entry rule, and unknown-key warning is shared verbatim between the TOML
 and manifest sources. When the TOML resource surface is deleted at the
 cutover, these loaders become manifest-only and can be renamed in place.
 
-Capability-owned blobs are the one deliberate exception to shared
-validation: the named capability validates its ``provider_config``
-(invoked here on the TRUE blob, with the loader's flat shape validating
-its own assembled blob), and the two sources diverge on stray blob
-keys by design (the flat domain stays silently loose until the flat
-shape is retired).
+Capability-owned blobs (``provider_config``, ``platform_config``,
+``harness_config``) are NOT validated here: their shape check is the
+finalize ``validate`` pass (R3), which runs once over the built graph
+with the Resource's source location re-attached. Decode still performs
+the kind-owned spec-shape checks (a blob must be a mapping, a field may
+not shadow kind-owned surface) and re-attaches the TRUE blob to the
+decl (the loader's flat shape drops keys it doesn't know), so the
+finalize pass sees every capability field.
 
 ``KIND_SECTIONS`` maps kind identifiers to their legacy TOML section
 names; it is the shared table the manifest migrator consumes so the two
@@ -56,6 +58,7 @@ KIND_SECTIONS: dict[str, tuple[str, ...]] = {
     "user-install-command": ("user_install_commands",),
 }
 
+
 class _FixedDecls:
     """Duck-typed stand-in for config's ``_SectionLineMap``: every lookup
     resolves to the manifest document's own location.
@@ -94,8 +97,7 @@ def decode_document(doc: Document, issues: list[str]) -> Any:
     # belongs in metadata, never in spec.
     if "description" in spec:
         raise ConfigError(
-            f"{doc.where}: description belongs in metadata.description, "
-            "not in spec",
+            f"{doc.where}: description belongs in metadata.description, not in spec",
         )
     if doc.description is not None:
         spec["description"] = doc.description
@@ -125,36 +127,28 @@ def decode_document(doc: Document, issues: list[str]) -> Any:
 def _decode_secret(doc: Document, spec: dict[str, object], issues: list[str]) -> Any:
     from agentworks.config import _load_secrets
 
-    result = _load_secrets(
-        {"secrets": {doc.name: spec}}, issues, _decls(doc.location)
-    )
+    result = _load_secrets({"secrets": {doc.name: spec}}, issues, _decls(doc.location))
     return result[doc.name]
 
 
 def _decode_vm_template(doc: Document, spec: dict[str, object], issues: list[str]) -> Any:
     from agentworks.config import _load_vm_templates
 
-    result = _load_vm_templates(
-        {"vm_templates": {doc.name: spec}}, issues, _decls(doc.location)
-    )
+    result = _load_vm_templates({"vm_templates": {doc.name: spec}}, issues, _decls(doc.location))
     return result[doc.name]
 
 
 def _decode_agent_template(doc: Document, spec: dict[str, object], issues: list[str]) -> Any:
     from agentworks.config import _load_agent_templates
 
-    result = _load_agent_templates(
-        {"agent_templates": {doc.name: spec}}, issues, _decls(doc.location)
-    )
+    result = _load_agent_templates({"agent_templates": {doc.name: spec}}, issues, _decls(doc.location))
     return result[doc.name]
 
 
 def _decode_workspace_template(doc: Document, spec: dict[str, object], issues: list[str]) -> Any:
     from agentworks.config import _load_workspace_templates
 
-    result = _load_workspace_templates(
-        {"workspace_templates": {doc.name: spec}}, issues, _decls(doc.location)
-    )
+    result = _load_workspace_templates({"workspace_templates": {doc.name: spec}}, issues, _decls(doc.location))
     return result[doc.name]
 
 
@@ -167,27 +161,14 @@ def _decode_session_template(doc: Document, spec: dict[str, object], issues: lis
     # nested shape) by the general deprecated-field table (FRD R11),
     # consulted in decode_document before this decoder runs, so no
     # bespoke check lives here.
-    harness = spec.get("harness")
     harness_config = spec.get("harness_config")
     if harness_config is not None and not isinstance(harness_config, dict):
         raise ConfigError("spec.harness_config must be a mapping")
-    # Capability validation on the declared blob, with this document's
-    # file:line in the error (decode_document prefixes ``doc.where``).
-    # Unknown harness names defer to the framework's miss policy at
-    # finalize, so they skip invocation here. Mirrors
-    # _decode_git_credential.
-    if isinstance(harness, str):
-        from agentworks.capabilities.harness import HARNESS_REGISTRY
-
-        capability = HARNESS_REGISTRY.get(harness)
-        if capability is not None:
-            capability.validate_config(
-                f"session-template/{doc.name}",
-                harness_config if isinstance(harness_config, dict) else {},
-            )
-    result = _load_session_templates(
-        {"session_templates": {doc.name: spec}}, issues, _decls(doc.location)
-    )
+    # The harness_config blob's shape is validated by the finalize
+    # ``validate`` pass (SessionTemplate.validate), not here: capability
+    # validation is decoupled from decode (R3). The mapping-shape check
+    # above is kind-owned decode structure and stays at load.
+    result = _load_session_templates({"session_templates": {doc.name: spec}}, issues, _decls(doc.location))
     return result[doc.name]
 
 
@@ -220,8 +201,7 @@ def _decode_git_credential(doc: Document, spec: dict[str, object], issues: list[
     if reserved:
         names = ", ".join(sorted(reserved))
         raise ConfigError(
-            f"spec.provider_config may not contain kind-owned field(s): "
-            f"{names}; they belong at the spec top level"
+            f"spec.provider_config may not contain kind-owned field(s): {names}; they belong at the spec top level"
         )
     if "token" in spec:
         raise ConfigError(
@@ -238,19 +218,13 @@ def _decode_git_credential(doc: Document, spec: dict[str, object], issues: list[
             "provider-specific configuration (e.g. azdo's org) goes under "
             "spec.provider_config"
         )
-    # Capability validation on the TRUE blob (the loader flatten drops
-    # keys it doesn't know, so stray blob fields must be caught here,
-    # where the error carries this document's file:line). Runs after the
-    # spec-shape checks so a misplaced field gets the nesting hint, not
-    # a confusing capability complaint. Unknown provider names defer to
-    # the framework's miss policy.
-    from agentworks.capabilities.git_credential import (
-        GIT_CREDENTIAL_PROVIDER_REGISTRY,
-    )
-
-    capability = GIT_CREDENTIAL_PROVIDER_REGISTRY.get(provider)
-    if capability is not None:
-        capability.validate_config(f"git-credential/{doc.name}", raw_config)
+    # The TRUE blob's shape is validated by the finalize ``validate``
+    # pass (GitCredentialConfig.validate), not here: capability
+    # validation is decoupled from decode (R3). The full blob is
+    # re-attached to the decl below so the finalize pass sees every
+    # capability field (the loader flatten drops keys it doesn't know).
+    # The spec-shape checks above stay at load (kind-owned decode
+    # structure).
     result = _load_git_credentials(
         {"git_credentials": {doc.name: loader_spec}},
         issues,
@@ -261,10 +235,10 @@ def _decode_git_credential(doc: Document, spec: dict[str, object], issues: list[
         warn_ignored_scope_keys=False,
     )[doc.name]
     # The loader flatten only carries the blob columns the legacy TOML
-    # shape knows (org); re-attach the full validated blob so manifest
-    # rows keep every capability field (reference derivation at finalize
-    # reads it). TOML rows keep the loader's blob -- the flat domain
-    # cannot express richer capability config.
+    # shape knows (org); re-attach the full blob so manifest rows keep
+    # every capability field (reference derivation and the finalize
+    # ``validate`` pass both read it). TOML rows keep the loader's blob:
+    # the flat domain cannot express richer capability config.
     if raw_config:
         import dataclasses
 
@@ -273,17 +247,18 @@ def _decode_git_credential(doc: Document, spec: dict[str, object], issues: list[
 
 
 def _decode_vm_site(doc: Document, spec: dict[str, object], issues: list[str]) -> Any:
-    from agentworks.config import validate_name
+    from agentworks.config import MAX_FREEFORM_NAME_LENGTH, validate_name
     from agentworks.vms.sites import VMSiteDecl
 
-    # Site names follow the VM-name rules (they appear in
-    # hostnames and SSH host aliases).
-    validate_name(doc.name)
+    # Site names hit no OS-level identifier limit: they are a registry key and
+    # display/config surface only, never derived into a hostname or SSH host
+    # alias (VM names, not site names, feed {slug}-{vm} hostnames). So they take
+    # the freeform cap, not the tighter VM-name cap.
+    validate_name(doc.name, max_length=MAX_FREEFORM_NAME_LENGTH)
     platform = spec.pop("platform", None)
     if not isinstance(platform, str) or not platform:
         raise ConfigError(
-            "vm-site requires spec.platform (a vm-platform capability name, "
-            "e.g. lima, wsl2, azure-vm, proxmox)",
+            "vm-site requires spec.platform (a vm-platform capability name, e.g. lima, wsl2, azure-vm, proxmox)",
         )
     raw_config = spec.pop("platform_config", {})
     if not isinstance(raw_config, dict):
@@ -295,20 +270,21 @@ def _decode_vm_site(doc: Document, spec: dict[str, object], issues: list[str]) -
     if reserved:
         names = ", ".join(sorted(reserved))
         raise ConfigError(
-            f"spec.platform_config may not contain kind-owned field(s): "
-            f"{names}; they belong at the spec top level"
+            f"spec.platform_config may not contain kind-owned field(s): {names}; they belong at the spec top level"
         )
     description = spec.pop("description", None)
     if spec:
         extras = ", ".join(sorted(spec))
         raise ConfigError(
-            f"unknown vm-site spec field(s): {extras}; platform-specific "
-            "configuration goes under spec.platform_config"
+            f"unknown vm-site spec field(s): {extras}; platform-specific configuration goes under spec.platform_config"
         )
-    # Capability validation on the TRUE blob, with this document's
-    # file:line in the error. Unknown platform names are tolerated: the
-    # site registers and self-disables ("platform 'x' is not
-    # installed"); a plugin's platform may simply not be here.
+    # The platform_config blob's shape is validated by the finalize
+    # ``validate`` pass (VMSiteDecl.validate), not here: capability
+    # validation is decoupled from decode (R3). The shadow check below is
+    # kind-owned decode structure and stays at load. Unknown platform
+    # names are tolerated: the site registers and self-disables
+    # ("platform 'x' is not installed"); a plugin's platform may simply
+    # not be here.
     from agentworks.capabilities.vm_platform import VM_PLATFORM_REGISTRY
 
     # A site named after a known platform must declare that
@@ -319,9 +295,6 @@ def _decode_vm_site(doc: Document, spec: dict[str, object], issues: list[str]) -
             f"a vm-site named '{doc.name}' must declare platform "
             f"'{doc.name}' (it shadows a platform name), not '{platform}'"
         )
-    capability = VM_PLATFORM_REGISTRY.get(platform)
-    if capability is not None:
-        capability.validate_config("spec.platform_config", raw_config)
     return VMSiteDecl(
         name=doc.name,
         platform=platform,
@@ -346,17 +319,12 @@ def _decode_admin_template(doc: Document, spec: dict[str, object], issues: list[
     return result
 
 
-def _decode_named_console_template(
-    doc: Document, spec: dict[str, object], issues: list[str]
-) -> Any:
+def _decode_named_console_template(doc: Document, spec: dict[str, object], issues: list[str]) -> Any:
     from agentworks.config import _load_named_console
 
-    result = _load_named_console(
-        {"named_console": spec}, issues, _decls(doc.location)
-    )
+    result = _load_named_console({"named_console": spec}, issues, _decls(doc.location))
     assert result is not None  # the key is always present on this path
     return result
-
 
 
 def _decode_apt_source(doc: Document, spec: dict[str, object], issues: list[str]) -> Any:
@@ -371,17 +339,13 @@ def _decode_apt_package(doc: Document, spec: dict[str, object], issues: list[str
     return _load_apt_packages({doc.name: spec}, _decls(doc.location))[doc.name]
 
 
-def _decode_system_install_command(
-    doc: Document, spec: dict[str, object], issues: list[str]
-) -> Any:
+def _decode_system_install_command(doc: Document, spec: dict[str, object], issues: list[str]) -> Any:
     from agentworks.install_commands import _load_system_commands
 
     return _load_system_commands({doc.name: spec}, _decls(doc.location))[doc.name]
 
 
-def _decode_user_install_command(
-    doc: Document, spec: dict[str, object], issues: list[str]
-) -> Any:
+def _decode_user_install_command(doc: Document, spec: dict[str, object], issues: list[str]) -> Any:
     from agentworks.install_commands import _load_user_commands
 
     return _load_user_commands({doc.name: spec}, _decls(doc.location))[doc.name]

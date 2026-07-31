@@ -21,7 +21,13 @@ from agentworks.vms import manager as vm_manager
 if TYPE_CHECKING:
     from agentworks.db import Database
 
+# Proxmox ships in the opt-in ``proxmox`` system plugin since Phase 10 (R11),
+# so a config that uses the proxmox site enables the plugin, exactly as a real
+# proxmox operator would.
 PROXMOX_SECTION = """
+[plugins]
+system = ["proxmox"]
+
 [proxmox]
 api_url = "https://pve:8006"
 node = "pve1"
@@ -42,10 +48,7 @@ def make_config(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
 
     def _make(extra: str = ""):
         path = tmp_path / "config.toml"
-        path.write_text(
-            f'[operator]\nssh_public_key = "{key}.pub"\nssh_private_key = "{key}"\n'
-            + extra
-        )
+        path.write_text(f'[operator]\nssh_public_key = "{key}.pub"\nssh_private_key = "{key}"\n' + extra)
         return load_config(path, warn_issues=False, warn_deprecations=False)
 
     return _make
@@ -84,7 +87,14 @@ def test_create_vm_request_shape_and_row(
         )
 
     monkeypatch.setattr(LimaPlatform, "create", _fake_create)
-    monkeypatch.setattr(vm_manager, "initialize_vm", lambda *a, **k: None)
+    # Phase A / Phase B are faked here: this suite pins the create()
+    # request shape and the persisted row, not the init sequence.
+    monkeypatch.setattr(
+        vm_manager,
+        "bootstrap_vm",
+        lambda *a, **k: (SimpleNamespace(), SimpleNamespace(), "/home/agentworks"),
+    )
+    monkeypatch.setattr(vm_manager, "run_initialization", lambda *a, **k: None)
 
     vm_manager.create_vm(db, config, name="dvm")
 
@@ -132,9 +142,7 @@ def test_create_vm_stores_and_provisions_selected_admin_template(
     config = make_config()
     captured: list[ProvisionRequest] = []
 
-    def _fake_create(
-        self: LimaPlatform, request: ProvisionRequest, ctx: object
-    ) -> ProvisionResult:
+    def _fake_create(self: LimaPlatform, request: ProvisionRequest, ctx: object) -> ProvisionResult:
         captured.append(request)
         return ProvisionResult(
             native_transport=SimpleNamespace(),  # type: ignore[arg-type]
@@ -144,7 +152,14 @@ def test_create_vm_stores_and_provisions_selected_admin_template(
         )
 
     monkeypatch.setattr(LimaPlatform, "create", _fake_create)
-    monkeypatch.setattr(vm_manager, "initialize_vm", lambda *a, **k: None)
+    # Phase A / Phase B are faked here: this suite pins the create()
+    # request shape and the persisted row, not the init sequence.
+    monkeypatch.setattr(
+        vm_manager,
+        "bootstrap_vm",
+        lambda *a, **k: (SimpleNamespace(), SimpleNamespace(), "/home/agentworks"),
+    )
+    monkeypatch.setattr(vm_manager, "run_initialization", lambda *a, **k: None)
 
     vm_manager.create_vm(db, config, name="wvm", admin_template="work")
 
@@ -185,13 +200,13 @@ def test_unknown_admin_template_errors_before_any_work(
     assert db.get_vm("nvm") is None
 
 
-def test_disabled_site_errors_before_tailscale_and_slug_prompt(
+def test_not_ready_site_errors_before_tailscale_and_slug_prompt(
     db: Database,
     make_config,
     monkeypatch: pytest.MonkeyPatch,
     captured_output: object,
 ) -> None:
-    """An explicit --site naming a disabled site errors UP FRONT: the
+    """An explicit --site naming a not-ready site errors UP FRONT: the
     operator never answers the system-slug prompt (and no Tailscale
     probe runs) for an op the site already sank, the same
     no-work-before-the-fatal-check discipline as the preflight
@@ -200,20 +215,22 @@ def test_disabled_site_errors_before_tailscale_and_slug_prompt(
     from agentworks.errors import StateError
 
     config = make_config()
+    from agentworks.resources.graph import Readiness
+
     monkeypatch.setattr(
-        LimaPlatform, "disabled_reason", lambda self: "limactl not installed"
+        LimaPlatform, "not_ready", classmethod(lambda cls, config: Readiness.blocked("limactl not installed"))
     )
 
     def _no_tailscale() -> None:
-        raise AssertionError("tailscale probed for a disabled site")
+        raise AssertionError("tailscale probed for a not-ready site")
 
     def _no_slug(db_: object) -> None:
-        raise AssertionError("slug prompt reached for a disabled site")
+        raise AssertionError("slug prompt reached for a not-ready site")
 
     monkeypatch.setattr(vm_manager, "verify_tailscale_available", _no_tailscale)
     monkeypatch.setattr(vm_manager, "_resolve_system_slug", _no_slug)
 
-    with pytest.raises(StateError, match="disabled on this host") as exc:
+    with pytest.raises(StateError, match="not ready on this host") as exc:
         vm_manager.create_vm(db, config, name="dvm", site="lima-local")
     assert "limactl" in str(exc.value)
 
@@ -244,7 +261,14 @@ def test_create_vm_composes_r11_hostname_with_slug(
         )
 
     monkeypatch.setattr(LimaPlatform, "create", _fake_create)
-    monkeypatch.setattr(vm_manager, "initialize_vm", lambda *a, **k: None)
+    # Phase A / Phase B are faked here: this suite pins the create()
+    # request shape and the persisted row, not the init sequence.
+    monkeypatch.setattr(
+        vm_manager,
+        "bootstrap_vm",
+        lambda *a, **k: (SimpleNamespace(), SimpleNamespace(), "/home/agentworks"),
+    )
+    monkeypatch.setattr(vm_manager, "run_initialization", lambda *a, **k: None)
 
     vm_manager.create_vm(db, config, name="svm")
 
@@ -290,18 +314,24 @@ def test_slug_resolution_precedes_secrets_and_insert(
     assert db.get_vm("ovm") is None  # insert happens after the resolve
 
 
-def test_r11_hostname_bound_by_construction() -> None:
-    """Slug max 20 + dash + name max 30 = 51 chars, inside the 63-char
-    hostname-label and Azure 64-char computer-name limits."""
-    from agentworks.config import MAX_NAME_LENGTH, validate_name
+def test_r11_hostname_and_vnet_bound_by_construction() -> None:
+    """The VM-name cap is the MIN over two composed sinks. At slug max 20 and
+    name max 38 (MAX_VM_NAME_LENGTH): the {slug}-{name} hostname is 59 chars
+    (inside the 63-char DNS-label limit), and the tighter {slug}-{name}-vnet
+    Azure virtual-network name is exactly 64 (its cap). The vnet sink is what
+    binds the cap at 38."""
+    from agentworks.config import AZURE_VNET_NAME_MAX_LENGTH, DNS_LABEL_MAX_LENGTH, MAX_VM_NAME_LENGTH, validate_name
+    from agentworks.plugins.azure.platform import VNET_NAME_SUFFIX
 
     slug = "a" * 20
     vm_manager.validate_slug(slug)
-    name = "b" * MAX_NAME_LENGTH
-    validate_name(name)
+    name = "b" * MAX_VM_NAME_LENGTH
+    validate_name(name, max_length=MAX_VM_NAME_LENGTH)
     hostname = f"{slug}-{name}"
-    assert len(hostname) == 51
-    assert len(hostname) <= 63
+    assert len(hostname) == 59
+    assert len(hostname) <= DNS_LABEL_MAX_LENGTH == 63
+    vnet_name = f"{slug}-{name}{VNET_NAME_SUFFIX}"
+    assert len(vnet_name) == AZURE_VNET_NAME_MAX_LENGTH == 64
 
 
 def test_proxmox_token_resolves_end_to_end(
@@ -314,7 +344,7 @@ def test_proxmox_token_resolves_end_to_end(
     pass (env-var backend under the AW_SECRET_ convention) and ops read
     it from the resolver's cache; there is no raw
     PROXMOX_TOKEN_SECRET env fallback."""
-    from agentworks.capabilities.vm_platform.proxmox import ProxmoxPlatform
+    from agentworks.plugins.proxmox.platform import ProxmoxPlatform
 
     config = make_config(PROXMOX_SECTION)
     monkeypatch.setenv("AW_SECRET_PROXMOX_TOKEN", "pve-token-value")
@@ -324,9 +354,7 @@ def test_proxmox_token_resolves_end_to_end(
 
     captured: dict[str, object] = {}
 
-    def _fake_create(
-        self: ProxmoxPlatform, request: object, ctx: RunContext
-    ) -> ProvisionResult:
+    def _fake_create(self: ProxmoxPlatform, request: object, ctx: RunContext) -> ProvisionResult:
         captured["token"] = ctx.secret("proxmox-token")
         raise RuntimeError("halt after binding")
 

@@ -32,8 +32,11 @@ class _EmptyRegistry:
 
 class _FakeBackend:
     def __init__(self, name: str, values: dict[str, str]) -> None:
+        from agentworks.resources.graph import Readiness
+
         self.name = name
         self.interactive = False
+        self.readiness = Readiness.ready()
         self._values = values
         self.resolve_calls: list[list[str]] = []
 
@@ -53,9 +56,7 @@ def backend(monkeypatch: pytest.MonkeyPatch) -> _FakeBackend:
     from agentworks.secrets import resolve as secrets_resolve
 
     fake = _FakeBackend("fake", {"git-token-gh": "ghtok", "proxmox-token": "pve"})
-    monkeypatch.setattr(
-        secrets_resolve, "active_backends", lambda config, registry: [fake]
-    )
+    monkeypatch.setattr(secrets_resolve, "active_backends", lambda config, registry: [fake])
     return fake
 
 

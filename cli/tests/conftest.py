@@ -7,6 +7,7 @@ from collections.abc import Generator
 from contextlib import AbstractContextManager
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Protocol
 
 import pytest
 
@@ -168,21 +169,48 @@ class _FakeResult:
         return self.returncode == 0
 
 
+class _SupportsDispatch(Protocol):
+    """The one method ``_FakeTarget`` needs from a stateful tmux model.
+
+    Typed as a Protocol (rather than importing ``tests._tmux_model.TmuxModel``)
+    because that module imports ``_FakeResult`` from here; a concrete import
+    the other way would be circular. ``TmuxModel`` satisfies it structurally.
+    """
+
+    def dispatch(self, command: str) -> _FakeResult: ...
+
+
 class _FakeTarget:
     """Captures the commands run against it. Supports a per-test override map
     that lets us simulate (e.g.) `has-session` returning nonzero on first probe.
+
+    Optionally stateful: pass a ``model`` (a ``tests._tmux_model.TmuxModel``)
+    and ``run()`` answers from live tmux state instead of a fixed default.
+    Resolution order is override map first, then the model, then default-OK,
+    so a test can still force a specific failure (e.g. "make this one
+    split-window fail") on top of an otherwise stateful target. Without a
+    model the target is the original stateless substring map, so every
+    existing test is unaffected.
     """
 
-    def __init__(self, responses: dict[str, _FakeResult] | None = None) -> None:
+    def __init__(
+        self,
+        responses: dict[str, _FakeResult] | None = None,
+        *,
+        model: _SupportsDispatch | None = None,
+    ) -> None:
         self.commands: list[str] = []
         # Substring -> response. First matching substring wins; default = ok.
         self.responses = responses or {}
+        self.model = model
 
     def run(self, command: str, **kwargs: object) -> _FakeResult:
         self.commands.append(command)
         for needle, response in self.responses.items():
             if needle in command:
                 return response
+        if self.model is not None:
+            return self.model.dispatch(command)
         return _FakeResult()
 
 
@@ -243,17 +271,19 @@ def stub_platform_support(monkeypatch: pytest.MonkeyPatch) -> None:
     supported and enabled, regardless of the test host's OS and
     tooling.
 
-    Platform capability rows are host-gated for real (wsl2 publishes
-    nothing off Windows) and sites self-disable for real (lima-local
-    needs a local limactl), so tests that want the full four-platform
-    graph enabled must opt out of the host's actual state. Tests OF
-    the disabled model itself patch the individual methods instead.
+    Platform capability rows publish unconditionally (R13), but their
+    readiness is host-gated for real (wsl2 is not-ready off Windows) and
+    sites are not-ready for real (lima-local needs a local limactl), so
+    tests that want the full four-platform graph READY must opt out of the
+    host's actual state. Tests OF the readiness model itself patch the
+    individual methods instead.
     """
     from agentworks.capabilities.vm_platform import VM_PLATFORM_REGISTRY
+    from agentworks.resources.graph import Readiness
 
     for cls in VM_PLATFORM_REGISTRY.values():
         monkeypatch.setattr(cls, "unsupported_reason", classmethod(lambda c: None))
-        monkeypatch.setattr(cls, "disabled_reason", lambda self: None)
+        monkeypatch.setattr(cls, "not_ready", classmethod(lambda c, config: Readiness.ready()))
 
 
 def stub_vm_gates(monkeypatch: pytest.MonkeyPatch) -> _StubPlatform:
@@ -277,10 +307,14 @@ def stub_vm_gates(monkeypatch: pytest.MonkeyPatch) -> _StubPlatform:
     return platform
 
 
-@pytest.fixture
-def fake_target(monkeypatch: pytest.MonkeyPatch) -> _FakeTarget:
-    """Install a FakeTarget for the transport layer and stub the VM gates."""
-    target = _FakeTarget()
+def install_fake_target(monkeypatch: pytest.MonkeyPatch, target: _FakeTarget) -> _FakeTarget:
+    """Route the transport layer through ``target`` and stub the VM gates.
+
+    Shared by the ``fake_target`` fixture (stateless) and the
+    ``console_target_factory`` fixture (stateful, model-backed), so both
+    install the same transport seams and gate stubs. Returns ``target`` for
+    the caller to keep a reference.
+    """
     # ``agentworks.transports.transport`` is the canonical admin-transport
     # factory; ``agentworks.sessions.manager.transport`` covers manager's
     # eager top-level import (used by batch_check_all_sessions and friends).
@@ -298,6 +332,37 @@ def fake_target(monkeypatch: pytest.MonkeyPatch) -> _FakeTarget:
     # fake target exposes it as a no-op so attach flows return cleanly.
     target.interactive = lambda command, **kwargs: 0  # type: ignore[attr-defined]
     return target
+
+
+@pytest.fixture
+def fake_target(monkeypatch: pytest.MonkeyPatch) -> _FakeTarget:
+    """Install a FakeTarget for the transport layer and stub the VM gates."""
+    return install_fake_target(monkeypatch, _FakeTarget())
+
+
+@pytest.fixture
+def console_target_factory(monkeypatch: pytest.MonkeyPatch):  # noqa: ANN201 - returns a local factory
+    """Return a factory that installs a stateful, model-backed fake target.
+
+    Usage::
+
+        def test_x(db, console_target_factory):
+            model = TmuxModel()
+            model.seed_session("aw-console-con", "a", pane_tags=(None, 0))
+            target = console_target_factory(model)
+            restore_session(db, _StubConfig(), console_name="con", session_name="a")
+            assert model.has_session("aw-console-con")
+
+    The installed target routes through the same transport seams / gate
+    stubs as ``fake_target``; ``responses`` still layers per-test overrides
+    on top of the model (override map wins), so a test can force one command
+    to fail while the rest stay stateful.
+    """
+
+    def _make(model: _SupportsDispatch | None = None, responses: dict[str, _FakeResult] | None = None) -> _FakeTarget:
+        return install_fake_target(monkeypatch, _FakeTarget(responses=responses, model=model))
+
+    return _make
 
 
 class _StubSessionTemplate:
@@ -432,6 +497,78 @@ class _StubRegistry:
 
     def iter_kind_items(self, kind: str):  # noqa: ANN201 - mirrors Registry
         return iter(self._kind_dict(kind).items())
+
+    @property
+    def graph(self) -> _StubGraph:
+        """The dependency-graph read surface. Phase 4 routes edge / readiness
+        reads through ``registry.graph``; the stub computes edges on demand
+        from each row's ``dependencies`` (empty build context, since the stub
+        publishes no backend rows) and reports every node ready (the namespace
+        fixtures model runnable resources)."""
+        return _StubGraph(self)
+
+
+class _StubGraph:
+    """Minimal ``DependencyGraph`` double over a :class:`_StubRegistry`.
+
+    ``edges_of`` recomputes a row's outbound edges from its ``dependencies``
+    (the stub is not finalized, so there is no frozen edge map to read);
+    ``reachable_from`` DFS-walks those; readiness is always ready. Enough for
+    the consumer reads the manager entries make against namespace fixtures.
+    """
+
+    def __init__(self, registry: _StubRegistry) -> None:
+        self._registry = registry
+
+    def edges_of(self, kind: str, name: str):  # noqa: ANN201 - mirrors DependencyGraph
+        from agentworks.resources.graph import BuildContext
+
+        row = self._registry.lookup(kind, name)  # KeyError on unknown, like the real graph
+        method = getattr(row, "dependencies", None)
+        if method is None:
+            return ()
+        return tuple(method(BuildContext()))
+
+    def reachable_from(self, kind: str, name: str) -> list[tuple[str, str]]:
+        # Tolerate a missing start node, exactly as the real graph does
+        # (graph.py:228-230): the DFS below catches the edges_of KeyError and
+        # yields an empty closure, so a consumer that walks a template resolved
+        # off a namespace fixture (not a registry row) gets [] rather than a
+        # KeyError. The recipe use-gate (ensure_recipe_enabled) relies on this.
+        visited: set[tuple[str, str]] = {(kind, name)}
+        ordered: list[tuple[str, str]] = []
+        stack: list[tuple[str, str]] = [(kind, name)]
+        while stack:
+            node = stack.pop()
+            try:
+                edges = self.edges_of(*node)
+            except KeyError:
+                continue
+            for ref in edges:
+                target = (ref.kind, ref.name)
+                if target not in visited:
+                    visited.add(target)
+                    ordered.append(target)
+                    stack.append(target)
+        return ordered
+
+    def readiness_of(self, kind: str, name: str):  # noqa: ANN201 - mirrors DependencyGraph
+        from agentworks.resources.graph import Readiness
+
+        return Readiness.ready()
+
+    def is_ready(self, kind: str, name: str) -> bool:
+        return True
+
+    def enablement_of(self, kind: str, name: str):  # noqa: ANN201 - mirrors DependencyGraph
+        # Every node is enabled in the stub (no plugin opt-out producer here),
+        # matching the real graph's every-node-is-enabled default. The session
+        # harness gate (``ensure_harness_enabled``) reads this at the build
+        # sites; a built-in harness (``shell``) stays enabled, so the gate is a
+        # no-op under the stub.
+        from agentworks.resources.graph import Enablement
+
+        return Enablement.enabled
 
 
 def stub_build_registry(monkeypatch: pytest.MonkeyPatch) -> None:

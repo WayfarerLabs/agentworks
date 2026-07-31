@@ -57,12 +57,21 @@ class _TestOnlyBackend:
     def __init__(self) -> None:
         self.batch_get_calls: list[list[str]] = []
 
+    def not_ready(self) -> Any:
+        from agentworks.resources.graph import Readiness
+
+        return Readiness.ready()
+
     def validate_mapping(self, owner: str, mapping: Any) -> None:
         # Store semantics: string or structured addressing accepted.
         if not isinstance(mapping, (str, dict)):
             from agentworks.errors import ConfigError
 
             raise ConfigError(f"{owner}: test-only mapping must be str or dict")
+
+    def dependencies(self, mapping: Any) -> tuple[Any, ...]:
+        # A store address implies no agentworks resource.
+        return ()
 
     def would_attempt(self, secret: Any, mapping: Any) -> bool:
         # Store semantics: only attempts explicitly-mapped secrets
@@ -76,9 +85,7 @@ class _TestOnlyBackend:
 
     def batch_get(self, wants: list[tuple[Any, Any]]) -> dict[str, str]:
         self.batch_get_calls.append([s.name for s, _ in wants])
-        return {
-            s.name: f"value-of-{s.name}" for s, m in wants if m is not None
-        }
+        return {s.name: f"value-of-{s.name}" for s, m in wants if m is not None}
 
 
 @pytest.fixture
@@ -128,9 +135,7 @@ def test_secret_backend_is_not_declarable(tmp_path: Path) -> None:
     assert "res.yaml" in str(exc.value)
 
 
-def test_chain_resolves_against_descriptor_rows(
-    tmp_path: Path, test_only_backend: Any
-) -> None:
+def test_chain_resolves_against_descriptor_rows(tmp_path: Path, test_only_backend: Any) -> None:
     """[secret_config].backends names capabilities; the runtime chain
     wraps them with the loop-side orchestration."""
     config = _config(
@@ -146,9 +151,7 @@ def test_chain_resolves_against_descriptor_rows(
     assert [b.interactive for b in backends] == [False, True]
 
 
-def test_structured_mapping_reaches_the_backend(
-    tmp_path: Path, test_only_backend: Any
-) -> None:
+def test_structured_mapping_reaches_the_backend(tmp_path: Path, test_only_backend: Any) -> None:
     """Per-secret store addressing lives in backend_mappings (the
     collapse's answer to the 1Password case): the structured dict rides
     through would_attempt / describe_lookup / batch_get."""
@@ -174,9 +177,7 @@ def test_structured_mapping_reaches_the_backend(
     assert values == {"s1": "value-of-s1"}
 
 
-def test_opt_out_never_reaches_the_capability(
-    tmp_path: Path, test_only_backend: Any
-) -> None:
+def test_opt_out_never_reaches_the_capability(tmp_path: Path, test_only_backend: Any) -> None:
     """The generic `false` opt-out is loop-side orchestration: an
     opted-out secret is excluded before the capability sees the
     batch."""
@@ -189,9 +190,7 @@ def test_opt_out_never_reaches_the_capability(
     )
     registry = build_registry(config)
     (backend,) = active_backends(config, registry)
-    opted_out = SecretDecl(
-        name="s1", description="s1", backend_mappings={"test-only": False}
-    )
+    opted_out = SecretDecl(name="s1", description="s1", backend_mappings={"test-only": False})
     assert not backend.would_attempt(opted_out)
     assert backend.describe_lookup(opted_out) is None
     assert backend.resolve([opted_out]) == {}
@@ -227,10 +226,7 @@ def test_legacy_toml_backend_section_is_warned_noop(tmp_path: Path) -> None:
         backends = ["env-var"]
         """,
     )
-    assert any(
-        "[secret_backends.env-var] is deprecated" in issue
-        for issue in config.deprecation_issues
-    )
+    assert any("[secret_backends.env-var] is deprecated" in issue for issue in config.deprecation_issues)
     registry = build_registry(config)
     row = registry.lookup("secret-backend", "env-var")
     assert row.origin.variant == "built-in"
@@ -248,6 +244,32 @@ def test_legacy_toml_backend_unknown_name_still_errors(tmp_path: Path) -> None:
             [secret_backends.envvar]
             """,
         )
+
+
+def test_shipped_backends_dependencies_are_total_and_empty() -> None:
+    """Every shipped backend's ``dependencies`` (the ``secret-backend``
+    half of the capability split) is total and implies no edge today: a
+    bare identifier mapping names no agentworks resource. It never raises,
+    even on a shape ``validate_mapping`` would reject."""
+    for backend in SECRET_BACKEND_REGISTRY.values():
+        assert backend.dependencies("AW_SECRET_X") == ()
+        assert backend.dependencies({"vault": "Work"}) == ()
+        assert backend.dependencies(None) == ()  # type: ignore[arg-type]
+
+
+def test_would_attempt_is_pure_of_secret_and_mapping() -> None:
+    """``would_attempt`` must be a pure function of ``(secret, mapping)``
+    with no host probing, so freezing it into edges at finalize is safe.
+    env-var / prompt always attempt; onepassword attempts iff mapped."""
+    from agentworks.plugins.onepassword.backend import OnePasswordBackend
+    from agentworks.secrets.env_var import EnvVarBackend
+    from agentworks.secrets.prompt import PromptBackend
+
+    secret = SecretDecl(name="s1", description="s1")
+    assert EnvVarBackend().would_attempt(secret, None) is True
+    assert PromptBackend().would_attempt(secret, None) is True
+    assert OnePasswordBackend().would_attempt(secret, None) is False
+    assert OnePasswordBackend().would_attempt(secret, "op://Vault/Item/field") is True
 
 
 def test_build_registry_is_pure(tmp_path: Path) -> None:

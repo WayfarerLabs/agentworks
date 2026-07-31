@@ -60,18 +60,14 @@ class _AgentTemplateKind:
         source = references[0].source if references else ALWAYS_MATERIALIZE_SOURCE
         return AgentTemplate(name="default", origin=Origin.auto_declared(source=source))
 
-    def instances(
-        self, db: Database, registry: Registry, resource: Any
-    ) -> Iterable[InstanceRef]:
+    def instances(self, db: Database, registry: Registry, resource: Any) -> Iterable[InstanceRef]:
         """Every agent whose ``template`` column matches this AgentTemplate's
         name -- or whose ``template`` is NULL when the resource is the
         reserved ``default``.
         """
         name = resource.name
         for agent in db.list_agents():
-            if agent.template == name or (
-                agent.template is None and name == "default"
-            ):
+            if agent.template == name or (agent.template is None and name == "default"):
                 yield InstanceRef(instance_kind="agent", instance_name=agent.name)
 
 

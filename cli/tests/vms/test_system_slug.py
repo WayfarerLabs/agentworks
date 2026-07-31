@@ -47,18 +47,14 @@ def test_slug_prompt_matches_the_frd_text() -> None:
     )
 
 
-def test_non_interactive_never_prompts_and_never_writes(
-    db: Database, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_non_interactive_never_prompts_and_never_writes(db: Database, monkeypatch: pytest.MonkeyPatch) -> None:
     """A later interactive create must still ask, so nothing is written."""
     monkeypatch.setattr("agentworks.output.is_interactive", lambda: False)
     assert vm_manager._resolve_system_slug(db) is None
     assert db.get_setting("system_slug") is None
 
 
-def test_blank_answer_is_final(
-    db: Database, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_blank_answer_is_final(db: Database, monkeypatch: pytest.MonkeyPatch) -> None:
     """An empty answer is a valid one ("no slug"): it records the
     declined row, so the prompt never fires again, not on the next
     create, not via any nudge."""
@@ -79,9 +75,7 @@ def test_blank_answer_is_final(
     assert len(prompts) == 1  # declined row short-circuits
 
 
-def test_first_create_prompt_stores_valid_slug(
-    db: Database, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_first_create_prompt_stores_valid_slug(db: Database, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("agentworks.output.is_interactive", lambda: True)
     monkeypatch.setattr("agentworks.output.prompt", lambda label, default=None: "team-a")
 
@@ -89,9 +83,7 @@ def test_first_create_prompt_stores_valid_slug(
     assert db.get_setting("system_slug") == "team-a"
 
 
-def test_invalid_answer_aborts_without_writing(
-    db: Database, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_invalid_answer_aborts_without_writing(db: Database, monkeypatch: pytest.MonkeyPatch) -> None:
     """Invalid input aborts the create before any state mutation; the
     next create asks again."""
     monkeypatch.setattr("agentworks.output.is_interactive", lambda: True)
@@ -102,9 +94,7 @@ def test_invalid_answer_aborts_without_writing(
     assert db.get_setting("system_slug") is None
 
 
-def test_no_prompt_of_any_kind_after_decline(
-    db: Database, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_no_prompt_of_any_kind_after_decline(db: Database, monkeypatch: pytest.MonkeyPatch) -> None:
     """The regression this file exists to prevent: a declined install
     must see NO slug prompt of any kind on later creates (the nudge
     call site is gone from create_vm entirely; _resolve_system_slug is
@@ -114,8 +104,6 @@ def test_no_prompt_of_any_kind_after_decline(
     monkeypatch.setattr("agentworks.output.is_interactive", lambda: True)
     monkeypatch.setattr(
         "agentworks.output.prompt",
-        lambda *a, **k: (_ for _ in ()).throw(
-            AssertionError("prompted after a declined slug")
-        ),
+        lambda *a, **k: (_ for _ in ()).throw(AssertionError("prompted after a declined slug")),
     )
     assert vm_manager._resolve_system_slug(db) is None

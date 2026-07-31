@@ -66,13 +66,21 @@ def ssh_agent_alias(agent_name: str, prefix: str = "awagent--") -> str:
     return f"{prefix}{agent_name}"
 
 
-def sync_ssh_config(config: Config, db: Database) -> None:
-    """Rebuild SSH config from current DB state."""
+def sync_ssh_config(config: Config, db: Database, *, announce: bool = True) -> None:
+    """Rebuild SSH config from current DB state.
+
+    Emits the "SSH config synced" line by default. Pass ``announce=False``
+    for a silent re-sync that still writes the file for correctness but
+    adds no output line (e.g. ``vm create``'s post-initialization sync,
+    which would otherwise duplicate the line already emitted as the last
+    step of the Provisioning phase).
+    """
     if config.operator.ssh_config_dir:
         _rebuild_config_dir(config, db)
     else:
         _legacy_rebuild(config, db)
-    output.info("SSH config synced")
+    if announce:
+        output.info("SSH config synced")
 
 
 def _legacy_rebuild(config: Config, db: Database) -> None:

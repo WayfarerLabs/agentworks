@@ -45,9 +45,7 @@ def session_create(
     ] = None,
     new_agent: Annotated[bool, typer.Option("--new-agent", help="Create a new agent for this session")] = False,
     agent_name: Annotated[str | None, typer.Option("--agent-name", help="Name for new agent")] = None,
-    agent_template: Annotated[
-        str | None, typer.Option("--agent-template", help="Template for new agent")
-    ] = None,
+    agent_template: Annotated[str | None, typer.Option("--agent-template", help="Template for new agent")] = None,
 ) -> None:
     """Create and start a session in a workspace."""
     from agentworks.config import load_config
@@ -132,7 +130,8 @@ def session_stop(
     workspace: Annotated[str | None, typer.Option("--workspace", help="Filter by workspace (with --all)")] = None,
     agent: Annotated[str | None, typer.Option("--agent", help="Filter by agent (with --all)")] = None,
     admin: Annotated[
-        bool, typer.Option("--admin", help="Only admin-mode sessions (with --all)"),
+        bool,
+        typer.Option("--admin", help="Only admin-mode sessions (with --all)"),
     ] = False,
     force: Annotated[bool, typer.Option("--force", help="Force-stop broken sessions via PID kill")] = False,
 ) -> None:
@@ -212,9 +211,7 @@ def session_restart(
     if admin and parsed_agent is not None:
         raise typer.BadParameter("--admin and --agent are mutually exclusive")
     if (parsed_vm or parsed_workspace or parsed_agent or admin) and not (all_stopped or all_sessions):
-        raise typer.BadParameter(
-            "--vm, --workspace, --agent, and --admin require --all or --all-stopped"
-        )
+        raise typer.BadParameter("--vm, --workspace, --agent, and --admin require --all or --all-stopped")
     if all_stopped or all_sessions:
         db = get_db()
         config = load_config()
@@ -244,12 +241,8 @@ def session_restart(
             if running:
                 names = ", ".join(s.name for s in running[:5])
                 suffix = f" (and {len(running) - 5} more)" if len(running) > 5 else ""
-                output.warn(
-                    f"{len(running)} session(s) are running and will be restarted ({names}{suffix})."
-                )
-                if not output.confirm(
-                    "Continue? (--all-stopped restarts only the stopped sessions)"
-                ):
+                output.warn(f"{len(running)} session(s) are running and will be restarted ({names}{suffix}).")
+                if not output.confirm("Continue? (--all-stopped restarts only the stopped sessions)"):
                     from agentworks.errors import UserAbort
 
                     raise UserAbort("restart cancelled")

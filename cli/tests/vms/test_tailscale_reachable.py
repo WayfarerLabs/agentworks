@@ -18,9 +18,7 @@ def _warn_counter(monkeypatch: pytest.MonkeyPatch) -> list[str]:
     once-per-process guard so the test sees the first-warn behavior."""
     warns: list[str] = []
     monkeypatch.setattr(vm_manager, "_warned_tailscale_missing", False)
-    monkeypatch.setattr(
-        "agentworks.output.warn", lambda msg, *a, **k: warns.append(msg)
-    )
+    monkeypatch.setattr("agentworks.output.warn", lambda msg, *a, **k: warns.append(msg))
     return warns
 
 

@@ -16,8 +16,8 @@ from typing import TYPE_CHECKING
 import pytest
 
 from agentworks.capabilities.base import OperationScope, RunContext, ScopeLevel
-from agentworks.capabilities.harness import ClaudeCodeHarness
 from agentworks.errors import ConfigError, StateError
+from agentworks.plugins.claude.harness import ClaudeCodeHarness
 from tests.conftest import _FakeResult, _FakeTarget
 
 if TYPE_CHECKING:
@@ -65,37 +65,44 @@ def _session_scope() -> OperationScope:
 # -- config vocabulary -------------------------------------------------------
 
 
-def test_validate_accepts_the_three_fields_and_implies_no_reference() -> None:
-    refs = ClaudeCodeHarness.validate_config(
-        "session-template/claude",
-        {"permission_mode": "acceptEdits", "model": "opus", "extra_args": ["--foo"]},
+def test_dependencies_imply_no_reference() -> None:
+    """``claude-code`` implies no edge, and ``dependencies`` is total: it
+    returns ``()`` for the known fields and even for a malformed blob."""
+    assert (
+        ClaudeCodeHarness.dependencies(
+            "session-template/claude",
+            {"permission_mode": "acceptEdits", "model": "opus", "extra_args": ["--foo"]},
+        )
+        == ()
     )
-    assert refs == ()
+    # Never raises, even on config that ``validate`` would reject.
+    assert ClaudeCodeHarness.dependencies("session-template/claude", {"model": 3, "permision_mode": "typo"}) == ()
 
 
-def test_validate_accepts_empty_config() -> None:
-    assert ClaudeCodeHarness.validate_config("session-template/claude", {}) == ()
+def test_validate_accepts_the_three_fields_and_empty_config() -> None:
+    assert (
+        ClaudeCodeHarness.validate(
+            "session-template/claude",
+            {"permission_mode": "acceptEdits", "model": "opus", "extra_args": ["--foo"]},
+        )
+        is None
+    )
+    assert ClaudeCodeHarness.validate("session-template/claude", {}) is None
 
 
 def test_validate_rejects_unknown_field() -> None:
     with pytest.raises(ConfigError, match="unknown claude-code harness field"):
-        ClaudeCodeHarness.validate_config(
-            "session-template/claude", {"permision_mode": "typo"}
-        )
+        ClaudeCodeHarness.validate("session-template/claude", {"permision_mode": "typo"})
 
 
 def test_validate_rejects_non_string_model() -> None:
     with pytest.raises(ConfigError, match="model must be a string"):
-        ClaudeCodeHarness.validate_config(
-            "session-template/claude", {"model": 3}
-        )
+        ClaudeCodeHarness.validate("session-template/claude", {"model": 3})
 
 
 def test_validate_rejects_non_list_extra_args() -> None:
     with pytest.raises(ConfigError, match="extra_args must be a list of strings"):
-        ClaudeCodeHarness.validate_config(
-            "session-template/claude", {"extra_args": "just-a-string"}
-        )
+        ClaudeCodeHarness.validate("session-template/claude", {"extra_args": "just-a-string"})
 
 
 def test_construct_revalidates_config() -> None:
@@ -108,14 +115,14 @@ def test_construct_revalidates_config() -> None:
 
 def test_validate_rejects_non_bool_pass_oauth_token() -> None:
     with pytest.raises(ConfigError, match="pass_oauth_token must be a boolean"):
-        ClaudeCodeHarness.validate_config(
+        ClaudeCodeHarness.validate(
             "session-template/claude", {"pass_oauth_token": "yes"}
         )
 
 
 def test_validate_rejects_non_string_oauth_token_secret() -> None:
     with pytest.raises(ConfigError, match="oauth_token_secret must be a string"):
-        ClaudeCodeHarness.validate_config(
+        ClaudeCodeHarness.validate(
             "session-template/claude",
             {"pass_oauth_token": True, "oauth_token_secret": 3},
         )
@@ -125,7 +132,7 @@ def test_validate_rejects_orphan_oauth_token_secret() -> None:
     """A secret name with nothing consuming it (``pass_oauth_token`` not
     true) is a misconfiguration, surfaced loudly."""
     with pytest.raises(ConfigError, match="nothing consuming it"):
-        ClaudeCodeHarness.validate_config(
+        ClaudeCodeHarness.validate(
             "session-template/claude", {"oauth_token_secret": "my-token"}
         )
 
@@ -136,7 +143,7 @@ def test_validate_orphan_error_also_fires_when_pass_is_explicitly_false() -> Non
     same orphan error (asserted end to end through the template merge in
     test_session_template_surface)."""
     with pytest.raises(ConfigError, match="nothing consuming it"):
-        ClaudeCodeHarness.validate_config(
+        ClaudeCodeHarness.validate(
             "session-template/claude",
             {"oauth_token_secret": "my-token", "pass_oauth_token": False},
         )
@@ -148,14 +155,14 @@ def test_validate_rejects_empty_oauth_token_secret(empty: str) -> None:
     default secret (the ``_oauth_secret_name`` fallback would map the token
     to the DEFAULT behind the operator's back); reject it loudly."""
     with pytest.raises(ConfigError, match="oauth_token_secret is empty"):
-        ClaudeCodeHarness.validate_config(
+        ClaudeCodeHarness.validate(
             "session-template/claude",
             {"pass_oauth_token": True, "oauth_token_secret": empty},
         )
 
 
-def test_validate_declares_default_secret_when_passing_enabled() -> None:
-    (ref,) = ClaudeCodeHarness.validate_config(
+def test_dependencies_declares_default_secret_when_passing_enabled() -> None:
+    (ref,) = ClaudeCodeHarness.dependencies(
         "session-template/claude", {"pass_oauth_token": True}
     )
     assert ref.kind == "secret"
@@ -163,17 +170,17 @@ def test_validate_declares_default_secret_when_passing_enabled() -> None:
     assert ref.usage == "the CLAUDE_CODE_OAUTH_TOKEN env var"
 
 
-def test_validate_declares_explicit_secret_name_when_passing_enabled() -> None:
-    (ref,) = ClaudeCodeHarness.validate_config(
+def test_dependencies_declares_explicit_secret_name_when_passing_enabled() -> None:
+    (ref,) = ClaudeCodeHarness.dependencies(
         "session-template/claude",
         {"pass_oauth_token": True, "oauth_token_secret": "prod-token"},
     )
     assert ref.name == "prod-token"
 
 
-def test_validate_declares_nothing_when_passing_disabled() -> None:
+def test_dependencies_declares_nothing_when_passing_disabled() -> None:
     assert (
-        ClaudeCodeHarness.validate_config(
+        ClaudeCodeHarness.dependencies(
             "session-template/claude", {"pass_oauth_token": False}
         )
         == ()
@@ -327,18 +334,14 @@ def test_restart_reads_the_stored_id_back_verbatim() -> None:
 
 def test_permission_mode_and_model_map_to_their_flags() -> None:
     target = _FakeTarget({f"{_SID}.jsonl": _FakeResult(1)})
-    command = _harness(
-        {"permission_mode": "acceptEdits", "model": "sonnet"}
-    ).start(_op_ctx(target))
+    command = _harness({"permission_mode": "acceptEdits", "model": "sonnet"}).start(_op_ctx(target))
     assert "--permission-mode acceptEdits" in command
     assert "--model sonnet" in command
 
 
 def test_extra_args_appended_verbatim_last_and_quoted() -> None:
     target = _FakeTarget({f"{_SID}.jsonl": _FakeResult(1)})
-    command = _harness(
-        {"model": "opus", "extra_args": ["--foo", "bar baz"]}
-    ).start(_op_ctx(target))
+    command = _harness({"model": "opus", "extra_args": ["--foo", "bar baz"]}).start(_op_ctx(target))
     # One argv token stays one token: "bar baz" is quoted, not re-split.
     assert shlex.quote("bar baz") in command
     # Appended last: after the managed --model flag.
@@ -351,9 +354,7 @@ def test_extra_args_with_shell_metacharacters_cannot_inject() -> None:
     must be ``shlex.quote``d into one inert argv token, never shell-active."""
     payload = "a'; touch /tmp/pwned #"
     target = _FakeTarget({f"{_SID}.jsonl": _FakeResult(1)})
-    command = _harness(
-        {"extra_args": ["--append-system-prompt", payload]}
-    ).start(_op_ctx(target))
+    command = _harness({"extra_args": ["--append-system-prompt", payload]}).start(_op_ctx(target))
 
     # The command is `sh -c '<inner>'`; the payload is nested-quoted (once
     # into the argv, once into the sh -c wrapper). Peeling both quoting

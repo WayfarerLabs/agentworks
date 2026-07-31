@@ -73,8 +73,17 @@ def _seed_lima_vm(db: Database) -> None:
     db._conn.commit()
 
 
+# claude-code ships as the opt-in `claude` system plugin (PR #237), so a
+# session on it must enable the plugin exactly as a real operator would;
+# every config in this suite opts in.
+_PLUGINS_ENABLED = """
+[plugins]
+system = ["claude"]
+"""
+
+
 def _make_config(tmp_path: Path, template_body: str) -> Config:
-    return write_operator_config(tmp_path, template_body)
+    return write_operator_config(tmp_path, _PLUGINS_ENABLED + template_body)
 
 
 # A claude-code session template with OAuth passing enabled.

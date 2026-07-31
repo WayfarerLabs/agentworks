@@ -48,8 +48,7 @@ class _StrictLoader(yaml.SafeLoader):
                 raise yaml.constructor.ConstructorError(
                     None,
                     None,
-                    "YAML merge keys (<<) are not supported in manifests; "
-                    "repeat the fields instead",
+                    "YAML merge keys (<<) are not supported in manifests; repeat the fields instead",
                     key_node.start_mark,
                 )
             key = self.construct_object(key_node, deep=True)
@@ -116,9 +115,7 @@ class ManifestSet:
                 entry.kind,
                 entry.name,
                 entry.resource,
-                Origin.operator_declared(
-                    file=entry.location.file, line=entry.location.line
-                ),
+                Origin.operator_declared(file=entry.location.file, line=entry.location.line),
             )
 
 

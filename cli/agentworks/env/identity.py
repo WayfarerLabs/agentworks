@@ -2,7 +2,7 @@
 
 A pure-data producer: takes a ResourceContext describing the shell's scope
 and returns the subset of AGENTWORKS_* vars that apply. No I/O, no config
-reads. The on-VM profile fragment writer (vms/initializer.py)
+reads. The on-VM profile fragment writer (``agentworks.vms.initializer``)
 calls this with the VM-level subset; runtime shell-opens (sessions,
 consoles, exec, agent-shell) call it with the full chain.
 """

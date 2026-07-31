@@ -16,9 +16,9 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from agentworks.capabilities.vm_platform.proxmox import ProxmoxPlatform
 from agentworks.db import VMStatus
 from agentworks.errors import UserAbort
+from agentworks.plugins.proxmox.platform import ProxmoxPlatform
 from agentworks.vms import manager as vm_manager
 
 if TYPE_CHECKING:
@@ -185,9 +185,7 @@ def test_user_abort_inside_an_op_span_aborts_the_delete(
     counts = _fake_backend(monkeypatch)
     monkeypatch.setattr(vm_manager, "_tailscale_logout", lambda *a, **k: None)
 
-    def _aborting_delete(
-        self: ProxmoxPlatform, row: VMRow, ctx: object
-    ) -> None:
+    def _aborting_delete(self: ProxmoxPlatform, row: VMRow, ctx: object) -> None:
         counts["delete"] += 1
         raise UserAbort("cancelled mid-op")
 

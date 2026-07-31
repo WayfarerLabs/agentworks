@@ -188,15 +188,12 @@ def unknown_template_error(
     declared names for that kind so the operator can correct the name in
     place; when none are declared it says so plainly rather than offering an
     empty list. It deliberately never points at config.toml, which is
-    deprecated for resources. Shared by the four template resolvers so the
-    four hint shapes stay uniform (they are siblings).
+    deprecated for resources. Shared by the four template resolvers and the
+    ``require_declared_template`` re-point validator so the hint shapes stay
+    uniform.
     """
     names = sorted(available)
-    hint = (
-        f"available {label}s: {', '.join(names)}"
-        if names
-        else f"no {label}s are declared"
-    )
+    hint = f"available {label}s: {', '.join(names)}" if names else f"no {label}s are declared"
     return NotFoundError(
         f"Unknown {label}: {name}",
         entity_kind=kind,

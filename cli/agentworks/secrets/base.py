@@ -11,10 +11,14 @@ persist on the VM.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
 
 from agentworks.declared_resource import DeclaredResource
 from agentworks.source_location import SourceLocation, synthesized
+
+if TYPE_CHECKING:
+    from agentworks.resources.graph import BuildContext
+    from agentworks.resources.reference import ResourceReference
 
 MappingValue = str | dict[str, object] | Literal[False]
 """One entry in ``SecretDecl.backend_mappings``: an identifier override
@@ -50,6 +54,92 @@ class SecretDecl(DeclaredResource):
     description: str = field()
     hint: str | None = None
     backend_mappings: dict[str, MappingValue] = field(default_factory=dict)
+
+    def dependencies(self, context: BuildContext) -> list[ResourceReference]:
+        """The secret's ``secret -> secret-backend`` edges: the candidate
+        backends that could resolve it, frozen into the graph at finalize.
+
+        The edge set is the union of:
+
+        - (a) every PRESENT backend that would attempt this secret
+          (``would_attempt(secret, mapping)`` true: it has a mapping or is
+          mapping-optional), read off the build ``context``'s available-backend
+          list, MINUS an explicit ``False`` opt-out; and
+        - (b) every explicit non-``False`` ``backend_mappings`` key, even one
+          naming no present backend (the DANGLING edge that turns a typo'd key
+          into a hard finalize miss under the ``secret-backend`` kind's
+          ``"error"`` policy, R9.11).
+
+        ``would_attempt`` is a pure function of ``(secret, mapping)`` (the
+        ``SecretBackend`` contract), so freezing candidates into edges at
+        finalize is safe: ``edges_of(secret)`` is the full candidate set that
+        resolution (LLD d) walks. Total and non-throwing. Deduped by target
+        backend name in first-encountered order (present backends in registry
+        order, then any extra explicit keys).
+        """
+        from agentworks.resources.reference import ResourceReference
+
+        source = ("secret", self.name)
+        seen: set[str] = set()
+        refs: list[ResourceReference] = []
+
+        def emit(backend_name: str) -> None:
+            if backend_name in seen:
+                return
+            seen.add(backend_name)
+            refs.append(
+                ResourceReference(
+                    name=backend_name,
+                    kind="secret-backend",
+                    usage=f"a resolution backend for secret {self.name!r}",
+                    source=source,
+                )
+            )
+
+        # (a) present backends that would attempt this secret (minus a false
+        # opt-out). ``would_attempt`` is pure over (secret, mapping).
+        for backend_name, backend in context.available_backends:
+            mapping = self.backend_mappings.get(backend_name)
+            if mapping is False:
+                continue
+            if backend.would_attempt(self, mapping):
+                emit(backend_name)
+        # (b) explicit non-false mapping keys, including any naming no present
+        # backend (a dangling edge that the "error" miss policy hard-errors).
+        for backend_name, mapping in self.backend_mappings.items():
+            if mapping is False:
+                continue
+            emit(backend_name)
+        return refs
+
+    def validate(self, enabled_backends: frozenset[str]) -> None:
+        """Throwing per-mapping spec check, run by the finalize ``validate``
+        pass: every declared ``backend_mappings`` entry addressed to a PRESENT
+        AND ENABLED backend is validated via that backend's ``validate_mapping``
+        (R9.9: every declared mapping, not just the opted-in ones, so a stale
+        mapping for a configured-but-not-opted-in backend now fails at build).
+
+        ``enabled_backends`` is the set of enabled ``secret-backend`` names the
+        finalize pass threads from the graph's enablement axis. A mapping to a
+        present-but-DISABLED backend is INERT (not validated until enabled),
+        the same enablement seam materialization-gating and resolution already
+        consult; inert today (no disabled producer ships, R7). The generic
+        ``False`` opt-out is loop-owned and never validated; a mapping to an
+        ABSENT backend is the dangling edge the resolve pass already
+        hard-errored (R9.11), so it never reaches here.
+        """
+        from agentworks.secrets.backends import SECRET_BACKEND_REGISTRY
+
+        for backend_name, mapping in self.backend_mappings.items():
+            if mapping is False:
+                continue
+            if backend_name not in enabled_backends:
+                # Absent (dangling, already hard-errored) or present-but-disabled
+                # (inert until enabled): neither is validated here.
+                continue
+            backend = SECRET_BACKEND_REGISTRY.get(backend_name)
+            if backend is not None:
+                backend.validate_mapping(f"secret {self.name!r}", mapping)
 
 
 DEFAULT_BACKEND_CHAIN: tuple[str, ...] = ("env-var", "prompt")

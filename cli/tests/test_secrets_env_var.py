@@ -7,6 +7,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from agentworks.resources.graph import Readiness
 from agentworks.secrets import ActiveBackend, SecretDecl, env_var_name_for
 from agentworks.secrets.env_var import EnvVarBackend
 
@@ -15,7 +16,7 @@ if TYPE_CHECKING:
 
 
 def _backend() -> ActiveBackend:
-    return ActiveBackend(capability=EnvVarBackend())
+    return ActiveBackend(capability=EnvVarBackend(), readiness=Readiness.ready())
 
 
 def test_default_convention_uppercases_and_dashes_to_underscores() -> None:
@@ -95,9 +96,7 @@ def test_resolve_omits_unset_env(monkeypatch: pytest.MonkeyPatch) -> None:
     """An unset env var is a soft miss: absent from the result."""
     monkeypatch.setenv("AW_SECRET_FOO", "foo-val")
     monkeypatch.delenv("AW_SECRET_BAR", raising=False)
-    out = _backend().resolve(
-        [SecretDecl(name="foo", description="F"), SecretDecl(name="bar", description="B")]
-    )
+    out = _backend().resolve([SecretDecl(name="foo", description="F"), SecretDecl(name="bar", description="B")])
     assert out == {"foo": "foo-val"}
 
 

@@ -33,6 +33,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Literal
 
 from agentworks import output
+from agentworks.resources.graph import Enablement
 from agentworks.resources.render import format_file_path, format_origin_line
 
 if TYPE_CHECKING:
@@ -45,7 +46,7 @@ if TYPE_CHECKING:
     from agentworks.resources.reference import ReferenceEntry
 
 
-OriginFilter = Literal["operator", "auto", "builtin"]
+OriginFilter = Literal["operator", "auto", "builtin", "plugin"]
 
 
 @dataclass(frozen=True)
@@ -54,17 +55,23 @@ class ResourceSummary:
     for one Registry-published Resource.
 
     - ``reference_count`` is the number of inbound ``ReferenceEntry``
-      instances on the Resource (how many config points name it). The
-      list view renders this as the REFS column.
+      instances on the Resource's graph node (how many config points name
+      it), from ``Registry.graph.dependents_of``. The list view renders
+      this as the REFS column.
     - ``used_by_count`` is the number of live DB instances that depend
       on this Resource per the current config, computed via the kind's
       ``instances(db, registry, resource)`` hook. ``None`` for kinds
       with no instance concept (apt / install-commands, providers,
       backends); the list view renders ``None`` as ``-`` in the USED BY
       column.
-    - ``disabled_reason`` is the kind's generic disabled hook's answer
-      (``None`` = enabled, or the kind has no disabled concept). The
-      list view marks disabled rows; describe shows the reason.
+    - ``not_ready_reason`` is the resource's stored readiness verdict's reason,
+      read off the graph (``None`` = ready, or the kind has no readiness
+      concept). The list view marks not-ready rows; describe shows the reason.
+    - ``disabled`` is the row's opt-in axis (``enablement_of is disabled``).
+      Only ever ``True`` on a row surfaced by ``list_resources(..., include_disabled=True)``,
+      since disabled rows are otherwise skipped. The list view marks it with a
+      ``(disabled)`` marker that dominates the ``(not ready)`` marker (a disabled
+      row's readiness is a ready placeholder anyway).
     """
 
     kind: str
@@ -73,7 +80,8 @@ class ResourceSummary:
     reference_count: int
     used_by_count: int | None
     description: str
-    disabled_reason: str | None = None
+    not_ready_reason: str | None = None
+    disabled: bool = False
 
 
 @dataclass(frozen=True)
@@ -84,6 +92,7 @@ class ResourceListing:
     operator_count: int
     auto_count: int
     code_count: int
+    plugin_count: int
 
 
 @dataclass(frozen=True)
@@ -106,7 +115,15 @@ class ResourceDescription:
     description: str
     references: tuple[ReferenceEntry, ...]
     used_by: tuple[InstanceRef, ...] | None
+    not_ready_reason: str | None = None
     disabled_reason: str | None = None
+    """The text of the ``Disabled:`` line, or ``None`` when the resource is
+    enabled. Derived from the row's ``system-plugin`` origin plus the opt-in
+    axis (``enablement_of``), NOT from a per-node reason (the frozen graph node
+    carries none; the disabling reason lives only on the transient
+    ``DisabledMark``). ``describe`` renders the named row even when disabled and
+    annotates it with this line, exactly as the doctor roster phrases the
+    state."""
 
 
 # -- Filter parsing ---------------------------------------------------------
@@ -120,6 +137,7 @@ _ORIGIN_FILTER_MAP: dict[str, str] = {
     "operator": "operator-declared",
     "auto": "auto-declared",
     "builtin": "built-in",
+    "plugin": "system-plugin",
 }
 
 
@@ -141,14 +159,24 @@ def list_resources(
     *,
     kinds: tuple[str, ...] | None = None,
     origin_filter: OriginFilter | None = None,
+    include_disabled: bool = False,
 ) -> ResourceListing:
     """Build a ``ResourceListing`` for ``agw resource list``.
 
     Filters narrow the rows; the summary counts are computed AFTER
     filtering so the header reflects what the operator actually sees.
-    Raises ``ValidationError`` when ``origin_filter`` isn't one of
-    ``operator`` / ``auto`` / ``code`` (the keys of ``_ORIGIN_FILTER_MAP``).
-    The CLI layer stays thin per the service-layer-is-the-authority rule.
+    Raises ``ValidationError`` when ``origin_filter`` isn't one of the
+    keys of ``_ORIGIN_FILTER_MAP`` (``operator`` / ``auto`` / ``builtin`` /
+    ``plugin``). The CLI layer stays thin per the
+    service-layer-is-the-authority rule.
+
+    ``include_disabled`` sets the default-surface rule (the plugin work is the
+    first producer of ``disabled`` rows): a row whose opt-in axis reads
+    ``Enablement.disabled`` is hidden by default and revealed only when this is
+    ``True``. The filter is on the ENABLEMENT axis (``enablement_of``), never on
+    readiness: a host-unsupported built-in (present, enabled, blocked) still
+    lists with its ``(not ready)`` marker. "Off by opt-in" hides; "on but
+    blocked" shows.
 
     ``db`` is optional: when provided, each row's ``used_by_count`` is
     populated via the kind's ``instances`` hook. When ``None`` (e.g.
@@ -159,8 +187,7 @@ def list_resources(
 
     if origin_filter is not None and origin_filter not in _ORIGIN_FILTER_MAP:
         raise ValidationError(
-            "origin_filter must be one of "
-            f"{sorted(_ORIGIN_FILTER_MAP)}; got {origin_filter!r}",
+            f"origin_filter must be one of {sorted(_ORIGIN_FILTER_MAP)}; got {origin_filter!r}",
             entity_kind="resource",
         )
     if kinds is not None and not kinds:
@@ -175,6 +202,7 @@ def list_resources(
     operator_count = 0
     auto_count = 0
     code_count = 0
+    plugin_count = 0
 
     for kind in target_kinds:
         # Sort by name within each kind so the output is stable across
@@ -185,7 +213,13 @@ def list_resources(
             origin = getattr(resource, "origin", None)
             if not _matches_origin(origin, origin_filter):
                 continue
-            references: tuple[ReferenceEntry, ...] = tuple(getattr(resource, "references", ()))
+            # Disabled hides, not-ready shows: skip a row that is off by
+            # opt-in unless the operator asked for it. Reads the ENABLEMENT
+            # axis, never readiness, so a not-ready-but-enabled row survives.
+            disabled = registry.graph.enablement_of(kind, name) is Enablement.disabled
+            if not include_disabled and disabled:
+                continue
+            references: tuple[ReferenceEntry, ...] = registry.graph.dependents_of(kind, name)
             description = getattr(resource, "description", "") or ""
             used_by_count = _count_used_by(db, registry, kind, resource)
             rows.append(
@@ -196,7 +230,8 @@ def list_resources(
                     reference_count=len(references),
                     used_by_count=used_by_count,
                     description=description,
-                    disabled_reason=disabled_reason_for(registry, kind, resource),
+                    not_ready_reason=not_ready_reason_for(registry, kind, name),
+                    disabled=disabled,
                 )
             )
             variant = origin.variant if origin is not None else None
@@ -206,44 +241,33 @@ def list_resources(
                 auto_count += 1
             elif variant == "built-in":
                 code_count += 1
+            elif variant == "system-plugin":
+                plugin_count += 1
 
     return ResourceListing(
         rows=tuple(rows),
         operator_count=operator_count,
         auto_count=auto_count,
         code_count=code_count,
+        plugin_count=plugin_count,
     )
 
 
-def disabled_reason_for(
-    registry: Registry, kind: str, resource: object
-) -> str | None:
-    """Project the kind's generic disabled hook: why ``resource``
-    cannot run on this host, or ``None`` when it can (or the kind has
-    no disabled concept). Same structural-duck-typing gate as
-    ``used_by_for``: absent-on-class IS the "never disabled" signal.
+def not_ready_reason_for(registry: Registry, kind: str, name: str) -> str | None:
+    """Project ``(kind, name)``'s stored readiness verdict: why it cannot run
+    on this host, or ``None`` when it can (a kind with no readiness concept
+    folds to ready, so its reason is ``None``).
+
+    Reads the fold's verdict off the graph (``readiness_of``), the single
+    unified read (R10/R11): no recompute, no per-kind readiness hook dispatch,
+    no live-registry probe. Feeds the ``(not ready)`` list marker and the
+    ``Not ready:`` describe line; "enabled/disabled" is reserved for the opt-in
+    axis and never used for host readiness (R6/R9.1).
     """
-    from agentworks.resources import KIND_REGISTRY
-
-    handler = KIND_REGISTRY.get(kind)
-    if handler is None:
-        return None
-    method = getattr(handler, "disabled_reason", None)
-    if method is None:
-        return None
-    reason = method(registry, resource)
-    if reason is not None and not isinstance(reason, str):
-        from agentworks.errors import StateError
-
-        raise StateError(
-            f"{kind}.disabled_reason returned {type(reason).__name__}, expected str | None"
-        )
-    return reason
+    return registry.graph.readiness_of(kind, name).reason
 
 
-def used_by_for(
-    db: Database | None, registry: Registry, kind: str, resource: object
-) -> tuple[InstanceRef, ...] | None:
+def used_by_for(db: Database | None, registry: Registry, kind: str, resource: object) -> tuple[InstanceRef, ...] | None:
     """Project ``(kind, resource) -> tuple[InstanceRef, ...] | None`` via
     the kind's ``instances`` hook. ``None`` for kinds that don't
     implement the hook (apt / install-commands, providers, backends) or
@@ -268,15 +292,44 @@ def used_by_for(
     return tuple(method(db, registry, resource))
 
 
-def _count_used_by(
-    db: Database | None, registry: Registry, kind: str, resource: object
-) -> int | None:
+def _count_used_by(db: Database | None, registry: Registry, kind: str, resource: object) -> int | None:
     """``len()`` variant of ``used_by_for`` used by the list-row builder.
     Returns ``None`` (renderer shows ``-``) when the kind has no
     instance concept; otherwise the count of live instances.
     """
     refs = used_by_for(db, registry, kind, resource)
     return None if refs is None else len(refs)
+
+
+def _plugin_provenance(origin: Origin | None) -> str | None:
+    """``"from plugin <name>"`` for a ``system-plugin`` row, else ``None``.
+
+    Reads ``origin.plugin`` already on the row (no separate lookup), so a
+    plugin's contributed resources are attributable in the list DESCRIPTION
+    cell and the describe header without the plugin being a resource (R12).
+    """
+    if origin is not None and origin.variant == "system-plugin" and origin.plugin:
+        return f"from plugin {origin.plugin}"
+    return None
+
+
+def _disabled_line_text(origin: Origin | None) -> str:
+    """The ``Disabled:`` line's text for a disabled row, derived from the row's
+    origin plus config the same way the doctor roster derives its state phrase
+    (from provenance, not a node reason): ``"not enabled in [plugins].system
+    (plugin <name>)"`` for a ``system-plugin`` row. The exact wording differs from the
+    roster's line because describe carries the plugin name inline while the
+    roster row already labels its plugin.
+
+    The disabling reason is NOT read off the frozen graph node (it carries
+    none; the reason lives only on the transient ``DisabledMark``), so the text
+    is reconstructed from provenance. A disabled row of any other origin (none
+    exists today: the plugin opt-in source is the sole producer) renders the
+    bare state word rather than a plugin phrase it cannot substantiate.
+    """
+    if origin is not None and origin.variant == "system-plugin" and origin.plugin:
+        return f"not enabled in [plugins].system (plugin {origin.plugin})"
+    return "disabled"
 
 
 def describe_resource(
@@ -328,14 +381,20 @@ def describe_resource(
             hint=hint,
         ) from None
 
+    origin = getattr(resource, "origin", None)
+    # describe is an EXPLICIT lookup by name, so it always renders the named row
+    # even when disabled (an operator debugging a specific disabled resource
+    # asked for it by name), annotating its state off the binary opt-in axis.
+    disabled = registry.graph.enablement_of(kind, name) is Enablement.disabled
     return ResourceDescription(
         kind=kind,
         name=name,
-        origin=getattr(resource, "origin", None),
+        origin=origin,
         description=getattr(resource, "description", "") or "",
-        references=tuple(getattr(resource, "references", ())),
+        references=registry.graph.dependents_of(kind, name),
         used_by=used_by_for(db, registry, kind, resource),
-        disabled_reason=disabled_reason_for(registry, kind, resource),
+        not_ready_reason=not_ready_reason_for(registry, kind, name),
+        disabled_reason=_disabled_line_text(origin) if disabled else None,
     )
 
 
@@ -374,13 +433,9 @@ def render_kind_table(rows: list[KindRow]) -> None:
     kind_w = max(len("KIND"), *(len(r.kind) for r in rows))
     cat_w = max(len("CATEGORY"), *(len(r.category) for r in rows))
     res_w = len("RESOURCES")
-    output.info(
-        f"{'KIND':<{kind_w}}  {'CATEGORY':<{cat_w}}  {'RESOURCES':<{res_w}}  DESCRIPTION"
-    )
+    output.info(f"{'KIND':<{kind_w}}  {'CATEGORY':<{cat_w}}  {'RESOURCES':<{res_w}}  DESCRIPTION")
     for r in rows:
-        output.info(
-            f"{r.kind:<{kind_w}}  {r.category:<{cat_w}}  {r.resources:<{res_w}}  {r.description}"
-        )
+        output.info(f"{r.kind:<{kind_w}}  {r.category:<{cat_w}}  {r.resources:<{res_w}}  {r.description}")
 
 
 def edit_location(registry: Registry, kind: str, name: str) -> tuple[Path, int]:
@@ -416,8 +471,7 @@ def edit_location(registry: Registry, kind: str, name: str) -> tuple[Path, int]:
                 hint=(
                     f"Declare an operator resource instead: {sample_hint}"
                     if declarable
-                    else f"{kind} is a capability provided by the app; "
-                    f"there is nothing to declare or edit."
+                    else f"{kind} is a capability provided by the app; there is nothing to declare or edit."
                 ),
             )
         raise ValidationError(
@@ -427,8 +481,7 @@ def edit_location(registry: Registry, kind: str, name: str) -> tuple[Path, int]:
     assert origin.file is not None and origin.line is not None  # variant contract
     if origin.file.suffix == ".toml":
         raise ValidationError(
-            f"{kind}/{name} is declared in TOML "
-            f"({format_file_path(origin.file)}:{origin.line})",
+            f"{kind}/{name} is declared in TOML ({format_file_path(origin.file)}:{origin.line})",
             hint=(
                 f"Move it to a YAML manifest with `agw resource migrate "
                 f"{kind}/{name}`, or edit the config directly with "
@@ -466,6 +519,8 @@ def render_resource_table(listing: ResourceListing) -> None:
         parts.append(f"{listing.auto_count} auto-declared")
     if listing.code_count:
         parts.append(f"{listing.code_count} built-in")
+    if listing.plugin_count:
+        parts.append(f"{listing.plugin_count} system-plugin")
     breakdown = f" ({', '.join(parts)})" if parts else ""
     output.info(f"{total} resource{'s' if total != 1 else ''}{breakdown}")
     output.info("")
@@ -478,15 +533,24 @@ def render_resource_table(listing: ResourceListing) -> None:
         # to distinguish "no instance concept" from "zero instances
         # right now."
         used_by_cell = "-" if row.used_by_count is None else str(row.used_by_count)
-        # Disabled rows are marked in the DESCRIPTION cell, never the
+        # Not-ready rows are marked in the DESCRIPTION cell, never the
         # NAME cell: the rendered name must stay the exact selector an
         # operator copies into `agw resource describe KIND/NAME`.
-        # `describe` carries the full reason.
-        description_cell = (
-            row.description
-            if row.disabled_reason is None
-            else f"(disabled) {row.description}".rstrip()
-        )
+        # `describe` carries the full reason. A system-plugin row also
+        # carries a `from plugin <name>` provenance annotation here.
+        description_cell = row.description
+        provenance = _plugin_provenance(row.origin)
+        if provenance is not None:
+            description_cell = f"{description_cell} ({provenance})" if description_cell else provenance
+        # A disabled row (only ever surfaced under --include-disabled) is marked
+        # with a ``(disabled)`` marker parallel to ``(not ready)``. Disabled
+        # dominates: a disabled node folds to a ready-placeholder readiness, so
+        # the ``(not ready)`` marker never coexists in practice, but if it ever
+        # did, ``(disabled)`` is the honest signal (opt-in, not host support).
+        if row.disabled:
+            description_cell = f"(disabled) {description_cell}".rstrip()
+        elif row.not_ready_reason is not None:
+            description_cell = f"(not ready) {description_cell}".rstrip()
         rendered.append(
             (
                 row.kind,
@@ -497,10 +561,7 @@ def render_resource_table(listing: ResourceListing) -> None:
                 description_cell,
             )
         )
-    widths = [
-        max(len(headers[i]), *(len(r[i]) for r in rendered))
-        for i in range(len(headers))
-    ]
+    widths = [max(len(headers[i]), *(len(r[i]) for r in rendered)) for i in range(len(headers))]
 
     def _fmt(cols: tuple[str, ...]) -> str:
         return "  ".join(c.ljust(widths[i]) for i, c in enumerate(cols))
@@ -518,13 +579,20 @@ def render_resource_description(desc: ResourceDescription) -> None:
     secret-specific sections (backend mappings, resolution preview).
     """
     output.info(f"Resource: {desc.kind}/{desc.name}")
+    # A system-plugin resource carries a `from plugin <name>` provenance
+    # annotation in the header (read off the origin), so a plugin's contributed
+    # resources are attributable without the plugin being a resource (R12).
+    provenance = _plugin_provenance(desc.origin)
     if desc.description:
-        output.detail(f"Description: {desc.description}")
+        description_line = f"{desc.description} ({provenance})" if provenance is not None else desc.description
+        output.detail(f"Description: {description_line}")
     else:
-        output.detail("Description: (none)")
+        output.detail(f"Description: {provenance}" if provenance is not None else "Description: (none)")
     output.detail(f"Origin: {format_origin_line(desc.origin)}")
     if desc.disabled_reason is not None:
         output.detail(f"Disabled: {desc.disabled_reason}")
+    if desc.not_ready_reason is not None:
+        output.detail(f"Not ready: {desc.not_ready_reason}")
 
     output.info("")
     output.info("Referenced by:")

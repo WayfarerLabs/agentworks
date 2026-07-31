@@ -10,8 +10,6 @@ variants) are the mechanism's further consumers.
 
 from __future__ import annotations
 
-from importlib import resources as importlib_resources
-from pathlib import Path
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -29,27 +27,17 @@ def publish_to(registry: Registry) -> None:
     The origin's source carries the bundled filename
     (``agentworks.manifests.builtin/<filename>``) so ``agw resource
     describe`` points at the actual shipped file. Bundled manifests are
-    app data: warn-level issues in them are app bugs, asserted here so
-    CI catches a dirty bundle the moment content is added.
+    app data: warn-level issues in them are app bugs, so the shared
+    ``publish_manifest_package`` body raises a typed error the moment a
+    bundle is dirty (a raise, not an ``assert``, so it holds under
+    ``python -O``).
     """
-    from agentworks.manifests.loader import load_manifests
+    from agentworks.manifests.package import publish_manifest_package
     from agentworks.resources import Origin
 
-    bundle = importlib_resources.files("agentworks.manifests") / "builtin"
-    # The traversable is a real directory both in the repo and in wheels
-    # (hatchling ships package data); resolve to a Path for the loader.
-    with importlib_resources.as_file(bundle) as bundle_dir:
-        manifests = load_manifests(Path(bundle_dir))
-
-    assert not manifests.issues, (
-        f"bundled manifests must be issue-free: {manifests.issues}"
+    publish_manifest_package(
+        registry,
+        anchor="agentworks.manifests",
+        subdir="builtin",
+        origin_for=lambda file_name: Origin.built_in(source=f"{_BUILTIN_SOURCE}/{file_name}"),
     )
-    for entry in manifests.entries:
-        registry.add(
-            entry.kind,
-            entry.name,
-            entry.resource,
-            Origin.built_in(
-                source=f"{_BUILTIN_SOURCE}/{entry.location.file.name}"
-            ),
-        )

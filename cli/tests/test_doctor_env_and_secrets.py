@@ -9,6 +9,7 @@ import pytest
 from agentworks.bootstrap import build_registry
 from agentworks.config import load_config
 from agentworks.doctor import Status, _check_config, _check_secrets
+from agentworks.errors import ConfigError
 
 
 def _write_config(tmp_path: Path, *, extras: str = "") -> Path:
@@ -40,7 +41,7 @@ shell = "zsh"
 # ---------------------------------------------------------------------------
 
 
-def test_auto_declared_secrets_are_reported(tmp_path: Path) -> None:
+def test_auto_declared_secrets_are_reported(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Doctor reports EVERY registry secret, auto-declared included --
     they are exactly the ones most likely to prompt at command time,
     so hiding them made doctor unable to predict the next command.
@@ -48,18 +49,21 @@ def test_auto_declared_secrets_are_reported(tmp_path: Path) -> None:
     ``tailscale-auth-key`` (vm-template requirement); it shows with an
     ``(auto)`` marker and an honest would-resolve-via-prompt heads-up.
     """
+    # Hosts that operate real VMs export this; clear it so the
+    # would-resolve-via-prompt assertion reflects the bare config, not the
+    # test host's environment (mirrors the sibling tests' delenv discipline).
+    monkeypatch.delenv("AW_SECRET_TAILSCALE_AUTH_KEY", raising=False)
     cfg = _write_config(tmp_path)
     config = load_config(cfg, warn_issues=False)
     g = _check_secrets(config, build_registry(config))
     assert g.name == "Secrets"
     statuses = [(c.name, c.status, c.message) for c in g.checks]
-    assert statuses == [
-        ("Secret 'tailscale-auth-key' (auto)", Status.OK, "would resolve via prompt")
-    ], statuses
+    assert statuses == [("Secret 'tailscale-auth-key' (auto)", Status.OK, "would resolve via prompt")], statuses
 
 
 def test_secret_resolves_via_env_var_when_set(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """When AW_SECRET_<NAME> is set, doctor reports the secret as resolving
     via env-var."""
@@ -81,15 +85,14 @@ backends = ["env-var", "prompt"]
     g = _check_secrets(config, build_registry(config))
     msgs = [(c.status, c.name, c.message) for c in g.checks]
     assert any(
-        status == Status.OK
-        and "shared" in name
-        and "would resolve via env-var" in (msg or "")
+        status == Status.OK and "shared" in name and "would resolve via env-var" in (msg or "")
         for status, name, msg in msgs
     ), msgs
 
 
 def test_secret_resolves_via_prompt_when_env_var_unset(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """When env-var has nothing and prompt is in the chain, doctor reports
     the secret as resolving via prompt -- prompt is just another backend."""
@@ -110,14 +113,14 @@ backends = ["env-var", "prompt"]
     config = load_config(cfg, warn_issues=False)
     g = _check_secrets(config, build_registry(config))
     oks = [c for c in g.checks if c.status == Status.OK]
-    assert any(
-        "shared" in c.name and "would resolve via prompt" in (c.message or "")
-        for c in oks
-    ), [(c.name, c.message) for c in oks]
+    assert any("shared" in c.name and "would resolve via prompt" in (c.message or "") for c in oks), [
+        (c.name, c.message) for c in oks
+    ]
 
 
 def test_secret_not_available_when_env_var_unset_and_prompt_opted_out(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """When prompt is opted out via backend_mappings.prompt = false AND
     env-var has no value, doctor reports the secret as WARN (config is
@@ -140,18 +143,144 @@ backends = ["env-var", "prompt"]
     config = load_config(cfg, warn_issues=False)
     g = _check_secrets(config, build_registry(config))
     warns = [c for c in g.checks if c.status == Status.WARN]
+    assert any("opted-out" in c.name and "not available" in (c.message or "") for c in warns), [
+        (c.name, c.message) for c in warns
+    ]
+
+
+# ---------------------------------------------------------------------------
+# _check_secret_backends (the new R9.7 backend-readiness group)
+# ---------------------------------------------------------------------------
+
+
+def test_secret_backends_group_reports_readiness(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The new secret-backends group lists one readiness row per backend off
+    the stored graph verdict (R11), parallel to VM platforms: env-var / prompt
+    are ready (``ok``); onepassword with no ``op`` on PATH is INFO with
+    ``not ready: op CLI not installed``."""
+    from agentworks.doctor import _check_secret_backends
+
+    monkeypatch.setattr("shutil.which", lambda name: None)  # op absent
+    config = load_config(
+        _write_config(tmp_path, extras='[plugins]\nsystem = ["onepassword"]\n'),
+        warn_issues=False,
+    )
+    g = _check_secret_backends(build_registry(config))
+
+    assert g.name == "Secret backends"
+    by_name = {c.name: c for c in g.checks}
+    assert by_name["env-var"].status is Status.OK
+    assert by_name["prompt"].status is Status.OK
+    assert by_name["onepassword"].status is Status.INFO
+    assert by_name["onepassword"].message == "not ready: op CLI not installed"
+
+
+def test_secret_backends_group_skips_disabled_plugin_backend(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A DISABLED plugin backend (``onepassword`` with the plugin not enabled) is
+    NOT listed in the Secret backends section: the System plugins roster is the
+    enablement authority and lists it as disabled instead. This is the fix for
+    the bug where a disabled backend rendered a misleading ``[ok]`` off its
+    ready-placeholder readiness, and where ENABLING onepassword made doctor look
+    worse (it flipped from ``[ok]`` to not-ready). The two core backends
+    (``env-var`` / ``prompt``) still list as ``ok``.
+    """
+    from agentworks.doctor import _check_plugins, _check_secret_backends
+
+    monkeypatch.setattr("shutil.which", lambda name: None)  # op absent
+    config = load_config(_write_config(tmp_path), warn_issues=False)  # no [plugins] system
+    registry = build_registry(config)
+
+    g = _check_secret_backends(registry)
+    by_name = {c.name: c for c in g.checks}
+    assert by_name["env-var"].status is Status.OK
+    assert by_name["prompt"].status is Status.OK
+    # Disabled: skipped here, never a misleading [ok].
+    assert "onepassword" not in by_name
+
+    # The System plugins roster IS the enablement authority: it lists the
+    # disabled backend's plugin as disabled.
+    roster = {c.name: c for c in _check_plugins(config).checks}
+    assert roster["plugin onepassword"].status is Status.INFO
+    assert "not enabled in [plugins].system" in (roster["plugin onepassword"].message or "")
+
+
+def test_check_secrets_flags_a_not_ready_only_backend(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """R9.6: a secret whose only attempting backend is not-ready is at-risk;
+    ``_check_secrets`` warns and names the not-ready backend rather than
+    falsely predicting resolution via it (lockstep with the resolution skip)."""
+    monkeypatch.setattr("shutil.which", lambda name: None)  # op absent
+    cfg = _write_config(
+        tmp_path,
+        extras="""
+[plugins]
+system = ["onepassword"]
+
+[admin.env]
+TOKEN = { secret = "op-only" }
+
+[secrets.op-only]
+description = "resolves only via onepassword"
+backend_mappings.onepassword = "op://Vault/item/field"
+backend_mappings.env-var = false
+
+[secret_config]
+backends = ["onepassword"]
+""",
+    )
+    config = load_config(cfg, warn_issues=False)
+    g = _check_secrets(config, build_registry(config))
+    warns = [c for c in g.checks if c.status == Status.WARN]
     assert any(
-        "opted-out" in c.name and "not available" in (c.message or "")
+        "op-only" in c.name and "not ready" in (c.message or "") and "op CLI not installed" in (c.message or "")
         for c in warns
     ), [(c.name, c.message) for c in warns]
 
 
-def test_mapping_to_undeclared_kind_fails(tmp_path: Path) -> None:
-    """A backend_mappings entry referencing a kind that has no
-    [secret_backends.<kind>] section AND is not a built-in (env-var /
-    prompt) fails the single per-secret row (FRD R6). Exactly one row
-    per secret, and FAIL takes precedence over the would-resolve preview
-    that env-var/prompt would otherwise emit."""
+def test_r9_3_manifest_malformed_block_surfaces_under_resource_registry(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """R9.3 doctor consequence: a malformed capability block in a MANIFEST now
+    surfaces under the "Resource registry" check row, not "Manifest". Capability
+    validation moved out of decode/load into the finalize ``validate`` pass, so
+    ``load_manifests`` accepts the block and ``build_registry`` fails it. Uses an
+    azdo git-credential; azdo ships in the opt-in ``azure`` system plugin, whose
+    validation is deferred while disabled, so the plugin is enabled here for the
+    block to validate (host-independent, so it always validates once enabled)."""
+    cfg = _write_config(tmp_path, extras='[plugins]\nsystem = ["azure"]')
+    resources_dir = tmp_path / "resources"
+    resources_dir.mkdir()
+    (resources_dir / "res.yaml").write_text(
+        "apiVersion: agentworks/v1\n"
+        "kind: git-credential\n"
+        "metadata:\n"
+        "  name: ado\n"
+        "spec:\n"
+        "  provider: azdo\n"
+        "  provider_config:\n"
+        "    org: my-org\n"
+        "    bogus: 1\n"
+    )
+    monkeypatch.setattr("agentworks.config.CONFIG_PATH", cfg)
+    g, _, registry = _check_config()
+
+    fails = {c.name: c for c in g.checks if c.status == Status.FAIL}
+    assert "Resource registry" in fails
+    assert "unknown azdo provider field" in (fails["Resource registry"].message or "")
+    assert "Manifest" not in fails  # the malformed block is no longer a decode/load failure
+    assert registry is None  # the registry-dependent tail is skipped after the failure
+
+
+def test_mapping_to_undeclared_kind_hard_errors_at_build(tmp_path: Path) -> None:
+    """R9.11: a ``backend_mappings`` entry naming a backend that is not a
+    registered ``secret-backend`` capability is a DANGLING ``secret ->
+    secret-backend`` edge, which the ``secret-backend`` kind's ``"error"``
+    miss policy turns into a hard ``build_registry`` failure (where the old
+    tolerant ``_check_secrets`` pinpointed it as one per-secret FAIL row).
+
+    Doctor-granularity regression (acknowledged, R9.11): because the build
+    now raises, a doctor run collapses its whole registry-dependent tail to
+    one "Resource registry: FAIL" row rather than pinpointing the secret.
+    """
     cfg = _write_config(
         tmp_path,
         extras="""
@@ -167,17 +296,15 @@ backends = ["env-var", "prompt"]
 """,
     )
     config = load_config(cfg, warn_issues=False)
-    g = _check_secrets(config, build_registry(config))
-    shared_rows = [c for c in g.checks if "shared" in c.name]
-    assert len(shared_rows) == 1, shared_rows
-    assert shared_rows[0].status == Status.FAIL
-    assert shared_rows[0].message == "references unknown backend: bogusvault"
+    with pytest.raises(ConfigError, match="unknown secret-backend 'bogusvault'"):
+        build_registry(config)
 
 
-def test_mapping_to_multiple_undeclared_kinds_pluralizes(tmp_path: Path) -> None:
-    """When two or more backend_mappings entries reference unknown kinds,
-    the single per-secret row lists them sorted and uses the plural
-    'backends' in the message."""
+def test_mapping_to_multiple_undeclared_kinds_hard_errors_at_build(tmp_path: Path) -> None:
+    """R9.11: with two unknown-backend mappings, the first dangling edge the
+    resolve pass reaches hard-errors at ``build_registry`` (naming that
+    backend); the build never gets far enough to enumerate both, unlike the
+    old tolerant per-secret doctor row that listed them sorted."""
     cfg = _write_config(
         tmp_path,
         extras="""
@@ -194,11 +321,8 @@ backends = ["env-var", "prompt"]
 """,
     )
     config = load_config(cfg, warn_issues=False)
-    g = _check_secrets(config, build_registry(config))
-    shared_rows = [c for c in g.checks if "shared" in c.name]
-    assert len(shared_rows) == 1, shared_rows
-    assert shared_rows[0].status == Status.FAIL
-    assert shared_rows[0].message == "references unknown backends: alpha-vault, zeta-vault"
+    with pytest.raises(ConfigError, match="unknown secret-backend '(alpha-vault|zeta-vault)'"):
+        build_registry(config)
 
 
 # ---------------------------------------------------------------------------
@@ -207,7 +331,8 @@ backends = ["env-var", "prompt"]
 
 
 def test_agentworks_identity_override_surfaces_in_configuration(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """An operator who sets AGENTWORKS_SESSION in their env table triggers
     a config-load warning. Doctor surfaces it once, in the Configuration
@@ -224,9 +349,7 @@ AGENTWORKS_SESSION = "operator-override"
     monkeypatch.setattr("agentworks.config.CONFIG_PATH", cfg)
     g, _, _ = _check_config()
     warns = [c for c in g.checks if c.status == Status.WARN]
-    assert any("AGENTWORKS_SESSION" in (c.message or "") for c in warns), (
-        [(c.name, c.message) for c in warns]
-    )
+    assert any("AGENTWORKS_SESSION" in (c.message or "") for c in warns), [(c.name, c.message) for c in warns]
 
 
 def test_doctor_surfaces_deprecation_nudges(tmp_path: Path, monkeypatch) -> None:
@@ -241,14 +364,8 @@ def test_doctor_surfaces_deprecation_nudges(tmp_path: Path, monkeypatch) -> None
     cfg = _write_config(tmp_path)  # has [vm_templates.default] + [admin.config]
     monkeypatch.setattr("agentworks.config.CONFIG_PATH", cfg)
     g, _, _ = _check_config()
-    warns = [
-        (c.name, c.message or "")
-        for c in g.checks
-        if c.status == Status.WARN
-    ]
-    ((name, message),) = [
-        w for w in warns if "deprecated TOML resource" in w[0]
-    ]
+    warns = [(c.name, c.message or "") for c in g.checks if c.status == Status.WARN]
+    ((name, message),) = [w for w in warns if "deprecated TOML resource" in w[0]]
     # Maintainer-specified row shape: the check NAME carries the fact,
     # the parenthetical carries the one next step.
     assert name == "Config has deprecated TOML resource declarations"
@@ -260,9 +377,7 @@ def test_doctor_surfaces_deprecation_nudges(tmp_path: Path, monkeypatch) -> None
     assert "[vm_templates.*]" not in line
 
 
-def test_doctor_shows_noop_secret_backend_sections(
-    tmp_path: Path, monkeypatch
-) -> None:
+def test_doctor_shows_noop_secret_backend_sections(tmp_path: Path, monkeypatch) -> None:
     cfg = _write_config(
         tmp_path,
         extras="""
@@ -271,15 +386,8 @@ def test_doctor_shows_noop_secret_backend_sections(
     )
     monkeypatch.setattr("agentworks.config.CONFIG_PATH", cfg)
     g, _, _ = _check_config()
-    warns = [
-        (c.name, c.message or "")
-        for c in g.checks
-        if c.status == Status.WARN
-    ]
-    assert any(
-        "[secret_backends.env-var]" in name and "remove it" in message
-        for name, message in warns
-    ), warns
+    warns = [(c.name, c.message or "") for c in g.checks if c.status == Status.WARN]
+    assert any("[secret_backends.env-var]" in name and "remove it" in message for name, message in warns), warns
 
 
 def test_manifest_issues_surface_as_doctor_rows(tmp_path: Path, monkeypatch, capsys) -> None:
@@ -355,8 +463,5 @@ bogus_key = 1
     fails = [c for c in g.checks if c.name == "Manifest" and c.status == Status.FAIL]
     assert fails and "broken.yaml" in (fails[0].message or "")
     # The TOML unknown-key warn row still rendered after the fail.
-    assert any(
-        c.name == "Config" and c.status == Status.WARN and "bogus_key" in (c.message or "")
-        for c in g.checks
-    )
+    assert any(c.name == "Config" and c.status == Status.WARN and "bogus_key" in (c.message or "") for c in g.checks)
     assert not any(c.name == "Config is valid" for c in g.checks)

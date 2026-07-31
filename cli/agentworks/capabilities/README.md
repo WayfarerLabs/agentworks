@@ -167,28 +167,39 @@ the same way: a capability not granted a target or a secret just finds it absent
 pairs with it: pre-resolve concerns read `self` (config bound at construct); runup and ops read the
 context.
 
-### 1. `validate_config` (declare; pure, classmethod)
+### 1. `dependencies` / `validate` (declare; pure, classmethods)
 
 ```python
-validate_config(owner: str, config: Mapping[str, object]) -> tuple[ConfigReference, ...]
+dependencies(owner: str, config: Mapping[str, object]) -> tuple[ConfigReference, ...]
+validate(owner: str, config: Mapping[str, object]) -> None
 ```
 
-Validates the config blob's _shape_ and returns the resource references it implies (secrets it
-names, other resources it points at). It is:
+The config-declaration contract is split in two. `dependencies` extracts the resource references the
+config blob implies (secrets it names, other resources it points at); `validate` is the throwing
+_shape_ check. This separation is what lets the registry build its dependency graph without
+validating: graph construction runs `dependencies` alone, and validation is a distinct pass. They
+are:
 
-- **Pure.** No I/O, no secret resolution, no network. It is called repeatedly and in varied contexts
-  (decode, registry finalize, construct), so it has to be cheap and side-effect-free everywhere;
-  finalize in particular is a pure graph-building pass where I/O has no place.
-- **A classmethod.** It has no instance; it validates a blob and declares refs.
+- **Total vs throwing.** `dependencies` **never raises**: it emits every edge it can derive
+  best-effort, omitting only an edge whose _identity_ depends on a field that is itself malformed.
+  All the raising lives in `validate`. Together, for a valid blob, they reproduce what the earlier
+  fused method did: the same refs from `dependencies`, the same errors from `validate`.
+- **Pure.** No I/O, no secret resolution, no network. They are called repeatedly and in varied
+  contexts (registry finalize, construct), so they have to be cheap and side-effect-free everywhere;
+  finalize in particular is a pure graph-building pass where I/O has no place. (`validate` used to
+  also run at manifest decode / TOML load; it moved into a dedicated finalize pass so graph
+  construction never depends on a block being valid.)
+- **Classmethods.** They have no instance; they read a blob to declare refs (`dependencies`) or
+  check its shape (`validate`).
 - **Host-agnostic.** `owner` is a label used only for error framing and reference attribution, never
-  dispatched on, so the same method serves config hosted in a dedicated kind, inline in a consumer,
-  or in a keyed map (see hosting shapes under Related). It is _not_ the consuming resource; if it
-  were, the method could serve only one host. Examples: `git-credential/ado`, or a session
-  template's `harness_config` site.
+  dispatched on, so the same methods serve config hosted in a dedicated kind, inline in a consumer,
+  or in a keyed map (see hosting shapes under Related). They are _not_ the consuming resource; if
+  they were, they could serve only one host. Examples: `git-credential/ado`, or a session template's
+  `harness_config` site.
 
-The references it returns are sourceless. The consuming resource attaches itself as the source when
-it emits them, in its `referenced_resources()` at finalize ("whoever hosts the config that names the
-secret emits the reference"). The framework consumes those references two ways: statically, they
+The references `dependencies` returns are sourceless. The consuming resource attaches itself as the
+source when it emits them, in its `dependencies()` at finalize ("whoever hosts the config that names
+the secret emits the reference"). The framework consumes those references two ways: statically, they
 feed the registry's reference graph and doctor's resolvability prediction; at runtime, their
 _values_ are fetched only by the framework's one batched resolve pass as soon as preflight passes
 (described under ops), and delivered through the context. References are never value-resolved at
@@ -198,11 +209,11 @@ command entry.
 
 The instance is constructed bound to its `(owner_name, config)`: its config, _not_ resolved secret
 values, and no secret machinery at all (the operation's boundary union comes from the plan's
-declared references; values arrive later through the context). Construction re-runs
-`validate_config` and **fails on an invalid config shape**: you do not build an instance around an
-invalid blob, so a shape error dies here, at construction, never later in preflight. (Errors that
-need the world to detect, an unreachable API, a missing tool, are preflight's job, not this.)
-Construction is otherwise cheap: no network, no secret resolution, no prompt.
+declared references; values arrive later through the context). Construction re-runs `validate` and
+**fails on an invalid config shape**: you do not build an instance around an invalid blob, so a
+shape error dies here, at construction, never later in preflight. (Errors that need the world to
+detect, an unreachable API, a missing tool, are preflight's job, not this.) Construction is
+otherwise cheap: no network, no secret resolution, no prompt.
 
 This is uniform across hosting shapes. Whether a consuming resource is dedicated to one capability
 (`vm-site`) or holds it as one field among many (a `session` with a harness), the instance is
@@ -367,9 +378,9 @@ the DB row anyway, orphaning the backend VM the operator just declined to authen
 Provisioning re-runs: `reinit` re-applies everything, and a failed command is retried. So the
 lifecycle has to be safe to re-run, and the five stages divide cleanly on how they get there:
 
-- `validate_config` (pure), `construct` (cheap, side-effect-free), and both readiness stages,
-  `preflight` and `runup` (read-only), are idempotent _by their existing contracts_. Their stated
-  re-runnability is idempotency by another name; nothing extra is required.
+- `dependencies` / `validate` (pure), `construct` (cheap, side-effect-free), and both readiness
+  stages, `preflight` and `runup` (read-only), are idempotent _by their existing contracts_. Their
+  stated re-runnability is idempotency by another name; nothing extra is required.
 - **ops** are the mutation phase, so idempotency there is an _explicit_ contract, not a free
   consequence. Each kind's ABC **flags the ops that must be idempotent** (a marker plus the standing
   docstring note), and implementations must conform: a flagged op, run twice, lands in the same
@@ -385,41 +396,60 @@ A flagged, idempotent minting op must therefore **check-then-mint**: read the cu
 it (the same read-only check `runup` runs), and mint only if it is absent or expired. That guard is
 real work the implementer is on the hook for, and the flag is what tells them so.
 
-## Disabled resources (`disabled_reason`)
+## Readiness (`not_ready`) and the fold
 
-Distinct from the lifecycle and cheaper than all of it: any resource (capability instance or
-declared resource) may answer **"do you have what you need to run on this host?"** via a generic
-`disabled_reason() -> str | None` (`None` = enabled). The contract is _cheap, offline,
-host-introspection only_: OS, tool presence, the shape of the bound config; never network, secrets,
-or prompting. Readiness that needs the secret machinery or a remote read is preflight's job at the
-op boundary; `disabled_reason` runs on inspection and selection surfaces (doctor, `resource list`,
-site selection) where preflight would be too heavy.
+Distinct from the lifecycle and cheaper than all of it: readiness answers **"can this run on this
+host right now?"** as a dependency-ordered fold computed once at finalize and stored on the graph
+(the registry's retained `DependencyGraph`; consumers read `graph.readiness_of`, never recompute).
+The contract is _cheap, offline, host-introspection only_: OS, tool presence, the shape of the
+config; never network, secrets, or prompting. Readiness that needs the secret machinery or a remote
+read is preflight's job at the op boundary.
 
-For most declared resources the answer is a no-op (a vm-template always has what it needs); the
-resource layer treats absent-on-kind as "never disabled" (the same structural-hook pattern as
-`instances`). Where it is real, the rules are uniform:
+Readiness splits into two config-shaped halves, both **non-constructing** (they never build an
+instance, so the fold stays total over unvalidated config, and a malformed block is never a
+permanent readiness reason):
 
-- A disabled resource **still registers**: it lists (marked), describes (with the reason), and holds
-  references. Existence and availability are separate axes.
-- **Using** a disabled resource is a typed error naming the reason chain.
-- **References to** a disabled resource are doctor warnings, never command failures: a resources dir
-  shared across hosts degrades gracefully on the host that lacks a requirement.
+- A capability's config-INDEPENDENT host support: `VMPlatform.unsupported_reason()` ("could any
+  configuration ever work here": wsl2 off Windows). This is the **capability node's own** readiness.
+- A capability's config-DEPENDENT check: the classmethod `not_ready(config) -> Readiness` (default:
+  ready), keyed on the consuming resource's config (a local-Lima site without `limactl`; a remote
+  site with a `vm_host` needs nothing locally). The fold calls it off the graph-carried impl.
 
-The vm stack is the first adopter: a platform's class-level `unsupported_reason` gates its
-capability row ("could any configuration ever work here": wsl2 off Windows), and every vm-site
-registers unconditionally, deriving its own `disabled_reason` from the chain: platform missing (an
-uninstalled plugin and a typo are indistinguishable by design), platform host-disabled, or the bound
-platform instance's own answer (a local-Lima site without `limactl`; remote sites run `limactl` on
-the `vm_host` and need nothing locally).
+A consuming resource decides its OWN verdict from its dependencies' states. The fold hands each node
+a `DependencyState` per dependency (the dep's enablement, its readiness when enabled, its carried
+disabled reason, its impl); the resource-level `not_ready(deps) -> Readiness` folds them however it
+likes. The fold imposes no propagation rule. Two consumers propagate from a single dependency:
+`vm-site` from its platform and `git-credential` from its provider (disabled dependency: the carried
+remediation reason, e.g. "enable plugin `<name>`", falling back to "enable its unit" when no source
+supplied one; a not-ready dependency with a readiness reason propagates that; else re-ask with the
+resource's own config). A `secret` and a `session-template` opt out (implement no `not_ready`, so
+they are always ready); a `session-template`'s harness is instead gated at use
+(`ensure_harness_enabled`), the secret model. The rules on the resulting verdict are uniform:
+
+- A not-ready resource **still registers**: it lists (marked), describes (with the reason), and
+  holds references. Existence and availability are separate axes.
+- **Using** a not-ready resource is a typed error naming the reason.
+- **References to** a not-ready resource are doctor warnings, never command failures: a resources
+  dir shared across hosts degrades gracefully on the host that lacks a requirement.
+- A reference to an **absent** resource (a typo, or an uninstalled plugin) is a hard error, not a
+  self-disable: absence is the registry's structural miss.
+
+Enablement (`enabled` / `disabled`) is a separate axis, for operator opt-in. It is modeled on the
+node and distributed by the fold, and it is now PRODUCED: `finalize` composes injected enablement
+sources into a disabled-node mark map and projects the binary axis from it (a node is `disabled` iff
+some source marks it). The plugin opt-in source (a not-opted-in `system-plugin` row is `disabled`
+with an "enable plugin `<name>`" reason) is the first such producer; it is threaded into `finalize`
+from `build_registry` (that wiring lands in a later plugin phase). A build with no sources yields
+all-`enabled`, exactly as before.
 
 ## The base class
 
 The shared surface is real (it is a lifecycle, not a boilerplate default), so it earns a base class
 (`capabilities/base.py`). The base owns the contract above and nothing domain-specific:
 
-- the `validate_config` classmethod, with a sensible default (accepts no config) and the standing
-  NOTE that this invoked-validation API may later be superseded by capabilities declaring their
-  config schema at registration time;
+- the `dependencies` / `validate` classmethods, with sensible defaults (no implied references,
+  accepts no config) and the standing NOTE that this invoked-validation API may later be superseded
+  by capabilities declaring their config schema at registration time;
 - the construct, `preflight`, and `runup` instance contract (both readiness stages no-op by default:
   resolvability prediction is the holding node's, central, and the capabilities with nothing to
   check or authenticate get the right behavior for free);
@@ -434,9 +464,9 @@ machinery, not framework machinery.
 ## Secrets are just declared references
 
 A capability's config may name secrets (a Proxmox API token, a git PAT, an AWS client secret).
-Nothing special happens: the secret is an ordinary `ConfigReference` returned by `validate_config`.
-The framework owns everything after the declaration: non-prompting _prediction_ in preflight (is
-this resolvable at all?, computed centrally over the declarations by the node holding the instance),
+Nothing special happens: the secret is an ordinary `ConfigReference` returned by `dependencies`. The
+framework owns everything after the declaration: non-prompting _prediction_ in preflight (is this
+resolvable at all?, computed centrally over the declarations by the node holding the instance),
 _resolution_ at the preflight boundary (everything the command declared, one batched prompt session,
 cached), and _delivery_ through the context, scoped to the declared names. The default secret name
 is the capability's to choose: a per-consumer default (`git-token-<name>`, derived from `owner`)
@@ -448,8 +478,8 @@ way the capability owns the default; the framework only resolves what was declar
 Everything above reduces, for a capability author, to two obligations at two moments, with the
 framework owning everything in between:
 
-1. **Declare, purely.** Name every secret (and every other resource reference) in `validate_config`:
-   no resolver, no I/O, no resolution. This is the capability's _entire_ input side. The framework
+1. **Declare, purely.** Name every secret (and every other resource reference) in `dependencies`: no
+   resolver, no I/O, no resolution. This is the capability's _entire_ input side. The framework
    reads those references to build the resolvability prediction preflight uses and to scope the one
    batched resolve pass.
 2. **Receive, from the context.** Read resolved secret values only via `ctx.secret(name)`, in
@@ -530,8 +560,8 @@ in ways worth recording before that change, because it is a different animal:
 - **Hosting shapes.** A consuming resource can host a capability's config three ways: as a dedicated
   kind (reference + a config blob, like `vm-site`), inline in a richer consumer (like a session's
   `harness_config`), or in a map keyed by name (like an agent template's feature map).
-  `validate_config`'s host-agnostic `owner` is exactly what lets one capability serve all three
-  without knowing which consumer hosts it.
+  `dependencies` / `validate`'s host-agnostic `owner` is exactly what lets one capability serve all
+  three without knowing which consumer hosts it.
 - `owner` is a host-agnostic string today. If a second consumer (preflight's richer context is the
   likely trigger) needs more than a name, the right evolution is a small host-agnostic context
   value, not passing the consuming resource, designed once, when two real consumers reveal its

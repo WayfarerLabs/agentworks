@@ -44,10 +44,7 @@ def console_create(
         bool,
         typer.Option(
             "--all-running",
-            help=(
-                "Like --all but only sessions whose live tmux state is OK "
-                "(one SSH probe; VM must be reachable)"
-            ),
+            help=("Like --all but only sessions whose live tmux state is OK (one SSH probe; VM must be reachable)"),
         ),
     ] = False,
     add_admin_shell: Annotated[
@@ -149,9 +146,7 @@ def console_describe(
 @console_app.command("attach")
 def console_attach(
     name: Annotated[str, typer.Argument(help="Console name")],
-    recreate: Annotated[
-        bool, typer.Option("--recreate", help="Kill and rebuild the console's tmux state")
-    ] = False,
+    recreate: Annotated[bool, typer.Option("--recreate", help="Kill and rebuild the console's tmux state")] = False,
     allow_nesting: Annotated[
         bool, typer.Option("--allow-nesting", help="Allow attaching from inside an existing tmux")
     ] = False,
@@ -202,12 +197,20 @@ def console_add_sessions(
 def console_remove_sessions(
     name: Annotated[str, typer.Argument(help="Console name")],
     sessions: Annotated[list[str], typer.Argument(help="Session names to remove")],
+    yes: Annotated[
+        bool,
+        typer.Option(
+            "--yes",
+            "-y",
+            help="Skip confirmation prompt",
+        ),
+    ] = False,
 ) -> None:
     """Remove sessions from a console."""
     from agentworks.config import load_config
     from agentworks.sessions.multi_console import remove_sessions
 
-    remove_sessions(get_db(), load_config(), console_name=name, session_names=sessions)
+    remove_sessions(get_db(), load_config(), console_name=name, session_names=sessions, yes=yes)
 
 
 @console_app.command("reorder-sessions")
@@ -228,9 +231,7 @@ def console_reorder_sessions(
     from agentworks.config import load_config
     from agentworks.sessions.multi_console import reorder_sessions
 
-    reorder_sessions(
-        get_db(), load_config(), console_name=name, session_names=sessions
-    )
+    reorder_sessions(get_db(), load_config(), console_name=name, session_names=sessions)
 
 
 @console_app.command("add-shell")
@@ -267,11 +268,13 @@ def console_restore_session(
 ) -> None:
     """Reconcile a session window's live shell panes against the configured list.
 
-    Re-adds any panes you killed (e.g. accidentally), restoring each one to
-    its original position. Refuses to remove panes if you have more live than
-    configured; for that, use `console attach --recreate`. Consoles created
-    before pane-tagging existed require `attach --recreate` once to retag from
-    scratch.
+    Re-adds any shell panes you killed (e.g. accidentally), restoring each one
+    to its original position, and rebuilds the window if it is gone entirely.
+    Never kills a live pane or window: if you have more panes live than
+    configured, or the window's session pane itself was killed (so the console
+    shows a plain shell instead of the session), it refuses and points you at
+    `console attach --recreate`. Consoles created before pane-tagging existed
+    require `attach --recreate` once to retag from scratch.
     """
     from agentworks.config import load_config
     from agentworks.sessions.multi_console import restore_session

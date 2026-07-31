@@ -69,6 +69,11 @@ def realize_agent(
     half-configured user); the caller's realization log never sees a
     half-made agent. Returns the inserted row.
     """
+    # DRIFT GUARD (Phase 7, recipe use-gate): this choreography is itself never
+    # gated; the recipe gate (``ensure_recipe_enabled``) lives at each COMMAND
+    # ENTRY that reaches it (agent create, session create --new-agent). If you
+    # add a NEW caller of ``realize_agent``, add its command-entry gate and
+    # update tests/agents/test_recipe_gate_drift.py's enumerated caller set.
     from agentworks.agents.initializer import create_agent_on_vm, delete_agent_on_vm
     from agentworks.agents.manager import derive_linux_user
     from agentworks.ssh import SSHLogger
@@ -76,7 +81,7 @@ def realize_agent(
     linux_user = derive_linux_user(name)
     ssh_logger = SSHLogger(vm.name, "agent-create")
     # Delivered secret values register on the scope's logger up front
-    # (the initialize_vm / reinit_vm pattern): the materials write only
+    # (the bootstrap_vm / reinit_vm pattern): the materials write only
     # ever logs paths and byte counts, so this is defense in depth
     # against any future command or traceback embedding a token.
     for token in git_tokens.values():
@@ -100,7 +105,11 @@ def realize_agent(
     try:
         try:
             create_agent_on_vm(
-                vm, config, registry, template, linux_user,
+                vm,
+                config,
+                registry,
+                template,
+                linux_user,
                 agent_name=name,
                 git_tokens=git_tokens,
                 logger=ssh_logger,

@@ -162,19 +162,20 @@ class Resolver:
 
         # Gate-seeded values are already resolved (by the gate's own
         # backend-chain pass); the boundary loop covers only the rest.
-        missing = [
-            decl
-            for name, decl in self._decls.items()
-            if name not in self._seeded
-        ]
+        missing = [decl for name, decl in self._decls.items() if name not in self._seeded]
         if not missing:
             self._values = dict(self._seeded)
             return
         self._values = {
             **self._seeded,
+            # ``registry`` powers the disabled-plugin failure hint (LLD b): a
+            # secret whose only mapping is a disabled plugin backend fails naming
+            # the plugin to enable. This is the dominant resolution path, so the
+            # hint reaches every VM / session / agent command through it.
             **resolve_secrets(
                 missing,
                 active_backends(self._config, self._registry),
+                registry=self._registry,
             ),
         }
 

@@ -13,6 +13,7 @@ from typing import cast
 import pytest
 
 from agentworks.errors import ConfigError, SecretMappingError, SecretUnavailableError
+from agentworks.resources.graph import Readiness
 from agentworks.secrets import SecretDecl
 from agentworks.secrets.resolve import ActiveBackend, preview_resolution, resolve_secrets
 
@@ -26,9 +27,13 @@ class _FakeBackend:
         values: dict[str, str] | None = None,
         attempts: set[str] | None = None,
         interactive: bool = False,
+        readiness: Readiness | None = None,
     ) -> None:
         self.name = name
         self.interactive = interactive
+        # Stored readiness verdict (R9.6): a not-ready backend is skipped with a
+        # warning at resolution. Defaults to ready.
+        self.readiness = readiness if readiness is not None else Readiness.ready()
         self._values = values or {}
         # If attempts is None, this backend attempts everything except
         # explicit opt-outs (keyed by BACKEND NAME). If attempts is a
@@ -48,11 +53,7 @@ class _FakeBackend:
 
     def resolve(self, secrets: list[SecretDecl]) -> dict[str, str]:
         self.resolve_calls.append([s.name for s in secrets])
-        return {
-            s.name: self._values[s.name]
-            for s in secrets
-            if s.name in self._values
-        }
+        return {s.name: self._values[s.name] for s in secrets if s.name in self._values}
 
 
 def _decl(name: str, **kw: object) -> SecretDecl:
@@ -307,6 +308,73 @@ def test_hard_miss_halts_before_interactive_doom_check(
     assert prompt.resolve_calls == []
 
 
+# -- R9.6: readiness gating (skip-with-warning, fall-through) -----------------
+
+
+def test_not_ready_backend_skipped_with_warning_and_chain_falls_through(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """R9.6: a not-ready opted-in backend is skipped WITH A WARNING (never
+    silent) and the chain falls through to the next candidate. Delta vs today:
+    a mapped-but-unavailable store used to raise ConnectivityError and halt;
+    now it warns and yields to a later backend."""
+    from agentworks import output
+
+    warnings: list[str] = []
+    monkeypatch.setattr(output, "warn", lambda message: warnings.append(message))
+
+    not_ready = _FakeBackend(
+        "onepassword", values={"x": "vaulted"}, readiness=Readiness.blocked("op CLI not installed")
+    )
+    later = _FakeBackend("prompt", values={"x": "prompted"})
+    got = resolve_secrets([_decl("x")], _chain(not_ready, later))
+    assert got == {"x": "prompted"}
+    assert not_ready.resolve_calls == []  # never asked to resolve
+    assert any("skipping onepassword" in w and "op CLI not installed" in w for w in warnings)
+
+
+def test_ready_store_hard_miss_still_halts_not_skipped() -> None:
+    """R9.6 contrast (anti-masking preserved): readiness distinguishes 'skip,
+    it can't run here' from 'halt, it ran and said no'. A READY store's hard
+    miss (SecretMappingError) still halts the chain, so a later prompt does not
+    mask the store's definitive 'no'."""
+
+    class _HardMiss(_FakeBackend):
+        def resolve(self, secrets: list[SecretDecl]) -> dict[str, str]:
+            raise SecretMappingError("store has no value")
+
+    ready_store = _HardMiss("onepassword")  # readiness defaults ready
+    prompt = _FakeBackend("prompt", values={"x": "prompted"})
+    with pytest.raises(SecretMappingError, match="store has no value"):
+        resolve_secrets([_decl("x")], _chain(ready_store, prompt))
+    assert prompt.resolve_calls == []  # halted: the prompt never masked the store's 'no'
+
+
+def test_doom_check_treats_not_ready_remaining_backend_as_non_attempting(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """R9.6 lockstep with the #202 predictor: ``remaining`` is filtered to
+    READY backends, so a secret whose only remaining would-attempt backend is
+    not-ready is doomed BEFORE the interactive prompt fires (it will be skipped,
+    so it must not count as attempting)."""
+    from agentworks import output
+
+    monkeypatch.setattr(output, "warn", lambda message: None)
+    _set_interactive(monkeypatch, True)
+
+    env = _FakeBackend("env-var")  # soft-misses everything
+    op = _FakeBackend(
+        "onepassword", values={"x": "vaulted"}, attempts={"x"}, readiness=Readiness.blocked("op CLI not installed")
+    )
+    prompt = _PromptFake("prompt", values={"a": "typed"}, attempts={"a"}, interactive=True)
+    with pytest.raises(SecretUnavailableError) as exc:
+        resolve_secrets([_decl("a"), _decl("x")], _chain(env, op, prompt))
+    # x is doomed (its only remaining attempter, onepassword, is not-ready), so
+    # the raise fires before the prompt for a runs.
+    assert prompt.resolve_calls == []
+    assert "x" in str(exc.value)
+
+
 # -- collect mode (errors out-param) -----------------------------------------
 
 
@@ -373,10 +441,7 @@ def test_collect_mode_default_is_unchanged_raise_behavior() -> None:
 def test_preview_reports_first_backend_with_value() -> None:
     b1 = _FakeBackend("env-var", values={"x": "from-env"})
     b2 = _FakeBackend("prompt", interactive=True)
-    assert (
-        preview_resolution(_decl("x"), _chain(b1, b2), interactive_available=True)
-        == "env-var"
-    )
+    assert preview_resolution(_decl("x"), _chain(b1, b2), interactive_available=True) == "env-var"
 
 
 def test_preview_falls_through_to_interactive() -> None:
@@ -385,10 +450,7 @@ def test_preview_falls_through_to_interactive() -> None:
     interactive input is available this run."""
     b1 = _FakeBackend("env-var")  # no values
     b2 = _FakeBackend("prompt", interactive=True)
-    assert (
-        preview_resolution(_decl("x"), _chain(b1, b2), interactive_available=True)
-        == "prompt"
-    )
+    assert preview_resolution(_decl("x"), _chain(b1, b2), interactive_available=True) == "prompt"
 
 
 def test_preview_interactive_unavailable_does_not_report_prompt() -> None:
@@ -397,10 +459,7 @@ def test_preview_interactive_unavailable_does_not_report_prompt() -> None:
     walks PAST the interactive backend and returns None."""
     b1 = _FakeBackend("env-var")  # no values
     b2 = _FakeBackend("prompt", interactive=True)
-    assert (
-        preview_resolution(_decl("x"), _chain(b1, b2), interactive_available=False)
-        is None
-    )
+    assert preview_resolution(_decl("x"), _chain(b1, b2), interactive_available=False) is None
 
 
 def test_preview_interactive_unavailable_still_reports_later_backend() -> None:
@@ -409,12 +468,7 @@ def test_preview_interactive_unavailable_still_reports_later_backend() -> None:
     b1 = _FakeBackend("env-var")  # no values
     b2 = _FakeBackend("prompt", interactive=True)
     b3 = _FakeBackend("vault", values={"x": "from-vault"})
-    assert (
-        preview_resolution(
-            _decl("x"), _chain(b1, b2, b3), interactive_available=False
-        )
-        == "vault"
-    )
+    assert preview_resolution(_decl("x"), _chain(b1, b2, b3), interactive_available=False) == "vault"
 
 
 def test_preview_never_probes_interactive_backends() -> None:
@@ -428,10 +482,7 @@ def test_preview_never_probes_interactive_backends() -> None:
 
     b1 = _FakeBackend("env-var")
     b2 = _ExplodingPrompt("prompt", interactive=True)
-    assert (
-        preview_resolution(_decl("x"), _chain(b1, b2), interactive_available=True)
-        == "prompt"
-    )
+    assert preview_resolution(_decl("x"), _chain(b1, b2), interactive_available=True) == "prompt"
 
 
 def test_preview_skips_opted_out_backend() -> None:
@@ -440,10 +491,7 @@ def test_preview_skips_opted_out_backend() -> None:
     b1 = _FakeBackend("env-var", values={"x": "from-env"})
     b2 = _FakeBackend("prompt", interactive=True)
     decl = _decl("x", backend_mappings={"env-var": False})
-    assert (
-        preview_resolution(decl, _chain(b1, b2), interactive_available=True)
-        == "prompt"
-    )
+    assert preview_resolution(decl, _chain(b1, b2), interactive_available=True) == "prompt"
 
 
 def test_preview_honors_opt_out_for_interactive_backend() -> None:
@@ -453,9 +501,7 @@ def test_preview_honors_opt_out_for_interactive_backend() -> None:
     b1 = _FakeBackend("env-var")  # no values; falls through
     b2 = _FakeBackend("prompt", interactive=True)
     decl = _decl("x", backend_mappings={"prompt": False})
-    assert (
-        preview_resolution(decl, _chain(b1, b2), interactive_available=True) is None
-    )
+    assert preview_resolution(decl, _chain(b1, b2), interactive_available=True) is None
 
 
 def test_preview_returns_none_when_no_backend_attempts() -> None:

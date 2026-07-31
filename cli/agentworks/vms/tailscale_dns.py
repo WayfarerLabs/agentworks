@@ -103,10 +103,7 @@ def _ensure_tailscaled_dropin(target: Transport, logger: SSHLogger) -> None:
     the file was actually rewritten.
     """
     existing = target.run(f"cat {TAILSCALED_DROPIN_PATH}", sudo=True, check=False)
-    if (
-        getattr(existing, "ok", False)
-        and getattr(existing, "stdout", "") == TAILSCALED_DROPIN_CONTENT
-    ):
+    if getattr(existing, "ok", False) and getattr(existing, "stdout", "") == TAILSCALED_DROPIN_CONTENT:
         output.info("tailscaled drop-in already installed; no change.")
         return
 

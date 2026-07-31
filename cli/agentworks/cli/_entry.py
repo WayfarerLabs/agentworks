@@ -75,14 +75,12 @@ def main() -> None:
         log_path = record_unhandled_error(e)
         if log_path is not None:
             typer.echo(
-                f"(full traceback written to {log_path}; "
-                f"rerun with --debug or AGW_DEBUG=1 to print on stderr)",
+                f"(full traceback written to {log_path}; rerun with --debug or AGW_DEBUG=1 to print on stderr)",
                 err=True,
             )
         else:
             typer.echo(
-                "(could not write traceback to log; "
-                "rerun with --debug or AGW_DEBUG=1 to print on stderr)",
+                "(could not write traceback to log; rerun with --debug or AGW_DEBUG=1 to print on stderr)",
                 err=True,
             )
         raise SystemExit(1) from None
@@ -119,14 +117,12 @@ def main() -> None:
         error(f"{type(e).__name__}: {e}")
         if log_path is not None:
             typer.echo(
-                f"(full traceback written to {log_path}; "
-                f"rerun with --debug or AGW_DEBUG=1 to print on stderr)",
+                f"(full traceback written to {log_path}; rerun with --debug or AGW_DEBUG=1 to print on stderr)",
                 err=True,
             )
         else:
             typer.echo(
-                "(could not write traceback to log; "
-                "rerun with --debug or AGW_DEBUG=1 to print on stderr)",
+                "(could not write traceback to log; rerun with --debug or AGW_DEBUG=1 to print on stderr)",
                 err=True,
             )
         raise SystemExit(1) from None

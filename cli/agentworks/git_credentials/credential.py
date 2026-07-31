@@ -5,8 +5,8 @@ Moved out of ``agentworks.config`` so the ``git_credentials`` domain owns
 its declared-resource type. The provider capability it references (and
 its kind, ``agentworks.capabilities.git_credential.kinds``) lives in the
 capabilities subtree; this consuming resource depends on it, not the
-reverse. ``config.py`` keeps only the legacy TOML loader that constructs
-it.
+reverse. The ``agentworks.config`` package keeps only the legacy TOML
+loader that constructs it.
 """
 
 from __future__ import annotations
@@ -17,6 +17,9 @@ from typing import TYPE_CHECKING
 from agentworks.declared_resource import DeclaredResource
 
 if TYPE_CHECKING:
+    from collections.abc import Mapping
+
+    from agentworks.resources.graph import BuildContext, DependencyState, Readiness
     from agentworks.resources.reference import ResourceReference
 
 
@@ -25,8 +28,8 @@ def credential_references(
     source: tuple[str, str],
 ) -> list[ResourceReference]:
     """Emit a ``ResourceReference`` of kind ``"git-credential"`` per
-    name in ``git_credentials``. Used by ``AdminConfig.referenced_resources``
-    and ``AgentTemplate.referenced_resources`` to feed the
+    name in ``git_credentials``. Used by ``AdminConfig.dependencies``
+    and ``AgentTemplate.dependencies`` to feed the
     ``GitCredentialKind``'s error miss policy: a typo'd or undeclared
     name errors at finalize with the reference source pointing at the
     declaring Resource.
@@ -61,18 +64,18 @@ class GitCredentialConfig(DeclaredResource):
     # Provider-owned configuration (azdo's org; github's repos/owner;
     # and the ``token`` secret name that every current provider sources
     # its PAT from, default ``git-token-<name>``, owned by the
-    # provider's ``validate_config`` since sourcing is provider-specific
+    # provider's ``dependencies`` since sourcing is provider-specific
     # (a future minting provider declares a bootstrap secret, or none).
     # The flat TOML section is the ONLY place these live at the top
     # level; the loader nests them here so the internal representation
     # matches the YAML manifest shape.
     provider_config: dict[str, object] = field(default_factory=dict)
 
-    def referenced_resources(self) -> list[ResourceReference]:
+    def dependencies(self, context: BuildContext) -> list[ResourceReference]:
         from agentworks.resources.reference import (
             ResourceReference as _ResourceReq,
         )
-        from agentworks.resources.reference import SecretReference
+        from agentworks.resources.reference import sourced_references
 
         source = ("git-credential", self.name)
         # The ``provider`` field references a known provider
@@ -85,27 +88,62 @@ class GitCredentialConfig(DeclaredResource):
                 source=source,
             ),
         ]
-        # Everything the credential references (its token secret and
-        # any other provider-declared resources) comes from the
-        # provider validating its config block and returning the
-        # references it implies; this resource (the config block's
-        # owner) attributes them to itself.
+        # Everything the credential references (its token secret and any
+        # other provider-declared resources) comes from the provider
+        # deriving the references its config block implies (dependencies,
+        # total and non-throwing); this resource (the config block's
+        # owner) attributes them to itself via the shared conversion.
         from agentworks.capabilities.git_credential import (
             GIT_CREDENTIAL_PROVIDER_REGISTRY,
         )
 
         capability = GIT_CREDENTIAL_PROVIDER_REGISTRY.get(self.provider)
         if capability is not None:
-            for cref in capability.validate_config(
-                f"git-credential/{self.name}", self.provider_config
-            ):
-                ref_cls = SecretReference if cref.kind == "secret" else _ResourceReq
-                refs.append(
-                    ref_cls(
-                        name=cref.name,
-                        kind=cref.kind,
-                        usage=cref.usage,
-                        source=source,
-                    )
+            refs.extend(
+                sourced_references(
+                    capability.dependencies(f"git-credential/{self.name}", self.provider_config),
+                    source,
                 )
+            )
         return refs
+
+    def not_ready(self, deps: Mapping[tuple[str, str], DependencyState]) -> Readiness:
+        """This credential's readiness verdict, propagated from its SINGLE
+        provider dependency's enablement (mirroring ``VMSiteDecl.not_ready``,
+        the vm-site propagation model, R14).
+
+        A ``git-credential`` fronts exactly one provider, so, like a vm-site
+        over its platform, it is not-ready when that provider is disabled: the
+        fold hands the provider's :class:`DependencyState` for free (the
+        ``git-credential -> git-credential-provider`` edge already exists in
+        ``dependencies``), and this hook returns a blocked verdict carrying the
+        mark's remediation reason (e.g. "enable plugin `<name>`"), falling back
+        to "enable its unit" when no source supplied one. The provider itself
+        has no host-support axis (a git-credential-provider node is always
+        ready), so there is no not-ready readiness to propagate: only the
+        opt-in (enablement) axis matters here. An enabled provider leaves the
+        credential ready.
+        """
+        from agentworks.resources.graph import Enablement, Readiness
+
+        provider = deps[("git-credential-provider", self.provider)]
+        if provider.enablement is Enablement.disabled:
+            tail = provider.disabled_reason or "enable its unit"
+            return Readiness.blocked(f"depends on git-credential-provider '{self.provider}', which is disabled; {tail}")
+        return Readiness.ready()
+
+    def validate(self, enabled_backends: frozenset[str]) -> None:
+        """Throwing shape check for the ``provider_config`` blob, run by
+        the finalize ``validate`` pass (``enabled_backends`` is the
+        secret-only R9.9 input, ignored here). Mirrors ``dependencies``:
+        the named provider capability validates the blob it owns. An
+        unknown provider is tolerated here (the framework miss policy
+        reports it); a seated provider validates the blob.
+        """
+        from agentworks.capabilities.git_credential import (
+            GIT_CREDENTIAL_PROVIDER_REGISTRY,
+        )
+
+        capability = GIT_CREDENTIAL_PROVIDER_REGISTRY.get(self.provider)
+        if capability is not None:
+            capability.validate(f"git-credential/{self.name}", self.provider_config)

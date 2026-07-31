@@ -39,18 +39,44 @@ agw session stop my-session      # Sessions can be stopped (or can exit on their
 agw session list
 agw session restart my-session
 agw session attach my-session
-agw session delete my-session    # When you're done with it. Agent and workspace are preserved.
+agw session delete my-session    # When you're done with it. Agent and workspace are preserved unless this was their last session (see below).
 
 # Alternatively, you can create ephemeral workspaces and agents along with your sessions
 agw session create my-ephemeral-session --vm my-vm --new-workspace --new-agent
 agw session attach my-ephemeral-session
 agw session delete my-ephemeral-session    # This will prompt you to delete the associated workspace and agent, too
 
+# Deleting a session also checks whether its workspace and agent are now unused
+# (whether or not this session created them). A workspace is unused once it has
+# no sessions; an agent is unused only once it has no sessions AND no standing
+# workspace grant (no explicit grant and grant-all unset; a standing grant
+# means you still intend to use the agent, so it is left alone). For each
+# resource now unused, session delete offers to delete it interactively.
+# Under --yes it auto-deletes only a workspace/agent
+# this session created; anything else now unused is reported (naming
+# `agw workspace delete <name>` / `agw agent delete <name>`) and left in place
+# for you to remove by hand.
+# One guard applies: if any agent holds an explicit per-workspace grant on the
+# now-unused workspace (deleting it would silently revoke that grant), the
+# --yes auto-delete is refused and the workspace is reported (naming the
+# granting agents) instead, while the interactive offer discloses whose grants
+# a delete would revoke. Grant-all agents don't trigger the guard: blanket
+# access is policy, not per-workspace intent.
+
 # Finally, create two sessions and a named console
 agw session create s1 --vm my-vm --new-workspace --new-agent
 agw session create s2 --vm my-vm --new-workspace --new-agent
 agw console create my-console s1 s2+1      # The + syntax gives you extra shells as that agent
 agw console attach my-console
+
+# Deleting a session drops it from any console that referenced it (no dangling
+# references are left behind). session delete lists the affected consoles, and
+# for any console left with no sessions it offers to delete the now-empty
+# console (interactively). Under --yes it reports the empty console but leaves
+# it for you to remove with `agw console delete <name>`. `console remove-sessions`
+# gets the same now-empty treatment when it drops a console's last session.
+agw session delete s1                      # Reports that my-console still referenced s1
+
 agw console delete my-console              # Extra shells are lost but sessions are preserved
 ```
 
@@ -60,7 +86,8 @@ agw console delete my-console              # Extra shells are lost but sessions 
 - [uv](https://docs.astral.sh/uv/) or [pipx](https://pipx.pypa.io/) for installation
 - [Tailscale](https://tailscale.com/) installed and connected (for VM workspaces)
 - One of: [Lima](https://lima-vm.io/), Azure CLI (`az`), [Proxmox](https://www.proxmox.com/), or
-  WSL2 (for VM provisioning)
+  WSL2 (for VM provisioning; Azure and Proxmox also need their [system plugin](#system-plugins)
+  enabled)
 
 ## Global Options
 
@@ -102,7 +129,7 @@ exits with the conventional SIGINT exit code (130).
 
 ## Commands
 
-### Top-level
+### Top-Level
 
 | Command                    | Description                              |
 | -------------------------- | ---------------------------------------- |
@@ -118,13 +145,16 @@ Manage virtual machines across declared vm-sites (Lima local or remote, Azure, W
 
 Where VMs are created is declared as `vm-site` resources: YAML manifests under
 `~/.config/agentworks/resources/` that pair a platform (the code that runs VMs on one backend kind)
-with its configuration. The `lima-local` and `wsl2` sites ship built in. Every site registers on
-every host and disables itself when this host lacks what it needs (wsl2 is Windows-only; a local
-Lima site needs `limactl`; a platform may simply not be installed): a disabled site still lists and
-describes, using it is an error naming the requirement, and `agw doctor` shows each platform's and
-site's state with the reason. Run `agw resource sample vm-site` for commented, ready-to-edit
-examples (an Azure site, a remote-Lima site with `platform_config.vm_host`). The former
-`agw vm-host` registry is gone: a remote Lima host is now just a vm-site.
+with its configuration. The `lima-local` and `wsl2` sites ship built in and are always available;
+the `azure-vm` and `proxmox` platforms ship as the opt-in `azure` and `proxmox` system plugins (see
+[System Plugins](#system-plugins)) and are not-ready until enabled. Every site registers on every
+host and reports not-ready when this host lacks what it needs (wsl2 is Windows-only; a local Lima
+site needs `limactl`; a platform may simply not be installed, or its plugin not enabled): a
+not-ready site still lists and describes, using it is an error naming the requirement, and
+`agw doctor` shows each platform's and site's state with the reason. Run
+`agw resource sample vm-site` for commented, ready-to-edit examples (an Azure site, a remote-Lima
+site with `platform_config.vm_host`). The former `agw vm-host` registry is gone: a remote Lima host
+is now just a vm-site.
 
 > **Note on WSL2:** WSL2 distros share the Windows workstation's lifecycle. They idle-shut after
 > ~60s of no `wsl.exe` activity (`vmIdleTimeout` in `.wslconfig`) and do not survive workstation
@@ -195,6 +225,10 @@ directory on this VM. The workspace's template env joins the env chain (between 
 into the workspace; the exec variant runs the command from the workspace directory. A workspace that
 lives on a different VM is rejected with a `ValidationError` before any SSH work.
 
+In both exec commands the `--` separator is only required when the remote command's first token
+starts with `-` (it stops agentworks from reading the token as its own option); without it, a
+dash-led first token is rejected with a hint naming the recoveries. Bare commands need no `--`.
+
 Combining `--workspace` with `--platform` works (the shell still `cd`s into the workspace) but the
 workspace's template env and the `AGENTWORKS_WORKSPACE` identity vars are not delivered: the
 platform-native transports (`limactl shell`, `wsl.exe`) drop the `env=` kwarg by design. Treat
@@ -221,7 +255,7 @@ Manage workspaces on VMs.
 | `agw workspace list`                 | List workspaces                     |
 | `agw workspace copy <source> <name>` | Copy a workspace to a new VM        |
 | `agw workspace rehome <name>`        | Move workspace to a new path        |
-| `agw workspace reinit <name>`        | Reinit workspace infrastructure     |
+| `agw workspace repair <name>`        | Repair workspace infrastructure     |
 | `agw workspace delete <name>`        | Delete a workspace                  |
 
 `workspace create <name>` takes the workspace name as a required positional. Optional flags: `--vm`,
@@ -247,7 +281,7 @@ Manage agents (isolated Linux users) on VMs. Agents are VM-scoped and access wor
 | `agw agent create <name> [--vm]`                       | Create an agent on a VM                  |
 | `agw agent list [--vm <vm>]`                           | List agents                              |
 | `agw agent describe <name>`                            | Show agent details and grants            |
-| `agw agent reinit <name>`                              | Re-run agent setup                       |
+| `agw agent reinit <name> [--update-template <tmpl>]`   | Re-run agent setup                       |
 | `agw agent grant-workspaces <name> <ws>...`            | Grant workspace access                   |
 | `agw agent grant-workspaces <name> --all`              | Grant access to all workspaces           |
 | `agw agent revoke-workspaces <name> <ws>...`           | Revoke workspace access                  |
@@ -258,6 +292,10 @@ Manage agents (isolated Linux users) on VMs. Agents are VM-scoped and access wor
 
 `agent create <name>` takes the agent name as a required positional. Optional flags: `--vm`,
 `--template`, and `--grant-all-workspaces`.
+
+`agent reinit --update-template <tmpl>` re-points the agent to a different declared template
+(validated against the resource registry, then persisted) before re-running setup. An unknown
+template name is rejected up front, leaving the stored binding unchanged.
 
 `agent shell` and `agent exec` both SSH directly as the agent's Linux user. `agent shell` opens an
 interactive login shell (sources the agent's profile). `agent exec` runs a single command
@@ -279,7 +317,7 @@ confirmation prompt.
 agent (e.g. from VS Code Remote-SSH or `scp`), use the `awagent--<agent>` alias documented under
 [Direct SSH aliases](#direct-ssh-aliases).
 
-### Direct SSH aliases
+### Direct SSH Aliases
 
 Agentworks maintains operator-side SSH config entries for both VMs and agents under
 `~/.ssh/config.d/agentworks.conf` (or inline in `~/.ssh/config` if `ssh_config_dir = false`):
@@ -351,7 +389,7 @@ has no other sessions and no explicit grants.
 
 <!-- Linked from the top-level README; rename only if you also update README.md. -->
 
-### Named consoles
+### Named Consoles
 
 Named consoles are persistent, curated tmux views over sessions on a VM. Each console is its own
 tmux session (`aw-console-<name>`) containing one window per included session, plus any extra shell
@@ -365,9 +403,10 @@ panes you want preloaded into a session's window.
 | `agw console attach <name>`                         | Attach (builds tmux state on first attach)                        |
 | `agw console delete <name>`                         | Tear down and remove the console                                  |
 | `agw console add-sessions <name> <sessions...>`     | Add session windows                                               |
-| `agw console remove-sessions <name> <sessions...>`  | Remove session windows                                            |
+| `agw console remove-sessions <name> <sessions...>`  | Remove session windows (accepts `-y`/`--yes`)                     |
 | `agw console reorder-sessions <name> <sessions...>` | Bump member sessions to the front in the order given              |
 | `agw console add-shell <name> <session>`            | Add a shell pane to a session window (accepts `--cwd`, `--admin`) |
+| `agw console restore-session <name> <session>`      | Repair one session window against its configured shell list       |
 
 `console create` accepts:
 
@@ -413,11 +452,25 @@ agw console create everything --vm aw-private --all
 agw console add-shell backend auth-server --cwd src/api --admin
 ```
 
+`console restore-session` repairs a single session window in a running console: it re-adds shell
+panes you killed by accident (each back in its configured position) and rebuilds the window from
+config if it is gone entirely. It is additive and never kills a live pane or window, so it refuses,
+pointing you at `console attach --recreate`, when the fix would require destroying live state: more
+panes live than configured, shell panes it can't map back to the config (untagged, duplicated, or
+out of range), or a window whose session pane itself was killed (the console then shows a plain
+shell where the session should be).
+
 Memberships and shell layouts persist in the database. `agw console attach` builds the tmux session
 on first attach (or with `--recreate`); subsequent attaches reuse the running tmux session. Adding
 or removing sessions/shells while a console is attached updates the live tmux state immediately
 (best-effort); when the console isn't running on the VM, only the DB is updated and changes appear
 on next attach.
+
+When `console remove-sessions` (or the session-delete cascade) leaves a console with no configured
+sessions, the console is a dead end (`console attach` would just warn "has no members"). It offers
+to delete the now-empty console; pass `-y`/`--yes` to run non-interactively, which reports the
+emptied console and leaves it in place (delete it yourself with `agw console delete <name>`). The
+removed sessions themselves are untouched; only their membership in the console is removed.
 
 <!-- Linked from the top-level README; rename only if you also update README.md. -->
 
@@ -432,23 +485,26 @@ with sessions, at different scopes:
 | `console`                 | Curated subset across workspaces | `aw-console-<name>` | Operator's machine |
 | `vm console` (deprecated) | All sessions on the VM           | `vm-console`        | Operator's machine |
 
-#### Session tmux sessions
+#### Session tmux Sessions
 
 Each session gets a locked-down tmux session using the session name directly as the tmux session
 name. The user's `~/.tmux.conf` (customizable via dotfiles) is loaded first so that familiar
 keybindings (prefix, detach, copy mode, scroll) work for direct `session attach`. Window/pane
 creation, session management, and the command prompt are selectively unbound.
 
-Agent-mode sessions run on a per-agent tmux socket so the agent's shell connects directly to the
-tmux pane PTY. The socket path is persisted in the database.
+Agent-mode sessions each get their own tmux socket, so every session runs as its own tmux server
+rather than as a window in a shared one. The sockets are grouped in a per-agent directory whose
+ownership keeps one agent from reaching another's (cross-agent isolation), and giving each session
+its own server means it inherits the environment delivered over its own SSH connection instead of
+leaking env across sessions through a shared server. The agent's shell attaches directly to the tmux
+pane PTY, and each socket path is persisted in the database.
 
-#### Named console
+#### Named Console
 
-`console attach <name>` creates or attaches to the `aw-console-<name>` tmux session. Membership and
-per-session shell layout are stored in the database. Each member session becomes a window running
-the same wrapper used by the VM console, plus a configurable number of extra shell panes (default
-user = session's agent user, default cwd = workspace root; override per pane with `--cwd` /
-`--admin` on `console add-shell`).
+`console attach <name>` creates or attaches to the `aw-console-<name>` tmux session. Each member
+session becomes a window running the same wrapper used by the VM console, plus a configurable number
+of extra shell panes (default user = session's agent user, default cwd = workspace root; override
+per pane with `--cwd` / `--admin` on `console add-shell`).
 
 ```text
 aw-console-backend
@@ -457,14 +513,13 @@ aw-console-backend
   Window 3: docs                       attached session only
 ```
 
-The tmux session is built lazily on first `attach` (or rebuilt with `--recreate`). Adding or
-removing sessions/shells while the console is attached updates tmux immediately; when offline, only
-the DB is touched and changes appear on next attach. The mutation commands (`add-sessions`,
-`remove-sessions`, `reorder-sessions`, `add-shell`) never auto-boot the VM; the explicit
-attach/repair commands (`attach`, `restore-session`) do start a stopped VM, since their job is to
-bring live state up.
+Membership and per-session shell layout are stored in the database; see
+[Named Consoles](#named-consoles) above for the lazy-build and live-update semantics. Of note here
+is the VM-boot behavior: the mutation commands (`add-sessions`, `remove-sessions`,
+`reorder-sessions`, `add-shell`) never auto-boot the VM, whereas the explicit attach/repair commands
+(`attach`, `restore-session`) do start a stopped VM, since their job is to bring live state up.
 
-#### Workspace tmuxinator config
+#### Workspace tmuxinator Config
 
 Workspaces with tmuxinator enabled in their template (the default) carry a tmuxinator config
 (`.tmuxinator.yml` in the workspace root, symlinked as `~/.config/tmuxinator/ws-<name>-console.yml`)
@@ -473,7 +528,7 @@ regenerated whenever sessions change. The `agw workspace console` command that a
 removed (superseded by named consoles); the config remains usable directly on the VM via
 `tmuxinator start ws-<name>-console` (e.g. inside VS Code's integrated terminal).
 
-#### VM console (deprecated)
+#### VM Console (deprecated)
 
 `vm console` creates or attaches to the `vm-console` session, which spans all sessions on the VM.
 Built dynamically (not via tmuxinator). Superseded by named consoles, which let you curate which
@@ -485,7 +540,7 @@ future release.
 `vm shell` and `agent shell` open plain login shells with no tmux (optionally rooted in a workspace
 via `--workspace <ws>`). Use these when you just need a terminal without the console structure.
 
-#### Key behaviors
+#### Key Behaviors
 
 - **Direct attach** (`session attach`): the user's prefix key, detach, copy mode, and scroll all
   work normally. Status bar is hidden since there is only one pane.
@@ -542,9 +597,13 @@ which is a permanent supported spelling, not a deprecation.
 
 The `claude-code` harness runs Claude Code as the session: `session create` starts a new Claude
 session and `session restart` resumes the same conversation when its transcript still exists on disk
-(launching fresh when Claude never wrote one). It needs only that `claude` is installed on the
-launch target, and announces the chosen action (resume vs new session) in the pane, so the decision
-is never silent. Its `harness_config` vocabulary is five optional fields:
+(launching fresh when Claude never wrote one). It ships as the opt-in `claude` system plugin (see
+[System Plugins](#system-plugins)), disabled by default: a session-template naming it still lists
+ready, but creating a session on it is refused with an "enable plugin `claude`" hint until you add
+`claude` to `[plugins].system`. (The built-in `shell` harness stays the default and needs no
+opt-in.) Once enabled, it needs only that `claude` is installed on the launch target, and announces
+the chosen action (resume vs new session) in the pane, so the decision is never silent. Its
+`harness_config` vocabulary is five optional fields:
 
 - `permission_mode`: forwarded verbatim to `claude --permission-mode` (its choice set is Claude's,
   not validated here).
@@ -635,10 +694,12 @@ mappings, template inheritance chains, resolution previews), reach for the per-k
 | `agw resource sample KIND [--write]` | Print (or save) a kind's commented sample manifest (--all for all)   |
 
 `resource list` accepts `--kind <csv>` (e.g. `--kind secret,vm-template`) and `--origin <variant>`
-where variant is `operator`, `auto`, or `builtin`. `--names-only` emits `kind/name` per line and
-backs shell completion (`/` cannot appear in resource names, so the split is unambiguous). The
-`kind/name` token is the one grammar across the resource group: `resource describe secret/npm-token`
-and `resource migrate vm-template/dev` take the same shape.
+where variant is `operator`, `auto`, `builtin`, or `plugin`. Disabled rows (a not-enabled system
+plugin's capabilities and bundled resources) are hidden by default; pass `--include-disabled` to
+reveal them (combine with `--origin plugin` to see just a not-enabled plugin's rows). `--names-only`
+emits `kind/name` per line and backs shell completion (`/` cannot appear in resource names, so the
+split is unambiguous). The `kind/name` token is the one grammar across the resource group:
+`resource describe secret/npm-token` and `resource migrate vm-template/dev` take the same shape.
 
 `resource migrate` is a recurring, incremental mover -- run it any time you want to move resources
 (or a subset) from TOML to YAML manifests. Selectors scope the run: `KIND` one kind, `KIND/NAME` one
@@ -684,6 +745,8 @@ Settings sections (`config.toml`, permanent):
 - `[session.config]` -- session defaults (history limit)
 - `[secret_config]` -- active secret backend chain (`[secret_backends.*]` sections are deprecated
   no-ops; see Secret Backends below)
+- `[plugins]`: the plugin-subsystem namespace; its `system` key is the opt-in list of enabled system
+  plugins (see [System Plugins](#system-plugins) below)
 
 Resource kinds (YAML manifests; the deprecated TOML section is noted for each):
 
@@ -692,8 +755,9 @@ Resource kinds (YAML manifests; the deprecated TOML section is noted for each):
   subscription/resource-group/region, Proxmox API endpoint + token secret, remote-Lima `vm_host`).
   The `lima-local` and `wsl2` sites ship built in (on hosts where their platform can run) and their
   names are reserved
-- `vm-platform`: read-only capability rows for the in-tree platforms (lima, wsl2, azure-vm,
-  proxmox); listed by `agw resource kinds`, never declared
+- `vm-platform`: read-only capability rows for the VM platforms (`lima`, `wsl2` built in; `azure-vm`
+  and `proxmox` ship as the opt-in `azure` and `proxmox` system plugins, disabled by default, see
+  [System Plugins](#system-plugins)); listed by `agw resource kinds`, never declared
 - `vm-template` (`[vm_templates.*]`): VM resources, apt packages, system install commands, mise, and
   the target `site`
 - `admin-template` (`[admin.config]`) -- admin user shell, dotfiles, git credentials, user install
@@ -771,8 +835,11 @@ Inspect the merged result for any context with `agw env show`:
 
 ```bash
 agw env show --session my-session              # secrets redacted as <from secret: name>
-agw env show --vm my-vm --reveal-secrets       # resolves through the active backend chain
+agw env show --vm my-vm --resolve              # resolves through the active backend chain
 ```
+
+(The flag was formerly spelled `--reveal-secrets`; it was renamed to `--resolve` as a breaking
+change, the old spelling no longer works.)
 
 Inspect how each active backend would resolve each declared or auto-declared secret (e.g. "which env
 var name does this secret read from?") with `agw secret list`:
@@ -845,13 +912,53 @@ wrong-scope) happens at the capability `runup()` stage inside provisioning ops, 
 the planned `agw doctor --runup` (which may prompt). The Tailscale group checks only workstation
 connectivity; the auth key is the `tailscale-auth-key` secret row.
 
+When the config or a resource manifest fails to load, the groups that depend on them (VM sites,
+Secrets) do not vanish: each renders a single
+`[info] ... skipped (config or manifests unavailable; see the Configuration group)` row, so a
+degraded run keeps the same section skeleton as a healthy one and the Configuration group carries
+the actual failure.
+
 ### Secret Backends
 
-A **backend** is a capability resource that produces secret values (`env-var`, `prompt`; future
-backends like `onepassword`): a read-only row backed by registered code, listed by
+A **backend** is a capability resource that produces secret values (`env-var`, `prompt` built in;
+`onepassword` ships as the opt-in `onepassword` system plugin, disabled by default, see
+[System Plugins](#system-plugins) below): a read-only row backed by registered code, listed by
 `agw resource list --kind secret-backend` and activated in precedence order by the chain
 (`[secret_config].backends`). Per-secret behavior -- identifier overrides, structured store
 addressing, opt-outs -- lives in each secret's `backend_mappings.<backend>`.
+
+### System Plugins
+
+Agentworks ships some vendor- and tool-specific capabilities (VM platforms, session harnesses,
+git-credential providers, secret backends) as **system plugins**: separable bundles that are
+installed but off by default. The shipped build installs `azure` (the `azure-vm` VM platform, the
+`azdo` git-credential provider, and the `az-cli` install-command), `proxmox` (the `proxmox` VM
+platform), `onepassword` (the `onepassword` secret backend), and `claude` (the `claude-code` session
+harness and the `claude` CLI install-command). (This is a different sense of "plugin" from
+[Claude Code Plugins](#claude-code-plugins) below, which installs marketplace plugins into Claude
+Code itself.)
+
+Opt in by name in `config.toml`:
+
+```toml
+[plugins]
+system = ["azure", "proxmox", "onepassword", "claude"]   # only the ones you use
+```
+
+A resource that references a not-enabled plugin's contribution (an `azure-vm` vm-site, a
+`claude-code` session-template, a secret mapped to `onepassword`, ...) is not-ready, or refused at
+use, with an "enable plugin `<name>`" hint, never an unknown-name error. The default local path (the
+`lima` / `wsl2` platforms, the `shell` harness, the `env-var` / `prompt` secret backends, and the
+`github` git-credential provider) is built in, always on, and needs no `[plugins]` entry.
+
+A not-enabled plugin's rows are hidden from `agw resource list` by default; pass
+`--include-disabled` to reveal them (see [Resource Registry](#resource-registry) above).
+`agw doctor` has a **System plugins** group listing every installed plugin, its description, and
+whether it is enabled.
+
+See [docs/guides/resources.md](../docs/guides/resources.md#system-plugins) for the full model
+(origins, the disabled-resource semantics, config-error deferral) and the upgrade note for configs
+that relied on Azure, Proxmox, 1Password, or Claude Code before they became opt-in.
 
 ### Mise (Polyglot Tool Manager)
 

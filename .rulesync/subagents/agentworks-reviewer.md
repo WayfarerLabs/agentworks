@@ -183,6 +183,13 @@ Look for:
 - Hand-wired edges: an orchestrator wiring dependencies the node factories should derive from
   declared references and row fields. Two constructions of "the same" node (the walk raises loudly
   on this; the fix is in the factory, not in softening the walk).
+- Proper use of `preflight` vs `runup`. `preflight` should test everything it can in terms of
+  _initial state_ and without resolving secrets (which might prompt the operator). This includes
+  testing on target (if the target exists at the start of the command). `runup` should be used as a
+  last-minute check that the required resources are available and in a proper state, with full
+  access to resolved secrets, _immediately prior to a specific operation_. Both should be
+  implemented to the maximum extent possible, and the orchestrator should call them in the right
+  order and at the right times.
 - Gate misuse in either direction: gating a command whose operation IS the power-state change
   (`vm start` / `stop` / `delete` never gate), or skipping the gate on a command whose readiness
   probes must reach a live VM. Validation placed after the gate or boundary when it could run
@@ -282,8 +289,8 @@ runner.
   already have in a derivable form, the migration backfills them with the _old_ derived shape, not
   the new one. Existing entities continue to work; new entities use the new shape.
 - **Migrations are forward-only, idempotent, and run automatically** at the start of every
-  `Database()` open. Each migration in `cli/agentworks/db.py:MIGRATIONS` must be safe to apply on
-  any pre-existing DB at the prior version and produce a consistent post-migration state.
+  `Database()` open. Each migration in `cli/agentworks/db/migrations.py:MIGRATIONS` must be safe to
+  apply on any pre-existing DB at the prior version and produce a consistent post-migration state.
 - **Table rebuilds follow the SQLite-recommended pattern.** Because the migration runner runs with
   `PRAGMA foreign_keys = OFF` and verifies via `PRAGMA foreign_key_check` at the end, rebuild
   migrations must explicitly delete from referencing tables (sessions, agent_workspace_grants, etc.)
@@ -371,8 +378,8 @@ failure to whichever client is calling it.
 - Produces user-facing output and feedback through the `agentworks.output` module, never through
   `typer.echo`, `print`, or by formatting strings into return values.
 - Must not import `typer`. This is enforced by a CI check; the only allowlisted exceptions are the
-  CLI layer (`cli.py`, `doctor.py`, `completions/`) and `sessions/manager.py` (which uses typer
-  purely as a raw data-pipe; see the comment in that file).
+  CLI layer (`cli.py`, `doctor.py`, `completions/`) and `sessions/manager/_logs.py` (which uses
+  typer purely as a raw data-pipe; see the comment in that file).
 
 **CLI layer** (`cli.py`, the completion subsystem, `doctor.py`):
 

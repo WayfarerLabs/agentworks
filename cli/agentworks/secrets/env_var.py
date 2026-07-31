@@ -11,6 +11,8 @@ from typing import TYPE_CHECKING
 from agentworks.errors import ConfigError
 
 if TYPE_CHECKING:
+    from agentworks.resources.graph import Readiness
+    from agentworks.resources.reference import ConfigReference
     from agentworks.secrets.base import MappingValue, SecretDecl
 
 
@@ -41,6 +43,14 @@ class EnvVarBackend:
     description = "resolves from AW_SECRET_<NAME> environment variables"
     interactive = False
 
+    def not_ready(self) -> Readiness:
+        """Always ready: reading an environment variable needs no host tool
+        (an unset variable is a per-secret soft miss at resolution, not a
+        backend-level readiness failure)."""
+        from agentworks.resources.graph import Readiness
+
+        return Readiness.ready()
+
     def validate_mapping(self, owner: str, mapping: MappingValue) -> None:
         # The load-time gate; ``_resolved_name`` keeps its own check as
         # defense in depth for hand-built decls that never pass through
@@ -50,6 +60,12 @@ class EnvVarBackend:
                 f"{owner}: backend_mappings for the env-var backend must "
                 f"be a non-empty string (an env var name) or false"
             )
+
+    def dependencies(self, mapping: MappingValue) -> tuple[ConfigReference, ...]:
+        """An env-var mapping is a bare env var name; it implies no
+        agentworks resource, so the edge set is empty (total,
+        non-throwing)."""
+        return ()
 
     def _resolved_name(self, secret: SecretDecl, mapping: MappingValue | None) -> str:
         if isinstance(mapping, str):

@@ -18,7 +18,7 @@ from typing import TYPE_CHECKING
 import pytest
 
 from agentworks.vms import manager as vm_manager
-from tests.orchestrated_fixtures import PROXMOX_SECTION, write_operator_config
+from tests.orchestrated_fixtures import PLUGINS_ENABLED, PROXMOX_SECTION, write_operator_config
 
 if TYPE_CHECKING:
     from agentworks.db import Database, VMRow
@@ -48,30 +48,30 @@ def _seed_vm(db: Database, site: str) -> VMRow:
 
 
 def test_no_site_secrets_skips_the_resolve_pass(
-    db: Database, make_config, resolve_counter: list[list[str]]  # noqa: ANN001
+    db: Database,
+    make_config,
+    resolve_counter: list[list[str]],  # noqa: ANN001
 ) -> None:
     """A secret-free site's boundary resolve is a no-op: the backend
     loop never runs, so nothing can prompt."""
     config = make_config()
-    vm_node, _ops_ctx = vm_manager._live_vm_boundary(
-        db, config, _seed_vm(db, "lima-local")
-    )
+    vm_node, _ops_ctx = vm_manager._live_vm_boundary(db, config, _seed_vm(db, "lima-local"))
     assert vm_node.site.platform.name == "lima"
     assert resolve_counter == []
 
 
 def test_secret_bearing_site_resolves_exactly_once(
-    db: Database, make_config, resolve_counter: list[list[str]]  # noqa: ANN001
+    db: Database,
+    make_config,
+    resolve_counter: list[list[str]],  # noqa: ANN001
 ) -> None:
     """The bound platform's declared config secret resolves in the ONE
     boundary pass and ops read it through the returned op-start
     context (scoped delivery over the boundary cache)."""
-    from agentworks.capabilities.vm_platform.proxmox import ProxmoxPlatform
+    from agentworks.plugins.proxmox.platform import ProxmoxPlatform
 
-    config = make_config(PROXMOX_SECTION)
-    vm_node, ops_ctx = vm_manager._live_vm_boundary(
-        db, config, _seed_vm(db, "proxmox")
-    )
+    config = make_config(PLUGINS_ENABLED + PROXMOX_SECTION)
+    vm_node, ops_ctx = vm_manager._live_vm_boundary(db, config, _seed_vm(db, "proxmox"))
     assert isinstance(vm_node.site.platform, ProxmoxPlatform)
     assert ops_ctx.secret("proxmox-token") == "pve-token"
     assert len(resolve_counter) == 1
@@ -85,14 +85,14 @@ def test_preflight_failure_prevents_the_resolve_pass(
 ) -> None:
     """The lifecycle ordering pin: a failing preflight means the
     operator is never asked for a secret (no resolve pass runs)."""
-    from agentworks.capabilities.vm_platform.proxmox import ProxmoxPlatform
     from agentworks.errors import ConnectivityError
+    from agentworks.plugins.proxmox.platform import ProxmoxPlatform
 
     def _boom(self: object, ctx: object) -> None:
         raise ConnectivityError("world broken")
 
     monkeypatch.setattr(ProxmoxPlatform, "preflight", _boom)
-    config = make_config(PROXMOX_SECTION)
+    config = make_config(PLUGINS_ENABLED + PROXMOX_SECTION)
     with pytest.raises(ConnectivityError):
         vm_manager._live_vm_boundary(db, config, _seed_vm(db, "proxmox"))
     assert resolve_counter == []
@@ -113,17 +113,16 @@ def test_env_targets_join_the_site_secret_pass(
 
     monkeypatch.setenv("AW_SECRET_API_KEY", "k")
     monkeypatch.setattr(vm_manager, "_is_tailscale_reachable", lambda host: True)
-    config = make_config(
-        PROXMOX_SECTION + '\n[secrets.api-key]\ndescription = "workload key"\n'
-    )
+    config = make_config(PLUGINS_ENABLED + PROXMOX_SECTION + '\n[secrets.api-key]\ndescription = "workload key"\n')
     registry = build_registry(config)
     target = SecretTarget(
         vm={"API_KEY": EnvEntry(key="API_KEY", secret="api-key")},
         label="test-shell",
     )
-    with vm_manager.gated_vm_boundary(
-        db, config, registry, _seed_vm(db, "proxmox"), targets=[target]
-    ) as (_vm_node, resolver):
+    with vm_manager.gated_vm_boundary(db, config, registry, _seed_vm(db, "proxmox"), targets=[target]) as (
+        _vm_node,
+        resolver,
+    ):
         pass
 
     assert len(resolve_counter) == 1

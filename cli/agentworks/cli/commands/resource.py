@@ -15,7 +15,14 @@ import typer
 
 from agentworks.cli._app import app
 from agentworks.cli._helpers import get_db
-from agentworks.manifests.samples import SAMPLE_KINDS
+
+# Module-level so the sample-kind Choice below can be built at decoration
+# time. This is intentional and adds no startup cost over the pre-fix
+# code: that imported SAMPLE_KINDS from `agentworks.manifests.samples`,
+# which already pulls the full `agentworks.resources` capability chain
+# transitively, so `agw`, `agw --help`, and completion loaded the same
+# modules before this fix.
+from agentworks.resources import KIND_REGISTRY
 
 if TYPE_CHECKING:
     from agentworks.resources.inspect import OriginFilter
@@ -29,7 +36,13 @@ app.add_typer(resource_app)
 
 _LAYOUT_CHOICES = click.Choice(["per-kind", "single", "per-resource"])
 _TOML_CHOICES = click.Choice(["comment", "delete"])
-_SAMPLE_KIND_CHOICES = click.Choice(list(SAMPLE_KINDS))
+# The sample-kind argument is deliberately a plain string, not a
+# click.Choice: ANY kind the operator types (a capability kind, a typo,
+# anything) must reach the service layer, which rejects with a clean,
+# kind-aware domain error either way (see
+# manifests.samples._validated_kinds). A Choice would intercept
+# out-of-set strings at parse time, the raw-traceback escape #276 is
+# about. Completions still steer via the completion spec.
 
 
 @resource_app.command("list")
@@ -37,26 +50,22 @@ def resource_list(
     kind: str | None = typer.Option(
         None,
         "--kind",
-        help=(
-            "Filter to one or more kinds (CSV: --kind secret,vm-template). "
-            "Default: all kinds in the registry."
-        ),
+        help=("Filter to one or more kinds (CSV: --kind secret,vm-template). Default: all kinds in the registry."),
     ),
     origin_filter: str | None = typer.Option(
         None,
         "--origin",
-        help=(
-            "Filter by origin variant: operator, auto, or builtin. "
-            "Default: all origins."
-        ),
+        help=("Filter by origin variant: operator, auto, builtin, or plugin. Default: all origins."),
+    ),
+    include_disabled: bool = typer.Option(
+        False,
+        "--include-disabled",
+        help=("Also show disabled resources, for example a not-enabled plugin's rows. Default: hidden."),
     ),
     names_only: bool = typer.Option(
         False,
         "--names-only",
-        help=(
-            "Emit one kind/name per line (no header, no formatting). "
-            "Used by shell completion."
-        ),
+        help=("Emit one kind/name per line (no header, no formatting). Used by shell completion."),
     ),
 ) -> None:
     """List every Resource in the Registry across all kinds.
@@ -99,13 +108,14 @@ def resource_list(
         db,
         kinds=kinds,
         origin_filter=cast("OriginFilter | None", origin_filter),
+        include_disabled=include_disabled,
     )
     # ``--names-only`` short-circuits the table render. Per the
     # cli-conventions ``--names-only`` rule, render-only work is skipped:
     # ``list_resources`` does no network or DB-heavy work (attribute
-    # access over already-published Resources, plus each kind's
-    # ``disabled_reason`` hook: offline host introspection like a PATH
-    # scan by contract), so the cost up to here is completion-cheap.
+    # access over already-published Resources, plus a read of each row's
+    # stored readiness verdict off the graph: a cheap dict lookup, no
+    # recompute), so the cost up to here is completion-cheap.
     # Keep it that way: heavier per-row work belongs after this check.
     # The cross-kind divergence from the rule: we emit ``kind/name``
     # rather than bare ``name`` because two kinds can publish resources
@@ -126,10 +136,7 @@ def resource_kinds(
     names_only: bool = typer.Option(
         False,
         "--names-only",
-        help=(
-            "Emit one kind name per line (no header, no formatting). "
-            "Used by shell completion."
-        ),
+        help=("Emit one kind name per line (no header, no formatting). Used by shell completion."),
     ),
 ) -> None:
     """List every resource kind the app defines.
@@ -143,11 +150,10 @@ def resource_kinds(
     kind.
     """
     from agentworks import output
-    from agentworks.resources import KIND_REGISTRY
 
     # The names-only path needs no config and no registry: kinds are
     # static code. Keeps completion fast and working even with a broken
-    # or absent config.
+    # or absent config. KIND_REGISTRY is imported at module level.
     if names_only:
         for name in sorted(KIND_REGISTRY):
             output.info(name)
@@ -274,10 +280,7 @@ def resource_edit(
                     f"the file directly if the resource lives there."
                 )
             raise
-        output.warn(
-            f"config is currently failing validation ({exc}); opening "
-            f"the declaring manifest anyway"
-        )
+        output.warn(f"config is currently failing validation ({exc}); opening the declaring manifest anyway")
         path, line = found.location.file, found.location.line
     # Per-kind layout files hold many documents; the line tells the
     # operator where to look. (No editor +line heuristics -- keep it
@@ -347,15 +350,10 @@ def resource_migrate(
         bool,
         typer.Option(
             "--full",
-            help=(
-                "With --dry-run: include the full YAML documents and the "
-                "config.toml diff in the output."
-            ),
+            help=("With --dry-run: include the full YAML documents and the config.toml diff in the output."),
         ),
     ] = False,
-    yes: Annotated[
-        bool, typer.Option("--yes", help="Skip the confirmation prompt.")
-    ] = False,
+    yes: Annotated[bool, typer.Option("--yes", help="Skip the confirmation prompt.")] = False,
 ) -> None:
     """Move resources from config.toml to YAML manifests.
 
@@ -425,11 +423,7 @@ def resource_sample(
     kind: Annotated[
         str | None,
         typer.Argument(
-            click_type=_SAMPLE_KIND_CHOICES,
-            help=(
-                "Kind to print a sample manifest for (e.g. secret, "
-                "vm-template). Required unless --all is passed."
-            ),
+            help=("Kind to print a sample manifest for (e.g. secret, vm-template). Required unless --all is passed."),
         ),
     ] = None,
     all_kinds: Annotated[

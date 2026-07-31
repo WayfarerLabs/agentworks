@@ -7,10 +7,6 @@ on:
 jobs:
   release-please:
     runs-on: ubuntu-latest
-    env:
-      # release-please-action@v4 still declares node20; force node24 on the runner.
-      # Remove once the action publishes a node24 release (see googleapis/release-please-action#1192).
-      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
     outputs:
       pr_branch: ${{ steps.extract.outputs.pr_branch }}
     steps:
@@ -20,7 +16,7 @@ jobs:
       - uses: actions/create-github-app-token@v3
         id: app-token
         with:
-          app-id: ${{ vars.RELEASE_APP_ID }}
+          client-id: ${{ vars.RELEASE_APP_CLIENT_ID }}
           private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
 
       - uses: googleapis/release-please-action@v5
@@ -33,8 +29,15 @@ jobs:
       - name: Extract release PR branch
         id: extract
         if: steps.release.outputs.pr
+        # Pass the PR JSON through the environment, not inline interpolation. The
+        # release-notes body contains shell metacharacters (parens in markdown
+        # links, quotes, backticks), so inlining `${{ steps.release.outputs.pr }}`
+        # into the script breaks parsing (and is a script-injection vector). As an
+        # env var the shell treats it as one opaque string; jq parses the JSON.
+        env:
+          RELEASE_PR: ${{ steps.release.outputs.pr }}
         run: |
-          branch=$(echo '${{ steps.release.outputs.pr }}' | jq -r .headBranchName)
+          branch=$(jq -r .headBranchName <<<"$RELEASE_PR")
           echo "pr_branch=$branch" >> "$GITHUB_OUTPUT"
 
   sync-lockfile:
@@ -51,7 +54,7 @@ jobs:
       - uses: actions/create-github-app-token@v3
         id: app-token
         with:
-          app-id: ${{ vars.RELEASE_APP_ID }}
+          client-id: ${{ vars.RELEASE_APP_CLIENT_ID }}
           private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
 
       - uses: actions/checkout@v7

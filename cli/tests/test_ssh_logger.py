@@ -1,7 +1,7 @@
 """Tests for ``SSHLogger`` close-time exception capture.
 
 When ``close()`` is called from inside an ``except`` block (the pattern
-used by every operation-level handler in ``vms/initializer.py`` and
+used by every operation-level handler in ``agentworks.vms.initializer`` and
 elsewhere), the in-flight exception's traceback should be appended to
 the per-op log. That keeps operation-level errors out of the shared
 ``error.log`` at the top of the config dir.

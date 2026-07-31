@@ -79,9 +79,7 @@ class _VMTemplateKind:
         source = references[0].source if references else ALWAYS_MATERIALIZE_SOURCE
         return VMTemplate(name="default", origin=Origin.auto_declared(source=source))
 
-    def instances(
-        self, db: Database, registry: Registry, resource: Any
-    ) -> Iterable[InstanceRef]:
+    def instances(self, db: Database, registry: Registry, resource: Any) -> Iterable[InstanceRef]:
         """Every VM whose ``template`` column matches this VMTemplate's
         name -- or whose ``template`` is NULL when the resource is the
         reserved ``default`` (a NULL ``template`` column means "use the
@@ -122,9 +120,7 @@ class _AdminTemplateKind:
         source = references[0].source if references else ALWAYS_MATERIALIZE_SOURCE
         return AdminConfig(name="default", origin=Origin.auto_declared(source=source))
 
-    def instances(
-        self, db: Database, registry: Registry, resource: Any
-    ) -> Iterable[InstanceRef]:
+    def instances(self, db: Database, registry: Registry, resource: Any) -> Iterable[InstanceRef]:
         """The VMs provisioned from this admin-template. Each VM records
         its selected admin-template in the ``vms.admin_template`` column
         (NULL = the reserved ``default``); the admin template defines the
@@ -165,6 +161,11 @@ class _VMPlatformKind:
             "first)"
         )
 
+    # No per-kind readiness hook: readiness projection is unified on
+    # ``inspect.not_ready_reason_for`` reading ``graph.readiness_of`` directly
+    # (Phase 4 retired the per-kind shim, including the Phase-3 vm-platform
+    # projection pulled forward to render the now-published not-ready row).
+
 
 KIND_REGISTRY["vm-platform"] = _VMPlatformKind()
 
@@ -188,31 +189,20 @@ class _VMSiteKind:
         from agentworks.resources.kind import NoUnreferencedDefaultError
 
         raise NoUnreferencedDefaultError(
-            "the vm-site kind has no reserved default name; synthesize "
-            "is never invoked under the error miss policy"
+            "the vm-site kind has no reserved default name; synthesize is never invoked under the error miss policy"
         )
 
-    def instances(
-        self, db: Database, registry: Registry, resource: Any
-    ) -> Iterable[InstanceRef]:
-        """Every VM whose ``site`` column names this site.
-
-        """
+    def instances(self, db: Database, registry: Registry, resource: Any) -> Iterable[InstanceRef]:
+        """Every VM whose ``site`` column names this site."""
         name = resource.name
         for vm in db.list_vms():
             if vm.site == name:
                 yield InstanceRef(instance_kind="vm", instance_name=vm.name)
 
-    def disabled_reason(self, registry: Registry, resource: Any) -> str | None:
-        """The generic disabled hook (structural, like ``instances``):
-        a site registers on every host and self-disables when its
-        platform is missing, host-disabled, or the bound instance
-        reports a missing requirement. Domain logic lives with the
-        sites module; this is the framework-facing delegation.
-        """
-        from agentworks.vms.sites import site_disabled_reason
-
-        return site_disabled_reason(resource)
+    # No per-kind readiness hook: a site's readiness verdict is folded at
+    # finalize and read via ``graph.readiness_of`` (through
+    # ``inspect.not_ready_reason_for``), retiring the ``site_disabled_reason``
+    # recompute (R11).
 
 
 KIND_REGISTRY["vm-site"] = _VMSiteKind()

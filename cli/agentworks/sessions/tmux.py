@@ -11,6 +11,8 @@ from __future__ import annotations
 import shlex
 from typing import TYPE_CHECKING, Protocol
 
+from agentworks.config.validation import LINUX_USERNAME_MAX_LENGTH
+
 if TYPE_CHECKING:
     from collections.abc import Callable
 
@@ -22,6 +24,29 @@ DEFAULT_HISTORY_LIMIT = 50_000
 # Agent tmux socket infrastructure
 AGENT_SOCKET_ROOT = "/run/agentworks/agent-tmux-sockets"
 AGENT_SOCKET_GROUP = "tmux-agent-access"
+
+# AF_UNIX socket paths are capped by ``sizeof(sun_path)`` (Linux <sys/un.h>):
+# 108 bytes. A pathname socket needs a trailing NUL, so the usable path length
+# is 107. (Live-measured on Linux: a 107-char bind succeeds, 108 fails with
+# "File name too long".)
+SUN_PATH_MAX = 108
+
+# Session names embed into the per-agent tmux socket path
+# ``agent_socket_path`` builds: f"{AGENT_SOCKET_ROOT}/{linux_user}/{name}.sock".
+# The tightest case is the longest possible agent username: ``agt-`` plus a
+# max-length agent name is exactly LINUX_USERNAME_MAX_LENGTH (32), the Linux
+# username ceiling. The fixed socket-path overhead under that username is the
+# socket root, two separators, the username, and the ".sock" suffix; whatever
+# remains under the usable path length (SUN_PATH_MAX - 1) is the session-name
+# budget. Deriving the cap from ``AGENT_SOCKET_ROOT`` in this same module ties
+# it to the real prefix: a socket-root change shifts the cap automatically
+# rather than silently reintroducing an unbindable path (and a pinned test
+# asserts the worst-case path is exactly 107 at the cap). Admin sessions embed
+# into an equal-length root under an equal-capped username, so this cap is safe
+# for them too. At 34 this stays well clear of the freeform 64 that console /
+# vm-site names use, so it is NOT redundant with MAX_FREEFORM_NAME_LENGTH.
+_SESSION_SOCKET_OVERHEAD = len(AGENT_SOCKET_ROOT) + len("/") + LINUX_USERNAME_MAX_LENGTH + len("/") + len(".sock")
+MAX_SESSION_NAME_LENGTH = (SUN_PATH_MAX - 1) - _SESSION_SOCKET_OVERHEAD  # 107 - 73 = 34
 
 # Admin tmux socket infrastructure (mirrors the agent pattern; per-session
 # sockets so each admin session creates a fresh tmux server that inherits the
@@ -75,8 +100,7 @@ def ensure_agent_socket_root(
     q_root = shlex.quote(AGENT_SOCKET_ROOT)
 
     probe = target.run(
-        f'if test -d {q_root}; then stat -c "%G %a" {q_root} 2>/dev/null || echo PROBE_FAILED; '
-        f"else echo MISSING; fi",
+        f'if test -d {q_root}; then stat -c "%G %a" {q_root} 2>/dev/null || echo PROBE_FAILED; else echo MISSING; fi',
         sudo=True,
         check=False,
     )
@@ -166,7 +190,8 @@ def cleanup_stale_sockets(target: Transport, linux_user: str) -> int:
     Returns the number of stale sockets removed.
     """
     return _cleanup_stale_sockets_under(
-        target, f"{AGENT_SOCKET_ROOT}/{linux_user}",
+        target,
+        f"{AGENT_SOCKET_ROOT}/{linux_user}",
     )
 
 
@@ -179,7 +204,8 @@ def cleanup_stale_admin_sockets(target: Transport, admin_username: str) -> int:
     repeated session create/delete cycles.
     """
     return _cleanup_stale_sockets_under(
-        target, f"{ADMIN_SOCKET_ROOT}/{admin_username}",
+        target,
+        f"{ADMIN_SOCKET_ROOT}/{admin_username}",
     )
 
 
@@ -331,9 +357,7 @@ def _grant_server_access(
     q_sock = shlex.quote(socket_path)
     grp = shlex.quote(AGENT_SOCKET_GROUP)
     run_command(
-        f"for u in $(getent group {grp} | cut -d: -f4 | tr ',' ' '); do "
-        f'tmux -S {q_sock} server-access -a "$u"; '
-        f"done",
+        f"for u in $(getent group {grp} | cut -d: -f4 | tr ',' ' '); do tmux -S {q_sock} server-access -a \"$u\"; done",
     )
 
 
@@ -446,13 +470,10 @@ def create_session(
     # is a conflict (something else owns this name).
     sock_exists = run_command(f"test -e {q_sock}", check=False)
     if getattr(sock_exists, "ok", False):
-        server_alive = run_command(
-            f"tmux -S {q_sock} list-sessions 2>/dev/null", check=False
-        )
+        server_alive = run_command(f"tmux -S {q_sock} list-sessions 2>/dev/null", check=False)
         if getattr(server_alive, "ok", False):
             raise RuntimeError(
-                f"Socket {sock} already has an active tmux server. "
-                f"Kill it first or choose a different session name."
+                f"Socket {sock} already has an active tmux server. Kill it first or choose a different session name."
             )
         from agentworks import output as _output
 
@@ -461,10 +482,7 @@ def create_session(
 
     # Create the session. SetEnv vars travel with run_command; tmux's -e
     # flags add them to the session-environment table.
-    cmd = (
-        f"tmux -S {q_sock} new-session -d -s {q_session} "
-        f"-c {q_path} -f {RESTRICTED_CONFIG_PATH}{env_flags}"
-    )
+    cmd = f"tmux -S {q_sock} new-session -d -s {q_session} -c {q_path} -f {RESTRICTED_CONFIG_PATH}{env_flags}"
     if pane_cmd:
         cmd += f" {shlex.quote(pane_cmd)}"
     run_command(cmd, env=env)

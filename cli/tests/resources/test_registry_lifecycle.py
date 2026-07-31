@@ -134,7 +134,7 @@ class _RefEmitter:
     origin: object = None
     references: tuple = ()  # type: ignore[type-arg]
 
-    def referenced_resources(self) -> list[object]:
+    def dependencies(self, context: object) -> list[object]:
         from agentworks.resources.reference import ResourceReference
 
         return [
@@ -148,7 +148,8 @@ class _RefEmitter:
 
 
 def test_error_miss_policy_includes_reference_usage(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
 ) -> None:
     """The error-miss ConfigError carries the reference's usage in the
     message so the operator sees what needed the missing resource."""
@@ -212,7 +213,7 @@ def test_iter_kind_returns_published_resources(tmp_path: Path) -> None:
     """Published secrets land in iter_kind output. Phase 2a.1's
     always-materialized ``vm-template:default`` emits a
     ``SecretReference`` for ``tailscale-auth-key`` via its
-    ``required_resources``, so the requirement-driven path adds
+    ``dependencies``, so the requirement-driven path adds
     ``tailscale-auth-key`` alongside the published a/b/c. The test
     filters to operator-declared rows to pin the published-name set
     without coupling to which framework-auto-declared rows exist.
@@ -227,8 +228,7 @@ def test_iter_kind_returns_published_resources(tmp_path: Path) -> None:
         )
     r.finalize()
     operator_names = sorted(
-        s.name for s in r.iter_kind("secret")
-        if s.origin is not None and s.origin.variant == "operator-declared"
+        s.name for s in r.iter_kind("secret") if s.origin is not None and s.origin.variant == "operator-declared"
     )
     assert operator_names == ["a", "b", "c"]
 
@@ -239,9 +239,7 @@ def test_iter_kind_empty_when_kind_absent() -> None:
     assert list(r.iter_kind("nonexistent")) == []
 
 
-def test_build_registry_equivalent_to_manual_steps(
-    example_config: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_build_registry_equivalent_to_manual_steps(example_config: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """``build_registry(config)`` matches the manual publisher sequence.
 
     The manual side needs the bundled built-in manifests (backend rows)
@@ -295,20 +293,24 @@ def test_build_registry_publishes_builtin_apt_and_install_entries(
     cfg = load_config(example_config, warn_issues=False)
     r = build_registry(cfg)
 
+    # ``system-install-command`` is deliberately absent: its only built-in
+    # entry (``az-cli``) migrated to the ``azure`` system plugin (Phase 11), so
+    # the built-in bundle now ships no system-install-commands. The remaining
+    # three kinds still have built-in rows.
     for kind in (
         "apt-source",
         "apt-package",
-        "system-install-command",
         "user-install-command",
     ):
-        rows = list(r.iter_kind(kind))
-        assert rows, f"expected at least one {kind} row from the bundled built-in manifests"
-        # The built-in rows are built-in. Operator overrides (if any)
-        # would re-publish the same name with operator-declared origin;
-        # the test's example_config doesn't exercise that path.
+        # The built-in rows are built-in. Operator overrides (if any) would
+        # re-publish the same name with operator-declared origin, and a migrated
+        # bundle (the ``claude`` user-install-command) publishes a system-plugin
+        # row; the test's example_config exercises neither, so scope the oracle
+        # to the built-in-origin rows.
+        rows = [row for row in r.iter_kind(kind) if row.origin is not None and row.origin.variant == "built-in"]
+        assert rows, f"expected at least one built-in {kind} row from the bundled built-in manifests"
         for row in rows:
             assert row.origin is not None
-            assert row.origin.variant == "built-in"
             assert row.origin.source is not None
             assert row.origin.source.startswith("agentworks.manifests.builtin/")
             assert row.origin.source.endswith(".yaml")
@@ -326,7 +328,7 @@ def test_unknown_kind_in_requirement_errors_clearly(tmp_path: Path) -> None:
         origin = None
         usage = ()
 
-        def referenced_resources(self) -> list[ResourceReference]:
+        def dependencies(self, context: object) -> list[ResourceReference]:
             return [
                 ResourceReference(
                     name="anything",

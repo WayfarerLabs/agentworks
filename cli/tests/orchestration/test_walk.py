@@ -102,9 +102,7 @@ def test_cycle_report_trims_the_acyclic_prefix() -> None:
     b = _N("agent/dev", (a,))
     a._deps = (b,)
     root = _N("session/s1", (b,))
-    with pytest.raises(
-        StateError, match=r"cycle: agent/dev -> workspace/ws1 -> agent/dev$"
-    ):
+    with pytest.raises(StateError, match=r"cycle: agent/dev -> workspace/ws1 -> agent/dev$"):
         walk(root)
 
 

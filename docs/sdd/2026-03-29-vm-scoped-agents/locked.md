@@ -45,3 +45,14 @@ resource/verb-object pattern used elsewhere," and that elsewhere-pattern (`conso
 The cli-conventions rule now codifies "pluralize when variadic, singular when single object," and
 these two commands are variadic. Service-layer function names are unchanged (`grant_workspaces` /
 `revoke_workspaces` were always plural).
+
+## 2026-07-25
+
+The `workspace reinit` command described in the 2026-06-01 addendum was renamed back to
+`workspace repair`, restoring the honest name for what is a filesystem infrastructure repair (group,
+ownership, permissions, ACLs, parent traversal, agent access, and git identity). The 2026-06-01
+rename to `reinit` had leaned on symmetry with `vm reinit` / `agent reinit`, but that symmetry is
+now treated as intentionally asymmetric: the command is named for what it does. The behavior is
+unchanged (still idempotent forward-only reconciliation of live VM state against the DB, including
+the git-identity convergence). Service-layer rename: `reinit_workspace` is now `repair_workspace`,
+in module `workspaces/manager/repair.py` (the file was renamed back from `reinit.py`).

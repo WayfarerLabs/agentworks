@@ -50,9 +50,7 @@ def test_error_fields_raise_one_grouped_message(synthetic_table: None) -> None:
 
 
 def test_single_error_field_raises(synthetic_table: None) -> None:
-    with pytest.raises(
-        ConfigError, match=r"test-kind spec field\(s\) old_a are gone; do X instead"
-    ):
+    with pytest.raises(ConfigError, match=r"test-kind spec field\(s\) old_a are gone; do X instead"):
         check_deprecated_fields("test-kind", {"old_a": 1})
 
 
@@ -99,12 +97,7 @@ def _manifest(tmp_path: Path, spec_lines: list[str], name: str = "sess") -> Path
     root.mkdir(parents=True, exist_ok=True)
     body = "".join(f"  {line}\n" for line in spec_lines)
     (root / "res.yaml").write_text(
-        "apiVersion: agentworks/v1\n"
-        "kind: session-template\n"
-        "metadata:\n"
-        f"  name: {name}\n"
-        "spec:\n"
-        f"{body}"
+        f"apiVersion: agentworks/v1\nkind: session-template\nmetadata:\n  name: {name}\nspec:\n{body}"
     )
     return root
 
@@ -133,9 +126,7 @@ def test_session_template_flat_fields_rejected_with_preserved_message(
 
 def test_session_template_single_flat_field_rejected(tmp_path: Path) -> None:
     root = _manifest(tmp_path, ["command: htop"])
-    with pytest.raises(
-        ConfigError, match="move them under spec.harness_config"
-    ):
+    with pytest.raises(ConfigError, match="move them under spec.harness_config"):
         load_manifests(root)
 
 
@@ -170,18 +161,14 @@ def warn_seeded_session_template(monkeypatch: pytest.MonkeyPatch) -> None:
     )
 
 
-def test_manifest_deprecation_notices_finds_warn_field(
-    tmp_path: Path, warn_seeded_session_template: None
-) -> None:
+def test_manifest_deprecation_notices_finds_warn_field(tmp_path: Path, warn_seeded_session_template: None) -> None:
     root = _manifest(
         tmp_path,
         ["harness: shell", "legacy_note: something"],
     )
     notices = manifest_deprecation_notices(root)
     assert len(notices) == 1
-    assert notices[0].endswith(
-        "session-template spec field(s) legacy_note are vestigial and ignored"
-    )
+    assert notices[0].endswith("session-template spec field(s) legacy_note are vestigial and ignored")
     assert "res.yaml:" in notices[0]
 
 
@@ -240,14 +227,9 @@ def test_doctor_surfaces_warn_level_deprecated_field(
     dedicated = [
         c
         for c in group.checks
-        if c.name == "Deprecated manifest field"
-        and c.status is Status.WARN
-        and "legacy_note" in (c.message or "")
+        if c.name == "Deprecated manifest field" and c.status is Status.WARN and "legacy_note" in (c.message or "")
     ]
     assert len(dedicated) == 1
     # The dedicated finding is not also emitted as a generic Manifest row
     # (the notice string is filtered out of that channel).
-    assert not any(
-        c.name == "Manifest" and c.message == dedicated[0].message
-        for c in group.checks
-    )
+    assert not any(c.name == "Manifest" and c.message == dedicated[0].message for c in group.checks)

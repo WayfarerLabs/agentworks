@@ -6,7 +6,7 @@ Two consumers share the constants in this module:
   ``~admin/.zshrc`` once at provision time, before init runs. Once
   written, agentworks never refreshes them: operator edits in the
   admin's home survive every subsequent reinit.
-- ``vms/initializer.py`` writes ``/etc/skel/.bashrc`` and
+- ``agentworks.vms.initializer`` writes ``/etc/skel/.bashrc`` and
   ``/etc/skel/.zshrc`` on every init / reinit so future ``useradd -m``
   (i.e. new agents) inherits the seed automatically. The ``/etc/skel``
   copies ARE refreshed on every reinit; the user-home copies are not.

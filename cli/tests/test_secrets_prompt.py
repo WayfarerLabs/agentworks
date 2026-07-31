@@ -7,6 +7,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from agentworks.resources.graph import Readiness
 from agentworks.secrets import ActiveBackend, SecretDecl
 from agentworks.secrets.prompt import PromptBackend
 
@@ -15,7 +16,7 @@ if TYPE_CHECKING:
 
 
 def _backend() -> ActiveBackend:
-    return ActiveBackend(capability=PromptBackend())
+    return ActiveBackend(capability=PromptBackend(), readiness=Readiness.ready())
 
 
 def _set_interactive(monkeypatch: pytest.MonkeyPatch, value: bool) -> None:
@@ -38,7 +39,9 @@ def test_would_attempt_false_when_opted_out() -> None:
     path in an interactive shell. The opt-out is generic loop-side
     behavior; the provider never sees it."""
     decl = SecretDecl(
-        name="x", description="X", backend_mappings={"prompt": False},
+        name="x",
+        description="X",
+        backend_mappings={"prompt": False},
     )
     assert _backend().would_attempt(decl) is False
 

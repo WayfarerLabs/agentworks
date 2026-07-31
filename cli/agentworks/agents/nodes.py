@@ -198,8 +198,7 @@ class PendingAgentNode:
     def mark_realized(self) -> None:
         if self._realized:
             raise StateError(
-                f"{self.key} was already marked realized; the "
-                f"pending-to-realized flip is one-way and once."
+                f"{self.key} was already marked realized; the pending-to-realized flip is one-way and once."
             )
         self._realized = True
 
@@ -226,19 +225,14 @@ class PendingAgentNode:
             ) from exc
 
 
-def agent_template_node(
-    registry: Registry, tmpl: ResolvedAgentTemplate
-) -> AgentTemplateNode:
+def agent_template_node(registry: Registry, tmpl: ResolvedAgentTemplate) -> AgentTemplateNode:
     """Build the ``agent-template/<name>`` node from the RESOLVED
     template: each name in its declared ``git_credentials`` becomes an
     edge to a ``git-credential`` node (constructed here, one per name,
     each holding its provider instance)."""
     from agentworks.git_credentials.nodes import git_credential_node
 
-    credentials = tuple(
-        git_credential_node(registry, cred_name)
-        for cred_name in tmpl.git_credentials
-    )
+    credentials = tuple(git_credential_node(registry, cred_name) for cred_name in tmpl.git_credentials)
     return AgentTemplateNode(tmpl, credentials)
 
 
@@ -256,9 +250,7 @@ def credential_tokens(
     restricted to each credential's own declared names.
     """
     return {
-        node.provider.owner_name: scoped_ctx(node.secret_refs()).secret(
-            node.provider.secret_name
-        )
+        node.provider.owner_name: scoped_ctx(node.secret_refs()).secret(node.provider.secret_name)
         for node in template.credentials
     }
 

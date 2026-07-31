@@ -16,9 +16,9 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from agentworks.capabilities.vm_platform.proxmox import ProxmoxPlatform
 from agentworks.db import VMStatus
 from agentworks.errors import ValidationError
+from agentworks.plugins.proxmox.platform import ProxmoxPlatform
 from agentworks.vms import manager as vm_manager
 
 if TYPE_CHECKING:
@@ -47,8 +47,7 @@ def _seed_vm(db: Database) -> None:
 
 def _seed_workspace(db: Database, *, vm_name: str = "box", name: str = "ws1") -> None:
     db._conn.execute(
-        "INSERT INTO workspaces (name, vm_name, workspace_path, linux_group) "
-        "VALUES (?, ?, ?, ?)",
+        "INSERT INTO workspaces (name, vm_name, workspace_path, linux_group) VALUES (?, ?, ?, ?)",
         (name, vm_name, f"/srv/{name}", f"ws-{name}"),
     )
     db._conn.commit()
@@ -65,12 +64,8 @@ def _stop_the_vm(monkeypatch: pytest.MonkeyPatch, events: list[str]) -> None:
         "status",
         lambda self, row, ctx: events.append("status") or VMStatus.STOPPED,
     )
-    monkeypatch.setattr(
-        ProxmoxPlatform, "start", lambda self, row, ctx: events.append("start")
-    )
-    monkeypatch.setattr(
-        vm_manager, "_ensure_tailscale", lambda *a, **k: events.append("tailscale")
-    )
+    monkeypatch.setattr(ProxmoxPlatform, "start", lambda self, row, ctx: events.append("start"))
+    monkeypatch.setattr(vm_manager, "_ensure_tailscale", lambda *a, **k: events.append("tailscale"))
 
 
 class _FakeTarget:
@@ -90,9 +85,7 @@ class _FakeTarget:
 @pytest.fixture
 def target(monkeypatch: pytest.MonkeyPatch) -> _FakeTarget:
     fake = _FakeTarget()
-    monkeypatch.setattr(
-        "agentworks.transports.transport", lambda vm, config, **kwargs: fake
-    )
+    monkeypatch.setattr("agentworks.transports.transport", lambda vm, config, **kwargs: fake)
     return fake
 
 
@@ -100,7 +93,8 @@ def target(monkeypatch: pytest.MonkeyPatch) -> _FakeTarget:
 
 
 def test_graph_derives_from_row_and_env_joins_via_targets(
-    db: Database, make_config  # noqa: ANN001
+    db: Database,
+    make_config,  # noqa: ANN001
 ) -> None:
     """The shell / exec graph is the live VM alone (vm-site + vm), so
     the walk union is the site's config secret ONLY. The env-chain
@@ -127,9 +121,7 @@ def test_graph_derives_from_row_and_env_joins_via_targets(
     for name in secret_union(nodes):
         resolver.register_name(name)
     scopes = vm_manager._resolve_vm_admin_env_scopes(registry, vm)
-    resolver.register_targets(
-        [vm_manager._vm_secret_target(scopes, label="vm-shell=box")]
-    )
+    resolver.register_targets([vm_manager._vm_secret_target(scopes, label="vm-shell=box")])
     resolver.resolve()
     assert set(resolver.values) == {"proxmox-token", "vm-env-secret"}
 
@@ -249,11 +241,122 @@ def test_exec_dash_prefixed_command_fails_with_zero_resolves_and_zero_gate(
     _seed_vm(db)
     _no_gate(monkeypatch)
 
-    with pytest.raises(ValidationError, match="cannot start with '-'"):
+    with pytest.raises(ValidationError, match="cannot start with '-'") as exc_info:
         vm_manager.exec_vm(db, config, "box", ["--workspace", "ws1", "pwd"])
+
+    # The hint names the real workaround: the `--` separator (and the
+    # `sh -c` fallback), not the misleading "put agentworks args first".
+    hint = exc_info.value.hint or ""
+    assert "put '--' before" in hint
+    assert "sh -c" in hint
+    assert resolve_counter == []
+    assert target.streaming_calls == []
+
+
+def test_exec_double_dash_separator_runs_dash_led_command(
+    db: Database,
+    make_config,  # noqa: ANN001
+    resolve_counter: list[list[str]],
+    target: _FakeTarget,
+    monkeypatch: pytest.MonkeyPatch,
+    captured_output,  # noqa: ANN001
+) -> None:
+    """`vm exec box -- --version` consumes the leading `--` separator and
+    runs the dash-led remote command verbatim; the leading-dash guard
+    steps aside because the operator marked where the command begins."""
+    config = make_config(VM_ENV_SECTION)
+    _seed_vm(db)
+    _reachable(monkeypatch, True)
+
+    rc = vm_manager.exec_vm(db, config, "box", ["--", "--version"])
+
+    assert rc == 0
+    ((cmd, _env),) = target.streaming_calls
+    assert cmd == "--version"
+
+
+def test_exec_double_dash_separator_strips_only_the_first(
+    db: Database,
+    make_config,  # noqa: ANN001
+    resolve_counter: list[list[str]],
+    target: _FakeTarget,
+    monkeypatch: pytest.MonkeyPatch,
+    captured_output,  # noqa: ANN001
+) -> None:
+    """Only ONE leading `--` is consumed; a later `--` is part of the
+    remote command and is preserved verbatim."""
+    config = make_config(VM_ENV_SECTION)
+    _seed_vm(db)
+    _reachable(monkeypatch, True)
+
+    rc = vm_manager.exec_vm(db, config, "box", ["--", "git", "log", "--", "path"])
+
+    assert rc == 0
+    ((cmd, _env),) = target.streaming_calls
+    assert cmd == "git log -- path"
+
+
+def test_exec_double_dash_separator_preserves_an_adjacent_second(
+    db: Database,
+    make_config,  # noqa: ANN001
+    resolve_counter: list[list[str]],
+    target: _FakeTarget,
+    monkeypatch: pytest.MonkeyPatch,
+    captured_output,  # noqa: ANN001
+) -> None:
+    """Back-to-back separators: only the FIRST `--` is consumed, so an
+    immediately-adjacent second `--` survives as the remote command's
+    own first token."""
+    config = make_config(VM_ENV_SECTION)
+    _seed_vm(db)
+    _reachable(monkeypatch, True)
+
+    rc = vm_manager.exec_vm(db, config, "box", ["--", "--", "x"])
+
+    assert rc == 0
+    ((cmd, _env),) = target.streaming_calls
+    assert cmd == "-- x"
+
+
+def test_exec_missing_command_after_double_dash_fails_pre_gate(
+    db: Database,
+    make_config,  # noqa: ANN001
+    resolve_counter: list[list[str]],
+    target: _FakeTarget,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A bare `--` with nothing after it is a missing command, rejected
+    before any resolve or gate."""
+    config = make_config()
+    _seed_vm(db)
+    _no_gate(monkeypatch)
+
+    with pytest.raises(ValidationError, match="missing command after '--'"):
+        vm_manager.exec_vm(db, config, "box", ["--"])
 
     assert resolve_counter == []
     assert target.streaming_calls == []
+
+
+def test_exec_bare_flag_after_command_word_still_works(
+    db: Database,
+    make_config,  # noqa: ANN001
+    resolve_counter: list[list[str]],
+    target: _FakeTarget,
+    monkeypatch: pytest.MonkeyPatch,
+    captured_output,  # noqa: ANN001
+) -> None:
+    """A flag that follows a command word (no separator needed) runs as
+    before: `vm exec box free -m` is unaffected by the `--` handling."""
+    config = make_config(VM_ENV_SECTION)
+    _seed_vm(db)
+    _reachable(monkeypatch, True)
+
+    rc = vm_manager.exec_vm(db, config, "box", ["free", "-m"])
+
+    assert rc == 0
+    ((cmd, _env),) = target.streaming_calls
+    assert cmd == "free -m"
 
 
 def test_cross_vm_workspace_mismatch_fails_with_zero_resolves_and_zero_gate(
@@ -270,9 +373,7 @@ def test_cross_vm_workspace_mismatch_fails_with_zero_resolves_and_zero_gate(
     _no_gate(monkeypatch)
 
     with pytest.raises(ValidationError, match="belongs to VM 'other', not 'box'"):
-        vm_manager.exec_vm(
-            db, config, "box", ["echo", "hi"], workspace_name="ws-other"
-        )
+        vm_manager.exec_vm(db, config, "box", ["echo", "hi"], workspace_name="ws-other")
 
     assert resolve_counter == []
     assert target.streaming_calls == []

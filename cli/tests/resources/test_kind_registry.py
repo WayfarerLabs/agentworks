@@ -13,15 +13,11 @@ def _secret_req(name: str, source: tuple[str, str], usage: str = "the X env var"
 
 
 def _admin_req() -> SecretReference:
-    return SecretReference(
-        name="default", kind="admin-template", usage="ignored", source=("test", "x")
-    )
+    return SecretReference(name="default", kind="admin-template", usage="ignored", source=("test", "x"))
 
 
 def _named_console_req() -> SecretReference:
-    return SecretReference(
-        name="default", kind="named-console-template", usage="ignored", source=("test", "x")
-    )
+    return SecretReference(name="default", kind="named-console-template", usage="ignored", source=("test", "x"))
 
 
 def test_phase_1a_kinds_registered() -> None:
@@ -67,8 +63,8 @@ def test_secret_kind_synthesize_builds_auto_declared_decl() -> None:
     assert decl.origin is not None
     assert decl.origin.variant == "auto-declared"
     assert decl.origin.source == ("vm-template", "default")  # first-matching
-    # Usage attached at finalize, not at synthesize.
-    assert decl.references == ()
+    # Usage is attached at finalize (on the graph node), not at synthesize;
+    # a freshly synthesized decl carries no inbound reference state at all.
 
 
 def test_admin_template_kind_synthesize_builds_empty_admin() -> None:

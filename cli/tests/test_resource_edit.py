@@ -119,9 +119,7 @@ def test_unknown_kind_and_name_reuse_describe_errors(tmp_path: Path) -> None:
         edit_location(registry, "secret", "nope")
 
 
-def test_cli_edit_launches_editor_on_manifest(
-    tmp_path: Path, monkeypatch
-) -> None:
+def test_cli_edit_launches_editor_on_manifest(tmp_path: Path, monkeypatch) -> None:
     from typer.testing import CliRunner
 
     from agentworks.cli import app
@@ -143,9 +141,7 @@ def test_cli_edit_launches_editor_on_manifest(
     monkeypatch.setattr("agentworks.config.CONFIG_PATH", cfg)
     monkeypatch.setenv("EDITOR", "test-editor")
     calls: list[list[str]] = []
-    monkeypatch.setattr(
-        "subprocess.call", lambda argv: calls.append(argv) or 0
-    )
+    monkeypatch.setattr("subprocess.call", lambda argv: calls.append(argv) or 0)
 
     result = CliRunner().invoke(app, ["resource", "edit", "secret/npm-token"])
     assert result.exit_code == 0, result.output
@@ -170,9 +166,7 @@ def test_cli_edit_requires_editor_env(tmp_path: Path, monkeypatch) -> None:
     assert "$EDITOR is not set" in result.output
 
 
-def test_cli_edit_rejects_token_without_slash(
-    tmp_path: Path, monkeypatch
-) -> None:
+def test_cli_edit_rejects_token_without_slash(tmp_path: Path, monkeypatch) -> None:
     from typer.testing import CliRunner
 
     from agentworks.cli import app
@@ -187,9 +181,7 @@ def test_cli_edit_rejects_token_without_slash(
     assert "expected KIND/NAME" in str(result.exception)
 
 
-def test_cli_edit_works_when_config_fails_validation(
-    tmp_path: Path, monkeypatch
-) -> None:
+def test_cli_edit_works_when_config_fails_validation(tmp_path: Path, monkeypatch) -> None:
     """The fix-it path: a broken config is exactly when edit is needed
     most (the maintainer hit this breaking YAML intentionally). A
     ConfigError from the strict path falls back to a tolerant,
@@ -220,9 +212,7 @@ def test_cli_edit_works_when_config_fails_validation(
     calls: list[list[str]] = []
     monkeypatch.setattr("subprocess.call", lambda argv: calls.append(argv) or 0)
 
-    result = CliRunner().invoke(
-        app, ["resource", "edit", "secret/openai-api-key"]
-    )
+    result = CliRunner().invoke(app, ["resource", "edit", "secret/openai-api-key"])
     assert result.exit_code == 0, result.output
     assert calls == [["test-editor", str(resources / "secrets.yaml")]]
     assert "config is currently failing validation" in result.output
@@ -253,9 +243,7 @@ def test_fallback_scan_tolerates_broken_sibling_files(tmp_path: Path) -> None:
     assert found.unreadable == (resources / "broken.yaml",)
 
 
-def test_fallback_miss_names_unreadable_files(
-    tmp_path: Path, monkeypatch
-) -> None:
+def test_fallback_miss_names_unreadable_files(tmp_path: Path, monkeypatch) -> None:
     """When the target isn't found AND some files couldn't be parsed,
     the original config error re-raises with a hint naming them --
     the resource may live in the unparseable file."""

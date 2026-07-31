@@ -328,10 +328,7 @@ def test_migration_19_succeeds_without_legacy_sessions(tmp_path: Path) -> None:
         "INSERT INTO sessions (name, workspace_name, template, mode, socket_path) "
         "VALUES ('s1', 'ws', 'default', 'agent', '/sock')"
     )
-    conn.execute(
-        "INSERT INTO sessions (name, workspace_name, template, mode) "
-        "VALUES ('s2', 'ws', 'default', 'admin')"
-    )
+    conn.execute("INSERT INTO sessions (name, workspace_name, template, mode) VALUES ('s2', 'ws', 'default', 'admin')")
     conn.commit()
     conn.close()
 
@@ -348,10 +345,7 @@ def test_migration_19_fails_with_legacy_agent_session(tmp_path: Path) -> None:
     # Insert an agent session WITHOUT socket_path (legacy)
     conn = sqlite3.connect(str(db_path))
     conn.execute("INSERT INTO workspaces (name, type, workspace_path) VALUES ('ws', 'vm', '/tmp/ws')")
-    conn.execute(
-        "INSERT INTO sessions (name, workspace_name, template, mode) "
-        "VALUES ('s1', 'ws', 'default', 'agent')"
-    )
+    conn.execute("INSERT INTO sessions (name, workspace_name, template, mode) VALUES ('s1', 'ws', 'default', 'agent')")
     conn.commit()
     conn.close()
 
@@ -399,15 +393,9 @@ def test_list_sessions_filters(db: Database) -> None:
     db.insert_agent("coder", "dev-vm", "agt--coder")
     db.insert_agent("helper", "dev-vm", "agt--helper")
 
-    db.insert_session(
-        "s-a-coder", "ws-a", "default", SessionMode.AGENT, agent_name="coder", socket_path="/s1"
-    )
-    db.insert_session(
-        "s-a-helper", "ws-a", "default", SessionMode.AGENT, agent_name="helper", socket_path="/s2"
-    )
-    db.insert_session(
-        "s-b-coder", "ws-b", "default", SessionMode.AGENT, agent_name="coder", socket_path="/s3"
-    )
+    db.insert_session("s-a-coder", "ws-a", "default", SessionMode.AGENT, agent_name="coder", socket_path="/s1")
+    db.insert_session("s-a-helper", "ws-a", "default", SessionMode.AGENT, agent_name="helper", socket_path="/s2")
+    db.insert_session("s-b-coder", "ws-b", "default", SessionMode.AGENT, agent_name="coder", socket_path="/s3")
     db.insert_session("s-b-admin", "ws-b", "default", SessionMode.ADMIN)
     db.insert_session("s-c-admin", "ws-c", "default", SessionMode.ADMIN)
 
@@ -451,23 +439,31 @@ def test_list_sessions_filters(db: Database) -> None:
 
     # Multi-value (list) filters: lists OR within a filter, filters AND across.
     assert names(db.list_sessions(workspace_name=["ws-a", "ws-b"])) == [
-        "s-a-coder", "s-a-helper", "s-b-admin", "s-b-coder",
+        "s-a-coder",
+        "s-a-helper",
+        "s-b-admin",
+        "s-b-coder",
     ]
     assert names(db.list_sessions(agent_name=["coder", "helper"])) == [
-        "s-a-coder", "s-a-helper", "s-b-coder",
+        "s-a-coder",
+        "s-a-helper",
+        "s-b-coder",
     ]
     # Multi VM: dev-vm OR other-vm = everything.
     assert names(db.list_sessions(vm_name=["dev-vm", "other-vm"])) == [
-        "s-a-coder", "s-a-helper", "s-b-admin", "s-b-coder", "s-c-admin",
+        "s-a-coder",
+        "s-a-helper",
+        "s-b-admin",
+        "s-b-coder",
+        "s-c-admin",
     ]
     # Multi-value composed with a single-value filter from another flag.
     assert names(db.list_sessions(workspace_name=["ws-a", "ws-b"], agent_name="coder")) == [
-        "s-a-coder", "s-b-coder",
+        "s-a-coder",
+        "s-b-coder",
     ]
     # Single-element list behaves identically to a bare string.
-    assert names(db.list_sessions(workspace_name=["ws-a"])) == names(
-        db.list_sessions(workspace_name="ws-a")
-    )
+    assert names(db.list_sessions(workspace_name=["ws-a"])) == names(db.list_sessions(workspace_name="ws-a"))
 
 
 def test_list_workspaces_and_agents_multi_value(db: Database) -> None:
@@ -530,12 +526,9 @@ def test_migration_20_drops_status_adds_pid(tmp_path: Path) -> None:
     # Insert a session at v19 (has status column). vm + vm-scoped workspace
     # so the row survives the later migration 26 cleanup.
     conn = sqlite3.connect(str(db_path))
+    conn.execute("INSERT INTO vms (name, platform, admin_username) VALUES ('dev-vm', 'lima', 'admin')")
     conn.execute(
-        "INSERT INTO vms (name, platform, admin_username) VALUES ('dev-vm', 'lima', 'admin')"
-    )
-    conn.execute(
-        "INSERT INTO workspaces (name, type, workspace_path, vm_name) "
-        "VALUES ('ws', 'vm', '/tmp/ws', 'dev-vm')"
+        "INSERT INTO workspaces (name, type, workspace_path, vm_name) VALUES ('ws', 'vm', '/tmp/ws', 'dev-vm')"
     )
     conn.execute(
         "INSERT INTO sessions (name, workspace_name, template, mode, status) "
@@ -619,17 +612,11 @@ def test_migration_21_adds_boot_id(tmp_path: Path) -> None:
                 conn.execute(stmt)
         conn.execute("INSERT INTO schema_version (version) VALUES (?)", (version,))
     # vm + vm-scoped workspace so the row survives the later migration 26 cleanup.
+    conn.execute("INSERT INTO vms (name, platform, admin_username) VALUES ('dev-vm', 'lima', 'admin')")
     conn.execute(
-        "INSERT INTO vms (name, platform, admin_username) VALUES ('dev-vm', 'lima', 'admin')"
+        "INSERT INTO workspaces (name, type, workspace_path, vm_name) VALUES ('ws', 'vm', '/tmp/ws', 'dev-vm')"
     )
-    conn.execute(
-        "INSERT INTO workspaces (name, type, workspace_path, vm_name) "
-        "VALUES ('ws', 'vm', '/tmp/ws', 'dev-vm')"
-    )
-    conn.execute(
-        "INSERT INTO sessions (name, workspace_name, template, mode) "
-        "VALUES ('s1', 'ws', 'default', 'admin')"
-    )
+    conn.execute("INSERT INTO sessions (name, workspace_name, template, mode) VALUES ('s1', 'ws', 'default', 'admin')")
     conn.commit()
     conn.close()
 
@@ -667,9 +654,7 @@ def test_migration_22_adds_and_backfills_linux_group(tmp_path: Path) -> None:
             if stmt:
                 conn.execute(stmt)
         conn.execute("INSERT INTO schema_version (version) VALUES (?)", (version,))
-    conn.execute(
-        "INSERT INTO vms (name, platform, admin_username) VALUES ('dev-vm', 'lima', 'admin')"
-    )
+    conn.execute("INSERT INTO vms (name, platform, admin_username) VALUES ('dev-vm', 'lima', 'admin')")
     conn.execute(
         "INSERT INTO workspaces (name, type, workspace_path, vm_name) "
         "VALUES ('legacy-vm-ws', 'vm', '/tmp/legacy-vm-ws', 'dev-vm')"
@@ -722,17 +707,12 @@ def test_migration_25_adds_created_agent(tmp_path: Path) -> None:
             if stmt:
                 conn.execute(stmt)
         conn.execute("INSERT INTO schema_version (version) VALUES (?)", (version,))
-    conn.execute(
-        "INSERT INTO vms (name, platform, admin_username) VALUES ('dev-vm', 'lima', 'admin')"
-    )
+    conn.execute("INSERT INTO vms (name, platform, admin_username) VALUES ('dev-vm', 'lima', 'admin')")
     conn.execute(
         "INSERT INTO workspaces (name, type, workspace_path, vm_name, linux_group) "
         "VALUES ('ws', 'vm', '/tmp/ws', 'dev-vm', 'ws-ws')"
     )
-    conn.execute(
-        "INSERT INTO sessions (name, workspace_name, template, mode) "
-        "VALUES ('s1', 'ws', 'default', 'admin')"
-    )
+    conn.execute("INSERT INTO sessions (name, workspace_name, template, mode) VALUES ('s1', 'ws', 'default', 'admin')")
     conn.commit()
     conn.close()
 
@@ -772,9 +752,7 @@ def test_migration_26_drops_local_workspaces(tmp_path: Path) -> None:
             if stmt:
                 conn.execute(stmt)
         conn.execute("INSERT INTO schema_version (version) VALUES (?)", (version,))
-    conn.execute(
-        "INSERT INTO vms (name, platform, admin_username) VALUES ('dev-vm', 'lima', 'admin')"
-    )
+    conn.execute("INSERT INTO vms (name, platform, admin_username) VALUES ('dev-vm', 'lima', 'admin')")
     conn.execute(
         "INSERT INTO workspaces (name, type, workspace_path, vm_name, linux_group) "
         "VALUES ('vm-ws', 'vm', '/tmp/vm-ws', 'dev-vm', 'ws--vm-ws')"
@@ -784,20 +762,16 @@ def test_migration_26_drops_local_workspaces(tmp_path: Path) -> None:
         "VALUES ('local-ws', 'local', '/tmp/local-ws', NULL)"
     )
     conn.execute(
-        "INSERT INTO sessions (name, workspace_name, template, mode) "
-        "VALUES ('s-vm', 'vm-ws', 'default', 'admin')"
+        "INSERT INTO sessions (name, workspace_name, template, mode) VALUES ('s-vm', 'vm-ws', 'default', 'admin')"
     )
     conn.execute(
-        "INSERT INTO sessions (name, workspace_name, template, mode) "
-        "VALUES ('s-local', 'local-ws', 'default', 'admin')"
+        "INSERT INTO sessions (name, workspace_name, template, mode) VALUES ('s-local', 'local-ws', 'default', 'admin')"
     )
     # Agent grants are normally VM-scoped, but defensively seed one against
     # the local workspace to confirm migration 26 cleans it up before
     # rebuilding (FKs are disabled during the migration loop, so the
     # ON DELETE CASCADE would not fire on its own).
-    conn.execute(
-        "INSERT INTO agents (name, vm_name, linux_user) VALUES ('coder', 'dev-vm', 'agt-coder')"
-    )
+    conn.execute("INSERT INTO agents (name, vm_name, linux_user) VALUES ('coder', 'dev-vm', 'agt-coder')")
     conn.execute(
         "INSERT INTO agent_workspace_grants (agent_name, workspace_name, grant_type) "
         "VALUES ('coder', 'local-ws', 'explicit')"
@@ -812,9 +786,7 @@ def test_migration_26_drops_local_workspaces(tmp_path: Path) -> None:
     assert "type" not in cols  # column dropped
 
     # Verify NOT NULL on vm_name and linux_group
-    not_null = {
-        row[1] for row in upgraded._conn.execute("PRAGMA table_info(workspaces)").fetchall() if row[3] == 1
-    }
+    not_null = {row[1] for row in upgraded._conn.execute("PRAGMA table_info(workspaces)").fetchall() if row[3] == 1}
     assert "vm_name" in not_null
     assert "linux_group" in not_null
 

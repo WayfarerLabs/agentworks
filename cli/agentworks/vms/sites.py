@@ -10,14 +10,20 @@ many sites. Site rows arrive from the built-in bundle (``lima-local``,
 ``[proxmox]`` TOML sections.
 
 Every site registers UNCONDITIONALLY (bundled and declared alike,
-whatever the host) and self-disables when it lacks what it needs
-(:func:`site_disabled_reason`): its platform is missing (a plugin not
-installed, or a typo), unsupported on this host (wsl2 off Windows), or
-the bound instance reports a missing requirement (a local-Lima site
-without ``limactl``). A disabled site still lists, describes, and
-holds references; using it (:func:`resolve_site`) is a typed error
-with the reason, and existing references (VMs, ``defaults.site``)
-degrade to doctor warnings rather than breaking every command.
+whatever the host). Whether it can run here is READINESS, computed by
+the finalize fold and stored on the graph: a site is not-ready when its
+platform is host-unsupported (wsl2 off Windows) or the bound config
+reports a missing requirement (a local-Lima site without ``limactl``).
+An UNKNOWN platform (a typo, or an uninstalled plugin) is no longer a
+self-disable but a hard finalize error (R9.2): the site emits its
+platform edge unconditionally and the absent capability row is a loud
+miss. A not-ready site still lists, describes, and holds references;
+using it (:func:`resolve_site`) is a typed error with the reason, and
+existing references (VMs, ``defaults.site``) degrade to doctor warnings
+rather than breaking every command. Readiness is folded once at finalize and
+read off the graph (``graph.readiness_of``); :func:`select_site` /
+:func:`ensure_site_ready` and the inspect / doctor projections all read that
+stored verdict rather than recomputing it.
 """
 
 from __future__ import annotations
@@ -29,8 +35,11 @@ from agentworks.declared_resource import DeclaredResource
 from agentworks.errors import ConfigError
 
 if TYPE_CHECKING:
+    from collections.abc import Mapping
+
     from agentworks.capabilities.vm_platform import VMPlatform
     from agentworks.config import Config
+    from agentworks.resources.graph import BuildContext, DependencyState, Readiness
     from agentworks.resources.reference import ResourceReference
     from agentworks.resources.registry import Registry
 
@@ -49,50 +58,98 @@ class VMSiteDecl(DeclaredResource):
     platform: str
     platform_config: dict[str, object] = field(default_factory=dict)
 
-    def referenced_resources(self) -> list[ResourceReference]:
+    def dependencies(self, context: BuildContext) -> list[ResourceReference]:
         from agentworks.resources.reference import (
             ResourceReference as _ResourceRef,
         )
-        from agentworks.resources.reference import SecretReference
+        from agentworks.resources.reference import sourced_references
 
         source = ("vm-site", self.name)
-        refs: list[ResourceReference] = []
-        # A host-disabled site claims NO edges: the platform edge would
-        # dangle (the capability row publishes only when installed AND
-        # supported here), and the config-implied secret edges would
-        # auto-declare and predict-resolve secrets for a site that can
-        # never run on this host. A site whose platform merely lacks an
-        # INSTANCE requirement (limactl) keeps its edges: installing
-        # the tool enables it, and its secrets should already predict.
+        # A site ALWAYS emits its platform edge (the suppression is gone,
+        # R13/R12): the platform node is always present (published
+        # unconditionally), so the edge always resolves; an unknown platform
+        # is now a hard finalize miss (R9.2), not a silently-dropped edge.
+        # Whether this site can run on the host is READINESS (the fold), and
+        # readiness gates whether its config-implied secrets materialize (R12),
+        # so the edges are emitted unconditionally here and gated downstream.
         from agentworks.capabilities.vm_platform import VM_PLATFORM_REGISTRY
 
-        capability = VM_PLATFORM_REGISTRY.get(self.platform)
-        if capability is None or capability.unsupported_reason() is not None:
-            return refs
-        refs.append(
+        refs: list[ResourceReference] = [
             _ResourceRef(
                 name=self.platform,
                 kind="vm-platform",
                 usage="the VM platform",
                 source=source,
             )
-        )
-        # Capability-implied references: the platform validates its
-        # config block and returns the references it implies; this
-        # resource (the config block's owner) attributes them to itself.
-        for cref in capability.validate_config(
-            f"vm-site/{self.name}", self.platform_config
-        ):
-            ref_cls = SecretReference if cref.kind == "secret" else _ResourceRef
-            refs.append(
-                ref_cls(
-                    name=cref.name,
-                    kind=cref.kind,
-                    usage=cref.usage,
-                    source=source,
-                )
+        ]
+        capability = VM_PLATFORM_REGISTRY.get(self.platform)
+        if capability is not None:
+            # Capability-implied references: the platform derives the
+            # references its config block implies (dependencies, total and
+            # non-throwing); this resource (the config block's owner)
+            # attributes them to itself via the shared sourced-conversion. An
+            # unknown platform emits only the (dangling) platform edge above,
+            # which the resolve pass turns into the R9.2 hard error.
+            refs.extend(
+                sourced_references(capability.dependencies(f"vm-site/{self.name}", self.platform_config), source)
             )
         return refs
+
+    def not_ready(self, deps: Mapping[tuple[str, str], DependencyState]) -> Readiness:
+        """This site's readiness verdict, self-determined from its single
+        platform dependency's :class:`DependencyState` (the fold hands it in
+        ``deps``) plus its own ``platform_config`` (LLD c). Pure, total,
+        NON-CONSTRUCTING: the config-dependent tool check calls the platform's
+        ``not_ready`` classmethod off the graph-carried impl, never building an
+        instance (which would re-run the throwing validator: the B1 loop).
+
+        The chain, by owner: a DISABLED platform yields a disabled hint whose
+        remediation tail is the carried ``disabled_reason`` (e.g. "enable plugin
+        `<name>`" from the plugin source), falling back to "enable its unit" when
+        no source supplied a reason (a direct test that disables without a
+        source); a not-ready platform
+        (host-unsupported) propagates its verdict verbatim (the platform's own
+        readiness reason already names it, e.g. "platform 'wsl2' is unsupported
+        here: Windows only", so re-wrapping would double the naming); otherwise
+        the site re-asks with its OWN config (a remote-Lima site needs no local
+        ``limactl``, so it does not blindly inherit the platform verdict, R4).
+        The "disabled" branch is the opt-in axis (enablement), not host
+        readiness; readiness reasons never say "disabled" (R6/R9.1).
+        """
+        from typing import cast
+
+        from agentworks.resources.graph import Enablement, Readiness
+
+        platform = deps[("vm-platform", self.platform)]
+        if platform.enablement is Enablement.disabled:
+            tail = platform.disabled_reason or "enable its unit"
+            return Readiness.blocked(f"depends on vm-platform '{self.platform}', which is disabled; {tail}")
+        if platform.readiness is not None and not platform.readiness.is_ready:
+            return platform.readiness
+        if platform.impl is None:
+            return Readiness.ready()
+        # The impl is the platform CLASS the graph stamped (``_impl_for`` fails
+        # fast on a missing impl), so ``not_ready`` is a classmethod call, never
+        # a construction.
+        return cast("type[VMPlatform]", platform.impl).not_ready(self.platform_config)
+
+    def validate(self, enabled_backends: frozenset[str]) -> None:
+        """Throwing shape check for the ``platform_config`` blob, run by
+        the finalize ``validate`` pass (``enabled_backends`` is the
+        secret-only R9.9 input, ignored here). Mirrors ``dependencies``:
+        the named platform capability validates the blob it owns. An
+        unknown platform is a no-op HERE (the platform capability is absent,
+        so there is no blob owner to validate against); the site's dangling
+        platform edge is what makes the unknown platform a hard finalize miss
+        (R9.2). The blob is validated whenever the platform's implementation
+        is seated, regardless of host support (an unsupported platform still
+        validates an empty or well-formed blob for a ready+enabled site).
+        """
+        from agentworks.capabilities.vm_platform import VM_PLATFORM_REGISTRY
+
+        capability = VM_PLATFORM_REGISTRY.get(self.platform)
+        if capability is not None:
+            capability.validate(f"vm-site/{self.name}", self.platform_config)
 
 
 def site_manifest_hint(name: str, *, vm_host: str | None = None) -> str:
@@ -126,16 +183,16 @@ def select_site(
     registry: Registry,
 ) -> str:
     """Site selection for ``vm create``: the explicit flag, then
-    ``defaults.site``, then the house model over the ENABLED sites:
+    ``defaults.site``, then the house model over the READY sites:
     infer when exactly one exists, prompt interactively when several
-    do, error otherwise. Disabled sites are never a choice (using one
+    do, error otherwise. Not-ready sites are never a choice (using one
     is an error), but their existence never breaks inference.
 
     Placement is deliberately host/operator-scoped only: templates
     describe WHAT a VM is and carry no site (a shared template must not
     smuggle a per-host placement decision), and there is no hardcoded
-    fallback site (sites disabled on this host drop out, so "exactly
-    one enabled" IS the zero-config case).
+    fallback site (sites not ready on this host drop out, so "exactly
+    one ready" IS the zero-config case).
     """
     from agentworks import output
     from agentworks.errors import ValidationError
@@ -144,19 +201,18 @@ def select_site(
         return flag
     if default_site:
         return default_site
+    graph = registry.graph
     sites = sorted(registry.iter_kind_items("vm-site"), key=lambda item: item[0])
-    names = [name for name, decl in sites if site_disabled_reason(decl) is None]
+    names = [name for name, _decl in sites if graph.is_ready("vm-site", name)]
     if len(names) == 1:
         return names[0]
     if not names:
-        disabled = [
-            f"{name} ({site_disabled_reason(decl)})" for name, decl in sites
-        ]
-        detail = f" (disabled: {'; '.join(disabled)})" if disabled else ""
+        not_ready = [f"{name} ({graph.readiness_of('vm-site', name).reason})" for name, _decl in sites]
+        detail = f" (not ready: {'; '.join(not_ready)})" if not_ready else ""
         raise ValidationError(
-            f"no vm-sites are enabled on this host{detail}",
+            f"no vm-sites are ready on this host{detail}",
             hint=(
-                "meet a disabled site's requirement, or declare a site "
+                "meet a not-ready site's requirement, or declare a site "
                 "under ~/.config/agentworks/resources/ "
                 "(`agw resource sample vm-site`)"
             ),
@@ -165,41 +221,13 @@ def select_site(
         choice = output.choose("Select a site:", names)
         return names[choice]
     raise ValidationError(
-        f"multiple sites are enabled ({', '.join(names)})",
+        f"multiple sites are ready ({', '.join(names)})",
         hint="pass --site <name> or set defaults.site in config.toml",
     )
 
 
-def site_disabled_reason(decl: VMSiteDecl) -> str | None:
-    """Why this site cannot be used on this host, or ``None`` when it
-    can (the vm-site kind's generic disabled hook delegates here).
-
-    The chain, cheapest first: the platform is missing entirely (a
-    plugin not installed, or a typo, indistinguishable by design),
-    the platform is host-disabled (``unsupported_reason``), or the
-    bound instance reports a missing requirement
-    (``Capability.disabled_reason``: a local-Lima site without
-    ``limactl``). Same offline-and-cheap contract as the methods it
-    composes; preflight remains the deeper op-boundary check.
-    """
-    from agentworks.capabilities.vm_platform import VM_PLATFORM_REGISTRY
-
-    platform_cls = VM_PLATFORM_REGISTRY.get(decl.platform)
-    if platform_cls is None:
-        return f"platform '{decl.platform}' is not installed"
-    if (reason := platform_cls.unsupported_reason()) is not None:
-        return f"platform '{decl.platform}' is disabled: {reason}"
-    # Construction re-runs validate_config, but it cannot fail here:
-    # every decl source runs the same pure classmethod at load whenever
-    # the platform is installed (manifest decode, legacy TOML), and the
-    # branches above returned for the one unvalidated shape (missing
-    # platform). Inspection loops (doctor, resource list) rely on
-    # this: one bad row must not take down the whole listing.
-    return platform_cls(decl.name, decl.platform_config).disabled_reason()
-
-
 def lookup_site(name: str, registry: Registry) -> VMSiteDecl:
-    """The site's declaration (enabled or disabled), or a
+    """The site's declaration (ready or not-ready), or a
     ``ConfigError`` with the ready-to-paste manifest on a miss (the
     stranded-site case, e.g. a migrated remote-Lima row whose site
     manifest the operator has not added yet). Bundled sites register
@@ -238,35 +266,37 @@ def resolve_site(
     or platform classes.
 
     This is the one chokepoint every operation passes through, so the
-    disabled guard lives here: using a disabled site is a typed error
+    readiness guard lives here: using a not-ready site is a typed error
     naming the reason chain.
     """
     from agentworks.capabilities.vm_platform import VM_PLATFORM_REGISTRY
 
     decl = lookup_site(name, registry)
-    ensure_site_enabled(decl)
-    # Enabled implies the platform is installed and supported here.
+    ensure_site_ready(decl, registry)
+    # Ready implies the platform is installed and supported here.
     platform_cls = VM_PLATFORM_REGISTRY[decl.platform]
     return platform_cls(decl.name, decl.platform_config)
 
 
-def ensure_site_enabled(decl: VMSiteDecl) -> None:
-    """The typed using-a-disabled-site error. ``resolve_site`` (the
+def ensure_site_ready(decl: VMSiteDecl, registry: Registry) -> None:
+    """The typed using-a-not-ready-site error. ``resolve_site`` (the
     chokepoint every op passes through) always applies it; roots with
     operator interaction BEFORE their resolve (``create_vm``'s system
-    slug prompt) call it up front too, so a disabled explicit choice
+    slug prompt) call it up front too, so a not-ready explicit choice
     errors before the operator answers anything.
+
+    Reads the site's stored readiness verdict off the graph (R11: the fold
+    computed it, this does not recompute). The verdict folds in the platform's
+    enablement too, so a site whose platform is disabled (the opt-in axis) is
+    correctly unusable, reported with the "enable its unit" hint.
     """
     from agentworks.errors import StateError
 
-    reason = site_disabled_reason(decl)
+    reason = registry.graph.readiness_of("vm-site", decl.name).reason
     if reason is not None:
         raise StateError(
-            f"vm-site '{decl.name}' is disabled on this host: {reason}",
-            hint=(
-                "`agw doctor` lists each site's state; meet the "
-                "requirement or use an enabled site"
-            ),
+            f"vm-site '{decl.name}' is not ready on this host: {reason}",
+            hint=("`agw doctor` lists each site's state; meet the requirement or use a ready site"),
         )
 
 

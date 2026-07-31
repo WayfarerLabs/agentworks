@@ -1,9 +1,9 @@
 """On-VM agent provisioning: the SSH bodies that create, configure,
 and remove an agent's Linux user.
 
-The agent counterpart of ``vms/initializer.py``. Command orchestration
+The agent counterpart of ``agentworks.vms.initializer``. Command orchestration
 (validation, gating, DB rows, rollback choreography) lives in
-``agents/manager.py`` and ``agents/realize.py``; this module owns the
+``agentworks.agents.manager`` and ``agents/realize.py``; this module owns the
 remote mutations they drive over SSH: the user bootstrap and
 self-configure sequence, its install-command / profile / rc / mise
 sub-steps, and the user removal.
@@ -61,6 +61,12 @@ def create_agent_on_vm(
     agent's behalf and matches the rule that operations whose target
     user is the agent open SSH directly as the agent's Linux user.
     """
+    # DRIFT GUARD (Phase 7, recipe use-gate): this function is itself never
+    # gated; it runs ``_run_agent_install_commands`` (a declarable consumer), so
+    # the recipe gate (``ensure_recipe_enabled``) must sit at each COMMAND ENTRY
+    # that reaches it (agent create/reinit, session create --new-agent). If you
+    # add a NEW caller of ``create_agent_on_vm``, add its command-entry gate and
+    # update tests/agents/test_recipe_gate_drift.py's enumerated caller set.
     from agentworks.sessions.tmux import (
         cleanup_stale_sockets,
         ensure_agent_socket_dir,
@@ -71,7 +77,6 @@ def create_agent_on_vm(
 
     admin_target = transport(vm, config, logger=logger)
 
-    output.info(f"Creating user '{linux_user}' on VM '{vm.name}'...")
     home = f"/home/{linux_user}"
 
     agent_cfg = agent_tmpl
@@ -79,13 +84,74 @@ def create_agent_on_vm(
 
     # -- Phase 1: bootstrap (admin) ---------------------------------------
 
-    # Create user with the template's shell (idempotent: skip if exists).
+    # Create-or-converge the agent's Linux user, reporting the TRUE
+    # outcome rather than announcing a create every time. This body is
+    # shared by ``agent create`` (user usually absent) and ``agent
+    # reinit`` (user usually present), so the message is driven by the
+    # DETECTED state, not by which command called us: the case that must
+    # not be hidden is a truly-gone agent user being recreated on reinit,
+    # which the old unconditional "Creating user..." line silently masked
+    # as a converging no-op (issue #252). A single ``getent passwd`` probe
+    # yields both existence (exit status) and the current login shell
+    # (field 7), the one attribute the ``usermod`` convergence below
+    # touches, so the three reported outcomes (created / already-exists /
+    # shell-corrected) each reflect what actually happened on the VM.
     shell_path = f"/bin/{agent_shell}" if "/" not in agent_shell else agent_shell
-    user_exists = admin_target.run(f"id {linux_user}", sudo=True, check=False)
-    if not user_exists.ok:
-        admin_target.run(f"useradd -m -s {shell_path} {linux_user}", sudo=True)
+    # ``-U`` (``--user-group``) forces a per-user private primary group
+    # regardless of the base image's ``USERGROUPS_ENAB`` setting. This is
+    # load-bearing for the 0750 home below: 0750 is only agent-private if
+    # the group half grants access to nobody but this user. On an image
+    # where new users land in a shared primary group (e.g. ``users``,
+    # GID 100), a bare ``useradd`` plus 0750 would GRANT every other agent
+    # group read+execute on this home, an inversion of the goal. We do
+    # not assume a clean Debian image (see capabilities/vm_platform/README).
+    passwd_entry = admin_target.run(f"getent passwd {linux_user}", sudo=True, check=False)
+    if not passwd_entry.ok:
+        admin_target.run(f"useradd -m -U -s {shell_path} {linux_user}", sudo=True)
+        output.info(f"Created agent user '{linux_user}' on VM '{vm.name}'")
     else:
-        admin_target.run(f"usermod -s {shell_path} {linux_user}", sudo=True)
+        # ``getent passwd`` line is colon-delimited with the login shell
+        # last; the leading fields (name, gecos, home) never contain a
+        # colon, so the final field is the shell. Take the first line in
+        # case NSS ever returns more than one entry for the name.
+        current_shell = passwd_entry.stdout.strip().splitlines()[0].rsplit(":", 1)[-1]
+        if current_shell != shell_path:
+            admin_target.run(f"usermod -s {shell_path} {linux_user}", sudo=True)
+            output.info(f"Fixed agent user '{linux_user}' on VM '{vm.name}': shell {current_shell} -> {shell_path}")
+        else:
+            output.info(f"Agent user '{linux_user}' already exists on VM '{vm.name}'")
+
+    # Tighten the agent's home to 0750. ``useradd -m`` honors the system
+    # umask (022), leaving home world-readable (0755), which lets any
+    # other agent user on the VM read this agent's scratch artifacts,
+    # logs, shell history, cloned repos, and tool caches. Per-agent Linux
+    # users exist to keep agent credentials and state separate, so a
+    # world-readable $HOME undercuts the isolation. With the private
+    # primary group enforced above, 0750 is effectively owner-only.
+    # Idempotent: a no-op when already 0750, so it also fixes pre-existing
+    # agents on reinit. Kept in phase 1 on the admin transport: this runs
+    # before authorized_keys is installed, so the agent's own SSH session
+    # does not exist yet.
+    admin_target.run(f"chmod 0750 {home}", sudo=True)
+
+    # Post-condition guard: verify the primary group really is private.
+    # ``-U`` enforces this on the create path, but reinit, pre-existing
+    # agents created before ``-U`` was added, and odd images can still
+    # leave a shared primary group, which would make the 0750 home
+    # group-readable by whoever shares that group. Warn (do not fail) so
+    # the drift is surfaced with a fix hint rather than silently defeating
+    # isolation: a hard fail here could block a legitimately custom setup
+    # or a partial-state reinit, and ``-U`` already covers fresh creates.
+    primary_group = admin_target.run(f"id -gn {linux_user}", sudo=True, check=False)
+    if primary_group.ok and primary_group.stdout.strip() != linux_user:
+        output.warn(
+            f"agent '{linux_user}' primary group is "
+            f"'{primary_group.stdout.strip()}', not a private per-user group; "
+            f"its home ({home}) cannot be made private and may be readable by "
+            f"other members of that group. Fix on the VM with "
+            f"'sudo groupadd {linux_user} && sudo usermod -g {linux_user} {linux_user}' "
+            f"and reinit, or check the image's group model."
+        )
 
     # Tmux socket infrastructure for the agent (root-owned ``/var/lib/``
     # parent; admin is the only transport that can create it).
@@ -149,7 +215,7 @@ def create_agent_on_vm(
     # step at the end of setup adds a ``. ~/.agentworks-rc.sh`` line to
     # the agent's .bashrc/.zshrc unconditionally; if the file doesn't
     # exist, every interactive login hits "No such file or directory".
-    # Matches the admin pattern in vms/initializer.py:_write_agentworks_rc.
+    # Matches the admin pattern in vms/initializer/shell_env.py:_write_agentworks_rc.
     _write_agent_shell_rc(agent_target, home=home, agent_cfg=agent_cfg)
 
     # No PS1 setup: operators who want an agent indicator can read
@@ -184,10 +250,7 @@ def create_agent_on_vm(
 
         output.info("Configuring git credentials...")
         providers = resolve_git_credential_providers(registry, agent_cfg.git_credentials)
-        missing = [
-            cred_name for cred_name in providers
-            if cred_name not in git_tokens
-        ]
+        missing = [cred_name for cred_name in providers if cred_name not in git_tokens]
         if missing:
             from agentworks.errors import StateError
 
@@ -219,9 +282,7 @@ def create_agent_on_vm(
         # write_file paths spell the home out (agent_target conventions).
         if providers:
             materials = build_credential_materials(providers, git_tokens)
-            agent_target.write_file(
-                f"{home}/.git-credentials", materials.store_content, mode="600"
-            )
+            agent_target.write_file(f"{home}/.git-credentials", materials.store_content, mode="600")
             agent_target.write_file(
                 f"{home}/{GIT_SCOPES_INCLUDE_PATH.removeprefix('~/')}",
                 materials.gitconfig_content,
@@ -237,9 +298,7 @@ def create_agent_on_vm(
                 f"(git config --global --get-all include.path | grep -qxF '{GIT_SCOPES_INCLUDE_PATH}' "
                 f"|| git config --global --add include.path '{GIT_SCOPES_INCLUDE_PATH}')"
             )
-            output.detail(
-                f"Git credentials configured for {output.count(len(providers), 'provider')}"
-            )
+            output.detail(f"Git credentials configured for {output.count(len(providers), 'provider')}")
 
     # User install commands + login-shell PATH profile fragment.
     _run_agent_install_commands(
@@ -277,35 +336,30 @@ def create_agent_on_vm(
                         if ref.ref:
                             agent_target.run(
                                 f"git -C {_shlex.quote(dest)} fetch",
-                                check=False, timeout=120,
+                                check=False,
+                                timeout=120,
                             )
                             checkout = agent_target.run(
                                 f"git -C {_shlex.quote(dest)} checkout {_shlex.quote(ref.ref)}",
                                 check=False,
                             )
                             if not checkout.ok:
-                                output.warn(
-                                    f"dotfiles checkout of '{ref.ref}' failed, skipping"
-                                )
+                                output.warn(f"dotfiles checkout of '{ref.ref}' failed, skipping")
                         else:
                             pull = agent_target.run(
                                 f"git -C {_shlex.quote(dest)} pull",
-                                check=False, timeout=120,
+                                check=False,
+                                timeout=120,
                             )
                             if not pull.ok:
-                                output.warn(
-                                    "dotfiles pull failed (local changes?), skipping"
-                                )
+                                output.warn("dotfiles pull failed (local changes?), skipping")
                     else:
-                        raise SourceRefError(
-                            f"dotfiles destination {dest} exists but is a different repo"
-                        )
+                        raise SourceRefError(f"dotfiles destination {dest} exists but is a different repo")
                 else:
                     clone_cmd = f"git clone {_shlex.quote(ref.path)} {_shlex.quote(dest)}"
                     if ref.ref:
                         clone_cmd = (
-                            f"git clone --branch {_shlex.quote(ref.ref)}"
-                            f" {_shlex.quote(ref.path)} {_shlex.quote(dest)}"
+                            f"git clone --branch {_shlex.quote(ref.ref)} {_shlex.quote(ref.path)} {_shlex.quote(dest)}"
                         )
                     agent_target.run(clone_cmd, timeout=120)
             else:
@@ -336,14 +390,15 @@ def create_agent_on_vm(
     # agent's PATH (mise shims, ~/.local/bin, etc.); a plain SSH command
     # gets a non-interactive non-login shell that sources none of the
     # rc / profile files. Wrap in `<shell> -lc` for parity with the
-    # admin caller in vms/initializer.py.
+    # admin caller in agentworks.vms.initializer.
     import shlex as _shlex
 
     from agentworks.vms.initializer import install_claude_plugins
 
     def _agent_run_cmd(cmd: str, timeout: int) -> object:
         return agent_target.run(
-            f"{agent_shell} -lc {_shlex.quote(cmd)}", timeout=timeout,
+            f"{agent_shell} -lc {_shlex.quote(cmd)}",
+            timeout=timeout,
         )
 
     install_claude_plugins(
@@ -356,8 +411,12 @@ def create_agent_on_vm(
     # install (or any other later step) overwrote a shell rc file in
     # place. Idempotent grep-or-append.
     from agentworks.vms.initializer import _ensure_agentworks_files_sourced
+
     _ensure_agentworks_files_sourced(
-        agent_target, home=home, shell=agent_shell, logger=logger,
+        agent_target,
+        home=home,
+        shell=agent_shell,
+        logger=logger,
     )
 
 
@@ -413,6 +472,11 @@ def _run_agent_install_commands(
     from agentworks.resources.access import kind_dict
     from agentworks.ssh import SSHError
 
+    # DRIFT GUARD (Phase 7, recipe use-gate): this runner consumes
+    # user-install-command rows by name and must never run a disabled plugin's
+    # row. It is reached only via ``create_agent_on_vm``; the recipe gate lives
+    # at each command entry that reaches it (see
+    # tests/agents/test_recipe_gate_drift.py's entry table).
     user_install_commands = kind_dict(registry, "user-install-command")
     shell = agent_tmpl.shell
     path_additions: list[str] = []
@@ -489,9 +553,26 @@ def _write_agent_profile(
     from agentworks.vms.initializer import AGENTWORKS_PROFILE
 
     lines = ["# Managed by agentworks -- do not edit"]
+    # Cross-agent isolation is enforced by the 0750 home + private primary
+    # group (see create_agent_on_vm): once other agents cannot search the
+    # home, files inside it are unreachable regardless of their own mode,
+    # so the umask adds nothing there. Its real value is defense-in-depth
+    # for artifacts the agent writes OUTSIDE its home: /tmp, $TMPDIR, and
+    # any world-traversable shared directory, where the file's own mode is
+    # what protects it. 027 is portable across sh/bash/zsh. It does NOT
+    # reduce group access inside a workspace: the workspace dir carries a
+    # POSIX default ACL (setfacl -d, see workspaces/backends/vm.py) that
+    # makes new files inherit group rwx regardless of the process umask,
+    # so collaboration is preserved. Coverage is partial by design: this
+    # rides the login-shell profile chain, so non-login `sh -c`, cron,
+    # systemd user units, and sftp/scp keep the default umask 022. The
+    # 0750 home is the boundary; the umask is a supplement. Emitted here
+    # (not appended separately) so it survives the second
+    # _write_agent_profile call, which overwrites this file with PATH.
+    lines.append("umask 027")
     for key, value in identity_env.items():
         lines.append(f"export {key}={shlex.quote(value)}")
-    for p in (path_additions or []):
+    for p in path_additions or []:
         expanded = p.replace("~", "$HOME", 1) if p.startswith("~") else p
         lines.append(f'export PATH="{expanded}:$PATH"')
     content = "\n".join(lines) + "\n"

@@ -25,7 +25,7 @@ if TYPE_CHECKING:
     from collections.abc import Sequence
 
     from agentworks.resources.origin import Origin
-    from agentworks.resources.reference import ReferenceEntry, ResourceReference
+    from agentworks.resources.reference import ResourceReference
 
 
 @dataclass(frozen=True)
@@ -37,11 +37,13 @@ class HarnessEntry:
     lives beside this in ``agentworks.capabilities.harness``; this row is
     what a ``session-template`` ``spec.harness`` reference resolves
     against in the framework.
+
+    Inbound references live on the dependency graph
+    (``Registry.graph.dependents_of``), not on this row.
     """
 
     name: str
     origin: Origin | None = None
-    references: tuple[ReferenceEntry, ...] = ()
 
 
 @dataclass(frozen=True)

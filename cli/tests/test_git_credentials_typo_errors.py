@@ -84,9 +84,7 @@ def test_agent_template_referencing_undeclared_git_credential_errors(
     assert "agent-template" in str(exc.value)
 
 
-def test_declared_git_credential_does_not_error(
-    tmp_path: Path, ssh_keys: tuple[Path, Path]
-) -> None:
+def test_declared_git_credential_does_not_error(tmp_path: Path, ssh_keys: tuple[Path, Path]) -> None:
     """The positive case: a declared credential resolves cleanly
     through the framework.
     """

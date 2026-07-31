@@ -76,8 +76,17 @@ def realize_workspace(
     ssh_logger = SSHLogger(vm.name, "workspace-create")
 
     def _cleanup() -> None:
+        # The on-VM teardown (directory + the workspace's fresh Linux group)
+        # is gated on workspace_path, which is set only once
+        # create_vm_workspace RETURNS. So it covers failures AFTER a
+        # successful create (the VS Code stub, the row insert), the same
+        # window the directory cleanup already covered; the group teardown
+        # rides along on exactly that window. A failure mid-create (e.g. the
+        # git clone) still leaves workspace_path unset, so neither the
+        # directory nor the group is reclaimed here. That partial-progress
+        # gap predates this change and is tracked separately.
         if workspace_path:
-            delete_vm_workspace(vm, config, name, workspace_path, logger=ssh_logger)
+            delete_vm_workspace(vm, config, name, workspace_path, workspace_group(name), logger=ssh_logger)
         if vscode_path:
             from pathlib import Path
 
@@ -101,9 +110,7 @@ def realize_workspace(
     # "Finished" footer before the rollback section, making the log misleading.
     try:
         try:
-            output.info(
-                f"Creating workspace '{name}' on VM '{vm.name}' (template: {template.name})..."
-            )
+            output.info(f"Creating workspace '{name}' on VM '{vm.name}' (template: {template.name})...")
             workspace_path = create_vm_workspace(vm, config, name, template, logger=ssh_logger)
 
             vscode_path = generate_vscode_workspace(vm, config, name, workspace_path)
@@ -165,15 +172,10 @@ def realize_workspace(
                     raise
                 except Exception as e:
                     failed.append(agent.name)
-                    output.warn(
-                        f"Failed to insert grant for agent '{agent.name}' on workspace "
-                        f"'{name}': {e}"
-                    )
+                    output.warn(f"Failed to insert grant for agent '{agent.name}' on workspace '{name}': {e}")
                     continue
                 try:
-                    add_to_workspace_group(
-                        vm, config, db, agent.linux_user, name, logger=ssh_logger
-                    )
+                    add_to_workspace_group(vm, config, db, agent.linux_user, name, logger=ssh_logger)
                     added += 1
                 except KeyboardInterrupt:
                     # KI is a BaseException and slips past `except Exception`,

@@ -163,7 +163,7 @@ DYNAMIC_COMPLETIONS: dict[tuple[str, str], str] = {
     ("workspace.copy", "vm"): "vms",
     ("workspace.describe", "name"): "workspaces",
     ("workspace.rehome", "name"): "workspaces",
-    ("workspace.reinit", "name"): "workspaces",
+    ("workspace.repair", "name"): "workspaces",
     ("workspace.delete", "name"): "workspaces",
     ("workspace.create", "vm"): "vms",
     ("workspace.create", "template"): "ws_templates",
@@ -174,6 +174,7 @@ DYNAMIC_COMPLETIONS: dict[tuple[str, str], str] = {
     ("agent.create", "template"): "agent_templates",
     ("agent.describe", "name"): "agents",
     ("agent.reinit", "name"): "agents",
+    ("agent.reinit", "update_template"): "agent_templates",
     ("agent.grant-workspaces", "name"): "agents",
     ("agent.grant-workspaces", "workspaces"): "workspaces",
     ("agent.revoke-workspaces", "name"): "agents",
@@ -203,20 +204,16 @@ DYNAMIC_COMPLETIONS: dict[tuple[str, str], str] = {
     ("session.restart", "vm"): "vms",
     ("session.restart", "workspace"): "workspaces",
     ("session.restart", "agent"): "agents",
-
     ("session.attach", "name"): "sessions",
     ("session.delete", "name"): "sessions",
     ("session.logs", "name"): "sessions",
-
     # VM console
     ("vm.console", "name"): "vms",
-
     # Env inspection
     ("env.show", "vm"): "vms",
     ("env.show", "workspace"): "workspaces",
     ("env.show", "agent"): "agents",
     ("env.show", "session"): "sessions",
-
     # Named consoles
     ("console.create", "vm"): "vms",
     ("console.create", "sessions"): "sessions",
@@ -236,7 +233,6 @@ DYNAMIC_COMPLETIONS: dict[tuple[str, str], str] = {
     ("console.add-shell", "session"): "sessions",
     ("console.restore-session", "name"): "consoles",
     ("console.restore-session", "session"): "sessions",
-
     # Secret inspection
     ("secret.describe", "name"): "secrets",
     # Resource inspection (describe took the single KIND/NAME
@@ -244,9 +240,13 @@ DYNAMIC_COMPLETIONS: dict[tuple[str, str], str] = {
     ("resource.list", "kind"): "resource_kinds",
     ("resource.describe", "ref"): "resource_refs",
     ("resource.edit", "ref"): "resource_refs",
-    # Resource migration + authoring. `resource sample`'s kind
-    # argument is a static click.Choice (SAMPLE_KINDS), so it completes
-    # via ParamSpec.choices rather than a dynamic completer.
+    # Resource migration + authoring. `resource sample`'s kind argument
+    # is a plain string (no click.Choice: any typed kind must reach the
+    # service layer for a clean domain error, issue #276), so it
+    # completes via the same config-free kinds completer `resource list
+    # --kind` uses. Capability kinds complete too, then fail with a
+    # kind-aware domain error (they have no bundled sample).
+    ("resource.sample", "kind"): "resource_kinds",
     ("resource.migrate", "selectors"): "migrate_selectors",
 }
 

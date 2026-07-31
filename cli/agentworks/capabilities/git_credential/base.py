@@ -1,7 +1,7 @@
 """Base interface for git credential providers.
 
 A git credential provider is a capability (see ``capabilities/README.md``):
-it validates its own ``provider_config`` block (``validate_config``),
+it validates its own ``provider_config`` block (``validate``),
 declares the secret its token comes from, checks that token against the
 host at the post-resolve ``runup`` stage, and produces the credential
 materials (``credential_lines`` / ``helper_entry``) as its op. Token
@@ -27,9 +27,7 @@ if TYPE_CHECKING:
     from agentworks.resources.reference import ConfigReference
 
 
-def _http_probe(
-    url: str, headers: dict[str, str], *, timeout: float = 5.0
-) -> tuple[int, bytes, dict[str, str]]:
+def _http_probe(url: str, headers: dict[str, str], *, timeout: float = 5.0) -> tuple[int, bytes, dict[str, str]]:
     """GET ``url``; returns (status, body, lowercased-headers).
 
     HTTP error statuses are returned, not raised; network-level
@@ -63,27 +61,41 @@ def default_token_secret(credential_name: str) -> str:
     return f"git-token-{credential_name}"
 
 
-def token_config_reference(
-    owner: str, config: Mapping[str, object]
-) -> ConfigReference:
+def token_dependency(owner: str, config: Mapping[str, object]) -> ConfigReference | None:
     """The token-secret reference a token-sourcing provider implies from
     its ``provider_config``: the ``token`` field names the secret
     (default ``git-token-<name>``). Shared by github and azdo (both
     source a PAT from a mapped secret today). A minting provider would
     instead declare its bootstrap secret(s) here (or none).
+
+    Total and non-throwing (the extraction half of the split): the
+    edge's identity is the token secret name, so a malformed ``token``
+    field (present but not a non-empty string) makes the name underivable
+    and returns ``None`` (the edge is omitted) rather than raising;
+    :func:`validate_token_field` is where that shape error surfaces.
     """
-    from agentworks.errors import ConfigError
     from agentworks.resources.reference import ConfigReference
 
     raw = config.get("token")
-    if raw is not None and (not isinstance(raw, str) or not raw):
-        raise ConfigError(
-            f"{owner}.token must be a non-empty secret name (a string)"
-        )
-    name = raw if isinstance(raw, str) and raw else default_token_secret(
-        credential_name_from_owner(owner)
-    )
+    if raw is None:
+        name = default_token_secret(credential_name_from_owner(owner))
+    elif isinstance(raw, str) and raw:
+        name = raw
+    else:
+        return None
     return ConfigReference(kind="secret", name=name, usage="the auth token")
+
+
+def validate_token_field(owner: str, config: Mapping[str, object]) -> None:
+    """The throwing shape check for the ``token`` field: a present token
+    must be a non-empty secret name (a string). The correctness half of
+    the split, paired with :func:`token_dependency`.
+    """
+    from agentworks.errors import ConfigError
+
+    raw = config.get("token")
+    if raw is not None and (not isinstance(raw, str) or not raw):
+        raise ConfigError(f"{owner}.token must be a non-empty secret name (a string)")
 
 
 @dataclass(frozen=True)
@@ -116,9 +128,9 @@ class GitCredentialProvider(Capability):
     the context at ``runup`` / op time.
 
     Subclasses (``GitHubCredentialProvider``, ``AzDOCredentialProvider``)
-    override ``validate_config`` (declaring the token secret and any
-    scope shape), ``_verify_token`` (the authenticated probe), and the
-    ops ``helper_entry`` / ``credential_lines``.
+    override ``dependencies`` / ``validate`` (declaring the token secret
+    and validating any scope shape), ``_verify_token`` (the authenticated
+    probe), and the ops ``helper_entry`` / ``credential_lines``.
     """
 
     owner_kind: ClassVar[str] = "git-credential"
@@ -138,7 +150,7 @@ class GitCredentialProvider(Capability):
     @property
     def secret_name(self) -> str:
         """The token secret this credential sources its PAT from: the
-        one secret its ``validate_config`` declared (default
+        one secret its ``dependencies`` declared (default
         ``git-token-<name>``). Named by the helper's rejection
         diagnosis and read from the context at ``runup``."""
         if self._secret_refs:
@@ -217,15 +229,11 @@ class GitCredentialProvider(Capability):
         try:
             status, body, resp_headers = _http_probe(url, headers)
         except OSError as exc:
-            output.warn(
-                f"could not verify git credential {self.owner_name!r} "
-                f"(network: {exc}); continuing unverified"
-            )
+            output.warn(f"could not verify git credential {self.owner_name!r} (network: {exc}); continuing unverified")
             return None
         if status in reject_statuses:
             raise TokenRejectedError(
-                f"{host_label} rejected the token for git credential "
-                f"{self.owner_name!r} (secret {self.secret_name!r})",
+                f"{host_label} rejected the token for git credential {self.owner_name!r} (secret {self.secret_name!r})",
                 entity_kind="git-credential",
                 entity_name=self.owner_name,
                 hint=(

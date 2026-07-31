@@ -94,9 +94,7 @@ def _patch_common(
     return targets
 
 
-def test_create_session_probes_before_state_mutation(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_create_session_probes_before_state_mutation(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """``create_session --agent`` must probe agent SSH BEFORE inserting any
     DB rows or adding the agent to the workspace's Linux group.
 
@@ -150,15 +148,12 @@ def test_create_session_probes_before_state_mutation(
     assert db.get_session("s1") is None
     assert not db.has_any_grant("a1", "ws1")
     assert add_calls == [], (
-        "agent was added to workspace group before probe rejected; "
-        "probe must run BEFORE state mutation"
+        "agent was added to workspace group before probe rejected; probe must run BEFORE state mutation"
     )
     db.close()
 
 
-def test_create_session_uses_agent_target_for_tmux(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_create_session_uses_agent_target_for_tmux(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """The ``run_command`` passed to ``create_tmux_session`` for an agent
     session must come from ``agent_transport``, not admin+sudo.
     """
@@ -171,9 +166,7 @@ def test_create_session_uses_agent_target_for_tmux(
     targets = _patch_common(monkeypatch, call_log=call_log)
 
     monkeypatch.setattr(agent_mgr, "_assert_agent_ssh_works", lambda *a, **k: None)
-    monkeypatch.setattr(
-        "agentworks.agents.grants.add_to_workspace_group", lambda *a, **k: None
-    )
+    monkeypatch.setattr("agentworks.agents.grants.add_to_workspace_group", lambda *a, **k: None)
     monkeypatch.setattr(tmux_mod, "deploy_restricted_config", lambda *args, **kwargs: None)
     # _regenerate_tmuxinator fires after create_tmux_session returns; it
     # scps a YAML file which doesn't help this test's transport assertion.
@@ -181,9 +174,7 @@ def test_create_session_uses_agent_target_for_tmux(
 
     captured: dict[str, object] = {}
 
-    def _capture_create(
-        name, ws_path, command, linux_user, *, run_command, target, admin_username, is_admin, env=None
-    ):  # type: ignore[no-untyped-def]
+    def _capture_create(name, ws_path, command, linux_user, *, run_command, target, admin_username, is_admin, env=None):  # type: ignore[no-untyped-def]
         captured["run_command"] = run_command
         captured["target"] = target
         captured["env"] = env
@@ -211,9 +202,7 @@ def test_create_session_uses_agent_target_for_tmux(
     db.close()
 
 
-def test_create_session_aborts_on_missing_required_command(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_create_session_aborts_on_missing_required_command(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """A template whose ``required_commands`` aren't installed on the agent must
     abort with a clear ``StateError`` BEFORE any state mutation, rather than
     leaving the operator with the cryptic downstream tmux server-access failure.
@@ -241,13 +230,9 @@ def test_create_session_aborts_on_missing_required_command(
                 return _MissingCmdResult(ok=False)
             return _MissingCmdResult(ok=True)
 
-    monkeypatch.setattr(
-        "agentworks.transports.transport", lambda *a, **k: _MissingCmdTarget()
-    )
+    monkeypatch.setattr("agentworks.transports.transport", lambda *a, **k: _MissingCmdTarget())
     monkeypatch.setattr("agentworks.sessions.manager.transport", lambda *a, **k: _MissingCmdTarget())
-    monkeypatch.setattr(
-        "agentworks.transports.agent_transport", lambda *a, **k: _MissingCmdTarget()
-    )
+    monkeypatch.setattr("agentworks.transports.agent_transport", lambda *a, **k: _MissingCmdTarget())
     monkeypatch.setattr(agent_mgr, "_assert_agent_ssh_works", lambda *a, **k: None)
     stub_vm_gates(monkeypatch)
 
@@ -298,9 +283,7 @@ def test_create_session_aborts_on_missing_required_command(
     db.close()
 
 
-def test_delete_session_probes_before_confirm_prompt(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_delete_session_probes_before_confirm_prompt(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """A pre-rollout agent must trip ``_assert_agent_ssh_works`` BEFORE the
     "Delete session ...?" prompt fires; otherwise the operator confirms a
     delete that immediately bails with a StateError, wasting the confirm.
@@ -331,9 +314,7 @@ def test_delete_session_probes_before_confirm_prompt(
     )
     from agentworks.db import SessionStatus
 
-    monkeypatch.setattr(
-        session_manager, "check_session_status", lambda *a, **k: SessionStatus.STOPPED
-    )
+    monkeypatch.setattr(session_manager, "check_session_status", lambda *a, **k: SessionStatus.STOPPED)
 
     # If we reach the confirm prompt, fail loudly.
     confirm_called = [False]
@@ -346,9 +327,7 @@ def test_delete_session_probes_before_confirm_prompt(
 
     # Probe rejects.
     def _probe_rejects(target, agent):  # type: ignore[no-untyped-def]
-        raise StateError(
-            "rejected", entity_kind="agent", entity_name="a1", hint="reinit"
-        )
+        raise StateError("rejected", entity_kind="agent", entity_name="a1", hint="reinit")
 
     # _assert_agent_ssh_works is imported into create_session as a local;
     # patching at its source module catches every late import.
@@ -359,15 +338,11 @@ def test_delete_session_probes_before_confirm_prompt(
     with pytest.raises(StateError):
         session_manager.delete_session(db, config, name="s1", yes=False)  # type: ignore[arg-type]
 
-    assert not confirm_called[0], (
-        "confirm prompt fired before probe rejected; probe must run first"
-    )
+    assert not confirm_called[0], "confirm prompt fired before probe rejected; probe must run first"
     db.close()
 
 
-def test_exec_agent_uses_direct_agent_ssh(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_exec_agent_uses_direct_agent_ssh(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """``exec_agent`` must run through a direct-agent ``Transport`` (whose
     SSH user IS the agent's Linux user) and must NOT shell out through
     ``sudo --login -u``.
@@ -393,7 +368,8 @@ def test_exec_agent_uses_direct_agent_ssh(
     # SimpleNamespace config below doesn't need vm_templates / agent_templates
     # / secrets plumbing. This test focuses on the SSH transport, not env.
     monkeypatch.setattr(
-        agent_mgr, "_resolve_agent_direct_env_scopes",
+        agent_mgr,
+        "_resolve_agent_direct_env_scopes",
         lambda *a, **k: agent_mgr._AgentDirectEnvScopes(vm={}, workspace=None, agent={}),
     )
     # A real, empty SecretTarget: the orchestrated root registers the
@@ -444,9 +420,7 @@ class _NullCM:
         return None
 
 
-def test_restart_migrates_legacy_session_to_per_session_socket(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_restart_migrates_legacy_session_to_per_session_socket(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Legacy admin sessions (created on the VM's default tmux server,
     ``socket_path=None``) used to surface ``check_session_status`` as a
     typed ``StateError`` and force the operator into a delete-then-create
@@ -519,9 +493,7 @@ def test_restart_migrates_legacy_session_to_per_session_socket(
     # downstream ``db.update_session_socket_path`` lands the migration.
     create_calls: list[dict[str, object]] = []
 
-    def _capture_create(
-        name, ws_path, command, linux_user, *, run_command, target, admin_username, is_admin, env=None
-    ):  # type: ignore[no-untyped-def]
+    def _capture_create(name, ws_path, command, linux_user, *, run_command, target, admin_username, is_admin, env=None):  # type: ignore[no-untyped-def]
         create_calls.append({"name": name, "is_admin": is_admin})
         return ("/tmp/agentworks-sessions/legacy.sock", 67890)
 

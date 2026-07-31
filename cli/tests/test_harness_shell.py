@@ -74,23 +74,40 @@ def _session_scope(
     )
 
 
-# -- config vocabulary: validate_config --------------------------------------
+# -- config vocabulary: dependencies + validate ------------------------------
 
 
-def test_validate_accepts_the_known_fields_and_implies_no_reference() -> None:
-    refs = ShellHarness.validate_config(
-        "session-template/claude",
-        {
-            "command": "claude",
-            "restart_command": "claude --resume",
-            "required_commands": ["claude", "rg"],
-        },
+def test_dependencies_imply_no_reference() -> None:
+    """``shell`` implies no edge, and ``dependencies`` is total: it
+    returns ``()`` for the known fields and even for a malformed blob."""
+    assert (
+        ShellHarness.dependencies(
+            "session-template/claude",
+            {
+                "command": "claude",
+                "restart_command": "claude --resume",
+                "required_commands": ["claude", "rg"],
+            },
+        )
+        == ()
     )
-    assert refs == ()
+    # Never raises, even on config that ``validate`` would reject.
+    assert ShellHarness.dependencies("session-template/claude", {"commnad": "typo", "command": 3}) == ()
 
 
-def test_validate_accepts_empty_config() -> None:
-    assert ShellHarness.validate_config("session-template/claude", {}) == ()
+def test_validate_accepts_the_known_fields_and_empty_config() -> None:
+    assert (
+        ShellHarness.validate(
+            "session-template/claude",
+            {
+                "command": "claude",
+                "restart_command": "claude --resume",
+                "required_commands": ["claude", "rg"],
+            },
+        )
+        is None
+    )
+    assert ShellHarness.validate("session-template/claude", {}) is None
 
 
 def test_shell_launch_note_is_silent() -> None:
@@ -100,28 +117,22 @@ def test_shell_launch_note_is_silent() -> None:
 
 def test_validate_rejects_unknown_field() -> None:
     with pytest.raises(ConfigError, match="unknown shell harness field"):
-        ShellHarness.validate_config(
-            "session-template/claude", {"commnad": "typo"}
-        )
+        ShellHarness.validate("session-template/claude", {"commnad": "typo"})
 
 
 def test_validate_rejects_non_string_command() -> None:
     with pytest.raises(ConfigError, match="command must be a string"):
-        ShellHarness.validate_config(
-            "session-template/claude", {"command": 3}
-        )
+        ShellHarness.validate("session-template/claude", {"command": 3})
 
 
 def test_validate_rejects_non_string_required_commands() -> None:
     with pytest.raises(ConfigError, match="required_commands must be a list"):
-        ShellHarness.validate_config(
-            "session-template/claude", {"required_commands": [1, 2]}
-        )
+        ShellHarness.validate("session-template/claude", {"required_commands": [1, 2]})
 
 
 def test_construct_revalidates_config() -> None:
     """A shape error dies at construction (the base re-runs
-    validate_config)."""
+    validate)."""
     with pytest.raises(ConfigError, match="unknown shell harness field"):
         _harness({"nope": 1})
 
@@ -244,9 +255,7 @@ def test_agent_mode_defers_pending_target_then_probes_after_flip() -> None:
 
 def test_agent_mode_missing_command_names_the_agent() -> None:
     target = SimpleNamespace(name="dev", realized=True)
-    harness = _harness(
-        {"required_commands": ["claude"]}, target=target, admin=False
-    )
+    harness = _harness({"required_commands": ["claude"]}, target=target, admin=False)
     probe = _Probe(missing={"claude"})
     ctx = RunContext(
         operation_scope=_session_scope(agent="dev", admin=False),
@@ -280,9 +289,7 @@ def test_agent_mode_absent_target_is_a_loud_error() -> None:
     identity guard (null-safe on ``self._target``) catches the mis-wiring
     first; step 6's own ``refusing to skip`` branch is the same-intent
     backstop for a target that goes absent behind a matching scope."""
-    harness = _harness(
-        {"required_commands": ["claude"]}, target=None, admin=False
-    )
+    harness = _harness({"required_commands": ["claude"]}, target=None, admin=False)
     ctx = RunContext(operation_scope=_session_scope(agent="dev", admin=False))
     with pytest.raises(StateError, match="runs as agent None"):
         harness.preflight(ctx)
@@ -302,9 +309,7 @@ def test_missing_transport_defers_at_preflight_and_is_loud_at_runup() -> None:
 def test_identity_guard_raises_on_vm_mismatch() -> None:
     harness = _harness({"required_commands": ["claude"]}, vm_name="box")
     probe = _Probe()
-    ctx = RunContext(
-        operation_scope=_session_scope(vm="other-box"), admin_target=probe
-    )
+    ctx = RunContext(operation_scope=_session_scope(vm="other-box"), admin_target=probe)
     with pytest.raises(StateError, match="wired for VM 'box'") as exc:
         harness.preflight(ctx)
     assert exc.value.entity_name == "s1"
@@ -313,9 +318,7 @@ def test_identity_guard_raises_on_vm_mismatch() -> None:
 
 def test_identity_guard_raises_on_agent_mismatch() -> None:
     target = SimpleNamespace(name="dev", realized=True)
-    harness = _harness(
-        {"required_commands": ["claude"]}, target=target, admin=False
-    )
+    harness = _harness({"required_commands": ["claude"]}, target=target, admin=False)
     ctx = RunContext(
         operation_scope=_session_scope(agent="someone-else", admin=False),
         agent_target=_Probe(),

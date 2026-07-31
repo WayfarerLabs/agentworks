@@ -17,6 +17,7 @@ from typing import TYPE_CHECKING
 
 from agentworks import output
 from agentworks.agents.manager import agent_scope
+from agentworks.config.validation import LINUX_GROUPNAME_MAX_LENGTH
 from agentworks.errors import NotFoundError, ValidationError
 from agentworks.transports import transport
 from agentworks.vms.manager import gated_vm_boundary
@@ -27,6 +28,13 @@ if TYPE_CHECKING:
     from agentworks.ssh import SSHLogger
 
 WS_GROUP_PREFIX = "ws-"
+
+# Derived FROM the prefix so a prefix change cannot reintroduce an over-limit
+# Linux group. ``workspace_group`` builds ``ws-<name>``, which must fit the
+# 32-char Linux group limit: 32 - len("ws-") = 29. The ceiling is imported from
+# the config layer (never the reverse); config.validation depends on nothing in
+# the agents package, so this cannot cycle.
+MAX_WORKSPACE_NAME_LENGTH = LINUX_GROUPNAME_MAX_LENGTH - len(WS_GROUP_PREFIX)
 
 
 def workspace_group(workspace_name: str) -> str:
@@ -61,8 +69,7 @@ def grant_workspaces(
     """
     if not grant_all and not workspace_names:
         raise ValidationError(
-            f"grant for '{agent_name}' needs at least one workspace name "
-            f"or workspace_names empty + grant_all=True",
+            f"grant for '{agent_name}' needs at least one workspace name or workspace_names empty + grant_all=True",
             entity_kind="agent",
             entity_name=agent_name,
         )
@@ -80,10 +87,7 @@ def grant_workspaces(
     from agentworks.bootstrap import build_registry
 
     registry = build_registry(config)
-    with gated_vm_boundary(
-        db, config, registry, vm, scope=agent_scope(db, vm.name, agent_name)
-    ):
-
+    with gated_vm_boundary(db, config, registry, vm, scope=agent_scope(db, vm.name, agent_name)):
         if grant_all:
             db.update_agent_grant_all(agent_name, True)
             # Add to all existing workspace groups on this VM
@@ -103,9 +107,7 @@ def grant_workspaces(
             db.insert_agent_grant(agent_name, ws_name, "explicit")
             output.info(f"Granted: {ws_name}")
             granted += 1
-        output.result(
-            f"Agent '{agent_name}' granted access to {output.count(granted, 'workspace')}"
-        )
+        output.result(f"Agent '{agent_name}' granted access to {output.count(granted, 'workspace')}")
 
 
 def revoke_workspaces(
@@ -126,8 +128,7 @@ def revoke_workspaces(
     """
     if not revoke_all and not workspace_names:
         raise ValidationError(
-            f"revoke for '{agent_name}' needs at least one workspace name "
-            f"or workspace_names empty + revoke_all=True",
+            f"revoke for '{agent_name}' needs at least one workspace name or workspace_names empty + revoke_all=True",
             entity_kind="agent",
             entity_name=agent_name,
         )
@@ -145,10 +146,7 @@ def revoke_workspaces(
     from agentworks.bootstrap import build_registry
 
     registry = build_registry(config)
-    with gated_vm_boundary(
-        db, config, registry, vm, scope=agent_scope(db, vm.name, agent_name)
-    ):
-
+    with gated_vm_boundary(db, config, registry, vm, scope=agent_scope(db, vm.name, agent_name)):
         if revoke_all:
             # Snapshot the granted workspaces BEFORE deleting any rows.
             # Taking it afterwards missed explicitly-granted-only
@@ -167,9 +165,7 @@ def revoke_workspaces(
                     remove_from_workspace_group(vm, config, db, agent.linux_user, ws_name, logger=None)
             output.result(f"All explicit grants revoked for agent '{agent_name}'")
             if remaining_implicit:
-                output.warn(
-                    f"agent still has implicit access via sessions to: {', '.join(remaining_implicit)}"
-                )
+                output.warn(f"agent still has implicit access via sessions to: {', '.join(remaining_implicit)}")
             return
 
         for ws_name in workspace_names:
@@ -179,10 +175,7 @@ def revoke_workspaces(
                 output.info(f"Revoked: {ws_name}")
             else:
                 output.info(f"Revoked: {ws_name} (still has implicit access via sessions)")
-        output.result(
-            f"Revoked {output.count(len(workspace_names), 'workspace grant')} "
-            f"from agent '{agent_name}'"
-        )
+        output.result(f"Revoked {output.count(len(workspace_names), 'workspace grant')} from agent '{agent_name}'")
 
 
 def revoke_workspace_grants(

@@ -59,9 +59,7 @@ class _SpyTarget:
     def run(self, command: str, **kwargs: object) -> _SpyResult:
         self.runs.append((command, kwargs))
         if "visudo -cf" in command or "sshd -t" in command:
-            return _SpyResult(
-                ok=self._validate_ok, returncode=0 if self._validate_ok else 1
-            )
+            return _SpyResult(ok=self._validate_ok, returncode=0 if self._validate_ok else 1)
         if command.startswith("sudo test -f "):
             return _SpyResult(
                 ok=self._prior_file_present,
@@ -125,7 +123,9 @@ def test_identity_profile_strips_prior_block_before_appending() -> None:
     appends, so reinit doesn't accumulate stale entries."""
     target = _SpyTarget(prior_file_present=True)
     _write_agentworks_identity_profile(
-        target, {"AGENTWORKS_VM": "vm-1"}, _SpyLogger(),
+        target,
+        {"AGENTWORKS_VM": "vm-1"},
+        _SpyLogger(),
     )
     commands = [r for r, _ in target.runs]
     sed_idx = next(i for i, c in enumerate(commands) if "sed -i" in c and "zprofile" in c)
@@ -141,7 +141,9 @@ def test_identity_profile_skips_strip_on_first_init() -> None:
     ``tee -a`` creates the file."""
     target = _SpyTarget(prior_file_present=False)
     _write_agentworks_identity_profile(
-        target, {"AGENTWORKS_VM": "vm-1"}, _SpyLogger(),
+        target,
+        {"AGENTWORKS_VM": "vm-1"},
+        _SpyLogger(),
     )
     commands = [r for r, _ in target.runs]
     assert not any("sed -i" in c and "zprofile" in c for c in commands)
@@ -158,20 +160,17 @@ def test_identity_profile_creates_etc_zsh_directory() -> None:
     when zsh isn't installed yet."""
     target = _SpyTarget(prior_file_present=False)
     _write_agentworks_identity_profile(
-        target, {"AGENTWORKS_VM": "vm-1"}, _SpyLogger(),
+        target,
+        {"AGENTWORKS_VM": "vm-1"},
+        _SpyLogger(),
     )
     commands = [r for r, _ in target.runs]
     mkdir_idx = next(
         (i for i, c in enumerate(commands) if "mkdir -p /etc/zsh" in c),
         None,
     )
-    assert mkdir_idx is not None, (
-        "expected `mkdir -p /etc/zsh` somewhere in the run; got: "
-        f"{commands}"
-    )
-    append_idx = next(
-        i for i, c in enumerate(commands) if "tee -a /etc/zsh/zprofile" in c
-    )
+    assert mkdir_idx is not None, f"expected `mkdir -p /etc/zsh` somewhere in the run; got: {commands}"
+    append_idx = next(i for i, c in enumerate(commands) if "tee -a /etc/zsh/zprofile" in c)
     assert mkdir_idx < append_idx, "mkdir must precede the append"
 
 
@@ -196,7 +195,9 @@ def test_identity_profile_only_strips_when_both_markers_present() -> None:
 
     target = _HalfEditedTarget()
     _write_agentworks_identity_profile(
-        target, {"AGENTWORKS_VM": "vm-1"}, _SpyLogger(),
+        target,
+        {"AGENTWORKS_VM": "vm-1"},
+        _SpyLogger(),
     )
     commands = [r for r, _ in target.runs]
     # No sed -i call: the strip is gated on BOTH markers being present.
@@ -278,13 +279,9 @@ def test_sshd_accept_env_success_with_prior_file_ordering() -> None:
     commands = [r for r, _ in target.runs]
 
     cp_idx = next(i for i, c in enumerate(commands) if c.startswith("sudo cp ") and ".bak" in c)
-    tee_idx = next(
-        i for i, c in enumerate(commands) if "tee" in c and "50-agentworks-accept-env" in c
-    )
+    tee_idx = next(i for i, c in enumerate(commands) if "tee" in c and "50-agentworks-accept-env" in c)
     validate_idx = next(i for i, c in enumerate(commands) if "sshd -t" in c)
-    cleanup_idx = next(
-        i for i, c in enumerate(commands) if c.startswith("sudo rm -f ") and ".bak" in c
-    )
+    cleanup_idx = next(i for i, c in enumerate(commands) if c.startswith("sudo rm -f ") and ".bak" in c)
     reload_idx = next(i for i, c in enumerate(commands) if "systemctl reload ssh" in c)
 
     assert cp_idx < tee_idx < validate_idx < cleanup_idx < reload_idx
@@ -349,10 +346,7 @@ def test_sudoers_console_setenv_writes_and_validates() -> None:
     assert any(f"tee {staging}" in c for c in commands)
     assert any(f"visudo -cf '{staging}'" in c or f"visudo -cf {staging}" in c for c in commands)
     # mv promotes staging to the real path AFTER validation.
-    mv_idx = next(
-        i for i, c in enumerate(commands)
-        if "mv" in c and "51-agentworks-console-setenv" in c
-    )
+    mv_idx = next(i for i, c in enumerate(commands) if "mv" in c and "51-agentworks-console-setenv" in c)
     validate_idx = next(i for i, c in enumerate(commands) if "visudo -cf" in c)
     assert validate_idx < mv_idx
 
@@ -360,9 +354,7 @@ def test_sudoers_console_setenv_writes_and_validates() -> None:
 def test_sudoers_console_setenv_scopes_to_admin_user() -> None:
     target = _SpyTarget()
     _write_sudoers_console_setenv(target, _SpyLogger(), "custom-admin")
-    tee_cmd = next(
-        r for r, _ in target.runs if "tee" in r and "51-agentworks-console-setenv" in r
-    )
+    tee_cmd = next(r for r, _ in target.runs if "tee" in r and "51-agentworks-console-setenv" in r)
     # User-scoped Defaults, not a global toggle.
     assert "Defaults:custom-admin setenv" in tee_cmd
     assert "Defaults setenv" not in tee_cmd.replace("Defaults:custom-admin setenv", "")
@@ -428,28 +420,28 @@ def test_ensure_files_sourced_appends_profile_to_bash_rcs() -> None:
     shape."""
     target = _SpyTarget()
     _ensure_agentworks_files_sourced(
-        target, home="/home/me", shell="bash", logger=_SpyLogger(),
+        target,
+        home="/home/me",
+        shell="bash",
+        logger=_SpyLogger(),
     )
     commands = [c for c, _ in target.runs]
-    profile_appends = [
-        c for c in commands if AGENTWORKS_PROFILE in c and "grep -q" in c
-    ]
+    profile_appends = [c for c in commands if AGENTWORKS_PROFILE in c and "grep -q" in c]
     assert any("/home/me/.profile" in c for c in profile_appends)
     assert any("/home/me/.bashrc" in c for c in profile_appends)
-    assert not any(".zprofile" in c for c in profile_appends), (
-        "bash shell should not touch .zprofile"
-    )
+    assert not any(".zprofile" in c for c in profile_appends), "bash shell should not touch .zprofile"
 
 
 def test_ensure_files_sourced_adds_zprofile_when_shell_is_zsh() -> None:
     target = _SpyTarget()
     _ensure_agentworks_files_sourced(
-        target, home="/home/me", shell="zsh", logger=_SpyLogger(),
+        target,
+        home="/home/me",
+        shell="zsh",
+        logger=_SpyLogger(),
     )
     commands = [c for c, _ in target.runs]
-    profile_appends = [
-        c for c in commands if AGENTWORKS_PROFILE in c and "grep -q" in c
-    ]
+    profile_appends = [c for c in commands if AGENTWORKS_PROFILE in c and "grep -q" in c]
     assert any("/home/me/.zprofile" in c for c in profile_appends)
 
 
@@ -458,7 +450,10 @@ def test_ensure_files_sourced_appends_rc_to_interactive_rcs() -> None:
     .bashrc, plus .zshrc when shell=zsh."""
     target = _SpyTarget()
     _ensure_agentworks_files_sourced(
-        target, home="/home/me", shell="zsh", logger=_SpyLogger(),
+        target,
+        home="/home/me",
+        shell="zsh",
+        logger=_SpyLogger(),
     )
     commands = [c for c, _ in target.runs]
     rc_appends = [c for c in commands if AGENTWORKS_RC in c and "grep -q" in c]
@@ -472,12 +467,13 @@ def test_ensure_files_sourced_uses_grep_or_append_shape() -> None:
     introduce duplicate source lines on every reinit."""
     target = _SpyTarget()
     _ensure_agentworks_files_sourced(
-        target, home="/home/me", shell="bash", logger=_SpyLogger(),
+        target,
+        home="/home/me",
+        shell="bash",
+        logger=_SpyLogger(),
     )
     for command, _ in target.runs:
-        assert command.startswith("grep -q "), (
-            f"expected grep-or-append shape; got: {command}"
-        )
+        assert command.startswith("grep -q "), f"expected grep-or-append shape; got: {command}"
         assert " || printf " in command
 
 

@@ -29,9 +29,7 @@ def test_user_command_preserves_test_exec() -> None:
 
 
 def test_user_command_test_fields_default_none() -> None:
-    entries = _load_user_commands(
-        {"my-tool": {"command": "echo install", "description": "My tool"}}
-    )
+    entries = _load_user_commands({"my-tool": {"command": "echo install", "description": "My tool"}})
     assert entries["my-tool"].test_exec is None
     assert entries["my-tool"].test_file is None
     assert entries["my-tool"].test_dir is None

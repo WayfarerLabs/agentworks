@@ -4,6 +4,10 @@
 # the same shape and differ only in execution scope. Published with a
 # built-in origin through the bundled-manifest loader.
 #
+# The former `az-cli` system-install-command migrated to the opt-in `azure`
+# system plugin (Phase 11), so this bundle now ships user-install-commands
+# only; `az-cli` publishes present-but-disabled from that plugin's manifests.
+#
 # Commands may be re-run (e.g. during reinit) so they should be
 # idempotent. An optional installed-check short-circuits installation
 # when the tool is already present; at most one may be set per entry:
@@ -12,15 +16,6 @@
 #   test_dir:  skip if this directory exists (~ resolves to the user's home)
 # path: directories to add to the user's PATH, needed only when the
 # install command does not update the PATH itself.
-apiVersion: agentworks/v1
-kind: system-install-command
-metadata:
-  name: az-cli
-  description: Azure CLI
-spec:
-  command: "curl -sL https://aka.ms/InstallAzureCLIDeb | sudo bash"
-  test_exec: az
----
 apiVersion: agentworks/v1
 kind: user-install-command
 metadata:
@@ -56,17 +51,6 @@ metadata:
 spec:
   command: "curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.4/install.sh | bash"
   test_file: ~/.nvm/nvm.sh
----
-apiVersion: agentworks/v1
-kind: user-install-command
-metadata:
-  name: claude
-  description: Claude Code CLI
-spec:
-  command: "curl -fsSL https://claude.ai/install.sh | bash"
-  path:
-    - ~/.local/bin
-  test_exec: claude
 ---
 apiVersion: agentworks/v1
 kind: user-install-command

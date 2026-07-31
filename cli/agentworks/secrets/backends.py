@@ -11,8 +11,12 @@ distinct is the design (ADR 0016):
   uniform machinery and the backends list/describe like every other
   resource.
 - IMPLEMENTATIONS: this module. ``SECRET_BACKEND_REGISTRY`` holds the
-  code behind those rows (``env-var``, ``prompt``, ``onepassword``;
-  later plugin-registered backends). Capability kinds have no
+  code behind those rows: the two core backends (``env-var``,
+  ``prompt``) plus any plugin-registered backends seated at import
+  (``onepassword`` ships as the ``onepassword`` system plugin, whose
+  adapter seats its instance here; its ROW, unlike the core two, is
+  published by ``plugins.publish_plugins`` with a ``system-plugin``
+  origin, so ``publish_to`` below skips it). Capability kinds have no
   declarable form; ``SecretBackend`` is an ordinary well-defined API
   abstracting where secrets actually come from, consumed by the
   resolution loop (``agentworks.secrets.resolve``).
@@ -42,10 +46,11 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Protocol
 
 from agentworks.secrets.env_var import EnvVarBackend
-from agentworks.secrets.onepassword import OnePasswordBackend
 from agentworks.secrets.prompt import PromptBackend
 
 if TYPE_CHECKING:
+    from agentworks.resources.graph import Readiness
+    from agentworks.resources.reference import ConfigReference
     from agentworks.resources.registry import Registry
     from agentworks.secrets.base import MappingValue, SecretDecl
 
@@ -96,6 +101,26 @@ class SecretBackend(Protocol):
     @property
     def interactive(self) -> bool: ...
 
+    def not_ready(self) -> Readiness:
+        """Why this backend cannot resolve on this host, or ready when it
+        can. Config-INDEPENDENT (a backend's host tool is present or not,
+        irrespective of any per-secret mapping), so it takes no argument:
+        the readiness fold (LLD c) calls it once per ``secret-backend`` node
+        and stores the verdict (R9.6 gives backends offline readiness).
+
+        This is the per-kind refinement of the uniform capability
+        ``not_ready(config)`` hook: secret-backend impls are instances (LLD
+        a) whose readiness is config-free, so the no-arg instance form is the
+        honest shape, and the fold's per-kind dispatch contains the asymmetry.
+
+        Offline and cheap by contract: a pure presence test (``op`` on PATH),
+        never a store probe, biometric, or re-auth (that is
+        interactive-optimism's concern at resolution time, kept optimistic).
+        REQUIRED, not defaulted (Protocol bodies are not inherited by
+        structural implementers): every registered backend implements it.
+        """
+        ...
+
     def validate_mapping(
         self,
         owner: str,
@@ -103,10 +128,12 @@ class SecretBackend(Protocol):
     ) -> None:
         """Validate one ``backend_mappings`` value addressed to this
         backend -- capability-owned config in its per-secret host.
-        Invoked by ``validate_chain`` for active-chain backends so a
-        malformed mapping fails at ``build_registry`` with config
-        vocabulary instead of at first resolution. The generic ``False``
-        opt-out never reaches this. ``owner`` is display context.
+        Invoked by the secret's own ``validate`` (run by the finalize
+        ``validate`` pass) for every PRESENT backend it addresses, so a
+        malformed mapping fails at ``build_registry`` with config vocabulary
+        instead of at first resolution (R9.9: every declared mapping, not just
+        the opted-in ones). The generic ``False`` opt-out never reaches this.
+        ``owner`` is display context.
 
         REQUIRED, not defaulted: Protocol bodies are not inherited by
         structural implementers, so every registered backend must
@@ -117,6 +144,26 @@ class SecretBackend(Protocol):
         capabilities pushing a declarative config schema definition at
         registration time, letting the core engine validate (and derive
         any implied references) without invoking the capability.
+        """
+        ...
+
+    def dependencies(
+        self,
+        mapping: MappingValue,
+    ) -> tuple[ConfigReference, ...]:
+        """The resource references one ``backend_mappings`` value implies:
+        the reference-deriving counterpart to :meth:`validate_mapping`
+        (this is the ``secret-backend`` half of the capability contract's
+        ``dependencies`` / ``validate`` split).
+
+        Total and non-throwing, like every capability's ``dependencies``.
+        Today every backend's mapping is a bare external identifier (an
+        env var name, an ``op://`` reference, or nothing) that implies no
+        agentworks resource, so all three shipped backends return ``()``;
+        the method exists so a ``secret``'s own ``dependencies`` can
+        compose its backends' implied edges uniformly when a future
+        backend implies one. REQUIRED, not defaulted (Protocol bodies are
+        not inherited by structural implementers).
         """
         ...
 
@@ -141,23 +188,37 @@ class SecretBackend(Protocol):
 SECRET_BACKEND_REGISTRY: dict[str, SecretBackend] = {
     "env-var": EnvVarBackend(),
     "prompt": PromptBackend(),
-    "onepassword": OnePasswordBackend(),
 }
-"""The capability registry. Future plugins register here (and publish
-their own capability resources with plugin origins)."""
+"""The core capability registry: the two always-available backends
+(``env-var``, ``prompt``). The ``onepassword`` backend now ships as the
+``onepassword`` system plugin (``agentworks.plugins.onepassword``), which
+seats its instance here at import through the ``secret-backend`` adapter;
+future plugins register the same way (and publish their own capability
+resources with ``system-plugin`` origins)."""
 
 
 def publish_to(registry: Registry) -> None:
     """Publish one ``secret-backend`` capability resource per registered
-    backend, ``built-in`` origin. Read-only rows: the chain and
-    per-secret mappings validate against them uniformly, and the
-    backends list/describe like every other resource.
+    backend, ``built-in`` origin (except backends seated by a system plugin,
+    which are published by ``plugins.publish_plugins`` with a ``system-plugin``
+    origin and skipped here). Read-only rows: the chain and per-secret mappings
+    validate against them uniformly, and the backends list/describe like every
+    other resource.
     """
+    from agentworks.plugins.registration import plugin_seated_names
     from agentworks.resources import Origin
     from agentworks.secrets.kinds import SecretBackendEntry
 
+    # A backend seated by a system plugin (e.g. onepassword) keeps its impl in
+    # this registry so ``_impl_for`` can stamp it onto the graph node, but its
+    # row is published by ``plugins.publish_plugins`` with a ``system-plugin``
+    # origin. Skip those names here so the plugin is the sole publisher of the
+    # row; publishing it here too would collide (built-in vs system-plugin).
+    seated_by_plugin = plugin_seated_names("secret-backend")
     origin = Origin.built_in(source="agentworks.secrets")
     for name, backend in SECRET_BACKEND_REGISTRY.items():
+        if name in seated_by_plugin:
+            continue
         registry.add(
             "secret-backend",
             name,

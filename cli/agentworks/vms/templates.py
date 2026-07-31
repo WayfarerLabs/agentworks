@@ -14,6 +14,7 @@ from agentworks.errors import ConfigError, unknown_template_error
 
 if TYPE_CHECKING:
     from agentworks.env import EnvEntry
+    from agentworks.resources.graph import BuildContext
     from agentworks.resources.reference import ResourceReference
     from agentworks.resources.registry import Registry
     from agentworks.vms.template import VMTemplate
@@ -42,7 +43,7 @@ class ResolvedVMTemplate:
     # Inheritance applies like other scalar fields: child overrides parent.
     tailscale_auth_key: str = "tailscale-auth-key"
 
-    def referenced_resources(self) -> list[ResourceReference]:
+    def dependencies(self, context: BuildContext) -> list[ResourceReference]:
         """Emit the resolved template's references: env-block secret
         refs (with inheritance applied via the merged ``env`` dict) plus
         the Tailscale auth-key secret. Used by ``vm create`` / ``vm     reinit``
@@ -51,9 +52,7 @@ class ResolvedVMTemplate:
         from agentworks.env.entry import env_references
         from agentworks.vms.template import tailscale_secret_reference
 
-        refs: list[ResourceReference] = list(
-            env_references(self.env, ("vm-template", self.name))
-        )
+        refs: list[ResourceReference] = list(env_references(self.env, ("vm-template", self.name)))
         refs.append(tailscale_secret_reference(self.tailscale_auth_key, self.name))
         return refs
 
@@ -100,9 +99,7 @@ def _resolve_from_dict(
     """
     if name in _visiting:
         path = " -> ".join((*_visiting, name))
-        raise ConfigError(
-            f"vm_templates inheritance cycle detected: {path}"
-        )
+        raise ConfigError(f"vm_templates inheritance cycle detected: {path}")
 
     if name not in templates:
         # Implicit default: return built-in defaults

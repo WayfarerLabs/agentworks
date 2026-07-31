@@ -39,8 +39,8 @@ def vm_create(
             "--site",
             help=(
                 "vm-site to create the VM at (a declared vm-site resource; "
-                "falls back to defaults.site, else the single enabled "
-                "site is inferred; when several are enabled, prompts for "
+                "falls back to defaults.site, else the single ready "
+                "site is inferred; when several are ready, prompts for "
                 "a choice)"
             ),
         ),
@@ -195,9 +195,7 @@ def vm_exec(
     if not ctx.args:
         typer.echo("Error: missing command", err=True)
         raise typer.Exit(1)
-    raise typer.Exit(
-        exec_vm(get_db(), load_config(), name, ctx.args, workspace_name=workspace)
-    )
+    raise typer.Exit(exec_vm(get_db(), load_config(), name, ctx.args, workspace_name=workspace))
 
 
 @vm_app.command("shell")
@@ -249,9 +247,7 @@ def vm_port_forward(
     from agentworks.config import load_config
     from agentworks.vms.manager import port_forward_vm
 
-    raise typer.Exit(
-        port_forward_vm(get_db(), load_config(), name, ports, address=address, verbose=verbose)
-    )
+    raise typer.Exit(port_forward_vm(get_db(), load_config(), name, ports, address=address, verbose=verbose))
 
 
 @vm_app.command("add-git-credential")

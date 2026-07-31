@@ -22,7 +22,7 @@ from importlib import resources as importlib_resources
 from typing import TYPE_CHECKING
 
 from agentworks.errors import ValidationError
-from agentworks.manifests.decode import KIND_SECTIONS
+from agentworks.resources import KIND_REGISTRY
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -30,13 +30,16 @@ if TYPE_CHECKING:
 _SAMPLES_PACKAGE = "agentworks.manifests"
 _SAMPLES_DIR = "samples"
 
-# Every kind in the decoder's table is manifest-declarable and has a
-# bundled sample; the samples-exist test pins this stays true as kinds
-# are added.
-# secret-backend stays in KIND_SECTIONS (the migrator's drop table) but
-# is a capability kind, not declarable -- no sample exists.
+# The declarable kinds, sorted, straight from the kind registry's
+# per-kind category (ADR 0016). This is the single source of truth the
+# capability guard in `_validated_kinds` also keys off, so the two can
+# never disagree: a kind is sampleable exactly when its handler is
+# declarable. Sorted for a stable order that matches `agw resource
+# kinds`, insulated from KIND_REGISTRY's import-order churn. The
+# samples-exist test pins that every declarable kind ships a bundled
+# sample file as new kinds are added.
 SAMPLE_KINDS: tuple[str, ...] = tuple(
-    k for k in KIND_SECTIONS if k != "secret-backend"
+    sorted(name for name, handler in KIND_REGISTRY.items() if handler.category == "declarable")
 )
 
 _SUFFIXES = {".yaml", ".yml"}
@@ -100,8 +103,25 @@ def _validated_kinds(kind: str | None, all_kinds: bool) -> tuple[str, ...]:
         )
     if kind not in SAMPLE_KINDS:
         known = ", ".join(SAMPLE_KINDS)
+        handler = KIND_REGISTRY.get(kind)
+        if handler is not None and handler.category == "capability":
+            # Capability kinds (harness, secret-backend, vm-platform,
+            # git-credential-provider) are code-backed and carry no
+            # manifest, so there is nothing to sample. `resource kinds`
+            # lists them alongside the declarable kinds, so a curious
+            # operator will ask for one here; name the kind and point at
+            # the declarable set that does have samples, matching --all.
+            raise ValidationError(
+                f"{kind!r} is a capability kind; it has no sample manifest",
+                entity_kind="resource",
+                entity_name=kind,
+                hint=f"declarable kinds: {known}",
+            )
         raise ValidationError(
-            f"unknown kind {kind!r}", hint=f"known kinds: {known}"
+            f"unknown kind {kind!r}",
+            entity_kind="resource",
+            entity_name=kind,
+            hint=f"known kinds: {known}",
         )
     return (kind,)
 
@@ -117,8 +137,7 @@ def _validated_target(resources_dir: Path, filename: str) -> Path:
     rel = PurePath(filename)
     if rel.is_absolute() or ".." in rel.parts:
         raise ValidationError(
-            f"--write takes a path relative to the resources directory; "
-            f"got {filename!r}",
+            f"--write takes a path relative to the resources directory; got {filename!r}",
             hint=f"Files land under {resources_dir}.",
         )
     if rel.suffix not in _SUFFIXES:

@@ -41,6 +41,12 @@ class SecretCell:
     """Backend's lookup identifier for this secret (env var name, op:// URI,
     vault path, ...). None means the backend has no static identifier --
     prompt always attempts but doesn't know what to look up until run time."""
+    not_ready_reason: str | None
+    """The backend node's stored readiness reason (off the graph), or None when
+    the backend is ready. Orthogonal to ``would_attempt`` (readiness is host
+    usability; would-attempt is a pure (secret, mapping) function): a not-ready
+    backend still "would attempt" a mapped secret, but cannot run here, so the
+    grid shows ``not ready: <reason>`` and it wins over the identifier (R9.7)."""
 
 
 @dataclass(frozen=True)
@@ -113,6 +119,7 @@ def build_secret_table(config: Config, registry: Registry) -> SecretTable:
                 backend=b.name,
                 would_attempt=b.would_attempt(decl),
                 identifier=b.describe_lookup(decl),
+                not_ready_reason=b.readiness.reason,
             )
             for b in backends
         )
@@ -133,6 +140,10 @@ def build_secret_table(config: Config, registry: Registry) -> SecretTable:
 
 
 _BACKEND_CELL_WIDTH = 40
+# Wide enough for every practical name (the auto-declared git-token-* family
+# included) while keeping the list view scannable when a name approaches the
+# 253-char secret cap.
+_NAME_CELL_WIDTH = 50
 """Cap for the per-backend identifier columns in the LIST view, so a long
 ``op://`` reference (optionally account-prefixed) or env-var name does not
 blow the table width out. The single-secret DETAIL view is left uncapped."""
@@ -148,12 +159,18 @@ def render_secret_table(table: SecretTable) -> None:
       auto-declared.
     - ``No active secret backends.`` -- ``[secret_config].backends = []``.
 
-    Otherwise a header + table with one column per active backend in
-    chain order. Cell semantics: an explicit identifier
-    (``AW_SECRET_X``, ``op://...``) when the backend has one;
-    ``disabled`` when ``would_attempt`` is False;
-    ``enabled`` for backends that always attempt without a static key
-    (e.g. ``prompt``).
+    Otherwise a header + table with one column per active (opted-in) backend
+    in chain order. Cell semantics, per R9.7 (never the overloaded
+    ``enabled`` / ``disabled`` literals):
+
+    - ``won't attempt`` when ``would_attempt`` is False (a ``false`` opt-out,
+      or a mapping-required backend with no mapping);
+    - ``not ready: <reason>`` when the backend's node is not-ready on this host
+      (wins over the identifier: it cannot run here, R9.7);
+    - the explicit identifier (``AW_SECRET_X``, ``op://...``) when the backend
+      would attempt, is ready, and has a static lookup key;
+    - ``would attempt`` when it would attempt and is ready but has no static
+      key (e.g. ``prompt``).
     """
     if not table.rows:
         output.info("No secrets in the resource registry.")
@@ -179,26 +196,31 @@ def render_secret_table(table: SecretTable) -> None:
     # Render cells to strings up front so column widths can be measured.
     rendered: list[tuple[str, ...]] = []
     for row in table.rows:
-        cells: list[str] = [row.name, row.description]
+        # Cap the name column too: secret names may run to
+        # MAX_SECRET_NAME_LENGTH (253) since #275, and an uncapped name
+        # would blow the table out exactly like a long op:// ref. The
+        # DETAIL view (secret describe) keeps the full name.
+        cells: list[str] = [output.truncate(row.name, _NAME_CELL_WIDTH), row.description]
         for cell in row.cells:
             if not cell.would_attempt:
-                cells.append("disabled")
+                # Opted out for THIS secret (readiness is moot: it would not
+                # attempt regardless of whether the host tool is present).
+                cells.append("won't attempt")
+            elif cell.not_ready_reason is not None:
+                # Not-ready wins over the identifier (R9.7): a mapped backend
+                # that cannot run here shows why, not the ref it can't use.
+                cells.append(output.truncate(f"not ready: {cell.not_ready_reason}", _BACKEND_CELL_WIDTH))
             elif cell.identifier is not None:
                 # Cap the identifier column so a long op:// ref (or
                 # account-prefixed one) does not blow the table out. The
                 # DETAIL view keeps the full identifier.
-                cells.append(
-                    output.truncate(cell.identifier, _BACKEND_CELL_WIDTH)
-                )
+                cells.append(output.truncate(cell.identifier, _BACKEND_CELL_WIDTH))
             else:
-                cells.append("enabled")
+                cells.append("would attempt")
         rendered.append(tuple(cells))
 
     headers = ("NAME", "DESCRIPTION", *table.backends)
-    widths = [
-        max(len(headers[i]), *(len(r[i]) for r in rendered))
-        for i in range(len(headers))
-    ]
+    widths = [max(len(headers[i]), *(len(r[i]) for r in rendered)) for i in range(len(headers))]
 
     def _fmt(cols: tuple[str, ...]) -> str:
         return "  ".join(c.ljust(widths[i]) for i, c in enumerate(cols))
@@ -233,6 +255,10 @@ class BackendMapping:
     backend: str
     would_attempt: bool
     identifier: str | None
+    not_ready_reason: str | None
+    """The backend node's stored readiness reason, or None when ready. The
+    mapping is still shown when not-ready (the config is real; it just cannot
+    run here now), annotated ``(not ready: <reason>)`` (R9.1)."""
 
 
 @dataclass(frozen=True)
@@ -243,13 +269,20 @@ class ResolutionPreview:
       would yield a value for this secret right now (e.g. ``"env-var"``
       when ``AW_SECRET_<NAME>`` is set, ``"prompt"`` when the chain
       falls through to an interactive prompt). ``None`` = no active
-      backend would resolve the secret.
+      backend would resolve the secret. Readiness-aware: a not-ready
+      backend is skipped and never named here (R9.6), while a ready
+      ``prompt`` still previews optimistically on would-attempt alone.
     - ``available``: True iff ``resolved_by`` is not None. Convenience
       flag for the renderer (mirrors ``resolved_by is not None``).
+    - ``skipped_not_ready``: the (backend, reason) pairs the walk skipped
+      because their node is not-ready on this host, in chain order. Shown
+      as ``skipped: not ready: <reason>`` so the preview is honest about the
+      offline layer under the optimistic interactivity preview (R9.6).
     """
 
     resolved_by: str | None
     available: bool
+    skipped_not_ready: tuple[tuple[str, str], ...] = ()
 
 
 @dataclass(frozen=True)
@@ -318,10 +351,9 @@ def describe_secret(
         ) from None
     origin = getattr(decl, "origin", None)
     description = getattr(decl, "description", "") or ""
-    # References come from the finalize pass's attachment (one entry per
-    # reference that resolved here). Defensive: a Resource constructed
-    # outside the framework path may not have the field.
-    references: tuple[ReferenceEntry, ...] = tuple(getattr(decl, "references", ()))
+    # Inbound references come off the dependency graph (one entry per
+    # reference that resolved here), populated by the finalize pass.
+    references: tuple[ReferenceEntry, ...] = registry.graph.dependents_of(SECRET_KIND_NAME, name)
 
     # Backend mappings: ask each active backend how it would
     # handle this secret.
@@ -333,9 +365,18 @@ def describe_secret(
             backend=b.name,
             would_attempt=b.would_attempt(decl),
             identifier=b.describe_lookup(decl),
+            not_ready_reason=b.readiness.reason,
         )
         for b in backends
     ]
+    # The offline readiness layer under the preview: backends that would
+    # attempt this secret but are not-ready on this host, in chain order.
+    # Resolution skips them (R9.6); the preview shows them as skipped.
+    skipped_not_ready = tuple(
+        (b.name, b.readiness.reason)
+        for b in backends
+        if b.would_attempt(decl) and not b.readiness.is_ready and b.readiness.reason is not None
+    )
 
     # Resolution preview: which active backend would actually yield a
     # value right now. ``preview_resolution`` reflects runtime presence
@@ -362,6 +403,7 @@ def describe_secret(
         resolution=ResolutionPreview(
             resolved_by=resolved_by,
             available=available,
+            skipped_not_ready=skipped_not_ready,
         ),
     )
 
@@ -430,16 +472,24 @@ def render_secret_description(desc: SecretDescription) -> None:
     else:
         for mapping in desc.backend_mappings:
             if not mapping.would_attempt:
-                status = "disabled"
+                status = "won't attempt"
             elif mapping.identifier is not None:
                 status = mapping.identifier
             else:
                 status = "(prompt at resolution time)"
+            # A would-attempt backend that cannot run here keeps its mapping
+            # shown (the config is real) but is flagged not-ready (R9.1).
+            if mapping.would_attempt and mapping.not_ready_reason is not None:
+                status += f" (not ready: {mapping.not_ready_reason})"
             output.detail(f"- {mapping.backend}: {status}")
 
     # --- Resolution preview ---
     output.info("")
     output.info("Resolution preview:")
+    # The honest offline layer first: backends the walk skips because they are
+    # not-ready here (R9.6), then the optimistic would-resolve verdict under it.
+    for backend_name, reason in desc.resolution.skipped_not_ready:
+        output.detail(f"- skipped {backend_name}: not ready: {reason}")
     if not desc.resolution.available:
         output.detail("not available in any active backend")
     else:

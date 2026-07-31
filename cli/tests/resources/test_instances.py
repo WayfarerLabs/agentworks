@@ -28,9 +28,7 @@ from agentworks.db import Database, SessionMode
 from agentworks.resources import KIND_REGISTRY, InstanceRef, Registry
 
 
-def _instances(
-    kind: str, db: Database, registry: Registry, resource: object
-) -> list[InstanceRef]:
+def _instances(kind: str, db: Database, registry: Registry, resource: object) -> list[InstanceRef]:
     """Call the kind handler's ``instances`` method by structural
     duck-typing -- mirrors what the framework consumer
     (``resources/inspect.py``'s ``used_by_for``) does at runtime.
@@ -79,21 +77,24 @@ def _seed_basic(tmp_path: Path) -> tuple[Database, Registry]:
     db = Database(tmp_path / "test.db")
     db.insert_vm("vm-default", site="lima", hostname="lima--vm-default", template=None)
     db.insert_vm("vm-custom", site="lima", hostname="lima--vm-custom", template="custom")
-    db.insert_workspace(
-        "ws-a", workspace_path="/tmp/ws-a", vm_name="vm-default", linux_group="ws-ws-a"
-    )
-    db.insert_workspace(
-        "ws-b", workspace_path="/tmp/ws-b", vm_name="vm-custom", linux_group="ws-ws-b"
-    )
+    db.insert_workspace("ws-a", workspace_path="/tmp/ws-a", vm_name="vm-default", linux_group="ws-ws-a")
+    db.insert_workspace("ws-b", workspace_path="/tmp/ws-b", vm_name="vm-custom", linux_group="ws-ws-b")
     db.insert_agent("agent-a", "vm-default", "agt-agent-a")
     db.insert_agent("agent-b", "vm-custom", "agt-agent-b")
     db.insert_session(
-        "sess-a", "ws-a", template="default", mode=SessionMode.ADMIN,
+        "sess-a",
+        "ws-a",
+        template="default",
+        mode=SessionMode.ADMIN,
         socket_path="/tmp/sess-a.sock",
     )
     db.insert_session(
-        "sess-b", "ws-b", template="default", mode=SessionMode.AGENT,
-        agent_name="agent-b", socket_path="/tmp/sess-b.sock",
+        "sess-b",
+        "ws-b",
+        template="default",
+        mode=SessionMode.AGENT,
+        agent_name="agent-b",
+        socket_path="/tmp/sess-b.sock",
     )
     db._conn.commit()
     return db, registry
@@ -108,12 +109,8 @@ def test_vm_template_instances_counts_matching_vms(tmp_path: Path) -> None:
     vm_default = registry.lookup("vm-template", "default")
     vm_custom = registry.lookup("vm-template", "custom")
 
-    default_instances = list(
-        _instances("vm-template", db, registry, vm_default)
-    )
-    custom_instances = list(
-        _instances("vm-template", db, registry, vm_custom)
-    )
+    default_instances = list(_instances("vm-template", db, registry, vm_default))
+    custom_instances = list(_instances("vm-template", db, registry, vm_custom))
 
     # vm-default has template=NULL (defaults to ``default``); vm-custom
     # explicitly uses ``custom``.
@@ -129,9 +126,7 @@ def test_workspace_template_instances_counts_matching_workspaces(
     db, registry = _seed_basic(tmp_path)
 
     ws_default = registry.lookup("workspace-template", "default")
-    instances = list(
-        _instances("workspace-template", db, registry, ws_default)
-    )
+    instances = list(_instances("workspace-template", db, registry, ws_default))
     # Both workspaces are NULL-template; both fall back to ``default``.
     assert {r.instance_name for r in instances} == {"ws-a", "ws-b"}
     assert all(r.instance_kind == "workspace" for r in instances)
@@ -141,9 +136,7 @@ def test_agent_template_instances_counts_matching_agents(tmp_path: Path) -> None
     db, registry = _seed_basic(tmp_path)
 
     agent_default = registry.lookup("agent-template", "default")
-    instances = list(
-        _instances("agent-template", db, registry, agent_default)
-    )
+    instances = list(_instances("agent-template", db, registry, agent_default))
     # Both agents are NULL-template; both fall back to ``default``.
     assert {r.instance_name for r in instances} == {"agent-a", "agent-b"}
 
@@ -154,9 +147,7 @@ def test_session_template_instances_counts_matching_sessions(
     db, registry = _seed_basic(tmp_path)
 
     sess_default = registry.lookup("session-template", "default")
-    instances = list(
-        _instances("session-template", db, registry, sess_default)
-    )
+    instances = list(_instances("session-template", db, registry, sess_default))
     # SessionRow.template is non-optional; both sessions explicitly use
     # ``default`` so the NULL-fallback path doesn't apply.
     assert {r.instance_name for r in instances} == {"sess-a", "sess-b"}
@@ -170,9 +161,7 @@ def test_admin_template_instances_counts_matching_vms(tmp_path: Path) -> None:
     db, registry = _seed_basic(tmp_path)
 
     admin = registry.lookup("admin-template", "default")
-    instances = list(
-        _instances("admin-template", db, registry, admin)
-    )
+    instances = list(_instances("admin-template", db, registry, admin))
     assert {r.instance_name for r in instances} == {"vm-default", "vm-custom"}
 
 
@@ -197,20 +186,22 @@ def test_admin_template_instances_split_by_column(tmp_path: Path) -> None:
 
     db = Database(tmp_path / "test.db")
     db.insert_vm("vm-plain", site="lima", hostname="lima--vm-plain")
-    db.insert_vm(
-        "vm-work", site="lima", hostname="lima--vm-work", admin_template="work"
-    )
+    db.insert_vm("vm-work", site="lima", hostname="lima--vm-work", admin_template="work")
     db._conn.commit()
 
     default_instances = list(
         _instances(
-            "admin-template", db, registry,
+            "admin-template",
+            db,
+            registry,
             registry.lookup("admin-template", "default"),
         )
     )
     work_instances = list(
         _instances(
-            "admin-template", db, registry,
+            "admin-template",
+            db,
+            registry,
             registry.lookup("admin-template", "work"),
         )
     )
@@ -224,18 +215,12 @@ def test_named_console_template_instances_counts_every_console(
 ) -> None:
     """Same shape as admin-template: every console uses the singleton."""
     db, registry = _seed_basic(tmp_path)
-    db._conn.execute(
-        "INSERT INTO consoles (name, vm_name) VALUES ('con-a', 'vm-default')"
-    )
-    db._conn.execute(
-        "INSERT INTO consoles (name, vm_name) VALUES ('con-b', 'vm-custom')"
-    )
+    db._conn.execute("INSERT INTO consoles (name, vm_name) VALUES ('con-a', 'vm-default')")
+    db._conn.execute("INSERT INTO consoles (name, vm_name) VALUES ('con-b', 'vm-custom')")
     db._conn.commit()
 
     nc = registry.lookup("named-console-template", "default")
-    instances = list(
-        _instances("named-console-template", db, registry, nc)
-    )
+    instances = list(_instances("named-console-template", db, registry, nc))
     assert {r.instance_name for r in instances} == {"con-a", "con-b"}
 
 
@@ -260,15 +245,15 @@ def test_secret_instances_finds_sessions_via_admin_env(tmp_path: Path) -> None:
 
     db = Database(tmp_path / "test.db")
     db.insert_vm("vm-1", site="lima", hostname="lima--vm-1")
-    db.insert_workspace(
-        "ws-1", workspace_path="/tmp/ws-1", vm_name="vm-1", linux_group="ws-ws-1"
-    )
+    db.insert_workspace("ws-1", workspace_path="/tmp/ws-1", vm_name="vm-1", linux_group="ws-ws-1")
     db.insert_session(
-        "sess-1", "ws-1", template="default", mode=SessionMode.ADMIN,
+        "sess-1",
+        "ws-1",
+        template="default",
+        mode=SessionMode.ADMIN,
         socket_path="/tmp/sess-1.sock",
     )
     db._conn.commit()
-
 
     secret = registry.lookup("secret", "shared-key")
     instances = list(_instances("secret", db, registry, secret))
@@ -300,24 +285,32 @@ def test_secret_instances_follow_per_vm_admin_template(tmp_path: Path) -> None:
     registry = build_registry(config)
 
     db = Database(tmp_path / "test.db")
-    db.insert_vm(
-        "vm-work", site="lima", hostname="lima--vm-work", admin_template="work"
-    )
+    db.insert_vm("vm-work", site="lima", hostname="lima--vm-work", admin_template="work")
     db.insert_vm("vm-plain", site="lima", hostname="lima--vm-plain")
     db.insert_workspace(
-        "ws-work", workspace_path="/tmp/ws-work", vm_name="vm-work",
+        "ws-work",
+        workspace_path="/tmp/ws-work",
+        vm_name="vm-work",
         linux_group="ws-ws-work",
     )
     db.insert_workspace(
-        "ws-plain", workspace_path="/tmp/ws-plain", vm_name="vm-plain",
+        "ws-plain",
+        workspace_path="/tmp/ws-plain",
+        vm_name="vm-plain",
         linux_group="ws-ws-plain",
     )
     db.insert_session(
-        "sess-work", "ws-work", template="default", mode=SessionMode.ADMIN,
+        "sess-work",
+        "ws-work",
+        template="default",
+        mode=SessionMode.ADMIN,
         socket_path="/tmp/sess-work.sock",
     )
     db.insert_session(
-        "sess-plain", "ws-plain", template="default", mode=SessionMode.ADMIN,
+        "sess-plain",
+        "ws-plain",
+        template="default",
+        mode=SessionMode.ADMIN,
         socket_path="/tmp/sess-plain.sock",
     )
     db._conn.commit()
@@ -349,23 +342,28 @@ def test_secret_instances_finds_sessions_via_vm_template_env(
     db = Database(tmp_path / "test.db")
     db.insert_vm("vm-prod", site="lima", hostname="lima--vm-prod", template="prod")
     db.insert_vm("vm-default", site="lima", hostname="lima--vm-default")
+    db.insert_workspace("ws-prod", workspace_path="/tmp/ws-prod", vm_name="vm-prod", linux_group="ws-ws-prod")
     db.insert_workspace(
-        "ws-prod", workspace_path="/tmp/ws-prod", vm_name="vm-prod", linux_group="ws-ws-prod"
-    )
-    db.insert_workspace(
-        "ws-default", workspace_path="/tmp/ws-default", vm_name="vm-default",
+        "ws-default",
+        workspace_path="/tmp/ws-default",
+        vm_name="vm-default",
         linux_group="ws-ws-default",
     )
     db.insert_session(
-        "sess-prod", "ws-prod", template="default", mode=SessionMode.ADMIN,
+        "sess-prod",
+        "ws-prod",
+        template="default",
+        mode=SessionMode.ADMIN,
         socket_path="/tmp/sess-prod.sock",
     )
     db.insert_session(
-        "sess-default", "ws-default", template="default", mode=SessionMode.ADMIN,
+        "sess-default",
+        "ws-default",
+        template="default",
+        mode=SessionMode.ADMIN,
         socket_path="/tmp/sess-default.sock",
     )
     db._conn.commit()
-
 
     secret = registry.lookup("secret", "prod-db-token")
     instances = list(_instances("secret", db, registry, secret))
@@ -387,15 +385,15 @@ def test_secret_instances_finds_sessions_via_tailscale_system_secret(
 
     db = Database(tmp_path / "test.db")
     db.insert_vm("vm-1", site="lima", hostname="lima--vm-1")
-    db.insert_workspace(
-        "ws-1", workspace_path="/tmp/ws-1", vm_name="vm-1", linux_group="ws-ws-1"
-    )
+    db.insert_workspace("ws-1", workspace_path="/tmp/ws-1", vm_name="vm-1", linux_group="ws-ws-1")
     db.insert_session(
-        "sess-1", "ws-1", template="default", mode=SessionMode.ADMIN,
+        "sess-1",
+        "ws-1",
+        template="default",
+        mode=SessionMode.ADMIN,
         socket_path="/tmp/sess-1.sock",
     )
     db._conn.commit()
-
 
     ts = registry.lookup("secret", "tailscale-auth-key")
     instances = list(_instances("secret", db, registry, ts))
@@ -424,15 +422,15 @@ def test_secret_instances_empty_when_no_session_reaches_it(
 
     db = Database(tmp_path / "test.db")
     db.insert_vm("vm-1", site="lima", hostname="lima--vm-1")
-    db.insert_workspace(
-        "ws-1", workspace_path="/tmp/ws-1", vm_name="vm-1", linux_group="ws-ws-1"
-    )
+    db.insert_workspace("ws-1", workspace_path="/tmp/ws-1", vm_name="vm-1", linux_group="ws-ws-1")
     db.insert_session(
-        "sess-1", "ws-1", template="default", mode=SessionMode.ADMIN,
+        "sess-1",
+        "ws-1",
+        template="default",
+        mode=SessionMode.ADMIN,
         socket_path="/tmp/sess-1.sock",
     )
     db._conn.commit()
-
 
     dead = registry.lookup("secret", "dead-key")
     instances = list(_instances("secret", db, registry, dead))
@@ -462,16 +460,17 @@ def test_secret_instances_finds_sessions_via_agent_template_env(
 
     db = Database(tmp_path / "test.db")
     db.insert_vm("vm-1", site="lima", hostname="lima--vm-1")
-    db.insert_workspace(
-        "ws-1", workspace_path="/tmp/ws-1", vm_name="vm-1", linux_group="ws-ws-1"
-    )
+    db.insert_workspace("ws-1", workspace_path="/tmp/ws-1", vm_name="vm-1", linux_group="ws-ws-1")
     db.insert_agent("agent-claude", "vm-1", "agt-agent-claude", template="claude")
     db.insert_session(
-        "sess-claude", "ws-1", template="default", mode=SessionMode.AGENT,
-        agent_name="agent-claude", socket_path="/tmp/sess-claude.sock",
+        "sess-claude",
+        "ws-1",
+        template="default",
+        mode=SessionMode.AGENT,
+        agent_name="agent-claude",
+        socket_path="/tmp/sess-claude.sock",
     )
     db._conn.commit()
-
 
     secret = registry.lookup("secret", "agent-secret")
     instances = list(_instances("secret", db, registry, secret))
@@ -500,20 +499,24 @@ def test_secret_instances_admin_secret_not_attributed_to_agent_session(
 
     db = Database(tmp_path / "test.db")
     db.insert_vm("vm-1", site="lima", hostname="lima--vm-1")
-    db.insert_workspace(
-        "ws-1", workspace_path="/tmp/ws-1", vm_name="vm-1", linux_group="ws-ws-1"
-    )
+    db.insert_workspace("ws-1", workspace_path="/tmp/ws-1", vm_name="vm-1", linux_group="ws-ws-1")
     db.insert_agent("agent-1", "vm-1", "agt-agent-1")
     db.insert_session(
-        "sess-admin", "ws-1", template="default", mode=SessionMode.ADMIN,
+        "sess-admin",
+        "ws-1",
+        template="default",
+        mode=SessionMode.ADMIN,
         socket_path="/tmp/sess-admin.sock",
     )
     db.insert_session(
-        "sess-agent", "ws-1", template="default", mode=SessionMode.AGENT,
-        agent_name="agent-1", socket_path="/tmp/sess-agent.sock",
+        "sess-agent",
+        "ws-1",
+        template="default",
+        mode=SessionMode.AGENT,
+        agent_name="agent-1",
+        socket_path="/tmp/sess-agent.sock",
     )
     db._conn.commit()
-
 
     secret = registry.lookup("secret", "admin-only-secret")
     instances = list(_instances("secret", db, registry, secret))
@@ -543,22 +546,20 @@ def test_secret_instances_finds_sessions_via_auto_declared_secret(
 
     db = Database(tmp_path / "test.db")
     db.insert_vm("vm-1", site="lima", hostname="lima--vm-1")
-    db.insert_workspace(
-        "ws-1", workspace_path="/tmp/ws-1", vm_name="vm-1", linux_group="ws-ws-1"
-    )
+    db.insert_workspace("ws-1", workspace_path="/tmp/ws-1", vm_name="vm-1", linux_group="ws-ws-1")
     db.insert_session(
-        "sess-1", "ws-1", template="default", mode=SessionMode.ADMIN,
+        "sess-1",
+        "ws-1",
+        template="default",
+        mode=SessionMode.ADMIN,
         socket_path="/tmp/sess-1.sock",
     )
     db._conn.commit()
 
-
     auto_secret = registry.lookup("secret", "anthropic-api-ky")
     assert auto_secret.origin is not None
     assert auto_secret.origin.variant == "auto-declared"
-    instances = list(
-        _instances("secret", db, registry, auto_secret)
-    )
+    instances = list(_instances("secret", db, registry, auto_secret))
     assert [r.instance_name for r in instances] == ["sess-1"]
 
 
@@ -627,21 +628,16 @@ def test_describe_resource_returns_none_used_by_for_no_instance_kinds(
 
     # secret-backend kinds (env-var, prompt) have no ``instances`` method;
     # describe_resource must return ``used_by = None`` for them.
-    backend_names = [
-        name for name, _ in registry.iter_kind_items("secret-backend")
-    ]
+    backend_names = [name for name, _ in registry.iter_kind_items("secret-backend")]
     assert backend_names, "expected at least one secret_backend in the registry"
     for name in backend_names:
         desc = describe_resource(registry, "secret-backend", name, db=db)
         assert desc.used_by is None, (
-            f"secret_backend {name!r} should yield used_by=None "
-            f"(kind has no instance concept) but got {desc.used_by!r}"
+            f"secret_backend {name!r} should yield used_by=None (kind has no instance concept) but got {desc.used_by!r}"
         )
 
 
-def test_list_view_renders_dash_for_no_instance_kinds(
-    tmp_path: Path, monkeypatch
-) -> None:
+def test_list_view_renders_dash_for_no_instance_kinds(tmp_path: Path, monkeypatch) -> None:
     """The list-view renderer turns ``used_by_count = None`` into ``-``
     in the USED BY column. The contract is that ``-`` distinguishes
     "this kind has no instance concept" from ``0`` ("there are zero
@@ -660,12 +656,8 @@ def test_list_view_renders_dash_for_no_instance_kinds(
 
     # Patch get_db so the CLI exercises the full path (including the
     # renderer) against our empty db.
-    with patch(
-        "agentworks.cli.commands.resource.get_db", return_value=db
-    ):
-        result = CliRunner().invoke(
-            app, ["resource", "list", "--kind", "secret-backend"]
-        )
+    with patch("agentworks.cli.commands.resource.get_db", return_value=db):
+        result = CliRunner().invoke(app, ["resource", "list", "--kind", "secret-backend"])
     assert result.exit_code == 0, result.stdout
     assert "USED BY" in result.stdout
     # secret-backend rows render ``-`` in the USED BY column (kind has

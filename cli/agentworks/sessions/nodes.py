@@ -188,8 +188,7 @@ class PendingSessionNode:
     def mark_realized(self) -> None:
         if self._realized:
             raise StateError(
-                f"{self.key} was already marked realized; the "
-                f"pending-to-realized flip is one-way and once."
+                f"{self.key} was already marked realized; the pending-to-realized flip is one-way and once."
             )
         self._realized = True
 
@@ -220,9 +219,7 @@ class PendingSessionNode:
         agent_name = self._agent.name
         workspace_name = self._workspace.name
         try:
-            self._db.delete_agent_grant(
-                agent_name, workspace_name, "implicit", session_name=self._name
-            )
+            self._db.delete_agent_grant(agent_name, workspace_name, "implicit", session_name=self._name)
             remaining = self._db.has_any_grant(agent_name, workspace_name)
         except Exception as e:
             output.warn(
@@ -247,8 +244,7 @@ class PendingSessionNode:
                 )
             except Exception as e:
                 output.warn(
-                    f"rollback: failed to remove agent '{agent_name}' from "
-                    f"workspace '{workspace_name}' group: {e}"
+                    f"rollback: failed to remove agent '{agent_name}' from workspace '{workspace_name}' group: {e}"
                 )
 
 
@@ -311,7 +307,14 @@ def pending_session_node(
     object is wired as the session's dependency edge AND as the held
     harness's ``target``, by construction, so the harness observes the
     orchestrator's ``mark_realized`` flip. Exactly one of ``agent`` /
-    ``admin`` must be given (the session-scope invariant)."""
+    ``admin`` must be given (the session-scope invariant).
+
+    HARNESS ENABLEMENT GATE (R14): the ``registry`` here is threaded only for
+    the harness's secret-prediction preflight (issue #220); this factory does
+    NOT gate plugin enablement. Every caller MUST call
+    ``ensure_harness_enabled(registry, template.harness)`` first; the drift
+    guard ``test_every_session_factory_caller_gates_the_harness`` pins that a
+    future caller cannot silently bypass it."""
     if (agent is not None) == admin:
         raise StateError(
             f"session '{name}': exactly one of an agent node or "
@@ -348,7 +351,14 @@ def live_session_node(
     missing argument would structurally disable the fork's loud branch
     (an agent-mode row handed no agent node would silently probe the
     admin user instead of raising). The factory cross-checks both
-    directions and raises on mismatch."""
+    directions and raises on mismatch.
+
+    HARNESS ENABLEMENT GATE (R14): the ``registry`` here is threaded only for
+    the harness's secret-prediction preflight (issue #220); this factory does
+    NOT gate plugin enablement. Every caller MUST call
+    ``ensure_harness_enabled(registry, template.harness)`` first; the drift
+    guard ``test_every_session_factory_caller_gates_the_harness`` pins that a
+    future caller cannot silently bypass it."""
     if row.agent_name is not None:
         if agent is None:
             raise StateError(
@@ -365,8 +375,7 @@ def live_session_node(
             )
     elif agent is not None:
         raise StateError(
-            f"session '{row.name}' is an admin session but an agent "
-            f"node ('{agent.name}') was handed to the factory."
+            f"session '{row.name}' is an admin session but an agent node ('{agent.name}') was handed to the factory."
         )
     harness = _harness_for_template(
         template,

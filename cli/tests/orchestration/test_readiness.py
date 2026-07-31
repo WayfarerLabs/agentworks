@@ -79,9 +79,7 @@ def test_skip_and_degrade_keeps_passing_items_in_order() -> None:
     from agentworks.orchestration.readiness import runup_skip_and_degrade
 
     items = [_RunupItem("gh"), _RunupItem("ado")]
-    passed = runup_skip_and_degrade(
-        items, RunContext(), on_reject=lambda item, exc: None
-    )
+    passed = runup_skip_and_degrade(items, RunContext(), on_reject=lambda item, exc: None)
     assert [item.name for item in passed] == ["gh", "ado"]
 
 

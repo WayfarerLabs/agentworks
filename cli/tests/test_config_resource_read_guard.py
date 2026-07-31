@@ -4,8 +4,8 @@ The consumer repoint moved every resource read from ``Config``
 attributes to Registry queries so the operator source can swap from
 TOML to YAML manifests without touching consumers. The only sanctioned
 readers of Config resource attributes are the publishers
-(``Config.publish_to`` in config.py and the ``publish_to`` operator
-publishers in apt.py / install_commands.py).
+(``Config.publish_to`` in config/models.py and the ``publish_to``
+operator publishers in apt.py / install_commands.py).
 
 This is a source-level scan (same spirit as the Phase 0 vocabulary
 guard): any ``config.<resource-attr>`` / ``cfg.<resource-attr>`` read
@@ -24,7 +24,7 @@ import agentworks
 _AGENTWORKS_ROOT = Path(agentworks.__file__).parent
 
 _PUBLISHER_ALLOWLIST = {
-    Path("config.py"),
+    Path("config/models.py"),
     Path("apt.py"),
     Path("install_commands.py"),
 }
@@ -47,9 +47,7 @@ _RESOURCE_ATTRS = (
     "user_install_commands",
 )
 
-_READ_RE = re.compile(
-    r"\b(?:config|cfg)\.(?:" + "|".join(_RESOURCE_ATTRS) + r")\b"
-)
+_READ_RE = re.compile(r"\b(?:config|cfg)\.(?:" + "|".join(_RESOURCE_ATTRS) + r")\b")
 
 
 def test_no_config_resource_reads_outside_publishers() -> None:
@@ -58,13 +56,10 @@ def test_no_config_resource_reads_outside_publishers() -> None:
         rel = path.relative_to(_AGENTWORKS_ROOT)
         if rel in _PUBLISHER_ALLOWLIST:
             continue
-        for line_no, line in enumerate(
-            path.read_text(encoding="utf-8").splitlines(), start=1
-        ):
+        for line_no, line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
             if _READ_RE.search(line):
                 offenders.append(f"{rel}:{line_no}: {line.strip()}")
     assert not offenders, (
         "Config resource reads outside the publishers "
-        "(repoint them to Registry queries via agentworks.resources.access):\n"
-        + "\n".join(offenders)
+        "(repoint them to Registry queries via agentworks.resources.access):\n" + "\n".join(offenders)
     )

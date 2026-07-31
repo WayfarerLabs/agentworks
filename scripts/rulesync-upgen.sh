@@ -12,8 +12,9 @@
 #
 # Usage:
 #   ./scripts/rulesync-upgen.sh           Install + regenerate all outputs.
-#   ./scripts/rulesync-upgen.sh --check   Verify committed copilot output is
-#                                         up to date; exit non-zero on drift.
+#   ./scripts/rulesync-upgen.sh --check   Verify the committed shared-target
+#                                         output (copilot, claudecode, codexcli)
+#                                         is up to date; exit non-zero on drift.
 #                                         Does not write or install.
 # ============================================================================
 
@@ -30,15 +31,26 @@ RULESYNC_VERSION=$(read_version_file .rulesync-version "" "$REPO_ROOT")
 INSTALLED_SKILLS_DIR="$REPO_ROOT/.rulesync/skills"
 CLAUDE_SKILLS_DIR="$REPO_ROOT/.claude/skills"
 
+# The shared targets whose generated output is committed and drift-checked are
+# exactly rulesync.jsonc's "targets". Derive them from that file so this script
+# and the config cannot diverge (a divergence would let a newly added shared
+# target's committed output escape the drift check). The array is single-line
+# in rulesync.jsonc; extract its contents and strip spaces/quotes.
+SHARED_TARGETS=$(sed -n 's/.*"targets"[[:space:]]*:[[:space:]]*\[\([^]]*\)\].*/\1/p' "$REPO_ROOT/rulesync.jsonc" | tr -d ' "')
+if [[ -z "$SHARED_TARGETS" ]]; then
+    echo "Error: could not parse \"targets\" from rulesync.jsonc (is the array on one line?)." >&2
+    exit 1
+fi
+
 cd "$REPO_ROOT"
 
 # --- Arg parsing ---
 #
-# `--check` mode verifies only the committed copilot output. We always pass
-# `-t copilot` so the dev's personal rulesync.local.jsonc targets don't enter
-# the picture; only the shared, committed output is what's checked here (and
-# the same script runs the same `-t copilot --check` invocation in CI, so the
-# local and CI checks cannot drift).
+# `--check` mode verifies the committed shared-target output. We always pass
+# `-t $SHARED_TARGETS` so the dev's personal rulesync.local.jsonc targets don't
+# enter the picture; only the shared, committed output is what's checked here
+# (and the same script runs the same invocation in CI, so the local and CI
+# checks cannot drift).
 CHECK_ONLY=0
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -48,8 +60,8 @@ while [[ $# -gt 0 ]]; do
 Usage: $0 [--check]
 
   (no flag)   Install + regenerate all outputs (including the committed
-              copilot output under .github/).
-  --check     Verify the committed copilot output is up to date; exit
+              shared-target output: copilot, claudecode, codexcli).
+  --check     Verify the committed shared-target output is up to date; exit
               non-zero on drift. Does not write or install.
 EOF
             exit 0
@@ -63,8 +75,8 @@ EOF
 done
 
 if [[ $CHECK_ONLY -eq 1 ]]; then
-    echo "Checking committed copilot output (v$RULESYNC_VERSION)..."
-    run_npm_package rulesync@"$RULESYNC_VERSION" generate -t copilot --check
+    echo "Checking committed output for $SHARED_TARGETS (v$RULESYNC_VERSION)..."
+    run_npm_package rulesync@"$RULESYNC_VERSION" generate -t "$SHARED_TARGETS" --check
     exit
 fi
 
@@ -92,11 +104,11 @@ echo "Running rulesync generate (v$RULESYNC_VERSION)..."
 run_npm_package rulesync@"$RULESYNC_VERSION" generate
 
 # rulesync.local.jsonc's `targets` field replaces (not unions) the shared
-# config's, so when a dev's local targets exclude copilot, the committed
-# .github/ output above does not get refreshed. Force-regenerate it here so
-# the CI drift check stays green regardless of personal target choices.
-echo "Regenerating committed copilot output (v$RULESYNC_VERSION)..."
-run_npm_package rulesync@"$RULESYNC_VERSION" generate -t copilot
+# config's, so when a dev's local targets exclude a shared target, its
+# committed output above does not get refreshed. Force-regenerate all shared
+# targets here so the CI drift check stays green regardless of personal choices.
+echo "Regenerating committed output for $SHARED_TARGETS (v$RULESYNC_VERSION)..."
+run_npm_package rulesync@"$RULESYNC_VERSION" generate -t "$SHARED_TARGETS"
 
 # Workaround: rulesync generate also drops the executable bit.
 # Propagate from installed skills to generated .claude/skills output.

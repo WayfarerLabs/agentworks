@@ -47,9 +47,32 @@ ssh_private_key = "~/.ssh/id_ed25519"        # required: used for SSH connection
 # --- Paths ---
 
 [paths]
+# Must NOT be at or under /home: that is the Linux user-home namespace, and the
+# admin and agent homes there are kept private (mode 0750). Use a data volume path.
 #vm_workspaces = "/opt/agentworks/workspaces"  # workspace directory on VMs
 #vscode_workspaces = "~/aw-vscode-workspaces"   # .code-workspace file directory
 #backups = "~/.config/agentworks/backups"       # backup directory (vm backups, config.toml backups from `agw resource migrate`)
+
+# --- System plugins ---
+# `[plugins]` is the plugin-subsystem namespace, and `system` is its list of
+# enabled in-repo system plugins. System plugins bundle capability
+# implementations (VM platforms, harnesses, git-credential providers, secret
+# backends) and optional resource manifests that ship with agentworks but are
+# separable and opt-in. This is a primary opt-in you set early, since later
+# sections (secret backends, git credentials, vm-sites, session templates)
+# reference the plugins enabled here. List the plugins you want enabled by name.
+# A plugin NOT listed here still publishes its capability rows AND its bundled
+# manifests, but they are disabled: a resource referencing one is not-ready (or
+# refused at use) with an "enable plugin <name>" hint, never an unknown-name
+# error. Only installed plugin names are valid in `system` (an unknown name is a
+# hard error, as is any key in `[plugins]` other than `system`). The shipped
+# build installs `onepassword` (the 1Password secret backend), `claude` (the
+# Claude Code session harness and its `claude` CLI install-command), `proxmox`
+# (the Proxmox VE VM platform), and `azure` (the Azure VM platform, the Azure
+# DevOps git-credential provider, and the `az-cli` install-command). `agw
+# doctor` shows a System plugins roster with each plugin's state.
+#[plugins]
+#system = ["onepassword", "claude", "proxmox", "azure"]   # names of installed system plugins to enable
 
 # --- Default values for CLI flags ---
 
@@ -119,6 +142,9 @@ ssh_private_key = "~/.ssh/id_ed25519"        # required: used for SSH connection
 #description = "Azure DevOps for my-org"          # optional, shown in prompts and logs
 #token = "git-token-azdo"                         # optional; default is `git-token-<name>`
 # Resolved secret value is the PAT (create at https://dev.azure.com/{org}/_usersSettings/tokens).
+# The `azdo` provider ships in the opt-in `azure` system plugin: an azdo
+# credential is not-ready and refused at use with an "enable plugin `azure`"
+# hint until you add `[plugins] system = ["azure"]` above.
 
 # --- Secrets ---
 # A pluggable, named-secret system used by env tables on resources below.
@@ -149,6 +175,9 @@ ssh_private_key = "~/.ssh/id_ed25519"        # required: used for SSH connection
 
 #[secrets.registry-password]
 #description = "container registry password"
+# onepassword ships as an opt-in system plugin: enable it with
+# `[plugins] system = ["onepassword"]` (see System plugins above) before these
+# mappings resolve; while the plugin is disabled the backend is dormant.
 # onepassword needs an explicit per-secret address (no name-based default).
 # The address is the `op://vault/item/field` reference 1Password's
 # "Copy Secret Reference" produces (an optional `.../section/field` segment
@@ -167,12 +196,19 @@ ssh_private_key = "~/.ssh/id_ed25519"        # required: used for SSH connection
 #                 AW_SECRET_<UPPER_SNAKE_CASE>, so secret "npm-token" reads
 #                 from AW_SECRET_NPM_TOKEN unless overridden via
 #                 `[secrets.<name>].backend_mappings.env-var`.
-#   onepassword : reads via the 1Password CLI (`op read op://...`). Requires
+#   onepassword : ships as the opt-in `onepassword` system plugin (enable it in
+#                 [plugins] above); while disabled it is dormant (dropped from
+#                 the chain). Once enabled it reads via the 1Password CLI
+#                 (`op read op://...`). Requires
 #                 a per-secret `backend_mappings.onepassword` address (string
 #                 or table, above); unmapped secrets are skipped. `op` must be
 #                 able to read at command time (the 1Password app's CLI
 #                 integration enabled, or `op signin`); a mapping that points
 #                 at a missing item is a hard error, not a fall-through.
+#                 If `op` is not installed the backend is NOT-READY on this
+#                 host: resolution skips it with a warning and falls through to
+#                 the next backend in the chain (`agw secret list` /
+#                 `agw doctor` show its readiness).
 #   prompt      : interactive prompt. Always applies; you are never asked for
 #                 the same secret twice in one command, and all prompting
 #                 happens before the command starts changing anything.
@@ -182,9 +218,15 @@ ssh_private_key = "~/.ssh/id_ed25519"        # required: used for SSH connection
 
 #[secret_config]
 #backends = ["env-var", "onepassword", "prompt"]    # example chain; the default is ["env-var", "prompt"].
-# Declared backends absent from this list are dormant. Order is resolution
-# precedence: the first backend that produces a value wins. An explicit
-# empty list `backends = []` disables resolution entirely.
+# Naming `onepassword` here also requires enabling its plugin
+# (`[plugins] system = ["onepassword"]` above); until then it is dropped from
+# the chain as disabled.
+# This is the opt-in chain: only listed backends are consulted, in this
+# precedence order (the first backend that produces a value wins). Declared
+# backends absent from this list are dormant. A backend that is not-ready on
+# this host (e.g. onepassword with no `op` installed) is skipped with a warning
+# and the chain falls through to the next one. An explicit empty list
+# `backends = []` disables resolution entirely.
 
 # --- VM sites (azure, proxmox, remote Lima, ...) ---
 # Places to create VMs are declared as vm-site RESOURCES (YAML manifests
@@ -192,8 +234,13 @@ ssh_private_key = "~/.ssh/id_ed25519"        # required: used for SSH connection
 # `agw resource sample vm-site` for commented, ready-to-edit examples.
 # The legacy [azure] / [proxmox] sections still load as deprecated
 # vm-site declarations; migrate them with `agw resource migrate vm-site`.
-# The proxmox API token is the `proxmox-token` secret (default
-# env-var: AW_SECRET_PROXMOX_TOKEN).
+# proxmox ships as the opt-in `proxmox` system plugin: a proxmox site (declared
+# or legacy) is not-ready with an "enable plugin `proxmox`" hint until you add
+# `[plugins] system = ["proxmox"]` above. The proxmox API token is the
+# `proxmox-token` secret (default env-var: AW_SECRET_PROXMOX_TOKEN).
+# azure-vm likewise ships as the opt-in `azure` system plugin: an azure site
+# (declared or legacy) is not-ready with an "enable plugin `azure`" hint until
+# you add `[plugins] system = ["azure"]` above.
 
 # =============================================================================
 # Templates
@@ -254,7 +301,7 @@ ssh_private_key = "~/.ssh/id_ed25519"        # required: used for SSH connection
 #]
 #apt_packages = ["gh", "docker"]            # named apt-package entries from the registry
 #snap = []                                  # direct snap packages
-#system_install_commands = ["az-cli"]       # system-install-command entries from the registry
+#system_install_commands = ["az-cli"]       # system-install-command entries from the registry (az-cli ships in the opt-in `azure` plugin; enable it above)
 
 #[vm_templates.heavy]
 #inherits = ["default"]
@@ -289,7 +336,9 @@ ssh_private_key = "~/.ssh/id_ed25519"        # required: used for SSH connection
 #mise_prune_on_reinit = true                # remove stale tool versions on reinit
 # -- Git --
 #git_force_safe_directory = true              # set safe.directory '*' for admin and agents
-# -- Claude Code (requires claude CLI on PATH, e.g. via user_install_commands) --
+# -- Claude Code (requires the claude CLI on PATH; the `claude` install-command
+#    ships with the opt-in `claude` system plugin, so `user_install_commands =
+#    ["claude"]` needs `[plugins] system = ["claude"]`) --
 #claude_marketplaces = ["https://github.com/WayfarerLabs/nerftools#4.1.0"]
 #claude_plugins = ["nerftools-default@nerftools"]
 
@@ -316,7 +365,9 @@ ssh_private_key = "~/.ssh/id_ed25519"        # required: used for SSH connection
 #mise_allow_unlocked = false
 #mise_install_before = "7d"
 #mise_prune_on_reinit = true
-# -- Claude Code (requires claude CLI on PATH, e.g. via user_install_commands) --
+# -- Claude Code (requires the claude CLI on PATH; the `claude` install-command
+#    ships with the opt-in `claude` system plugin, so `user_install_commands =
+#    ["claude"]` needs `[plugins] system = ["claude"]`) --
 #claude_marketplaces = ["https://github.com/WayfarerLabs/nerftools#4.1.0"]
 #claude_plugins = ["nerftools-default@nerftools"]
 
@@ -402,6 +453,9 @@ ssh_private_key = "~/.ssh/id_ed25519"        # required: used for SSH connection
 # conversation on `agw session restart`. Its config is five optional fields:
 # permission_mode / model (forwarded to `claude`), extra_args (raw tokens),
 # and the OAuth-token pair below.
+# `claude-code` ships as the opt-in `claude` system plugin: enable it with
+# `[plugins] system = ["claude"]` (see System plugins above), otherwise
+# creating a session on this template is refused with the enable hint.
 #[session_templates.claude]
 #harness = "claude-code"
 #description = "Claude Code session"

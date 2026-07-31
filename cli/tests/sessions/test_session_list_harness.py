@@ -34,8 +34,7 @@ def _seed_vm(db: Database, name: str, ws: str) -> None:
     db.insert_vm(name, site="proxmox", hostname=name)
     db.update_vm_tailscale(name, "100.64.0.9")
     db._conn.execute(
-        "INSERT INTO workspaces (name, vm_name, workspace_path, linux_group) "
-        "VALUES (?, ?, ?, ?)",
+        "INSERT INTO workspaces (name, vm_name, workspace_path, linux_group) VALUES (?, ?, ?, ?)",
         (ws, name, f"/srv/{ws}", f"ws-{ws}"),
     )
     db._conn.commit()

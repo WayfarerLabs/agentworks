@@ -22,28 +22,36 @@ def test_kind_flags() -> None:
     assert site_kind.builtin_override == "reserved"
 
 
-def test_publisher_adds_one_row_per_supported_platform(
+def test_publisher_adds_one_row_per_core_built_in_platform(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """The core ``publish_to`` publishes one built-in row per core platform.
+    ``proxmox`` and ``azure-vm`` are INSTALLED (re-seated into
+    ``VM_PLATFORM_REGISTRY`` by their opt-in plugins) but their rows are
+    published by ``plugins.publish_plugins`` with a ``system-plugin`` origin, so
+    the core publisher skips them to avoid a built-in-vs-system-plugin collision
+    at ``Registry.add``."""
     from tests.conftest import stub_platform_support
 
     stub_platform_support(monkeypatch)
     registry = Registry.empty()
     vm_platforms.publish_to(registry)
     names = {entry.name for entry in registry.iter_kind("vm-platform")}
-    assert names == {"lima", "wsl2", "azure-vm", "proxmox"}
-    row = registry.lookup("vm-platform", "azure-vm")
+    assert names == {"lima", "wsl2"}
+    row = registry.lookup("vm-platform", "lima")
     assert row.origin is not None
     assert row.origin.variant == "built-in"
     assert row.description
 
 
-def test_publisher_skips_unsupported_platforms(
+def test_publisher_publishes_unsupported_platform_unconditionally(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """An installed platform whose host requirements aren't met (the
-    platform's own unsupported_reason) publishes no capability row: it
-    is invisible to the resource graph and listed only by doctor."""
+    """R13: an installed platform whose host requirements aren't met (the
+    platform's own ``unsupported_reason``) still publishes its capability
+    row. Host support becomes the node's readiness (the fold), not its
+    presence, so a site referencing it is not-ready rather than dangling
+    on an absent row."""
     from agentworks.capabilities.vm_platform.wsl2 import WSL2Platform
 
     monkeypatch.setattr(
@@ -54,17 +62,13 @@ def test_publisher_skips_unsupported_platforms(
     registry = Registry.empty()
     vm_platforms.publish_to(registry)
     names = {entry.name for entry in registry.iter_kind("vm-platform")}
-    assert "wsl2" not in names
-    assert {"lima", "azure-vm", "proxmox"} <= names
+    # Core built-ins only; proxmox's and azure-vm's rows come from their plugins.
+    assert names == {"lima", "wsl2"}
 
 
 def test_vm_platform_is_not_manifest_declarable(tmp_path: Path) -> None:
     (tmp_path / "cap.yaml").write_text(
-        "apiVersion: agentworks/v1\n"
-        "kind: vm-platform\n"
-        "metadata:\n"
-        "  name: my-cloud\n"
-        "spec: {}\n"
+        "apiVersion: agentworks/v1\nkind: vm-platform\nmetadata:\n  name: my-cloud\nspec: {}\n"
     )
     with pytest.raises(ConfigError, match="provided by the app"):
         load_manifests(tmp_path)

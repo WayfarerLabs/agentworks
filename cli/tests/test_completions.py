@@ -56,9 +56,7 @@ class TestTopLevelGroups:
         # spec.subcommands includes both groups and direct commands (e.g.
         # `agentworks doctor`); subcommands whose own `subcommands` dict is
         # non-empty are groups.
-        actual_groups = {
-            name for name, sub in spec.subcommands.items() if sub.subcommands
-        }
+        actual_groups = {name for name, sub in spec.subcommands.items() if sub.subcommands}
         missing = self.EXPECTED_GROUPS - actual_groups
         unexpected = actual_groups - self.EXPECTED_GROUPS
         assert not missing and not unexpected, (
@@ -126,6 +124,40 @@ class TestDynamicCompletionsMapping:
             assert completer_id in BASH_SNIPPETS, (
                 f"Completer '{completer_id}' from ({command_path}, {param_name}) has no bash snippet mapping"
             )
+
+
+class TestOptionFlagsInSpec:
+    """Pin option flags that must (or must not) reach the completion tree.
+
+    The tree is generated live from ``build_spec(app)``, so a flag rename flows
+    through here. This is the direct completion-spec guard for the
+    ``env show --reveal-secrets`` -> ``--resolve`` rename (R9.8): the renamed
+    flag must complete, and the removed spelling must NOT appear (the
+    always-consider-completions rule).
+    """
+
+    def _env_show_option_flags(self) -> list[str]:
+        spec = build_spec(app)
+        env_show = _walk_commands(spec)["agentworks.env.show"]
+        return [opt for param in env_show.params for opt in param.opts]
+
+    def test_resolve_flag_is_in_the_completion_spec(self) -> None:
+        assert "--resolve" in self._env_show_option_flags()
+
+    def test_removed_reveal_secrets_spelling_is_absent_from_the_spec(self) -> None:
+        # --reveal-secrets was removed (breaking change, R9.8), not kept as a
+        # hidden alias, so it appears nowhere in the completion spec.
+        assert "--reveal-secrets" not in self._env_show_option_flags()
+
+    def test_include_disabled_flag_reaches_the_completion_spec(self) -> None:
+        # `resource list --include-disabled` is a plain boolean flag, captured
+        # by the Typer introspection with no merge-tree change (it is not a
+        # dynamic path element). The always-consider-completions rule: a new CLI
+        # flag must reach the tree.
+        spec = build_spec(app)
+        resource_list = _walk_commands(spec)["agentworks.resource.list"]
+        opts = [opt for param in resource_list.params for opt in param.opts]
+        assert "--include-disabled" in opts
 
 
 class TestGeneration:
@@ -198,12 +230,9 @@ class TestRegistrySourcedCompleters:
         for completer_id, kind in self._REGISTRY_SOURCED:
             snippet = DYNAMIC_SNIPPETS[completer_id]
             assert f"--kind {kind}" in snippet, (
-                f"bash {completer_id!r} should source from Registry"
-                f" (--kind {kind}); got: {snippet!r}"
+                f"bash {completer_id!r} should source from Registry (--kind {kind}); got: {snippet!r}"
             )
-            assert "sed " not in snippet, (
-                f"bash {completer_id!r} still uses sed-over-TOML: {snippet!r}"
-            )
+            assert "sed " not in snippet, f"bash {completer_id!r} still uses sed-over-TOML: {snippet!r}"
 
     def test_zsh_functions_source_from_registry(self) -> None:
         from agentworks.completions.zsh import DYNAMIC_FUNCTIONS
@@ -211,12 +240,9 @@ class TestRegistrySourcedCompleters:
         for completer_id, kind in self._REGISTRY_SOURCED:
             fn = DYNAMIC_FUNCTIONS[completer_id]
             assert f"--kind {kind}" in fn, (
-                f"zsh {completer_id!r} should source from Registry"
-                f" (--kind {kind}); got: {fn!r}"
+                f"zsh {completer_id!r} should source from Registry (--kind {kind}); got: {fn!r}"
             )
-            assert "sed " not in fn, (
-                f"zsh {completer_id!r} still uses sed-over-TOML: {fn!r}"
-            )
+            assert "sed " not in fn, f"zsh {completer_id!r} still uses sed-over-TOML: {fn!r}"
 
     def test_powershell_snippets_source_from_registry(self) -> None:
         from agentworks.completions.powershell import DYNAMIC_SNIPPETS
@@ -224,12 +250,10 @@ class TestRegistrySourcedCompleters:
         for completer_id, kind in self._REGISTRY_SOURCED:
             snippet = DYNAMIC_SNIPPETS[completer_id]
             assert f"--kind {kind}" in snippet, (
-                f"powershell {completer_id!r} should source from Registry"
-                f" (--kind {kind}); got: {snippet!r}"
+                f"powershell {completer_id!r} should source from Registry (--kind {kind}); got: {snippet!r}"
             )
             assert "Select-String" not in snippet, (
-                f"powershell {completer_id!r} still uses Select-String"
-                f" regex over config.toml: {snippet!r}"
+                f"powershell {completer_id!r} still uses Select-String regex over config.toml: {snippet!r}"
             )
 
 
@@ -348,9 +372,7 @@ class TestCompletionCli:
 class TestInstall:
     """Filesystem-level checks for `agentworks completion install`."""
 
-    def test_bash_install_drops_agw_alias_symlink(
-        self, monkeypatch, tmp_path
-    ) -> None:
+    def test_bash_install_drops_agw_alias_symlink(self, monkeypatch, tmp_path) -> None:
         """Bash's lazy autoload is keyed on the command name -- typing `agw`
         looks for a file named `agw`, not `agentworks`. Install must drop a
         symlink so both names trigger the same script."""
@@ -359,14 +381,10 @@ class TestInstall:
         # Redirect home via Path.home itself: setenv("HOME") only works on
         # POSIX; Path.home() reads USERPROFILE on Windows.
         monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path))
-        result = CliRunner().invoke(
-            app, ["completion", "install", "--shell", "bash"]
-        )
+        result = CliRunner().invoke(app, ["completion", "install", "--shell", "bash"])
         assert result.exit_code == 0
 
-        completions_dir = (
-            tmp_path / ".local" / "share" / "bash-completion" / "completions"
-        )
+        completions_dir = tmp_path / ".local" / "share" / "bash-completion" / "completions"
         primary = completions_dir / "agentworks"
         alias = completions_dir / "agw"
         assert primary.is_file()
@@ -375,9 +393,7 @@ class TestInstall:
         assert alias.is_symlink() or alias.is_file()
         assert alias.read_text() == primary.read_text()
 
-    def test_zsh_install_drops_agw_alias_symlink(
-        self, monkeypatch, tmp_path
-    ) -> None:
+    def test_zsh_install_drops_agw_alias_symlink(self, monkeypatch, tmp_path) -> None:
         """zsh's compinit autoload is keyed on the command name too: typing
         `agw<TAB>` looks for `_agw` in fpath. Without a symlink the
         `#compdef agentworks agw` directive inside `_agentworks` is never
@@ -390,9 +406,7 @@ class TestInstall:
         # Steer install away from Oh My Zsh detection so we land in ~/.zfunc.
         monkeypatch.delenv("ZSH_CUSTOM", raising=False)
 
-        result = CliRunner().invoke(
-            app, ["completion", "install", "--shell", "zsh"]
-        )
+        result = CliRunner().invoke(app, ["completion", "install", "--shell", "zsh"])
         assert result.exit_code == 0
 
         zfunc = tmp_path / ".zfunc"
@@ -408,29 +422,21 @@ class TestInstall:
 class TestUninstall:
     """Filesystem-level checks for `agentworks completion uninstall`."""
 
-    def test_bash_uninstall_removes_script_and_alias(
-        self, monkeypatch, tmp_path
-    ) -> None:
+    def test_bash_uninstall_removes_script_and_alias(self, monkeypatch, tmp_path) -> None:
         from typer.testing import CliRunner
 
         monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path))
-        completions_dir = (
-            tmp_path / ".local" / "share" / "bash-completion" / "completions"
-        )
+        completions_dir = tmp_path / ".local" / "share" / "bash-completion" / "completions"
         completions_dir.mkdir(parents=True)
         (completions_dir / "agentworks").write_text("x")
         (completions_dir / "agw").write_text("x")
 
-        result = CliRunner().invoke(
-            app, ["completion", "uninstall", "--shell", "bash"]
-        )
+        result = CliRunner().invoke(app, ["completion", "uninstall", "--shell", "bash"])
         assert result.exit_code == 0
         assert not (completions_dir / "agentworks").exists()
         assert not (completions_dir / "agw").exists()
 
-    def test_zsh_uninstall_removes_script_and_alias(
-        self, monkeypatch, tmp_path
-    ) -> None:
+    def test_zsh_uninstall_removes_script_and_alias(self, monkeypatch, tmp_path) -> None:
         from typer.testing import CliRunner
 
         monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path))
@@ -440,16 +446,12 @@ class TestUninstall:
         (zfunc / "_agentworks").write_text("x")
         (zfunc / "_agw").write_text("x")
 
-        result = CliRunner().invoke(
-            app, ["completion", "uninstall", "--shell", "zsh"]
-        )
+        result = CliRunner().invoke(app, ["completion", "uninstall", "--shell", "zsh"])
         assert result.exit_code == 0
         assert not (zfunc / "_agentworks").exists()
         assert not (zfunc / "_agw").exists()
 
-    def test_powershell_uninstall_removes_script_and_profile_line(
-        self, monkeypatch, tmp_path
-    ) -> None:
+    def test_powershell_uninstall_removes_script_and_profile_line(self, monkeypatch, tmp_path) -> None:
         from typer.testing import CliRunner
 
         from agentworks.completions import install
@@ -463,9 +465,7 @@ class TestUninstall:
 
         monkeypatch.setattr(install, "_query_powershell_profile", lambda: profile)
 
-        result = CliRunner().invoke(
-            app, ["completion", "uninstall", "--shell", "powershell"]
-        )
+        result = CliRunner().invoke(app, ["completion", "uninstall", "--shell", "powershell"])
         assert result.exit_code == 0
         assert not script.exists()
         assert "agentworks.ps1" not in profile.read_text()
@@ -473,9 +473,7 @@ class TestUninstall:
         assert "Write-Host hi" in profile.read_text()
 
     @pytest.mark.parametrize("shell", ["bash", "zsh", "powershell"])
-    def test_uninstall_when_nothing_installed_is_clean(
-        self, monkeypatch, tmp_path, shell
-    ) -> None:
+    def test_uninstall_when_nothing_installed_is_clean(self, monkeypatch, tmp_path, shell) -> None:
         """Every shell's uninstall exits 0 with a "nothing found" message
         when there's nothing to remove -- not just bash."""
         from typer.testing import CliRunner
@@ -491,16 +489,12 @@ class TestUninstall:
             profile = tmp_path / "profile.ps1"
             monkeypatch.setattr(install, "_query_powershell_profile", lambda: profile)
 
-        result = CliRunner().invoke(
-            app, ["completion", "uninstall", "--shell", shell]
-        )
+        result = CliRunner().invoke(app, ["completion", "uninstall", "--shell", shell])
         assert result.exit_code == 0
         # Lowercase compare: the powershell message uses "PowerShell".
         assert f"no {shell} completions found" in result.stdout.lower()
 
-    def test_powershell_uninstall_fails_when_no_binary(
-        self, monkeypatch
-    ) -> None:
+    def test_powershell_uninstall_fails_when_no_binary(self, monkeypatch) -> None:
         """If neither `pwsh` nor `powershell` is on PATH, uninstall exits
         non-zero with a clear error rather than silently succeeding."""
         from typer.testing import CliRunner
@@ -509,15 +503,11 @@ class TestUninstall:
 
         monkeypatch.setattr(install, "_query_powershell_profile", lambda: None)
 
-        result = CliRunner().invoke(
-            app, ["completion", "uninstall", "--shell", "powershell"]
-        )
+        result = CliRunner().invoke(app, ["completion", "uninstall", "--shell", "powershell"])
         assert result.exit_code != 0
         assert "could not determine PowerShell $PROFILE path" in result.stderr
 
-    def test_powershell_uninstall_preserves_user_lines_mentioning_filename(
-        self, monkeypatch, tmp_path
-    ) -> None:
+    def test_powershell_uninstall_preserves_user_lines_mentioning_filename(self, monkeypatch, tmp_path) -> None:
         """The $PROFILE strip must match the installer's exact
         dot-source-plus-quoted-path shape, not any line containing the
         string 'agentworks.ps1'. Comments, conditionals, and unrelated
@@ -538,14 +528,10 @@ class TestUninstall:
         user_comment = "# uses agentworks.ps1 for completions"
         user_conditional = 'if ($true) { Write-Host "agentworks.ps1 loaded" }'
         user_alt_dotsource = '. "$HOME/custom/agentworks.ps1.bak"'  # different filename suffix
-        profile.write_text(
-            "\n".join([user_comment, installer_line, user_conditional, user_alt_dotsource]) + "\n"
-        )
+        profile.write_text("\n".join([user_comment, installer_line, user_conditional, user_alt_dotsource]) + "\n")
         monkeypatch.setattr(install, "_query_powershell_profile", lambda: profile)
 
-        result = CliRunner().invoke(
-            app, ["completion", "uninstall", "--shell", "powershell"]
-        )
+        result = CliRunner().invoke(app, ["completion", "uninstall", "--shell", "powershell"])
         assert result.exit_code == 0
 
         remaining = profile.read_text()
@@ -601,13 +587,9 @@ class TestKindsSourcedCompleter:
             ("powershell", PS_SNIPPETS["resource_kinds"]),
         ):
             assert "resource kinds --names-only" in source, (
-                f"{shell} resource_kinds should call the config-free "
-                f"kinds command; got: {source!r}"
+                f"{shell} resource_kinds should call the config-free kinds command; got: {source!r}"
             )
-            assert "resource list" not in source, (
-                f"{shell} resource_kinds still scrapes resource list: "
-                f"{source!r}"
-            )
+            assert "resource list" not in source, f"{shell} resource_kinds still scrapes resource list: {source!r}"
 
 
 class TestStaticChoiceCompletion:
@@ -626,14 +608,19 @@ class TestStaticChoiceCompletion:
         assert by_name["layout"] == ["per-kind", "single", "per-resource"]
         assert by_name["toml"] == ["comment", "delete"]
 
-    def test_sample_kind_choices_extracted(self) -> None:
+    def test_sample_kind_completes_dynamically(self) -> None:
+        # The sample-kind argument is a plain string (no click.Choice: any
+        # typed kind, capability kinds and typos included, must reach the
+        # service layer for a clean, kind-aware domain error, issue #276).
+        # It completes via the config-free resource_kinds dynamic completer,
+        # the same one `resource list --kind` uses.
         from agentworks.cli import app
         from agentworks.completions.spec import build_spec
-        from agentworks.manifests.samples import SAMPLE_KINDS
 
         sample = build_spec(app).subcommands["resource"].subcommands["sample"]
         (kind,) = [p for p in sample.params if p.name == "kind"]
-        assert kind.choices == list(SAMPLE_KINDS)
+        assert not kind.choices
+        assert kind.dynamic_completer == "resource_kinds"
 
     def test_all_shells_emit_toml_choices(self) -> None:
         from agentworks.cli import app

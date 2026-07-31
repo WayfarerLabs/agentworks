@@ -13,8 +13,8 @@ from typing import ClassVar
 from agentworks.capabilities import Capability
 from agentworks.capabilities.base import RunContext
 from agentworks.capabilities.git_credential.github import GitHubCredentialProvider
-from agentworks.capabilities.vm_platform.proxmox import ProxmoxPlatform
 from agentworks.orchestration.node import CreatableNode, Node, Readiness
+from agentworks.plugins.proxmox.platform import ProxmoxPlatform
 
 _PROXMOX_CONFIG = {
     "api_url": "https://pve:8006",

@@ -35,7 +35,7 @@ if TYPE_CHECKING:
     from collections.abc import Sequence
 
     from agentworks.resources.origin import Origin
-    from agentworks.resources.reference import ReferenceEntry, ResourceReference
+    from agentworks.resources.reference import ResourceReference
 
 
 @dataclass(frozen=True)
@@ -43,16 +43,18 @@ class GitCredentialProviderEntry:
     """A name-keyed marker for one git credential provider implementation
     (e.g., ``"github"``, ``"azdo"``).
 
-    The actual provider class (``GitHubCredentialProvider``,
-    ``AzDOCredentialProvider``) lives in
-    ``agentworks.git_credentials.<name>``; this row is what
-    ``[git_credentials.<name>].type = "..."`` resolves against in the
-    framework.
+    The actual provider class (``GitHubCredentialProvider`` in core,
+    ``AzDOCredentialProvider`` in the ``azure`` plugin at
+    ``agentworks.plugins.azure.azdo``) lives beside its capability module;
+    this row is what ``[git_credentials.<name>].provider = "..."`` resolves
+    against in the framework.
+
+    Inbound references live on the dependency graph
+    (``Registry.graph.dependents_of``), not on this row.
     """
 
     name: str
     origin: Origin | None = None
-    references: tuple[ReferenceEntry, ...] = ()
 
 
 @dataclass(frozen=True)

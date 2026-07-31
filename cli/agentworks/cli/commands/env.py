@@ -41,16 +41,13 @@ def env_show(
         str | None,
         typer.Option(
             "--session",
-            help=(
-                "Anchor the chain at this session (its workspace, agent, "
-                "and VM are auto-resolved)."
-            ),
+            help=("Anchor the chain at this session (its workspace, agent, and VM are auto-resolved)."),
         ),
     ] = None,
-    reveal_secrets: Annotated[
+    resolve: Annotated[
         bool,
         typer.Option(
-            "--reveal-secrets",
+            "--resolve",
             help=(
                 "Resolve secret-backed entries through the configured "
                 "backend chain and print their values (default: redacted)."
@@ -62,8 +59,8 @@ def env_show(
 
     At least one of --vm / --workspace / --agent / --session is required.
     Entries are precedence-sorted and scope-annotated. Secret-backed
-    entries are redacted by default; pass --reveal-secrets to resolve
-    them through the active backend chain.
+    entries are redacted by default; pass --resolve to resolve them
+    through the active backend chain.
     """
     from agentworks.config import load_config
     from agentworks.env.show import show_env
@@ -75,5 +72,5 @@ def env_show(
         workspace_name=workspace,
         agent_name=agent,
         session_name=session,
-        reveal_secrets=reveal_secrets,
+        reveal_secrets=resolve,
     )

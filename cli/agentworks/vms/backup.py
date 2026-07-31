@@ -152,7 +152,9 @@ def backup_vm(
                     output.info("Archiving workspace files...")
                     local_archive = backup_dir / "workspaces.tar.zst"
                     archived_paths, skipped_paths = _archive_workspaces(
-                        target, workspaces, local_archive,
+                        target,
+                        workspaces,
+                        local_archive,
                     )
                 else:
                     output.info("No VM workspaces to archive.")
@@ -380,7 +382,10 @@ def _transfer_with_progress(
     args.append(str(local_path))
 
     proc = subprocess.Popen(
-        args, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        args,
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
     )
     try:
         last_report = time.monotonic()
@@ -391,10 +396,7 @@ def _transfer_with_progress(
                     local_size = local_path.stat().st_size
                     if remote_size > 0:
                         pct = local_size / remote_size * 100
-                        output.detail(
-                            f"Transfer: {_fmt_size(local_size)} / "
-                            f"{_fmt_size(remote_size)} ({pct:.0f}%)"
-                        )
+                        output.detail(f"Transfer: {_fmt_size(local_size)} / {_fmt_size(remote_size)} ({pct:.0f}%)")
                     else:
                         output.detail(f"Transfer: {_fmt_size(local_size)}")
                 except FileNotFoundError:
