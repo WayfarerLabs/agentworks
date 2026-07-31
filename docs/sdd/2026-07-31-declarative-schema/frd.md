@@ -90,11 +90,11 @@ Derived surfaces:
   diagnostics in schema-aware editors.
 - **FR10.** Samples are rendered live by the CLI from the registered schema, uniformly for bundled
   kinds and plugin capabilities alike; no generated sample files are checked in. A rendered sample
-  is the schema-derived field reference (every field, type, required/optional, default,
-  description; one union arm rendered with alternatives indicated) merged with a hand-authored
-  prose blurb per kind and per capability. A capability registered without sample prose still
-  yields a complete generated skeleton. The bundled hand-authored sample files are retired, and
-  `agw resource sample` (including `--write`) keeps its interface over the new renderer.
+  is the schema-derived field reference (every field, type, required/optional, default, description;
+  one union arm rendered with alternatives indicated) merged with a hand-authored prose blurb per
+  kind and per capability. A capability registered without sample prose still yields a complete
+  generated skeleton. The bundled hand-authored sample files are retired, and `agw resource sample`
+  (including `--write`) keeps its interface over the new renderer.
 - **FR11.** An operator can ask the CLI to explain schema: `agw resource describe` (or a sibling
   surface; naming is HLA's call) renders the field reference for a kind or capability, including
   plugin-registered ones, from the same schema.
@@ -102,10 +102,10 @@ Derived surfaces:
   (`<owner>.<field>: ...`) and file/position context at least as good as today's, and unknown keys
   remain errors for capability config.
 - **FR13.** Drift is structurally impossible or test-caught: schema facts appear in exactly one
-  authored place (the model), samples and describe output are rendered from it (so they cannot
-  drift by construction), the renderer is pinned by tests over fixture schemas plus every bundled
-  kind (rendered samples load cleanly and build a registry), and any remaining checked-in derived
-  docs are pinned by tests that fail when regeneration would change them.
+  authored place (the model), samples and describe output are rendered from it (so they cannot drift
+  by construction), the renderer is pinned by tests over fixture schemas plus every bundled kind
+  (rendered samples load cleanly and build a registry), and any remaining checked-in derived docs
+  are pinned by tests that fail when regeneration would change them.
 
 Stretch (in scope only if phase 2 lands cleanly; may be descoped to a follow-up without
 renegotiating this FRD):
