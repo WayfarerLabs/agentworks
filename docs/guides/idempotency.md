@@ -81,7 +81,9 @@ memberships, while the DB grant rows survive the reinit untouched, so without th
 would hold grants in the database but no actual on-VM workspace access. The reconcile is idempotent
 (each group add is a no-op when membership already holds), so it runs on every reinit, and it
 touches on-VM state only: the grant rows are left as they are. A grant row pointing at a
-since-deleted workspace is skipped with a warning rather than failing the repair.
+since-deleted workspace is skipped with a warning rather than failing the repair. On success reinit
+reports how many grants it reconciled, so an operator recovering a gone user gets confirmation the
+access was restored.
 
 ### Fully idempotent
 

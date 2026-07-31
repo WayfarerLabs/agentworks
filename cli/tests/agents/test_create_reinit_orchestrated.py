@@ -235,6 +235,9 @@ def test_reinit_stopped_vm_gate_resolves_once_and_seeds_the_boundary(
     assert any("reinitialized" in m for m in captured_output.info)
     # The terminal outcome routes through result(): RESULT role at level 0.
     assert (Role.RESULT, 0, "Agent 'dev' reinitialized") in captured_output.lines
+    # No grants seeded, so the reconcile summary line (issue #280 item 5) is
+    # suppressed: nothing was reconciled, so nothing is claimed.
+    assert not any(m.startswith("Reconciled ") for m in captured_output.info)
     # Banner parity: reinit frames the same phases the imperative root
     # did, so a framing regression cannot pass.
     assert "=== Preflight ===" in captured_output.info
@@ -558,6 +561,25 @@ def test_create_grant_all_reconciles_between_insert_and_sync(
 
 
 # -- reinit reconciles recorded grants onto the VM (issue #280) ----------------
+#
+# These tests fake ``create_agent_on_vm`` wholesale (via the ``mutation``
+# fixture, or a local recorder). The user step's two outcomes, the "#252
+# truly-gone user" RECREATE and the already-exists no-op, both live INSIDE
+# that faked function, so this seam does not distinguish them: whichever
+# occurred, the reconcile that follows runs unconditionally. These tests
+# therefore pin the reconcile itself (that it runs, over which workspaces,
+# without re-inserting rows), NOT that the recreate branch specifically was
+# taken. Driving the two user-step outcomes would require exercising the real
+# ``create_agent_on_vm`` against a fake transport, which is out of scope here.
+
+
+def _add_workspace(db: Database, name: str) -> None:
+    """Insert a workspace row on 'box' with its canonical ws-<name> group."""
+    db._conn.execute(
+        "INSERT INTO workspaces (name, vm_name, workspace_path, linux_group) VALUES (?, 'box', ?, ?)",
+        (name, f"/srv/{name}", f"ws-{name}"),
+    )
+    db._conn.commit()
 
 
 def _seed_granted_agent(db: Database, workspaces: list[str]) -> None:
@@ -565,11 +587,22 @@ def _seed_granted_agent(db: Database, workspaces: list[str]) -> None:
     ``workspaces`` (creating each workspace row too)."""
     db.insert_agent("dev", "box", "agt-dev", template="default")
     for ws in workspaces:
-        db._conn.execute(
-            "INSERT INTO workspaces (name, vm_name, workspace_path, linux_group) VALUES (?, 'box', ?, ?)",
-            (ws, f"/srv/{ws}", f"ws-{ws}"),
-        )
-        db._conn.commit()
+        _add_workspace(db, ws)
+        db.insert_agent_grant("dev", ws, "explicit")
+
+
+def _seed_grant_all_agent(db: Database, workspaces: list[str]) -> None:
+    """Seed the 'dev' agent on 'box' as a grant_all agent with the rows that
+    grant_all materializes.
+
+    Faithful to the real grant_all shape: the agent row carries the
+    grant_all flag, and each workspace has an 'explicit' grant row (the type
+    grant_all writes, see agents/grants.py grant_all branch, realize.py, and
+    workspaces/realize.py). There is no distinct grant_type for grant_all;
+    the flag on the agent row is what marks these rows as blanket policy."""
+    db.insert_agent("dev", "box", "agt-dev", template="default", grant_all=True)
+    for ws in workspaces:
+        _add_workspace(db, ws)
         db.insert_agent_grant("dev", ws, "explicit")
 
 
@@ -581,13 +614,13 @@ def test_reinit_reconciles_recorded_grants_onto_the_vm(
     captured_output,  # noqa: ANN001
 ) -> None:
     """Regression for issue #280. reinit shares ``create_agent_on_vm`` with
-    the create path but not realize's grant pass, so when the user step
-    recreates a truly-gone agent user (issue #252) the fresh user lands with
-    no workspace group memberships while the DB grant rows survive. reinit
-    must reconcile the recorded grants back onto the VM. The on-VM mutation
-    is faked (the recreate happens inside it), so this asserts the reconcile
-    that follows adds the agent to the granted workspace's group. Fails
-    without the fix, because reinit never called ``add_to_workspace_group``."""
+    the create path but not realize's grant pass, so an agent's recorded
+    grants were never reconciled onto the VM after reinit (which silently
+    lost workspace access when the user step had recreated a gone user).
+    This asserts the reconcile runs and adds the agent to its granted
+    workspace's group. Fails without the fix, because reinit never called
+    ``add_to_workspace_group``. (See the section note: this pins the
+    reconcile, not which user-step branch ran.)"""
     config = make_config()
     _seed_vm(db)
     _seed_granted_agent(db, ["ws1"])
@@ -635,12 +668,10 @@ def test_reinit_reconcile_is_idempotent_across_repeated_reinits(
     monkeypatch: pytest.MonkeyPatch,
     captured_output,  # noqa: ANN001
 ) -> None:
-    """The reconcile runs on every reinit (both the recreate and the
-    already-exists branch of the user step) because it is idempotent:
-    ``add_to_workspace_group`` is ``getent || groupadd`` then ``usermod
-    -aG``, a no-op once membership holds. A second reinit (user now present,
-    membership already held) still invokes it, completes cleanly, and
-    duplicates no grant rows."""
+    """The reconcile runs on every reinit and is safe to repeat because it is
+    idempotent: ``add_to_workspace_group`` is ``getent || groupadd`` then
+    ``usermod -aG``, a no-op once membership holds. A second reinit still
+    invokes it, completes cleanly, and duplicates no grant rows."""
     config = make_config()
     _seed_vm(db)
     _seed_granted_agent(db, ["ws1"])
@@ -692,3 +723,40 @@ def test_reinit_skips_stale_grant_and_reconciles_the_rest(
     assert done == ["good"]  # the healthy grant was still reconciled
     assert any("stale" in w and "skipping stale grant" in w for w in captured_output.warnings)
     assert (Role.RESULT, 0, "Agent 'dev' reinitialized") in captured_output.lines
+
+
+def test_reinit_reconciles_grant_all_agent_via_materialized_rows(
+    db: Database,
+    make_config,  # noqa: ANN001
+    mutation: dict[str, Any],
+    monkeypatch: pytest.MonkeyPatch,
+    captured_output,  # noqa: ANN001
+) -> None:
+    """The fix's subtlest claim, pinned for reinit: a grant_all agent is
+    reconciled via its MATERIALIZED grant rows, with no grant_all-flag branch.
+    ``create`` covers grant_all through ``db.list_workspaces``
+    (test_create_grant_all_reconciles_between_insert_and_sync); reinit instead
+    reconciles from ``db.list_granted_workspaces``, which returns the rows
+    grant_all materialized. This seeds a real grant_all agent (flag set, one
+    'explicit' row per workspace) and asserts the reconcile invoked
+    ``add_to_workspace_group`` for that workspace. Fails without the reconcile
+    (same discriminator as the explicit-grant regression test). Also asserts
+    the success summary line names the reconciled count (issue #280 item 5)."""
+    config = make_config()
+    _seed_vm(db)
+    _seed_grant_all_agent(db, ["ws1"])
+    _reachable(monkeypatch, True)
+    group_adds: list[tuple[str, str]] = []
+    monkeypatch.setattr(
+        agent_grants,
+        "add_to_workspace_group",
+        lambda vm, config_, db_, linux_user, ws, **k: group_adds.append((linux_user, ws)),
+    )
+
+    agent_manager.reinit_agent(db, config, name="dev")
+
+    row = db.get_agent("dev")
+    assert row is not None and row.grant_all  # the seed is a real grant_all agent
+    assert group_adds == [("agt-dev", "ws1")]  # reconciled via the materialized row
+    # Summary line present when grants were reconciled (N > 0).
+    assert "Reconciled 1 workspace grant" in captured_output.info
