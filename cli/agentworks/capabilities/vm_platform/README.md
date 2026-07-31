@@ -182,12 +182,21 @@ which is worse than failing. Cache the credential per instance: its identity is 
 config, so one build and one probe serve every op.
 
 **4. Probe once at build, and let runup pay for it.** Both credential paths make one live token
-request when built, so a bad credential becomes a typed error naming the site and the secret at the
-point of construction rather than a raw SDK exception from whichever call happened to be first. The
-platform's `runup` is where that lands on the provisioning path, ahead of `create`, so a wrong
-credential aborts `vm create` with nothing realized. Keep the client construction OUTSIDE the `try`
-that wraps SDK calls in a platform error type; a typed credential failure is already the answer, and
-re-wrapping it strips the hint.
+request when built, but they answer a failed probe differently, and the difference is the point. On
+the EXPLICIT path the probe is purely diagnostic: there is no fallback to choose, so a failure
+becomes a typed error naming the site and the secret at the point of construction, rather than a raw
+SDK exception from whichever call happened to be first. On the AMBIENT path the probe is the
+fallback DECISION: a failure means nothing in the chain can authenticate, so it answers with an
+unprobed interactive-browser credential and raises nothing. The platform's `runup` is where the
+explicit path's error lands on the provisioning timeline, ahead of `create`, so a wrong credential
+aborts `vm create` with nothing realized.
+
+Two placement rules go with it. Keep the client construction OUTSIDE the `try` that wraps SDK calls
+in your platform error type: a typed credential failure is already the answer, and re-wrapping it
+strips the hint (worse, a `status()` that degrades to UNKNOWN on any exception would swallow it
+entirely). But keep the credential's own construction INSIDE the try that produces that typed error,
+alongside its probe: SDKs validate constructor arguments eagerly, and a resolved secret that comes
+back empty is reachable in a way config validation cannot catch.
 
 Read `_parse_service_principal`, `_build_service_principal_credential`, and `_get_credential`
 together: that trio is the whole pattern.

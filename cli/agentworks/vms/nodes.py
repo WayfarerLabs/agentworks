@@ -205,6 +205,14 @@ class LiveVMNode:
         self._observed = observed
         # RUNNING or UNKNOWN proceeds: a transient status failure must
         # not trigger a spurious start; the real op surfaces the error.
+        # That degrade covers the BACKEND read only. A failure in the
+        # credential layer beneath it does not reach here as UNKNOWN: a
+        # platform with explicitly configured credentials (an azure site
+        # with a service_principal) raises a typed error instead, and
+        # deliberately so, since its identity layer cannot distinguish a
+        # rejected credential from an unreachable one and reporting
+        # UNKNOWN would hide a misconfiguration behind a plausible
+        # answer. Same stance as that platform's fatal runup.
         return observed in (VMStatus.STOPPED, VMStatus.DEALLOCATED)
 
     def auto_start(self, gate_secrets: SecretReader) -> None:

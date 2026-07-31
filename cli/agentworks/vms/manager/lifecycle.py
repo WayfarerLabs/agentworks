@@ -285,14 +285,17 @@ def create_vm(
 
     with ExitStack() as init_stack:
         with output.section("Provisioning"):
-            # Provisioning-phase runup: authenticate the platform's own
-            # credential (proxmox API token) before create() mutates anything. A
+            # Provisioning-phase runup: the platform's own authenticated
+            # pre-check before create() mutates anything (proxmox authenticates
+            # its API token; azure resolves its credential, which on a site with
+            # a configured service principal means reading and probing the
+            # client secret, and confirms the resource group exists). A
             # definitive rejection aborts here, before the DB row or any backend
             # resource exists (the FATAL policy: nothing realized, nothing to
             # unwind). Runup is deferred and announced inline (no phase of its
-            # own); lima/wsl2/azure have no token, so this is a silent no-op for
-            # them. The credentials' write-step runup stays deferred into
-            # initialization, under the skip-and-degrade policy.
+            # own); lima and wsl2 have nothing to authenticate, so it is a
+            # silent no-op for them. The credentials' write-step runup stays
+            # deferred into initialization, under the skip-and-degrade policy.
             site_node.runup(scoped_ctx(site_node.secret_refs()))
             tailscale_auth_key = scoped_ctx(template_node.secret_refs()).secret(vm_tmpl.tailscale_auth_key)
             # Each credential's token, read through its node's SCOPED delivery.
