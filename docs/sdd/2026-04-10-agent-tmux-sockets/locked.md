@@ -41,3 +41,13 @@ concern of agent sessions running under the admin's tmux server.
 - `cli/agentworks/agents/manager.py` -- agent create socket dir, agent delete socket cleanup
 - `cli/agentworks/ssh.py` -- sudo scoping documentation
 - `cli/tests/test_tmuxinator.py` -- socket path and wrapper tests
+
+## 2026-07-30
+
+Agent delete now removes the per-agent tmux socket directory
+(`/run/agentworks/agent-tmux-sockets/<linux_user>`) alongside `userdel`, best-effort (ref #281).
+Previously the empty directory, owned by the freed uid, lingered on tmpfs under `/run` until reboot
+and accumulated under create/delete churn on long-lived VMs. The removal derives its path from the
+same `agent_socket_dir()` helper that create uses (`ensure_agent_socket_dir`), so create and
+teardown agree on the location. This lockfile note aside, these specs are locked and will not be
+updated to reflect further implementation changes.
