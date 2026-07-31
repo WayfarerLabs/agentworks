@@ -537,18 +537,21 @@ def reinit_agent(
                     # (list_granted_workspaces), not from the live workspace set.
                     # This one query is uniform across grant types: explicit,
                     # grant_all, and implicit (session-tied) grants all
-                    # materialize rows, so it already covers every kind with no
-                    # per-type branching. In particular grant_all needs no
-                    # special case: enabling it materializes an explicit row per
-                    # workspace and the invariant is maintained eagerly (each new
-                    # workspace inserts a row for every grant_all agent), so for
-                    # a grant_all agent the row set already equals the live
-                    # workspace set. Special-casing the grant_all flag to iterate
-                    # db.list_workspaces (as the CREATE path does) would add
-                    # branching and could only ever differ from the rows if that
-                    # materialization invariant is already broken, in which case
-                    # reinit should surface the bookkeeping bug, not silently
-                    # self-heal around it by re-deriving membership from the flag.
+                    # materialize rows, so it covers every kind with no per-type
+                    # branching. grant_all needs no special case: enabling it
+                    # materializes an explicit row per workspace, and the create
+                    # and workspace-create paths keep that in sync, so for a
+                    # grant_all agent the rows normally equal the live workspace
+                    # set. That sync is a maintained convention, not an
+                    # unbreakable invariant (e.g. copy_workspace does not
+                    # materialize grant_all rows today, issue #321), so the two
+                    # can legitimately diverge. reinit deliberately reconciles the
+                    # recorded ledger rather than re-deriving membership from the
+                    # grant_all flag: a missing row means the agent is not granted
+                    # that workspace yet, and reinit reflecting that (no access) is
+                    # more honest than papering over a materialization gap by
+                    # self-healing from the flag. The gap is fixed at its source
+                    # (issue #321), not masked here.
                     #
                     # add_to_workspace_group is idempotent (getent || groupadd,
                     # then usermod -aG), so running it unconditionally is a

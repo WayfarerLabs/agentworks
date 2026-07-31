@@ -732,16 +732,20 @@ def test_reinit_reconciles_grant_all_agent_via_materialized_rows(
     monkeypatch: pytest.MonkeyPatch,
     captured_output,  # noqa: ANN001
 ) -> None:
-    """The fix's subtlest claim, pinned for reinit: a grant_all agent is
-    reconciled via its MATERIALIZED grant rows, with no grant_all-flag branch.
-    ``create`` covers grant_all through ``db.list_workspaces``
-    (test_create_grant_all_reconciles_between_insert_and_sync); reinit instead
-    reconciles from ``db.list_granted_workspaces``, which returns the rows
-    grant_all materialized. This seeds a real grant_all agent (flag set, one
-    'explicit' row per workspace) and asserts the reconcile invoked
-    ``add_to_workspace_group`` for that workspace. Fails without the reconcile
-    (same discriminator as the explicit-grant regression test). Also asserts
-    the success summary line names the reconciled count (issue #280 item 5)."""
+    """A grant_all agent IS reconciled on reinit, from the recorded grant rows
+    (``db.list_granted_workspaces``). This seeds a real grant_all agent (flag
+    set, one 'explicit' row per workspace, the shape grant_all materializes) and
+    asserts the reconcile invoked ``add_to_workspace_group`` for that workspace.
+    Fails without the reconcile (same discriminator as the explicit-grant
+    regression test). Also asserts the success summary line names the reconciled
+    count (issue #280 item 5).
+
+    Note: with a single workspace this does not isolate "reconcile from rows"
+    from a hypothetical "reconcile from the grant_all flag via
+    db.list_workspaces": under the maintained rows/live-set sync both produce
+    the same call. That distinction only bites when the two diverge (issue
+    #321); the reconcile-from-rows design choice is documented at the call
+    site."""
     config = make_config()
     _seed_vm(db)
     _seed_grant_all_agent(db, ["ws1"])
