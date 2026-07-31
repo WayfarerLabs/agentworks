@@ -497,7 +497,7 @@ def test_delete_removes_per_agent_socket_dir_best_effort(
 ) -> None:
     """``delete_agent_on_vm`` removes the per-agent tmux socket directory
     (the same path create derives via ``ensure_agent_socket_dir``), with
-    sudo, best-effort (``check=False``), after the ``userdel``. Even when
+    sudo, best-effort (``check=False``), before the ``userdel``. Even when
     the removal fails it does not abort the delete."""
     import shlex
 
@@ -529,9 +529,54 @@ def test_delete_removes_per_agent_socket_dir_best_effort(
     assert len(rm_matches) == 1, fake.calls
     rm_idx, rm_kwargs = rm_matches[0]
 
-    assert rm_idx > userdel_idx  # after the user (and its processes) are gone
+    # Before the userdel: the pkill already freed the sockets, and running
+    # the rm first means a failing userdel cannot skip it (see the dedicated
+    # regression test below).
+    assert rm_idx < userdel_idx
     assert rm_kwargs.get("sudo") is True
     assert rm_kwargs.get("check") is False  # best-effort: a failing rm does not abort
+
+
+def test_delete_socket_dir_runs_even_when_userdel_fails(
+    db: Database,
+    make_config,  # noqa: ANN001
+    monkeypatch: pytest.MonkeyPatch,
+    captured_output: CapturedOutput,
+) -> None:
+    """Regression (#296): a failing ``userdel`` must not skip the socket-dir
+    removal. ``userdel`` runs checked, so on failure it raises; because the
+    ``rm`` now runs BEFORE it, the socket dir is already cleaned and does not
+    re-orphan under the freed uid. The delete still warns rather than aborts."""
+    import shlex
+
+    from agentworks.agents import initializer as agent_initializer
+    from agentworks.sessions.tmux import agent_socket_dir
+    from agentworks.ssh import SSHLogger
+
+    config = make_config()
+    _seed(db)
+    vm = db.get_vm("box")
+    assert vm is not None
+
+    # userdel "fails" on the VM (checked -> raises); the rm must have already run.
+    fake = _KwargRecordingTarget(fail_substr="userdel")
+    monkeypatch.setattr(agent_initializer, "transport", lambda *a, **k: fake)
+
+    agent_initializer.delete_agent_on_vm(
+        vm,
+        config,
+        "agt-a1",
+        logger=SSHLogger("box", "test-delete-socket-userdel-fail"),
+    )
+
+    expected_path = shlex.quote(agent_socket_dir("agt-a1"))
+    commands = [cmd for cmd, _k in fake.calls]
+    assert f"rm -rf {expected_path}" in commands  # socket dir cleaned despite the userdel failure
+    assert any(c.startswith("userdel -r agt-a1") for c in commands)
+    rm_idx = commands.index(f"rm -rf {expected_path}")
+    userdel_idx = next(i for i, c in enumerate(commands) if c.startswith("userdel -r agt-a1"))
+    assert rm_idx < userdel_idx
+    assert any("remote cleanup for 'agt-a1' failed" in w for w in captured_output.warnings)
 
 
 def test_delete_nested_platform_path_reuses_the_callers_composition(
