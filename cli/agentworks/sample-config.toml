@@ -126,6 +126,10 @@ ssh_private_key = "~/.ssh/id_ed25519"        # required: used for SSH connection
 # (env-var, prompt, ...) at VM-init time; the resolved value is written to
 # `~/.git-credentials` and served by the agentworks-managed credential
 # helper (which replaces git's credential-store).
+# The credential name (the part after the dot) should follow the standard
+# naming rules (lowercase alphanumeric with hyphens or underscores) because
+# the default `git-token-<name>` secret is derived from it; a non-conforming
+# name (e.g. `GITHUB`) still loads but warns at config load.
 
 # Scoped GitHub credentials (fine-grained PATs pinned to a repo or org)
 # are declared in YAML manifests, not TOML: see

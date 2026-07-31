@@ -29,6 +29,14 @@ def create_vm_workspace(
     """Create a workspace on a VM. Returns the remote workspace path.
 
     Errors if the workspace directory already exists on the VM.
+
+    Self-cleaning: the group and directory are created early, then the
+    clone and configuration follow. A failure anywhere after those
+    resources exist (most often the git clone) tears down exactly what
+    this function made and re-raises the ORIGINAL error, so a failed
+    create leaves no residue on the VM (issue #262). ``realize._cleanup``
+    is gated on this function RETURNING, so it never covers a mid-create
+    failure; this teardown is the only one for that window.
     """
     from agentworks.agents.grants import workspace_group
 
@@ -48,81 +56,106 @@ def create_vm_workspace(
             hint=(f"Remove it manually (ssh to the VM and 'sudo rm -rf {workspace_path}') or choose a different name."),
         )
 
-    # Create workspace group (idempotent), add admin, and set up directory with setgid
-    target.run(f"sh -c 'getent group {ws_group} >/dev/null 2>&1 || /usr/sbin/groupadd {ws_group}'", sudo=True)
-    target.run(f"usermod -aG {ws_group} {vm.admin_username}", sudo=True)
-    target.run(f"mkdir -p {workspace_path}", sudo=True)
-    target.run(f"chown {vm.admin_username}:{ws_group} {workspace_path}", sudo=True)
-    target.run(f"chmod 2770 {workspace_path}", sudo=True)
-    # The canonical workspace ACL is applied at the end (apply_workspace_acls),
-    # after any clone and other content is placed, so existing entries are
-    # covered too. This is the same recursive spec workspace repair applies,
-    # so a first repair of this workspace is a true no-op.
+    # Everything below creates on-VM resources (the group, then the
+    # directory and its contents). If any step fails, tear down exactly
+    # what was made and re-raise the ORIGINAL error so a failed create
+    # leaves no residue (issue #262). The existence precheck above is
+    # deliberately outside this block: an AlreadyExistsError means the
+    # directory is NOT ours, so it must never be swept up by the teardown.
+    try:
+        # Create workspace group (idempotent), add admin, and set up directory with setgid
+        target.run(f"sh -c 'getent group {ws_group} >/dev/null 2>&1 || /usr/sbin/groupadd {ws_group}'", sudo=True)
+        target.run(f"usermod -aG {ws_group} {vm.admin_username}", sudo=True)
+        target.run(f"mkdir -p {workspace_path}", sudo=True)
+        target.run(f"chown {vm.admin_username}:{ws_group} {workspace_path}", sudo=True)
+        target.run(f"chmod 2770 {workspace_path}", sudo=True)
+        # The canonical workspace ACL is applied at the end (apply_workspace_acls),
+        # after any clone and other content is placed, so existing entries are
+        # covered too. This is the same recursive spec workspace repair applies,
+        # so a first repair of this workspace is a true no-op.
 
-    # Git clone if repo is set
-    if template.repo:
-        output.info(f"Cloning {template.repo}...")
-        try:
-            import shlex
+        # Git clone if repo is set
+        if template.repo:
+            output.info(f"Cloning {template.repo}...")
+            try:
+                import shlex
 
-            # `--` stops option parsing so a repo URL beginning with `-` can
-            # never be read as a git flag; both operands are quoted for spaces.
+                # `--` stops option parsing so a repo URL beginning with `-` can
+                # never be read as a git flag; both operands are quoted for spaces.
+                target.run(
+                    f"git clone -- {shlex.quote(template.repo)} {shlex.quote(workspace_path)}",
+                    timeout=300,
+                )
+
+                # Stamp the checkout with its configured git identity so commits
+                # made here are attributed correctly. This is repo-local config
+                # (the checkout's own .git/config), so it is actor-agnostic: any
+                # agent, the admin, or a human over VS Code Remote picks it up,
+                # and it overrides any per-user global identity. Identity is only
+                # meaningful for a repo-backed workspace, so it rides the clone.
+                for git_key, value in (
+                    ("user.name", template.git_user_name),
+                    ("user.email", template.git_user_email),
+                ):
+                    if value:
+                        # --local is explicit so the write can only ever land in
+                        # the checkout's .git/config, never the admin's global
+                        # ~/.gitconfig (git config defaults to global outside a repo).
+                        target.run(
+                            f"git -C {shlex.quote(workspace_path)} config --local {git_key} {shlex.quote(value)}"
+                        )
+
+                # Ensure cloned files inherit the workspace group and subdirectories
+                # have SGID so new files (including atomic writes) get the right group
+                target.run(f"chgrp -R {ws_group} {shlex.quote(workspace_path)}", sudo=True)
+                sgid_cmd = f"find {shlex.quote(workspace_path)} -type d -exec chmod g+s {{}} +"
+                target.run(sgid_cmd, sudo=True, timeout=120)
+            except Exception:
+                if template.repo.startswith("git@"):
+                    output.warn(
+                        "Hint: SSH repo URLs are not supported. Use HTTPS URLs "
+                        "and configure git credentials with 'vm add-git-credential'."
+                    )
+                else:
+                    output.warn(
+                        "Hint: for private repos, ensure git credentials are "
+                        "configured on the VM (see 'vm add-git-credential')."
+                    )
+                raise
+
+        # Tmuxinator config (no tasks yet at workspace creation time)
+        if template.tmuxinator:
+            tmux_config = generate_config(ws_name, workspace_path)
+            target.write_file(f"{workspace_path}/.tmuxinator.yml", tmux_config)
+            # Symlink so tmuxinator can find it by console session name
+            session = console_session_name(ws_name)
+            target.run("mkdir -p ~/.config/tmuxinator", timeout=10)
             target.run(
-                f"git clone -- {shlex.quote(template.repo)} {shlex.quote(workspace_path)}",
-                timeout=300,
+                f"ln -sf {workspace_path}/.tmuxinator.yml ~/.config/tmuxinator/{session}.yml",
+                timeout=10,
             )
 
-            # Stamp the checkout with its configured git identity so commits
-            # made here are attributed correctly. This is repo-local config
-            # (the checkout's own .git/config), so it is actor-agnostic: any
-            # agent, the admin, or a human over VS Code Remote picks it up,
-            # and it overrides any per-user global identity. Identity is only
-            # meaningful for a repo-backed workspace, so it rides the clone.
-            for git_key, value in (
-                ("user.name", template.git_user_name),
-                ("user.email", template.git_user_email),
-            ):
-                if value:
-                    # --local is explicit so the write can only ever land in
-                    # the checkout's .git/config, never the admin's global
-                    # ~/.gitconfig (git config defaults to global outside a repo).
-                    target.run(f"git -C {shlex.quote(workspace_path)} config --local {git_key} {shlex.quote(value)}")
-
-            # Ensure cloned files inherit the workspace group and subdirectories
-            # have SGID so new files (including atomic writes) get the right group
-            target.run(f"chgrp -R {ws_group} {shlex.quote(workspace_path)}", sudo=True)
-            sgid_cmd = f"find {shlex.quote(workspace_path)} -type d -exec chmod g+s {{}} +"
-            target.run(sgid_cmd, sudo=True, timeout=120)
-        except Exception:
-            if template.repo.startswith("git@"):
-                output.warn(
-                    "Hint: SSH repo URLs are not supported. Use HTTPS URLs "
-                    "and configure git credentials with 'vm add-git-credential'."
-                )
-            else:
-                output.warn(
-                    "Hint: for private repos, ensure git credentials are "
-                    "configured on the VM (see 'vm add-git-credential')."
-                )
-            raise
-
-    # Tmuxinator config (no tasks yet at workspace creation time)
-    if template.tmuxinator:
-        tmux_config = generate_config(ws_name, workspace_path)
-        target.write_file(f"{workspace_path}/.tmuxinator.yml", tmux_config)
-        # Symlink so tmuxinator can find it by console session name
-        session = console_session_name(ws_name)
-        target.run("mkdir -p ~/.config/tmuxinator", timeout=10)
-        target.run(
-            f"ln -sf {workspace_path}/.tmuxinator.yml ~/.config/tmuxinator/{session}.yml",
-            timeout=10,
-        )
-
-    # Canonical workspace ACL, applied last so every entry written above (a
-    # clone, the tmuxinator config) is covered, and future entries inherit via
-    # the default ACL. Shared with workspace repair so the two never drift and
-    # a first repair of this workspace is a no-op.
-    apply_workspace_acls(target, workspace_path)
+        # Canonical workspace ACL, applied last so every entry written above (a
+        # clone, the tmuxinator config) is covered, and future entries inherit via
+        # the default ACL. Shared with workspace repair so the two never drift and
+        # a first repair of this workspace is a no-op.
+        apply_workspace_acls(target, workspace_path)
+    except Exception:
+        # Best-effort teardown of exactly what was created above: the same
+        # primitives the delete path uses (rm -rf the directory, groupdel the
+        # group), so partially-created state is tolerated (a failure at
+        # groupadd itself means the directory does not exist yet; rm -rf and
+        # groupdel check=False both no-op on the missing pieces). A cleanup
+        # failure must never mask the original create error, so it is caught
+        # and surfaced as a warning while the original propagates.
+        try:
+            delete_vm_workspace(vm, config, ws_name, workspace_path, ws_group, logger=logger)
+        except Exception as cleanup_err:
+            output.warn(
+                f"cleanup after failed workspace create '{ws_name}' failed: {cleanup_err}. "
+                f"VM may have a residual directory ({workspace_path}) or group ({ws_group})."
+            )
+        raise
 
     return workspace_path
 

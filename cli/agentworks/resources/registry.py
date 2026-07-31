@@ -217,8 +217,9 @@ class Registry:
             if handler is not None and handler.builtin_override == "allow":
                 return _CollisionDecision.OVERWRITE
             raise ConfigError(
-                f'{kind} "{name}" is a built-in resource with a reserved '
-                f"name; declare a differently-named {kind} instead",
+                f'{kind} "{name}" ({format_origin_line(incoming)}) is a '
+                f"built-in resource with a reserved name; declare a "
+                f"differently-named {kind} instead",
             )
         if existing_variant == "operator-declared" and incoming.variant == "operator-declared":
             raise ConfigError(

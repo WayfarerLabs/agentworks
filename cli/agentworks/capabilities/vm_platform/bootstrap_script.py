@@ -129,10 +129,16 @@ cat > {ssh_preserve_path} <<'CLOUDCFG'
 echo "##SUCCESS## SSH host key preservation configured"
 
 # -- Step 3: SSH public key --
+# This bootstrap runs as a Lima provision.system provisioner, which Lima
+# re-executes on every guest boot (not just create), so the key install must
+# be idempotent: append only when the exact line is not already present.
+# grep -qxF matches the whole line as a fixed string; 2>/dev/null and the ||
+# cover the first boot, where authorized_keys does not exist yet.
 echo "##STEP## SSH public key"
 HOME_DIR="/home/$VM_USER"
 mkdir -p "$HOME_DIR/.ssh"
-echo "$SSH_PUBLIC_KEY" >> "$HOME_DIR/.ssh/authorized_keys"
+grep -qxF "$SSH_PUBLIC_KEY" "$HOME_DIR/.ssh/authorized_keys" 2>/dev/null \
+    || echo "$SSH_PUBLIC_KEY" >> "$HOME_DIR/.ssh/authorized_keys"
 chown -R "$VM_USER:$VM_USER" "$HOME_DIR/.ssh"
 chmod 700 "$HOME_DIR/.ssh"
 chmod 600 "$HOME_DIR/.ssh/authorized_keys"

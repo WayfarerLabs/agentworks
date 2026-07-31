@@ -427,14 +427,31 @@ def delete_agent_on_vm(
     *,
     logger: SSHLogger | None = None,
 ) -> None:
-    """Remove an agent Linux user from a VM."""
+    """Remove an agent Linux user from a VM, along with related on-VM
+    state: their processes are killed, the user and home directory are
+    removed, and the per-agent tmux socket directory is cleaned up.
+    """
+    import shlex
+
+    from agentworks.sessions.tmux import agent_socket_dir
     from agentworks.ssh import SSHError
 
     target = transport(vm, config, logger=logger)
 
     try:
-        # Kill any running processes for the user
+        # Kill any running processes for the user. This also frees any live
+        # tmux sockets under the per-agent socket dir removed next.
         target.run(f"pkill -u {linux_user}", sudo=True, check=False)
+        # Remove the per-agent tmux socket directory (created by
+        # ``ensure_agent_socket_dir`` at create time). It lives on tmpfs
+        # under /run, is owned by the agent uid, and would otherwise linger
+        # until reboot. Done BEFORE userdel and best-effort (check=False) so
+        # that a userdel failure (e.g. exit 12, home or mail-spool cleanup)
+        # cannot skip it and re-orphan the dir under the freed uid. The dir
+        # is separate from the home directory userdel removes, and the
+        # sockets are already dead from the pkill above, so this ordering is
+        # safe.
+        target.run(f"rm -rf {shlex.quote(agent_socket_dir(linux_user))}", sudo=True, check=False)
         # Remove the user and their home directory
         target.run(f"userdel -r {linux_user}", sudo=True)
     except SSHError as e:
