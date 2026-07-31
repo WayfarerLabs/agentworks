@@ -17,7 +17,12 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from agentworks.agents.template import AgentTemplate
-from agentworks.config.loaders_core import _parse_env_table, _require_string_list, _warn_unexpected_keys
+from agentworks.config.loaders_core import (
+    _parse_env_table,
+    _require_string_list,
+    _warn_nonconforming_secret_name,
+    _warn_unexpected_keys,
+)
 from agentworks.errors import ConfigError
 from agentworks.sessions.layouts import AW_SESSION_VERTICAL_LAYOUT, VALID_TMUX_LAYOUTS
 from agentworks.sessions.template import NamedConsoleConfig
@@ -125,6 +130,9 @@ def _load_vm_templates(
                     f'"tailscale-auth-key"'
                 )
             ts_key_raw = tdata["tailscale_auth_key"]
+            _warn_nonconforming_secret_name(
+                ts_key_raw, location=f"vm_templates.{name}.tailscale_auth_key", issues=issues
+            )
 
         templates[name] = VMTemplate(
             name=name,
@@ -402,6 +410,7 @@ _LEGACY_SITE_SECTIONS: dict[str, tuple[str, tuple[str, ...]]] = {
 
 def _load_vm_sites_legacy(
     data: dict[str, object],
+    issues: list[str],
     decls: _SectionLineMap,
 ) -> dict[str, VMSiteDecl]:
     """Load the legacy ``[azure]`` / ``[proxmox]`` sections as ``vm-site``
@@ -425,6 +434,13 @@ def _load_vm_sites_legacy(
         if not isinstance(raw, dict):
             raise ConfigError(f"[{section}] must be a table")
         platform_config: dict[str, object] = {key: raw[key] for key in known_keys if key in raw}
+        # ``token_secret`` (proxmox) is a bare operator-supplied secret name;
+        # warn (only) when it is present and non-conforming, matching the other
+        # reference sites. A non-string / empty shape is left to the finalize
+        # ``validate`` pass (ProxmoxPlatform.validate), not re-checked here.
+        token_secret = platform_config.get("token_secret")
+        if isinstance(token_secret, str) and token_secret:
+            _warn_nonconforming_secret_name(token_secret, location=f"{section}.token_secret", issues=issues)
         # The assembled platform_config blob's shape is validated by the
         # finalize ``validate`` pass (VMSiteDecl.validate), not here:
         # capability validation is decoupled from load (R3).

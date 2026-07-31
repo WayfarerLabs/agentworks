@@ -61,6 +61,38 @@ def _warn_unexpected_keys(
         issues.append(f"unexpected keys in [{section}]: {keys}")
 
 
+def _warn_nonconforming_secret_name(name: str, *, location: str, issues: list[str]) -> None:
+    """Record a non-fatal warning when an operator-supplied secret NAME does
+    not follow the secret naming rules, then leave the name unchanged.
+
+    Names declared explicitly in ``[secrets.*]`` are validated with a hard
+    error (``_load_secrets``). The covered set here is the operator-supplied
+    secret-name REFERENCE sites, which historically bypassed that check. There
+    are four: an env entry's ``env.<KEY>.secret``, a git credential's
+    ``git_credentials.<name>.token``, a VM template's
+    ``vm_templates.<name>.tailscale_auth_key``, and a vm-site's
+    ``platform_config.token_secret`` (both the TOML ``[proxmox]`` legacy path
+    and the YAML manifest path). Validating them here at load unifies the
+    guarantee at the operator boundary (issue #279) WITHOUT breaking configs
+    that already load: a non-conforming reference still declares and resolves
+    exactly as before. The runtime synthesize and resolve paths stay tolerant
+    by design, so the warning is the only effect.
+
+    Deriving this coverage structurally from the ``ConfigReference(kind=
+    "secret")`` edges, rather than hand-enumerating the loaders that reference
+    a secret, is tracked in issue #311.
+    """
+    try:
+        validate_name(name, max_length=MAX_SECRET_NAME_LENGTH)
+    except ValidationError:
+        issues.append(
+            f"{location}: secret name {name!r} does not follow the secret naming rules "
+            f"(lowercase alphanumeric with hyphens or underscores, starting and ending "
+            f"with a letter or digit, at most {MAX_SECRET_NAME_LENGTH} characters). It "
+            f"still resolves as declared; rename it to conform."
+        )
+
+
 def _warn_nonconforming_derived_secret(credential_name: str, issues: list[str]) -> None:
     """Warn (do not raise) when a git-credential NAME would derive a
     non-conforming default token secret.
@@ -167,6 +199,7 @@ def _parse_env_table(
                     f"{context}.env.{key_str}: inline table must set "
                     "'secret = \"<name>\"' (or use a bare string for plaintext)"
                 )
+            _warn_nonconforming_secret_name(secret_name, location=f"{context}.env.{key_str}", issues=issues)
             result[key_str] = EnvEntry(key=key_str, secret=secret_name)
         else:
             raise ConfigError(
@@ -401,6 +434,7 @@ def _load_git_credentials(
                     f"omit the key to inherit the default secret name "
                     f'"git-token-{name}"'
                 )
+            _warn_nonconforming_secret_name(cdata["token"], location=f"git_credentials.{name}.token", issues=issues)
             provider_config["token"] = cdata["token"]
         else:
             # Only the token-absent case derives ``git-token-<name>`` from the
