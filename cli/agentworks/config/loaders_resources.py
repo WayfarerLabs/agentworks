@@ -17,7 +17,12 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from agentworks.agents.template import AgentTemplate
-from agentworks.config.loaders_core import _parse_env_table, _require_string_list, _warn_unexpected_keys
+from agentworks.config.loaders_core import (
+    _parse_env_table,
+    _require_string_list,
+    _warn_nonconforming_secret_name,
+    _warn_unexpected_keys,
+)
 from agentworks.errors import ConfigError
 from agentworks.sessions.layouts import AW_SESSION_VERTICAL_LAYOUT, VALID_TMUX_LAYOUTS
 from agentworks.sessions.template import NamedConsoleConfig
@@ -125,6 +130,9 @@ def _load_vm_templates(
                     f'"tailscale-auth-key"'
                 )
             ts_key_raw = tdata["tailscale_auth_key"]
+            _warn_nonconforming_secret_name(
+                ts_key_raw, location=f"vm_templates.{name}.tailscale_auth_key", issues=issues
+            )
 
         templates[name] = VMTemplate(
             name=name,

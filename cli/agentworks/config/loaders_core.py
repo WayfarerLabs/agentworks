@@ -13,9 +13,14 @@ import sys
 from pathlib import Path
 
 from agentworks.config.models import DefaultsConfig, OperatorConfig, PathsConfig, _SectionLineMap
-from agentworks.config.validation import SSH_HOST_PREFIX_RE, validate_vm_workspaces
+from agentworks.config.validation import (
+    MAX_SECRET_NAME_LENGTH,
+    SSH_HOST_PREFIX_RE,
+    validate_name,
+    validate_vm_workspaces,
+)
 from agentworks.env import EnvEntry
-from agentworks.errors import ConfigError
+from agentworks.errors import ConfigError, ValidationError
 from agentworks.git_credentials.credential import GitCredentialConfig
 
 
@@ -54,6 +59,30 @@ def _warn_unexpected_keys(
     if unexpected:
         keys = ", ".join(sorted(unexpected))
         issues.append(f"unexpected keys in [{section}]: {keys}")
+
+
+def _warn_nonconforming_secret_name(name: str, *, location: str, issues: list[str]) -> None:
+    """Record a non-fatal warning when an operator-supplied secret NAME does
+    not follow the secret naming rules, then leave the name unchanged.
+
+    Names declared explicitly in ``[secrets.*]`` are validated with a hard
+    error (``_load_secrets``), but names that enter through a REFERENCE (a VM
+    template's ``tailscale_auth_key``, an env entry's ``secret = "..."``, a git
+    credential's ``token``) historically bypassed that check. Validating them
+    here at load unifies the guarantee at the operator boundary (issue #279)
+    WITHOUT breaking configs that already load: a non-conforming reference
+    still declares and resolves exactly as before. The runtime synthesize and
+    resolve paths stay tolerant by design, so the warning is the only effect.
+    """
+    try:
+        validate_name(name, max_length=MAX_SECRET_NAME_LENGTH)
+    except ValidationError:
+        issues.append(
+            f"{location}: secret name {name!r} does not follow the secret naming rules "
+            f"(lowercase alphanumeric with hyphens or underscores, starting and ending "
+            f"with a letter or digit, at most {MAX_SECRET_NAME_LENGTH} characters). It "
+            f"still resolves as declared; rename it to conform."
+        )
 
 
 _ENV_KEY_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
@@ -122,6 +151,7 @@ def _parse_env_table(
                     f"{context}.env.{key_str}: inline table must set "
                     "'secret = \"<name>\"' (or use a bare string for plaintext)"
                 )
+            _warn_nonconforming_secret_name(secret_name, location=f"{context}.env.{key_str}", issues=issues)
             result[key_str] = EnvEntry(key=key_str, secret=secret_name)
         else:
             raise ConfigError(
@@ -356,6 +386,7 @@ def _load_git_credentials(
                     f"omit the key to inherit the default secret name "
                     f'"git-token-{name}"'
                 )
+            _warn_nonconforming_secret_name(cdata["token"], location=f"git_credentials.{name}.token", issues=issues)
             provider_config["token"] = cdata["token"]
         # The flat TOML shape only ever read ``org``, and only for azdo;
         # hoisting it into the blob for other providers would promote a
